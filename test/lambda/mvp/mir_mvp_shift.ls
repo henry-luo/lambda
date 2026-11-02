@@ -7,7 +7,16 @@ pn bad_count(count: int) {
     var result: int = shr(7, count)
     print("UNEXPECTED COUNT\n")
 }
+pn packed(a: int, count: int) any { return bor(shl(a, count), 1) }
+pn nested(a: int, b: int) any { return bxor(bor(a, b), shl(a, 2)) }
+pn mark(a: int) int { print(a); print(" "); return a }
+pn effectful_bits() any { return bor(shl(mark(3), 1), mark(1)) }
 pn main() {
+    print(packed(3, 1)); print(" "); print(packed(-3, 1)); print(" "); print(packed(7, 64)); print("\n")
+    print(packed(1, -1)); print(" "); print(packed(1, 53)); print(" "); print(packed(1, 63)); print("\n")
+    print(packed(int(inf), 1)); print(" "); print(packed(int(nan), 1)); print("\n")
+    print(nested(3, 8)); print(" "); print(effectful_bits()); print("\n")
+
     print(typed(42, 1)); print(" "); print(typed(-43, 1)); print("\n")
     print(typed(9007199254740991, 0)); print(" "); print(typed(-9007199254740991, 63)); print("\n")
     print(typed(7, 64)); print(" "); print(typed(-7, 64)); print(" "); print(typed(7, 9007199254740991)); print("\n")

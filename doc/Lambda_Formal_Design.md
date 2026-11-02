@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 58.0.1 (2026-11-02)
+**Spec version:** 59.0.0 (2026-11-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1380,13 +1380,20 @@ that carries them.
   inside a procedure. Unknown callable colours retain the runtime guard;
   ordinary preceding procedure statements retain their procedural context.
   [S12.1.1v3; U14, NM §6.2, Lang_Hosting §7.1]
-- **D6.1.2** The bit is load-bearing across the runtime: it is the
+- **D6.1.2v2*** The bit is load-bearing across the runtime: it is the
   const-folder's soundness gate, the stream-fusion and parallelization
   license (*Polars/DuckDB must trust their UDFs; Lambda verifies*), the
   reduction-legality condition, the guarantee that `fn` regions are
   suspension-free (no scheduling polls in pure code), and what makes the
   JS Promise membrane computable. **No reified effects**: a `pn` call
-  executes; there is no held, unexecuted effect value. [U26, PD11, K19, K23, Features §3.6]
+  executes; there is no held, unexecuted effect value. Local mutation and
+  control inside `fn` do not change its call colour, but the bit alone does
+  not prove a local read invariant, a loop independent, or evaluation
+  terminating. Optimizations must preserve sequential local dependencies
+  and completion; non-escaping live captures may not be lifted into shared
+  or cached environments. Escaping captures keep the immutable-value
+  contract of S9.1.4v2. [U26, PD11, K19, K23, Features §3.6;
+  S12.1.2v3; Design_Procedural §6]
 - **D6.1.3v2*** Effect analyses beyond the bit are separate compiler
   facts: `may_await` (the call may park, so it may collect and re-enter)
   and `may_defect` (fault capability) — and a **missing analysis must mean
@@ -1417,14 +1424,20 @@ that carries them.
   backstop; adapter spans are dynamically sized, precisely rooted, and
   LIFO-destroyed. Dynamic calls with named arguments and dynamic calls to
   `var`/inout signatures remain rejected. [Function_Arg, LC call-ABI; JC1–JC4]
-- **D6.2.3v2** Lambda-language closures are **immutable values**: captures
-  snapshot at creation and are stored as `Item`s in the env, unboxed on
-  access; assignment — including interior mutation — through a captured name
-  is a compile error (semantics S9.1.4). State never lives inside a Lambda
-  function value. Under the guest-semantic boundary of **D1.3v3**, this does
-  not prescribe capture semantics for a hosted profile: LambdaJS captures
-  lexical bindings by reference through its own precisely traced environment
-  records. [C4, Box_Unbox, JSI5]
+- **D6.2.3v3*** **Closure representation respects capture permissions.**
+  `fn` captures and every potentially escaping closure retain immutable
+  `Item` snapshots at creation; captured writes are compile errors. A
+  proven non-escaping nested `pn` may access the enclosing `fn`'s live local
+  `var` storage under S9.1.4v2. Sibling procedures refer to the same binding
+  home, not independent writable copies. One tier-shared analysis decides
+  capture mode before layout/lowering; an unknown escape is not proof of
+  confinement. Live storage never outlives the parent invocation and uses
+  precise roots (D4.3.3, D6.2.4), never a native-stack scan. Escape does not
+  trigger a late snapshot: snapshot-at-creation semantics must already
+  hold. Captures outside this confined parent-fn case keep their existing
+  snapshot representation. Under D1.3v3 this does not change LambdaJS
+  capture semantics.
+  [Design_Procedural §5.3; C4, Box_Unbox, JSI5]
 - **D6.2.4** The closure env is precisely traced (`closure_field_count`);
   wide scalars live in the env's tail region (SF18). Closures are
   **boxed-only** in the dual-func plan — the most valuable future
@@ -2804,6 +2817,7 @@ slice; no formal semantic ruling or document semver changes.
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
 | D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
 | D5.2.1v5 | **2026-11-02: normalized ordinary-error and union-only particular-error contract planning remains pending (TE-13.2–TE-13.3); the following qualification predates unification.** LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
+| D6.1.2v2, D6.2.3v3 | **Ratified 2026-11-02; implementation pending.** Separate local-control capability, mutable-root ownership and call effects; classify non-escaping shared captures versus immutable snapshots before either tier lowers them. [Implementation plan](../vibe/impl/Lambda_Impl_Function_Local_State.md). |
 | D6.1.3v2 | `may_await` (v2) feeds call metadata and GC planning as a may-park effect, and still gates the MIR region producer/consumer pass. **`may_defect` built 2026-09-27, fail-closed.** build_ast computes a conservative fact per function (`TypeFunc::defect_known`/`may_defect`); it fixes literal slot layouts and the S11.4.3 flag for both tiers and serves imports. The JIT solves the least fixed point per compile (`mir_solve_may_defect`), each origination site judged by the emitter's own gate, and treats anything outside its table as defect-capable. build_ast's fact over-approximates the solve, and the JIT narrows the S11.4.3 flag with its own answer except for an operand whose type admits error. `may_return_error` still carries both meanings in the variant effects. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
@@ -3127,7 +3141,8 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
+| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5; Design_Procedural §5.3 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
+| D6.1.2v2, D6.2.3v3 | Local control dependencies and confined procedure captures (USER, 2026-11-02) | `Lambda_Design_Procedural.md` §5.3, §6 |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D5.1.1v3, D5.3.6v2, D6.1.3v2, D6.3.3v2, D7.4.2v2, D8.1.1v16, D8.3.4v4 | RA1–RA15 | `Lambda_Design_Runtime_Async.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |

@@ -8,19 +8,24 @@ with bounded inlining, guarded numeric loops, checked mutation and precise
 Coverage now extends to **28 rows**, including floating recursion, FFT,
 allocation-heavy search, dynamic arrays, character processing, numerical kernels
 and JSON generation. All 28 original goldens pass; allocation workloads also
-pass forced GC with freed-memory poisoning. The latest 30-run paired tuning
-campaign qualifies **25/28** against Full MIR, **16/28** against the C2MIR
-allowance, and **15/28** against both. The latest pass reuses typed-constructor
-admission, establishes fresh array storage witnesses, extends native copy loops
-to constant index offsets, and lowers guarded modular updates and power-of-two
-integer division/remainder (**S4.1.2**, **S9.1.2–S9.1.3**). Against the
-interleaved previous MVP, NQueens improves 33%, Brainfuck 20%, Queens 16% and
-Fannkuch 9%. NQueens still misses Full MIR; Beng Mandelbrot's confidence bound
-reaches parity, so its faster median does not qualify in this campaign. Sumfp
-remains below the original clock's resolution and unqualified pending longer
-matched timing. All 34 focused test groups pass; the required baseline is
-8,501/8,502 with the previously recorded AUTO-tier cold-float snapshot failure.
-The full 28-row performance milestone remains open.
+pass forced GC with freed-memory poisoning. The latest 100-run paired campaign
+qualifies **26/28** against Full MIR and **15/28** against both gates using the
+original execution windows. A separate matched 10,000-invocation Sumfp batch
+resolves that row's clock limit, bringing combined qualification to **27/28**
+against Full MIR and **16/28** against both. The original zero-duration samples
+remain recorded and unqualified.
+
+The latest pass lowers native-bit primitive fills, folds small constant fills
+for proven direct read-only consumers, keeps nested bitwise operations in native
+lanes, reuses closed array guards inside conditional arms and extends read-only
+array tail calls (**D4.1.1v2–D4.1.3**, **D5.3**, **S4.1.2**, **S9.1.2–S9.1.3**).
+NQueens improves another **16.6%** against the interleaved previous MVP and now
+qualifies against Full MIR; Beng Mandelbrot now qualifies against both. Fannkuch
+has a faster median than Full MIR but still misses its confidence gate. Twelve
+rows miss the C2MIR allowance. All **40 focused test groups** pass. The full
+baseline remains **8,501/8,502**, with the previously recorded AUTO-tier
+cold-float snapshot failure. Brainfuck also records a 3.3% before/after
+slowdown in this campaign. The 28-row performance milestone remains open.
 See the
 [implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
 

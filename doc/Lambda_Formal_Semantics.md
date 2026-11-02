@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 79.0.1 (2026-11-02)
+**Spec version:** 80.0.0 (2026-11-02)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -63,11 +63,12 @@ answered from them first.
   arithmetic is exact; parsed data always lands in an exact home (§S4.3).
   `int` is exact over its whole domain (§S4.1); `float` is the explicitly
   inexact type. [C3, C13, C16, v5]
-- **S1.4 — Mutation is visible or it does not exist.** Values never alias;
-  mutability is a property of bindings, marked by `var`. **Lambda script has
-  no global mutable state** — `var` is a procedural binding, so every mutable
-  root is owned by a `pn` activation, a view/template instance, or an object
-  reachable from one (S9.1.7). [C4, RG14]
+- **S1.4v2* — Mutation is visible or it does not exist.** Container values
+  copy observably; mutability belongs to bindings marked `var`. A local
+  mutable root may belong to an `fn` or `pn` activation; `fn` may write only
+  its own locals. Explicit inout parameters and the nested-`pn` capture
+  permission are governed by S9.1.3v2–S9.1.4v2. Module-level mutable bindings
+  remain forbidden (S9.1.7v2). [C4, RG14; Design_Procedural §4–§5]
 - **S1.5 — Set-oriented: absence flows, failure is deliberate.** *Total reads,
   checked writes, deliberate failures.* Absence lets set processing continue;
   every error value is deliberate. [C5, C14]
@@ -394,9 +395,13 @@ harnesses.
 - **S2.5.2v2** **A for-expression produces a list, whatever its clauses**
   — `where`, `order by`, `limit`/`offset`, `group by` included — so its
   results spread where it lands: `[for (i in 1 to 2) (i, i)]` has four items.
-- **S2.5.3v2*** **A functional block `{…}` produces a list** of its
+- **S2.5.3v3*** **A functional block `{…}` produces a list** of its
   statements' results, in order: `{ 1; 2 }` is the list `(1, 2)`.
-  A procedural block follows S12.1.2v2 instead: each normal result replaces
+  Local imperative statements in an `fn` do not switch its fallthrough to
+  procedural replacement: declarations, assignments and statement `while`
+  loops contribute no result; `return e` completes the callable with `e`
+  instead of the accumulated results (S12.1.2v3, S2.5.7v4).
+  A procedural block follows S12.1.2v3 instead: each normal result replaces
   the preceding result, including `null`; a statement producing no result
   leaves it unchanged. On normal completion the block yields its most recent
   result, or `null` if none was produced. [Design_Procedural §2.4]
@@ -975,13 +980,13 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   position; their effect restrictions are unchanged. `e ^ { ^ }` returns
   the same error value, with no conversion to a softer category. [C14, C14a,
   TE-13.2]
-- **S7.4.6v2*** **`raise v` completes the enclosing callable early with an
+- **S7.4.6v3*** **`raise v` completes the enclosing callable early with an
   error.** An error operand is returned unchanged; a non-error operand is
   normalized by `error(v)` (S7.4.4), stamped at the raise site, then returned.
-  Constructing `error(v)` alone does not exit. In a `pn`, this is equivalent
-  to returning the normalized error; in an `fn`, it is early completion,
-  without making the `return` keyword legal there (S12.1.2v2). A caller
-  receives the same outcome as an ordinary error return. [TE-21, TE-13.2]
+  Constructing `error(v)` alone does not exit. In either `fn` or `pn`,
+  this completes the call with the normalized error; `return` is also legal
+  in both under S12.1.2v3. A caller receives the same outcome as an ordinary
+  error return. [TE-21, TE-13.2; Design_Procedural §2.4]
 
 ### S7.5 Acknowledgment
 
@@ -1037,7 +1042,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   outcome whose result is replaced without capture, handling, or propagation;
   a later statement or the function's return annotation does not acknowledge
   it. A final outcome is checked against its actual receiving return contract.
-  No-result statements do not overwrite it (S12.1.2v2). This static obligation
+  No-result statements do not overwrite it (S12.1.2v3). This static obligation
   adds no runtime early exit. A captured but uninspected outcome remains
   legal; an unused-fallible-binding lint is a separate question. [TE-13.2]
 
@@ -1059,7 +1064,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
 <a id="s76-discharge-the-handler-and-postfix-"></a>
 ### S7.6 Discharge: handlers and postfix `^`
 
-- **S7.6.1v8*** **`e ^ { … ^ … }` is the unfiltered postfix error handler and is
+- **S7.6.1v9*** **`e ^ { … ^ … }` is the unfiltered postfix error handler and is
   origin-independent** — it receives ordinary error values and (at `pn`
   boundaries) system faults, binding the error to handler-local `^`
   (innermost-wins). The operand is evaluated exactly once; the handler
@@ -1074,9 +1079,9 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   again by the same handler. **The handler produces its normal result for both
   `fn` and `pn` operands**, including when used as a standalone statement. In a
   procedural sequence that result replaces the preceding result under
-  S12.1.2v2; a later result may replace it in turn. A final handler supplies
+  S12.1.2v3; a later result may replace it in turn. A final handler supplies
   the block's result. A `null` result replaces an earlier value; it is not
-  suppressed. `return` inside the body exits the enclosing procedure, not just
+  suppressed. `return` inside the body exits the enclosing callable, not just
   the handler; `raise`, `break`, and `continue` retain their ordinary targets.
 
   The receiving type must retain any error returned by the handler body;
@@ -1096,7 +1101,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   Handler results remain primary-like, and chains associate from the left.
   A caret followed by a handler body, or a named error selector and its body,
   selects handling; a bare postfix caret remains propagation (`f()^ - 1`).
-  Bodies are brace-delimited under S16.2.6v2/S16.4.3v3. `or^` is a separate
+  Bodies are brace-delimited under S16.2.6v2/S16.4.3v4. `or^` is a separate
   infix fallback at ordinary `or` precedence (S7.6.8).
   **There is no success or cleanup suffix.** `e ^ { h } ~ { v }` remains
   a syntax error, never `finally` or unrelated trailing expressions. There
@@ -1147,7 +1152,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   the actual triggering value and preserves outer `~`. Evaluate the body
   once and return its result unchanged, including a fresh error or falsy
   value; do not run the fallback again. Its result/control/suspension rules
-  follow S7.6.1v8/S7.6.7v5. `or^` is one contiguous operator, left-associative
+  follow S7.6.1v9/S7.6.7v5. `or^` is one contiguous operator, left-associative
   at ordinary `or` precedence: `a + b or^ { h }` protects the sum. `^or`
   is not an alias; postfix propagation followed by `or` retains its meaning.
   This adds neither a new falsy value nor a system-fault policy. [TE-16.3]
@@ -1163,7 +1168,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   `e ^A { ha } ^B { hb }` means `(e ^A { ha }) ^B { hb }`; the second
   handler also sees errors produced by `ha`. Use a single `match` to select
   exclusively from the original outcome. Body, effect, and suspension rules
-  follow S7.6.1v8/S7.6.7v5. System faults retain S7.4.3/S7.11; this rule
+  follow S7.6.1v9/S7.6.7v5. System faults retain S7.4.3/S7.11; this rule
   specifies ordinary-error filtering. [TE-16.4]
 
 ### S7.7 Validation outcomes and boundary behavior
@@ -1538,8 +1543,10 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S9.1 The model
 
-*Values never alias; `var` is the only mutability marker and the only sharing
-construct; `let` is final; there is no global mutable state.* [C4, RG14]
+*Container values copy; `var` marks mutable bindings; `fn` writes only
+its locals. Inout borrows and nested-`pn` captures are explicit sharing
+boundaries; module-level `var` remains forbidden.* [C4, RG14;
+Design_Procedural §4–§5]
 
 - **S9.1.1** `let` is final: nothing reachable through a `let` binding ever
   changes. `let` is the variable of algebra (referential transparency);
@@ -1549,21 +1556,28 @@ construct; `let` is final; there is no global mutable state.* [C4, RG14]
 - **S9.1.2** Binding, assignment, and construction copy, observably, for
   every container kind. Implementation is COW; **sharing must be
   unobservable** — a verifiable property, not a convention.
-- **S9.1.3*** `var` parameters (`pn f(var a: T)`) are the sole sharing
-  construct — an inout borrow. Compile checks: arguments must be `var`;
-  **exclusivity** (writer-vs-writer only: the same `var` or overlapping
+- **S9.1.3v2*** `var` parameters (`pn f(var a: T)`) are explicit inout
+  borrows; `fn` has no `var` parameters. Compile checks: arguments must be
+  `var`; **exclusivity** (writer-vs-writer only: the same `var` or overlapping
   paths cannot feed two `var` params; plain params snapshot before any
   borrow's mutation begins, so readers need no check); `pn` methods require
-  a `var` receiver; `var` parameters are **invariant** (S9.2.1).
-- **S9.1.4*** Closures are immutable values: captures snapshot at creation;
-  assignment to a captured name — including interior mutation through it —
-  is a compile error. State lives in a `pn` activation, a view/template
-  instance, or an object instance reachable from one of those; never inside a
-  function value, and **never at module scope** (S9.1.7). This clause
-  previously named "module-level `var`s" first — stale wording inherited from
-  the C4 record, corrected 2026-08-28. (A non-escaping
-  nested `pn` used only in call position may later be allowed direct access
-  — designed, deferred.)
+  a `var` receiver; `var` parameters are **invariant** (S9.2.1). Nested `pn`
+  capture of an enclosing `fn` local is the additional sharing permission
+  in S9.1.4v2; it does not authorize arbitrary mutable aliases.
+- **S9.1.4v2*** **Capture permissions follow the callable's colour.** An
+  `fn` closure captures immutable snapshots: neither rebinding a captured
+  name nor writing through it is permitted. A **non-escaping nested `pn`**
+  may share live access to the enclosing `fn`'s local `var` bindings,
+  including member/index writes; sibling `pn`s share those same bindings.
+  A captured `let` or ordinary parameter stays immutable. **A closure that
+  can escape the parent `fn` follows the existing rules:** snapshots at
+  creation, and no writes to captures. Returning a capture-writing procedure
+  is therefore rejected, not converted to a private mutable snapshot.
+  Declaring or forming a procedure value does not execute it: the enclosing
+  `fn` still cannot call it, directly or indirectly (S12.1.1v3). All captures
+  outside this confined parent-fn case retain the snapshot rule. Capture
+  permission grants no exception to the call-colour rule. [USER, 2026-11-02;
+  Design_Procedural §5.3; D6.2.3v3]
 - **S9.1.5v2** No reference cells; structural `==` is the only value
   equality (`===` compares identity data, S5.1.4v2, and creates no
   reference). The value model is a tree: cycles are unconstructible, so
@@ -1579,14 +1593,17 @@ construct; `let` is final; there is no global mutable state.* [C4, RG14]
   binding's declared type; an unannotated `var` may change runtime type under
   S12.2.1. [S8.2.1v4, S9.1.2, C5.3b]
 
-- **S9.1.7** **No global mutable state.** A mutable binding cannot be declared
-  at module scope: there is no script-level global variable. Every mutable root
-  is owned by one `pn` activation, one view/template instance, or one object
-  instance reachable from such a root. The transitive path is closed too — a
-  module-level `let` holding a container or object cannot be written through
-  (S9.1.1). This is not a convention; it follows from the scope model, since
-  only `fn`/`pn` bodies, `while` bodies and event handlers open a procedural
-  scope. [RG14]
+- **S9.1.7v2*** **No module-level mutable binding.** A `var` cannot be
+  declared at module scope, and a module-level `let` container cannot be
+  written through (S9.1.1). Local mutable roots may belong to an `fn` or
+  `pn` activation, a view/template instance, or an object reachable from
+  such a root. An `fn` may mutate only variables declared within its own
+  invocation, never an enclosing or caller-owned binding; its nested `pn`
+  has the separate permission in S9.1.4v2. Merely being in `fn` effect
+  context does not create an activation or authorize top-level statements.
+  A closure leaving that invocation carries immutable snapshots under
+  S9.1.4v2, never a retained mutable root; there is still no global mutable
+  state hidden behind a module-held closure. [RG14; Design_Procedural §4–§5]
 
 ### S9.2 Covariance, borrows, and views
 
@@ -1707,7 +1724,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `that` constraint and a type constraint `T that cond` in any position
   (S11), the `that` proviso (S10.1.5v3), and a `match` arm (S11.2.1).
   Unfiltered/filtered handlers and `or^` bodies bind `^` only and retain
-  their enclosing `~` context (S7.6.1v8, S7.6.8–S7.6.9). In `or^`, `^`
+  their enclosing `~` context (S7.6.1v9, S7.6.8–S7.6.9). In `or^`, `^`
   can be an error or an ordinary falsy value. No handler success-arm context
   exists. [TE-16.2–TE-16.4]
 
@@ -2158,24 +2175,29 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   The run-time check is confined to the calls that need it — never the
   statically resolved ones. Accepted price: no reified effects — a `pn` call
   executes; there is no held, unexecuted effect value. [Features §3.6, C20.7]
-- **S12.1.2v2*** `break`, `continue`, `return`, `while`, and `var`
-  declarations are `pn`-only; using them in an `fn` is a compile error.
-  **Procedural sequencing retains the most recent normal result.** Statements
-  execute in sequence; each result replaces the preceding one, even if it is
-  `null`. A statement whose contract produces **no result** contributes
-  nothing and leaves the preceding result unchanged (declarations:
-  S2.5.4v3). On normal completion the block yields that result, or `null` if
-  none was produced; a procedure reaching its body's end returns that value.
-  Thus `pn f() { 1; null }` returns `null`, while
-  `pn f() { 1; let x = 2 }` returns `1`. A handler participates by its normal
-  result (S7.6.1v8), with no special discard rule. `return e` exits the
-  enclosing procedure with `e`, including from a loop or handler; bare
-  `return` returns `null`. `raise`, `break`, and `continue` transfer control
-  according to their own rules, not by replacing a normal result.
-  [Design_Procedural §2.4, TE-16.1]
-- **S12.1.3** Reactive templates are the doctrine applied: template body =
-  pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
-  architecture enforced by the effect bit. [Features §3.7]
+- **S12.1.2v3*** **Local imperative control is admitted in `fn` and `pn`.**
+  Braced callable bodies admit `var`, local assignment, `while`, `break`,
+  `continue`, and `return`. An `fn` writes only its own local `var`s
+  (S9.1.7v2), and still cannot call `pn` (S12.1.1v3). Statements execute
+  sequentially. `break`/`continue` target the innermost eligible loop in
+  the same callable; `while` is eligible in either colour, and existing
+  procedural `for` loops remain eligible. Comprehension extensions are
+  SO51, not implied by admitting the keywords.
+  **Normal completion keeps the existing result convention:** functional
+  collection is S2.5.3v3; procedural sequencing retains the most recent
+  normal result, including `null`, and no-result statements leave it
+  unchanged (S2.5.4v3). Thus `pn f() { 1; null }` returns `null`, while
+  `pn f() { 1; let x = 2 }` returns `1`. A handler contributes its normal
+  result (S7.6.1v9). `return e` exits the nearest enclosing callable with
+  `e`, including from a loop or handler, discarding prior body results;
+  the ordinary function-result conversion and type contract still apply
+  (S2.5.7v4, S11.4.1v5). Bare `return` returns `null`. No control transfer
+  crosses a nested callable boundary. [USER, 2026-11-02;
+  Design_Procedural §2, §6; TE-16.1]
+- **S12.1.3v2*** Reactive templates are the doctrine applied: template body =
+  pure `fn` transformation; mutation of persistent view state only in
+  `on` handlers (`pn`). Helpers may use `fn`-local working state under
+  S12.1.2v3 without writing view state. [Features §3.7; Design_Procedural §4]
 - **S12.1.4v4*** **Effect polymorphism: the `function` declaration.** A
   function declared with the keyword `function` takes its colour from its
   arguments rather than declaring one — *pure iff its function arguments are
@@ -2636,17 +2658,17 @@ below by its section.
   context → empty map, pn context → empty block**, aligning with value use:
   fn control bodies produce values, pn control bodies discard them. An
   unprefixed arrow's body is fn context by definition, even written inside a
-  `pn`; a procedure arrow's braces are its body (S16.4.3, S16.6.7v2), so
+  `pn`; a procedure arrow's braces are its body (S16.4.3, S16.6.7v3), so
   `pn () => {}` is the empty procedure. A bare `{}` **statement** in `pn` is
   a syntax error — dead code under either reading — which removes the context
   rule from statement position entirely. [Design_Syntax §5.9, §7.30]
-- **S16.4.3v3*** **Declaration braces are structural and never read as maps.**
+- **S16.4.3v4*** **Declaration braces are structural and never read as maps.**
   `fn`, `pn`, `view`, and `on` bodies, braced match arms (`case T { ... }`),
   handler bodies (`^ { ... }`, `^ErrorType { ... }`, `or^ { ... }`),
   and `while` bodies are always
   blocks; `{}` in each is the empty body. `while` belongs here by the same
-  value-use principle — it is procedural-only, so its body value is always
-  discarded and a map body is dead by construction. Each declaration has an
+  value-use principle — its body value is discarded in both `fn` and
+  `pn`, so a map body is dead by construction. Each declaration has an
   expression escape where a value body is wanted (`fn f() => {a: 1}`,
   `case int: {a: 1}`). `match`'s outer braces delimit the arm list
   (S16.6.4); `type` bodies have their own interior; map-*type* patterns
@@ -2702,11 +2724,14 @@ below by its section.
 - **S16.6.4*** `match` keeps its single braced form: its braces delimit an
   arm list, not a body, so no parenthesized spelling exists.
   [Design_Syntax §5.5]
-- **S16.6.5*** The expression/statement distinction is enforced by semantic
-  analysis on the S12.1 effect boundary, not by grammar: `break`/`continue`
-  and `while` are procedural-only; a `for` is a comprehension in functional
-  context and an effect loop in procedural context. [Design_Syntax §5.6,
-  S12.1]
+- **S16.6.5v2*** **Control capability and call effects are separate.**
+  Semantic analysis admits local imperative statements in `fn` and `pn`
+  bodies (S12.1.2v3) while independently checking call colour, mutable-root
+  ownership, statement/value position and lexical control targets. A `for`
+  remains a comprehension in functional context and an effect loop in
+  procedural context; adding a local `var` does not change that meaning.
+  Comprehension mutation and early-control extensions are SO51.
+  [Design_Syntax §5.6; Design_Procedural §6]
 - **S16.6.6*** Control statements require braces. `return`, `break`, and
   `continue` are statements and are admitted **only inside a braced body**.
   Every unbraced control body — the paren-form `if`/`for` body, an `else`
@@ -2716,43 +2741,41 @@ below by its section.
   and admits them: `if (c) { return x }`, `case T: { return x }`. Each
   rejection names the repair; the two grounds are argued in Design_Syntax
   §6 point 35. [Design_Syntax §6 point 35]
-- **S16.6.7v2** **A procedure's body is always the braced statement
+- **S16.6.7v3*** **A procedure's body is always the braced statement
   block, and the arrow is the one anonymous function.** A declared procedure
   is `pn name(...) { ... }`, never `=>`-bodied. An anonymous function is an
   arrow: the unprefixed `(x) => e`, whose body is fn context (S16.4.2v2), or
   the **procedure arrow** `pn (x) => { ... }`, whose body must be braced
   (`pn (x) => e` is rejected): its braces are the procedure's body
-  (S16.4.3), where `return`, `var` and `while` belong. `fn` never begins an
+  (S16.4.3). An unprefixed arrow whose body is a block may also use
+  `fn`-local statements (S12.1.2v3); a map body still returns a map, and
+  `() => {}` keeps its empty-map meaning (S16.4.2v2). `fn` never begins an
   anonymous function — `fn (x) { ... }` and `fn (x) => e` are not
   expressions (S16.1.3v2), and the repair is `(x) => e`. *The arrow makes a
   function anonymous; `pn` only sets its colour.* A procedure arrow is a
-  nested `pn` without its name: it captures by snapshot (S9.1.4), its value
+  nested `pn` without its name: capture permissions follow S9.1.4v2, its value
   is a `pn` (S11.1.5v2), and it may be created in any context, since only
   calling it is `pn`-only (S12.1.1v2). It takes no `var` parameter, because
   it is only ever called through a value (S12.3.2). [Design_Syntax §7.30,
   §6 point 36; USER 2026-09-26]
-- **S16.6.8v2*** A **procedural block is a statement, never an
-  expression**. A braced block whose top level contains a pn-only construct
-  (`return`, `break`, `continue`, `var`, assignment) is rejected in every
-  expression position: after `case T:`, in tuple/argument/operand position,
-  as an unprefixed arrow's `=>` body — an expression must produce a value,
-  and a procedural block may not (probe and grounds in Design_Syntax §6
-  point 37). A procedure arrow's braces are its body, not an expression
-  position (S16.6.7v2). Functional blocks (`{ 1; 2 }`,
-  `{ let r = f(x); g(r) }`) and maps remain expressions everywhere, so
-  `case T: { … }` stays legal and — by this very ruling — can never conceal
-  a statement: after `:`, braces are a map or a pure block, nothing else.
-  Classification is by interior, extending S16.4.1v4's doctrine from
-  brace-disambiguation to statement-ness. [Design_Syntax §6 point 37, §7.30]
-- **S16.6.9*** **Branch homogeneity.** An `if`/`else` chain or `match` is
+- **S16.6.8v3*** **An imperative control block is a statement, not a
+  general expression.** A block containing `return`, `break`, `continue`,
+  `var`, assignment or statement `while` cannot be embedded as a tuple
+  item, argument, operand or colon-form match value. Such statements are
+  admitted in a named callable body and in an anonymous callable's block
+  body, including an unprefixed arrow (S16.6.7v3): that body establishes its
+  own control target and mutation owner. Ordinary value blocks and maps
+  remain expressions. Statement classification does not imply `pn` effect
+  colour. [Design_Syntax §6 point 37, §7.31; Design_Procedural §2]
+- **S16.6.9v2*** **Branch homogeneity.** An `if`/`else` chain or `match` is
   either a **value form** — every branch an expression, where functional
   blocks, maps, and diverging `raise` arms all count as expressions — or a
-  **control form** — every branch a procedural block, the whole form a
+  **control form** — every branch a control block, the whole form a
   statement that yields no value and is illegal in value position. Mixtures
   (`if (c) { return 1 } else 0`, a braced-statement `case` arm beside a
   `default: expr` arm) are rejected. Match surface reading: `:` arms are
-  value arms, braced arms are control arms. The fn/pn classification rides
-  the S12.1 effect boundary and lives in semantic analysis per S16.6.5.
+  value arms, braced arms are control arms. This classification is
+  independent of the enclosing callable's effect colour (S16.6.5v2).
   [Design_Syntax §6 point 38]
 
 ### S16.7 Script top level
@@ -3103,6 +3126,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
+| S1.4v2, S2.5.3v3, S7.4.6v3, S9.1.3v2–S9.1.4v2, S9.1.7v2, S12.1.2v3–S12.1.3v2, S16.6.5v2, S16.6.7v3–S16.6.9v2 | **Ratified 2026-11-02; implementation pending.** Local imperative `fn` bodies and non-escaping nested-`pn` shared captures are specified; escaping closures retain immutable snapshots. Comprehension extensions remain SO51. Existing frontend guards and capture classification require changes on interp, jit and auto. [Implementation plan](../vibe/impl/Lambda_Impl_Function_Local_State.md). |
 | S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
 | S8.3.1v3 (element arm) | **Conformant as of 2026-09-03 (USER ruling).** `fn_len`'s element arm and the JIT's `fn_len_e` both answer attribute count plus content-item count, so `len(<e a:1, b:2, "t">)` is 3 and equals what `for (x in e)` walks — attribute VALUES first, then content items. Structural and nominal elements no longer disagree, and `len_iter_law.ls` pins the law. The child axis it displaced is now spelled **`content(e)`** (2026-09-04, USER): a read-only ARRAY VIEW that shadow-copies the element's items pointer and length without copying the slots, so `len(content(e))` is the child count and `content(e)[i]` the child walk. See [LR09-9](../vibe/Lambda_Issue_Ledger.md) for the ruling, the rejected `e.content` / `size(e)` spellings, and the migration. Baseline 4090/4090, GC stress 93/93. |
 | S8.2.3, S12.3.3v2 | **Conformant as of 2026-09-03**, with one deliberate substitution. `lambda_object_member` is the single resolver for both member lanes — the ANY lane (`fn_member`) and the static lane (`item_attr`), which previously diverged: a bare `obj.m` bound on one and read `null` on the other. It resolves the key domain, then the type's own methods, then the base chain; `lambda_object_find_method` is the one walk. A bare `fn` method now yields a receiver-captured closure on both tiers (T0 binds through the new `interp_bind_object_method` seam, since an un-JITted method has no `compiled_fn`), and `obj["m"]` resolves identically to `obj.m`. `len`, `in`, `at` and the projections were already key-domain-only and are unchanged. **Gap:** S12.3.3v2 rules a bare `pn` method reference a compile error; it is not rejected at all today. The rejection cannot live in the runtime member lane — MIR lowers a `pn` method *call* by lowering its callee through that same lane, so refusing there makes the call a silent no-op on the JIT tier. It needs an AST flag plus a validation point in build_ast, which alone can tell a bare reference from a sanctioned callee. Tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). Fixtures: `test/lambda/object_method_value.ls`, `object_method_receiver.ls`, `proc/object_method_write.ls`; baseline 4082/4082. |
@@ -3116,13 +3140,10 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.2v3, S11.4.2v3 | **Ratified 2026-11-02; typed-caret retirement pending.** Both parsers still accept typed return carets. Union-only particular error sets, removal of implicit broad ordinary errors, syntax rejection, and caller migration remain unimplemented. No new runtime verification is claimed. [TE-13.3 status](../vibe/Lambda_Design_Type_Error_Handling.md#typed-caret-retirement). |
-| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v2, S7.5.1v5, S7.5.3v3–S7.5.5, S7.6.1v8, S7.6.3v3, S7.6.5v4–S7.6.6v6, S7.1.3v3, S11.4.2v3, S12.1.4v4, S12.3.4v2 | **Ratified 2026-11-02; unification implementation pending.** The resolver still gates acknowledgement on `call->can_raise`; return spelling and `raise` licensing retain the prior distinction. Composition/overwritten-result diagnostics and type/ABI equivalence require qualification on both tiers. Existing mutation and system-fault control boundaries remain. [TE-13.2 status](../vibe/Lambda_Design_Type_Error_Handling.md#ordinary-error-unification). |
-| S7.5.6, S7.6.8–S7.6.9 | **Partial, M1 implemented 2026-11-02.** Both parsers and execution tiers implement combined fallback and named/qualified filtered chains with conservative residual types. Selection, laziness, exact caret subjects, fresh chained errors, and GC are qualified. General ordinary-error acknowledgement, including classification consumers, remains P1 work; filtered system-fault policy remains open. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
-| S7.4.4 | **Partial, updated 2026-10-29 on interp, auto and jit.** Owned error values retain code, message, wrapped `.source` and source coordinates. Deferred boundary failures now retain their admission site ([LR10-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-15>)); legacy sentinels never read ambient `last_error` ([LR10-14](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-14>)). Integer conversion, formatted runtime producers and parse/format cleanup return owned diagnostics. Residue: opaque compatibility sentinels retain stable generic members rather than operation-specific metadata. Fixtures: `error_members.ls`, `ledger_error_payload.ls`, `ledger_boundary_location.ls`, `negative/runtime/ledger_parameter_site.ls`. |
-| S7.5.1v6, S7.5.2v4 | **Partial, revised 2026-11-02; source inspection only.** Existing explicit handlers, propagation, and explicit-error contracts remain. Inferred initializer/reassignment acknowledgement, `any` equivalence, and the unresolved-admission warning are pending; the resolver still checks the declared contract with the older explicit-error test. No runtime conformance is claimed for the new rule. [TE-13.1 implementation status](../vibe/Lambda_Design_Type_Error_Handling.md#initializer-acknowledgement). |
-| S7.6.1v8 | **M1 implemented 2026-11-02.** Procedure success/recovery values are preserved in bindings and block results; fresh recovery errors remain ordinary outcomes. The retired success arm is removed. Normal, suspending, nested, and forced-GC cases are qualified on interp/jit/auto. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
-| S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v3 | **M1 implemented 2026-11-02.** Both parsers reject the retired suffix, including across lines. AST/runtime success-arm state is removed, callers migrated, and named-filter/combined-fallback braces follow the introducer-line rule. Reference carets distinguish handler bodies from propagation. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
-| S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. The handler-local `^` remains scoped to the selected error arm. |
+| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S7.6.1v9, S7.6.3v3, S7.6.5v4–S7.6.6v6, S7.1.3v3, S11.4.2v3, S12.1.4v4, S12.3.4v2 | **Ratified 2026-11-02; unification implementation pending.** The resolver still gates acknowledgement on `call->can_raise`; return spelling and `raise` licensing retain the prior distinction. Composition/overwritten-result diagnostics and type/ABI equivalence require qualification on both tiers. Existing mutation and system-fault control boundaries remain. [TE-13.2 status](../vibe/Lambda_Design_Type_Error_Handling.md#ordinary-error-unification). |
+| S7.5.6, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | **Partial, M1 implemented 2026-11-02.** Both parsers and execution tiers implement combined fallback and named/qualified filtered chains with conservative residual types. Selection, laziness, exact caret subjects, fresh chained errors, and GC are qualified. General ordinary-error acknowledgement, including classification consumers, remains P1 work; filtered system-fault policy remains open. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
+| S7.6.1v9 | **M1 implemented 2026-11-02.** Procedure success/recovery values are preserved in bindings and block results; fresh recovery errors remain ordinary outcomes. The retired success arm is removed. Normal, suspending, nested, and forced-GC cases are qualified on interp/jit/auto. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
+| S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 | **M1 implemented 2026-11-02.** Both parsers reject the retired suffix, including across lines. AST/runtime success-arm state is removed, callers migrated, and named-filter/combined-fallback braces follow the introducer-line rule. Reference carets distinguish handler bodies from propagation. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.6.7v5 | **M1 implemented 2026-11-02.** Procedure handlers yield values in receiving and final-result positions before and after suspension. Explicit control targets and the existing procedure fault boundary are retained; focused tier/GC qualification and existing concurrency fixtures cover the change. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4, S11.4.1v5, S11.4.6v3, S11.4.7v3, S12.2.1v3, SI14v3 | **Partial, revised 2026-11-02.** M1 makes completed whole-variable assignments retain admitted errors without implicit return. Deferred initializer/reassignment validation still follows former containment; continued error storage, effective facts across writes/joins, and warnings remain pending on both tiers. Field/element store contracts are separate. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.7.3–S7.7.4, S7.7.6 (prior containment qualification) | **Prior behavior verified 2026-10-31, both tiers; initializer/reassignment skipping and retained-old-variable behavior are superseded by S7.7.2v2/S7.7.4v2 and remain implementation gaps.** Deferred declaration/reassignment failures end the declaring block, including iteration-local and comma-separated bindings; parameter admission failures are call values; checked assignments/stores report their skipped tail and retained/partial state. Inferred record calls retain error values, including later caller effects. Fixtures `proc/ledger_containment.ls`, `ledger_parameter_result_site.ls`, prior `proc/defect_value_flow.ls`, and native diagnostic coverage. **Residue:** the complete static diagnostic tiers and `for x: T in e` surface are not complete; independent proof precision and join arithmetic remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24). Qualification: [containment follow-up](<../vibe/impl/Lambda_Impl_Ledger_Containment_Followup (done).md>). |
@@ -3152,7 +3173,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S11.4.12 | **Implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
-| S2.5.3v2, S2.5.4v3, S12.1.2v2 | **Partial, verified 2026-11-02 with the existing executable on interpreter and JIT.** Normal value results replace earlier results, including a final `null`; declarations leave them unchanged. The handler case still excludes procedure handlers from result selection (S7.6.1v8 footnote). Assignment and loop result contracts are not changed by this revision. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results). |
+| S2.5.3v2, S2.5.4v3, S12.1.2v2 (prior procedural-result rule) | **Historical baseline before M1 and the local-control revision.** Normal value results replace earlier results, including a final `null`; declarations leave them unchanged. M1 now preserves procedure-handler results under S7.6.1v9; local imperative `fn` control under S12.1.2v3 remains pending (see the ratified-rulings status above). [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results). |
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
@@ -3286,6 +3307,12 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO34** `emit()` vs `send()` — two event vocabularies coexist; state the boundary explicitly.
 - **SO47** Whether an empty literal needle matches at every code-point boundary. `replace("abc", "", "-")` is `"abc"` and `find("abc", "")` is `[]`, and `\("")` is the same value (SP7), where ECMAScript and Python give `"-a-b-c-"`, `split("abc", "")` already splits at every boundary (S17.1.1), and an empty-matching pattern such as `\("\d"*)` already replaces there (S17.6.1). [SP21; [Lambda_Design_String_Pattern.md SPO14](../vibe/Lambda_Design_String_Pattern.md#9-open-issues-spo1spo14)]
 
+- **SO51** Local imperative control in comprehensions: mutation of a
+  containing `fn` local across iterations, `break`/`continue`, nonlocal
+  `return`, partial-result collection and ordering/parallelization.
+  S12.1.2v3 admits `while` and preserves existing `for` meanings; it does
+  not choose these comprehension extensions. [Design_Procedural §6](../vibe/Lambda_Design_Procedural.md#6-loops-early-exit-and-the-effect-bit-together)
+
 **Surface syntax**
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
 - **SO38** Whether `|:` over a **map** should keep the surviving keys
@@ -3332,14 +3359,15 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-13.1, TE-15–TE-18, TE-16.1–TE-16.4, TE-18.1–TE-18.2; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v5, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v2; S7.5.1v6, S7.5.3v3–S7.5.5; S11.4.2v3; S12.1.4v4, S12.3.4v2 | TE-13.2–TE-13.3 | `Lambda_Design_Type_Error_Handling.md` |
-| S7.5.6–S7.5.7, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v8–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v3 | TE-16.3–TE-16.4 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
+| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3; S7.5.1v6, S7.5.3v3–S7.5.5; S11.4.2v3; S12.1.4v4, S12.3.4v2 | TE-13.2–TE-13.3 | `Lambda_Design_Type_Error_Handling.md` |
+| S7.5.6–S7.5.7, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | TE-16.3–TE-16.4 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
 | S7.5.1v6, S7.5.2v4 | TE-13.1 | `Lambda_Design_Type_Error_Handling.md` |
 | SI14v3; S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4; S11.4.1v5, S11.4.6v3, S11.4.7v3; S12.2.1v3 | TE-18.1–TE-18.2 | `Lambda_Design_Type_Error_Handling.md` |
-| S7.6.1v8, S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v3 | TE-16.2 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
-| S2.5.3v2, S2.5.4v3, S12.1.2v2; S7.6.1v8, S7.6.7v5 | Design_Procedural §2.4; TE-16.1 | `Lambda_Design_Procedural.md`, `Lambda_Design_Type_Error_Handling.md` |
+| S7.6.1v9, S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 | TE-16.2 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
+| S2.5.3v3, S2.5.4v3, S12.1.2v3; S7.6.1v9, S7.6.7v5 | Design_Procedural §2.4; TE-16.1 | `Lambda_Design_Procedural.md`, `Lambda_Design_Type_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2) |
+| S1.4v2, S2.5.3v3, S7.4.6v3, S7.6.1v9; S9.1.3v2–S9.1.4v2, S9.1.7v2; S12.1.2v3–S12.1.3v2; S16.4.3v4, S16.6.5v2, S16.6.7v3–S16.6.9v2 | Local imperative fn; confined shared pn captures (USER, 2026-11-02) | `Lambda_Design_Procedural.md` §2, §4–§6; `Lambda_Design_Syntax.md` §7.31; `Lambda_Design_Type_Error_Handling.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md`, `Lambda_Typed_Array.md` (S10.2.4) |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20, TE-23 (S11.4.12); OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21, SP24 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md` |
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |

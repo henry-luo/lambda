@@ -3086,6 +3086,9 @@ extern "C" {
         Type* expected, const char* boundary, ArrayRepCert* cert);
     // shared construction kernel; count and scalar lane are admitted by the caller
     Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane);
+    // native lane bits; a non-null certificate is already proven to match the scalar and count
+    Item lambda_fill_primitive_bits(int64_t count, uint64_t bits, ArrayNumElemType lane,
+        ArrayRepCert* cert);
     bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result);
     Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         const char* boundary);

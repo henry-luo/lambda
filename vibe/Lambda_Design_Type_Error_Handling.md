@@ -8,16 +8,16 @@ ratified (USER, 2026-11-02); implementation is partial. Further
 error-handling design rules will be settled in this document.
 **Formal linkage:** S7.5.6–S7.5.7, S7.6.8–S7.6.9, S7.6.5v4, S16.2.2v3,
 S16.2.6v2 (handler convenience and classification);
-S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v2,
+S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3,
 S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3, S12.1.4v4, S12.3.4v2,
 D5.2.1v5 (ordinary-error unification and union-only particular errors);
 S7.5.1v6, S7.5.2v4 (initializer and reassignment acknowledgement);
 S7.7.1v3, S7.7.2v2, S7.7.4v2, S7.7.5v3, S7.7.6v2, S7.7.7v4, S11.4.1v5, S11.4.6v3,
 S11.4.7v3, S12.2.1v3, SI14v3 (validation and binding outcomes);
 D2.8.3v3, D3.2.2v3, D3.2.3v3 (representation and recorded type facts);
-S2.5.3v2, S2.5.4v3, S12.1.2v2 (procedural results);
-S7.6.1v8, S7.6.7v5 (uniform handler results);
-S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v3 (single-arm handler surface).
+S2.5.3v3, S2.5.4v3, S12.1.2v3 (procedural results);
+S7.6.1v9, S7.6.7v5 (uniform handler results);
+S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 (single-arm handler surface).
 **Scope:** this is the home for the new error-handling design. Earlier decisions
 remain in [Type Enforcement](Lambda_Design_Type_Enforcement.md), pending their
 move as the remaining design questions settle. This record extends TE-13,
@@ -143,7 +143,7 @@ and scope remain open. No new must-inspect rule is introduced here.
 ## TE-13.2 — One ordinary error outcome and acknowledgement rule
 
 **Decided 2026-11-02, USER. Authority: S7.4.1v2–S7.4.2v3,
-S7.4.5v2–S7.4.6v2, S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3,
+S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3,
 S12.1.4v4, S12.3.4v2; representation: D1.4v4, D5.2.1v5.
 Implementation and caller migration pending.**
 
@@ -167,17 +167,20 @@ removing convenient per-item error retention or introducing automatic exits.
 existing error unchanged, or normalizes a non-error through `error(v)`, then
 completes the enclosing callable early. Normalization uses the existing
 constructor's code/message rules and raise-site location; an existing error
-is not wrapped again or stripped of its payload (S7.4.4, S7.4.6v2).
+is not wrapped again or stripped of its payload (S7.4.4, S7.4.6v3).
 
 ```lambda
 let err = error("failed")  // retain a value; subsequent statements execute
 raise err                 // return that error early from the enclosing callable
 ```
 
-In a `pn`, `raise err` for an existing error has the outcome and control effect
-of `return err`. `raise "failed"` means construct `error("failed")` and return
-it. In an `fn`, this is **early completion**, not a source expansion granting
-general `return` syntax: S12.1.2v2 still makes that keyword `pn`-only.
+In either `fn` or `pn`, `raise err` for an existing error has the outcome and
+control effect of `return err`. `raise "failed"` means construct
+`error("failed")` and complete the callable with it. **S7.4.6v3/S12.1.2v3**
+also admit explicit `return` in an `fn` block body; this local-control
+extension does not change error normalization, admission or acknowledgement.
+The prior pn-only syntax restriction is superseded by
+[Design_Procedural §2.4](Lambda_Design_Procedural.md#24-return-and-block-results).
 
 The enclosing return contract must admit the error. A handler in the caller
 can receive the call's error outcome. A handler body does not become a new
@@ -243,7 +246,7 @@ The warning allowance is not generalized to every unresolved receiving site.
 `operation() ^ { ^ }` now returns the same ordinary error. It has no hard-to-soft
 conversion role. A handler's recovery result, including a returned error,
 must fit its receiving context; a fresh error is not caught again by that
-same handler (S7.6.1v8, S7.5.4).
+same handler (S7.6.1v9, S7.5.4).
 
 ### Composition and procedural overwriting
 
@@ -275,7 +278,7 @@ Capture, handle, or propagate that outcome. An error-admitting return
 annotation does not acknowledge the non-final call. A final result can be
 acknowledged by its actual return contract. No-result declarations leave the
 preceding result intact, so syntactic statement position alone does not
-decide whether the outcome is overwritten (S12.1.2v2, S7.5.5).
+decide whether the outcome is overwritten (S12.1.2v3, S7.5.5).
 
 This check does not add runtime control flow. It does not restore declaration
 skipping, and it does not diagnose an already captured binding merely because
@@ -403,7 +406,7 @@ The superseded convention and exact prior rulings are retained in
 
 ## TE-16.1 — Handler results follow procedural sequencing
 
-**Decided 2026-11-02. Authority: S7.6.1v8, S7.6.7v5, S12.1.2v2.**
+**Decided 2026-11-02. Authority: S7.6.1v9, S7.6.7v5, S12.1.2v3.**
 
 ### Normal results, no result, and control transfer
 
@@ -425,7 +428,7 @@ The statement that a standalone handler "discards its result" is therefore
 wrong. The result can be replaced by a later result, or become the final result
 of the block. The distinction matters even without a surrounding binding.
 
-`return e` is a control transfer out of the enclosing procedure, including when
+`return e` is a control transfer out of the enclosing callable, including when
 written inside a handler or loop. It does not mean "produce the handler's
 fallback". `raise`, `break`, and `continue` keep their ordinary control-flow
 targets. None is a normal result update.
@@ -435,7 +438,7 @@ targets. None is a normal result update.
 The operand is evaluated once. In the single error handler, a successful result
 passes through unchanged; an error selects the handler body, whose normal
 result becomes the handler's result. Errors produced by the handler body
-remain fresh outcomes, not inputs to the same handler again (S7.6.1v8).
+remain fresh outcomes, not inputs to the same handler again (S7.6.1v9).
 The optional success arm is retired by TE-16.2 below.
 
 This is independent of the operand's `fn`/`pn` effect. A `pn` handler is valid
@@ -475,8 +478,8 @@ a procedure that succeeds with `3`, and `bad()` raises an error.
 
 ## TE-16.2 — One error handler; no success or finally suffix
 
-**Decided 2026-11-02, USER. Authority: S7.6.1v8, S7.6.2v5, S7.6.6v6,
-S10.1.7v4, S16.4.3v3. Implemented in M1.**
+**Decided 2026-11-02, USER. Authority: S7.6.1v9, S7.6.2v5, S7.6.6v6,
+S10.1.7v4, S16.4.3v4. Implemented in M1.**
 
 ### Decision
 
@@ -555,7 +558,7 @@ precedence explicitly.
 
 **Decided 2026-11-02, USER. Authority: S7.6.8, S7.5.6, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2,
-S16.4.3v3. Handler implementation complete in M1; general acknowledgement
+S16.4.3v4. Handler implementation complete in M1; general acknowledgement
 remains pending. The `empty` keyword is rejected
 below under S7.5.7; ordinary user-defined aliases remain available.**
 
@@ -592,7 +595,7 @@ let result = operation() or^ {
 
 Body results, explicit `return`/`raise`, procedural sequencing, and suspension
 follow the existing handler rules. A null result remains a real result;
-explicit return exits the enclosing procedure. A fresh error from the body
+explicit return exits the enclosing callable. A fresh error from the body
 requires an acknowledging receiver. Existing system-fault boundaries remain;
 this shorthand introduces no new fault category or recovery mechanism.
 
@@ -661,7 +664,7 @@ meaning of emptiness or confusing it with no result, `none`, or falsiness.
 ## TE-16.4 — Filtered handlers and ordinary left-to-right chaining
 
 **Decided 2026-11-02, USER. Authority: S7.6.9, S7.6.2v5, S7.5.1v6,
-S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.6v2, S16.4.3v3.
+S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.6v2, S16.4.3v4.
 Handler implementation complete in M1; general acknowledgement remains pending.**
 
 ### Select an error type or pattern
@@ -933,7 +936,7 @@ retain S7.7.6v2/S7.8.1 and their no-invalid-write contract; it does not allow an
 error in a clean `int[]` element or typed field. Parameter admission and dedicated
 typed loop-variable admission are unchanged. It creates no new permission for
 module state or writes through captures (S9.1.4). Assignment statement-result
-contracts are not redefined; S12.1.2v2 still distinguishes normal results from
+contracts are not redefined; S12.1.2v3 still distinguishes normal results from
 no result.
 
 ### Why retire retained-old-value assignment failure

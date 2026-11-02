@@ -59,7 +59,16 @@ pn count_up(var a: int[], n: int) int {
     if (n == 4) { return a[0] }
     return count_up(a, n + 1)
 }
+pn collecting_tail(a: int[], n: int, sum: int) int {
+    if (n == 0) { return sum }
+    let garbage = fill(32, n)
+    let part: int = a[0]
+    return collecting_tail(a, n - 1, sum + part)
+}
 pn main() {
+    print(collecting_tail([3], 1000, 0)); print("\n")
+    print(collecting_tail([], 1, 0)); print("\n")
+
     var a: int[] = [2, 3, 5]
     print(sum_tail(a, 3)); print("\n")
     print(even_read(a, 3)); print("\n")

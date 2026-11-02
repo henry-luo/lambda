@@ -26,7 +26,7 @@
 > See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
 
 > **2026-11-02 ordinary-error unification; implementation pending:**
-> **S7.4.1v2–S7.4.2v2, S7.4.6v2, S7.5.1v4–S7.5.5** retire the soft/raised
+> **S7.4.1v2–S7.4.2v3, S7.4.6v3, S7.5.1v6–S7.5.5** retire the soft/raised
 > distinction. `T^` and `T | error` are equivalent return contracts; `raise`
 > returns an ordinary error early; all ordinary outcomes require acknowledgement.
 > Current decisions and the moved legacy channel records are in
@@ -35,7 +35,7 @@
 > restore separate caller obligations. System faults remain separately ruled.
 
 > **2026-11-02 handler simplification; implemented in M1:**
-> **S7.6.1v8/S7.6.2v5** retire the optional `~ { ... }` success arm.
+> **S7.6.1v9/S7.6.2v5** retire the optional `~ { ... }` success arm.
 > Keep `e ^ { ... }`; use `match` for explicit outcome branching. The retired
 > suffix does not become `finally`. General cleanup remains a separate design
 > question. See [TE-16.2](Lambda_Design_Type_Error_Handling.md#te-162--one-error-handler-no-success-or-finally-suffix).
@@ -56,7 +56,7 @@
 > [Type and Error Handling, TE-13.1](Lambda_Design_Type_Error_Handling.md#te-131--initializer-acknowledgement-by-type-admission).
 
 > **2026-11-02 ruling; handler results implemented in M1:**
-> **S7.6.1v8, S7.6.7v5, S12.1.2v2** supersede procedure handlers' result
+> **S7.6.1v9, S7.6.7v5, S12.1.2v3** supersede procedure handlers' result
 > discard and statement-only restriction. New error-handling decisions live in
 > [Type and Error Handling, TE-16.1](Lambda_Design_Type_Error_Handling.md).
 > Earlier error rulings will move there as the remaining design is settled.
