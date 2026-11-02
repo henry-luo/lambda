@@ -1,5 +1,26 @@
 # Lambda — Type Support Design: Enforcement First
 
+> **2026-11-02 validation ruling; implementation pending:**
+> **S7.7.2v2/S11.4.1v4** remove implicit block exit from deferred initializer
+> checks. Validation yields an admitted value or error; the binding retains
+> that outcome and execution continues. The declared target remains strict,
+> while the effective type records the possible error. See
+> [Type and Error Handling, TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
+> Earlier initializer-skipping descriptions in this record are superseded.
+
+> **2026-11-02 initializer ruling; implementation pending:**
+> **S7.5.1v3/S7.5.2v3** allow inferred error-admitting bindings, including
+> `any`. Undecidable error admission by an explicit initializer contract warns
+> and defers to the ordinary runtime check; proven incompatibility still fails
+> statically. Both options and the decision are in
+> [Type and Error Handling, TE-13.1](Lambda_Design_Type_Error_Handling.md#te-131--initializer-acknowledgement-by-type-admission).
+
+> **2026-11-02 ruling; handler-result implementation pending:**
+> **S7.6.1v5, S7.6.7v5, S12.1.2v2** supersede procedure handlers' result
+> discard and statement-only restriction. New error-handling decisions live in
+> [Type and Error Handling, TE-16.1](Lambda_Design_Type_Error_Handling.md).
+> Earlier error rulings will move there as the remaining design is settled.
+
 > **2026-10-16 ruling; implementation pending:** **S3.1v2–S3.5, S7.5.1v2,
 > S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v3** replace the error-falsy and
 > `or`-rescue decisions. See TE-22. Earlier descriptions of `or` as error
@@ -1074,69 +1095,22 @@ value — `raise` there is a compile error (the existing plain-`T` raise restric
 the union form). Channel ↔ verb: `^` raises, `| error` returns — exactly §7.3's "fn return
 error; pn raise error" given surface spellings.
 
-**Acknowledgment forms (DECIDED 2026-07-29 — generalization ratified): must-handle =
-must-engage-explicitly, at the immediate expression.**
-E228 guards against *unawareness*, not against deferred branching — so it is satisfied whenever
-the enforcing call's result is received by a context that **textually** engages the error
-possibility:
+**Initializer acknowledgement (revised 2026-11-02, USER).**
+**S7.5.1v3/S7.5.2v3** accept a binding whose declared or inferred receiving
+type admits the initializer's error outcome. `let x = a()` can retain the
+outcome without an annotation; `any` and `any | error` acknowledge identically.
+A known incompatibility is still a static error. If an explicit contract's
+error admission is undecidable, emit a warning and retain the ordinary runtime
+check. Unannotated inference conservatively retains the error possibility.
 
-1. a braced handler or postfix-`^` propagation;
-2. a binding, parameter, or declared return whose explicit type admits `error` — `T | error`,
-   `T^` (equivalent in value positions), or `error` itself. The binding carries the outcome as
-   a union, and ordinary assignability already enforces engagement-before-plain-`T` for both
-   spellings — the §7.3 wrapper idiom in one step, and the batch idiom for collecting
-   enforcing-call outcomes. The declared-return form counts **only for the call in return/tail
-   position** (`return f()`, or the final expression) — see tightness below. **`any` never
-   counts** — it admits error but acknowledges nothing;
-3. a `match` with a `case error:` arm.
-
-Bare `let x = a()` remains an error — Lambda stays stricter than Zig/Rust/Go, all of which
-accept an untyped capture. The §10.7 firewall backstops the demotion path: an acknowledged
-error still cannot silently escape a declared plain-`T` interface. Implementation: one added
-condition at the existing E228 site (`build_ast.cpp:5197` — "declared type explicitly admits
-error") plus a third suggestion in the diagnostic text.
-
-#### Common binding acknowledgments
-
-For ordinary variable binding, the three common forms are:
-
-```lambda
-let value = expr ^ { ^ }       // preserve the soft error value
-let value = expr ^ { null }    // intentional fallback value
-let value: T | error = pn_call // explicit union binding
-```
-
-The third form is an acknowledgment boundary under **S7.5.1**: success binds `T`, while a
-hard raised error is captured as a soft `error` value in `value`. It neither re-raises nor
-chooses a fallback. The first form uses the handler to preserve the error; the second
-acknowledges it and replaces it with `null`, per **S7.6.1v3/S7.6.2v3**. These forms replace
-the retired `let value^err = pn_call` split under **S7.6.5v2**.
-
-**Acknowledgment tightness (DECIDED 2026-07-29, user): tight everywhere for `^` — keyed on the
-form, not on fn vs pn.** The acknowledgment must be the **immediate expression surrounding the
-call**; never distant, never scope-level. In particular, a declared error-admitting return does
-*not* retroactively acknowledge non-tail calls:
-
-```lambda
-pn p() T | error {
-    f()        // compile error if f is enforcing — discarded outcome, no acknowledgment
-    g()        // same — and f's unhandled failure could be the very cause of g's
-    return r   // the declared return covers only THIS expression, not the calls above
-}
-```
-
-Rationale: the `^` channel is *designed* to demand explicit acknowledgment — primarily for pn
-code, where an unengaged failure invalidates every subsequent command (§7.3: "commands halt on
-failure"); fn may use `^` too, under the same discipline. No laxer rule for fn is needed,
-because the relaxed pattern **already has its own spelling**: a callee that wants callers to
-write `let a = b()` and let errors flow simply declares `T | error`. The two forms are the two
-intended design patterns — the callee author chooses the caller discipline by choosing the
-form:
-
-| Pattern | Declare | Caller experience |
-|---|---|---|
-| Urgent — must acknowledge | `T^` | engage at the immediate expression, everywhere |
-| Relaxed — value-flowing | `T \| error` | `let a = b()` is fine; the error propagates as a value |
+The full decision, the static-error and warning alternatives, examples, and
+open follow-ups are now in
+[TE-13.1](Lambda_Design_Type_Error_Handling.md#te-131--initializer-acknowledgement-by-type-admission).
+This change concerns initializer bindings; the existing immediate-expression
+boundary and other receiving-position rules remain. `^ { }`, postfix `^`, and
+`match` with an error arm remain explicit acknowledgement forms. The superseded
+policy and its rationale have moved to
+[Appendix S](Lambda_Design_Type_Error_Handling.md#earlier-acknowledgement-policy-2026-07-29-superseded-for-initializers).
 
 **The soft form's contract (decided 2026-07-29, user): flow through the interior, detect at
 the type boundary.** Softness is *desirable* for fn code — pipelines, batch processing,
@@ -1347,166 +1321,32 @@ Whether every function receives both versions, whether usage creates additional
 specializations, and how open returns use boxed or side-channel ABIs are deferred. They are
 performance decisions, not part of the language contract.
 
-### TE-15 — Soft-error containment: skip to the closest safe boundary (decided 2026-08-01, user)
+<a id="te-15--soft-error-containment-skip-to-the-closest-safe-boundary-decided-2026-08-01-user"></a>
 
-**Decision.** A soft error does not *propagate* through the expressions around it — it **skips**:
-at the moment of origination, control transfers to the end of the closest statically-enclosing
-*safe boundary*, and that boundary's position receives the error value. Everything between the
-origination site and the boundary is never evaluated. This is the containment policy for the
-whole family of soft/evaluation errors — failed deferred type checks, failed conversions and
-casts, validation failures, and error values produced by `| error` computations — not a rule
-for any one numeric case.
+### TE-15 — Initializer containment retired (revised 2026-11-02, user)
 
-#### The problem it closes
+**S7.7.1v2/S7.7.2v2** replace automatic initializer skipping with a bound
+validation outcome. A deferred `let`/`var` check warns, produces an admitted
+value or error, binds it, and continues. Proven incompatibilities remain
+static errors; the effective binding type preserves failure. Initializer
+handling no longer abandons a block on the user's behalf.
 
-§10.8 (revised 2026-07-30) already decided that a failed annotated binding "yields the boundary
-error *before the binding exists* — `x` never holds an error." That promises control leaves the
-straight-line path on failure but names no landing site, and the code after the binding was
-compiled assuming `x: T`, so execution cannot simply continue. The gap is measurable today
-(repro `temp/overflow_fn_test3.ls`, 2026-08-01): with `fn f(a: int) int { a + a*a }` and an
-argument whose body result leaves the flex-int band, the *same call* yields a bare `ITEM_ERROR`
-under boxed consumption (`let d = f(x)`, `f(x) or -1`) but a silently resurrected `float`
-under native-arithmetic consumption (`f(x) + 1`). Mechanism: the native entry flattens its
-boxed int-or-float result through `it2i` (truncated raw i64, no boundary check — the
-`transpile-mir.cpp:12034` checked return never fires because the body's AST type is `INT`), and
-the outcome then depends on whether the *caller* re-boxes (53-bit guard → bare error singleton)
-or keeps computing in the native lane (next flex-int op promotes the out-of-band i64 back to
-float). Same call, two results by consumption context — the fourth outcome §1 forbids, twice.
-
-#### Options considered (2026-08-01)
-
-1. **Status quo** — rejected: incoherent per the evidence above; the "error" produced is also
-   the bare singleton, violating the rich-payload decision (§10 Q4).
-2. **Require the user to spell `T | error`** — rejected: viral. If overflow (or any deferred
-   check) counted as inferred error-possibility, every arithmetic-bearing plain-`T` fn would
-   fail the §10.7 firewall and `| error` would spread through every signature — the `Result`
-   pandemic, and not user-friendly.
-3. **Redefine flex `int` as the float-representable integers** — **DECIDED 2026-08-01 as C16**
-   (`Lambda_Semantics_Formal2.md` C16; spec §4.1/§4.2/§4.6/§4.7 updated), in the *tagged*
-   variant: `int` remains a distinct runtime type (never a hint erased into float); arithmetic
-   incl. `div`/`%` is closed and total via `int.inf`/`int.nan`; the overflow-promotes-to-float
-   rule is deleted; unsuffixed literals stay restricted to ±(2⁵³−1). Consequence for TE-15:
-   int *arithmetic* no longer originates defects at all — the mechanism below still governs
-   casts, parsing, validation, and fractional→int admission.
-4. **Handle it for the user — automatic containment.** Two granularities:
-   - *Skip to end of function* — rejected. Every annotated `let` becomes an invisible early
-     return (`T^` behavior without the spelling), and one bad item inside a `for` kills the
-     whole batch because the jump target is past the loop.
-   - *Skip to end of the closest block/element body* — **adopted**, generalized into the
-     three-zone rule below. The containment region is not a policy choice but derived: it
-     equals the variable's scope, which is exactly the static extent of the violated
-     assumption. Code later in the block assumed `a: T`; code outside the block cannot name
-     `a` at all, so scope itself proves it needs no protection.
-
-#### The rule: three zones, one mechanism
-
-Every expression position has a statically-known **error destination** — the nearest enclosing
-construct that can *accept* an error value. Origination skips straight to it:
-
-- **Zone 1 — binding boundary.** `let a: T = e` where the deferred check fails (or an error
-  value arrives): the annotated binding is *not* an acceptor; the error skips to the end of the
-  smallest enclosing block, and **the block evaluates to the error**. Subsequent statements in
-  the block never run; outer blocks are safe by scoping.
-- **Zone 2 — composition points.** List/map/element child positions *are* acceptors: the error
-  lands as an ordinary data item and construction continues (§10 Q6's batch idiom, unchanged).
-  `[1, int("x"), 3]` still composes to `[1, error, 3]` — the element position is the nearest
-  acceptor, so the skip never reaches the block.
-- **Zone 3 — expression interior.** Operators and calls between origination and destination
-  have no acceptor positions of their own and are simply **skipped, never evaluated**. The
-  error does not travel through them as a value.
-
-The acceptor set is the closed list already enumerated by TE-8's short-circuit targets plus the
-engagement forms: container element positions; `or`-left operands (skip lands at the rescue —
-the right operand evaluates); `^err` destructuring and postfix `^` (capture/propagate);
-`match`/`is` scrutinee positions with error classification; positions typed `any`, `error`,
-`T | error`, `T^`; and unannotated bindings (which infer the union and hold the value, boxed).
-The smallest enclosing block is the destination of last resort. The fn body is the outermost
-block, so an uncontained error becomes the function's result — for *disclosed* soft errors this
-is exactly §10.7 (an open body must disclose `| error` or contain); for **defect-channel**
-errors (failed deferred boundary checks) it crosses a plain-`T` return on the unenumerated
-system channel per `Lambda_Formal_Semantics.md` §7.3 — inference must **never** widen a
-signature because of defect possibility, or option 2's pandemic returns through the back door.
-
-#### Semantic consequences
-
-- **Origination is a sequence point.** Evaluation of the containing expression stops
-  immediately; operands and effects to its right never run (Rust/Swift argument behavior).
-  Vacuous inside `fn` (no effects to observe); meaningful inside `pn`. Corollary: strict
-  left-to-right evaluation order becomes *normative*, not incidental.
-- **Rescue moves to the initializer.** Since failure exits the block, `a or 0` *after* the
-  binding is unreachable by construction; the idioms are `let a: T = e or 0` and
-  `let a^err = e` (engagement suppresses the skip and captures instead).
-- **Batch friendliness is a theorem, not a hope.** A `for` body is a block, so a bad item
-  yields one error item in the collected result and the loop continues:
-  `for (x in xs) { let n: int = int(x.count); n * 2 }` → error elements for bad items, results
-  for good ones.
-- **Elements.** Child-expression errors remain child items (zone 2); only a failed *binding*
-  declared inside the body collapses the element body to the error.
-- **Payload.** The skip delivers the §10 Q4 rich error (code, message, expected/actual,
-  boundary location) — the bare `ITEM_ERROR` singleton observed at today's re-box guard does
-  not satisfy the contract. Exception: a defect rescued *by an `or` on the same edge* may skip
-  materializing the error object (log-line breadcrumb only) as an optimization.
-
-#### Implementation model: errors are control, not values
-
-**Invariant.** An error exists only (a) boxed in an Item-typed lane or slot, or (b) transiently
-on a resolved control edge from origination site to destination. Native/unboxed lanes are
-error-free *by construction*; no operator in unboxed code ever receives an error operand — the
-emitter, not the runtime, guarantees this.
-
-Value-propagation through unboxed lanes was considered and rejected: it requires an in-band
-sentinel (today's accidental out-of-band i64 *is* one, and its consumer-dependent meaning is
-the measured divergence), or re-boxing every lane an error might cross (re-creates the flexint
-ANY-poisoning this design exists to remove), or a polled side-flag (cost on every operation).
-
-- **Destination stack.** The emitter maintains the acceptor context lexically while lowering
-  (same shape as the online-exception emission-time tracker). Destinations are static; there is
-  no dynamic unwinding — skips are intra-function branches, and fn boundaries use the ordinary
-  return path.
-- **Origination sites are a closed set**, each already computing its failure condition:
-  `lambda_type_check` boundaries, fallible conversions/sys-funcs, and calls to open/`^`
-  callees. (The flex-int promote edge was a fourth class; C16 deleted it — int arithmetic
-  never leaves int.) Routing retargets existing branches — happy-path cost is zero. `any`-lane
-  data cannot smuggle errors into native lanes because every `any`→native transition is already
-  a checked boundary (TE-5 R3).
-- **Cross-function ABI.** Interior routing reaches the fn's outermost region → error return;
-  the *call site* is an origination site in the caller. Boxed-returning calls carry the error
-  in the result Item; native-returning calls check the context error lane
-  (`FN_ERROR_LANE_CONTEXT_ITEM`) — one load-and-branch after the call, the Swift-`throws`
-  shape. A callee whose compiled body provably contains **zero** origination sites needs no
-  caller-side branch; carry this as the emission-time effect bit
-  (`FnEffectSummary.may_return_error`) — transitive in the implementation, invisible in types.
-  **Polarity fix required:** today's `closed_item_result` gate (`transpile-mir.cpp:11355`)
-  treats a *missing* variant analysis as "trusted clean, skip the error branch" — that is one
-  half of the measured divergence. Unknown must mean defect-capable; branch-free only on proof.
-- **Boxed lanes keep value contagion** (the helpers' existing "error in, error out") as an
-  equivalent implementation wherever it is unobservable — i.e. pure `fn` code. `pn` bodies emit
-  control-routing on both boxed and unboxed paths so the two agree on which effects ran.
-  **Equivalence invariant (test target, DF9-style): contagion ≡ routing wherever observable.**
-- **Landing pads.** One per region that contains origination sites: receive/box the error, root
-  it, restore the side-number-stack watermark (`lambda_restore_number_frame_top` — the existing
-  single-funnel machinery generalized per block).
-
-#### Open sub-questions
-
-- **Statement-position defects in `pn` (the hardest).** A failed reassignment whose block value
-  is discarded — `acc = acc + x` inside a loop — must not evaporate with `acc` silently stale.
-  Recommendation: escalate (raise channel / abort the loop); **undecided**.
-- **Flex-int overflow policy — RESOLVED 2026-08-01 by C16** (option 3 above, tagged variant):
-  int arithmetic is total, so it no longer produces defects; TE-15's zones stand unchanged
-  for casts, parsing, validation, and fractional→int.
-- **Skip is containment, not acknowledgement — RESOLVED by TE-16.** A raised (`T^E`) error
-  is compile-time gated at the immediate expression and therefore never reaches the skip
-  machinery; TE-15 governs defects and boundary-rejected soft errors only.
+The current decision is
+[TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
+The former containment argument, alternatives, and implementation model are
+retained in [Appendix S](#appendix-s--superseded-declaration-skipping-design).
+Other failure boundaries retain their formal rulings until separately revised.
 
 ### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-17, user)
 
-**Decision.** Local error handling uses one braced syntax with two
-context-selected forms:
+**Decision.** Local error handling uses one braced syntax in value and
+statement positions. Both preserve their normal result under **S7.6.1v5**;
+the result rule no longer depends on the callee's `fn`/`pn` effect
+([TE-16.1](Lambda_Design_Type_Error_Handling.md)).
 
 ```lambda
 let a = e ^ { … ^ … }      // expression form: ^ is the handled error
-pn_call() ^ {               // statement form: handle, then continue
+pn_call() ^ {               // result participates in procedural sequencing
     … ^ …
 }
 ```
@@ -1562,7 +1402,7 @@ supplies the third: `e ^ { }` is `let … else { }` in expression form; the stat
 form is the ordinary command counterpart, where the handler body runs only on failure and control
 then resumes after the handled statement.
 
-#### The two context forms
+#### Value use and procedural sequencing
 
 - **Expression form.** `e ^ { h }` is evaluated as one ordinary expression, with
   `type(e ^ h) = (type(e) \ error) | type(h)`. It has no privileged relationship with a
@@ -1571,11 +1411,14 @@ then resumes after the handled statement.
   like `let a: T = other_expr`: static rejection where provable, otherwise a deferred check and
   TE-18 skip. The outer check is **not** caught by the inner handler. This makes the form a
   shorthand for value-level error matching, not a contextual checked-cast construct.
-- **Statement (`stam`) form.** `pn_call() ^ { H }` protects a procedural call whose value is
-  discarded. Success continues with the next statement. On error, `H` runs as a statement body
-  with `^` bound to the handled error; if `H` completes normally, execution likewise continues after the handled
-  statement. No handler-result type is required. `return` or `raise` in `H` still acts on the
-  enclosing procedure.
+- **Procedural sequence.** `pn_call() ^ { H }` preserves its successful
+  operand value or the normal result of `H`. That result replaces the preceding
+  block result, including when it is `null`; a later result may replace it in
+  turn. A final handler supplies the block result (**S12.1.2v2**). The same
+  handler can initialize a binding (**S7.6.7v5**). `return` in `H` exits the
+  enclosing procedure rather than supplying a fallback value. The former
+  result-discard rule is preserved in
+  [TE-16.1, Appendix S](Lambda_Design_Type_Error_Handling.md#appendix-s--superseded-rules).
 - **No implicit divergence rule.** In expression position the handler may return any value; its
   union participates in ordinary contextual typing. In statement position it may complete
   normally. Letting some enclosing block skip is a runtime outcome, never a static claim that the
@@ -1623,8 +1466,9 @@ pn_func(inner, options) ^ {
 This statement-position shape is expected to be the common `pn`-call flow: handle a directly
 raised error in the first arm, or continue with the returned value in the second. Omitting the
 `~` arm preserves the one-arm rule: success passes through unchanged. In expression position the
-result type is `type(error_arm) | type(value_arm)`; in statement position the selected arm
-executes and normal completion continues after the handler. The complete two-arm construct
+result type is `type(error_arm) | type(value_arm)`; in a procedural sequence
+the selected arm's normal result updates the block result before execution
+continues (**S7.6.1v5, S12.1.2v2**). The complete two-arm construct
 remains primary-like at the member-access/postfix tier, so, for example,
 `e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
 
@@ -1711,59 +1555,32 @@ value expression.
 
 #### Acknowledgement taxonomy for the enforcing channel
 
-A raised `T^E` must be acknowledged at the immediate expression (TE-13 tightness) by exactly
-one of:
+**S7.5.1v3/S7.5.2v3** define acknowledgement at the immediate expression:
+a handler, postfix propagation, `match` with an error arm, an initializer
+binding under the admission rule, or a declared parameter/return under the
+existing explicit-error contract rule. The initializer decision and warning
+policy are recorded in
+[TE-13.1](Lambda_Design_Type_Error_Handling.md#te-131--initializer-acknowledgement-by-type-admission).
 
-1. `match` with a `case error:` arm;
-2. `e ^ { … }` — handle here, optionally with `~ { … }` as the explicit non-error arm;
-3. `e^` — propagate;
-4. a receiving position that textually admits error — `let x: T^ = e`, `let x: T | error = e`,
-   or a declared parameter/return of that shape.
-
-`let x = e` alone never acknowledges (stricter than Zig/Rust/Go, per TE-13), and — the ruling
-this section adds — **TE-15's skip does not acknowledge either.** Skip is automatic
-containment for *defects*; it is not user engagement, so it cannot discharge an obligation
-the user is required to make visible. Consequently a raised error is compile-time gated and
-never reaches the skip machinery.
-
-**The three regimes, stated once** (they are routinely conflated):
+An undecidable explicit initializer contract warns and defers admission.
+Under **S7.7.2v2/S11.4.1v4**, the admitted value or validation error is bound,
+and subsequent statements execute. The effective type retains the error
+possibility; there is no declaration-driven block exit. Other checked
+boundaries retain their own contracts.
 
 | Class | Mechanism | Compile-time obligation |
 |---|---|---|
-| soft error values (`T \| error`) | flow as data — the batch idiom | none |
-| defects (failed boundary checks) | TE-15 skip to closest safe boundary | none (automatic) |
-| raised errors (`T^E`) | must be acknowledged at the immediate expression | E228 |
+| Soft error values (`T \| error`) | Flow as data | Ordinary type contracts |
+| Defects (failed boundary checks) | Containment at the applicable boundary | Existing boundary rules |
+| Raised errors (`T^E`) | Immediate acknowledgement | Initializer admission per S7.5.2v3; other unacknowledged calls retain E228 |
 
-#### Handler-protected `await` — rejected for now (decided 2026-08-06, user)
+#### Handler-protected suspension
 
-The handler must eventually cover the **system-fault** channel, not only value-error handling.
-The retired destructure used `transpile_local_fault_expression` with a real
-`LambdaRecoveryFrame` and inline `sigsetjmp`; that implementation path and its
-`AstNamedNode.local_fault_safe` state are gone. The remaining design constraint is unchanged:
-the jump buffer records a machine context inside the *currently executing* JIT activation, and
-an `await` unwinds the native stack back to the scheduler, resuming later on a different frame.
-A buffer captured before the suspension points at stack that no longer exists. The new handler
-lowering must use `MayAwaitScan` to reject such operands rather than silently degrading capture.
-
-**Decision: `e ^ { … }` over a possibly-suspending operand is a compile error.** Keep it simple
-first. This is the existing restriction made *loud* rather than silent, so nothing regresses, and
-it reuses the `MayAwaitScan` already written.
-
-**Rejected: silently splitting the capability** (always catch value errors, catch faults only
-when the operand cannot suspend). The same syntax would catch OOM in one place and not another,
-decided by whether the operand happens to contain an `await` — the "same construct, two
-behaviours by invisible context" pattern this design exists to eliminate. Worse for `^ { }` than
-for the old destructure, because the handler is an expression that composes freely and
-`(await f()) ^ { … }` is the canonical async shape.
-
-**Follow-on, not now: segment the protected region per poll.** The frame never actually needs to
-span a suspension — split the region at each `await` into straight-line segments and arm one
-frame per segment. The handler label is stable (same function), so every segment lands in the
-same place, and no jump buffer ever crosses a poll. This is cheaper than "represent fault
-recovery across task polls" because it *avoids* crossing polls rather than supporting them; note
-too that a fault inside the awaited task belongs to that task's own recovery frame, and a fault
-after resume is on the new stack, which a re-armed segment frame covers. Going from compile
-error to allowed is backward-compatible, so no code written under the rejection breaks later.
+**S7.6.7v5** admits handlers over suspending procedure calls in value and
+statement positions within procedural context. Suspension preserves normal
+results, error selection, and control transfers. The earlier restriction and
+its rationale are retained in
+[TE-16.1, Appendix S](Lambda_Design_Type_Error_Handling.md#earlier-suspension-restriction-2026-08-06-superseded).
 
 #### Migration
 
@@ -1920,276 +1737,27 @@ rather than TE-17 for the lane rule from here on; TE-17 remains the record of th
   destination and a streaming source, representation cannot be chosen before consumption.
   Committing to boxed-until-proven is consistent with TE-17 and is the presumed answer.
 
-### TE-18 — Skip is a declaration-boundary mechanism; the guard dominates the scope (decided 2026-08-06, user)
+<a id="te-18--skip-is-a-declaration-boundary-mechanism-the-guard-dominates-the-scope-decided-2026-08-06-user"></a>
 
-**Decision.** TE-15's skip applies at **declaration boundaries only** — `let` / `var` / `for`
-loop variables, plus declared parameters and declared returns, plus the future `cast … as T`.
-It does **not** apply inside expression composition. An expression whose operand can fail is
-typed `T | error` and computed as such; the error travels as a value, guarded where the
-representation requires it, and the user recovers with `e ^ { … }` where *they* choose.
+### TE-18 — Validation outcomes at declarations (revised 2026-11-02, user)
 
-**The invariant this buys.** A declaration with a native contract *guards once, on entry*, and
-that guard **dominates every use of the binding in its scope**. Inside the scope the binding is
-native-lane, unconditionally, with no per-use error check.
+**S7.7.2v2/S11.4.1v4** keep declared admission strict and make its deferred
+failure an ordinary bound error. The binding's effective type includes that
+outcome; no invalid value is admitted as the declared type and no block is
+implicitly exited. A declaration remains a no-result statement (S2.5.4v3).
+**D2.8.3v2** replaces the old whole-scope clean-binding guarantee with proof
+of error freedom before native use. The full rule and examples are now in
+[TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
 
-This restates rather than replaces TE-15: containment still exists, but its trigger set shrinks
-to the boundaries that were already checking, so no new control mechanism enters expression
-lowering. It is the original conservative design, made explicit.
+Argument admission still follows **S7.7.3**: a rejected argument prevents the
+callee from running and the call yields the error. Existing reassignment and
+field/store rules (**S7.7.4/S7.7.6**) are separate; their retained-value and
+failure-control policies need follow-up. This revision does not authorize an
+invalid native store or silently successful mutation.
 
-#### Why expression interiors do not skip
-
-Three reasons, in the user's ordering: (1) skipping complicates lowering — every operator
-position becomes a potential control edge; (2) it makes a *soft* error behave like a hard one,
-collapsing the distinction the three-regime taxonomy exists to maintain; (3) it performs a
-recovery the user did not request, pre-empting the `^ { }` they might have written.
-
-**And it costs nothing, because TE-17's I3 already does the work.** TE-15's motivating defect
-was the O1 divergence: `let d = f(x)` yielding a bare `ITEM_ERROR` while `f(x) + 1` silently
-resurrected a `float`, the same call giving two answers by consumption context. Under I3 that
-is fixed without any interior skip — `f(x) : int | error` is **not lane-eligible**, so `f(x) + 1`
-is computed boxed, where contagion yields the error, which is exactly what the binding yields.
-Interior skip was machinery introduced to close a hole that the eligibility gate closes more
-cheaply. Removing it is a simplification, not a weakening.
-
-**Corollary retired.** TE-15's implementation note that *"strict left-to-right evaluation order
-becomes normative"* was forced by interior skip (effects to the right of an origination had to
-be provably unevaluated). With no interior skip, effects to the right of an error-valued operand
-run normally, and evaluation order returns to being an ordinary design choice.
-
-#### The boundary scenarios
-
-| # | Form | Ruling |
-|---|---|---|
-| 1 | `let x: int[] = e` / `var x: int[] = e` / `for x: int[] in e` | Guard on assignment. Error ⇒ **skip to end of the enclosing block**, which yields the error; the binding is never established. Success ⇒ the binding is native-lane for its whole scope. |
-| 2 | `fn f(x: int[])`, called as `f(e)` | Guard on the argument at the **call site**. Error ⇒ `f` is not entered and **the call expression evaluates to that error**. Success ⇒ `f`'s body runs native. Declared returns are the same shape, with the fn body as the region. |
-| 3 | `e as T` (future; not yet in the language) | An inline declaration. Same as case 1: skip on error, continue native on success. |
-| 4 | `[…]`, `{…}`, `<e …>` with no static type | Never enters a native lane. Accepts and contains error values — the batch idiom. |
-| 5 | `a + e + b` — expression composition | **No skip.** The result type is `T \| error`; the error flows as a value. Guard only where representation demands it (I3). |
-| 6 | `pn` bodies | One extra ruling only — case 7. |
-| 7 | `x = e` — reassignment to a declared `var` | Its own ruling: skip to the **declaring block** of `x`, old value retained, **and diagnose** — see below. |
-| 8 | `while (c) { … }` in a `pn` | Contributes **no region**. A skip inside it exits the loop, landing at the declaring block of the assigned binding. |
-| 9 | inner callable assigns an outer-frame `var` | Failure stops at the mutating callable's boundary and returns an error. The call invalidates subsequent reads of the outer binding until the caller explicitly re-establishes it; `mutate(); use(x)` is rejected, while no later use and `x = mutate(); use(x)` are legal (S3). |
-
-Cases 1–3 are the same mechanism (a declared boundary with a region behind it); 4 and 5 are the
-same mechanism (values flowing through error-admitting positions); 7 is case 1's mechanism with
-a diagnostic obligation case 1 does not have. Case 9 is the cross-frame termination rule: the
-callee can return an error but cannot branch into another frame's declaring block.
-
-#### Case 7 — reassignment is not case 1, and must be diagnosed
-
-`var` is genuinely harder than `let`, and the difference is observability. When
-`let x: T = e` fails, the skip happens **before the binding exists**: nothing was established,
-the block yields the error, and no code the user wrote is silently abandoned in a surprising
-state. When `x = e` fails mid-block, two things are true that have no analogue in case 1:
-
-1. **`x` already exists and now holds a stale value** — the previous one, retained per §10.8.
-2. **The rest of the block was written assuming the new value**, and is skipped.
-
-So the skip here is not merely containment; it is the runtime **abandoning code the user wrote,
-holding a value the user did not intend, on the user's behalf without being asked**. That is a
-runtime error in substance even though it is handled. It must be reported, not merely logged as
-an origination breadcrumb.
-
-**Three tiers.**
-
-- **Static, provable.** A reassignment whose RHS is provably `T | error` against a declared
-  `var x: T` inherits the existing binding rule unchanged — the same **compile error** as
-  `let x: int = a()` (decided 2026-07-29: "when the user is explicit, we check explicitly"). No
-  new rule; confirm it applies to reassignment as well as declaration.
-- **Static, deferred — new warning.** Where the RHS is only *deferred*-fallible (implicit
-  openness, an `any` source, an unproven callee) **and the block has statements after the
-  reassignment**, warn: this reassignment can fail, and if it does, the following N statements
-  will not run and `x` will keep its previous value. Gate the warning on there actually being a
-  tail to abandon — a reassignment in final position skips nothing and deserves no warning. This
-  is the "parts of the following body might be violated" case, made precise.
-- **Runtime — a report, not a breadcrumb.** When the skip fires, report at a severity above the
-  ordinary origination log, naming both consequences: which binding kept its previous value, and
-  how many statements of the block were not executed. Reporting only "an error originated here"
-  hides exactly the part that distinguishes case 7 from case 1.
-
-**The handler is not an assignment-boundary catch.** In `x = e ^ { … }`, the handler first
-produces the complete RHS value; the ordinary `x` contract check happens afterward. Handling can
-make the RHS statically clean and thereby remove the warning, but a later dynamic mismatch at the
-assignment boundary still reports and skips exactly as it would without `^ { … }`.
-
-#### Case 8 — `while`, and the rule that makes it a corollary
-
-`while (c) { … }` is a `pn`-only *statement* (`while_stam` sits in `_statement` in
-`grammar.js`, alongside `for_stam`). It declares nothing and **yields no value**. Two
-independent arguments therefore say it cannot be a skip destination: it establishes no binding
-whose scope could bound a region, and it has no result position in which an error could be
-delivered. So a reassignment skip inside a `while` **exits the loop**, landing at the end of the
-block where the assigned `var` was declared. The user's case-8 ruling is correct.
-
-But it is not a special case. It falls out of the general rule, which case 8 is what forced into
-focus:
-
-> **Regions are created by declarations, not by control structures.** A skip lands at the end of
-> the block that **declares the binding** whose establishment or assignment failed.
-
-`while`, `if`, plain blocks, and `for_stam` contribute no region of their own; only the
-declarations inside them do. This also **corrects case 7's destination**: "the enclosing block"
-was ambiguous between the block enclosing the *statement* and the block declaring the *variable*.
-It is the declaring block, and that choice is load-bearing:
-
-> **Within one frame, no use of a binding observes a value left by a failed assignment.**
-> Skipping to the declaring block ends the stale binding's scope at the same moment the skip
-> lands. Cross-frame reassignment stops at the mutating callable's boundary, but statically
-> invalidates the outer binding for later reads until the caller explicitly re-establishes it.
-
-Spec §13 invariant 7 ("no binding holds a placeholder for a failure") still holds: the retained
-outer value is a real previously-established `T`, not a null/error placeholder. S3 enforces the
-stronger source-level rule by rejecting reads of that value after a hidden outer write.
-
-#### The `acc = acc + f(x)` weak spot is closed — and the liveness proposal is withdrawn
-
-The previous entry here proposed a liveness analysis: route out of a discarded region when the
-failed binding is live across iterations. **Superseded — the declaring-block rule gives the same
-answers syntactically, with no dataflow analysis at all**, because *where a binding is declared*
-already encodes *whether it is carried across iterations*:
-
-| Shape | Declared in | Skip lands | Behaviour |
-|---|---|---|---|
-| `acc = acc + f(x)` in a `for`/`while` body, `var acc` in the fn body | fn body | end of fn body | exits the loop; fn yields the error |
-| `let y: int = f(x)` inside a loop body | iteration body | end of iteration body | loop continues — batch idiom |
-| per-item check on the `for` variable itself (V6) | the `for` | end of iteration body | loop continues — batch theorem intact |
-
-An accumulator is *by definition* declared outside the loop; a per-item temp is *by definition*
-declared inside it. All four earlier rulings — case 1, case 7, case 8, V6 — collapse into the
-one rule above, and every property that was wanted follows:
-
-- the batch is killed for an accumulator, which is correct: a stale `acc` poisons every later
-  iteration;
-- the stale binding is never observable, because its scope ended;
-- the defect cannot evaporate: the fn body's result *is* observed;
-- one runtime report instead of n.
-
-#### Three sub-cases the declaring-block rule does not cover directly (decided 2026-08-06, user)
-
-**S1 — Element and field stores** (`arr[i] = f(x)`, `m.k = f(x)`). There is no binding being
-assigned, and a partially-mutated container is **not** scoped away by leaving a block: it may be
-aliased, or have been passed in as a parameter, so it outlives the region the skip would exit.
-Scope exit therefore cannot restore the pre-failure state, and the invariant that makes case 7
-safe ("the stale value's scope ends when the skip lands") does not apply.
-
-**Ruling:** a failed element or field store is **reported**, using case 7's three tiers, and the
-container is left in a documented partial state — it is not silently contained. The skip
-destination remains the declaring block of the *container* binding, but the report is what
-carries the truth, because the skip alone does not undo the mutation. TE-17 narrows this to
-deferred checks only: a provably-fallible store is already a compile error, so the runtime case
-is the `any`-sourced or unproven-callee residue.
-
-**S2 — Module-level `var`.** The declaring block is the module body, so a failed reassignment
-skips to the end of module initialization and the module fails to initialize. This is the
-correct reading of the rule and is stated deliberately rather than inherited by accident: a
-module whose top-level state is half-established must not become importable. Partial module
-state is exactly the "stale binding visible to later code" failure at module scope.
-
-**S3 — Reassignment from an inner function or closure** to a `var` declared in an outer frame.
-The destination is in another frame, so the skip cannot be an intra-function branch. The accepted
-rule is deliberately local: failure returns an error from the mutating callable and stops at that
-callable's boundary. The call site receives the error as its ordinary result; it does **not**
-re-apply the outer binding's declaring-block skip. Execution may continue after a discarded
-result, but a call that may write captured `x` makes `x` unavailable for subsequent reads in the
-caller until a definite explicit assignment re-establishes it:
-
-```lambda
-mutate()
-use(x)       // compile error: x may have changed invisibly inside mutate
-```
-
-Two shapes are legal:
-
-```lambda
-mutate()     // mutate may read/use x internally
-             // no later read of x in this caller
-
-x = mutate() // the returned outcome explicitly re-establishes x
-use(x)
-```
-
-The rule bans **invisible mutate-then-use flow**, not cross-frame mutation itself. Any read counts:
-direct use, passing `x` as an argument, member/index access through `x`, capture by a later closure,
-or reading it on the RHS of a purported re-establishment. An assignment re-establishes `x` only
-when its RHS does not itself read the invalidated `x`; `x = x` is therefore not an escape.
-
-This is ordinary definite-state analysis. At a control-flow merge `x` remains unavailable if any
-reachable predecessor contains the hidden write without a definite re-establishment. A hidden
-write in a loop therefore carries into later iterations. The analysis affects diagnostics only;
-runtime routing remains local to `mutate`, and the previous runtime value remains a valid `T`.
-
-The inner function is defect-capable, so `may_defect` must still treat outer-frame reassignment as
-an effect. The compiler additionally needs the exact captured-write set for a known callee, not
-only a boolean. An indirect call whose write set was erased must conservatively invalidate every
-in-scope mutable binding that the callable may capture, or be rejected when that set cannot be
-bounded soundly.
-
-#### Violations found against the live tree (2026-08-06)
-
-The dominance invariant was checked against the implementation. It holds, with these exceptions:
-
-- **V1 — `fn_array_set` silently despecializes in place. REAL, LIVE, and the invariant's only
-  hard counterexample.** A mismatched element store calls `convert_specialized_to_generic`
-  (`lambda-eval.cpp`, in the `fn_array_set` ArrayNum arm — the `ELEM_FLOAT64`, `ELEM_INT64`,
-  `ELEM_UINT64` and `ELEM_INT` cases all do it), converting a declared `int[]` into a generic
-  `Array` *underneath a live binding*. The current mitigation is explicit in
-  `mir_store_may_change_elem_type`'s comment (`transpile-mir.cpp`): *"the runtime elem-type
-  guards on the inline paths cover the residue"* — i.e. **inline reads re-check the element type
-  today, so guarded bodies are not in fact unconditionally native.** Under TE-17 a store to a
-  declared container is a gated boundary: it either satisfies the contract or originates an
-  error. Declared containers must never silently despecialize. Fixing V1 therefore **deletes the
-  per-read elem-type guards — a performance win, not just a correctness fix.** (Inference-only
-  narrowed arrays, which have no declaration to violate, may keep the fallback.)
-- **V2 — `for x: int[] in e` does not parse.** `loop_expr` (`grammar.js`) admits a type
-  annotation only on the *key* of the `for k, v in e` form (`index_type`, and only an
-  `$.identifier`, not a type expression). The value variable has no annotation slot at all. Case
-  1's `for` form needs the grammar extended, or case 1 must be restricted to `let`/`var` until
-  it is.
-- **V3 — reassignment inside the guarded scope is not covered by the entry guard.**
-  `var x: int[] = e; …; x = g()` is a second boundary the declaration's guard does not dominate.
-  **Ruling: reassignment to a declared binding is declaration-shaped** — it guards, and on
-  failure skips to the end of the enclosing block with the *old* value retained (per §10.8).
-  This is what preserves "the binding is always native", and it closes most of the open
-  statement-position question in `Lambda_Impl_Error_Handling.md` §8.1.
-- **V4 — case 2's "returns the error directly" must not become a hidden early return.** It is
-  the *call expression* that evaluates to the error (case 5 contagion), not a non-local exit
-  from the caller. Consequently an argument-check failure widens **the call site** to
-  `T | error`, never the callee's signature — the §10.7 firewall is untouched.
-- **V5 — "the body always executes in native lane" is too strong as phrased.** A body may
-  contain arbitrary fallible code of its own. The precise claim is a *dominance* property: **the
-  declared binding is native-lane at every use within its scope.** State it that way; the
-  stronger reading is false and would be unimplementable.
-- **V6 — the `for` skip target must be the iteration body, not the loop.** Skipping to the end
-  of the whole loop would kill the batch on one bad item, which is the granularity TE-15
-  explicitly rejected. Per-iteration skip means each body runs native while **the loop's
-  *result* is `(T | error)[]` — Item-lane, per TE-17.** Body native, result boxed: that is where
-  TE-15 and TE-17 meet, and it must be written down or someone will implement break-out-of-loop.
-
-Nothing else in the checked set violated the invariant: `any`-provenance re-entry is already a
-checked boundary (TE-5 R3), closures capture after the guard, COW preserves C4 value semantics,
-and cross-suspension mutation is excluded by the isolate model.
-
-#### What `pn` adds
-
-**Exactly one ruling: case 7 (reassignment).** Everything else falls out of decisions already
-made:
-
-- A bare expression statement whose value is a soft error simply discards it, as any discarded
-  value would be — consistent with "soft errors are values", and errors log at origination, so
-  the breadcrumb survives.
-- A raised `T^E` in statement position is already E228-gated and cannot reach here.
-- A defect at a declaration boundary skips to the block, which is case 1.
-
-Because interior skip is gone, the "contagion ≡ routing" equivalence obligation largely
-dissolves too: expressions use contagion in both `fn` and `pn`, so there are no longer two
-lowerings that must be proven to agree on which effects ran.
-
-**Residue — closed.** The discarded-region problem (a failed reassignment inside a `pn` loop
-body swallowing the defect) is resolved by the declaring-block rule: the skip leaves the loop
-and lands where the binding was declared, which is an observed position. S1–S3 above settle the
-three shapes the rule does not reach directly. TE-18 has no open items.
-
----
+The former declaration-skipping rationale, boundary table, and mutation
+analysis are retained in
+[Appendix S](#appendix-s--superseded-declaration-skipping-design).
 
 ### TE-19 — Verified once, valid while unchanged; a required field is a required field (decided 2026-09-17, user)
 
@@ -2435,9 +2003,10 @@ union member while the caller owns error-value flow (**S7.7.3**).
 
 Intentional recovery sites in packages and fixtures now use explicit handlers;
 error-bearing status fields use type classification rather than `!= null`.
-Procedure statement handlers discard their successful value under **S7.6.7v4**;
-when code needs both the result and a default, it first receives the outcome
-in an explicit error-admitting binding and then handles that value.
+The existing implementation still discards procedure-handler normal results;
+the explicit error-admitting binding used by some callers is a migration
+workaround, not the current rule. **S7.6.1v5/S7.6.7v5** require preserving the
+result directly ([TE-16.1](Lambda_Design_Type_Error_Handling.md)).
 
 Regression coverage pins payload retention, skipped effects, normal falsy
 defaults, aliased/nested containers and captures, early mismatch, and retained
@@ -2792,3 +2361,439 @@ semantics.
 15. **`STRING` in the native-return set** — P2 audits the four ad-hoc widenings; the clean fix
    (widen `mir_is_native_scalar_value_type` or stop widening ad hoc) interacts with the perf
    stage's ABI plans; decide there, enforce honestly here.
+
+## Appendix S — Superseded declaration-skipping design
+
+~~A failed initializer leaves its binding unestablished and skips to the end
+of its declaring block; its successful entry guard dominates every use.~~
+Replaced by **S7.7.2v2/S11.4.1v4/D2.8.3v2**, recorded in
+[TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
+
+The original TE-15/TE-18 deliberations below preserve the design history,
+including earlier alternatives and implementation evidence. Their initializer
+skip and clean-binding assumptions are superseded. Mutation and argument
+material is retained as context for the separate current formal rulings and
+future follow-ups; these quotations do not override those rulings.
+
+> ### TE-15 — Soft-error containment: skip to the closest safe boundary (decided 2026-08-01, user)
+>
+> **Decision.** A soft error does not *propagate* through the expressions around it — it **skips**:
+> at the moment of origination, control transfers to the end of the closest statically-enclosing
+> *safe boundary*, and that boundary's position receives the error value. Everything between the
+> origination site and the boundary is never evaluated. This is the containment policy for the
+> whole family of soft/evaluation errors — failed deferred type checks, failed conversions and
+> casts, validation failures, and error values produced by `| error` computations — not a rule
+> for any one numeric case.
+>
+> #### The problem it closes
+>
+> §10.8 (revised 2026-07-30) already decided that a failed annotated binding "yields the boundary
+> error *before the binding exists* — `x` never holds an error." That promises control leaves the
+> straight-line path on failure but names no landing site, and the code after the binding was
+> compiled assuming `x: T`, so execution cannot simply continue. The gap is measurable today
+> (repro `temp/overflow_fn_test3.ls`, 2026-08-01): with `fn f(a: int) int { a + a*a }` and an
+> argument whose body result leaves the flex-int band, the *same call* yields a bare `ITEM_ERROR`
+> under boxed consumption (`let d = f(x)`, `f(x) or -1`) but a silently resurrected `float`
+> under native-arithmetic consumption (`f(x) + 1`). Mechanism: the native entry flattens its
+> boxed int-or-float result through `it2i` (truncated raw i64, no boundary check — the
+> `transpile-mir.cpp:12034` checked return never fires because the body's AST type is `INT`), and
+> the outcome then depends on whether the *caller* re-boxes (53-bit guard → bare error singleton)
+> or keeps computing in the native lane (next flex-int op promotes the out-of-band i64 back to
+> float). Same call, two results by consumption context — the fourth outcome §1 forbids, twice.
+>
+> #### Options considered (2026-08-01)
+>
+> 1. **Status quo** — rejected: incoherent per the evidence above; the "error" produced is also
+>    the bare singleton, violating the rich-payload decision (§10 Q4).
+> 2. **Require the user to spell `T | error`** — rejected: viral. If overflow (or any deferred
+>    check) counted as inferred error-possibility, every arithmetic-bearing plain-`T` fn would
+>    fail the §10.7 firewall and `| error` would spread through every signature — the `Result`
+>    pandemic, and not user-friendly.
+> 3. **Redefine flex `int` as the float-representable integers** — **DECIDED 2026-08-01 as C16**
+>    (`Lambda_Semantics_Formal2.md` C16; spec §4.1/§4.2/§4.6/§4.7 updated), in the *tagged*
+>    variant: `int` remains a distinct runtime type (never a hint erased into float); arithmetic
+>    incl. `div`/`%` is closed and total via `int.inf`/`int.nan`; the overflow-promotes-to-float
+>    rule is deleted; unsuffixed literals stay restricted to ±(2⁵³−1). Consequence for TE-15:
+>    int *arithmetic* no longer originates defects at all — the mechanism below still governs
+>    casts, parsing, validation, and fractional→int admission.
+> 4. **Handle it for the user — automatic containment.** Two granularities:
+>    - *Skip to end of function* — rejected. Every annotated `let` becomes an invisible early
+>      return (`T^` behavior without the spelling), and one bad item inside a `for` kills the
+>      whole batch because the jump target is past the loop.
+>    - *Skip to end of the closest block/element body* — **adopted**, generalized into the
+>      three-zone rule below. The containment region is not a policy choice but derived: it
+>      equals the variable's scope, which is exactly the static extent of the violated
+>      assumption. Code later in the block assumed `a: T`; code outside the block cannot name
+>      `a` at all, so scope itself proves it needs no protection.
+>
+> #### The rule: three zones, one mechanism
+>
+> Every expression position has a statically-known **error destination** — the nearest enclosing
+> construct that can *accept* an error value. Origination skips straight to it:
+>
+> - **Zone 1 — binding boundary.** `let a: T = e` where the deferred check fails (or an error
+>   value arrives): the annotated binding is *not* an acceptor; the error skips to the end of the
+>   smallest enclosing block, and **the block evaluates to the error**. Subsequent statements in
+>   the block never run; outer blocks are safe by scoping.
+> - **Zone 2 — composition points.** List/map/element child positions *are* acceptors: the error
+>   lands as an ordinary data item and construction continues (§10 Q6's batch idiom, unchanged).
+>   `[1, int("x"), 3]` still composes to `[1, error, 3]` — the element position is the nearest
+>   acceptor, so the skip never reaches the block.
+> - **Zone 3 — expression interior.** Operators and calls between origination and destination
+>   have no acceptor positions of their own and are simply **skipped, never evaluated**. The
+>   error does not travel through them as a value.
+>
+> The acceptor set is the closed list already enumerated by TE-8's short-circuit targets plus the
+> engagement forms: container element positions; `or`-left operands (skip lands at the rescue —
+> the right operand evaluates); `^err` destructuring and postfix `^` (capture/propagate);
+> `match`/`is` scrutinee positions with error classification; positions typed `any`, `error`,
+> `T | error`, `T^`; and unannotated bindings (which infer the union and hold the value, boxed).
+> The smallest enclosing block is the destination of last resort. The fn body is the outermost
+> block, so an uncontained error becomes the function's result — for *disclosed* soft errors this
+> is exactly §10.7 (an open body must disclose `| error` or contain); for **defect-channel**
+> errors (failed deferred boundary checks) it crosses a plain-`T` return on the unenumerated
+> system channel per `Lambda_Formal_Semantics.md` §7.3 — inference must **never** widen a
+> signature because of defect possibility, or option 2's pandemic returns through the back door.
+>
+> #### Semantic consequences
+>
+> - **Origination is a sequence point.** Evaluation of the containing expression stops
+>   immediately; operands and effects to its right never run (Rust/Swift argument behavior).
+>   Vacuous inside `fn` (no effects to observe); meaningful inside `pn`. Corollary: strict
+>   left-to-right evaluation order becomes *normative*, not incidental.
+> - **Rescue moves to the initializer.** Since failure exits the block, `a or 0` *after* the
+>   binding is unreachable by construction; the idioms are `let a: T = e or 0` and
+>   `let a^err = e` (engagement suppresses the skip and captures instead).
+> - **Batch friendliness is a theorem, not a hope.** A `for` body is a block, so a bad item
+>   yields one error item in the collected result and the loop continues:
+>   `for (x in xs) { let n: int = int(x.count); n * 2 }` → error elements for bad items, results
+>   for good ones.
+> - **Elements.** Child-expression errors remain child items (zone 2); only a failed *binding*
+>   declared inside the body collapses the element body to the error.
+> - **Payload.** The skip delivers the §10 Q4 rich error (code, message, expected/actual,
+>   boundary location) — the bare `ITEM_ERROR` singleton observed at today's re-box guard does
+>   not satisfy the contract. Exception: a defect rescued *by an `or` on the same edge* may skip
+>   materializing the error object (log-line breadcrumb only) as an optimization.
+>
+> #### Implementation model: errors are control, not values
+>
+> **Invariant.** An error exists only (a) boxed in an Item-typed lane or slot, or (b) transiently
+> on a resolved control edge from origination site to destination. Native/unboxed lanes are
+> error-free *by construction*; no operator in unboxed code ever receives an error operand — the
+> emitter, not the runtime, guarantees this.
+>
+> Value-propagation through unboxed lanes was considered and rejected: it requires an in-band
+> sentinel (today's accidental out-of-band i64 *is* one, and its consumer-dependent meaning is
+> the measured divergence), or re-boxing every lane an error might cross (re-creates the flexint
+> ANY-poisoning this design exists to remove), or a polled side-flag (cost on every operation).
+>
+> - **Destination stack.** The emitter maintains the acceptor context lexically while lowering
+>   (same shape as the online-exception emission-time tracker). Destinations are static; there is
+>   no dynamic unwinding — skips are intra-function branches, and fn boundaries use the ordinary
+>   return path.
+> - **Origination sites are a closed set**, each already computing its failure condition:
+>   `lambda_type_check` boundaries, fallible conversions/sys-funcs, and calls to open/`^`
+>   callees. (The flex-int promote edge was a fourth class; C16 deleted it — int arithmetic
+>   never leaves int.) Routing retargets existing branches — happy-path cost is zero. `any`-lane
+>   data cannot smuggle errors into native lanes because every `any`→native transition is already
+>   a checked boundary (TE-5 R3).
+> - **Cross-function ABI.** Interior routing reaches the fn's outermost region → error return;
+>   the *call site* is an origination site in the caller. Boxed-returning calls carry the error
+>   in the result Item; native-returning calls check the context error lane
+>   (`FN_ERROR_LANE_CONTEXT_ITEM`) — one load-and-branch after the call, the Swift-`throws`
+>   shape. A callee whose compiled body provably contains **zero** origination sites needs no
+>   caller-side branch; carry this as the emission-time effect bit
+>   (`FnEffectSummary.may_return_error`) — transitive in the implementation, invisible in types.
+>   **Polarity fix required:** today's `closed_item_result` gate (`transpile-mir.cpp:11355`)
+>   treats a *missing* variant analysis as "trusted clean, skip the error branch" — that is one
+>   half of the measured divergence. Unknown must mean defect-capable; branch-free only on proof.
+> - **Boxed lanes keep value contagion** (the helpers' existing "error in, error out") as an
+>   equivalent implementation wherever it is unobservable — i.e. pure `fn` code. `pn` bodies emit
+>   control-routing on both boxed and unboxed paths so the two agree on which effects ran.
+>   **Equivalence invariant (test target, DF9-style): contagion ≡ routing wherever observable.**
+> - **Landing pads.** One per region that contains origination sites: receive/box the error, root
+>   it, restore the side-number-stack watermark (`lambda_restore_number_frame_top` — the existing
+>   single-funnel machinery generalized per block).
+>
+> #### Open sub-questions
+>
+> - **Statement-position defects in `pn` (the hardest).** A failed reassignment whose block value
+>   is discarded — `acc = acc + x` inside a loop — must not evaporate with `acc` silently stale.
+>   Recommendation: escalate (raise channel / abort the loop); **undecided**.
+> - **Flex-int overflow policy — RESOLVED 2026-08-01 by C16** (option 3 above, tagged variant):
+>   int arithmetic is total, so it no longer produces defects; TE-15's zones stand unchanged
+>   for casts, parsing, validation, and fractional→int.
+> - **Skip is containment, not acknowledgement — RESOLVED by TE-16.** A raised (`T^E`) error
+>   is compile-time gated at the immediate expression and therefore never reaches the skip
+>   machinery; TE-15 governs defects and boundary-rejected soft errors only.
+>
+> ### TE-18 — Skip is a declaration-boundary mechanism; the guard dominates the scope (decided 2026-08-06, user)
+>
+> **Decision.** TE-15's skip applies at **declaration boundaries only** — `let` / `var` / `for`
+> loop variables, plus declared parameters and declared returns, plus the future `cast … as T`.
+> It does **not** apply inside expression composition. An expression whose operand can fail is
+> typed `T | error` and computed as such; the error travels as a value, guarded where the
+> representation requires it, and the user recovers with `e ^ { … }` where *they* choose.
+>
+> **The invariant this buys.** A declaration with a native contract *guards once, on entry*, and
+> that guard **dominates every use of the binding in its scope**. Inside the scope the binding is
+> native-lane, unconditionally, with no per-use error check.
+>
+> This restates rather than replaces TE-15: containment still exists, but its trigger set shrinks
+> to the boundaries that were already checking, so no new control mechanism enters expression
+> lowering. It is the original conservative design, made explicit.
+>
+> #### Why expression interiors do not skip
+>
+> Three reasons, in the user's ordering: (1) skipping complicates lowering — every operator
+> position becomes a potential control edge; (2) it makes a *soft* error behave like a hard one,
+> collapsing the distinction the three-regime taxonomy exists to maintain; (3) it performs a
+> recovery the user did not request, pre-empting the `^ { }` they might have written.
+>
+> **And it costs nothing, because TE-17's I3 already does the work.** TE-15's motivating defect
+> was the O1 divergence: `let d = f(x)` yielding a bare `ITEM_ERROR` while `f(x) + 1` silently
+> resurrected a `float`, the same call giving two answers by consumption context. Under I3 that
+> is fixed without any interior skip — `f(x) : int | error` is **not lane-eligible**, so `f(x) + 1`
+> is computed boxed, where contagion yields the error, which is exactly what the binding yields.
+> Interior skip was machinery introduced to close a hole that the eligibility gate closes more
+> cheaply. Removing it is a simplification, not a weakening.
+>
+> **Corollary retired.** TE-15's implementation note that *"strict left-to-right evaluation order
+> becomes normative"* was forced by interior skip (effects to the right of an origination had to
+> be provably unevaluated). With no interior skip, effects to the right of an error-valued operand
+> run normally, and evaluation order returns to being an ordinary design choice.
+>
+> #### The boundary scenarios
+>
+> | # | Form | Ruling |
+> |---|---|---|
+> | 1 | `let x: int[] = e` / `var x: int[] = e` / `for x: int[] in e` | Guard on assignment. Error ⇒ **skip to end of the enclosing block**, which yields the error; the binding is never established. Success ⇒ the binding is native-lane for its whole scope. |
+> | 2 | `fn f(x: int[])`, called as `f(e)` | Guard on the argument at the **call site**. Error ⇒ `f` is not entered and **the call expression evaluates to that error**. Success ⇒ `f`'s body runs native. Declared returns are the same shape, with the fn body as the region. |
+> | 3 | `e as T` (future; not yet in the language) | An inline declaration. Same as case 1: skip on error, continue native on success. |
+> | 4 | `[…]`, `{…}`, `<e …>` with no static type | Never enters a native lane. Accepts and contains error values — the batch idiom. |
+> | 5 | `a + e + b` — expression composition | **No skip.** The result type is `T \| error`; the error flows as a value. Guard only where representation demands it (I3). |
+> | 6 | `pn` bodies | One extra ruling only — case 7. |
+> | 7 | `x = e` — reassignment to a declared `var` | Its own ruling: skip to the **declaring block** of `x`, old value retained, **and diagnose** — see below. |
+> | 8 | `while (c) { … }` in a `pn` | Contributes **no region**. A skip inside it exits the loop, landing at the declaring block of the assigned binding. |
+> | 9 | inner callable assigns an outer-frame `var` | Failure stops at the mutating callable's boundary and returns an error. The call invalidates subsequent reads of the outer binding until the caller explicitly re-establishes it; `mutate(); use(x)` is rejected, while no later use and `x = mutate(); use(x)` are legal (S3). |
+>
+> Cases 1–3 are the same mechanism (a declared boundary with a region behind it); 4 and 5 are the
+> same mechanism (values flowing through error-admitting positions); 7 is case 1's mechanism with
+> a diagnostic obligation case 1 does not have. Case 9 is the cross-frame termination rule: the
+> callee can return an error but cannot branch into another frame's declaring block.
+>
+> #### Case 7 — reassignment is not case 1, and must be diagnosed
+>
+> `var` is genuinely harder than `let`, and the difference is observability. When
+> `let x: T = e` fails, the skip happens **before the binding exists**: nothing was established,
+> the block yields the error, and no code the user wrote is silently abandoned in a surprising
+> state. When `x = e` fails mid-block, two things are true that have no analogue in case 1:
+>
+> 1. **`x` already exists and now holds a stale value** — the previous one, retained per §10.8.
+> 2. **The rest of the block was written assuming the new value**, and is skipped.
+>
+> So the skip here is not merely containment; it is the runtime **abandoning code the user wrote,
+> holding a value the user did not intend, on the user's behalf without being asked**. That is a
+> runtime error in substance even though it is handled. It must be reported, not merely logged as
+> an origination breadcrumb.
+>
+> **Three tiers.**
+>
+> - **Static, provable.** A reassignment whose RHS is provably `T | error` against a declared
+>   `var x: T` inherits the existing binding rule unchanged — the same **compile error** as
+>   `let x: int = a()` (decided 2026-07-29: "when the user is explicit, we check explicitly"). No
+>   new rule; confirm it applies to reassignment as well as declaration.
+> - **Static, deferred — new warning.** Where the RHS is only *deferred*-fallible (implicit
+>   openness, an `any` source, an unproven callee) **and the block has statements after the
+>   reassignment**, warn: this reassignment can fail, and if it does, the following N statements
+>   will not run and `x` will keep its previous value. Gate the warning on there actually being a
+>   tail to abandon — a reassignment in final position skips nothing and deserves no warning. This
+>   is the "parts of the following body might be violated" case, made precise.
+> - **Runtime — a report, not a breadcrumb.** When the skip fires, report at a severity above the
+>   ordinary origination log, naming both consequences: which binding kept its previous value, and
+>   how many statements of the block were not executed. Reporting only "an error originated here"
+>   hides exactly the part that distinguishes case 7 from case 1.
+>
+> **The handler is not an assignment-boundary catch.** In `x = e ^ { … }`, the handler first
+> produces the complete RHS value; the ordinary `x` contract check happens afterward. Handling can
+> make the RHS statically clean and thereby remove the warning, but a later dynamic mismatch at the
+> assignment boundary still reports and skips exactly as it would without `^ { … }`.
+>
+> #### Case 8 — `while`, and the rule that makes it a corollary
+>
+> `while (c) { … }` is a `pn`-only *statement* (`while_stam` sits in `_statement` in
+> `grammar.js`, alongside `for_stam`). It declares nothing and **yields no value**. Two
+> independent arguments therefore say it cannot be a skip destination: it establishes no binding
+> whose scope could bound a region, and it has no result position in which an error could be
+> delivered. So a reassignment skip inside a `while` **exits the loop**, landing at the end of the
+> block where the assigned `var` was declared. The user's case-8 ruling is correct.
+>
+> But it is not a special case. It falls out of the general rule, which case 8 is what forced into
+> focus:
+>
+> > **Regions are created by declarations, not by control structures.** A skip lands at the end of
+> > the block that **declares the binding** whose establishment or assignment failed.
+>
+> `while`, `if`, plain blocks, and `for_stam` contribute no region of their own; only the
+> declarations inside them do. This also **corrects case 7's destination**: "the enclosing block"
+> was ambiguous between the block enclosing the *statement* and the block declaring the *variable*.
+> It is the declaring block, and that choice is load-bearing:
+>
+> > **Within one frame, no use of a binding observes a value left by a failed assignment.**
+> > Skipping to the declaring block ends the stale binding's scope at the same moment the skip
+> > lands. Cross-frame reassignment stops at the mutating callable's boundary, but statically
+> > invalidates the outer binding for later reads until the caller explicitly re-establishes it.
+>
+> Spec §13 invariant 7 ("no binding holds a placeholder for a failure") still holds: the retained
+> outer value is a real previously-established `T`, not a null/error placeholder. S3 enforces the
+> stronger source-level rule by rejecting reads of that value after a hidden outer write.
+>
+> #### The `acc = acc + f(x)` weak spot is closed — and the liveness proposal is withdrawn
+>
+> The previous entry here proposed a liveness analysis: route out of a discarded region when the
+> failed binding is live across iterations. **Superseded — the declaring-block rule gives the same
+> answers syntactically, with no dataflow analysis at all**, because *where a binding is declared*
+> already encodes *whether it is carried across iterations*:
+>
+> | Shape | Declared in | Skip lands | Behaviour |
+> |---|---|---|---|
+> | `acc = acc + f(x)` in a `for`/`while` body, `var acc` in the fn body | fn body | end of fn body | exits the loop; fn yields the error |
+> | `let y: int = f(x)` inside a loop body | iteration body | end of iteration body | loop continues — batch idiom |
+> | per-item check on the `for` variable itself (V6) | the `for` | end of iteration body | loop continues — batch theorem intact |
+>
+> An accumulator is *by definition* declared outside the loop; a per-item temp is *by definition*
+> declared inside it. All four earlier rulings — case 1, case 7, case 8, V6 — collapse into the
+> one rule above, and every property that was wanted follows:
+>
+> - the batch is killed for an accumulator, which is correct: a stale `acc` poisons every later
+>   iteration;
+> - the stale binding is never observable, because its scope ended;
+> - the defect cannot evaporate: the fn body's result *is* observed;
+> - one runtime report instead of n.
+>
+> #### Three sub-cases the declaring-block rule does not cover directly (decided 2026-08-06, user)
+>
+> **S1 — Element and field stores** (`arr[i] = f(x)`, `m.k = f(x)`). There is no binding being
+> assigned, and a partially-mutated container is **not** scoped away by leaving a block: it may be
+> aliased, or have been passed in as a parameter, so it outlives the region the skip would exit.
+> Scope exit therefore cannot restore the pre-failure state, and the invariant that makes case 7
+> safe ("the stale value's scope ends when the skip lands") does not apply.
+>
+> **Ruling:** a failed element or field store is **reported**, using case 7's three tiers, and the
+> container is left in a documented partial state — it is not silently contained. The skip
+> destination remains the declaring block of the *container* binding, but the report is what
+> carries the truth, because the skip alone does not undo the mutation. TE-17 narrows this to
+> deferred checks only: a provably-fallible store is already a compile error, so the runtime case
+> is the `any`-sourced or unproven-callee residue.
+>
+> **S2 — Module-level `var`.** The declaring block is the module body, so a failed reassignment
+> skips to the end of module initialization and the module fails to initialize. This is the
+> correct reading of the rule and is stated deliberately rather than inherited by accident: a
+> module whose top-level state is half-established must not become importable. Partial module
+> state is exactly the "stale binding visible to later code" failure at module scope.
+>
+> **S3 — Reassignment from an inner function or closure** to a `var` declared in an outer frame.
+> The destination is in another frame, so the skip cannot be an intra-function branch. The accepted
+> rule is deliberately local: failure returns an error from the mutating callable and stops at that
+> callable's boundary. The call site receives the error as its ordinary result; it does **not**
+> re-apply the outer binding's declaring-block skip. Execution may continue after a discarded
+> result, but a call that may write captured `x` makes `x` unavailable for subsequent reads in the
+> caller until a definite explicit assignment re-establishes it:
+>
+> ```lambda
+> mutate()
+> use(x)       // compile error: x may have changed invisibly inside mutate
+> ```
+>
+> Two shapes are legal:
+>
+> ```lambda
+> mutate()     // mutate may read/use x internally
+>              // no later read of x in this caller
+>
+> x = mutate() // the returned outcome explicitly re-establishes x
+> use(x)
+> ```
+>
+> The rule bans **invisible mutate-then-use flow**, not cross-frame mutation itself. Any read counts:
+> direct use, passing `x` as an argument, member/index access through `x`, capture by a later closure,
+> or reading it on the RHS of a purported re-establishment. An assignment re-establishes `x` only
+> when its RHS does not itself read the invalidated `x`; `x = x` is therefore not an escape.
+>
+> This is ordinary definite-state analysis. At a control-flow merge `x` remains unavailable if any
+> reachable predecessor contains the hidden write without a definite re-establishment. A hidden
+> write in a loop therefore carries into later iterations. The analysis affects diagnostics only;
+> runtime routing remains local to `mutate`, and the previous runtime value remains a valid `T`.
+>
+> The inner function is defect-capable, so `may_defect` must still treat outer-frame reassignment as
+> an effect. The compiler additionally needs the exact captured-write set for a known callee, not
+> only a boolean. An indirect call whose write set was erased must conservatively invalidate every
+> in-scope mutable binding that the callable may capture, or be rejected when that set cannot be
+> bounded soundly.
+>
+> #### Violations found against the live tree (2026-08-06)
+>
+> The dominance invariant was checked against the implementation. It holds, with these exceptions:
+>
+> - **V1 — `fn_array_set` silently despecializes in place. REAL, LIVE, and the invariant's only
+>   hard counterexample.** A mismatched element store calls `convert_specialized_to_generic`
+>   (`lambda-eval.cpp`, in the `fn_array_set` ArrayNum arm — the `ELEM_FLOAT64`, `ELEM_INT64`,
+>   `ELEM_UINT64` and `ELEM_INT` cases all do it), converting a declared `int[]` into a generic
+>   `Array` *underneath a live binding*. The current mitigation is explicit in
+>   `mir_store_may_change_elem_type`'s comment (`transpile-mir.cpp`): *"the runtime elem-type
+>   guards on the inline paths cover the residue"* — i.e. **inline reads re-check the element type
+>   today, so guarded bodies are not in fact unconditionally native.** Under TE-17 a store to a
+>   declared container is a gated boundary: it either satisfies the contract or originates an
+>   error. Declared containers must never silently despecialize. Fixing V1 therefore **deletes the
+>   per-read elem-type guards — a performance win, not just a correctness fix.** (Inference-only
+>   narrowed arrays, which have no declaration to violate, may keep the fallback.)
+> - **V2 — `for x: int[] in e` does not parse.** `loop_expr` (`grammar.js`) admits a type
+>   annotation only on the *key* of the `for k, v in e` form (`index_type`, and only an
+>   `$.identifier`, not a type expression). The value variable has no annotation slot at all. Case
+>   1's `for` form needs the grammar extended, or case 1 must be restricted to `let`/`var` until
+>   it is.
+> - **V3 — reassignment inside the guarded scope is not covered by the entry guard.**
+>   `var x: int[] = e; …; x = g()` is a second boundary the declaration's guard does not dominate.
+>   **Ruling: reassignment to a declared binding is declaration-shaped** — it guards, and on
+>   failure skips to the end of the enclosing block with the *old* value retained (per §10.8).
+>   This is what preserves "the binding is always native", and it closes most of the open
+>   statement-position question in `Lambda_Impl_Error_Handling.md` §8.1.
+> - **V4 — case 2's "returns the error directly" must not become a hidden early return.** It is
+>   the *call expression* that evaluates to the error (case 5 contagion), not a non-local exit
+>   from the caller. Consequently an argument-check failure widens **the call site** to
+>   `T | error`, never the callee's signature — the §10.7 firewall is untouched.
+> - **V5 — "the body always executes in native lane" is too strong as phrased.** A body may
+>   contain arbitrary fallible code of its own. The precise claim is a *dominance* property: **the
+>   declared binding is native-lane at every use within its scope.** State it that way; the
+>   stronger reading is false and would be unimplementable.
+> - **V6 — the `for` skip target must be the iteration body, not the loop.** Skipping to the end
+>   of the whole loop would kill the batch on one bad item, which is the granularity TE-15
+>   explicitly rejected. Per-iteration skip means each body runs native while **the loop's
+>   *result* is `(T | error)[]` — Item-lane, per TE-17.** Body native, result boxed: that is where
+>   TE-15 and TE-17 meet, and it must be written down or someone will implement break-out-of-loop.
+>
+> Nothing else in the checked set violated the invariant: `any`-provenance re-entry is already a
+> checked boundary (TE-5 R3), closures capture after the guard, COW preserves C4 value semantics,
+> and cross-suspension mutation is excluded by the isolate model.
+>
+> #### What `pn` adds
+>
+> **Exactly one ruling: case 7 (reassignment).** Everything else falls out of decisions already
+> made:
+>
+> - A bare expression statement whose value is a soft error simply discards it, as any discarded
+>   value would be — consistent with "soft errors are values", and errors log at origination, so
+>   the breadcrumb survives.
+> - A raised `T^E` in statement position is already E228-gated and cannot reach here.
+> - A defect at a declaration boundary skips to the block, which is case 1.
+>
+> Because interior skip is gone, the "contagion ≡ routing" equivalence obligation largely
+> dissolves too: expressions use contagion in both `fn` and `pn`, so there are no longer two
+> lowerings that must be proven to agree on which effects ran.
+>
+> **Residue — closed.** The discarded-region problem (a failed reassignment inside a `pn` loop
+> body swallowing the defect) is resolved by the declaring-block rule: the skip leaves the loop
+> and lands where the binding was declared, which is an observed position. S1–S3 above settle the
+> three shapes the rule does not reach directly. TE-18 has no open items.
+>
+> ---

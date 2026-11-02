@@ -465,7 +465,14 @@ pn find_first_even(nums: int[]) {
 }
 ```
 
-Without `return`, the last expression in the function body is the return value:
+On normal completion, a procedure returns its body's most recent result
+(**S12.1.2v2**). Each produced result replaces the preceding result, including
+`null`. A declaration produces **no result**, so it leaves the preceding result
+unchanged (**S2.5.4v3**); if nothing produced a result, the block yields `null`.
+This sequencing rule also applies to nested procedural blocks. An explicit
+`return` inside a loop or error handler still exits the enclosing procedure.
+
+For example, a single expression supplies the implicit return value:
 
 ```lambda
 pn add_one(x: int) {

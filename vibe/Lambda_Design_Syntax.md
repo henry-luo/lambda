@@ -3057,11 +3057,19 @@ raised:
     one-item list are indistinguishable by design. Blocks collapse the same
     way. Collapse counts items after spreading and drops nothing, so
     `(1, null)` stays two items.
-15. **A `pn` body follows the procedural convention** (S2.5.3, S12.1.2):
-    without `return` it yields its last expression, not a list.
+15. **Procedural blocks retain the most recent normal result**
+    (S2.5.3v2, S12.1.2v2; clarified 2026-11-02): each produced result replaces
+    the preceding one, including `null`; declarations produce no result and
+    leave it unchanged (S2.5.4v3). Normal completion with no produced result
+    yields `null`. A procedure reaching its body's end returns that result.
+    A handler contributes its normal result under S7.6.1v5, including as the
+    final statement. See [Procedural §2.4](Lambda_Design_Procedural.md#24-return-and-block-results).
 
 Probed the same day, `(…)` literals and blocks conform to 9, 11, 12, 14
-(except the literal), and 15. A fuller survey the same day corrected the
+(except the literal), and the then-current point 15. The handler-result
+revision of 2026-11-02 remains partially implemented (S7.6.1v5;
+[implementation status](Lambda_Design_Type_Error_Handling.md#appendix-a--implementation-status)).
+A fuller survey the same day corrected the
 earlier "conforms to 9–12": **for-expression results do not behave as lists**
 — bound with `let`, `[r, 9]` gives `[[1,2],9]`; an empty one is not `null`;
 a one-item one is `[v]` — against 9, 10, and 14. Root cause: two list flags

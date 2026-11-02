@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 54.0.0 (2026-10-29)
+**Spec version:** 55.0.0 (2026-11-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -518,19 +518,21 @@ language-visible counterparts are the semantics spec's SI ledger.
   errors and defects only — system/resource faults are untyped, no static
   analysis can gate them, and they unwind through `LambdaRecoveryFrame`
   (D6.3.3), abandoning any partially-built container. [IEH I2, TE-15]
-- **D2.8.3*** **Lane entry is gated on static proof, never on runtime
+- **D2.8.3v2*** **Lane entry is gated on static proof, never on runtime
   rescue.** Admission is read from the destination contract (§S7.8.1): a
   provably infallible source enters branch-free; a source only inferable
   as `T | error` is **not lane-eligible** and stays boxed until
-  discharged — never a checked lane store that might fail mid-mutation. A
-  declaration's entry guard then dominates every use of the binding in its
-  scope (§S7.7.2), so D2.8.1 and D2.8.2 hold **by construction rather than
-  by per-use guards**. The gating analysis is `may_defect` with
+  discharged — never a checked lane store that might fail mid-mutation.
+  A deferred initializer binds an admitted value or error and continues
+  (§S7.7.2v2); its annotation alone therefore does not prove later uses clean.
+  Its effective outcome stays error-capable until discharge or a valid proof
+  excludes the error on the use path. Only that clean path may use native
+  storage and operators (D2.8.1–D2.8.2). The gating analysis is `may_defect` with
   fail-closed polarity (D6.1.3): unknown ⇒ defect-capable ⇒ demotion,
   which is viral through unanalyzed callers — so the effect split is a
   **prerequisite** for lane routing, not a later optimization, and an
   unannotated literal that boxes solely for unproven fallibility must be
-  diagnosed rather than silently demoted. [TE-17, TE-18; IEH I3, I4]
+  diagnosed rather than silently demoted. [TE-17, TE-18.1; IEH I3, I4]
 
 ### D2.9 Mark file conventions
 
@@ -662,16 +664,21 @@ that carries them.
   runtime membership, drives `is`/`match`/validator checks;
   `checked_convert(item, T)` — explicit conversion functions own lossy
   conversions. [TE-6]
-- **D3.2.2*** The **validator is the runtime enforcer** for user-defined
+- **D3.2.2v2*** The **validator is the runtime enforcer** for user-defined
   types: deep, on first crossing, producing a rich error with a validator
-  path — or the binding never exists. Constrained types (`T that …`)
+  path as the failed validation outcome. A deferred initializer binds that
+  outcome without exiting its block (S7.7.2v2); other boundaries consume it
+  according to their own contracts. Constrained types (`T that …`)
   enforce the base only, for now; `is`, `fn_is`, the emitter, and the
   validator must consolidate onto the shared foundation (a known
-  three-way divergence today). [TE-10, TE-6 P5]
-- **D3.2.3** Declared and effective types are **separate recorded facts**
+  three-way divergence today). [TE-10, TE-6 P5, TE-18.1]
+- **D3.2.3v2*** Declared and effective types are **separate recorded facts**
   (declaration on the binding node, inference beside it): an annotation is
-  a contract (semantics S11.4.1); inference is never a binding contract
-  and may never override what it proved. [TE-1, TE §8.1]
+  a strict admission contract (S11.4.1v4). A deferred initializer's effective
+  type includes the validation-error alternative (S7.7.2v2); preserving that
+  outcome does not weaken admission or make the rejected value satisfy the
+  annotation. Inference must never replace validation or authorize a native
+  representation for an error-bearing outcome. [TE-1, TE §8.1, TE-18.1]
 - **D3.2.4v4*** **A crossing into a named map contract is a reification, not
   merely a check.** A named contract fixes a *physical* packed layout —
   per-field `byte_offset` and storage class — and the emitter's direct
@@ -2749,7 +2756,8 @@ slice; no formal semantic ruling or document semver changes.
 | D2.6.7 | Bound `fn` methods already build the receiver-captured closure (`to_closure_named` in `lambda-eval.cpp`; `closure_env` holds the receiver). Not verified: the compile-time rejection of a bare `pn` method reference on both tiers. |
 | D2.6.8 | No identity carrier exists; nothing to verify until DO25 is decided. |
 | D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
-| D2.8.2–D2.8.3 | **Built 2026-09-27 (LR12-24), on the D6.1.3 fact.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
+| D2.8.3v2, D3.2.2v2, D3.2.3v2 | **Revised 2026-11-02; pending for deferred initializer outcomes.** Existing clean-binding planning relies on the former declaration skip. The effective error-bearing outcome must remain represented safely after continued execution; annotation alone is not a clean-value proof. No new runtime verification is claimed. [TE-18.1 implementation status](../vibe/Lambda_Design_Type_Error_Handling.md#validation-outcomes). |
+| D2.8.2 (prior lane-gating qualification) | **Prior lane-gating implementation, 2026-09-27 (LR12-24), on the D6.1.3 fact; this predates D2.8.3v2's continued initializer outcomes.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D2.9.1–D2.9.2 | **Implemented 2026-10-02.** Twenty fixtures migrated with unchanged contents; Lambda/input baseline 6,162/6,162, MIME detection 13/13, new extension regression matches on interp/jit/auto, and 15 CLI checks pass. Verification and existing fixture residue: [Input_System appendix](../vibe/input/Input_System.md#appendix--mark-extension-migration-2026-10-02). |
 | D2.9.3 | **Implemented 2026-10-07.** Format `slides` parses with the Mark parser (`input.cpp`); the `slides` document transform (`lambda.slide.present.present`) backs the `.slides` view/layout route; no filename detection was added. The three demo decks were converted from `.ls` and re-format byte-identically to their generator output; five slide UI fixtures open `.slides` decks. Record: [Lambda_Pkg_Slide_Presentation §0](../vibe/Lambda_Pkg_Slide_Presentation.md). |
 | D2.10.1v2 | **Implemented 2026-10-15.** Shared XML emission profile, explicit format and MIME/extension routes, direct Radiant loading, and Lambda-returned document unwrapping. XHTML golden passes on interpreter, automatic and MIR tiers; five Radiant integration tests cover HTML parity, linked/inline CSS, foreign content, scripts, HTTP MIME/redirects, no-doctype standards mode and the feature gallery. The gallery's 27 checks and nine replay assertions pass in desktop/narrow interactive views; static layout/render retains a startup computed-border discrepancy. MIME tests 13/13 and related Lambda XML/HTML/parse goldens 26/26 pass. Full Lambda/Radiant baselines and the native parser test runner cannot link with the concurrent Wiki change's unresolved `array_push`; those gates remain unverified. Record: [Input_XML §XHTML admission](../vibe/input/Input_XML.md#xhtml-admission). **v2 catalog extension implemented 2026-10-26:** recognized public IDs select the shared HTML entity table without external DTD acquisition; seven native XHTML parser tests and the combined Lambda/input baseline (8,251/8,251) pass. The Radiant baseline passes. The broader input-processing run completes with 4,533/4,559 passing; remaining wiki/prose-format and PDF checks are recorded in [the writing-modes implementation log](../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md). |
@@ -3088,7 +3096,8 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
-| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
+| D2.8 | TE-15/TE-17/TE-18; TE-18.1; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
+| D3.2.2v2, D3.2.3v2 | TE-18.1 | `Lambda_Design_Type_Error_Handling.md` |
 | D2.9 | Mark file extensions (2026-10-02) | `input/Input_System.md` §Mark file extensions |
 | D2.10 | XHTML input (2026-10-15) | `input/Input_XML.md` §XHTML admission |
 | D2.11 | Shared SVG admission, DOM export and virtual-frame snapshots (USER, 2026-10-18) | [Radiant_SVG2 §SVG parsing admission](../vibe/radiant/Radiant_SVG2.md#svg-parsing-admission), [§DOM export and virtual-frame snapshots](../vibe/radiant/Radiant_SVG2.md#dom-export-and-virtual-frame-snapshots) |

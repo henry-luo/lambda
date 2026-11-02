@@ -1,7 +1,7 @@
 # Lambda Procedural Programming — Design
 
-**Revision:** 1 (2026-10-23) — consolidation of the two procedural records into one, brought up to the current rulings.
-**Status:** the procedural surface (`pn`, `var`, assignment, `while`, `break`, `continue`, `return`) is ratified and implemented on every tier (interp, jit, auto). Mutable value semantics is ratified; COW Stage 1 is landed and Stage 2 (exclusivity, the capture-assignment error, view-borrow confinement) is partial (§5, §9). The resource model is designed, not built (§7.3). Superseded designs are in Appendix S; open questions are in §9.
+**Revision:** 2 (2026-11-02) — normal block results, no-result statements, and handler result preservation clarified under S12.1.2v2 and TE-16.1.
+**Status:** the procedural surface (`pn`, `var`, assignment, `while`, `break`, `continue`, `return`) is ratified and implemented on every tier (interp, jit, auto), except the newly ratified uniform handler-result behavior (§2.4, TE-16.1). Mutable value semantics is ratified; COW Stage 1 is landed and Stage 2 (exclusivity, the capture-assignment error, view-borrow confinement) is partial (§5, §9). The resource model is designed, not built (§7.3). Superseded designs are in Appendix S; open questions are in §9.
 **Formal linkage:** effect bit S12.1.1v3, D6.1.1v2; pn-only constructs S12.1.2, S16.6.5; assignment S12.2.1, S12.2.2; mutable value semantics S9.1.1–S9.1.7, S9.2.1–S9.2.4v2, S9.3.1–S9.3.2; COW D4.4.1–D4.4.6; closures D6.2.3v2; control forms S16.6.1–S16.6.9; `return` line rule S16.2.5; script top level S16.7.1, S16.7.6; numeric widening S4.4.1; declared types S11.4.1; error channels S7.4–S7.6; resources S12.4.1v3–S12.4.3; dynamic calls S12.3.2; key domains S8.2.1v4; invalid writes S7.1.3v2; comma decomposition S16.8.7; open issues SO14.
 **Spec mapping:** `Lambda_Procedural.md` §1–§5 (the 2026-01-23 proposal) → S12.1.2, S16.6.5, S12.2.1; `Lambda_Proc_Assignment.md` design principles 1–4 → S12.2.1; principle 5 and §4.3–§4.5 → S9.1.6, S9.3.2, S12.2.2; §4.6 and Phase 6 → superseded by S9.1.4 (Appendix S, S-1).
 **Scope:** procedural code in Lambda — what `pn` admits, how bindings and assignment behave, the value semantics that keep procedures observably functional, where mutable state may live, and how a procedure reaches the outside world (files, documents, errors, resources) — with the reasons and the history of what was rejected or superseded. The COW machinery, nested-mutation ergonomics, document updates and concurrency each have their own record; this one links to them rather than restating them.
@@ -58,9 +58,35 @@ Procedural scopes are opened only by `fn`/`pn` bodies, `while` bodies and event 
 
 Labeled loops (`outer: for …` / `break outer`) were sketched in 2026-01 as a future extension and have not been adopted; nested-loop exit is written with a flag or by moving the inner loop into a `pn` that `return`s (§9, open item).
 
-### 2.4 `return`
+### 2.4 `return` and block results
 
-`return e` exits the enclosing function with `e`; a bare `return` returns `null`. A `return` inside a `for` or `while` exits the function, not the loop. A function without an explicit `return` returns its last expression (S12.1.2, S2.5). Because `return` takes a following start-token line as its value, `return` ⏎ `42` returns 42; a bare return is `return` followed by a separator or the closing brace (S16.2.5) — the JavaScript restricted-production trap fixed by inversion rather than a special rule.
+`return e` exits the enclosing procedure with `e`; a bare `return` returns
+`null`. The target is the same from inside a loop or handler. Because `return`
+takes a following start-token line as its value, `return` followed on the next
+line by `42` returns 42; a bare return is `return` followed by a separator or
+the closing brace (S16.2.5).
+
+**Normal procedural sequencing is replacement, not collection or null
+filtering** (S12.1.2v2, S2.5.3v2). Statements execute in sequence; each normal
+result replaces the preceding result, including `null`. A statement whose
+contract produces no result leaves it unchanged. A normally completed block
+yields the most recent result, or `null` if none was produced; a procedure
+reaching its body's end returns that value. This rule applies to nested
+procedural blocks as well as the procedure body. It does not turn procedural
+blocks into general expressions (S16.6.8v2).
+
+**No result is distinct from a `null` result** (S2.5.4v3). Declarations
+contribute no result, so `pn f() { 11; let x = 22 }` returns `11`, whereas
+`pn f() { 11; null }` returns `null`. No result is not a language value or
+type. Other statements follow their own result contracts; this clarification
+does not assign a new result to assignment or loop statements.
+
+A handler has an ordinary normal result, regardless of its operand's `fn`/`pn`
+effect (S7.6.1v5, S7.6.7v5). A final handler supplies the block's result; a
+later result can replace it. Producing a fallback value in the handler body
+differs from writing `return fallback`, which exits the enclosing procedure.
+The new behavior and its pending implementation are recorded in
+[TE-16.1](Lambda_Design_Type_Error_Handling.md#te-161--handler-results-follow-procedural-sequencing).
 
 `return` is how a scoped resource escapes its block, and the escape must be visible in the declared return type (S12.4.2, §7.3).
 
@@ -162,6 +188,7 @@ A procedure reports failure through Lambda's error channels, not through excepti
 |---|---|---|
 | `fn`/`pn` effect bit; top level and element construction are `fn` context | S12.1.1v3, D6.1.1v2 | Implemented; residue in the S12.1.4v3 footnote |
 | `break`/`continue`/`return`/`while`/`var` are `pn`-only | S12.1.2, S16.6.5 | Implemented |
+| Normal results replace earlier results, including null; no-result declarations leave them unchanged; handlers follow the same rule | S2.5.3v2, S2.5.4v3, S12.1.2v2, S7.6.1v5, S7.6.7v5 | Partial: procedure-handler results pending (TE-16.1) |
 | `while` two spellings; statements need braces; procedural blocks are statements; branch homogeneity | S16.6.1–S16.6.2, S16.6.6, S16.6.8v2, S16.6.9 | Implemented (both front ends) |
 | `return` takes the next start-token line | S16.2.5 | See its footnote |
 | `let`/params immutable; unannotated `var` may change type; annotated `var` by exact embedding | S12.2.1, S4.4.1, S11.4.1 | Implemented; LR03-36 partial |
@@ -197,6 +224,7 @@ A procedure reports failure through Lambda's error channels, not through excepti
 - ~~**S-8 · Accumulating by re-`let` inside a loop** (Procedural §1 examples: `let total = total + n` inside a `for` body).~~ Never valid: an inner `let` shadows for its block only and accumulates nothing. The spelling is a `var` and assignment.
 - ~~**S-9 · A plain parameter mutated by the callee writes through to the caller** (the AWFY-era behavior the 2026-02 audit inherited).~~ Retired 2026-08-29: plain parameters snapshot unconditionally and `var` is the sole write-through construct, **S9.1.3** (CW29).
 - ~~**S-10 · Multiple return values by tuple unpacking** (Procedural §6.4, future: `let (q, r) = divide(17, 5)`).~~ Bracket and paren destructuring are rejected by **S16.8.7**; a procedure returns one value (an array or map when it has several results), and comma decomposition `let q, r = divide(17, 5)` takes it apart (§3.1).
+- ~~**S-11 · A procedure without an explicit return returns its last expression.**~~ Refined by **S12.1.2v2** (2026-11-02): retain the most recent normal result, including null, while no-result statements leave it unchanged. The earlier shorthand did not specify that distinction or the result of a standalone handler (§2.4, TE-16.1).
 
 ## Appendix A — Implementation notes
 

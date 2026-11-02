@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 71.1.6 (2026-10-31)
+**Spec version:** 74.0.0 (2026-11-02)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -28,6 +28,7 @@ the number model
 ([`Lambda_Semantics_Number_Model.md`](../vibe/Lambda_Semantics_Number_Model.md));
 TE-1–TE-20
 ([`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md));
+TE-13.1, TE-16.1, TE-18.1 ([`Lambda_Design_Type_Error_Handling.md`](../vibe/Lambda_Design_Type_Error_Handling.md));
 ER-D1–D13 ([`Lambda_Design_Exec_Recovery.md`](../vibe/Lambda_Design_Exec_Recovery.md));
 REH-D1–D14
 ([`Lambda_Design_Runtime_Error_Handling.md`](../vibe/Lambda_Design_Runtime_Error_Handling.md));
@@ -163,10 +164,12 @@ harnesses.
 - **SI13 — No aliasing.** Values never alias; construction captures by
   value; cycles are unconstructible natively, so deep `==` terminates
   (depth-limited only against interop imports). [S9.1, S9.3, S5.1.3]
-- **SI14 — A binding's static type is never a lie.** If `x : T` is
-  readable, it holds a real `T`: failure either never reaches the binding
-  (establishment skips before it exists) or leaves it unchanged
-  (reassignment keeps the previous value) — never a null-for-failure
+- **SI14v2 — A binding's static type is never a lie.** A readable binding's
+  effective type covers its actual outcome. A deferred initializer check
+  against declared `T` binds an admitted value or an error, so its effective
+  type retains the error alternative (S7.7.2v2); the annotation alone never
+  proves that outcome error-free. Failed reassignment retains its previous
+  value under its own contract. There is never a null-for-failure
   placeholder. Every error value is deliberate; discharge strips error
   constituents from its success type; no boundary silently substitutes
   `0`, `null`, or reinterpreted bits. (Fault *timing* is exempt from SI3v2.)
@@ -389,15 +392,20 @@ harnesses.
 - **S2.5.2v2** **A for-expression produces a list, whatever its clauses**
   — `where`, `order by`, `limit`/`offset`, `group by` included — so its
   results spread where it lands: `[for (i in 1 to 2) (i, i)]` has four items.
-- **S2.5.3** **A block `{…}` produces a list** of its statements' results, in
-  order — not merely its last expression: `{ 1; 2 }` is the list `(1, 2)`.
-  A `pn` body is the exception: it follows the procedural convention and,
-  without `return`, yields its last expression (S12.1.2).
-- **S2.5.4v2** **Declarations produce no item.** `let`/`var` bindings and
+- **S2.5.3v2*** **A functional block `{…}` produces a list** of its
+  statements' results, in order: `{ 1; 2 }` is the list `(1, 2)`.
+  A procedural block follows S12.1.2v2 instead: each normal result replaces
+  the preceding result, including `null`; a statement producing no result
+  leaves it unchanged. On normal completion the block yields its most recent
+  result, or `null` if none was produced. [Design_Procedural §2.4]
+- **S2.5.4v3** **Declarations produce no result, not a `null` result.** `let`/`var` bindings and
   `type` and function (`fn`/`pn`) declarations bind names and contribute
   nothing to the enclosing block, list, or content — as `let` does in a
   list: `(let x = 5, x + 1)` has the single item `x + 1`, and
-  `{ let y = 1; y + 1 }` the single item `y + 1`. A `let` is an expression
+  `{ let y = 1; y + 1 }` the single item `y + 1`. In a procedural block a
+  declaration leaves the preceding result unchanged. **No result is absence
+  of a contribution, not a Lambda value or type**; `null` is a value and
+  does contribute. A `let` is an expression
   **only** as an item of such a parenthesized list, anywhere among its
   items; elsewhere it is a statement, so `[let x = 1, x]` and
   `f(let x = 1)` are syntax errors. [USER 2026-09-24, Design_Syntax §7.18]
@@ -964,16 +972,30 @@ it.* [TE-13, C14]
 
 ### S7.5 Acknowledgment
 
-- **S7.5.1v2** A call carrying a `^` channel must engage the error at the
+- **S7.5.1v3*** A call carrying a `^` channel must engage the error at the
   **immediate expression**, through exactly one of: an `error` arm in
-  `match`; the `^ { }` handler; postfix `^`; or a receiving
-  position that textually admits error (`let x: T^`, `let x: T | error`, or
-  a declared param/return of that shape). *Must-handle = must-engage-
-  explicitly.* Logical operators do not acknowledge raised errors.
-  [TE-13, TE-16, TE-22]
-- **S7.5.2** `any` never acknowledges (it admits error but engages nothing);
-  a bare `let x = a()` never acknowledges. Automatic containment (§S7.7)
-  never acknowledges: *skip is containment, not acknowledgement.* [TE-13, TE-16]
+  `match`; the `^ { }` handler; postfix `^`; an initializer binding under
+  S7.5.2v3; or a declared parameter/return explicitly admitting error
+  (`T^`, `T | error`, or `error`). *Acknowledgement can preserve the outcome;
+  it need not recover or prove success.* Logical operators do not themselves
+  acknowledge raised errors. The initializer rule does not grant scope-wide
+  acknowledgement to unrelated calls. [TE-13.1, TE-16, TE-22]
+- **S7.5.2v3*** **Initializer acknowledgement follows type admission.** A
+  `let`/`var` initializer is acknowledged when its declared or inferred
+  receiving type admits the possible error outcomes. `any` includes error
+  (S11.4.3), so `any` and `any | error` acknowledge identically; aliases and
+  equivalent type expressions do not change admission. An inferred binding
+  preserves the error possibility, using a conservative type if necessary.
+  A proven incompatibility is a static error. If an explicit contract's error
+  admission is undecidable, **warn and defer to the ordinary runtime check**
+  (S11.4.1v4); bind the admitted value or validation error and continue
+  (S7.7.2v2). The effective binding type retains the failure possibility.
+  Mere inference imprecision does not require an acknowledgement warning.
+  An admitted error is retained as a
+  value, so subsequent statements can execute. The warning permits unresolved
+  initializer admission; it never authorizes an unchecked value as `T` or an
+  implicit block exit. Other receiving-position rules are unchanged.
+  [TE-13.1, TE-18.1]
 - **S7.5.3v2** `a or b` defaults only `null`, `false`, and `""`; an error
   from `a` remains the expression's error and `b` is not evaluated (S3.4).
   Its type must retain that error possibility: `or` never narrows away error
@@ -983,7 +1005,7 @@ it.* [TE-13, C14]
 
 ### S7.6 Discharge: the handler and postfix `^`
 
-- **S7.6.1v4*** **`e ^ { … ^ … }` handles the error locally and is
+- **S7.6.1v5*** **`e ^ { … ^ … }` handles the error locally and is
   channel-agnostic** — it receives soft values, raised errors, and (at `pn`
   boundaries) system faults alike, binding the error to handler-local `^`
   (innermost-wins). In the one-arm form, the handler introduces no `~`
@@ -999,8 +1021,13 @@ it.* [TE-13, C14]
   context, so a bare field name in `v` reads `~.name` (S10.1.7v2). Its type is
   `type(h) | type(v)`. An error raised while evaluating
   either selected arm is a fresh outcome and is not consumed again by the
-  same handler. In statement position, the selected arm executes as a
-  statement body and normal completion continues after the handler.
+  same handler. **The handler produces its normal result for both `fn` and
+  `pn` operands**, including when used as a standalone statement. In a
+  procedural sequence that result replaces the preceding result under
+  S12.1.2v2; a later result may replace it in turn. A final handler supplies
+  the block's result. A `null` result replaces an earlier value; it is not
+  suppressed. `return` inside an arm exits the enclosing procedure, not just
+  the arm; `raise`, `break`, and `continue` retain their ordinary targets.
 
   In either form the selected handler result has the ordinary contextual type
   or the arm does not complete normally (`raise` / `return`); the binding it
@@ -1009,11 +1036,9 @@ it.* [TE-13, C14]
 
   Ordinary error outcomes always reach this handler by normal return and a
   local generated branch; the handler never uses non-local recovery for a
-  returned or raised language error. In statement position,
-  `pn_call() ^ { error_body }` may protect a procedure call that suspends: its
-  completion and handler destination are durable state, and the body executes
-  after resume with the same single-evaluation and fresh-outcome rules.
-  [TE-16, REH-D8, REH-D12]
+  returned or raised language error. A handler may protect a procedure call
+  that suspends (S7.6.7v5), with the same single-evaluation, result, and
+  fresh-outcome rules after resume. [TE-16.1, REH-D8, REH-D12]
 - **S7.6.2v3** The handler is the left-associative postfix-primary form
   `primary ^ { error_body }`, optionally followed immediately by the normal
   value arm `~ { value_body }`. It occupies the same precedence tier as member
@@ -1054,31 +1079,38 @@ it.* [TE-13, C14]
   `^ { } ~ { }` branches explicitly between error and non-error outcomes;
   `e^` catches errors only, propagating. Both caret forms remain
   channel-agnostic; `or` acknowledges neither error channel. [TE-16, TE-22]
-- **S7.6.7v4** A statement-position procedure handler
-  `pn_call() ^ { error_body }` may protect a possibly-suspending call. The
-  call parks and resumes in place, so its error reaches the handler exactly
-  as a non-suspending call's does; *suspension is invisible to error
-  handling*. A value-producing postfix handler over a possibly-suspending `pn`
-  remains a compile error because `pn` handlers are statement-only. (Revised
-  2026-10-05, v4: v3 routed the error through a durable completion and the
-  caller's state machine, with a non-local carve-out for a fault after
-  suspension.) [TE-16, ER-D13, REH-D12, REH-D13, Runtime_Async RA1]
+- **S7.6.7v5*** **Procedure handlers produce values under the same rules as
+  function handlers.** In procedural context, `pn_call() ^ { h }` is valid
+  in a binding, another value position, or a statement sequence; the callee's
+  `pn` effect does not erase its result. The call may suspend and resumes in
+  place with the same success/error selection and result as a synchronous
+  call. *Suspension is invisible to error handling.* The S12.1 effect
+  restrictions still apply: this does not permit a `pn` call in `fn` context.
+  [TE-16.1, ER-D13, REH-D12, REH-D13, Runtime_Async RA1]
 
-### S7.7 Containment: the declaration-boundary skip
+### S7.7 Validation outcomes and boundary behavior
 
-*Regions are created by declarations, not by control structures. The guard
-dominates the scope.* [TE-15, TE-18]
+*Validation produces an outcome; a declaration does not choose a block to
+abandon.* [TE-18.1]
 
-- **S7.7.1*** Skip is a **declaration-boundary mechanism only** — `let`,
-  `var`, `for` loop variables, declared parameters, declared returns.
-  **Expression interiors never skip**: in `a + e + b` the error flows as a
-  value and the expression types `T | error`. (Strict left-to-right
-  evaluation order is *not* normative.) [TE-18]
-- **S7.7.2*** A failed deferred check at a declaration skips to the end of
-  the block that **declares** the binding; that block yields the error; the
-  binding is never established, and code between failure and boundary never
-  runs. On success, the declaration's guard **dominates every use of the
-  binding in its scope** — native-lane, no per-use checks. [TE-18]
+- **S7.7.1v2*** **Initializer validation is an expression-level operation**
+  yielding an admitted value or a rich error. Failure of a `let`/`var`
+  initializer check never implicitly exits its declaring block. Validation
+  composes with ordinary handlers and explicit propagation; its standalone
+  surface spelling remains to be settled. In ordinary expression composition
+  (`a + e + b`) the error flows as a value and the expression types
+  `T | error`. (Strict left-to-right
+  evaluation order is *not* normative.) [TE-18.1]
+- **S7.7.2v2*** **A deferred initializer binds its validation outcome.** For
+  `let a: T = val` (likewise `var` initialization), proven admission adds no
+  validation-error alternative; proven incompatibility is a static error. Undecidable admission
+  warns and checks at runtime: `a` receives the admitted value or a rich
+  validation error, and execution continues. Its effective type includes
+  `T | error`, conservatively approximated if `T` is runtime-dependent;
+  declared `T` remains the admission contract, not proof of a clean outcome
+  (SI14v2). No invalid original value is passed off as `T`. A declaration
+  still contributes no result (S2.5.4v3); a bound error becomes the block's
+  result only through ordinary result-producing code. [TE-18.1]
 - **S7.7.3*** A declared parameter guards at the **call site**: on failure the
   function is not entered and **the call expression evaluates to that
   error** — call-site contagion, never a hidden early return, never a
@@ -1089,20 +1121,25 @@ dominates the scope.* [TE-15, TE-18]
   abandon; a runtime report naming the binding that kept its previous value.
   `x = e ^ { … }` suppresses all three. **No use of a binding ever observes
   a value left by a failed assignment.** [TE-18]
-- **S7.7.5*** In a `for`, the skip target is the **iteration body**, not the
-  loop: per-item skip keeps the batch alive; *body native, result boxed* —
-  the loop result is `(T | error)[]`. An accumulator declared outside the
-  loop dies with the batch, correctly (a stale accumulator would poison every
-  later iteration); a per-item temp declared inside it continues. *Batch
-  friendliness is a theorem, not a hope.* [TE-15, TE-18]
+- **S7.7.5v2*** **Initializer failure inside a loop does not skip its body
+  or abandon the loop.** A `let`/`var` declaration inside the iteration
+  follows S7.7.2v2; later statements and explicit recovery remain reachable.
+  The enclosing `for` collects its body's ordinary result, including an
+  error if that is the result, under the existing collection rules. This
+  initializer ruling does not change accumulator reassignment or settle
+  dedicated typed loop-variable admission. [TE-18.1]
 - **S7.7.6*** Edge sites: element/field stores report via S7.7.4's tiers
   (containers are not scoped away — documented partial state); a failed
   module-level reassignment **aborts module initialization**; a cross-frame
   reassignment from a closure becomes an error return of the inner function,
   re-originating at the call site. [TE-18]
-- **S7.7.7v2** Recovery belongs in the initializer: `let a: T = e ^ { … }`.
-  Recovery after a failed declaration is unreachable by construction;
-  `or` in the initializer does not contain an error. [TE-15, TE-22]
+- **S7.7.7v3*** **Validation errors can be handled as ordinary values.**
+  Recovery after a deferred initializer failure is reachable through the bound
+  outcome: `a ^ { … }`. A handler inside `let a: T = e ^ { … }` handles
+  `e`'s outcome, not a later failure of the annotation check. To recover or
+  propagate before binding a clean `T`, include validation itself in the
+  handled or propagated expression. `or` never recovers an error.
+  [TE-18.1, TE-22]
 
 ### S7.8 Containers and errors
 
@@ -1823,7 +1860,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   is `T{n+}`, echoing the bare `+` that means one or more. Each retired
   spelling is rejected with a diagnostic naming its replacement rather than
   reading as a different type. **Element content is a sequence-pattern slot** (ruled 2026-09-25): an element pattern's content section — `<tag c, d>`, or `<tag attrs, c, d>` after the S16.9.3 boundary comma — matches the element's normalized content (S2.6) as `[c, d]` matches an array — item by item, runs included, and the whole content — so `<ul <li>*>` admits any number of `li` children and nothing else, and open content is spelled with a trailing `any*`. A pattern without a content section (`<div>`, `<div a: int>`) leaves content unconstrained; the spelling of *must be empty* is SO46. [Type_Pattern §1.3, Design_Syntax §7.28, Shape_Transitions §7]
-- **S11.1.7*** **`none` is the empty type** — the bottom of the type lattice, as `any` is its top. It admits no value, `null` and errors included (the null type admits `null`; `none` admits nothing), so `none <: T` holds for every `T` and `T <: none` only when `T` is `none` (S11.1.4v2). A type operation (S10.1.1v4) **reduces** to `none` when its literal operands decide that nothing is admitted — scalar literals, and containers as the pattern their literal spells: `1 & 2`, `(1 | 2) ! (1 | 2)`, `int & "a"`, `null & int`, `[1] & [2]`, `{a: 1} & {a: 2}` — and `none` is the identity of `|` and `!` and absorbs `&`: `T | none` and `T ! none` are `T`, while `T & none` and `none ! T` are `none`. The reduction holds in value and type context alike (`type E = 1 & 2` names `none`), and a reduced form *is* its result: it prints as it, and under S5.5.2 `(3 & 4) == (1 & 2)` and `(int | none) == int`. *Informative:* the implementation reduces only what literal operands decide, so an operation that admits nothing for another reason, such as `int & string`, is left as written (Appendix A); a good implementation should detect one and warn, or reject it. As a declared type `none` is a contract no value passes (S11.4.1v3), with no rule of its own: a known source is a compile error (`let x: none = 5`, `fn f() none => 5`), and an unknown one fails the way its position fails for any type — a failed return is the call's error value, a failed declaration or argument stops. A function that only raises declares `none^E`. `none` is a base-type word (S16.10.1v2). *Why: the empty type needed a spelling distinct from the null type. `none` pairs with `any`, names what it admits, and implies no exception — a failed Lambda contract is an error value, not a throw.* [C6.5]
+- **S11.1.7*** **`none` is the empty type** — the bottom of the type lattice, as `any` is its top. It admits no value, `null` and errors included (the null type admits `null`; `none` admits nothing), so `none <: T` holds for every `T` and `T <: none` only when `T` is `none` (S11.1.4v2). A type operation (S10.1.1v4) **reduces** to `none` when its literal operands decide that nothing is admitted — scalar literals, and containers as the pattern their literal spells: `1 & 2`, `(1 | 2) ! (1 | 2)`, `int & "a"`, `null & int`, `[1] & [2]`, `{a: 1} & {a: 2}` — and `none` is the identity of `|` and `!` and absorbs `&`: `T | none` and `T ! none` are `T`, while `T & none` and `none ! T` are `none`. The reduction holds in value and type context alike (`type E = 1 & 2` names `none`), and a reduced form *is* its result: it prints as it, and under S5.5.2 `(3 & 4) == (1 & 2)` and `(int | none) == int`. *Informative:* the implementation reduces only what literal operands decide, so an operation that admits nothing for another reason, such as `int & string`, is left as written (Appendix A); a good implementation should detect one and warn, or reject it. As a declared type `none` is a contract no value passes (S11.4.1v4), with no rule of its own: a known source is a compile error (`let x: none = 5`, `fn f() none => 5`), and an unknown one fails the way its position fails for any type — a failed return is the call's error value, a failed declaration or argument stops. A function that only raises declares `none^E`. `none` is a base-type word (S16.10.1v2). *Why: the empty type needed a spelling distinct from the null type. `none` pairs with `any`, names what it admits, and implies no exception — a failed Lambda contract is an error value, not a throw.* [C6.5]
 
 ### S11.2 Match
 
@@ -1859,12 +1896,15 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md) (TE-1–TE-20).
 
-- **S11.4.1v3** An annotation is a contract on the binding, not a hint.
+- **S11.4.1v4*** An annotation is a strict **admission contract**, not a hint.
   **Three outcomes, never a fourth**: statically proven, statically
   rejected, or a deferred runtime check whose failure produces a rich error
   (boundary, expected type, actual value, location) — never null, never a
-  wrong value, never silence. Failure never establishes the binding;
-  reassignment checks before commit and leaves the old value unchanged. A
+  wrong value, never silence. A deferred initializer binds the check's
+  outcome and continues; its effective type preserves the possible error
+  separately from the declared target (S7.7.2v2, SI14v2). The rejected value
+  is never admitted as that target. Reassignment checks before commit and
+  leaves the old value unchanged under its own boundary contract. A
   `T[]` boundary validates/adopts every logical element before publishing its
   representation, and a typed array mutation validates its new element before
   changing the owner. An annotation may drive representation only if its
@@ -1897,13 +1937,16 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   `int 3`); an inexact one fails with the rich error. Poison follows domain
   membership (S4.2.4). Static positions reject the whole class
   (`let x: int = 3.0` is a compile error). [TE-5, TE-6]
-- **S11.4.6*** User-defined types are enforced by the validator: deep, on
-  first crossing, or a rich error with a validator path and no binding.
+- **S11.4.6v2*** User-defined types are enforced by the validator: deep, on
+  first crossing, yielding an admitted value or a rich error with a validator
+  path. Initializer bindings retain that outcome under S7.7.2v2; a rejected
+  argument does not enter the callee (S7.7.3).
   Named map types are **open** — extra fields pass. Constrained types
   (`T that …`) enforce the base only, for now. [TE-10]
-- **S11.4.7** Containment and discharge follow §S7.7–S7.8: skip at
-  declaration boundaries, destination-contract container acceptance, and
-  `^ { }` as the engagement form that suppresses the skip.
+- **S11.4.7v2*** Validation and discharge follow §S7.7–S7.8: deferred
+  initializer checks produce bound outcomes without implicit block exit;
+  containers retain destination-contract admission; `^ { }` handles an
+  error value and postfix `^` explicitly propagates it. [TE-18.1]
 - **S11.4.8v2** A function signature may establish a **type binder** with an
   explicit `T: type` parameter, a parameter-contract site `B as T`, or the
   non-optional parameter shorthand `x: as T`, which elaborates exactly to
@@ -1959,7 +2002,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   error answer fails the test. The proviso `x that p` evaluates the same body
   the same way, in its own enclosing context (S10.1.5v3). [TE-20; 2026-09-26,
   user]
-- **S11.4.12*** **A type name binds for its whole scope and never reads as `any`.** At a module's top level every type declaration — an alias `type T = …`, an object type `type T { … }`, a binary layout, a named string or symbol pattern, and a `grammar` — binds its name before any type expression in the module resolves, as top-level `fn`/`pn` do. A type may name itself, a type declared later, or a type that names it back: `type A = {b: B?}` before `type B = {a: A?}` is one pair of mutually recursive contracts. A type declared in a block binds from its declaration to the end of the block, its own body included, as a block-local function does. The names a `that` predicate reads are values and keep value scoping (S11.4.11). Every reference cycle among types passes through a structural position — a map field, an element attribute or content slot, an array or list item, or a `that` predicate body — so that each step consumes one level of the value. A cycle made only of aliases and type operators (`|`, `&`, `!`, occurrences, `?`) is E240, as is any cycle among string or symbol patterns, which no regular pattern can express, and a binary-layout cycle not broken by a native pointer field (S11.5.4). A type name that resolves to no declaration, import or base type is E204 under the strictness policy of SI3v2, never `any`. *Why: a declared type is a contract (S11.4.1v3). A name that silently reads as `any` voids that contract with only a log warning, so a schema written root-first — the usual schema style — checked nothing below its first forward reference.* [TE-23; S11.4.1v3, S11.4.6, S12.3.7; 2026-10-21, user]
+- **S11.4.12*** **A type name binds for its whole scope and never reads as `any`.** At a module's top level every type declaration — an alias `type T = …`, an object type `type T { … }`, a binary layout, a named string or symbol pattern, and a `grammar` — binds its name before any type expression in the module resolves, as top-level `fn`/`pn` do. A type may name itself, a type declared later, or a type that names it back: `type A = {b: B?}` before `type B = {a: A?}` is one pair of mutually recursive contracts. A type declared in a block binds from its declaration to the end of the block, its own body included, as a block-local function does. The names a `that` predicate reads are values and keep value scoping (S11.4.11). Every reference cycle among types passes through a structural position — a map field, an element attribute or content slot, an array or list item, or a `that` predicate body — so that each step consumes one level of the value. A cycle made only of aliases and type operators (`|`, `&`, `!`, occurrences, `?`) is E240, as is any cycle among string or symbol patterns, which no regular pattern can express, and a binary-layout cycle not broken by a native pointer field (S11.5.4). A type name that resolves to no declaration, import or base type is E204 under the strictness policy of SI3v2, never `any`. *Why: a declared type is a contract (S11.4.1v4). A name that silently reads as `any` voids that contract with only a log warning, so a schema written root-first — the usual schema style — checked nothing below its first forward reference.* [TE-23; S11.4.1v4, S11.4.6, S12.3.7; 2026-10-21, user]
 
 ---
 
@@ -2021,10 +2064,21 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   The run-time check is confined to the calls that need it — never the
   statically resolved ones. Accepted price: no reified effects — a `pn` call
   executes; there is no held, unexecuted effect value. [Features §3.6, C20.7]
-- **S12.1.2** `break`, `continue`, `return`, `while`, and `var` declarations
-  are `pn`-only; using them in an `fn` is a compile error. `return` inside
-  `for` exits the function; a function without an explicit `return` returns
-  its last expression. [Design_Procedural §2]
+- **S12.1.2v2*** `break`, `continue`, `return`, `while`, and `var`
+  declarations are `pn`-only; using them in an `fn` is a compile error.
+  **Procedural sequencing retains the most recent normal result.** Statements
+  execute in sequence; each result replaces the preceding one, even if it is
+  `null`. A statement whose contract produces **no result** contributes
+  nothing and leaves the preceding result unchanged (declarations:
+  S2.5.4v3). On normal completion the block yields that result, or `null` if
+  none was produced; a procedure reaching its body's end returns that value.
+  Thus `pn f() { 1; null }` returns `null`, while
+  `pn f() { 1; let x = 2 }` returns `1`. A handler participates by its normal
+  result (S7.6.1v5), with no special discard rule. `return e` exits the
+  enclosing procedure with `e`, including from a loop or handler; bare
+  `return` returns `null`. `raise`, `break`, and `continue` transfer control
+  according to their own rules, not by replacing a normal result.
+  [Design_Procedural §2.4, TE-16.1]
 - **S12.1.3** Reactive templates are the doctrine applied: template body =
   pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
   architecture enforced by the effect bit. [Features §3.7]
@@ -2073,10 +2127,12 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 
 ### S12.2 Assignment
 
-- **S12.2.1** `let` bindings and parameters are immutable; only `var`
+- **S12.2.1v2*** `let` bindings and parameters are immutable; only `var`
   reassigns; shadowing is allowed. An unannotated `var` may change runtime
   type on reassignment; an annotated `var` constrains every assignment to
-  the declared type (S11.4.1). Implicit widening at annotated positions is
+  the declared admission type (S11.4.1v4). Deferred initialization may bind
+  an error outcome under S7.7.2v2; that does not make an invalid value a
+  successful assignment to `T`. Implicit numeric widening at annotated positions is
   by **exact embedding** only (S4.4.1) — never lossy coercion; assignment
   never silently corrupts data. [Design_Procedural §3]
 - **S12.2.2** Element mutation is defined on both faces: `elem.attr = v` as
@@ -2941,7 +2997,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S3.1v2–S3.5, S7.5.1v2, S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v3 | **Implemented 2026-10-16 on interp, jit and auto.** Logical operators and `if` preserve the original encountered error and skip unselected operands/arms. `or` retains error types and acknowledges no hard channel. Item-returning operator helpers preserve diagnostic payloads; native scalar paths remain available when proven safe. Reference docs and intentional package/fixture recovery sites use explicit handlers. Collection-predicate and procedural-loop failure boundaries remain open (TE-22); sorting is retained. Record: [TE-22](../vibe/Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user), [C2.4](../vibe/Lambda_Semantics_Formal.md#c24-errors-have-no-truth-value-2026-10-16--supersedes-the-error-part-of-c2). |
+| S3.1v2–S3.5, S7.5.3v2, S7.6.6v3, S7.9.2v3 | **Implemented 2026-10-16 on interp, jit and auto.** Logical operators and `if` preserve the original encountered error and skip unselected operands/arms. `or` retains error types and acknowledges no hard channel. Item-returning operator helpers preserve diagnostic payloads; native scalar paths remain available when proven safe. Reference docs and intentional package/fixture recovery sites use explicit handlers. Collection-predicate and procedural-loop failure boundaries remain open (TE-22); sorting is retained. Record: [TE-22](../vibe/Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user), [C2.4](../vibe/Lambda_Semantics_Formal.md#c24-errors-have-no-truth-value-2026-10-16--supersedes-the-error-part-of-c2). |
 | S5.1.1v2–S5.1.2v2, S5.1.4v3–S5.1.5, S5.5.1v2, S5.6.1v2, S6.1.2v2, S10.2.2v2 | **Scalar and recursive comparison core implemented 2026-10-16.** Language equality/inequality, direct identity comparison and magnitude comparisons preserve error Items. Deep equality visits aliased content and captures, stops at decisive mismatches, and retains visited error possibilities in inference. Existing physical map traversal is transitional; canonical traversal, competing-error selection, collection consumers and element-wise error shapes remain SO50. Total sorting is unchanged. Record: [C8.8](../vibe/Lambda_Semantics_Formal2.md#c88-comparisons-preserve-errors-recursively-2026-10-16-user). |
 | S11.5.1v2, S11.5.2, S11.5.3v3, S11.5.4 | **Fixed-record/native P2 profile implemented 2026-10-15 on interpreter and MIR Direct.** Fixed byte layouts, nested records, lazy native references and counted native spans use separate `& {…}` metadata. Versioned bindings reject mismatches; native spans check count/extent contracts and implement the ratified empty/absent distinction. Byte spans return owned copies. Native projections reject writes and stale structural reads. Buffer counted arrays, offset references, serialization and binary predicates remain outside the profile. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | S11.1.2v4 | **Implemented 2026-10-09 on interp, jit and auto.** The production lexer recognizes quoted class escapes only inside the shared island; the type-pattern resolver checks every quoted fragment and resolved reference for one consistent domain, rejecting mixed and wildcard-only islands. Literal-only string and symbol islands retain ordinary literal-union identity. Lowering and canonical printing preserve quotes and domains, including named symbol literal unions; string search refuses symbol-domain operands. The reference grammar and executable corpus use the new surface. Fixtures `pattern_quoted_classes.ls` and `negative/semantic/pattern_*.ls` cover fragment repetition, one-pass ordinary escapes, references, ranges, complement, wildcards, contracts and value-run separation. Syntax gates: C 411/411, Tree-sitter 397/397. Design and validation: [String Pattern SP24](../vibe/Lambda_Design_String_Pattern.md#appendix-a--implementation-history). |
@@ -2962,10 +3018,12 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | **Partial, updated 2026-10-29 on interp, auto and jit.** Owned error values retain code, message, wrapped `.source` and source coordinates. Deferred boundary failures now retain their admission site ([LR10-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-15>)); legacy sentinels never read ambient `last_error` ([LR10-14](<../vibe/Lambda_Issue_Ledger (fixed).md#lr10-14>)). Integer conversion, formatted runtime producers and parse/format cleanup return owned diagnostics. Residue: opaque compatibility sentinels retain stable generic members rather than operation-specific metadata. Fixtures: `error_members.ls`, `ledger_error_payload.ls`, `ledger_boundary_location.ls`, `negative/runtime/ledger_parameter_site.ls`. |
-| S7.6.1 | The one- and two-arm postfix handler grammar and MIR/interpreter lowering conform to S7.6.1v4/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration, direct raised-`pn` outcome routing, and rich-error preservation. |
+| S7.5.1v3, S7.5.2v3 | **Partial, revised 2026-11-02; source inspection only.** Existing explicit handlers, propagation, and explicit-error contracts remain. Inferred initializer acknowledgement, `any` equivalence, and the unresolved-admission warning are pending; the resolver still checks the declared contract with the older explicit-error test. No runtime conformance is claimed for the new rule. [TE-13.1 implementation status](../vibe/Lambda_Design_Type_Error_Handling.md#initializer-acknowledgement). |
+| S7.6.1v5 | **Partial, revised 2026-11-02.** One-/two-arm selection, scoped `^`/`~`, and rich-error preservation are implemented. Procedure-handler normal results are still erased and excluded from the block result; the new uniform result rule is not implemented. Verified with synchronous REPL probes on interpreter and JIT; record: [TE-16.1, Appendix A](../vibe/Lambda_Design_Type_Error_Handling.md#appendix-a--implementation-status). |
 | S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. The handler-local `^` remains scoped to the selected error arm. |
-| S7.6.7v4 | **Implemented 2026-10-05** (Runtime_Async P1): a suspending `pn` call returns to its handler like any other call in both tiers; the durable completions, handler fault states and carve-out are deleted. Value-producing handlers over possibly-suspending `pn` calls remain rejected. Lambda concurrency scripts 25/25 in both tiers, plain and under forced GC. |
-| S7.7.1–S7.7.6 | **Partial as of 2026-10-31, both tiers.** Deferred declaration/reassignment failures end the declaring block, including iteration-local and comma-separated bindings; parameter admission failures are call values; checked assignments/stores report their skipped tail and retained/partial state. Inferred record calls retain error values, including later caller effects. Fixtures `proc/ledger_containment.ls`, `ledger_parameter_result_site.ls`, prior `proc/defect_value_flow.ls`, and native diagnostic coverage. **Residue:** the complete static diagnostic tiers and `for x: T in e` surface are not complete; independent proof precision and join arithmetic remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24). Qualification: [containment follow-up](<../vibe/impl/Lambda_Impl_Ledger_Containment_Followup (done).md>). |
+| S7.6.7v5 | **Partial, revised 2026-11-02.** Statement-position suspension support predates this revision (Runtime_Async P1). Uniform value-position and final-handler results remain pending, including qualification across suspension. Synchronous value-position probes currently yield `null`, rather than the operand/recovery value. [TE-16.1, Appendix A](../vibe/Lambda_Design_Type_Error_Handling.md#appendix-a--implementation-status). |
+| S7.7.1v2, S7.7.2v2, S7.7.5v2, S7.7.7v3, S11.4.1v4, S11.4.6v2, S11.4.7v2, S12.2.1v2 | **Revised 2026-11-02; new outcome behavior pending.** Existing deferred initializer checks still terminate the declaring block. Binding the error, continuing, and reflecting the outcome in effective types require implementation on both tiers. No new runtime conformance is claimed. [TE-18.1 implementation status](../vibe/Lambda_Design_Type_Error_Handling.md#validation-outcomes). |
+| S7.7.3–S7.7.4, S7.7.6 (prior containment qualification) | **Prior behavior verified 2026-10-31, both tiers; initializer skipping is superseded by S7.7.2v2 and remains an implementation gap.** Deferred declaration/reassignment failures end the declaring block, including iteration-local and comma-separated bindings; parameter admission failures are call values; checked assignments/stores report their skipped tail and retained/partial state. Inferred record calls retain error values, including later caller effects. Fixtures `proc/ledger_containment.ls`, `ledger_parameter_result_site.ls`, prior `proc/defect_value_flow.ls`, and native diagnostic coverage. **Residue:** the complete static diagnostic tiers and `for x: T in e` surface are not complete; independent proof precision and join arithmetic remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24). Qualification: [containment follow-up](<../vibe/impl/Lambda_Impl_Ledger_Containment_Followup (done).md>). |
 | S7.8.1 | **TE-17 lane gating built 2026-09-27** on the D6.1.3 fact: a defect-capable call's value, and a member, element or arithmetic result of one, never enters a native lane, and a literal slot fed by one is boxed on both tiers. **2026-10-31:** checked `int[]` stores reject a mismatched value before publishing it and report retained partial state; inferred record calls and fields preserve error joins (`proc/ledger_containment.ls`, interp/auto/jit and forced/poisoned GC). Independent proof precision and join-arithmetic tuning remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24); this qualification does not audit every raw construction/setter API. |
 | S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.1.1v3, S7.10.5v3 (numeric functions, unary operators) | **Conformant as of 2026-09-23 (USER ruling), both tiers.** A `null` argument makes a numeric function's result `null` -- `math.*`, `abs`/`round`/`floor`/`ceil`/`trunc`/`sign`, the scalar `min`/`max` pair, `clip` and `**` -- and so does the unary `-`/`+`; every one of them had returned `error`. The JIT's native libm, rounding and unary lowerings now test the argument's lane null: they had computed on the sentinel's bits, giving NaN for a `float[]` read out of range and, for an `int[]` read, the routine applied to 0.0 (`math.sqrt` gave 0, `-a[i]` gave -inf). `a[i] / 2` on an `int[]` read is null, not 0; a nullable float result boxes as null wherever it escapes (it printed as NaN, typed `int`); and a failed reassignment into a declared `float` is reported naming the binding on both tiers (S7.7.4). A `REAL_TO_FLOAT` sys-func result is typed `float` only when every argument is real (`math.pow(2, [1, 2])` had been typed `float` and unboxed as NaN). Fixtures: `proc/null_numeric_propagation.ls`, `negative/runtime/null_numeric_reassign_float.ls`. **Residue:** an untyped binding of a nullable float result (`let x = v[i] + 1.0`, or `var t = 0.0` reassigned `t + v[i]`) still loses the null on the JIT, because arithmetic inference drops D2.5.3's `?` and nothing marks the binding's lane nullable. |
@@ -2987,11 +3045,12 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. **2026-09-27, both tiers:** a system function's rejected error operand is always the call's value, in every call form (`len(m)`, `m \|> len`) and whatever the operand's type ([LR12-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-25>), [LR12-36](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-36>)). The test is compiled only where an operand's type admits error (explicit `any`, or a member or element read typed `any`, since an Item-lane container keeps errors, S7.8.2) or it may carry a defect; an unannotated parameter or return adds none. **2026-10-31:** both an existing error argument and a fresh failed user-parameter admission become the call's error value (S7.7.3), without exiting the caller; `ledger_parameter_result_site.ls` and `proc/ledger_containment.ls` cover direct/indirect and null-lane cases. |
 | S11.4.5 | **Conformant (verified 2026-09-23, both tiers):** an ANY-held `3.0` crossing an `int` boundary is admitted as `3`, and `3.5` fails with E201. The type-directional reject this row used to record is gone. |
 | S11.1.6v2, S11.4.5 (native nullable lanes) | **Conformant as of 2026-09-23, both tiers:** a `float?` or `float \| null` contract admits an int as `float` does, re-represented (`5` becomes `5.0`), and `int?` admits an exactly integral float (`2.0` becomes `2`). The JIT had failed MIR verification on `let x: float? = 5`, and T0 had kept the int. A union of several numeric arms still admits by membership (`5` stays an int in `int \| float \| null`). Fixture: `proc/nullable_float_lane_admission.ls`. **Residue:** the sized and wide optionals (`i8?` to `u32?`, `i64?`) still admit by membership on both tiers, so `let t: i32? = 5` is rejected where `let t: i32 = 5` is admitted. |
-| S11.4.6 | **Base admission conformant as of 2026-09-25, both tiers.** `fn_is`, the validator, `is` and match arms all admit a constrained type's base as `x is <base>` does. Both tiers had compared the base's TypeId, so a union, occurrence, array, `float`, `any` or `number` base refused every value and a map, element or nominal base took any container of its kind; the generic `fn_is` admitted anything for a union, occurrence or array base; and the validator refused every element of `Pos[]` ([LR03-22](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-22>), [LR13-11](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-11>)). Predicates run where the type is named statically: `is` and match arms, inline, by name, or through an alias chain, innermost predicate first ([LR03-23](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-23>)). Everywhere else the interim holds and only the base is enforced: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). Fixture `constrained_type_base.ls`. How a predicate evaluates is S11.4.11's row. An inline pattern island admits as a base since 2026-09-26, compiled where its type resolves ([LR03-26](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-26>), fixture `pattern_island_type.ls`, three tiers). |
+| S11.4.6v2 (base admission only; new initializer routing pending) | **Base admission conformant as of 2026-09-25, both tiers.** `fn_is`, the validator, `is` and match arms all admit a constrained type's base as `x is <base>` does. Both tiers had compared the base's TypeId, so a union, occurrence, array, `float`, `any` or `number` base refused every value and a map, element or nominal base took any container of its kind; the generic `fn_is` admitted anything for a union, occurrence or array base; and the validator refused every element of `Pos[]` ([LR03-22](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-22>), [LR13-11](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-11>)). Predicates run where the type is named statically: `is` and match arms, inline, by name, or through an alias chain, innermost predicate first ([LR03-23](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-23>)). Everywhere else the interim holds and only the base is enforced: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). Fixture `constrained_type_base.ls`. How a predicate evaluates is S11.4.11's row. An inline pattern island admits as a base since 2026-09-26, compiled where its type resolves ([LR03-26](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-26>), fixture `pattern_island_type.ls`, three tiers). |
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S11.4.12 | **Implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
 | S12.1.4v3 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
+| S2.5.3v2, S2.5.4v3, S12.1.2v2 | **Partial, verified 2026-11-02 with the existing executable on interpreter and JIT.** Normal value results replace earlier results, including a final `null`; declarations leave them unchanged. The handler case still excludes procedure handlers from result selection (S7.6.1v5 footnote). Assignment and loop result contracts are not changed by this revision. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results). |
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
@@ -3140,7 +3199,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   (S16.6.7v2 keeps a procedure arrow's body braced so as not to prejudge it); the
   argument and cost survey live in
   [Design_Syntax §6 O5](../vibe/Lambda_Design_Syntax.md). An S12
-  effect-boundary question. [S12.1]
+  effect-boundary question. S7.6.7v5 admits procedure-handler expressions
+  specifically; it does not settle the general bare-call question. [S12.1]
 - **SO45** Whether a function type takes a suffix directly: `fn?`,
   `fn (x: int)?`, `fn ()[]`. S11.1.5v2 makes the return type optional, so
   after a return-less signature the suffix could only bind to the function
@@ -3169,7 +3229,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
-| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
+| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-13.1, TE-15–TE-18, TE-16.1, TE-18.1; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v5, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
+| S7.5.1v3, S7.5.2v3 | TE-13.1 | `Lambda_Design_Type_Error_Handling.md` |
+| SI14v2; S7.7.1v2, S7.7.2v2, S7.7.5v2, S7.7.7v3; S11.4.1v4, S11.4.6v2, S11.4.7v2; S12.2.1v2 | TE-18.1 | `Lambda_Design_Type_Error_Handling.md` |
+| S2.5.3v2, S2.5.4v3, S12.1.2v2; S7.6.1v5, S7.6.7v5 | Design_Procedural §2.4; TE-16.1 | `Lambda_Design_Procedural.md`, `Lambda_Design_Type_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2) |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md`, `Lambda_Typed_Array.md` (S10.2.4) |
