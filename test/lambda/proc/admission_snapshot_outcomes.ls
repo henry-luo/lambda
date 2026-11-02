@@ -11,6 +11,11 @@ pn borrowed_snapshot(var box: Box, value) any^ {
     return saved
 }
 pn main() {
+    let children: Child[] = [{value: 1}]
+    let extra: array = [{value: 2}]
+    let appended: Child[] = children ++ extra
+    var copy: Child[] = appended^
+    copy[0].value = 9
     let checked_borrowed: Box = {child: {value: 2}, items: []}
     var borrowed: Box = checked_borrowed^
     let captured = borrowed_snapshot(borrowed, {child: {value: 3}, items: []})
@@ -30,5 +35,5 @@ pn main() {
     let schema = Box | error;
     [first.child.value, union_snapshot^.child.value, reused_before.child.value,
      reused.child.value, child_snapshot^.value, plain.child.value,
-     error_copy is error, schema is type, captured^.child.value, borrowed^.child.value]
+     error_copy is error, schema is type, captured^.child.value, borrowed^.child.value, children[0].value, appended[0].value, copy[0].value]
 }

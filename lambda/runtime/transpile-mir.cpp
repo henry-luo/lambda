@@ -5419,12 +5419,13 @@ static bool mir_boxed_predicate_result(AstNode* source, int depth = 0) {
     if (!source || depth > 16) return false;
     AstNode* node = ast_unwrap_primary_to_leaf(source);
     if (!node) return false;
+    // S3.4: a boolean outcome, including a handler join, admits only true.
+    Type* normal = node->type ? lambda_type_remove_error(NULL, node->type) : NULL;
+    normal = mir_unwrap_decl_type(normal);
+    if (normal && normal->type_id == LMD_TYPE_BOOL) return true;
     if (node->node_type == AST_NODE_UNARY &&
             ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) {
         return mir_boxed_predicate_result(((AstUnaryNode*)node)->operand, depth + 1);
-    }
-    if (node->node_type == AST_NODE_PRIMARY || node->node_type == AST_NODE_LITERAL) {
-        return node->type && node->type->type_id == LMD_TYPE_BOOL;
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         // A bool/error outcome and its propagated success have the same
@@ -24848,7 +24849,10 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
                 // literals that were never null (D3.2.2, D3.3.3v3).
                 generic = emit_checked_boundary(mt, generic, LMD_TYPE_ANY,
                     mt->array_contract_hint, "float literal member", VALUE_REP_NONE);
-                // the constructor's receiver retains this admission outcome.
+                // S7.7.2v2/S7.7.3: a rejected member joins the owning
+                // expression before a successful array witness is published.
+                MirAdmissionCheckScope checking(mt);
+                emit_return_if_item_error(mt, generic);
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, generic)));
@@ -34647,6 +34651,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         // Item consumers unboxed: `string(f())` handed print a bare String*.
         // bool and DateTime returns are already boxed by their post-process.
         #define POST_PROCESS_CARRIER(result) \
+            if (c_ret_tid == LMD_TYPE_ANY && call_node->propagate) { \
+                /* The C Item ABI still carries its error before ^ narrows it. */ \
+                returned_boxed_item = true; \
+            } \
             if (call_expr_tid == LMD_TYPE_ANY && c_ret_tid != LMD_TYPE_ANY && \
                     c_ret_tid != LMD_TYPE_BOOL && c_ret_tid != LMD_TYPE_DTIME) { \
                 result = emit_box(mt, result, c_ret_tid); \

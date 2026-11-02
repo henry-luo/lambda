@@ -86,6 +86,9 @@ extern "C" bool ast_type_may_be_container(Type* type) {
 }
 
 static bool ast_nonnull_array_type(Type* type) {
+    // S9.1.2: a join's error outcome is immutable; its array success still
+    // owns a fresh root and must retain snapshot capture on later aliases.
+    type = lambda_type_remove_error(NULL, type);
     return type && !lambda_type_accepts_null(type) &&
         ast_type_is_array_contract(type);
 }

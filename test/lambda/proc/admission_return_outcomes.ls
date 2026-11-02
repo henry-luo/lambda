@@ -39,6 +39,13 @@ fn preserved_fill(n: int) float[]^ => fill(n, 1)
 pn checked_int_read(values: int[], index: int) int { return values[index] }
 pn checked_float_read(values: float[], index: int) float { return values[index] }
 pn checked_bool_read(values: bool[], index: int) bool { return values[index] }
+// A failed optimized literal must reach the receiver before a native call.
+pn sum_float_literal(values: float[]) float { return values[0] + values[1] }
+pn rejected_float_literals(values: float[], index: int) {
+    let called = sum_float_literal([values[index], values[index + 1]])
+    let checked: float[] = [values[index], values[index + 1]];
+    return [called is error, checked is error, "continued"]
+}
 pn main() {
     let absent_int = checked_int_read([7], 5)
     let absent_float = checked_float_read([7.5], 5)
@@ -67,5 +74,5 @@ pn main() {
      type(widened_plain(7)) == float, type(widened_union(7)) == int, type(propagated_union()) == int,
      type(mixed_union(true)) == int, type(mixed_union(false)) == float,
      type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7), vector, flags, type(scalar_member^) == int,
-     record_member^.a, type(filled_members[0]) == int, absent_int is error, absent_float is error, absent_bool is error]
+     record_member^.a, type(filled_members[0]) == int, absent_int is error, absent_float is error, absent_bool is error, rejected_float_literals([1.0], 5)]
 }

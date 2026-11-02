@@ -1037,3 +1037,32 @@ Evidence: `temp/error-handling/m3-outcome-snapshot-{qualified-diag,final-gc,qual
 `m3-outcome-snapshot-qualified-focused.log`, and `outcome-handle-qualified.out`.
 A full runtime-golden audit found additional legacy differences and regressions
 that remain under review; GC consistency alone does not qualify their values.
+
+### Explicit propagation and constructor call lanes (2026-11-03)
+
+S7.6.3v3/D2.8.3 explicit propagation now contributes its early-completion
+error lane even when a callable's final normal result is scalar. A propagated
+C-ABI Item result keeps its physical Item descriptor until the error check;
+this repairs the native WFC failure path without forcing clean native math
+producers through boxing. `proc/error_propagation_lanes` covers unary,
+condition, direct-call and system-call propagation followed by scalar returns.
+
+S7.7.2v2/S7.7.3 optimized nullable float literal admission now joins a rejected
+member into the owning expression before publishing a successful array witness.
+Both an initializer and a call retain that failure and continue; the admission
+return fixture covers both receivers. S9.1.2 fresh-array ownership also survives
+an error alternative on join operands. This restores later snapshot captures
+on both tiers; the snapshot fixture now includes typed array concatenation.
+Boolean outcome joins use their actual boolean domain for predicate admission
+(S3.4), retaining the existing MIR predicate guards.
+
+Qualification: focused tier/GC outcomes **144/144**, diagnostics **247/247**,
+Procart noise/WFC checks **3/3**, MIR emission **266/279**. Full MIR GC initially
+passed 349/350: the remaining bool-fill fixture relied on continuing after a
+failed propagated fill. It now retains and inspects the two failed call outcomes,
+with its focused GC check passing. The boxed-predicate and discarded-call
+fixtures likewise preserve intended local recovery instead of adding `^` early
+exits. Broad qualification and the outstanding native proof regressions remain
+open. Evidence: `temp/error-handling/m3-propagation-final-diag.json`,
+`m3-join-owner-focused.log`, `m3-join-owner-mir.json`,
+`m3-propagation-wfc.json`, and `m3-bool-fill-propagation-gc.json`.

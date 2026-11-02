@@ -264,6 +264,16 @@ static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
 // scans (build_ast's and the MIR solve) ask this before their own gates.
 static inline bool ast_node_originates_defect(AstNode* node) {
     switch (node->node_type) {
+    case AST_NODE_UNARY: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        // S7.6.3v3: propagation can complete an otherwise scalar callable.
+        return unary->op == OPERATOR_PROPAGATE && unary->operand &&
+            lambda_type_accepts_error(unary->operand->type);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        return call->propagate && lambda_type_has_proven_error(call->propagated_error_type);
+    }
     case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_CRUD_STAM: case AST_NODE_OPEN_STAM:
     case AST_NODE_START: case AST_NODE_HANDLER_STAM:
