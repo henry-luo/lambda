@@ -2392,11 +2392,13 @@ static FontProp* fixup_inline_effective_font(LayoutContext* lycon, ViewSpan* spa
     return lycon ? lycon->font.style : nullptr;
 }
 
-static float fixup_inline_content_area_height(LayoutContext* lycon, ViewSpan* span) {
+float layout_inline_content_area_height(LayoutContext* lycon, ViewSpan* span) {
     if (!span) return 0.0f;
     float content_height = 0.0f;
     FontProp* font = fixup_inline_effective_font(lycon, span);
     if (font) {
+        // zero font metrics stay zero even when a fixed line-height still contributes leading.
+        if (font_prop_used_size(font) == 0.0f) return 0.0f;
         if (font->font_handle) {
             content_height = font_get_cell_height(font->font_handle);
         }
@@ -2415,7 +2417,7 @@ static float fixup_inline_content_area_height(LayoutContext* lycon, ViewSpan* sp
 
 static float fixup_inline_dom_rect_height(LayoutContext* lycon, ViewSpan* span) {
     if (!span) return 0.0f;
-    return fixup_inline_content_area_height(lycon, span) +
+    return layout_inline_content_area_height(lycon, span) +
         fixup_inline_vertical_decoration_height(span);
 }
 

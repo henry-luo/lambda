@@ -5,8 +5,9 @@ Status: active. Started 2026-11-02 on `codex/css-ruby-wpt`, source base
 run reports 19 full matches, 193 geometry mismatches, and no execution errors.
 Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
-normalization is also qualified. Flow integration and the remaining raw
-suite failures are still open; the objective is not complete.
+normalization, inline font boxes and Ruby spacing are also qualified. Flow
+integration and the remaining raw suite failures are still open; the objective
+is not complete.
 
 ## Objective and contracts
 
@@ -555,3 +556,107 @@ each visible annotation containing a 160px-wide zero-height atomic child has
 zero height. Chromium exposes its 8px font box. Inspect the shared inline
 font-box/strut path and preserve descendant overflow independently before
 changing placement; do not add a per-fixture annotation height.
+
+## M6: inline font boxes around atomic content
+
+Priority: P1. Diagnose the textless-inline content-area path shared by ordinary
+inlines and Ruby annotations. CSS 2.2 §10.6.1 defines the inline content area's
+height from its font, while child atomic boxes can overflow it. CSS Ruby
+§3.1.2/§3.3 uses the annotation's inline content box, and §3.6 excludes its
+authored line-height from Ruby line spacing. Keep annotation font-box geometry
+and descendant overflow/line contributions distinct.
+
+First qualify a native reproducer against Chromium for zero-height and taller
+atomic descendants, nested inline owners, inherited and differing fonts,
+zero/large annotation line-height, over/under placement and computed role
+changes. Reuse the existing inline font/strut/fragment helpers; preserve source
+identity and selected-view ownership (**D4.1.4v5 / D4.5.1v4**). Include zero
+font-size and hidden annotations as controls. Run focused checks during the
+edit loop, then raw Ruby, dimension/inventory/diff checks and the required
+Radiant milestone gate when stable. Broaden input qualification only if
+source/interface changes or unresolved concerns require it.
+
+The Chromium control confirms 20px font boxes for ordinary atomic-only
+wrappers, 10px boxes for the annotation owners, and zero font boxes at zero
+font size. Zero and large annotation line-height do not change those content
+heights (`temp/ruby-inline-font-box-browser-probe.json`). The native
+reproducer narrows the failures to zero line-height and zero font size.
+
+The existing content-area helper is promoted from `layout_text.cpp` and shared
+by inline construction, final line alignment and collapsed-span fixup. It
+keeps a resolved zero font size at zero instead of falling back to leading.
+Construction and final alignment both normalize a real inline extent even
+when its line-height is zero. This also removes a duplicated font-height
+fallback in final alignment. The first edit fixed annotations but the
+ordinary controls exposed final line alignment overwriting their geometry;
+both phases now use the same content-area policy. Focused adjacent font/Ruby
+checks pass 14/14; final qualification is recorded below.
+
+The new native test preserves the ordinary atomic baselines and descendant
+heights, checks nested owners and differing child fonts, and exercises
+retained font/display/visibility changes without changing source identity.
+Logs: `temp/ruby-m6-reproducer-before.log`,
+`temp/ruby-m6-focused-first.log`, `temp/ruby-m6-focused-second.log`.
+
+The corrected font boxes exposed a second root cause: Ruby spacing compared
+preliminary box coordinates with a finalized paragraph baseline, adding the
+paragraph's leading twice. Three alignment cases lost their previously
+matching text positions in that intermediate build. Spacing now accumulates
+the complete over/under stack and reserves only its shortfall against the
+existing line height (CSS Ruby §3.6). Additional leading goes to the sides
+whose annotation extents exceed the available half-leading. This allows
+annotations to overflow their own line box while keeping equivalent successive
+Ruby lines apart. The existing initial-letter adjustment is retained.
+
+A visible zero-font annotation still establishes an annotation level, even
+though a tall atomic descendant overflows its zero-height font box. The
+Chromium control gives that row a 20px base extent, while a base-only Ruby at
+zero line-height leaves a zero-height line. The model distinguishes these
+cases by visible annotation geometry and reuses the shared font/atomic baseline
+queries for the base extent. Native retained controls reproduce both.
+
+The raw suite improves to **33 full matches / 179 mismatches**, with no lost
+full match or execution error. New matches are `nested-ruby-pairing-001-ref`,
+`no-break-opportunity-at-end-ref` and `ruby-autohide-001`. The three intermediate
+alignment regressions are recovered; other partial mismatches remain recorded
+without changing references or tolerances. Logs:
+`temp/ruby-m6-wpt-spacing.log`, `temp/ruby-m6-wpt-spacing-delta.json`,
+`temp/ruby-m6-focused-spacing-rebuilt.log`.
+
+The Radiant gate's text-query component passes **449/449**. Every layout
+baseline category passes: **4974 full matches, 300 accepted partials and zero
+regressions**. One CSS Text baseline case improves from partial to full. The
+aggregate remains red on the same twelve slide teardown cases already
+reproduced on the unchanged base; the browser-global profile passes. Logs:
+`temp/ruby-m6-radiant-baseline.log`,
+`temp/ruby-m6-radiant-output/test_summary.json`,
+`temp/ruby-m6-radiant-output/test_radiant_layout_baseline_results.json`.
+The rebuilt input gate completes **4594/4621**, with the same 27 failures as
+M5 and no new/resolved failure, skip or timeout. Logs:
+`temp/build-ruby-m6-input-runners.log`, `temp/ruby-m6-input-qualified.log`,
+`temp/ruby-m6-input-output/test_summary.json`.
+Dimension lint and diff checks pass. The generated CSS inventory is refreshed
+and its check passes; only source/test references change. This closes M6's
+font-box and spacing scope. No core runtime or formal ruling is changed.
+
+## M7: nested Ruby block-axis envelopes
+
+Priority: P1. CSS Ruby §3.1.2 requires a base container to include the base and
+annotation containers of descendant Ruby participating in its inline
+formatting context. The saved `nested-ruby-pairing-001` output now matches
+15/16 elements and 13/14 text nodes. Its outer `Southeast` reading is 10px too
+low; the outer base bounds include the inner Ruby's font box but omit its
+annotation level. Evidence: `temp/ruby-m6-nested-pairing-differences.json`.
+
+Extend the shared normalized-box bounds using the existing bounded view walk,
+including participating nested Ruby boxes while stopping at independent
+formatting contexts and out-of-flow descendants. Preserve each source box's
+own font/content geometry and DOM identity; the container envelope is layout
+structure (**D4.1.4v5 / D4.5.1v4**). Do not add a separate nested-Ruby placement
+algorithm or a per-test offset.
+
+Acceptance: inner/outer over and under combinations, multiple nested levels,
+hidden inner annotations, retained font/role changes, glyph positions and
+source identity. Verify the focused native Ruby controls and raw Ruby suite,
+then run the required Radiant gate at a stable boundary. General wrapping,
+non-inline containers, overhang and vertical layout remain open families.

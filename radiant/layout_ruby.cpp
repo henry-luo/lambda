@@ -714,26 +714,61 @@ static void ruby_position_annotation_levels(ViewSpan* ruby, LayoutRubySegment* s
     }
 }
 
+static float ruby_base_content_baseline(LayoutContext* context, LayoutRubyLevel* level, Rect bounds) {
+    bool found = false;
+    float baseline = 0.0f;
+    auto collect = [&](View* view, bool leaf, int) {
+        if (!leaf || layout_view_is_out_of_flow(view)) return;
+        float candidate = view->y + view->height;
+        if (ViewText* text = lam::view_as<RDT_VIEW_TEXT>(view)) {
+            float ascent = radiant::compute_font_baseline_ascender(context, text->font, false, 0.0f);
+            if (text->rect) candidate = text->rect->y + ascent;
+        } else if (ViewBlock* block = lam::view_as_block(view)) {
+            candidate = view->y + radiant::compute_element_last_baseline(context, block, true);
+        } else if (view->is_element()) {
+            candidate = view->y + radiant::compute_font_baseline_ascender(
+                context, view->as_element()->font, false, view->height);
+        }
+        baseline = found ? max(baseline, candidate) : candidate;
+        found = true;
+    };
+    auto no_leave = [](View*, int) {};
+    for (LayoutRubyBox* box = level->first; box; box = box->next) ruby_walk_box(box, collect, no_leave);
+    return found ? baseline - bounds.y : bounds.height;
+}
+
 static void ruby_contribute_line_metrics(LayoutContext* context, const Linebox* base_line,
-        float base_baseline, float base_line_height, float base_top,
-        Rect annotation, float content_extent, bool under) {
-    if (annotation.height <= 0.0f) return;
-    if (!under && base_line->has_initial_letter) {
-        float extent = base_top - annotation.y + content_extent - annotation.height;
-        float over_shift = max(0.0f, extent - context->block.lead_y);
+        LayoutRubyLevel* base, float base_baseline, float base_line_height, Rect bounds,
+        float over, float under) {
+    if (base_line->has_initial_letter && over <= 0.0f && under <= 0.0f) return;
+    if (over > 0.0f && base_line->has_initial_letter) {
+        float over_shift = max(0.0f, over - context->block.lead_y);
         float required_ascender = base_line->max_ascender + over_shift - base_line->initial_letter_origin_advance;
         context->line.max_ascender = max(context->line.max_ascender, required_ascender);
         context->line.ruby_annotation_over_shift = max(context->line.ruby_annotation_over_shift, over_shift);
         float advance_shift = max(0.0f, over_shift - base_line->initial_letter_origin_advance);
         context->line.ruby_annotation_min_line_height = max(
             context->line.ruby_annotation_min_line_height, base_line_height + advance_shift);
-        return;
+        if (under <= 0.0f) return;
+        over = 0.0f;
     }
-    // CSS Ruby §3.3/§3.6: consume existing leading, excluding annotation line-height.
-    float before = base_baseline, after = max(0.0f, base_line_height - base_baseline);
-    float baseline_y = context->block.advance_y + base_baseline;
-    if (under) after = max(after, annotation.y + content_extent - baseline_y);
-    else before = max(before, baseline_y - annotation.y + content_extent - annotation.height);
+    // CSS Ruby §3.6 reserves repeated-line spacing; annotations may overflow their own line box.
+    float extra = max(0.0f, bounds.height + over + under - base_line_height);
+    if (extra <= 0.0f) return;
+    float half_leading = max(0.0f, (base_line_height - bounds.height) * 0.5f);
+    float over_excess = max(0.0f, over - half_leading);
+    float under_excess = max(0.0f, under - half_leading);
+    float excess = over_excess + under_excess;
+    if (excess <= 0.0f) {
+        // a visible zero-height annotation still pairs with the base's physical font box.
+        float baseline = ruby_base_content_baseline(context, base, bounds);
+        over_excess = max(0.0f, baseline - base_baseline);
+        under_excess = max(0.0f, bounds.height - baseline - max(0.0f, base_line_height - base_baseline));
+        excess = over_excess + under_excess;
+    }
+    float before = base_baseline + (excess > 0.0f ? extra * over_excess / excess : 0.0f);
+    float after = max(0.0f, base_line_height - base_baseline) +
+        (excess > 0.0f ? extra * under_excess / excess : 0.0f);
     context->line.max_ascender = max(context->line.max_ascender, before);
     context->line.max_descender = max(context->line.max_descender, after);
     context->line.ruby_annotation_min_line_height = max(context->line.ruby_annotation_min_line_height, before + after);
@@ -889,14 +924,22 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
         for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
             ruby_place_level(segment, level, ruby, cursor);
         }
+        float over_extent = 0.0f, under_extent = 0.0f;
+        bool visible_annotation = false;
         auto contribute = [&](LayoutRubyLevel* level, Rect annotation, bool under) {
+            visible_annotation |= annotation.width > 0.0f || annotation.height > 0.0f;
             if (!ruby_has_text_box_trim_ancestor(ruby, under ? TEXT_BOX_TRIM_END : TEXT_BOX_TRIM_START)) {
                 float extent = max(annotation.height, level->line.max_atomic_inline_height);
-                ruby_contribute_line_metrics(context, &base_line, base_baseline, base_line_height,
-                    base_bounds.y, annotation, extent, under);
+                if (annotation.height <= 0.0f) return;
+                if (under) under_extent = max(under_extent,
+                    annotation.y + extent - base_bounds.y - base_bounds.height);
+                else over_extent = max(over_extent,
+                    base_bounds.y - annotation.y + extent - annotation.height);
             }
         };
         ruby_position_annotation_levels(ruby, segment, base_bounds, false, contribute);
+        if (visible_annotation) ruby_contribute_line_metrics(context, &base_line, &segment->base,
+            base_baseline, base_line_height, base_bounds, over_extent, under_extent);
         cursor += segment->width;
     }
     float advance = cursor - start;

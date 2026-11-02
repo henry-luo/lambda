@@ -2883,10 +2883,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
-    if (span->height > 0) {
+    if (span->height > 0.0f || span->width > 0.0f) {
         struct FontHandle* fh = span->font ? span->fontp()->font_handle : font_box_handle(&lycon->font);
-        if (fh) {
-            float content_area = font_get_cell_height(fh);
+        if (fh || span->font) {
+            float content_area = layout_inline_content_area_height(lycon, span);
             float bt = 0, bb = 0, pt_val = 0, pb_val = 0;
             if (span->bound) {
                 if (span->boundary()->border) {
@@ -2898,7 +2898,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             float expected_height = content_area + bt + pt_val + pb_val + bb;
             if (!span_is_multi_line && !span->has_split_inline_fragment_union() &&
-                roundf(span->height) > roundf(expected_height)) {
+                roundf(span->height) != roundf(expected_height)) {
+                // the inline's font box is independent of child height and its own leading.
                 float span_asc = span->font ? span->fontp()->ascender :
                     (lycon->font.style ? lycon->font.style->ascender : 0.0f);
                 float span_desc = span->font ? span->fontp()->descender :

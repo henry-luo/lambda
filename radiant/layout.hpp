@@ -5473,6 +5473,7 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top);
+float layout_inline_content_area_height(LayoutContext* lycon, ViewSpan* span);
 void layout_include_inline_box_metrics(LayoutContext* lycon, float ascender, float descender,
     float line_height, float normal_line_height, CssEnum align, float align_offset);
 void layout_commit_inline_boxes(LayoutContext* lycon);

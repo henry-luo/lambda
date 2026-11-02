@@ -15557,6 +15557,71 @@ TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutCha
     }
 }
 
+TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
+    ASSERT_NE(load("test/html/layout_ruby_inline_font_box.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float height; } cases[] = {
+        {"ordinary-zero", 20.0f}, {"ordinary-tall", 20.0f}, {"ordinary-nested", 20.0f},
+        {"ordinary-zero-leading", 20.0f}, {"ordinary-font-zero", 0.0f},
+        {"ruby-zero", 10.0f}, {"ruby-zero-leading", 10.0f}, {"ruby-high-leading", 10.0f},
+        {"ruby-tall", 10.0f}, {"ruby-under", 10.0f}, {"ruby-role", 10.0f},
+        {"ruby-nested", 10.0f}, {"ruby-font-zero", 0.0f},
+        {"ruby-small-child", 10.0f}, {"ruby-large-child", 10.0f},
+        {"ruby-zero-font-tall", 0.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(element, nullptr);
+            EXPECT_FLOAT_EQ(element->width, 80.0f) << entry.id;
+            EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+        }
+        expect_box("ordinary-zero", 0.0f, 40.0f, 80.0f, 20.0f);
+        expect_box("ordinary-zero-atomic", 0.0f, 56.0f, 80.0f, 0.0f);
+        expect_box("ordinary-tall", 0.0f, 140.0f, 80.0f, 20.0f);
+        expect_box("ordinary-tall-atomic", 0.0f, 106.0f, 80.0f, 50.0f);
+        for (const char* id : {"ruby-zero-row", "ruby-tall-row", "ruby-zero-container-row"}) {
+            DomElement* row = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(row, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id;
+        }
+        DomElement* zero_font_row = dom_find_element_by_id(document->root, "ruby-zero-font-tall-row");
+        DomElement* zero_font_atomic = dom_find_element_by_id(document->root, "ruby-zero-font-tall-atomic");
+        ASSERT_NE(zero_font_row, nullptr);
+        ASSERT_NE(zero_font_atomic, nullptr);
+        EXPECT_FLOAT_EQ(zero_font_row->height, 20.0f);
+        EXPECT_FLOAT_EQ(zero_font_atomic->height, 50.0f);
+        DomElement* no_annotation = dom_find_element_by_id(document->root, "ruby-no-annotation-row");
+        ASSERT_NE(no_annotation, nullptr);
+        EXPECT_FLOAT_EQ(no_annotation->height, 0.0f);
+    }
+    DomElement* annotation = dom_find_element_by_id(document->root, "ruby-zero");
+    DomNode* atomic = annotation->first_child;
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-inline-font-box"), nullptr);
+    for (const char* font_size : {"14px", "10px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "font-size", font_size));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(font_size, "14px") == 0 ? 14.0f : 10.0f);
+        EXPECT_FLOAT_EQ(atomic->height, 0.0f);
+        EXPECT_EQ(annotation->first_child.get(), atomic);
+        EXPECT_EQ(atomic->parent.get(), annotation);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "line-height", "100px"));
+    for (const char* display : {"inline-block", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(display, "ruby-text") == 0 ? 10.0f : 100.0f);
+        EXPECT_EQ(annotation->first_child.get(), atomic);
+    }
+    for (const char* visibility : {"collapse", "visible"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(visibility, "visible") == 0 ? 10.0f : 0.0f);
+        EXPECT_EQ(atomic->parent.get(), annotation);
+    }
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

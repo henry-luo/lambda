@@ -3611,16 +3611,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // CSS 2.1 §10.8.1: Empty/collapsed inline spans (no visible children)
         bool materialized_empty_inline = false;
         if (span->height == 0 && span->content_height > 0) {
-            float empty_inline_height = span_fh ? font_get_cell_height(span_fh) : 0.0f;
-            FontProp* empty_inline_font = span->font ? span->font : lycon->font.style;
-            if (empty_inline_height <= 0.0f && empty_inline_font && empty_inline_font->font_height > 0.0f) {
-                empty_inline_height = empty_inline_font->font_height;
-            }
-            if (empty_inline_height <= 0.0f && empty_inline_font &&
-                (empty_inline_font->ascender > 0.0f || empty_inline_font->descender > 0.0f)) {
-                empty_inline_height = empty_inline_font->ascender + empty_inline_font->descender;
-            }
-            span->height = empty_inline_height > 0.0f ? empty_inline_height : span->content_height;
+            span->height = layout_inline_content_area_height(lycon, span);
             materialized_empty_inline = true;
         }
         float span_asc = 0, span_desc = 0;
@@ -3638,8 +3629,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             span_asc = lycon->font.style->ascender;
             span_desc = lycon->font.style->descender;
         }
-        if (span->content_height > 0 && span_fh && (span_asc > 0 || span_desc > 0)) {
-            float content_area = font_get_cell_height(span_fh);
+        if ((span->content_height > 0.0f || span->width > 0.0f) && (span_fh || span->font)) {
+            // finalized child bounds cannot replace the inline's font box, including zero leading/font size.
+            float content_area = layout_inline_content_area_height(lycon, span);
             float bt = 0, bb = 0, pt = 0, pb = 0;
             if (span->bound) {
                 if (span->boundary()->border) {
