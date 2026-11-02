@@ -17,8 +17,8 @@ and remaining scope are recorded in the current components below. The M7 shared
 decoded-PCM output/lifetime/clock foundation, scene spatialization and bus/DSP
 graphs and native sample cue queues are implemented and qualified with recorded
 limits. Explicit offline render jobs are implemented and qualified with recorded
-limits below. MIDI/speech named-route adapters are implemented, with final
-qualification in progress. Provider export, shared video-track output and
+limits below. MIDI/speech named-route adapters are implemented with focused
+evidence; aggregate reruns after the shared-core merge remain outstanding. Provider export, shared video-track output and
 ratified capture remain subsequent native M7 work.
 Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
@@ -65,7 +65,7 @@ does not revise those contracts.
 | M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, rotation/velocity curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; analytic GPU plane/sphere collision, bounded seeded CPU/GPU noise, color/opacity with per-emitter depth ordering, texture sheets, billboard presentation and bounded CPU/GPU ribbon trails and copied spawn commands implemented and qualified with the recorded limits; depth collision awaits M9; presets/effect/sub-emitter rules moved to M13 |
-| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded output, scene clips/sources/listeners, spatialization/Doppler, bounded named bus/send/solo graphs, ordered filter/EQ/delay/reverb/compressor/limiter inserts, tail-aware lifetime, sample-time cues and explicit offline PCM/WAV jobs implemented and qualified with recorded limits; MIDI/speech routes implemented with qualification in progress; provider export, video-track routing and ratified microphone acquisition pending; music/voice/occlusion policy and factories moved to M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded output, scene clips/sources/listeners, spatialization/Doppler, bounded named bus/send/solo graphs, ordered filter/EQ/delay/reverb/compressor/limiter inserts, tail-aware lifetime, sample-time cues and explicit offline PCM/WAV jobs implemented and qualified with recorded limits; MIDI/speech routes implemented with focused evidence; post-merge aggregates pending; provider export, video-track routing and ratified microphone acquisition pending; music/voice/occlusion policy and factories moved to M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
@@ -5753,7 +5753,8 @@ The imported provider UI replay passes 50 events/44 assertions under forced
 GC. Its multi-await operations publish explicit completion before the next
 transport assertion; this avoids advancing virtual audio while a bridge call
 has not yet finished. No fixed sleeps or changed expected output were added.
-Backend, sanitizer and aggregate qualification is in progress.
+Backend and sanitizer evidence is recorded below. Final aggregate reruns on
+the merged checkout remain outstanding at the user-requested wrap-up.
 
 
 **Qualification correction:** a late independent activation assertion exposed
@@ -5766,6 +5767,46 @@ regression checks the combined inputs, then speech alone, and permits the edit a
 providers pause (**D7.5.4**). The initial aggregate/backend/sanitizer evidence
 predates this repair; final qualification below must use the corrected binary.
 
+
+**Concurrent checkout update:** while final aggregate tests were running, an
+external commit/pull advanced the checkout to `7ada4d131` (2026-11-03 06:23
+local). Its function-local-state implementation and migrated fixtures changed
+compiler/test inputs beneath pre-merge executables. The resulting Lambda/UI
+failures are retained as stale-run diagnostics, not final qualification. All
+63 frozen Scene3D component paths are unchanged; shared-core inputs still
+require a fresh build and refreshed bridge/sanitizer/aggregate evidence.
+
+**Wrap-up evidence — 2026-11-03:** on merged checkout `7ada4d131`, all five
+audio UI flows pass all six AST/MIR × interpreter/JIT/AUTO combinations with
+every-allocation GC and freed-memory poisoning (30 replays). The provider flow
+passes 50 events/44 assertions. Supported ASan passes 54 scene/audio, 18 host,
+36 decoder/graph/cue and 12 MIDI cases, with one opt-in physical-device skip,
+plus the provider UI replay under forced GC. Normal wrappers and the four test
+executables are restored after sanitizer work; the normal CLI stays unchanged.
+All 63 frozen component paths and 25,850 compiler/test source inputs remain
+unchanged through these checks. Dimension lint and diff whitespace pass; the
+boundary checker still reports the same six imports (140 deferred against
+baseline 165). No allowlist or baseline was changed.
+
+**Paused acceptance boundary:** the user requested wrapping up and pausing
+further goal execution. The first full Radiant gate passed before the late
+authored activation repair. The later aggregate run crossed the concurrent
+merge and is not final qualification. Required next acceptance work is a clean
+rebuilt Lambda baseline and complete Radiant baseline against one stable merged
+input set. The five representative core failures, including
+`proc_mir_mvp_roots`, all pass on the fresh merged host; the earlier scalar
+failure is historical until new evidence reproduces it. Provider export,
+shared video-track output and ratified capture remain M7 work; wider native
+M0–M12 acceptance and deferred M13 remain in scope. Video integration has not
+started beyond the plan below.
+
+Evidence: `temp/scene3d-audio-providers/{qualification,source-verification,
+merged-input-verification,cli-verification,boundary-comparison,asan-status,
+bridge-matrix-status,concurrent-merge}.json`, `scene-merged.log`,
+`core-merged-smoke.log`, `authored-gate-before.log`, `asan-{scene,host,player,
+midi,live}.log`, `build-normal-restored.log`, `dimension-lint.log`.
+The `before-authored-fix/` and `before-concurrent-merge/` artifacts retain
+superseded diagnostics; they are not evidence for the final merged binary.
 
 ### M7 shared video-track output — next
 
