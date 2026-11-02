@@ -5,6 +5,17 @@ fn checked_scalar(value) int => opaque(value)
 fn checked_bool(value) bool => opaque(value)
 fn forwarded(value) float[]^ => checked_array(value)
 pn checked_explicit(value) float[] { return opaque(value) }
+// Closed forward results are available without resolving defaults or binders.
+fn sum_down(n: int) int => if (n <= 0) 0 else n + sum_down(n - 1)
+fn braced_sum(n: int) int {
+    if (n <= 0) 0 else { let next = n - 1; n + braced_sum(next) }
+}
+fn present(value) bool => value != null
+fn mutual_left(flag: bool) Verdict => if (flag) mutual_right(false) else true
+fn mutual_right(flag: bool) Verdict => if (flag) mutual_left(false) else false
+type Verdict = bool
+type Selected = int
+fn dependent(value: number as Selected) Selected => value
 pn main() {
     let inferred = checked_array("bad")
     let admitted: float[]^ = checked_array("bad")
@@ -17,5 +28,7 @@ pn main() {
     let recovered = checked_array("bad") ^ { 42 }
     let good: float[]^ = checked_array([1.5]);
     [inferred is error, admitted is error, changed is error, scalar is error,
-     flag is error, explicit is error, forward is error, recovered, good[0], "continued"]
+     flag is error, explicit is error, forward is error, recovered, good[0], "continued",
+     sum_down(4), braced_sum(4), mutual_left(true), mutual_right(true),
+     dependent(1.5) == 1.5, present([error("nested")])]
 }

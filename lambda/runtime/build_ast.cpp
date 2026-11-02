@@ -6431,13 +6431,33 @@ static Type* propagated_error_outcomes(Transpiler* tp, AstNode* node) {
     return NULL;
 }
 
+static Type* return_value_proof_type(Transpiler* tp, AstNode* value) {
+    AstNode* node = boundary_unwrap_primary(value);
+    if (!node) return &TYPE_NULL;
+    if (node->node_type == AST_NODE_CONTENT &&
+            !((AstListNode*)node)->procedural_results) {
+        AstNode* result = ast_content_single_value(((AstListNode*)node)->item);
+        if (result) return return_value_proof_type(tp, result);
+    } else if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        // S2.5.4v3/S3.5: branch blocks with one produced result retain that
+        // proof; an uncertain condition must keep its possible error outcome.
+        if (branch->cond && !lambda_type_accepts_error(branch->cond->type)) {
+            return lambda_type_union_normalized(tp->pool,
+                return_value_proof_type(tp, branch->then),
+                return_value_proof_type(tp, branch->otherwise));
+        }
+    }
+    return node->type ? node->type : &TYPE_ANY;
+}
+
 static bool validate_declared_return_boundary(AstNode* node, void* data) {
     ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
     if (!node) return true;
     Type* actual = NULL;
     if (node->node_type == AST_NODE_RETURN_STAM) {
         AstNode* value = ((AstReturnNode*)node)->value;
-        actual = value && value->type ? value->type : &TYPE_NULL;
+        actual = return_value_proof_type(scan->tp, value);
         if (!lambda_type_has_proven_error(actual) && !lambda_type_accepts_error(scan->expected) &&
                 ordinary_outcome_has_error(scan->tp, value))
             actual = &TYPE_ERROR;
@@ -6484,15 +6504,7 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
         signature->returned;
     if (!expected || expected == &TYPE_ANY) return;
     Type* actual = signature->is_proc ? signature->inferred_return :
-        fn->body ? fn->body->type : NULL;
-    AstNode* body = boundary_unwrap_primary(fn->body);
-    if (!signature->is_proc && body && body->node_type == AST_NODE_CONTENT &&
-            !((AstListNode*)body)->procedural_results) {
-        // S2.5.4v3: declarations contribute no value; a single produced
-        // result proves this return even when the block keeps an open carrier.
-        AstNode* result = ast_content_single_value(((AstListNode*)body)->item);
-        if (result && result->type) actual = result->type;
-    }
+        return_value_proof_type(tp, fn->body);
     StaticBoundaryResult body_relation = actual
         ? static_boundary_relation(actual, expected) : STATIC_BOUNDARY_PROVEN;
     if (body_relation != STATIC_BOUNDARY_REJECTED &&
@@ -7372,7 +7384,7 @@ static bool collect_procedural_return_type(AstNode* node, void* data) {
     Type* returned = NULL;
     if (node->node_type == AST_NODE_RETURN_STAM) {
         AstNode* value = ((AstReturnNode*)node)->value;
-        returned = value && value->type ? value->type : &TYPE_NULL;
+        returned = return_value_proof_type(scan->tp, value);
         scan->may_return_error |= ordinary_outcome_has_error(scan->tp, value);
     } else if (node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM) {
         returned = &TYPE_ERROR;
@@ -9692,7 +9704,10 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     }
     if (op == OPERATOR_TO) return &TYPE_RANGE;
     if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ) {
-        bool deep = op != OPERATOR_REF_EQ;
+        // S5.1.1v2/S5.1.2v2: null never visits container children; direct
+        // error operands still propagate through the shallow proof below.
+        bool deep = op != OPERATOR_REF_EQ && lt->type_id != LMD_TYPE_NULL &&
+            rt->type_id != LMD_TYPE_NULL;
         if (lambda_type_comparison_may_error(lt, deep, false) ||
                 lambda_type_comparison_may_error(rt, deep, false)) {
             return lambda_type_union_normalized(tp->pool, &TYPE_BOOL, &TYPE_ERROR);
@@ -14167,6 +14182,24 @@ static void direct_collect_binder_contracts(Type* type, TypeBinder** binders,
     }
 }
 
+static void direct_publish_function_return(Transpiler* tp, TypeFunc* function_type,
+        AstNode* returned, AstNode* error_type, bool raised) {
+    Type* returned_type = direct_function_contract(returned);
+    Type* error = direct_function_contract(error_type);
+    if (raised && !error) error = &TYPE_ERROR;
+    if (returned_type) {
+        function_type->returned = returned_type;
+        function_type->inferred_return = returned_type;
+        Type* outcome = raised ? lambda_type_union_normalized(tp->pool,
+            returned_type, error ? error : &TYPE_ERROR) : returned_type;
+        set_fn_return_contract(tp, function_type, outcome, true);
+    }
+    if (error && !returned_type) {
+        function_type->error_type = error;
+        function_type->can_raise = true;
+    }
+}
+
 static void direct_complete_function(Transpiler* tp, SourceSpan span,
         AstFuncNode* fn, NameScope* function_scope, AstNode* params,
         AstNode* returned, AstNode* error_type, AstNode* body,
@@ -14223,19 +14256,7 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
             function_type->binder_count);
     }
     Type* returned_type = direct_function_contract(returned);
-    Type* error = direct_function_contract(error_type);
-    if (raised && !error) error = &TYPE_ERROR;
-    if (returned_type) {
-        function_type->returned = returned_type;
-        function_type->inferred_return = returned_type;
-        Type* outcome = raised ? lambda_type_union_normalized(tp->pool,
-            returned_type, error ? error : &TYPE_ERROR) : returned_type;
-        set_fn_return_contract(tp, function_type, outcome, true);
-    }
-    if (error && !returned_type) {
-        function_type->error_type = error;
-        function_type->can_raise = true;
-    }
+    direct_publish_function_return(tp, function_type, returned, error_type, raised);
     // Keep the inferred body result separate from its declared contract.
     // Otherwise the direct path cannot diagnose a mismatched return or an
     // implicit error escape after a completed function body is available.
@@ -18411,6 +18432,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk_chain(r, (AstNode*)tail[LSF_FUNCTION_PARAMS]);
         resolve_walk(r, (AstNode*)tail[LSF_FUNCTION_RETURN]);
         resolve_walk(r, (AstNode*)tail[LSF_FUNCTION_ERROR]);
+        // S11.4.1v5: self calls use the resolved contract before the body
+        // infers its return; an open placeholder is not a validation failure.
+        direct_publish_function_return(tp, (TypeFunc*)target->type,
+            (AstNode*)tail[LSF_FUNCTION_RETURN], (AstNode*)tail[LSF_FUNCTION_ERROR],
+            (fn->syntax_aux & LSF_FN_RAISED) != 0);
         resolve_walk(r, (AstNode*)tail[LSF_FUNCTION_BODY]);
         resolve_diagnostics(r, node);
         if (!r->failed) resolve_function(r, fn, target);
@@ -18836,6 +18862,48 @@ static AstNode* resolve_walk(LambdaResolver* r, AstNode* node) {
     return result;
 }
 
+// A return slot can resolve before its function scope only when every name
+// belongs to the module's type graph, independently of parameters and binders.
+static bool resolver_return_is_closed(LambdaResolver* r, AstFuncNode* fn,
+        AstNode* node) {
+    if (!node) return true;
+    switch (node->syntax_form) {
+    case LSF_NONE: return node->type != NULL;
+    case LSF_TP_BASE:
+    case LSF_TP_ANY: return true;
+    case LSF_TP_NAME: {
+        String* name = ((AstIdentNode*)node)->name;
+        void** tail = syntax_tail((AstNode*)fn, sizeof(AstFuncNode));
+        for (AstNamedNode* param = (AstNamedNode*)tail[LSF_FUNCTION_PARAMS]; param;
+                param = (AstNamedNode*)param->next) {
+            AstNode* annotation = (AstNode*)syntax_tail((AstNode*)param,
+                sizeof(AstNamedNode))[0];
+            if ((param->name && str_cmp(param->name->chars, param->name->len,
+                    name->chars, name->len) == 0) ||
+                    (annotation && source_span_has_word(r->tp, annotation->source_span, "as")))
+                return false;
+        }
+        NameEntry* entry = lookup_name(r->tp, (StrView){name->chars, (size_t)name->len});
+        AstNode* definition = entry ? entry->node : NULL;
+        if (!definition || definition->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+                !((AstDeclaratorNode*)definition)->is_type_definition) return false;
+        // The existing alias resolver leaves value-dependent `that` bodies
+        // pending until their declaration's source-order environment exists.
+        lambda_ast_resolve_type_early(r->tp, definition);
+        return ((AstDeclaratorNode*)definition)->init != NULL;
+    }
+    case LSF_TP_BINARY:
+    case LSF_TP_REGISTERED_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return resolver_return_is_closed(r, fn, binary->left) &&
+            resolver_return_is_closed(r, fn, binary->right);
+    }
+    case LSF_TP_OCCURRENCE:
+        return resolver_return_is_closed(r, fn, ((AstUnaryNode*)node)->operand);
+    default: return false;
+    }
+}
+
 // Top-level `fn`/`pn` declarations bind before any body resolves, so a
 // declaration cannot be mistaken for a same-spelled system function (for
 // example `gamma`) by an earlier body. Top-level type aliases and object types
@@ -18875,6 +18943,23 @@ static void resolver_predeclare(LambdaResolver* r) {
                 existing->node->node_type == AST_NODE_PROC) {
             ((TypeFunc*)existing->node->type)->is_public = (facts & LSF_FN_PUBLIC) != 0;
         }
+    }
+    for (int i = 0; i < list->length; i++) {
+        AstNode* node = (AstNode*)list->data[i];
+        if (node->node_type != AST_NODE_FUNC && node->node_type != AST_NODE_PROC) continue;
+        AstFuncNode* fn = (AstFuncNode*)node;
+        if (!fn->type) continue;
+        void** tail = syntax_tail(node, sizeof(AstFuncNode));
+        AstNode* returned = (AstNode*)tail[LSF_FUNCTION_RETURN];
+        AstNode* error = (AstNode*)tail[LSF_FUNCTION_ERROR];
+        if (!returned || !resolver_return_is_closed(r, fn, returned) ||
+                !resolver_return_is_closed(r, fn, error)) continue;
+        // S11.4.1v5: mutual calls see closed declared results as well. Parameter
+        // defaults and dependent slots keep their ordinary declaration scope.
+        resolve_walk(r, returned);
+        resolve_walk(r, error);
+        direct_publish_function_return(tp, (TypeFunc*)fn->type, returned, error,
+            (fn->syntax_aux & LSF_FN_RAISED) != 0);
     }
 }
 

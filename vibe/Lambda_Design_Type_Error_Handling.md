@@ -1041,6 +1041,15 @@ receiver. JIT pair forwarding must preserve return admission. This does not
 make an unused interior failed binding a returned error, or treat an open
 recursive inference as an ordinary-error producer.
 
+Return-admission inference publishes resolved declared results before a body
+checks recursive calls (S11.4.1v5). Closed module type results are also available
+to forward calls; parameter defaults and dependent return slots retain their
+declaration scope. A functional branch block with one produced result keeps
+that result's admission proof through nested branches (S2.5.4v3); its open
+execution carrier does not by itself introduce a validation failure. Equality
+against `null` retains direct error propagation without inventing a traversal
+of nested container errors (S5.1.1v2/S5.1.2v2).
+
 ### Initializer acknowledgement
 
 **2026-11-02, core implemented.** Inferred receivers acknowledge their complete

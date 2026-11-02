@@ -791,3 +791,28 @@ before undecidable admission is diagnosed; explicit-any equivalence produces
 no E241. Tutorial chapters 02 and 03 retain their outputs after explicit
 propagation at fallible display calls (**13/13**, **11/11**). Shared renderer
 migration and the required aggregate checks remain unfinished.
+
+### Recursive return-contract proofs (2026-11-03)
+
+S11.4.1v5 admission effects exposed late header publication: a self or mutual
+call could see `any` instead of its written result, manufacture a deferred
+return effect, and reject otherwise valid recursion. Return contracts now
+publish before body resolution. Closed forward return slots use the module
+type environment; parameter names, binders, defaults and value-dependent
+aliases keep their declaration scope. One shared helper publishes the contract
+for early headers and completed bodies.
+
+S2.5.4v3 single-result proofs now pass through nested functional branch blocks
+without changing their execution carriers. S5.1.1v2/S5.1.2v2 equality against
+`null` checks direct errors but does not inspect container children. The
+expanded return-outcome fixture covers simple and braced recursion, mutual
+recursion through a later type alias, a dependent binder shadowing a module
+alias, and a null comparison containing a nested error. The focused matrix
+passes **128/128**; factorial, mutual recursion and both tail-call MIR guards
+pass **4/4**. The diagnostic gate passes **247/247**. An initial concurrent
+run reproduced the previously observed mutual-stack-overflow `E0` instability;
+its isolated repeat and the subsequent full diagnostic run pass.
+
+The full source audit is **2,847/3,772** compiled, with **925** requiring
+review. This is migration evidence, not qualification; shared package failures
+still cascade into importers. No MIR expectation or budget is relaxed.
