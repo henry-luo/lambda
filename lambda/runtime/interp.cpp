@@ -1037,9 +1037,7 @@ static Item interp_read_mir_export(Script* owner, NameEntry* entry) {
     return ItemError;
 }
 
-// Captures are a by-value snapshot taken at closure creation (D6.2.3), so an
-// enclosing name is either this frame's own slot or an env index — never a
-// live cell. Stage 1 has no mutable upvalues (S9.1.4 via D6.2.3).
+// snapshot slots hold values; confined pn slots hold the parent's traced home.
 static int interp_capture_index(const AstFuncNode* fn, const NameEntry* entry) {
     if (!fn) return -1;
     int index = 0;
@@ -1047,6 +1045,25 @@ static int interp_capture_index(const AstFuncNode* fn, const NameEntry* entry) {
         if (cap->entry == entry) return index;
     }
     return -1;
+}
+
+static bool interp_capture_is_live(const AstFuncNode* fn, int slot) {
+    if (!fn || !fn->analysis || !fn->analysis->lambda_confined_proc) return false;
+    for (FnCapture* cap = fn->captures; cap; cap = cap->next, slot--)
+        if (slot == 0) return cap->lambda_live_local;
+    return false;
+}
+
+static Array* interp_binding_shared_home(InterpFrame* frame, NameEntry* entry) {
+    int slot = interp_capture_index(frame->fn, entry);
+    if (slot >= 0) {
+        if (!interp_capture_is_live(frame->fn, slot) || !frame->env ||
+                (uint32_t)slot >= frame->env_count) return NULL;
+        return frame->env[slot].array;
+    }
+    return entry && entry->lambda_shared_local && entry->storage_assigned &&
+        entry->slot >= 0 && (uint32_t)entry->slot < frame->scratch_base
+        ? (Array*)(uintptr_t)frame->slots[entry->slot] : NULL;
 }
 
 static bool interp_is_object_field_entry(const NameEntry* entry) {
@@ -1079,6 +1096,8 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
     int cap = capture_slot >= 0 ? capture_slot : interp_capture_index(f->fn, entry);
     if (cap >= 0) {
         if (!f->env || (uint32_t)cap >= f->env_count) return ItemNull;
+        if (interp_capture_is_live(f->fn, cap))
+            return lambda_capture_home_read(f->env[cap].array);
         // Capture storage is owned by the closure and outlives every frame that
         // reads it, so the Item is taken as-is (immortal) rather than re-homed.
         return owned_item_slot_read(f->env, f->env_count, cap, true);
@@ -1119,6 +1138,8 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
             entry->name ? entry->name->chars : "");
         return ItemError;
     }
+    if (entry->lambda_shared_local)
+        return lambda_capture_home_read((Array*)(uintptr_t)f->slots[entry->slot]);
     return (Item){.item = f->slots[entry->slot]};
 }
 
@@ -1164,6 +1185,11 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
         Rooted<Item> stored(roots, value);
         Item key = {.item = s2it(entry->name)};
         fn_map_set(self.get(), key, stored.get());
+        return;
+    }
+    Array* shared = interp_binding_shared_home(f, entry);
+    if (shared) {
+        lambda_capture_home_store(shared, value);
         return;
     }
     if (!entry->storage_assigned) return;
@@ -1441,6 +1467,18 @@ static void interp_format_named_boundary(const LambdaBoundary* boundary,
         name ? (int)name->len : 0, name ? name->chars : "");
 }
 
+static bool interp_initialize_binding(InterpFrame* f, NameEntry* entry, Item value) {
+    if (entry && entry->lambda_shared_local) {
+        // declarations create a fresh home on every lexical iteration.
+        Array* home = lambda_capture_home_new(value);
+        if (!home) return false;
+        f->slots[entry->slot] = (uint64_t)(uintptr_t)home;
+    } else {
+        interp_write_binding(f, entry, value);
+    }
+    return true;
+}
+
 static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         Item value) {
     if (!named) return false;
@@ -1474,8 +1512,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         interp_skip_binding(f, named->entry, bound, (AstNode*)named, 0);
         return false;
     }
-    interp_write_binding(f, named->entry, bound);
-    return true;
+    return interp_initialize_binding(f, named->entry, bound);
 }
 
 typedef struct InterpStaticMemberNameEntry {
@@ -1829,6 +1866,9 @@ static uint64_t* interp_borrow_home(InterpFrame* f, NameEntry* entry) {
     if (entry->binding_storage != BINDING_STORAGE_REGISTER) return NULL;
     if ((uint32_t)entry->slot >= f->scratch_base) return NULL;
     if (interp_is_object_field_entry(entry)) return NULL;
+    // the entry channel publishes through the owned slot, including scalars.
+    if (entry->lambda_shared_local ||
+            interp_capture_is_live(f->fn, interp_capture_index(f->fn, entry))) return NULL;
     for (InterpViewBinding* binding = f->st ? f->st->view_bindings : NULL;
             binding; binding = binding->prev) {
         if (binding->entry == entry) return NULL;
@@ -2014,23 +2054,37 @@ static void interp_propagate_proc_side_effect_error(InterpFrame* f,
     }
 }
 
+// a call's ABI home dies with this helper; copy wide scalars into the
+// current number frame before a binding or later evaluation can retain them.
+static Item interp_call_function_result(Function* function, List* arguments,
+        bool borrowed = false) {
+    uint64_t result_home = 0;
+    Item result = borrowed
+        ? fn_call_borrowed_into(function, arguments, &result_home)
+        : fn_call_into(function, arguments, &result_home);
+    return scalar_storage_read(result, false);
+}
+
 static Item interp_call_js_export(Function* function, const uint64_t* words,
-        int argc, uint64_t* result_home) {
+        int argc) {
+    uint64_t result_home = 0;
+    Item result = ItemNull;
     const Item* args = (const Item*)(const void*)words;
     switch (argc) {
-    case 0: return js_call_export_0_into(function, result_home);
-    case 1: return js_call_export_1_into(function, args[0], result_home);
-    case 2: return js_call_export_2_into(function, args[0], args[1], result_home);
-    case 3: return js_call_export_3_into(function, args[0], args[1], args[2], result_home);
-    case 4: return js_call_export_4_into(function, args[0], args[1], args[2], args[3], result_home);
-    case 5: return js_call_export_5_into(function, args[0], args[1], args[2], args[3], args[4], result_home);
-    case 6: return js_call_export_6_into(function, args[0], args[1], args[2], args[3], args[4], args[5], result_home);
-    case 7: return js_call_export_7_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], result_home);
-    case 8: return js_call_export_8_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], result_home);
+    case 0: result = js_call_export_0_into(function, &result_home); break;
+    case 1: result = js_call_export_1_into(function, args[0], &result_home); break;
+    case 2: result = js_call_export_2_into(function, args[0], args[1], &result_home); break;
+    case 3: result = js_call_export_3_into(function, args[0], args[1], args[2], &result_home); break;
+    case 4: result = js_call_export_4_into(function, args[0], args[1], args[2], args[3], &result_home); break;
+    case 5: result = js_call_export_5_into(function, args[0], args[1], args[2], args[3], args[4], &result_home); break;
+    case 6: result = js_call_export_6_into(function, args[0], args[1], args[2], args[3], args[4], args[5], &result_home); break;
+    case 7: result = js_call_export_7_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], &result_home); break;
+    case 8: result = js_call_export_8_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], &result_home); break;
     default:
         log_error("interp: JavaScript import call arity %d exceeds bridge limit", argc);
         return ItemError;
     }
+    return scalar_storage_read(result, false);
 }
 
 // CW25 / S9.2.2: a mutable borrow of a PLACE (`root.path`, `root[i]`) detaches
@@ -2537,9 +2591,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         List args = {};
         args.length = source_argc;
         args.items = (Item*)(void*)words;
-        uint64_t result_home = 0;
-        return fn_call_into((Function*)(uintptr_t)method_fn.get().item,
-            source_argc ? &args : NULL, &result_home);
+        return interp_call_function_result((Function*)(uintptr_t)method_fn.get().item,
+            source_argc ? &args : NULL);
     }
 
     Item callee_value = eval_expr(f, node->function);
@@ -2593,8 +2646,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             log_error("interp: JavaScript imports require positional arguments");
             return ItemError;
         }
-        uint64_t result_home = 0;
-        return interp_call_js_export(fn, words, dispatch_argc, &result_home);
+        return interp_call_js_export(fn, words, dispatch_argc);
     }
     if (ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
@@ -2686,9 +2738,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             List args = {};
             args.length = dispatch_argc;
             args.items = (Item*)(void*)words;
-            uint64_t result_home = 0;
-            Item result = fn_call_borrowed_into(fn, dispatch_argc ? &args : NULL,
-                &result_home);
+            Item result = interp_call_function_result(fn,
+                dispatch_argc ? &args : NULL, true);
             for (int index = 0; index < dispatch_argc; index++) {
                 transport->mir_var_homes[index] = NULL;
             }
@@ -2713,8 +2764,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         if (emitted) *emitted = true;
         return fn_call_emit(fn, dispatch_argc ? &args : nullptr, output_destination);
     }
-    uint64_t result_home = 0;
-    Item result = fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
+    Item result = interp_call_function_result(fn, dispatch_argc ? &args : NULL);
     // LR12-11: same call-site mark as the borrowed path above
     if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
     return interp_check_contract_return(f, node, result);
@@ -2728,8 +2778,7 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
                               InterpFrame* creating_frame) {
     int arity = 0;
     for (AstNamedNode* p = fn_node->param; p; p = (AstNamedNode*)((AstNode*)p)->next) arity++;
-    int cap_count = 0;
-    for (FnCapture* c = fn_node->captures; c; c = c->next) cap_count++;
+    int cap_count = ast_function_capture_count(fn_node);
 
     // Two allocations plus a capture read per slot, every one of them a
     // safepoint: the env and the Function must be rooted across all of them
@@ -2759,11 +2808,20 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
         (void)interp_whole_script_publish_function(module, (AstFuncNode*)fn_node, fn);
     }
 
-    // Snapshot captures by value (D6.2.3).
+    // D6.2.3v3: snapshots hold values; confined pns retain shared homes.
     if (cap_count > 0 && creating_frame) {
         int index = 0;
         for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, index++) {
+            if (cap->lambda_live_local) {
+                Array* home = interp_binding_shared_home(creating_frame, cap->entry);
+                Function* owner = fn_root.get();
+                owned_item_slot_store((Item*)owner->closure_env, cap_count, index,
+                    (Item){.array = home});
+                continue;
+            }
             Item value = interp_read_binding(creating_frame, cap->entry);
+            // captured containers must detach from subsequent parent writes.
+            cow_capture_value(value);
             Function* owner = fn_root.get();
             owned_item_slot_store((Item*)owner->closure_env, cap_count, index, value);
         }
@@ -4488,7 +4546,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
     bool item_position = interp_take_list_item_position(f, (AstNode*)list_node);
     bool is_root_content = hoist_functions;
     // Procedural context, exactly as transpile_content decides it: inside a `pn`
-    // or an `on` handler body, or any block declaring a `var`. It matters
+    // or an `on` handler body. Local var declarations do not choose it. It matters
     // because a proc block's value is its LAST value expression only — every
     // earlier one is a statement. Without this, `pn main() { print(a) … "done" }`
     // accumulates each intermediate result into the block's list instead of
@@ -4499,11 +4557,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
         is_proc = ((AstNode*)f->fn)->node_type == AST_NODE_PROC ||
             (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc);
     }
-    if (!is_proc) {
-        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
-            if (scan->node_type == AST_NODE_VAR_STAM) { is_proc = true; break; }
-        }
-    }
+    // S2.5.3v3: a local var never changes functional result collection.
 
     int value_count = 0, decl_count = 0, stam_count = 0;
     AstNode* last_value = NULL;
@@ -4519,7 +4573,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
     } else {
         for (AstNode* item = list_node->item; item; item = item->next) {
             if (is_declaration_node(item)) { decl_count++; continue; }
-            if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
+            if (ast_block_item_is_statement(item, is_proc)) { stam_count++; continue; }
             value_count++;
             last_value = item;
         }
@@ -4560,7 +4614,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
                     (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                      item->node_type == AST_NODE_FUNC_EXPR);
                 if (!already_hoisted) exec_declaration(f, item);
-            } else if (is_side_effect_stam(item->node_type)) {
+            } else if (ast_block_item_is_statement(item, is_proc)) {
                 Item side_effect = eval_expr(f, item);
                 interp_propagate_handler_error(f, item, side_effect);
                 interp_propagate_proc_side_effect_error(f, item, side_effect);
@@ -4597,7 +4651,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
             if (interp_frame_pending(f)) return acc.get();
             continue;
         }
-        if (is_side_effect_stam(item->node_type)) {
+        if (ast_block_item_is_statement(item, is_proc)) {
             Item side_effect = eval_expr(f, item);
             interp_propagate_handler_error(f, item, side_effect);
             interp_propagate_proc_side_effect_error(f, item, side_effect);
@@ -4759,7 +4813,10 @@ static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
         Item value = dec->is_named
             ? item_attr(source.get(), name->chars)
             : interp_item_at(source.get(), i);
-        interp_write_binding(f, entry, value);
+        // runtime overlays retain canonical entries here; their synthetic
+        // declarators are not retained AST nodes and may still name old entries.
+        value = cow_bind_var(value);
+        if (!interp_initialize_binding(f, entry, value)) return false;
     }
     return true;
 }
@@ -5510,6 +5567,8 @@ public:
 static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
         Item* result) {
     if (!frame || !loop || !result ||
+            (frame->fn && frame->fn->analysis &&
+             frame->fn->analysis->lambda_uses_shared_homes) ||
             !interp_fast_int_expr_shape(loop->cond) ||
             !interp_fast_int_stmt_shape(loop->body)) return false;
     InterpFastIntCache cache = {};
@@ -6841,7 +6900,9 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
     if (count > 0 && !analysis->param_types) return NULL;
 
     *continuation = *def;
-    ((AstNode*)continuation)->node_type = AST_NODE_PROC;
+    // retain fn colour: compiler continuations create no procedure boundary.
+    ((AstNode*)continuation)->node_type = def->node_type == AST_NODE_PROC
+        ? AST_NODE_PROC : AST_NODE_FUNC;
     ((AstNode*)continuation)->type = signature;
     ((AstNode*)continuation)->next = NULL;
     // the loop's offset keeps the MIR symbol distinct from the definition's
@@ -6878,6 +6939,8 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
 
     if (!st || !st->runtime || st->runtime->ui_mode) {
         why = "runtime";
+    } else if (def->analysis && def->analysis->lambda_uses_shared_homes) {
+        why = "shared-capture-homes";
     } else if (def->captures || def->is_generator || def->is_async) {
         why = "activation-kind";
     } else if (!signature || signature->type_id != LMD_TYPE_FUNC ||
@@ -6898,7 +6961,19 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
         }
         bool ends_in_transfer = last_item->node_type == AST_NODE_RETURN_STAM ||
             last_item->node_type == AST_NODE_RAISE_STAM;
-        if (!value_after_loop && !ends_in_transfer) why = "block-value";
+        if (def->node_type == AST_NODE_PROC) {
+            if (!value_after_loop && !ends_in_transfer) why = "block-value";
+        } else if (!ends_in_transfer) {
+            // a fn continuation collects its remaining values, but cannot
+            // discard an earlier value already held by the T0 collector.
+            for (AstNode* item = body->item; item && item != loop; item = item->next) {
+                if (!is_declaration_node(item) &&
+                        !ast_block_item_is_statement(item, false)) {
+                    why = "collected-prefix";
+                    break;
+                }
+            }
+        }
     }
     if (!why) why = interp_loop_live_ins(frame, loop, live, &live_count);
     if (!why && live_count + resume_args > LAMBDA_MAX_FUNCTION_ARGS) why = "live-in-count";
@@ -7041,10 +7116,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
     List args = {};
     args.length = argc;
     args.items = (Item*)(void*)words;
-    uint64_t result_home = 0;
-    Item result = borrowed
-        ? fn_call_borrowed_into(fn, argc ? &args : NULL, &result_home)
-        : fn_call_into(fn, argc ? &args : NULL, &result_home);
+    Item result = interp_call_function_result(fn, argc ? &args : NULL, borrowed);
     if (borrowed) {
         for (int i = 0; i < live_count; i++) transport->mir_var_homes[i] = NULL;
     }
@@ -8895,9 +8967,8 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                 }
                 // `main` runs on the base stack, which is the root task:
                 // task builtins see the same root at every tier (D6.3.1).
-                uint64_t result_home = 0;
-                tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
-                    NULL, &result_home));
+                tail.set(interp_call_function_result(
+                    (Function*)(uintptr_t)callee.item, NULL));
                 called_main = true;
                 break;
             }

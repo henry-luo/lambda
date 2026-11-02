@@ -4,32 +4,32 @@
 // Builds a JSON-like structure with 1000 objects, converts to string
 // Measures map creation and string concatenation speed
 
-pn json_escape(s) {
+fn json_escape(s) {
     // Simple escape for JSON strings (just handle double quotes)
     return s
 }
 
-pn json_str(s) {
+fn json_str(s) {
     return "\"" ++ json_escape(s) ++ "\""
 }
 
-pn json_num(n) {
+fn json_num(n) {
     return string(n)
 }
 
-pn json_obj_2(k1, v1, k2, v2) {
+fn json_obj_2(k1, v1, k2, v2) {
     return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "}"
 }
 
-pn json_obj_4(k1, v1, k2, v2, k3, v3, k4, v4) {
+fn json_obj_4(k1, v1, k2, v2, k3, v3, k4, v4) {
     return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "," ++ json_str(k3) ++ ":" ++ v3 ++ "," ++ json_str(k4) ++ ":" ++ v4 ++ "}"
 }
 
-pn next_rand(seed) {
+fn next_rand(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn benchmark() {
+fn benchmark() {
     let num_objects = 1000
     var seed = 42
     var json = "["

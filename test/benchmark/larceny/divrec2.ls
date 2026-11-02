@@ -4,25 +4,25 @@
 // Same as diviter but uses recursion instead of loops
 // Expected: result = 500000000
 
-pn divrec_div_helper(x: int, y: int, q: int) int {
+fn divrec_div_helper(x: int, y: int, q: int) int {
     if (x < y) {
         return q
     }
     return divrec_div_helper(x - y, y, q + 1)
 }
 
-pn divrec_div(x: int, y: int) int {
+fn divrec_div(x: int, y: int) int {
     return divrec_div_helper(x, y, 0)
 }
 
-pn divrec_mod(x: int, y: int) int {
+fn divrec_mod(x: int, y: int) int {
     if (x < y) {
         return x
     }
     return divrec_mod(x - y, y)
 }
 
-pn benchmark() int {
+fn benchmark() int {
     var result: int = 0
     var iter: int = 0
     while (iter < 1000) {

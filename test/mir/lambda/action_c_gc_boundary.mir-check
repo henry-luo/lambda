@@ -15,10 +15,10 @@
       ]
     },
     {
-      "in_func": "main",
+      "in_func": "_main_#",
       "expect": [
         "lambda_item_resolve_pending",
-        "list_end"
+        "array_push"
       ]
     }
   ]

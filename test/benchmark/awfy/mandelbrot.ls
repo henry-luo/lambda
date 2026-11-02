@@ -2,7 +2,7 @@
 // Expected result: 191 (for size 500)
 // Mandelbrot set fractal computation with bitwise operations
 
-pn mandelbrot() {
+fn mandelbrot() {
     var sz = 500
     var sum = 0
     var byte_acc = 0
@@ -59,7 +59,7 @@ pn mandelbrot() {
     return sum
 }
 
-pn benchmark() {
+fn benchmark() {
     var r = mandelbrot()
     return r
 }

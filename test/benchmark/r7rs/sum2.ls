@@ -2,16 +2,18 @@
 // Sum of integers from 0 to 10000, repeated 100 times
 // Adapted from r7rs-benchmarks/src/sum.scm (scaled down for Lambda JIT)
 
-pn run(n: int) int {
+fn run(n: int) int {
+    var work_n: int = n
+
     var s: int = 0
-    while (n >= 0) {
-        s = s + n
-        n = n - 1
+    while (work_n >= 0) {
+        s = s + work_n
+        work_n = work_n - 1
     }
     return s
 }
 
-pn benchmark() int {
+fn benchmark() int {
     var result: int = 0
     var iter: int = 0
     while (iter < 100) {

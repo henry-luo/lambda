@@ -16,7 +16,7 @@ let DEFAULT_CAPACITY = 16
 let LOAD_FACTOR = 0.75
 let EMPTY = -1
 
-pn compute_hash(key: int) int {
+fn compute_hash(key: int) int {
     // Java-style int hash
     var h = key
     h = bxor(h, shr(h, 16))
@@ -28,7 +28,7 @@ pn compute_hash(key: int) int {
     return h
 }
 
-pn hashmap_new(capacity: int) HashMap {
+fn hashmap_new(capacity: int) HashMap {
     var cap = DEFAULT_CAPACITY
     if (capacity > cap) {
         // round up to power of 2
@@ -45,7 +45,7 @@ pn hashmap_new(capacity: int) HashMap {
 }
 
 // Find a free slot in the flat arrays
-pn find_free_slot(hm: HashMap) int {
+fn find_free_slot(hm: HashMap) int {
     // Simply use size as the next index (compact storage)
     return hm.size
 }
@@ -127,7 +127,7 @@ pn hashmap_rehash(var hm: HashMap) any {
     }
 }
 
-pn hashmap_get(hm: HashMap, key: int) int {
+fn hashmap_get(hm: HashMap, key: int) int {
     var hash: int = compute_hash(key)
     var bucket: int = hash % hm.cap
     var hm_heads = hm.heads

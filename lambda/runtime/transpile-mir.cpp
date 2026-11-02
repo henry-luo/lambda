@@ -613,6 +613,7 @@ struct MirTranspiler {
     // Closure
     AstFuncNode* current_closure;
     MIR_reg_t env_reg;
+    bool lambda_has_shared_homes;
 
     // Object method context: set when transpiling a method body inside an object type
     TypeObject* method_owner;
@@ -1589,6 +1590,7 @@ static Type* mir_native_param_contract(const NativeFuncInfo* info, int index) {
 
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected);
+static AstNode* mir_explicit_return_body(AstFuncNode* fn_node);
 static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int depth);
 static TypeId mir_callsite_result_scalar_type(MirTranspiler* mt, AstFuncNode* fn);
 // With `mt` and a native `keep_lane`, an assignment counts only when its value
@@ -1688,52 +1690,18 @@ static bool mir_inferred_native_argument_proven(MirTranspiler* mt,
 // companion, leaving the epilogue with the latter branch's stale lane pair.
 // Count explicit returns so RV6 tail forwarding is limited to a single-return
 // body (D5.2.1v3, RV4.2).
-static int mir_explicit_return_count(AstNode* node) {
-    int count = 0;
-    while (node) {
-        AstNode* current = ast_unwrap_primary(node);
-        if (!current) {
-            node = node->next;
-            continue;
-        }
-        switch (current->node_type) {
-        case AST_NODE_RETURN_STAM:
-            count++;
-            break;
-        case AST_NODE_FUNC:
-        case AST_NODE_PROC:
-        case AST_NODE_FUNC_EXPR:
-            break;
-        case AST_NODE_IF_EXPR: {
-            AstIfNode* branch = (AstIfNode*)current;
-            count += mir_explicit_return_count(branch->then);
-            count += mir_explicit_return_count(branch->otherwise);
-            break;
-        }
-        case AST_NODE_LOOP:
-            count += mir_explicit_return_count(((AstWhileNode*)current)->body);
-            break;
-        case AST_NODE_FOR_EXPR:
-            count += mir_explicit_return_count(((AstForNode*)current)->then);
-            break;
-        case AST_NODE_MATCH_EXPR: {
-            AstMatchNode* match = (AstMatchNode*)current;
-            for (AstMatchArm* arm = match->first_arm; arm;
-                    arm = (AstMatchArm*)arm->next) {
-                count += mir_explicit_return_count(arm->body);
-            }
-            break;
-        }
-        case AST_NODE_CONTENT:
-        case AST_NODE_LIST:
-            count += mir_explicit_return_count(((AstListNode*)current)->item);
-            break;
-        default:
-            break;
-        }
-        node = node->next;
+static int mir_explicit_return_count(AstNode* node, bool values_only = false) {
+    struct ReturnCount { int count; bool values_only; } scan = {0, values_only};
+    // handlers inside expressions can return from this same activation.
+    for (AstNode* root = node; root; root = root->next) {
+        walk_lambda_ast(root, [](AstNode* current, void* data) -> bool {
+            ReturnCount* scan = (ReturnCount*)data;
+            if (current->node_type == AST_NODE_RETURN_STAM &&
+                    (!scan->values_only || ((AstReturnNode*)current)->value)) scan->count++;
+            return true;
+        }, &scan, false);
     }
-    return count;
+    return scan.count;
 }
 
 static bool mir_region_scalar_expr(AstNode* node) {
@@ -1859,10 +1827,16 @@ static bool mir_region_producer_node(AstNode* node, AstFuncNode* producer,
     }
 }
 
+static bool mir_region_callable_candidate(AstFuncNode* function) {
+    // terminal returns give pure bodies the same private-graph result shape;
+    // functional fallthrough may instead collect several values (S12.1.2v3).
+    return function && function->body && !function->captures &&
+        !(function->analysis && function->analysis->may_await) &&
+        (function->node_type == AST_NODE_PROC || mir_explicit_return_body(function));
+}
+
 static bool mir_region_producer_candidate(AstFuncNode* producer) {
-    if (!producer || !producer->body || producer->captures ||
-            ((AstNode*)producer)->node_type != AST_NODE_PROC ||
-            (producer->analysis && producer->analysis->may_await)) return false;
+    if (!mir_region_callable_candidate(producer)) return false;
     bool saw_map = false;
     bool saw_recursive_call = false;
     bool body_ok = mir_region_producer_node(producer->body, producer, &saw_map,
@@ -2053,9 +2027,7 @@ static bool mir_region_consumer_node(AstNode* node, AstFuncNode* consumer,
 
 static bool mir_region_consumer_candidate(AstFuncNode* consumer,
         AstFuncNode* producer) {
-    if (!consumer || !consumer->body || consumer->captures ||
-            ((AstNode*)consumer)->node_type != AST_NODE_PROC ||
-            (consumer->analysis && consumer->analysis->may_await)) return false;
+    if (!mir_region_callable_candidate(consumer)) return false;
     bool saw_recursive_call = false;
     bool body_ok = mir_region_consumer_node(consumer->body, consumer, producer,
         &saw_recursive_call);
@@ -3499,6 +3471,11 @@ static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char*
 
 static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     if (!var) return;
+    if (var->lambda_shared_home) {
+        emit_call_void_2(mt, "lambda_capture_home_store",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, var->lambda_shared_home),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+    }
     // An async frame snapshots only at a real suspension edge.  Keep the
     // ordinary side root current between edges: continuously mirroring every
     // local into the frame made a synchronous tail pay async set calls.
@@ -3940,6 +3917,29 @@ static MirVarEntry* mir_typed_array_cache_at(MirTranspiler* mt,
 static void lambda_after_may_gc_call(void* owner) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     if (!mt || !mt->em.func) return;
+    if (mt->lambda_has_shared_homes) {
+        for (int scope = 0; scope <= mt->scope_depth; scope++) {
+            if (!mt->var_scopes[scope]) continue;
+            size_t iter = 0;
+            void* item = NULL;
+            while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
+                MirVarEntry* var = &((VarScopeEntry*)item)->var;
+                if (!var->lambda_shared_home) continue;
+                // callbacks may update a sibling's home. Reload without a C
+                // call so a pending wide result keeps its companion intact.
+                MIR_reg_t items = new_reg(mt, "shared_items", MIR_T_P);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, items),
+                    MIR_new_mem_op(mt->ctx, MIR_T_P, MIR_CONTAINER_ITEMS_OFFSET,
+                        var->lambda_shared_home, 0, 1)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, items, 0, 1)));
+                if (var->root_slot >= 0)
+                    store_gc_root_slot(mt, var->root_slot, var->reg);
+            }
+        }
+    }
     if (!mt->typed_array_caches) return;
     if (mt->typed_array_caches_dirty) {
         mir_clear_typed_array_cache_locators(mt);
@@ -4188,6 +4188,15 @@ static void publish_var_binding(MirTranspiler* mt, const char* name,
             var->string_buffer_owned = scan.candidate;
         }
     }
+}
+
+static void mir_initialize_shared_home(MirTranspiler* mt, MirVarEntry* var) {
+    if (!var || !var->binding || !var->binding->lambda_shared_local) return;
+    MIR_reg_t home = emit_call_1(mt, "lambda_capture_home_new", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+    create_pointer_gc_root_slot(mt, home);
+    var->lambda_shared_home = home;
+    mt->lambda_has_shared_homes = true;
 }
 
 static GlobalVarEntry* find_global_var_by_binding(MirTranspiler* mt,
@@ -6670,15 +6679,11 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg,
     return em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
 }
 
-// Direct calls to a named closure do not pass through Function dispatch, so
-// they must materialize the same flat Item environment that a first-class
-// closure carries.  The environment is rooted for the complete call because
-// populating a slot may allocate and compact the GC heap.
+// construct a flat snapshot environment for closure creation or an unbound
+// direct entry. Populating a slot may allocate and compact the GC heap.
 static MIR_reg_t emit_capture_environment(MirTranspiler* mt,
-        AstFuncNode* fn_node, int* count_out) {
-    int cap_count = 0;
-    for (FnCapture* cap = fn_node ? fn_node->captures : NULL;
-            cap; cap = cap->next) cap_count++;
+        FnCapture* captures, int* count_out) {
+    int cap_count = ast_capture_count(captures);
     if (count_out) *count_out = cap_count;
     if (cap_count <= 0) return 0;
 
@@ -6690,11 +6695,16 @@ static MIR_reg_t emit_capture_environment(MirTranspiler* mt,
     env = load_gc_root_slot(mt, env_root, "direct_env");
 
     int cap_index = 0;
-    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) {
+    for (FnCapture* cap = captures; cap; cap = cap->next) {
         MIR_reg_t cap_val = 0;
         MirVarEntry* var = mir_var_for_binding(mt, cap->entry);
         if (var) {
-            cap_val = var->type_id == LMD_TYPE_STRING && var->string_buffer_owned
+            if (cap->lambda_live_local) {
+                cap_val = var->lambda_shared_home;
+            } else if (var->lambda_shared_home) {
+                cap_val = emit_call_1(mt, "lambda_capture_home_read", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, var->lambda_shared_home));
+            } else cap_val = var->type_id == LMD_TYPE_STRING && var->string_buffer_owned
                 ? em_require_rep(&mt->em,
                     mir_string_binding_value(mt, NULL, var, true), VALUE_REP_ITEM).reg
                 : emit_box(mt, var->reg, var->type_id);
@@ -6707,6 +6717,11 @@ static MIR_reg_t emit_capture_environment(MirTranspiler* mt,
         }
         if (!cap_val) {
             cap_val = emit_null_item_reg(mt);
+        }
+        // a closure owns a value snapshot; later parent writes must detach.
+        if (!cap->lambda_live_local) {
+            if (var && mir_root_may_need_cow(var)) var->cow_marked = true;
+            mir_emit_cow_boundary(mt, NULL, cap_val, false);
         }
         int cap_root = create_gc_root_slot(mt, cap_val);
         cap_val = load_gc_root_slot(mt, cap_root, "direct_cap");
@@ -6721,16 +6736,15 @@ static MIR_reg_t emit_capture_environment(MirTranspiler* mt,
     return load_gc_root_slot(mt, env_root, "direct_env_done");
 }
 
-// A direct closure call uses a fresh environment for the invocation.  Copy
-// each captured slot back to its outer binding afterwards so assignment to a
-// captured scalar remains visible, while in-place container mutation naturally
-// remains shared through the captured pointer.
+// legacy pn-parent captured writes retain their existing writeback contract;
+// read-only snapshots must never overwrite a later parent value (S9.1.4v2).
 static void emit_capture_writeback(MirTranspiler* mt, AstFuncNode* fn_node,
         MIR_reg_t env, int cap_count) {
     if (!fn_node || !env || cap_count <= 0) return;
     int env_root = create_pointer_gc_root_slot(mt, env);
     int cap_index = 0;
-    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) {
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, cap_index++) {
+        if (!cap->is_mutable || cap->lambda_live_local) continue;
         MirVarEntry* outer = mir_var_for_binding(mt, cap->entry);
         MIR_reg_t item = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, env),
@@ -6776,7 +6790,6 @@ static void emit_capture_writeback(MirTranspiler* mt, AstFuncNode* fn_node,
             }
         }
         env = load_gc_root_slot(mt, env_root, "direct_env_next");
-        cap_index++;
     }
 }
 
@@ -8691,8 +8704,7 @@ static MIR_reg_t emit_optional_argument_value(MirTranspiler* mt, MIR_reg_t value
 // the public wrapper only reads captures while resolving omitted defaults.
 static void emit_load_closure_captures(MirTranspiler* mt, AstFuncNode* fn_node,
         MIR_reg_t env_ptr_reg, bool track_write_back) {
-    int cap_count = 0;
-    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) cap_count++;
+    int cap_count = ast_function_capture_count(fn_node);
     int cap_index = 0;
     for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, cap_index++) {
         const char* cap_name = cap->name;
@@ -8701,9 +8713,21 @@ static void emit_load_closure_captures(MirTranspiler* mt, AstFuncNode* fn_node,
             MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
             MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
             MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        MIR_reg_t shared_home = 0;
+        if (cap->lambda_live_local) {
+            shared_home = cap_val;
+            create_pointer_gc_root_slot(mt, shared_home);
+            cap_val = emit_call_1(mt, "lambda_capture_home_read", MIR_T_I64,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, shared_home));
+        }
         // Store as local variable (already boxed as Item)
         set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
         publish_var_binding(mt, cap_name, cap->entry);
+        if (shared_home) {
+            mir_var_for_binding(mt, cap->entry)->lambda_shared_home = shared_home;
+            mt->lambda_has_shared_homes = true;
+            continue;
+        }
         if (!track_write_back) continue;
         MirVarEntry* cap_var = mir_var_for_binding(mt, cap->entry);
         if (cap_var) cap_var->env_offset = cap_index * 8;
@@ -9585,7 +9609,9 @@ bool lambda_const_materialize_script(Transpiler* tp) {
 
 static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_reg_t* out_reg) {
     if (!mt || !node || !out_reg) return false;
-    if (mt->in_proc) return false;
+    // callable literals are fresh owners under the shared COW proof; an
+    // immutable pooled header would let callers elide its required detach.
+    if (mt->in_proc || mt->in_user_func || mir_in_inline_context(mt)) return false;
     if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) return false;
     // RC15: the materialization pass already built and pooled this container.
     // Consume that fact rather than constructing a second copy here.
@@ -9609,45 +9635,6 @@ static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_r
 // ============================================================================
 // Forward declarations
 // ============================================================================
-
-static MIR_reg_t emit_closure_capture_env(MirTranspiler* mt,
-        FnCapture* captures, int cap_count, const char* closure_name) {
-    MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-    int cap_idx = 0;
-    for (FnCapture* cap = captures; cap; cap = cap->next) {
-        MIR_reg_t cap_val = 0;
-        MirVarEntry* var = mir_var_for_binding(mt, cap->entry);
-        if (var) {
-            cap_val = emit_box(mt, var->reg, var->type_id);
-        } else {
-            GlobalVarEntry* gvar = find_global_var_by_binding(mt, cap->entry);
-            if (gvar) {
-                cap_val = em_require_rep(&mt->em, load_global_var(mt, gvar),
-                    VALUE_REP_ITEM).reg;
-            } else {
-                log_error("mir: closure capture '%s' not found in scope", cap->name);
-                cap_val = new_reg(mt, "capnull", MIR_T_I64);
-                uint64_t null_val = (uint64_t)LMD_TYPE_NULL << 56;
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, cap_val),
-                    MIR_new_int_op(mt->ctx, (int64_t)null_val)));
-            }
-        }
-        emit_call_void_4(mt, "owned_item_slot_store",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
-        if (closure_name) {
-            log_debug("mir: closure '%s' - captured '%s' at env offset %d",
-                closure_name, cap->name, cap_idx * 8);
-        }
-        cap_idx++;
-    }
-    return env_reg;
-}
 
 // Call lowering owns the descriptor it publishes; no caller reconstructs a
 // representation from this expression's AST contract (D2.4.1, D8.2.6).
@@ -9837,8 +9824,7 @@ static MIR_reg_t emit_function_object(MirTranspiler* mt, AstFuncNode* function,
     MIR_reg_t object = 0;
     if (use_captures && function->captures) {
         int capture_count = ast_function_capture_count(function);
-        MIR_reg_t environment = emit_closure_capture_env(mt, function->captures,
-            capture_count, function->name ? function->name->chars : NULL);
+        MIR_reg_t environment = emit_capture_environment(mt, function->captures, NULL);
         if (function->name) {
             MIR_reg_t name = emit_load_string_literal(mt, function->name->chars);
             MIR_var_t args[4] = {{MIR_T_P, "f", 0}, {MIR_T_I64, "a", 0},
@@ -10877,10 +10863,8 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
             VALUE_REP_ITEM, &TYPE_TYPE, LMD_TYPE_TYPE);
     }
 
-    // Check if the AST name resolution says this is a function reference FIRST.
-    // This must come before variable/global lookup because a local fn declaration
-    // should shadow a global variable with the same name (but fn declarations
-    // don't create set_var entries — they're compiled as MIR functions).
+    // resolve the definition before spelling lookup; captured declarations
+    // have rooted local values, while capture-free definitions use MIR symbols.
     if (ident->entry && ident->entry->node) {
         AstNode* entry_node = ident->entry->node;
         if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC ||
@@ -10905,6 +10889,11 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
     {
     MirVarEntry* var = mir_var_for_ident(mt, ident);
     if (var) {
+        if (var->lambda_shared_home) {
+            MIR_reg_t value = emit_call_1(mt, "lambda_capture_home_read", MIR_T_I64,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, var->lambda_shared_home));
+            return mir_value_from_var_entry(mt, (AstNode*)ident, var, value);
+        }
         if (var->string_buffer_owned && var->type_id == LMD_TYPE_STRING) {
             return mir_string_binding_value(mt, (AstNode*)ident, var, true);
         }
@@ -12462,12 +12451,9 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         TypeFunc* direct_signature = direct_callee && direct_callee->type &&
             direct_callee->type->type_id == LMD_TYPE_FUNC
             ? (TypeFunc*)direct_callee->type : NULL;
-        if (direct_signature && direct_signature->is_proc) {
-            // A native pn return is a raw lane, but the stale proc default was
-            // ANY; consumers then passed that lane to Item helpers as tagged
-            // data. A can-raise proc is different: its success and error
-            // lanes merge into one Item until `^` consumes it, so recover the
-            // native witness only for a non-raising direct entry.
+        if (direct_signature) {
+            // both callable colours publish their proven native carrier;
+            // string-returning fn calls must retain it for concat fusion.
             if (!direct_signature->can_raise) {
                 TypeId native_return = mir_direct_native_return_type(mt, call);
                 if (native_return != LMD_TYPE_ANY) return native_return;
@@ -12476,7 +12462,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             // carrier of a procedure that has no generated native entry. The
             // boxed procedure ABI must remain boxed here; inferring a raw lane
             // from the declaration makes callers reinterpret an Item as data.
-            return LMD_TYPE_ANY;
+            if (direct_signature->is_proc) return LMD_TYPE_ANY;
         }
         // The call AST can lose its proc signature while the resolved local
         // entry still has a native ABI. Keep that ABI visible to the call
@@ -16079,7 +16065,7 @@ static MIR_reg_t emit_constrained_predicate_call(MirTranspiler* mt,
     MIR_reg_t answer = 0;
     if (local) {
         int capture_count = 0;
-        MIR_reg_t env = emit_capture_environment(mt, predicate, &capture_count);
+        MIR_reg_t env = emit_capture_environment(mt, predicate->captures, &capture_count);
         MirCallOptions options = {};
         options.has_hidden_context = true;
         options.has_hidden_env = env != 0;
@@ -24118,7 +24104,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     val = emit_unbox_bool_lane(mt, val);
                 }
 
-                bool cow_owned = mir_expr_produces_cow_owner(mt, asn->init) &&
+                bool cow_owned = (mir_expr_produces_cow_owner(mt, asn->init) ||
+                    (asn->entry && asn->entry->param_alias_written)) &&
                     ast_expr_may_return_container(asn->init, expr_tid, var_tid);
                 bool cow_binding = ast_expr_may_return_container(asn->init, expr_tid, var_tid) &&
                     mir_expr_is_owned_binding_alias(mt, asn->init, asn->entry);
@@ -24249,6 +24236,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     emit_return_if_item_error(mt, val);
                     expr_tid = var_tid = LMD_TYPE_ARRAY;
                 }
+                bool shared_local = asn->entry && asn->entry->lambda_shared_local;
+                if (shared_local) var_tid = LMD_TYPE_ANY;
                 MIR_type_t mtype = type_to_mir(var_tid);
                 ValueRep value_rep = initializer_native_int_lane
                     ? VALUE_REP_INT_LANE
@@ -24277,7 +24266,9 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         MIR_new_reg_op(mt->ctx, copy), MIR_new_reg_op(mt->ctx, src)));
                 } else {
                     MIR_reg_t src = val;
-                    if (value_rep == VALUE_REP_F64) {
+                    if (shared_local) {
+                        src = em_require_rep(&mt->em, value_producer, VALUE_REP_ITEM).reg;
+                    } else if (value_rep == VALUE_REP_F64) {
                         src = is_integer_type_id(var_tid)
                             ? emit_machine_index(mt, val, expr_tid)
                             : emit_box(mt, val, expr_tid);
@@ -24309,6 +24300,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 set_var(mt, name_buf, copy, mtype, var_tid);
                 publish_var_binding(mt, name_buf, asn->entry);
                 MirVarEntry* declared_var = mir_var_for_binding(mt, asn->entry);
+                mir_initialize_shared_home(mt, declared_var);
                 if (declared_var) {
                     declared_var->cow_owned = cow_owned;
                     // Preserve the occurrence wrapper here, not just its
@@ -24510,8 +24502,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
             if (dec->as && dec->name_count > 0) {
                 // Evaluate source expression and box it
                 MIR_reg_t boxed_src = transpile_box_item(mt, dec->as);
+                int source_root = create_gc_root_slot(mt, boxed_src);
+                // later source-path stores must respect projected child copies.
+                mir_note_value_captured(mt, dec->as);
 
                 for (int i = 0; i < dec->name_count; i++) {
+                    boxed_src = load_gc_root_slot(mt, source_root, "decompose_source");
                     String* name = dec->names[i];
                     const char* name_buf = name->chars;
 
@@ -24530,9 +24526,16 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_src),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, i));
                     }
+                    mir_emit_cow_boundary(mt, NULL, extracted, true);
                     set_var(mt, name_buf, extracted, MIR_T_I64, LMD_TYPE_ANY);
-                    publish_var_binding(mt, name_buf,
-                        dec->entries ? dec->entries[i] : NULL);
+                    NameEntry* binding = dec->entries ? dec->entries[i] : NULL;
+                    publish_var_binding(mt, name_buf, binding);
+                    MirVarEntry* var = mir_var_for_binding(mt, binding);
+                    mir_initialize_shared_home(mt, var);
+                    if (var) {
+                        var->cow_owned = true;
+                        var->cow_marked = true;
+                    }
 
                     // Store to BSS if this is a module-level decomposed variable
                     if (!mt->in_user_func && !mt->in_lexical_list_declaration) {
@@ -25175,13 +25178,6 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
 // is_proc_flow_side_effect_node lives in ast.hpp — the T0 walker makes the
 // same value-or-side-effect call for content-block items.
 
-static bool mir_tail_transfers_control(AstNode* node) {
-    node = ast_unwrap_primary(node);
-    return node && (node->node_type == AST_NODE_RETURN_STAM ||
-        node->node_type == AST_NODE_RAISE_STAM ||
-        node->node_type == AST_NODE_RAISE_EXPR);
-}
-
 // A native-return body publishes one lane. A producer the planner expected
 // to deliver that lane can instead yield an Item whose contract the lane does
 // not cover -- in a satellite image a direct call to a function outside the
@@ -25243,7 +25239,7 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
     }
     if (mt->native_return_tid != LMD_TYPE_ANY && mt->native_body_tail_expr &&
             tail_value == mt->native_body_tail_expr &&
-            !mir_tail_transfers_control(tail_value)) {
+            !ast_node_transfers_control(tail_value)) {
         // A tail `if` with a raised arm has a `T | error` source contract, but
         // its reachable result joins in the function's native return lane.
         // Preserve that producer-selected lane through the content wrapper;
@@ -25293,10 +25289,23 @@ static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
             transpile_let_stam(mt, (AstLetNode*)item);
         } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
             transpile_discard_expr(mt, item); // emit method registration
+        } else if (item->node_type == AST_NODE_FUNC ||
+                item->node_type == AST_NODE_FUNC_EXPR ||
+                item->node_type == AST_NODE_PROC) {
+            AstFuncNode* function = (AstFuncNode*)item;
+            if (function->captures && function->analysis &&
+                    function->analysis->decl_entry && function->name) {
+                // S9.1.4v2: named closures snapshot at declaration too; bind
+                // the rooted value so calls cannot rebuild an env from later locals.
+                MIR_reg_t value = transpile_box_item(mt, item);
+                set_var(mt, function->name->chars, value, MIR_T_I64, LMD_TYPE_FUNC);
+                publish_var_binding(mt, function->name->chars,
+                    function->analysis->decl_entry);
+            }
         }
         return true;
     }
-    if (is_side_effect_stam(item->node_type)) {
+    if (ast_block_item_is_statement(item, mt->in_proc)) {
         mir_binder_raw_guard_cse_clear(mt);
         transpile_proc_side_effect(mt, item);
         return true;
@@ -25432,11 +25441,12 @@ struct MirEqualityDispatchPlan {
 
 static bool mir_equality_dispatch_plan(MirTranspiler* mt, AstNode* first,
         AstNode* last_value, MirEqualityDispatchPlan* plan) {
-    if (!mt->in_proc) return false;
     *plan = {};
     for (AstNode* node = first; node && node != last_value && plan->count < 16;
             node = node->next) {
         if (node->node_type != AST_NODE_IF_EXPR) break;
+        // only statement branches may discard their results in a pure block.
+        if (!mt->in_proc && !ast_is_control_flow_statement(node)) break;
         AstIfNode* branch = (AstIfNode*)node;
         AstNode* test = ast_unwrap_primary(branch->cond);
         if (branch->otherwise || !branch->then || !test ||
@@ -25616,18 +25626,8 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     MIR_reg_t task_scope = mt->task_scopes
         ? emit_call_0(mt, "lambda_task_scope_enter", MIR_T_P) : 0;
 
-    // Detect proc context: either we're inside a pn function (mt->in_proc),
-    // or the content block contains proc-only nodes like VAR_STAM.
-    // In proc context, loops are side-effect statements, and only the LAST
-    // value expression contributes to the result.
+    // S2.5.3v3: result collection follows callable colour, not local var use.
     bool is_proc = mt->in_proc;
-    if (!is_proc) {
-        AstNode* scan = list_node->item;
-        while (scan) {
-            if (scan->node_type == AST_NODE_VAR_STAM) { is_proc = true; break; }
-            scan = scan->next;
-        }
-    }
     if (is_proc && mir_checked_int_tail_allowed(mt)) tail_position = false;
 
     // Count: declarations, side-effect statements, and value expressions
@@ -25637,7 +25637,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     while (scan) {
         if (is_declaration_node(scan)) {
             decl_count++;
-        } else if (is_side_effect_stam(scan->node_type)) {
+        } else if (ast_block_item_is_statement(scan, is_proc)) {
             stam_count++;
         } else {
             value_count++;
@@ -25723,25 +25723,15 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     if (value_count == 0) {
         push_scope(mt);
         (void)transpile_content_items(mt, list_node, last_value, is_proc, is_proc);
-        // In proc context, the result of a side-effect-only block is never used.
-        // Skip the expensive list()/list_end() allocation and return a null Item.
-        if (is_proc) {
-            MIR_reg_t result_reg = new_reg(mt, "null_block", MIR_T_I64);
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result_reg),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            MirValue result = mir_value_from_reg(mt, (AstNode*)list_node,
-                result_reg, VALUE_REP_ITEM, &TYPE_NULL, LMD_TYPE_NULL);
-            result = transpile_content_finish(mt, list_node, task_scope, result);
-            pop_scope(mt);
-            return result;
-        }
-        MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
-        MIR_reg_t result_reg = emit_call_1(mt, list_finish, MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, ls));
+        // an empty functional block has the same normalized null as an
+        // empty list; preserve its item marker without allocating per iteration.
+        MIR_reg_t result_reg = new_reg(mt, "null_block", MIR_T_I64);
+        uint64_t empty = item_position && !is_proc ? ITEM_NULL_SPREADABLE : ITEM_NULL;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)empty)));
         MirValue result = mir_value_from_reg(mt, (AstNode*)list_node,
-            result_reg, VALUE_REP_ITEM, &TYPE_LIST, LMD_TYPE_ARRAY);
+            result_reg, VALUE_REP_ITEM, &TYPE_NULL, LMD_TYPE_NULL);
         result = transpile_content_finish(mt, list_node, task_scope, result);
         pop_scope(mt);
         return result;
@@ -25764,7 +25754,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
             item = item->next;
             continue;
         }
-        if (is_side_effect_stam(item->node_type)) {
+        if (ast_block_item_is_statement(item, false)) {
             transpile_proc_side_effect(mt, item); // execute for side effects, don't push to list
             item = item->next;
             continue;
@@ -34982,12 +34972,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         StrBuf* name_buf = nullptr;
         MIR_item_t local_func = nullptr;
 
-        // Guard: if the identifier is a variable/parameter (has a MIR var registered),
-        // it holds a function value at runtime — must use dynamic dispatch, not direct call.
-        // This prevents treating `render_fn(args)` as a direct call to the function
-        // that was propagated to the parameter via AST type inference.
+        // variables/parameters use dynamic dispatch. A captured definition's
+        // immutable binding retains its known target and declaration env.
         MirVarEntry* ident_var = mir_var_for_ident(mt, ident);
-        bool is_fn_variable = (ident_var != nullptr);
+        bool bound_definition = ident_var && entry_node &&
+            (entry_node->node_type == AST_NODE_FUNC ||
+             entry_node->node_type == AST_NODE_FUNC_EXPR ||
+             entry_node->node_type == AST_NODE_PROC) &&
+            ((AstFuncNode*)entry_node)->captures;
+        bool is_fn_variable = ident_var && !bound_definition;
 
         bool satellite_dynamic_target = mt->satellite_target && entry_node &&
             (entry_node->node_type == AST_NODE_FUNC ||
@@ -36310,8 +36303,25 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             int direct_capture_count = 0;
             MIR_reg_t direct_env = 0;
             if (local_func && fn_def && fn_def->captures) {
-                direct_env = emit_capture_environment(mt, fn_def,
-                    &direct_capture_count);
+                MirVarEntry* closure = bound_definition
+                    ? mir_var_for_ident(mt, ident) : NULL;
+                if (closure) {
+                    // preserve the declaration snapshot without losing static
+                    // argument binding or the direct entry's proven ABI.
+                    MIR_reg_t object = closure->root_slot >= 0
+                        ? load_gc_root_slot(mt, closure->root_slot, "named_closure")
+                        : closure->reg;
+                    direct_env = new_reg(mt, "named_env", MIR_T_P);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, direct_env),
+                        MIR_new_mem_op(mt->ctx, MIR_T_P,
+                            offsetof(Function, closure_env), object, 0, 1)));
+                    create_pointer_gc_root_slot(mt, direct_env);
+                    direct_capture_count = ast_function_capture_count(fn_def);
+                } else {
+                    direct_env = emit_capture_environment(mt, fn_def->captures,
+                        &direct_capture_count);
+                }
             }
 
             MIR_reg_t result = 0;
@@ -42766,6 +42776,14 @@ static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
         AstListNode* block = (AstListNode*)body;
         AstNode* last = block->item;
         while (last && last->next) last = last->next;
+        if (fn_node->node_type != AST_NODE_PROC && last &&
+                last->node_type != AST_NODE_RETURN_STAM &&
+                block->item && block->item->next) {
+            // functional fallthrough may collect several values, so its tail
+            // alone cannot select the native result lane (S2.5.3v3).
+            AstNode* single = ast_content_single_value(block->item);
+            return single ? ast_unwrap_primary(single) : body;
+        }
         body = ast_unwrap_primary(last);
     }
     // A3: a braced proc ends in a `return` *statement*, whose own node carries
@@ -43241,7 +43259,7 @@ static bool mir_return_boundary_may_fail(MirTranspiler* mt, AstFuncNode* fn) {
     if (mir_contract_native_scalar_type(signature->return_contract, &lane) &&
             (lane == LMD_TYPE_INT || lane == LMD_TYPE_FLOAT || lane == LMD_TYPE_BOOL)) {
         // the emitter's own native-lane proof, recursive calls counted at the
-        // lane under proof (infer_proc_native_return_lane): a proven lane is
+        // lane under proof (infer_callable_native_return_lane): a proven lane is
         // converted at the return, never re-admitted
         AstFuncNode* saved_fn = mt->native_return_analysis_fn;
         TypeId saved_tid = mt->native_return_analysis_tid;
@@ -43286,7 +43304,7 @@ static bool mir_body_originates_defect(MirTranspiler* mt, AstFuncNode* fn_node) 
     scan.mt = mt;
     // least fixed point: a self-call returns this function's own lane while
     // its origination is being decided, as the emitter's inductive proofs
-    // count it (infer_proc_native_return_lane, T21-2c)
+    // count it (infer_callable_native_return_lane, T21-2c)
     TypeFunc* signature = fn_node ? lambda_type_func_signature(((AstNode*)fn_node)->type) : NULL;
     TypeId own_lane = LMD_TYPE_ANY;
     if (signature && signature->has_explicit_return_contract && signature->return_contract) {
@@ -43563,7 +43581,7 @@ static bool mir_recursive_call_arguments_prove_native(MirTranspiler* mt,
     return arg_count > 0;
 }
 
-static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
+static TypeId infer_callable_native_return_lane(MirTranspiler* mt,
         AstFuncNode* fn_node);
 
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
@@ -43637,6 +43655,16 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
 
         if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+            if (info && expected == LMD_TYPE_INT && call->argument &&
+                    call->argument->next && !call->argument->next->next &&
+                    mir_shr_native_literal_count(mt, (AstSysFuncNode*)callee,
+                        call->argument->next) &&
+                    mir_expr_proves_native_return_lane(mt, call->argument,
+                        LMD_TYPE_INT)) {
+                // the literal-count shr emitter returns an IntLane; retain
+                // that proof when an inferred parameter is copied to a var.
+                return true;
+            }
             if (info && info->fn == SYSFUNC_LEN && expected == LMD_TYPE_INT &&
                     call->argument && !call->argument->next &&
                     mir_expr_carrier_type(mt, call->argument) == LMD_TYPE_STRING) {
@@ -43739,6 +43767,11 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstIdentNode* ident = (AstIdentNode*)node;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
         if (binding && binding->node_type == AST_NODE_PARAM) {
+            MirVarEntry* live = mir_var_for_ident(mt, ident);
+            // inferred parameters already have their guarded native lane at
+            // emission, even outside the separate return-analysis prepass.
+            if (live && live->type_id == expected &&
+                    live->mir_type == type_to_mir(expected)) return true;
             TypeId inferred_parameter_tid = mir_native_analysis_param_type(mt,
                 (AstNamedNode*)binding);
             if (inferred_parameter_tid == expected ||
@@ -44014,119 +44047,56 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
 // Prove an unannotated procedural result from all explicit success exits. The
 // top-level tail-return requirement deliberately rejects implicit fallthrough;
 // recursive calls are admitted only through the candidate lane installed by
-// infer_proc_native_return_lane, so an open call cannot become raw by shape
+// infer_callable_native_return_lane, so an open call cannot become raw by shape
 // coincidence (D3.3.1, D3.3.2).
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         TypeId expected, int* return_count, bool wide_free,
         MirDefectOriginScan* defect_scan) {
-    while (node) {
-        AstNode* current = ast_unwrap_primary(node);
-        if (!current) {
-            node = node->next;
-            continue;
-        }
-        switch (current->node_type) {
-        case AST_NODE_RETURN_STAM: {
-            AstReturnNode* ret = (AstReturnNode*)current;
-            if (wide_free) {
-                if (!ret->value || !mir_expr_proves_wide_free(mt, ret->value)) {
-                    return false;
+    struct ReturnProof {
+        MirTranspiler* mt;
+        TypeId expected;
+        int* count;
+        bool wide_free;
+        MirDefectOriginScan* defect_scan;
+        bool valid;
+    } scan = {mt, expected, return_count, wide_free, defect_scan, true};
+    for (AstNode* root = node; root && scan.valid; root = root->next) {
+        walk_lambda_ast(root, [](AstNode* current, void* data) -> bool {
+            ReturnProof* scan = (ReturnProof*)data;
+            if (!scan->valid) return false;
+            if (current->node_type == AST_NODE_RAISE_STAM ||
+                    current->node_type == AST_NODE_RAISE_EXPR) {
+                scan->valid = false;
+                return false;
+            }
+            if (current->node_type == AST_NODE_RETURN_STAM) {
+                AstNode* value = ((AstReturnNode*)current)->value;
+                if (scan->wide_free) {
+                    scan->valid = value && mir_expr_proves_wide_free(scan->mt, value);
+                } else if (scan->expected != LMD_TYPE_ANY) {
+                    scan->valid = value && (scan->defect_scan
+                        ? mir_solve_value_proves_lane(scan->defect_scan, value,
+                            scan->expected, 0)
+                        : mir_expr_proves_native_return_lane(scan->mt, value,
+                            scan->expected));
                 }
-                (*return_count)++;
-                break;
+                if (value) (*scan->count)++;
             }
-            if (expected == LMD_TYPE_ANY) {
-                if (ret->value) (*return_count)++;
-                break;
-            }
-            bool value_proven = ret->value &&
-                (defect_scan
-                    ? mir_solve_value_proves_lane(defect_scan, ret->value,
-                        expected, 0)
-                    : mir_expr_proves_native_return_lane(mt, ret->value,
-                        expected));
-            if (!value_proven) return false;
-            (*return_count)++;
-            break;
-        }
-        case AST_NODE_RAISE_STAM:
-            return false;
-        case AST_NODE_FUNC:
-        case AST_NODE_PROC:
-        case AST_NODE_FUNC_EXPR:
-            // Nested functions have an independent return carrier.
-            break;
-        case AST_NODE_IF_EXPR: {
-            AstIfNode* branch = (AstIfNode*)current;
-            if (branch->then && !mir_proc_return_values_prove(mt,
-                    branch->then, expected, return_count, wide_free,
-                    defect_scan)) return false;
-            if (branch->otherwise && !mir_proc_return_values_prove(mt,
-                    branch->otherwise, expected, return_count, wide_free,
-                    defect_scan)) return false;
-            break;
-        }
-        case AST_NODE_LOOP: {
-            AstWhileNode* loop = (AstWhileNode*)current;
-            if (loop->body && !mir_proc_return_values_prove(mt,
-                    loop->body, expected, return_count, wide_free,
-                    defect_scan)) return false;
-            break;
-        }
-        case AST_NODE_FOR_EXPR: {
-            AstForNode* loop = (AstForNode*)current;
-            if (loop->then && !mir_proc_return_values_prove(mt,
-                    loop->then, expected, return_count, wide_free,
-                    defect_scan)) return false;
-            break;
-        }
-        case AST_NODE_MATCH_EXPR: {
-            AstMatchNode* match = (AstMatchNode*)current;
-            for (AstMatchArm* arm = match->first_arm; arm;
-                    arm = (AstMatchArm*)arm->next) {
-                if (arm->body && !mir_proc_return_values_prove(mt,
-                        arm->body, expected, return_count, wide_free,
-                        defect_scan)) return false;
-            }
-            break;
-        }
-        case AST_NODE_CONTENT:
-        case AST_NODE_LIST: {
-            AstListNode* list = (AstListNode*)current;
-            if (list->item && !mir_proc_return_values_prove(mt,
-                    list->item, expected, return_count, wide_free,
-                    defect_scan)) return false;
-            break;
-        }
-        default:
-            break;
-        }
-        node = node->next;
+            // the shared walk sees handler arms and skips nested callables.
+            return scan->valid;
+        }, &scan, false);
     }
-    return true;
+    return scan.valid;
 }
 
 static bool mir_proc_has_value_return(MirTranspiler* mt, AstFuncNode* fn_node) {
-    if (!fn_node) return false;
-    AstNode* body = ast_unwrap_primary(fn_node->body);
-    int return_count = 0;
-    mir_proc_return_values_prove(mt, body, LMD_TYPE_ANY, &return_count);
-    return return_count > 0;
+    return fn_node && mir_explicit_return_count(fn_node->body, true) > 0;
 }
 
-static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
-        AstFuncNode* fn_node) {
-    if (!mt || !fn_node || ((AstNode*)fn_node)->node_type != AST_NODE_PROC) {
-        return LMD_TYPE_ANY;
-    }
-    TypeFunc* signature = fn_node->type && fn_node->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)fn_node->type : NULL;
-    if (signature && signature->can_raise) return LMD_TYPE_ANY;
-    // A failing interior array admission exits with an ItemError, even when
-    // every explicit return is scalar. A native-only ABI would lose it.
-    if (function_body_may_check_array_call(mt, fn_node)) return LMD_TYPE_ANY;
-    AstNode* body = ast_unwrap_primary(fn_node->body);
-    AstNode* tail = function_body_result_expr(fn_node);
+// a terminal return discards every earlier functional block contribution;
+// without it, explicit exits alone cannot describe normal fn completion.
+static AstNode* mir_explicit_return_body(AstFuncNode* fn_node) {
+    AstNode* body = fn_node ? ast_unwrap_primary(fn_node->body) : NULL;
     AstNode* terminal = body;
     if (terminal && (terminal->node_type == AST_NODE_LIST ||
             terminal->node_type == AST_NODE_CONTENT)) {
@@ -44134,10 +44104,20 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
         while (terminal && terminal->next) terminal = terminal->next;
         terminal = ast_unwrap_primary(terminal);
     }
-    if (!body || !tail || !terminal ||
-            terminal->node_type != AST_NODE_RETURN_STAM) {
-        return LMD_TYPE_ANY;
-    }
+    return terminal && terminal->node_type == AST_NODE_RETURN_STAM ? body : NULL;
+}
+
+static TypeId infer_callable_native_return_lane(MirTranspiler* mt,
+        AstFuncNode* fn_node) {
+    if (!mt || !fn_node) return LMD_TYPE_ANY;
+    TypeFunc* signature = fn_node->type && fn_node->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)fn_node->type : NULL;
+    if (signature && signature->can_raise) return LMD_TYPE_ANY;
+    // A failing interior array admission exits with an ItemError, even when
+    // every explicit return is scalar. A native-only ABI would lose it.
+    if (function_body_may_check_array_call(mt, fn_node)) return LMD_TYPE_ANY;
+    AstNode* body = mir_explicit_return_body(fn_node);
+    if (!body) return LMD_TYPE_ANY;
 
     const TypeId candidates[] = {LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL,
         LMD_TYPE_STRING};
@@ -44169,8 +44149,8 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
         may_defer = true;
         goto done;
     }
-    if (fn_node && ((AstNode*)fn_node)->node_type == AST_NODE_PROC &&
-            infer_proc_native_return_lane(mt, fn_node) != LMD_TYPE_ANY) {
+    if (fn_node &&
+            infer_callable_native_return_lane(mt, fn_node) != LMD_TYPE_ANY) {
         // The same whole-function proof owns its typed local declarations:
         // recursive success calls are admitted as native before the generic
         // declaration scan sees their stale AST ANY type.
@@ -44342,12 +44322,11 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
-    if (is_proc) {
-        TypeId proc_return = infer_proc_native_return_lane(mt, fn_node);
+    // explicit fn returns need the same whole-body lane proof as pn returns.
+    if (is_proc || mir_explicit_return_count(fn_node->body) > 0) {
+        TypeId proc_return = infer_callable_native_return_lane(mt, fn_node);
         log_debug("mir: infer_return_type - proc return lane=%d", proc_return);
-        if (proc_return != LMD_TYPE_ANY) {
-            return proc_return;
-        }
+        return proc_return;
     }
 
     // 2. For fn (not pn): Check the body expression's type (fn body IS the return value)
@@ -44371,11 +44350,12 @@ static ScalarReturnClass infer_boxed_return_mode(MirTranspiler* mt,
         AstFuncNode* fn_node) {
     AstNode* fn_as_node = (AstNode*)fn_node;
     bool is_proc = fn_as_node->node_type == AST_NODE_PROC;
-    // A procedural body can exit through explicit returns after an await or
+    // A callable body can exit through explicit returns after an await or
     // a checked boundary. Its inferred result type is not a raw ABI promise,
     // but a whole-body wide-free proof can still use the one-result boxed
     // shape without exposing an untagged payload past the watermark.
-    if (is_proc) {
+    if (is_proc || mir_explicit_return_count(fn_node->body) > 0) {
+        if (!is_proc && !mir_explicit_return_body(fn_node)) return SCALAR_RETURN_DYNAMIC;
         if (!mir_proc_has_value_return(mt, fn_node)) {
             // A procedure with no value exit returns a plain ItemNull carrier;
             // reserving a number home for it only taxes every side-effecting
@@ -45769,6 +45749,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     AstCallNode* saved_region_producer_call = mt->region_producer_call;
     MIR_reg_t saved_region_capability_reg = mt->region_capability_reg;
     MIR_reg_t saved_binder_env_reg = mt->binder_env_reg;
+    bool saved_lambda_shared_homes = mt->lambda_has_shared_homes;
+    mt->lambda_has_shared_homes = false;
     uint16_t saved_binder_env_count = mt->binder_env_count;
     int saved_binder_root_slots[LAMBDA_MAX_FUNCTION_ARGS];
     memcpy(saved_binder_root_slots, mt->binder_root_slots,
@@ -46625,7 +46607,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             mir_is_native_int_arith(mt, native_body_expr);
         // A terminal return/raise owns its own ABI publication. Only a value
         // tail may be retained for the content/native-lane bridge below.
-        mt->native_body_tail_expr = mir_tail_transfers_control(native_body_expr)
+        mt->native_body_tail_expr = ast_node_transfers_control(native_body_expr)
             ? NULL : native_body_expr;
         if (native_int_body_lane &&
                 ast_unwrap_primary(fn_node->body) == native_body_expr) {
@@ -46808,6 +46790,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->region_producer_call = saved_region_producer_call;
     mt->region_capability_reg = saved_region_capability_reg;
     mt->binder_env_reg = saved_binder_env_reg;
+    mt->lambda_has_shared_homes = saved_lambda_shared_homes;
     mt->binder_env_count = saved_binder_env_count;
     memcpy(mt->binder_root_slots, saved_binder_root_slots,
         sizeof(mt->binder_root_slots));

@@ -4,20 +4,22 @@
 // Finds which starting number under 1000000 produces the longest sequence
 // Expected: starting at 837799, length = 525
 
-pn collatz_len(n: int) int {
+fn collatz_len(n: int) int {
+    var work_n: int = n
+
     var steps: int = 1
-    while (n != 1) {
-        if (n % 2 == 0) {
-            n = shr(n, 1)
+    while (work_n != 1) {
+        if (work_n % 2 == 0) {
+            work_n = shr(work_n, 1)
         } else {
-            n = 3 * n + 1
+            work_n = 3 * work_n + 1
         }
         steps = steps + 1
     }
     return steps
 }
 
-pn benchmark() int {
+fn benchmark() int {
     let limit: int = 1000000
     var max_len: int = 0
     var max_start: int = 0

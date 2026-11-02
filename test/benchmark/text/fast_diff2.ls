@@ -10,7 +10,7 @@ pn text_codes(text: string) int[] {
     codes
 }
 
-pn score_diff(left: int[], right: int[]) int {
+fn score_diff(left: int[], right: int[]) int {
     let n: int = len(left)
     let m: int = len(right)
     let cols: int = m + 1

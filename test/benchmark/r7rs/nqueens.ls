@@ -6,7 +6,7 @@
 // board[i] = column placed in row i (or -1 if not placed)
 // This is a direct translation of the Scheme version's logic
 
-pn ok(row, dist, placed, placed_len) {
+fn ok(row, dist, placed, placed_len) {
     if (dist > placed_len) {
         return 1
     }

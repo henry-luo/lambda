@@ -1,7 +1,7 @@
 // Text benchmark: bounded character diff over six source-like edit pairs.
 // The LCS table keeps this port's edit decisions deterministic across engines.
 
-pn score_diff(left, right) int {
+fn score_diff(left, right) int {
     let n = len(left)
     let m = len(right)
     let cols = m + 1

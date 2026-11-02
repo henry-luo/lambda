@@ -2529,22 +2529,11 @@ static void capture_constraint_reads(PredicateCaptureScan* scan, AstNode* named)
 }
 
 static void finish_capture_analysis(Transpiler* tp, AstFuncNode* fn_node) {
-    if (!fn_node->analysis) {
+    if (!fn_node->analysis)
         fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
-    }
     fn_node->analysis->captures = fn_node->captures;
-    fn_node->analysis->capture_count = 0;
-
-    for (FnCapture* capture = fn_node->captures; capture; capture = capture->next) {
-        fn_node->analysis->capture_count++;
-        // A mutable capture is an explicit cross-frame write only when the
-        // outer binding itself is a `var`; immutable captures remain pure.
-        if (capture->is_mutable && (!capture->entry || !capture->entry->is_mutable)) {
-            record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
-                "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
-                (int)capture->lambda_name->len, capture->lambda_name->chars);
-        }
-    }
+    // publish the linked capture count before consumers read cached analysis.
+    fn_node->analysis->capture_count = ast_capture_count(fn_node->captures);
 }
 
 // Analyze one closure from the shared owner-grouped reference table. Callers
@@ -2596,6 +2585,432 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
     }
     finish_capture_analysis(tp, fn_node);
     return tp->error_count == 0;
+}
+
+// S9.1.4v2/D6.2.3v3: one indexed value-flow graph decides capture mode for
+// every tier. Function summaries separate returned values from retained ones.
+struct LambdaClosureFlow {
+    AstIndex* index;
+    ArrayList** edges;
+    uint32_t* seen;
+    uint32_t* queue;
+    uint32_t* returned;
+    uint32_t* retained;
+    uint8_t* terminates;
+    uint32_t binding_base;
+    uint32_t result_base;
+    uint32_t rest_base;
+    uint32_t sink;
+    uint32_t epoch;
+    bool failed;
+};
+
+static bool result_type_is_scalar(Type* type);
+
+static uint32_t lambda_flow_node(LambdaClosureFlow* flow, AstNode* node) {
+    return node ? ast_index_find(flow->index, node) : AST_NODE_ID_INVALID;
+}
+
+static uint32_t lambda_flow_binding(LambdaClosureFlow* flow, NameEntry* entry) {
+    AstBindingId id = ast_index_find_binding_entry(flow->index, entry);
+    return id == AST_BINDING_ID_INVALID ? AST_NODE_ID_INVALID
+        : flow->binding_base + id;
+}
+
+static bool lambda_flow_edge(LambdaClosureFlow* flow, uint32_t from, uint32_t to) {
+    if (from > flow->sink || to > flow->sink || flow->failed) return false;
+    ArrayList* edges = flow->edges[from];
+    if (!edges) flow->edges[from] = edges = arraylist_new(2);
+    if (!edges) { flow->failed = true; return false; }
+    void* encoded = (void*)(uintptr_t)(to + 1);
+    for (int i = 0; i < edges->length; i++) {
+        if (edges->data[i] == encoded) return false;
+    }
+    if (!arraylist_append(edges, encoded)) flow->failed = true;
+    return true;
+}
+
+static void lambda_flow_value(LambdaClosureFlow* flow, AstNode* value, uint32_t to) {
+    lambda_flow_edge(flow, lambda_flow_node(flow, value), to);
+}
+
+static void lambda_flow_reach(LambdaClosureFlow* flow, uint32_t source) {
+    if (++flow->epoch == 0) {
+        memset(flow->seen, 0, (flow->sink + 1) * sizeof(uint32_t));
+        flow->epoch = 1;
+    }
+    if (source > flow->sink) return;
+    uint32_t begin = 0, end = 0;
+    flow->queue[end++] = source;
+    flow->seen[source] = flow->epoch;
+    while (begin < end) {
+        ArrayList* edges = flow->edges[flow->queue[begin++]];
+        for (int i = 0; edges && i < edges->length; i++) {
+            uint32_t next = (uint32_t)(uintptr_t)edges->data[i] - 1;
+            if (flow->seen[next] == flow->epoch) continue;
+            flow->seen[next] = flow->epoch;
+            flow->queue[end++] = next;
+        }
+    }
+}
+
+static bool lambda_flow_reached(LambdaClosureFlow* flow, uint32_t target) {
+    return target <= flow->sink && flow->seen[target] == flow->epoch;
+}
+
+static AstFuncNode* lambda_capture_region(AstFuncNode* function) {
+    for (NameScope* scope = function->vars ? function->vars->parent : NULL;
+            scope; scope = scope->parent) {
+        AstFuncNode* owner = scope->lambda_function;
+        if (owner && owner->node_type != AST_NODE_PROC) return owner;
+    }
+    return NULL;
+}
+
+static void lambda_flow_children(LambdaClosureFlow* flow, uint32_t id,
+        uint32_t destination) {
+    for (AstNodeId child = flow->index->first_children[id];
+            child != AST_NODE_ID_INVALID;
+            child = flow->index->next_siblings[child]) {
+        lambda_flow_edge(flow, child, destination);
+    }
+}
+
+static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
+    AstIndex* index = flow->index;
+    AstNode* node = index->nodes[id];
+    AstFunctionId owner = index->owner_functions[id];
+    uint32_t result = owner < index->function_count
+        ? flow->result_base + owner : flow->sink;
+    // children precede their parents in this reverse indexed pass. A block
+    // that always exits cannot publish values collected before its return.
+    bool terminates = ast_node_transfers_control(node) ||
+        node->node_type == AST_NODE_BREAK_STAM ||
+        node->node_type == AST_NODE_CONTINUE_STAM;
+    if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_LIST) {
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            AstNodeId item_id = lambda_flow_node(flow, item);
+            if (item_id != AST_NODE_ID_INVALID && flow->terminates[item_id])
+                terminates = true;
+        }
+    } else if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        AstNodeId left = lambda_flow_node(flow, branch->then);
+        AstNodeId right = lambda_flow_node(flow, branch->otherwise);
+        terminates = left != AST_NODE_ID_INVALID && right != AST_NODE_ID_INVALID &&
+            flow->terminates[left] && flow->terminates[right];
+    }
+    flow->terminates[id] = terminates;
+    switch (node->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC: {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        lambda_flow_edge(flow, id, lambda_flow_binding(flow,
+            fn->analysis ? fn->analysis->decl_entry : NULL));
+        lambda_flow_value(flow, fn->body, result);
+        for (FnCapture* cap = fn->captures; cap; cap = cap->next) {
+            uint32_t source = lambda_flow_binding(flow, cap->entry);
+            lambda_flow_edge(flow, source, id);
+            // immutable fn captures cannot carry a live procedure home.
+            if (node->node_type != AST_NODE_PROC)
+                lambda_flow_edge(flow, source, flow->sink);
+        }
+        break;
+    }
+    case AST_NODE_IDENT:
+        lambda_flow_edge(flow, lambda_flow_binding(flow,
+            ((AstIdentNode*)node)->entry), id);
+        break;
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* decl = (AstDeclaratorNode*)node;
+        lambda_flow_value(flow, decl->init, id);
+        lambda_flow_edge(flow, id, lambda_flow_binding(flow, decl->entry));
+        break;
+    }
+    case AST_NODE_DECOMPOSE: {
+        AstDecomposeNode* dec = (AstDecomposeNode*)node;
+        // projected values can carry closures just as ordinary aliases do.
+        for (int i = 0; dec->entries && i < dec->name_count; i++)
+            lambda_flow_value(flow, dec->as, lambda_flow_binding(flow, dec->entries[i]));
+        break;
+    }
+    case AST_NODE_PARAM: {
+        AstNamedNode* param = (AstNamedNode*)node;
+        TypeParam* type = lambda_type_param(param->type);
+        if (type) lambda_flow_value(flow, type->default_value,
+            lambda_flow_binding(flow, param->entry));
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        lambda_flow_value(flow, ((AstReturnNode*)node)->value, result);
+        break;
+    case AST_NODE_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_INDEX_ASSIGN_STAM: {
+        AstAssignNode* assign = (AstAssignNode*)node;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->object) {
+            AstIdentNode* root = ast_compound_root_ident(assign->object);
+            target = root ? root->entry : NULL;
+        }
+        uint32_t destination = lambda_flow_binding(flow, target);
+        lambda_flow_value(flow, assign->value, destination);
+        AstFuncNode* current = owner < index->function_count
+            ? (AstFuncNode*)index->functions[owner].node : NULL;
+        AstFuncNode* region = current && current->node_type == AST_NODE_PROC
+            ? lambda_capture_region(current) : current;
+        if (!region) region = current;
+        if (!target || target->is_var_param ||
+                !region || !is_local_to_scope(target, region->vars))
+            lambda_flow_value(flow, assign->value, flow->sink);
+        break;
+    }
+    case AST_NODE_LIST: case AST_NODE_CONTENT: {
+        if (terminates) break;
+        bool proc = owner < index->function_count &&
+            index->functions[owner].node->node_type == AST_NODE_PROC;
+        AstNode* last = NULL;
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            if (is_declaration_node(item) || ast_block_item_is_statement(item, proc))
+                continue;
+            if (!proc) lambda_flow_value(flow, item, id);
+            last = item;
+        }
+        if (proc) lambda_flow_value(flow, last, id);
+        break;
+    }
+    case AST_NODE_IF_EXPR:
+        if (!ast_is_control_flow_statement(node)) {
+            lambda_flow_value(flow, ((AstIfNode*)node)->then, id);
+            lambda_flow_value(flow, ((AstIfNode*)node)->otherwise, id);
+        }
+        break;
+    case AST_NODE_BINARY:
+        if (!ast_binary_only_reads_operands(((AstBinaryNode*)node)->op) &&
+                !result_type_is_scalar(node->type))
+            lambda_flow_children(flow, id, id);
+        break;
+    case AST_NODE_UNARY:
+        if (((AstUnaryNode*)node)->op != OPERATOR_NOT &&
+                !result_type_is_scalar(node->type))
+            lambda_flow_children(flow, id, id);
+        break;
+    case AST_NODE_CALL_EXPR:
+        // argument edges are installed from summaries after the base graph.
+        break;
+    case AST_NODE_LOOP:
+    case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM: case AST_NODE_PUB_STAM:
+    case AST_NODE_TYPE_STAM: case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM:
+        break;
+    case AST_NODE_START: case AST_NODE_CRUD_STAM: case AST_NODE_PIPE_FILE_STAM:
+        lambda_flow_children(flow, id, flow->sink);
+        break;
+    default:
+        if (!result_type_is_scalar(node->type)) lambda_flow_children(flow, id, id);
+        break;
+    }
+}
+
+static bool lambda_flow_calls(LambdaClosureFlow* flow) {
+    bool changed = false;
+    AstIndex* index = flow->index;
+    for (AstNodeId id = 0; id < index->count; id++) {
+        AstNode* node = index->nodes[id];
+        if (node->node_type != AST_NODE_CALL_EXPR) continue;
+        AstCallNode* call = (AstCallNode*)node;
+        AstFuncNode* target = ast_direct_call_function(call);
+        AstNodeId target_id = lambda_flow_node(flow, (AstNode*)target);
+        if (target_id != AST_NODE_ID_INVALID) {
+            AstFunctionId function = index->owner_functions[target_id];
+            AstNode* args[LAMBDA_MAX_FUNCTION_ARGS] = {};
+            ast_resolve_call_args(call->argument, target,
+                ast_linked_node_count(call->argument), args);
+            int position = 0;
+            for (AstNamedNode* param = target->param; param &&
+                    position < LAMBDA_MAX_FUNCTION_ARGS;
+                    param = (AstNamedNode*)param->next, position++) {
+                uint32_t source = lambda_flow_node(flow, args[position]);
+                uint32_t bit = UINT32_C(1) << position;
+                if (flow->returned[function] & bit)
+                    changed |= lambda_flow_edge(flow, source, id);
+                if (flow->retained[function] & bit)
+                    changed |= lambda_flow_edge(flow, source, flow->sink);
+            }
+            if (lambda_type_func_signature(target->type)->is_variadic) {
+                // varg() reads an implicit rest input, not the final named param.
+                uint32_t bit = UINT32_C(1) << LAMBDA_MAX_FUNCTION_ARGS;
+                int argument = 0;
+                for (AstNode* arg = call->argument; arg; arg = arg->next, argument++) {
+                    if (argument < position) continue;
+                    uint32_t source = lambda_flow_node(flow, arg);
+                    if (flow->returned[function] & bit)
+                        changed |= lambda_flow_edge(flow, source, id);
+                    if (flow->retained[function] & bit)
+                        changed |= lambda_flow_edge(flow, source, flow->sink);
+                }
+            }
+            if (!result_type_is_scalar(node->type))
+                changed |= lambda_flow_edge(flow, lambda_flow_node(flow,
+                    call->function), id);
+            continue;
+        }
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        if (info && (info->fn == SYSFUNC_VARG0 || info->fn == SYSFUNC_VARG1)) {
+            AstFunctionId owner = index->owner_functions[id];
+            if (owner < index->function_count)
+                changed |= lambda_flow_edge(flow, flow->rest_base + owner, id);
+        }
+        JitImportMetadata metadata = {};
+        bool audited = info && info->c_func_name &&
+            jit_import_get_metadata(info->c_func_name, &metadata) &&
+            metadata.reentry_effect == JIT_REENTRY_NO;
+        if (!info) {
+            // an unknown callable can return or retain itself as well as args.
+            changed |= lambda_flow_edge(flow, lambda_flow_node(flow,
+                call->function), flow->sink);
+            changed |= lambda_flow_edge(flow, lambda_flow_node(flow,
+                call->function), id);
+        }
+        int position = 0;
+        for (AstNode* arg = call->argument; arg; arg = arg->next, position++) {
+            uint32_t source = lambda_flow_node(flow, arg);
+            JitArgEffect effect = jit_import_arg_effect(&metadata, position);
+            if (effect == JIT_ARG_EFFECT_UNKNOWN &&
+                    (metadata.flags & JIT_IMPORT_ARGS_BORROWED_AUDITED))
+                effect = JIT_ARG_BORROWED;
+            // only an explicit borrowed-argument contract proves non-retention.
+            bool retained = !audited || effect != JIT_ARG_BORROWED;
+            if (retained) changed |= lambda_flow_edge(flow, source, flow->sink);
+            if (retained || !result_type_is_scalar(node->type))
+                changed |= lambda_flow_edge(flow, source, id);
+        }
+    }
+    return changed;
+}
+
+static bool lambda_analyze_capture_permissions(Transpiler* tp) {
+    AstIndex* index = &tp->ast_index;
+    bool needs_flow = false;
+    for (AstFunctionId id = 0; id < index->function_count && !needs_flow; id++) {
+        AstFuncNode* fn = (AstFuncNode*)index->functions[id].node;
+        AstFuncNode* region = fn->node_type == AST_NODE_PROC
+            ? lambda_capture_region(fn) : NULL;
+        for (FnCapture* cap = region ? fn->captures : NULL; cap; cap = cap->next)
+            if (cap->entry && cap->entry->is_mutable &&
+                    ast_scope_function(cap->entry->scope) == region) needs_flow = true;
+    }
+    LambdaClosureFlow flow = {};
+    flow.index = index;
+    flow.binding_base = index->count;
+    flow.result_base = flow.binding_base + index->binding_count;
+    flow.rest_base = flow.result_base + index->function_count;
+    flow.sink = flow.rest_base + index->function_count;
+    if (needs_flow) {
+        flow.edges = (ArrayList**)mem_calloc(flow.sink + 1, sizeof(ArrayList*), MEM_CAT_TEMP);
+        flow.seen = (uint32_t*)mem_calloc(flow.sink + 1, sizeof(uint32_t), MEM_CAT_TEMP);
+        flow.queue = (uint32_t*)mem_calloc(flow.sink + 1, sizeof(uint32_t), MEM_CAT_TEMP);
+        flow.returned = (uint32_t*)mem_calloc(index->function_count, sizeof(uint32_t), MEM_CAT_TEMP);
+        flow.retained = (uint32_t*)mem_calloc(index->function_count, sizeof(uint32_t), MEM_CAT_TEMP);
+        flow.terminates = (uint8_t*)mem_calloc(index->count, sizeof(uint8_t), MEM_CAT_TEMP);
+        flow.failed = !flow.edges || !flow.seen || !flow.queue || !flow.terminates ||
+            (index->function_count && (!flow.returned || !flow.retained));
+        if (!flow.failed) {
+            for (uint32_t id = index->count; id-- > 0;) lambda_flow_build_node(&flow, id);
+            bool changed;
+            do {
+                changed = lambda_flow_calls(&flow);
+                for (AstFunctionId id = 0; id < index->function_count; id++) {
+                    AstFuncNode* fn = (AstFuncNode*)index->functions[id].node;
+                    int position = 0;
+                    for (AstNamedNode* param = fn->param; param &&
+                            position < LAMBDA_MAX_FUNCTION_ARGS;
+                            param = (AstNamedNode*)param->next, position++) {
+                        lambda_flow_reach(&flow, lambda_flow_binding(&flow, param->entry));
+                        uint32_t bit = UINT32_C(1) << position;
+                        if (lambda_flow_reached(&flow, flow.result_base + id) &&
+                                !(flow.returned[id] & bit)) {
+                            flow.returned[id] |= bit;
+                            changed = true;
+                        }
+                        if ((lambda_flow_reached(&flow, flow.sink) ||
+                                (param->entry && param->entry->is_var_param)) &&
+                                !(flow.retained[id] & bit)) {
+                            flow.retained[id] |= bit;
+                            changed = true;
+                        }
+                    }
+                    if (lambda_type_func_signature(fn->type)->is_variadic) {
+                        lambda_flow_reach(&flow, flow.rest_base + id);
+                        uint32_t bit = UINT32_C(1) << LAMBDA_MAX_FUNCTION_ARGS;
+                        if (lambda_flow_reached(&flow, flow.result_base + id) &&
+                                !(flow.returned[id] & bit)) {
+                            flow.returned[id] |= bit;
+                            changed = true;
+                        }
+                        if (lambda_flow_reached(&flow, flow.sink) &&
+                                !(flow.retained[id] & bit)) {
+                            flow.retained[id] |= bit;
+                            changed = true;
+                        }
+                    }
+                }
+            } while (changed && !flow.failed);
+        }
+    }
+    if (!flow.failed) for (AstFunctionId id = 0; id < index->function_count; id++) {
+        AstFuncNode* fn = (AstFuncNode*)index->functions[id].node;
+        AstFuncNode* region = lambda_capture_region(fn);
+        bool confined = needs_flow && fn->node_type == AST_NODE_PROC && region;
+        if (confined) {
+            lambda_flow_reach(&flow, lambda_flow_node(&flow, (AstNode*)fn));
+            AstNodeId region_id = lambda_flow_node(&flow, (AstNode*)region);
+            uint32_t region_result = flow.result_base + index->owner_functions[region_id];
+            confined = !lambda_flow_reached(&flow, flow.sink) &&
+                !lambda_flow_reached(&flow, region_result);
+            // a backedge through a live home would construct a reference cycle.
+            for (FnCapture* cap = fn->captures; confined && cap; cap = cap->next)
+                if (cap->entry && cap->entry->is_mutable &&
+                        ast_scope_function(cap->entry->scope) == region &&
+                        lambda_flow_reached(&flow, lambda_flow_binding(&flow, cap->entry)))
+                    confined = false;
+            // an escaping intermediate pn owns snapshots, so its descendants
+            // cannot recover the original fn's live home through that boundary.
+            for (NameScope* scope = fn->vars->parent; confined && scope;
+                    scope = scope->parent) {
+                AstFuncNode* ancestor = scope->lambda_function;
+                if (ancestor == region) break;
+                if (ancestor && ancestor->node_type == AST_NODE_PROC &&
+                        !ancestor->analysis->lambda_confined_proc) confined = false;
+            }
+        }
+        fn->analysis->lambda_confined_proc = confined;
+        for (FnCapture* cap = fn->captures; cap; cap = cap->next) {
+            AstFuncNode* owner = cap->entry ? ast_scope_function(cap->entry->scope) : NULL;
+            cap->lambda_live_local = confined && owner == region &&
+                cap->entry && cap->entry->is_mutable;
+            if (cap->lambda_live_local) {
+                cap->entry->lambda_shared_local = true;
+                fn->analysis->lambda_uses_shared_homes = true;
+                owner->analysis->lambda_uses_shared_homes = true;
+            }
+            if (cap->is_mutable && ((!cap->entry || !cap->entry->is_mutable) ||
+                    (owner && owner->node_type != AST_NODE_PROC && !cap->lambda_live_local)))
+                record_semantic_error_span(tp, fn->source_span, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot mutate captured binding '%.*s'. escaping closures capture immutable snapshots.",
+                    (int)cap->lambda_name->len, cap->lambda_name->chars);
+        }
+    }
+    if (flow.edges) for (uint32_t id = 0; id <= flow.sink; id++)
+        if (flow.edges[id]) arraylist_free(flow.edges[id]);
+    mem_free(flow.edges);
+    mem_free(flow.seen);
+    mem_free(flow.queue);
+    mem_free(flow.returned);
+    mem_free(flow.retained);
+    mem_free(flow.terminates);
+    if (flow.failed) record_semantic_error_span(tp, tp->ast_root->source_span,
+        ERR_OUT_OF_MEMORY, "out of memory analyzing closure confinement");
+    return !flow.failed && tp->error_count == 0;
 }
 
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
@@ -5488,6 +5903,8 @@ static void resolve_decompose(Transpiler* tp, AstDecomposeNode* ast_node) {
         // every consumer uses its planned storage rather than re-looking up a
         // shadowable source spelling at evaluation time.
         ast_node->entries[i] = tp->current_scope->last;
+        // each projection owns a value snapshot, including borrowed inputs.
+        ast_node->entries[i]->cow_owned = true;
     }
 
 }
@@ -8716,7 +9133,7 @@ static bool lambda_ast_analyze_indexed_captures(Transpiler* tp, AstScript* scrip
                 node->node_type != AST_NODE_PROC)) continue;
         if (!analyze_captures(tp, (AstFuncNode*)node, script->global_vars)) return false;
     }
-    return true;
+    return lambda_analyze_capture_permissions(tp);
 }
 
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
@@ -10771,14 +11188,16 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
             if (!entry->binder->parameter_name) entry->binder->parameter_name = param->name;
         }
     }
-    if (tp->current_scope && tp->current_scope->is_proc) {
-        NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
-        if (entry) {
-            // the CW29 sweep resolves body writes against this exact entry
-            param->entry = entry;
-            entry->is_mutable = true;
-            entry->is_var_param = is_var;
-        }
+    NameEntry* parameter_entry = lookup_name_in_current_scope(tp, param->name);
+    param->entry = parameter_entry;
+    if (is_var && !tp->current_scope->is_proc) {
+        record_semantic_error_span(tp, param->source_span, ERR_IMMUTABLE_ASSIGNMENT,
+            "a function (fn) cannot have a var parameter");
+    }
+    if (parameter_entry && tp->current_scope->is_proc) {
+        // the CW29 sweep resolves body writes against this exact entry
+        parameter_entry->is_mutable = true;
+        parameter_entry->is_var_param = is_var;
     }
 }
 
@@ -10800,12 +11219,31 @@ static AstNode* build_control_statement_syntax(Transpiler* tp,
         span, sizeof(AstNode), LSF_BREAK, 0);
 }
 
-static void resolve_control_statement(Transpiler* tp, AstNode* node) {
+static void resolve_control_statement(LambdaResolver* resolver, AstNode* node) {
+    Transpiler* tp = resolver->tp;
     const char* subject = node->node_type == AST_NODE_RETURN_STAM ? "`return`"
         : node->node_type == AST_NODE_BREAK_STAM ? "`break`" : "`continue`";
-    if (!tp->current_scope || !tp->current_scope->is_proc) {
+    if (!ast_scope_allows_local_control(tp->current_scope)) {
         record_semantic_error_span(tp, node->source_span, ERR_PROC_IN_FN,
-            "%s is only allowed inside a procedure (pn)", subject);
+            "%s is only allowed inside a callable (fn or pn)", subject);
+    }
+    AstFuncNode* owner = ast_scope_function(tp->current_scope);
+    bool has_loop = false;
+    for (uint32_t i = resolver->loop_scope_depth; i > 0; i--) {
+        NameScope* scope = resolver->loop_scopes[i - 1];
+        if (ast_scope_function(scope) != owner) break;
+        if (scope->lambda_comprehension) {
+            record_semantic_error_span(tp, node->source_span, ERR_INVALID_OPERATION,
+                "%s cannot transfer control through a functional comprehension; use while",
+                subject);
+            break;
+        }
+        has_loop = true;
+        if (node->node_type != AST_NODE_RETURN_STAM) break;
+    }
+    if (owner && node->node_type != AST_NODE_RETURN_STAM && !has_loop) {
+        record_semantic_error_span(tp, node->source_span, ERR_INVALID_OPERATION,
+            "%s requires an enclosing loop in the same callable", subject);
     }
     if (node->node_type == AST_NODE_RETURN_STAM) {
         AstNode* value = ((AstReturnNode*)node)->value;
@@ -10852,10 +11290,34 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     lambda_ast_register_name(tp, assignment);
 }
 
+static bool direct_validate_write_owner(Transpiler* tp, SourceSpan span,
+        NameEntry* entry, String* name) {
+    AstFuncNode* owner = ast_scope_function(tp->current_scope);
+    if (owner && owner->node_type != AST_NODE_PROC &&
+            !is_local_to_scope(entry, owner->vars)) {
+        record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+            "cannot mutate captured binding '%.*s' from a function (fn)",
+            (int)name->len, name->chars);
+        return false;
+    }
+    for (NameScope* scope = tp->current_scope; scope; scope = scope->parent) {
+        if (scope->lambda_comprehension && !is_local_to_scope(entry, scope)) {
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+                "a functional comprehension cannot mutate enclosing binding '%.*s'; use while",
+                (int)name->len, name->chars);
+            return false;
+        }
+        if (scope->lambda_function) break;
+    }
+    return true;
+}
+
 static void direct_validate_mutable_compound(Transpiler* tp,
         SourceSpan span, AstNode* object) {
     AstIdentNode* root = compound_root_ident(object);
-    if (!root || !root->entry || root->entry->is_mutable) return;
+    if (!root || !root->entry) return;
+    if (!direct_validate_write_owner(tp, span, root->entry, root->name)) return;
+    if (root->entry->is_mutable) return;
     record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
         "cannot mutate through immutable binding '%.*s'. declare it with `var` or pass it as `var`.",
         (int)root->name->len, root->name->chars);
@@ -11309,7 +11771,7 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
                 ast_function_result_may_alias_entry(fn, param->entry, true);
         }
     }
-    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    // S9.1.2: fn-local aliases need the same ownership proof as pn aliases.
     ast_visit_core_children(fn->body, param_alias_scan_cb, fn->body);
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
@@ -12902,9 +13364,7 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
     case AST_NODE_BINARY: {
         // a comparison or type test only reads its operands
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        switch (binary->op) {
-        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
-        case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_IS:
+        if (ast_binary_only_reads_operands(binary->op)) {
             if (!var_share_is_bare(binary->left, scan->entry)) {
                 var_share_scan_node(binary->left, scan);
             }
@@ -12912,8 +13372,6 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
                 var_share_scan_node(binary->right, scan);
             }
             return;
-        default:
-            break;
         }
         break;
     }
@@ -13490,9 +13948,9 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
     SourceSpan span = node->source_span;
     AstNode* target = node->left;
     AstNode* value = node->right;
-    if (!tp->current_scope || !tp->current_scope->is_proc) {
+    if (!ast_scope_allows_local_control(tp->current_scope)) {
         record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
-            "assignment is only allowed inside a procedure (pn)");
+            "assignment is only allowed inside a callable (fn or pn)");
         reject_assignment(node);
         return;
     }
@@ -13539,6 +13997,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
     assignment->op = OPERATOR_ASSIGN;
     assignment->left = target;
     assignment->right = value;
+    if (entry) direct_validate_write_owner(tp, span, entry, ident->name);
     bool is_object_field_in_proc = entry && entry->node &&
         entry->node->node_type == AST_NODE_KEY_EXPR &&
         tp->current_scope && tp->current_scope->is_proc;
@@ -13895,7 +14354,7 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
 
 // S16.6.8/S16.6.9 branch classification, by INTERIOR on the S12.1 boundary.
 //
-// A block is CONTROL when its top level holds a pn-only statement, or holds a
+// A block is CONTROL when its top level holds an imperative statement, or holds a
 // nested `if`/`match` that is itself CONTROL — the recursion matters: the outer
 // then-branch of a nested if/else contains only an IF node, so a top-level-only
 // scan called it a value branch and rejected working procedural code.
@@ -13906,7 +14365,7 @@ AstBranchKind ast_branch_kind(AstNode* node) {
     case AST_NODE_CONTENT: {
         AstBranchKind kind = AST_BRANCH_NEUTRAL;
         for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
-            if (is_procedural_only_stam(item->node_type)) return AST_BRANCH_CONTROL;
+            if (is_imperative_statement(item->node_type)) return AST_BRANCH_CONTROL;
             if (ast_branch_kind(item) == AST_BRANCH_CONTROL) return AST_BRANCH_CONTROL;
             kind = AST_BRANCH_VALUE;
         }
@@ -13930,7 +14389,7 @@ AstBranchKind ast_branch_kind(AstNode* node) {
         return AST_BRANCH_VALUE;
     }
     default:
-        return is_procedural_only_stam(node->node_type)
+        return is_imperative_statement(node->node_type)
             ? AST_BRANCH_CONTROL : AST_BRANCH_VALUE;
     }
 }
@@ -14223,11 +14682,11 @@ static void resolve_while(Transpiler* tp, AstLoopControlNode* node,
     AstNode* condition = node->cond;
     AstNode* body = node->body;
     node->vars = loop_scope;
-    if (!tp->current_scope || !tp->current_scope->is_proc) {
+    if (!ast_scope_allows_local_control(tp->current_scope)) {
         // A loop scope inherits procedure capability; it must not manufacture
         // one for a top-level `while` before this source guard runs.
         record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
-            "`while` is only allowed inside a procedure (pn)");
+            "`while` is only allowed inside a callable (fn or pn)");
     }
     // Keep procedural conditions subject to the mask/container lint; this
     // guards truthy-array control flow (S5.4.1).
@@ -16109,6 +16568,7 @@ static void resolver_loop_begin(LambdaResolver* r, AstForNode* loop) {
     if (r->loop_scope_depth >= 64) return resolver_fail(r, "loop scope overflow");
     Transpiler* tp = r->tp;
     NameScope* scope = lambda_ast_enter_scope(tp, resolver_in_proc(tp));
+    scope->lambda_comprehension = loop && !scope->is_proc;
     if (loop) loop->vars = scope;
     r->loop_scopes[r->loop_scope_depth] = scope;
     r->for_nodes[r->loop_scope_depth++] = loop;
@@ -16200,7 +16660,10 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
     fn_type->is_public = (facts & LSF_FN_PUBLIC) != 0 || fn_type->is_public;
     if (facts & LSF_FN_COLOUR_POLY) fn_type->is_colour_poly = true;
     r->function_nodes[r->function_depth] = target;
-    r->function_scopes[r->function_depth++] = lambda_ast_enter_scope(tp, is_proc);
+    NameScope* scope = lambda_ast_enter_scope(tp, is_proc);
+    scope->lambda_function = target;
+    target->vars = scope;
+    r->function_scopes[r->function_depth++] = scope;
     return target;
 }
 
@@ -17227,22 +17690,31 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
     r->root = root;
 }
 
+static void resolve_var_binding(Transpiler* tp, AstDeclaratorNode* named) {
+    NameEntry* entry = named->entry ? named->entry :
+        lookup_name_in_current_scope(tp, named->name);
+    if (!entry) return;
+    entry->is_mutable = true;
+    named->entry = entry;
+    lambda_ast_mark_place_copy(named);  // CW24
+    lambda_ast_note_view_binding(named);  // CW31 face 4
+}
+
 static void resolve_var_stam(Transpiler* tp, AstLetNode* var) {
-    if (!resolver_in_proc(tp)) {
+    if (!ast_scope_allows_local_control(tp->current_scope)) {
         record_semantic_error_span(tp, var->source_span, ERR_PROC_IN_FN,
-            "`var` is only allowed inside a procedure (pn)");
+            "`var` is only allowed inside a callable (fn or pn)");
     }
     var->type = set_type_any(tp, ANY_STATEMENT);
     for (AstNode* declaration = var->declare; declaration;
             declaration = declaration->next) {
-        if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-        AstDeclaratorNode* named = (AstDeclaratorNode*)declaration;
-        NameEntry* entry = lookup_name_in_current_scope(tp, named->name);
-        if (entry) {
-            entry->is_mutable = true;
-            named->entry = entry;
-            lambda_ast_mark_place_copy(named);  // CW24
-            lambda_ast_note_view_binding(named);  // CW31 face 4
+        if (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            resolve_var_binding(tp, (AstDeclaratorNode*)declaration);
+        } else if (declaration->node_type == AST_NODE_DECOMPOSE) {
+            AstDecomposeNode* dec = (AstDecomposeNode*)declaration;
+            // decomposition retains canonical declarators through its entries.
+            for (int i = 0; dec->entries && i < dec->name_count; i++)
+                resolve_var_binding(tp, (AstDeclaratorNode*)dec->entries[i]->node);
         }
     }
 }
@@ -17293,11 +17765,7 @@ static void resolve_function(LambdaResolver* r, AstFuncNode* fn,
     uint16_t facts = fn->syntax_aux;
     void** tail = syntax_tail((AstNode*)fn, sizeof(AstFuncNode));
     AstNode* body = (AstNode*)tail[LSF_FUNCTION_BODY];
-    // S16.6.8: an `=>` body is an expression position. The braced form is the
-    // statement spelling, so it is exempt.
-    if (!(facts & LSF_FN_BODY_BLOCK)) {
-        reject_procedural_block_operand(tp, body, "an arrow `=>` body");
-    }
+    // S16.6.8v3: a callable's block body owns local control in either colour.
     uint32_t slot = r->function_depth - 1;
     direct_complete_function(tp, syntax_tail_span(&tail[LSF_FUNCTION_SPAN]),
         target, r->function_scopes[slot], (AstNode*)tail[LSF_FUNCTION_PARAMS],
@@ -17862,11 +18330,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_RETURN:
         resolve_walk(r, ((AstReturnNode*)node)->value);
         resolve_diagnostics(r, node);
-        resolve_control_statement(tp, node);
+        resolve_control_statement(r, node);
         break;
     case LSF_BREAK:
         resolve_diagnostics(r, node);
-        resolve_control_statement(tp, node);
+        resolve_control_statement(r, node);
         break;
     case LSF_CRUD:
         // a `put`/`del` target is a write place, never an implicit read

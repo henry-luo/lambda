@@ -15,7 +15,7 @@ type JsonObject = {jt: int, names: array, vals: array, ht: HashIndex}
 type JsonValue = JsonAtom | JsonScalar | JsonArray | JsonObject
 
 // `push` grows the array in place with amortized O(1) cost; indexing is direct O(1).
-pn vec_new() array {
+fn vec_new() array {
     return []
 }
 
@@ -23,23 +23,23 @@ pn vec_add(var v: array, item: any) any {
     push(v, item)
 }
 
-pn vec_at(v: array, idx: int) any {
+fn vec_at(v: array, idx: int) any {
     return v[idx]
 }
 
-pn vec_size(v: array) int {
+fn vec_size(v: array) int {
     return len(v)
 }
 
 // --- Hash Index Table ---
 
-pn string_hash(s: string) int {
+fn string_hash(s: string) int {
     var n: int = len(s)
     var h: int = n * 1402589
     return h
 }
 
-pn hit_new() HashIndex {
+fn hit_new() HashIndex {
     var ht: HashIndex = {tbl: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
     return ht
@@ -60,7 +60,7 @@ pn hit_add(var ht: HashIndex, name: string, index: int) any {
     }
 }
 
-pn hit_get(ht: HashIndex, name: string) int {
+fn hit_get(ht: HashIndex, name: string) int {
     var n: int = len(name)
     var conv = { v: 0 }
     conv.v = n
@@ -79,38 +79,38 @@ pn hit_get(ht: HashIndex, name: string) int {
 // jt=5: array  {jt:5, vals: vec}
 // jt=6: object {jt:6, names: vec, vals: vec, ht: hit}
 
-pn jv_null() JsonAtom {
+fn jv_null() JsonAtom {
     var v: JsonAtom = {jt: 0}
     return v
 }
 
-pn jv_true() JsonAtom {
+fn jv_true() JsonAtom {
     var v: JsonAtom = {jt: 1}
     return v
 }
 
-pn jv_false() JsonAtom {
+fn jv_false() JsonAtom {
     var v: JsonAtom = {jt: 2}
     return v
 }
 
-pn jv_number(s: string) JsonScalar {
+fn jv_number(s: string) JsonScalar {
     var v: JsonScalar = {jt: 3, sv: s}
     return v
 }
 
-pn jv_string(s: string) JsonScalar {
+fn jv_string(s: string) JsonScalar {
     var v: JsonScalar = {jt: 4, sv: s}
     return v
 }
 
-pn jv_array() JsonArray {
+fn jv_array() JsonArray {
     var vals = vec_new()
     var v: JsonArray = {jt: 5, vals: vals}
     return v
 }
 
-pn jv_object() JsonObject {
+fn jv_object() JsonObject {
     var names = vec_new()
     var vals = vec_new()
     var ht = hit_new()
@@ -124,7 +124,7 @@ pn jv_arr_add(var arr: JsonArray, item: JsonValue) any {
     arr.vals = vals
 }
 
-pn jv_arr_size(arr: JsonArray) int {
+fn jv_arr_size(arr: JsonArray) int {
     var vals = (arr.vals)
     var r = vec_size(vals)
     return r
@@ -137,7 +137,7 @@ pn jv_obj_add(var obj: JsonObject, name: string, value: JsonValue) any {
     vec_add(obj.vals, value)
 }
 
-pn jv_obj_get(obj: JsonObject, name: string) any {
+fn jv_obj_get(obj: JsonObject, name: string) any {
     var ht = (obj.ht)
     var idx = hit_get(ht, name)
     if (idx == -1) {
@@ -153,7 +153,7 @@ pn jv_obj_get(obj: JsonObject, name: string) any {
     return null
 }
 
-pn jv_is_object(v: JsonValue) int {
+fn jv_is_object(v: JsonValue) int {
     var jt: int = (v.jt)
     if (jt == 6) {
         return 1
@@ -161,7 +161,7 @@ pn jv_is_object(v: JsonValue) int {
     return 0
 }
 
-pn jv_is_array(v: JsonValue) int {
+fn jv_is_array(v: JsonValue) int {
     var jt: int = (v.jt)
     if (jt == 5) {
         return 1
@@ -175,7 +175,7 @@ pn jv_is_array(v: JsonValue) int {
 
 type Parser = {inp: string, idx: int, inplen: int, ln: int, col: int, cs: int, cb: string, cbf: int, cur: string}
 
-pn p_new(input: string) Parser {
+fn p_new(input: string) Parser {
     var il: int = len(input)
     var p: Parser = { inp: input, idx: 0, inplen: il, ln: 1, col: 0, cs: 0, cb: "_", cbf: 0, cur: "~" }
     p.idx = -1
@@ -257,7 +257,7 @@ pn p_end_capture(var p: Parser) string {
     return captured
 }
 
-pn p_is_ws(p: Parser) int {
+fn p_is_ws(p: Parser) int {
     var cur: string = (p.cur)
     if (cur == " ") {
         return 1
@@ -282,7 +282,7 @@ pn p_skip_ws(var p: Parser) any {
     }
 }
 
-pn p_is_digit(p: Parser) int {
+fn p_is_digit(p: Parser) int {
     var cur: string = (p.cur)
     if (cur == "0") { return 1 }
     if (cur == "1") { return 1 }
@@ -306,7 +306,7 @@ pn p_read_digit(var p: Parser) int {
     return 1
 }
 
-pn p_is_end(p: Parser) int {
+fn p_is_end(p: Parser) int {
     var cur: string = (p.cur)
     if (cur == "~") {
         return 1

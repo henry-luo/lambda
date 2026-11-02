@@ -32,7 +32,7 @@ higher-order functions whose purity depends on their arguments:
 
 | Kind | Keyword | Characteristics |
 |------|---------|-----------------|
-| **Functional** | `fn` | Pure, immutable, expression-based |
+| **Functional** | `fn` | Pure calls; expressions or local imperative computation |
 | **Procedural** | `pn` | Mutable state, side effects, imperative |
 | **Colour-polymorphic** | `function` | Pure iff its `function`-typed arguments are |
 
@@ -128,6 +128,32 @@ fn multiply(x: int, y: int) => x * y
 
 fn square(n: int) => n ** 2
 ```
+
+### Local State and Control Flow
+
+An `fn` block may declare `var`, assign to its own locals and use `while`,
+`break`, `continue` and `return` (S12.1.2v3). Parameters and captured bindings
+remain immutable; `var work = input` creates an observable value copy.
+Calling a `pn`, including one nested in the function, is still prohibited.
+
+```lambda
+fn sum_to(n: int) int {
+    var i = 0, total = 0
+    while (i < n) {
+        i = i + 1
+        total = total + i
+    }
+    return total
+}
+sum_to(5)   // 15
+```
+
+Normal `fn` fallthrough keeps its result-collection convention; local
+declarations, assignments and statement loops contribute no result. An
+explicit `return` completes the current callable with its operand, replacing
+earlier collected results. Functional `for` comprehensions keep their
+existing meaning; outer-local mutation and early exits there are outside
+the current milestone (SO51).
 
 ### Anonymous Functions
 
@@ -525,9 +551,9 @@ let counter = make_counter(5)
 counter(3)   // 13 (5*2 + 3)
 ```
 
-### Closure Captures Are Immutable Snapshots
+### Closure Capture Permissions
 
-Closures capture values by snapshot. A nested `fn` or `pn` may read a captured binding, but it cannot assign to the captured binding or mutate through it with an interior write such as `xs[0] = value`. Mutable state that must be updated by a helper should be passed explicitly as a `var` parameter, or returned as a new value.
+Pure closures and potentially escaping closures capture immutable snapshots. They cannot assign to a captured binding or mutate through it with an interior write such as `xs[0] = value`. A proven non-escaping nested `pn` can access its parent `fn`'s local `var` bindings (S9.1.4v2). The `fn` still cannot invoke that procedure (S12.1.1v3). Confinement analysis follows aliases, containers, assignments, transitive captures and known call results. Calls without a non-retention proof require snapshots. A returned closure snapshots when created and cannot retain writable parent state.
 
 ```lambda
 pn main() {
@@ -553,11 +579,12 @@ pn main() {
 ```
 
 **Capture and mutability semantics:**
-- Captures are by value: each closure gets a snapshot at creation time.
-- Captured bindings are read-only, including interior writes through arrays, maps, elements, and objects.
+
+- Pure and potentially escaping closures capture values at creation time, including named nested definitions.
+- Snapshot captures are read-only, including interior writes through arrays, maps, elements, and objects. Confined nested procedures have the parent-local permission described above.
 - `var` parameters are explicit inout parameters; callers must pass a mutable `var` binding.
 - A `var` parameter is invariant: the argument type must match the parameter type exactly. For covariant array assignment, declare the local binding with the wider type, such as `var xs: any[] = [1, 2, 3]`.
-- Named closures must be called through a variable (`let f = name; f()`) to pass the environment.
+- Named captured definitions take their snapshots at declaration; direct calls and aliases use that same environment.
 
 ---
 
@@ -647,9 +674,9 @@ let squares = apply_all(square, [1, 2, 3])   // pure call: [1, 4, 9]
   fine anywhere; `apply_all(log_square, xs)` is allowed only inside a `pn`, and
   is a compile error in `fn` context. When the argument's colour is known only
   at run time, the call returns an error value instead of running the `pn`.
-- **The body is checked as an `fn` body.** No `var`, `while` or `return`, and
-  no calls to known procedures: its only effects are the calls it makes
-  through its `function` parameters.
+- **The body is checked as an `fn` body.** Local `var`, assignment, `while`
+  and early return are allowed (S12.1.2v3). Calls to known procedures remain
+  forbidden; its call effects come from its `function` parameters.
 - **Its value is `fn`.** `apply_all is fn` is `true`, so it can be passed
   where an `fn (...)` is expected.
 

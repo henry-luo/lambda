@@ -9,7 +9,7 @@
 
 // Growable array via the built-in `push`/`len` (replaces the chunked-vector + .sz
 // workaround). `push` grows in place with amortized O(1); indexing is direct O(1).
-pn vec_new() {
+fn vec_new() {
     return []
 }
 
@@ -17,23 +17,23 @@ pn vec_add(var v, item) {
     push(v, item)
 }
 
-pn vec_at(v, idx) {
+fn vec_at(v, idx) {
     return v[idx]
 }
 
-pn vec_size(v) {
+fn vec_size(v) {
     return len(v)
 }
 
 // --- Hash Index Table ---
 
-pn string_hash(s) {
+fn string_hash(s) {
     var n = len(s)
     var h = n * 1402589
     return h
 }
 
-pn hit_new() {
+fn hit_new() {
     var ht = { tbl: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
     return ht
 }
@@ -55,7 +55,7 @@ pn hit_add(var ht, name, index) {
     }
 }
 
-pn hit_get(ht, name) {
+fn hit_get(ht, name) {
     var n = len(name)
     var conv = { v: 0 }
     conv.v = n
@@ -74,39 +74,39 @@ pn hit_get(ht, name) {
 // jt=5: array  {jt:5, vals: vec}
 // jt=6: object {jt:6, names: vec, vals: vec, ht: hit}
 
-pn jv_null() {
+fn jv_null() {
     var v = { jt: 0 }
     return v
 }
 
-pn jv_true() {
+fn jv_true() {
     var v = { jt: 1 }
     return v
 }
 
-pn jv_false() {
+fn jv_false() {
     var v = { jt: 2 }
     return v
 }
 
-pn jv_number(s) {
+fn jv_number(s) {
     var v = { jt: 3, sv: s }
     return v
 }
 
-pn jv_string(s) {
+fn jv_string(s) {
     var v = { jt: 4, sv: s }
     return v
 }
 
-pn jv_array() {
+fn jv_array() {
     var vals = vec_new()
     var v = { jt: 5, vals: null }
     v.vals = vals
     return v
 }
 
-pn jv_object() {
+fn jv_object() {
     var names = vec_new()
     var vals = vec_new()
     var ht = hit_new()
@@ -134,7 +134,7 @@ pn jv_obj_add(var obj, name, value) {
     vec_add(obj.vals, value)
 }
 
-pn jv_obj_get(obj, name) {
+fn jv_obj_get(obj, name) {
     var ht = (obj.ht)
     var idx = hit_get(ht, name)
     if (idx == -1) {
@@ -150,7 +150,7 @@ pn jv_obj_get(obj, name) {
     return null
 }
 
-pn jv_is_object(v) {
+fn jv_is_object(v) {
     var jt = (v.jt)
     if (jt == 6) {
         return 1
@@ -158,7 +158,7 @@ pn jv_is_object(v) {
     return 0
 }
 
-pn jv_is_array(v) {
+fn jv_is_array(v) {
     var jt = (v.jt)
     if (jt == 5) {
         return 1
@@ -170,7 +170,7 @@ pn jv_is_array(v) {
 // Parser state map. "~" is EOF sentinel (since "" is null in pn mode).
 // cbf: capture buffer flag (0=empty, 1=has accumulated content in cb)
 
-pn p_new(input) {
+fn p_new(input) {
     var p = { inp: input, idx: 0, ln: 1, col: 0, cs: 0, cb: "_", cbf: 0, cur: "~" }
     p.idx = -1
     p.cs = -1
@@ -253,7 +253,7 @@ pn p_end_capture(var p) {
     return captured
 }
 
-pn p_is_ws(p) {
+fn p_is_ws(p) {
     var cur = (p.cur)
     if (cur == " ") {
         return 1
@@ -278,7 +278,7 @@ pn p_skip_ws(var p) {
     }
 }
 
-pn p_is_digit(p) {
+fn p_is_digit(p) {
     var cur = (p.cur)
     if (cur == "0") { return 1 }
     if (cur == "1") { return 1 }
@@ -302,7 +302,7 @@ pn p_read_digit(var p) {
     return 1
 }
 
-pn p_is_end(p) {
+fn p_is_end(p) {
     var cur = (p.cur)
     if (cur == "~") {
         return 1
