@@ -5539,7 +5539,8 @@ static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, boundary->report == 2));
     }
     if (region && !region->function_body) {
-        // S7.7.2: only the declaring block ends; its error is an ordinary value.
+        // S7.7.6v2: container stores retain their separate containment edge;
+        // initializer and whole-binding admission no longer enter this path.
         if (!region->error) {
             region->error = new_label(mt);
             region->result = new_reg(mt, "block_failure", MIR_T_I64);
@@ -49211,6 +49212,19 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     bool saved_in_user_func = mt->in_user_func;
     AstNode* saved_func_body = mt->func_body;
     bool saved_block_returned = mt->block_returned;
+    Type* saved_return_contract = mt->current_return_type;
+    bool saved_can_raise = mt->current_func_can_raise;
+    bool saved_in_proc = mt->in_proc;
+    TypeId saved_native_return = mt->native_return_tid;
+    bool saved_raw_body = mt->native_body_result_is_raw;
+    AstNode* saved_body_tail = mt->native_body_tail_expr;
+    mt->current_return_type = view->signature
+        ? view->signature->return_contract : &TYPE_ANY_NO_ERROR;
+    mt->current_func_can_raise = lambda_type_accepts_error(mt->current_return_type);
+    mt->in_proc = false;
+    mt->native_return_tid = LMD_TYPE_ANY;
+    mt->native_body_result_is_raw = false;
+    mt->native_body_tail_expr = NULL;
 
     mt->in_user_func = true;
     mt->block_returned = false;
@@ -49309,6 +49323,15 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
     // transpile the body expression
     MIR_reg_t body_result = transpile_box_item(mt, view->body);
+    // S12.1.3v2/S11.4.1v5: template returns use the same admission helpers
+    // as functions; an explicit any contract remains an open result.
+    if (!mt->block_returned && mt->current_return_type &&
+            mt->current_return_type != &TYPE_ANY) {
+        body_result = emit_checked_boundary(mt, body_result, LMD_TYPE_ANY,
+            mir_unwrap_decl_type(mt->current_return_type), "view return");
+        emit_return_if_item_error(mt, body_result);
+        body_result = emit_coerce_boxed_to_declared(mt, body_result, mt->current_return_type);
+    }
 
     // emit return
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
@@ -49330,6 +49353,12 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     restore_view_function_state(mt, saved_func_item, saved_func, saved_consts_reg,
         saved_gc_reg, saved_tl_reg, saved_frame, saved_in_user_func,
         saved_func_body, saved_block_returned);
+    mt->current_return_type = saved_return_contract;
+    mt->current_func_can_raise = saved_can_raise;
+    mt->in_proc = saved_in_proc;
+    mt->native_return_tid = saved_native_return;
+    mt->native_body_result_is_raw = saved_raw_body;
+    mt->native_body_tail_expr = saved_body_tail;
 }
 
 // ============================================================================

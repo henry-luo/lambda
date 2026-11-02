@@ -1654,6 +1654,11 @@ static void plan_view(PlanCtx* outer, AstViewNode* view) {
     pc.plan = &view->interp_plan;
     pc.storage = BINDING_STORAGE_REGISTER;
     plan_assign_scope(&pc, view->vars);
+    if (view->signature && view->signature->return_contract) {
+        pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
+            view->signature->return_contract);
+        plan_destination(pc.script->pool, view->body, view->signature->return_contract);
+    }
     for (AstStateEntry* state = view->state; state; state = state->next_state) {
         plan_walk(state->value, &pc);
         // The model occupies a scratch home while a state default evaluates.

@@ -8763,6 +8763,18 @@ static Item interp_eval_view_activation(Context* host, Script* module,
         }
     }
     if (setup_ok) result.set(eval_expr(frame, body));
+    if (setup_ok && !handler && view->signature) {
+        if (frame->signal == EvalSignal::RETURNED) {
+            result.set(interp_signal_payload(frame));
+            frame->signal = EvalSignal::NORMAL;
+        }
+        if (!interp_frame_pending(frame)) {
+            static const LambdaBoundary return_label = {"view return", NULL, NULL, NULL, 0};
+            result.set(interp_coerce_declared_binding(frame, result.get(),
+                view->signature->return_contract, &return_label,
+                activation_plan->return_boundary));
+        }
+    }
     if (setup_ok && !interp_frame_pending(frame) && handler && view->is_edit) {
         edit_commit(NULL);
     }

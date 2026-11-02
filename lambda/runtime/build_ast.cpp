@@ -6541,6 +6541,7 @@ typedef struct EnforcingCallWalk {
 
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
         bool immediate_acknowledgment, bool return_acknowledgment);
+static void validate_view_return_contract(Transpiler* tp, AstViewNode* view);
 
 // Any child that is not one of its parent's acknowledging positions. The
 // generic traversal reaches every construct -- declarations, loops, views,
@@ -6838,6 +6839,16 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         // Nested functions are validated against their own return contract
         // by validate_function_enforcing_calls.
         return;
+    case AST_NODE_VIEW: {
+        AstViewNode* view = (AstViewNode*)node;
+        validate_view_return_contract(tp, view);
+        validate_enforcing_calls_in_expression(tp, view->pattern, false, false);
+        for (AstStateEntry* state = view->state; state; state = state->next_state)
+            validate_enforcing_calls_in_expression(tp, state->value, false, false);
+        for (AstEventHandler* handler = view->handler; handler; handler = handler->next_handler)
+            validate_enforcing_calls_in_expression(tp, (AstNode*)handler, false, false);
+        return;
+    }
     case AST_NODE_EVENT_HANDLER: {
         AstEventHandler* handler = (AstEventHandler*)node;
         // S12.1.3: an event handler is its own pn activation with an Item
@@ -6881,6 +6892,26 @@ static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn) {
         validate_enforcing_calls_in_expression(tp, param->as, false, false);
     }
     validate_enforcing_calls_in_expression(tp, fn->body, returns_error, returns_error);
+}
+
+static void validate_view_return_contract(Transpiler* tp, AstViewNode* view) {
+    if (!view->signature) return;
+    // S12.1.3v2: share function validation without publishing a synthetic
+    // callable or changing the view's template/state identity.
+    AstFuncNode body = {};
+    body.node_type = AST_NODE_FUNC;
+    body.source_span = view->source_span;
+    body.type = (Type*)view->signature;
+    body.name = view->name ? view->name : name_pool_create_len(tp->name_pool, "<view>", 6);
+    body.param = view->param;
+    body.body = view->body;
+    int errors_before = tp->error_count;
+    if (!lambda_type_accepts_error(view->signature->return_contract))
+        walk_lambda_ast(view->body, validate_raise_channel, tp, false);
+    if (tp->error_count != errors_before) return;
+    validate_function_return_contract(tp, &body, view->signature);
+    if (tp->error_count != errors_before) return;
+    validate_function_enforcing_calls(tp, &body);
 }
 
 // Cross-frame writes are deliberately a source-level invalidation, not a
@@ -15560,7 +15591,7 @@ enum {
 enum { LSF_FOR_PARTS, LSF_FOR_BODY, LSF_FOR_TAIL };
 enum { LSF_FOR_STATEMENT = 1u << 0 };
 
-// LSF_VIEW tail: a written return contract, which a view does not keep.
+// LSF_VIEW tail: the written return contract before normalization.
 enum { LSF_VIEW_RETURN, LSF_VIEW_ERROR, LSF_VIEW_TAIL };
 
 // LSF_TYPE_ALIAS tail: the aliased type and the declaration's full span.
@@ -15700,6 +15731,7 @@ static AstNode* syntax_view_finish(LambdaSyntaxSink* sink,
     void** tail = syntax_tail((AstNode*)view, sizeof(AstViewNode));
     tail[LSF_VIEW_RETURN] = syntax_child(reduction, 2);
     tail[LSF_VIEW_ERROR] = syntax_child(reduction, 3);
+    if (reduction->flags & LAMBDA_REDUCTION_FLAG_RAISED) view->syntax_aux |= LSF_FN_RAISED;
     return (AstNode*)view;
 }
 
@@ -18668,11 +18700,21 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk_chain(r, (AstNode*)view->param);
         resolve_walk(r, (AstNode*)tail[LSF_VIEW_RETURN]);
         resolve_walk(r, (AstNode*)tail[LSF_VIEW_ERROR]);
+        Type* returned = direct_function_contract((AstNode*)tail[LSF_VIEW_RETURN]);
+        Type* error = direct_function_contract((AstNode*)tail[LSF_VIEW_ERROR]);
+        bool raised = (view->syntax_aux & LSF_FN_RAISED) != 0;
+        Type* outcome = returned ? returned : &TYPE_ANY_NO_ERROR;
+        if (raised) outcome = lambda_type_union_normalized(tp->pool, outcome,
+            error ? error : &TYPE_ERROR);
+        view->signature = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+        set_fn_return_contract(tp, view->signature, outcome, returned != NULL);
         for (AstStateEntry* state = view->state; state && !r->failed;
                 state = state->next_state) {
             resolve_walk(r, (AstNode*)state);
         }
         resolve_walk(r, view->body);
+        view->signature->inferred_return = view->body && view->body->type
+            ? view->body->type : &TYPE_NULL;
         for (AstEventHandler* handler = view->handler; handler && !r->failed;
                 handler = handler->next_handler) {
             resolve_walk(r, (AstNode*)handler);

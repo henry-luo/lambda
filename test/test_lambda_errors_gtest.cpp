@@ -2677,6 +2677,15 @@ TEST_F(NegativeScriptTest, AnyJoinsRetainKnownErrorOutcomes) {
         "function 'underlying' body returns type error");
 }
 
+TEST_F(NegativeScriptTest, ViewBodiesOwnTheirReturnContract) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_view_default_return.ls",
+        "function 'implicit' may return error");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_view_plain_return.ls",
+        "function 'plain' may return error");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_view_return_mismatch.ls",
+        "body returns type int, declared return type string");
+}
+
 TEST_F(NegativeScriptTest, WholeArrayErrorsRequireAnAdmittingReceiver) {
     ExpectErrorMessage("test/lambda/negative/semantic/error_declared_array_outcome.ls",
         "cannot initialize 'values' of type int[] with int[] | error");

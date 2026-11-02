@@ -973,6 +973,7 @@ typedef struct AstViewNode : AstNode {
     AstNode* pattern;           // model pattern (type expression)
     AstNamedNode* param;        // optional parameters (linked list)
     AstNode* body;              // functional body
+    TypeFunc* signature;       // S12.1.3v2/S11.4.3: the view's return contract
     struct AstStateEntry* state; // optional state declarations (linked list)
     struct AstEventHandler* handler; // optional event handlers (linked list)
     NameScope* vars;            // scope for params and state
