@@ -33,6 +33,13 @@ type Progress {
         raise error("method raised")
     }
 }
+pn write_checked(var values: int[], index: int) any {
+    values[index] = 7
+}
+pn u32_binding(value: int) {
+    let checked: u32 = value
+    return [checked is error, if (checked is error) null else int(checked)]
+}
 pn main() {
     let source = error("condition")
     let unary = unary_after(source)
@@ -44,9 +51,14 @@ pn main() {
     let stopped = progress.finish(error("method propagated"))
     let stopped_count = progress.count
     let returned = progress.returned()
-    let raised = progress.raised();
+    let raised = progress.raised()
+    var values: int[] = [1, 2]
+    let rejected_store = write_checked(values, 4)
+    let accepted_store = write_checked(values, 1);
     [unary is error, unary.message, condition is error, condition.message,
      nested is error, nested.message, builtin is error,
      unary_after(1), condition_after(0), condition_after(1),
-     completed, stopped is error, stopped_count, returned is error, raised is error, progress.count]
+     completed, stopped is error, stopped_count, returned is error, raised is error, progress.count,
+     rejected_store is error, values, u32_binding(0), u32_binding(4294967295),
+     u32_binding(-1), u32_binding(4294967296)]
 }

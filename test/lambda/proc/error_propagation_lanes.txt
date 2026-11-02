@@ -1,1 +1,1 @@
-[true, "condition", true, "condition", true, "returned", true, 7, 1, 2, 1, true, 2, true, true, 4]
+[true, "condition", true, "condition", true, "returned", true, 7, 1, 2, 1, true, 2, true, true, 4, true, [1, 7], [false, 0], [false, 4294967295], [true, null], [true, null]]

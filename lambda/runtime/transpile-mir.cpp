@@ -6942,10 +6942,9 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         TypeId value_type, Type* expected, const char* site,
         ValueRep value_rep = VALUE_REP_NONE, bool carrier_proven = false) {
     Type* target = mir_unwrap_decl_type(expected);
-    bool retains_failure = mt->binding_boundary && mt->binding_boundary->binding &&
-        mt->binding_boundary->binding->admission_may_fail &&
-        mt->binding_boundary->report != 2;
-    if (!retains_failure && target && target->type_id == LMD_TYPE_NUM_SIZED &&
+    // S7.7.2v2: this fast boundary already returns the admitted Item or
+    // rich error; a receiver that retains failure needs the same check.
+    if (target && target->type_id == LMD_TYPE_NUM_SIZED &&
             type_num_sized_kind(target) == NUM_UINT32 &&
             (value_type == LMD_TYPE_INT || value_type == LMD_TYPE_INT64) &&
             value_rep == VALUE_REP_INT_LANE) {
@@ -23586,7 +23585,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     mt->empty_array_boundary_contract = initializer_contract;
                     mt->empty_array_boundary_site = empty_array_site;
                     mt->empty_array_boundary_admitted = false;
-                    bool native_u32_initializer = !outcome_binding && initializer_contract &&
+                    bool native_u32_initializer = initializer_contract &&
                         initializer_contract->type_id == LMD_TYPE_NUM_SIZED &&
                         type_num_sized_kind(initializer_contract) == NUM_UINT32 &&
                         mir_native_u32_initializer(mt, asn->init);
@@ -32611,7 +32610,11 @@ static bool mir_inline_callee_ok(MirTranspiler* mt, AstFuncNode* fn,
             info->return_type != LMD_TYPE_ANY) return false;
     TypeFunc* fn_type = fn->type && fn->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn->type : NULL;
-    if (!fn_type || fn_type->can_raise || fn_type->is_variadic ||
+    // S7.4.2v3: a broad any contract admits the complete Item join. Narrow
+    // result contracts still need the out-of-line return admission firewall.
+    bool complete_item_return = fn_type && info->return_type == LMD_TYPE_ANY &&
+        mir_unwrap_decl_type(fn_type->return_contract) == &TYPE_ANY;
+    if (!fn_type || (fn_type->can_raise && !complete_item_return) || fn_type->is_variadic ||
             fn_type->binder_count || fn_type->param_count != info->param_count ||
             fn_type->required_param_count != fn_type->param_count ||
             fn_type->param_count > LAMBDA_MAX_FUNCTION_ARGS) {

@@ -1116,3 +1116,28 @@ with no Lambda runtime: levels 0/1 compute the expected result, while level 2
 does not. The isolated source and runner are under
 `temp/error-handling/loop-standalone.{mir,c,exe}`. No vendored code has changed;
 AGENTS.md rule 16 approval is pending before a MIR fix and auditable patch.
+
+### Broad Item inlining and sized admission (2026-11-03)
+
+S7.4.2v3/D2.8.3 inlining now distinguishes a broad `any` return contract,
+whose existing Item join admits both outcomes, from a narrower result contract
+that needs its return firewall. The legacy `can_raise` rejection had disabled
+safe broad-Item leaves after ordinary-error unification. Existing store-inline
+and scalar-home MIR guards now pass, without changed expectations.
+
+The u32 range boundary already returns an admitted Item or rich error. It now
+serves a retaining initializer too (S7.7.2v2); the producer still must explicitly
+prove an IntLane. The focused fixture checks zero, the u32 maximum and both
+adjacent rejected domains, alongside a rejected inlined store whose caller
+continues. The tier/GC matrix passes **144/144** and MIR emission **268/279**.
+The u32 emission fixture still records an additional return-admission check;
+its range-check proof is restored, and that remaining assertion is retained.
+
+Two WIP modules that compiled at the base now disclose their ordinary outcomes
+and propagate at pipeline/iteration boundaries. The full authored inventory
+passes **3,763/3,776**, with its remaining 13 failures reproduced by the base
+compiler. Evidence: `temp/error-handling/m3-item-inline-u32-{focused.log,mir.json}`,
+`m3-item-qualified-source.log`, and `m3-base-remaining-source-review.json`.
+Radiant qualification was interrupted when sandbox-denied macOS GUI services
+made native cases stall; artifacts and the reason are preserved under
+`temp/error-handling/m3-radiant-sandbox-interrupted/` for an unsandboxed rerun.
