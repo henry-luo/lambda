@@ -1470,3 +1470,19 @@ Qualification: **184/184** focused tier/GC executions, **55/55** native
 optimization checks with original counters, **351/351** full MIR GC cases,
 and **277/280** MIR emission checks. Evidence:
 `m3-nullable-record-declaration-{focused.log,native.json,gc.json,mir.json}`.
+
+### Float outcome guard qualification (2026-11-03)
+
+S7.7.2v2/S7.6.3v3/D2.8.3: the migrated float-read fixture stores each local
+validation outcome, then propagates before using its normal float. Its old
+whole-function ban on `it2d` therefore rejected safe normal-arm decoding too.
+The MIR check now captures each exact Item, requires its error test and error
+return sequence before that Item's decode, and retains all four cold admission
+calls. It directly checks the intended safety invariant rather than forbidding
+decoding after acknowledgement. The runtime golden now also covers negative
+indices, both reads out of bounds, and the left/right reads failing separately;
+each must return error rather than a fabricated number.
+
+The expanded matrix passes **192/192** tier/GC executions; the full MIR gate
+passes **278/280**. No production code or root policy changed in this check
+update. Evidence: `m3-float-outcome-guard-{focused.log,mir.json,full-mir.json}`.

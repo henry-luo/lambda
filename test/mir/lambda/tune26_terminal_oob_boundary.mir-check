@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune26 / S4.1 / D5.2 / D5.3: each float[] read retains a cold lambda_type_check for its semantic OOB rejection, and that known-failing edge still does not tag-test the guaranteed error or rebuild typed-array caches. LR12-24/TE-15: the rejection now leaves on the error lane instead of being converted back to a double -- an `it2d` on this arm is the NaN republication the defect channel exists to remove, so it is forbidden outright.",
+  "description": "S7.7.2v2/S7.6.3v3/D2.8.3: each float[] read retains its cold admission. A local keeps the checked outcome; explicit ^ returns its error before decoding the normal float. Pin both guards to the exact Items consumed by it2d, and test negative, left-OOB and right-OOB outcomes at runtime.",
   "checks": [
     {
       "in_func": "_read_sum_#",
@@ -9,10 +9,21 @@
       ],
       "expect_seq": [
         ", 72057594037927936",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
-      ],
-      "forbid": [
-        "call\tit2d_p, it2d"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "\trsh\t{{r:left_tag}}, {{r:left_item}}, 56",
+        {"pattern": "eq\t{{r:left_error}}, {{r:left_tag}}, 27", "next_line": true},
+        {"pattern": "bf\tL", "next_line": true},
+        {"pattern": "dmov\t", "next_line": true},
+        {"pattern": "mov\t{{r}}, {{r:left_item}}", "next_line": true},
+        {"pattern": "jmp\tL", "next_line": true},
+        "call\tit2d_p, it2d, {{r}}, {{r:left_item}}",
+        "\trsh\t{{r:right_tag}}, {{r:right_item}}, 56",
+        {"pattern": "eq\t{{r:right_error}}, {{r:right_tag}}, 27", "next_line": true},
+        {"pattern": "bf\tL", "next_line": true},
+        {"pattern": "dmov\t", "next_line": true},
+        {"pattern": "mov\t{{r}}, {{r:right_item}}", "next_line": true},
+        {"pattern": "jmp\tL", "next_line": true},
+        "call\tit2d_p, it2d, {{r}}, {{r:right_item}}"
       ],
       "count": {
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 4

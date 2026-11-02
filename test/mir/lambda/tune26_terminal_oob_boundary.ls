@@ -9,4 +9,10 @@ pn read_sum(xs: float[], ys: float[], index: int) float^ {
 
 pn main() {
     print(read_sum([1.5, 2.5], [3.5, 4.5], 1))
+    print("\n")
+    print([read_sum([1.5], [3.5], 1) is error,
+        read_sum([1.5], [3.5], -1) is error,
+        read_sum([1.5], [3.5, 4.5], 1) is error,
+        read_sum([1.5, 2.5], [3.5], 1) is error])
+    print("\n")
 }
