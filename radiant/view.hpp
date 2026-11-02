@@ -4390,6 +4390,7 @@ bool css_is_mathml_element(const DomElement* element);
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height);
 DisplayValue blockify_display(DisplayValue display);
+bool css_display_is_ruby_internal(CssEnum display);
 
 namespace lam {
 

@@ -2899,25 +2899,19 @@ static int64_t get_style_pass_cascade_priority(LayoutContext* lycon,
 
 // CSS 2.1 §9.7: Apply blockification for floated or absolutely positioned elements
 DisplayValue blockify_display(DisplayValue display) {
-    if (display.inner == CSS_VALUE_TABLE_ROW ||
-        display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
-        display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
-        display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
-        display.inner == CSS_VALUE_TABLE_COLUMN ||
-        display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
-        display.inner == CSS_VALUE_TABLE_CELL ||
-        display.inner == CSS_VALUE_TABLE_CAPTION) {
-        return DisplayValue{CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-    }
-    if (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_FLOW) {
+    if (is_table_internal_display(display.inner) ||
+        css_display_is_ruby_internal(display.inner)) {
+        // CSS Display §2.7: blockifying an internal box removes its internal role.
         return DisplayValue{CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     }
     if (display.outer == CSS_VALUE_INLINE_BLOCK) {
         display.outer = CSS_VALUE_BLOCK;
         if (display.legacy_box) display.legacy_box = 1;
     }
-    if (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_TABLE) {
-        display.outer = CSS_VALUE_BLOCK;  // inline-table -> table
+    if (display.outer == CSS_VALUE_INLINE) {
+        // CSS Display §2.7: blockification changes the outside role of ruby,
+        // tables and other inline boxes while preserving their inner layout.
+        display.outer = CSS_VALUE_BLOCK;
     }
     return display;
 }
@@ -3086,11 +3080,34 @@ static bool display_contents_child_of_flex_or_grid(DomNode* node) {
     return false;
 }
 
-static bool css_display_is_ruby_internal(CssEnum display) {
-    return display == CSS_VALUE_RUBY_BASE ||
-        display == CSS_VALUE_RUBY_TEXT ||
-        display == CSS_VALUE_RUBY_BASE_CONTAINER ||
-        display == CSS_VALUE_RUBY_TEXT_CONTAINER;
+static bool display_inlinified_by_ruby_ancestor(DomNode* node) {
+    for (DomNode* ancestor = node ? node->parent : nullptr;
+         ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
+        DisplayValue display = resolve_display_value_raw(ancestor, true);
+        if (display.outer == CSS_VALUE_CONTENTS) continue;
+        if (display.inner == CSS_VALUE_RUBY || css_display_is_ruby_internal(display.inner)) {
+            return true;
+        }
+        // CSS Display §2.7: inlinified inline-flow boxes pass inlinification
+        // to their children; atomic and independent contexts stop that chain.
+        if (display.outer != CSS_VALUE_INLINE || display.inner != CSS_VALUE_FLOW) return false;
+    }
+    return false;
+}
+
+static DisplayValue inlinify_display(DisplayValue display) {
+    if (display.outer == CSS_VALUE_NONE || display.outer == CSS_VALUE_CONTENTS ||
+        is_table_internal_display(display.inner) || css_display_is_ruby_internal(display.inner)) {
+        return display;
+    }
+    if (display.outer == CSS_VALUE_BLOCK || display.outer == CSS_VALUE_LIST_ITEM ||
+        display.outer == CSS_VALUE_TABLE) {
+        if (display.inner == CSS_VALUE_FLOW) display.inner = CSS_VALUE_FLOW_ROOT;
+        bool atomic = display.inner == CSS_VALUE_FLOW_ROOT || display.inner == CSS_VALUE_FLEX ||
+            display.inner == CSS_VALUE_GRID || display.inner == RDT_DISPLAY_REPLACED;
+        display.outer = atomic ? CSS_VALUE_INLINE_BLOCK : CSS_VALUE_INLINE;
+    }
+    return display;
 }
 
 static DisplayValue resolve_display_value_raw(void* child,
@@ -3304,8 +3321,8 @@ DisplayValue resolve_display_value(void* child) {
         break;
     }
 
-    // CSS Ruby 1 §2.2: in-flow block-level children of ruby boxes are
-    // inlinified, so a block child of ruby-text computes to inline-block.
+    // CSS Ruby 1 §2.2 and CSS Display §2.7 transform computed display before
+    // box generation, including descendants through non-atomic inline boxes.
     DomElement* element = node->as_element();
     CssEnum float_value = layout_specified_keyword(
         element, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
@@ -3317,15 +3334,7 @@ DisplayValue resolve_display_value(void* child) {
         position_value == CSS_VALUE_FIXED;
     if (out_of_flow) return display;
 
-    DomElement* parent = node->parent->as_element();
-    DisplayValue parent_display = resolve_display_value_raw(parent, true);
-    if (!css_display_is_ruby_internal(parent_display.inner)) return display;
-
-    bool block_level = display.outer == CSS_VALUE_BLOCK ||
-        display.outer == CSS_VALUE_LIST_ITEM ||
-        display.outer == CSS_VALUE_TABLE;
-    if (block_level) display.outer = CSS_VALUE_INLINE_BLOCK;
-    return display;
+    return display_inlinified_by_ruby_ancestor(node) ? inlinify_display(display) : display;
 }
 
 static void resolve_current_font_size(LayoutContext* lycon) {

@@ -3541,8 +3541,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // not be realigned against a later line box.
             return;
         }
-        if (span->tag() == MARKUP_NAME_RT && span->parent && span->parent->is_element() &&
-            span->parent->tag() == MARKUP_NAME_RUBY) {
+        if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element() &&
+            resolve_display_value(span->parent).inner == CSS_VALUE_RUBY) {
             return;
         }
         span_vertical_align(lycon, span);
@@ -3564,8 +3564,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             has_block_fragment_child &&
             (span->has_split_inline_fragment_union() || span_is_multi_line) &&
             layout_inline_span_has_direct_visible_text_child(span);
-        bool is_ruby_container = span->tag() == MARKUP_NAME_RUBY &&
-            span->display.inner == CSS_VALUE_RUBY;
+        bool is_ruby_container = span->display.inner == CSS_VALUE_RUBY;
         if (!has_block_fragment_child || recompute_split_inline_bounds) {
             // CSS 2.1 §9.2.1.1: direct text after a block child is aligned on a
             // later line; refresh the split inline union after that line moves.
@@ -3662,7 +3661,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             bool has_direct_text = layout_inline_span_has_direct_visible_text_child(span);
             bool preserve_inline_atomic_line_origin =
                 layout_inline_span_has_direct_inline_atomic_child(span) &&
-                !has_direct_text && span->tag() != MARKUP_NAME_RT &&
+                !has_direct_text && !layout_ruby_annotation_node(span) &&
                 layout_inline_span_parent_has_different_font_metrics(span);
             // CSSOM View: an atomic-only inline chain exposes its descendant fragment;
             // inherited struts still contribute solely to the containing line box.
@@ -3718,15 +3717,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 }
             }
         }
-        if (span->tag() == MARKUP_NAME_RUBY &&
+        if (span->display.inner == CSS_VALUE_RUBY &&
             span->inl()->ruby_position != CSS_VALUE_UNDER) {
             bool preserve_trimmed_annotation_box =
                 ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_START);
             float base_top_y = span->y;
             bool has_base_box = false;
             for (View* child = span->first_child; child; child = child->next()) {
-                if (child->view_type == RDT_VIEW_INLINE &&
-                    child->tag() == MARKUP_NAME_RT) {
+                if (layout_ruby_annotation_node(static_cast<DomNode*>(child))) {
                     continue;
                 }
                 if (child->view_type == RDT_VIEW_NONE ||
@@ -3737,7 +3735,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 has_base_box = true;
             }
             for (View* child = span->first_child; child; child = child->next()) {
-                if (child->view_type != RDT_VIEW_INLINE || child->tag() != MARKUP_NAME_RT) {
+                if (child->view_type != RDT_VIEW_INLINE ||
+                    !layout_ruby_annotation_node(static_cast<DomNode*>(child))) {
                     continue;
                 }
                 ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);

@@ -5,6 +5,13 @@
 #include "../lib/stringbuf.h"
 #include <string.h>
 
+bool css_display_is_ruby_internal(CssEnum display) {
+    return display == CSS_VALUE_RUBY_BASE ||
+        display == CSS_VALUE_RUBY_TEXT ||
+        display == CSS_VALUE_RUBY_BASE_CONTAINER ||
+        display == CSS_VALUE_RUBY_TEXT_CONTAINER;
+}
+
 static bool css_legacy_box_is_vertical(DomElement* element) {
     Pool* scratch = pool_create();
     if (!scratch) return false;

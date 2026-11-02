@@ -15013,6 +15013,132 @@ TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     EXPECT_FLOAT_EQ(annotation->height, 5.0f);
 }
 
+TEST_F(RadiantTextQuery, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHeight) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_leading.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    const char* ids[] = {
+        "over-inherited", "over-zero", "over-high",
+        "under-inherited", "under-zero", "under-high",
+        "over-direct-inherited", "over-direct-zero", "over-direct-high",
+        "under-direct-inherited", "under-direct-zero", "under-direct-high"
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        float row_y = 0.0f;
+        for (const char* id : ids) {
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(row, nullptr) << id;
+            DomElement* ruby = row->first_child->as_element();
+            ASSERT_NE(ruby, nullptr) << id;
+            View* base = static_cast<View*>(ruby->first_child);
+            DomElement* annotation = ruby->last_child->as_element();
+            ASSERT_NE(base, nullptr) << id;
+            ASSERT_NE(annotation, nullptr) << id;
+            float base_y = 0.0f, annotation_y = 0.0f;
+            view_get_visual_bounds(base, nullptr, &base_y, nullptr, nullptr);
+            view_get_visual_bounds(annotation, nullptr, &annotation_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id << " retained=" << retained;
+            EXPECT_FLOAT_EQ(base->height, 20.0f) << id;
+            EXPECT_FLOAT_EQ(annotation->height, 10.0f) << id;
+            EXPECT_FLOAT_EQ(base_y, row_y + 40.0f) << id;
+            bool under = strncmp(id, "under-", 6) == 0;
+            EXPECT_FLOAT_EQ(annotation_y,
+                under ? base_y + base->height : base_y - annotation->height) << id;
+            row_y += 100.0f;
+        }
+        DomElement* ordinary = dom_find_element_by_id(document->root->as_element(), "ordinary");
+        ASSERT_NE(ordinary, nullptr);
+        EXPECT_FLOAT_EQ(ordinary->height, 2000.0f);
+        const char* atomic_ids[] = {"atomic-over", "atomic-under"};
+        for (const char* id : atomic_ids) {
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(row, nullptr);
+            DomElement* annotation = row->first_child->as_element()->last_child->as_element();
+            ASSERT_NE(annotation, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id;
+            EXPECT_FLOAT_EQ(annotation->height, 10.0f) << id;
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFormattingContexts) {
+    ASSERT_NE(load("test/html/layout_ruby_display_fixup.html"), nullptr);
+    struct Case { const char* id; CssEnum outer; CssEnum inner; bool list_item; } cases[] = {
+        {"direct-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"recursive-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"contents-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"list-child", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"block-list", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, true},
+        {"atomic-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"grid", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_GRID, false},
+        {"grid-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"flex", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLEX, false},
+        {"flex-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"table", CSS_VALUE_INLINE, CSS_VALUE_TABLE, false},
+        {"floated-annotation", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"positioned-base", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"floated-ruby", CSS_VALUE_BLOCK, CSS_VALUE_RUBY, false},
+        {"floated-flex", CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false},
+        {"hidden", CSS_VALUE_NONE, CSS_VALUE_NONE, false},
+        {"contents", CSS_VALUE_CONTENTS, CSS_VALUE_CONTENTS, false},
+        {"annotation-descendant", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(element, nullptr) << entry.id;
+            DisplayValue display = resolve_display_value(element);
+            EXPECT_EQ(display.outer, entry.outer) << entry.id;
+            EXPECT_EQ(display.inner, entry.inner) << entry.id;
+            EXPECT_EQ((bool)display.list_item, entry.list_item) << entry.id;
+        }
+    }
+    DomElement* owner = dom_find_element_by_id(document->root->as_element(), "owner");
+    DomElement* recursive = dom_find_element_by_id(document->root->as_element(), "recursive-block");
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(recursive, nullptr);
+    ASSERT_TRUE(owner->set_attribute("style", "display:flow-root"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(resolve_display_value(recursive).outer, CSS_VALUE_BLOCK);
+    EXPECT_EQ(resolve_display_value(recursive).inner, CSS_VALUE_FLOW);
+    ASSERT_TRUE(owner->set_attribute("style", "display:ruby"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(resolve_display_value(recursive).outer, CSS_VALUE_INLINE_BLOCK);
+    EXPECT_EQ(resolve_display_value(recursive).inner, CSS_VALUE_FLOW_ROOT);
+}
+
+TEST_F(RadiantTextQuery, RubyFormattingFollowsComputedRolesAcrossRetainedDisplayChanges) {
+    ASSERT_NE(load("test/html/layout_ruby_computed_roles.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        expect_box("native", 0.0f, 40.0f, 40.0f, 20.0f);
+        expect_box("native-annotation", 0.0f, 30.0f, 40.0f, 10.0f);
+        expect_box("custom", 0.0f, 140.0f, 40.0f, 20.0f);
+        expect_box("custom-annotation", 0.0f, 130.0f, 40.0f, 10.0f);
+        DomElement* inline_ruby = find("inline-annotation");
+        ASSERT_NE(inline_ruby, nullptr);
+        EXPECT_FLOAT_EQ(inline_ruby->width, 60.0f);
+    }
+    DomElement* annotation = find("custom-annotation");
+    DomElement* ruby = find("custom");
+    ASSERT_NE(annotation, nullptr);
+    ASSERT_NE(ruby, nullptr);
+    ASSERT_TRUE(annotation->set_attribute("style", "display:inline;font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(ruby->width, 50.0f);
+    ASSERT_TRUE(annotation->set_attribute("style", "display:ruby-text;font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(ruby->width, 40.0f);
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

@@ -2068,9 +2068,9 @@ static float ruby_simple_segment_inline_size(LayoutContext* lycon, DomNode* ruby
     for (DomNode* child = ruby && ruby->is_element()
              ? ruby->as_element()->first_child : nullptr;
          child; child = child->next_sibling) {
-        if (child->is_element() && child->tag() == MARKUP_NAME_RP) continue;
+        if (child->is_element() && resolve_display_value(child).outer == CSS_VALUE_NONE) continue;
         float child_size = calculate_max_content_width(lycon, child);
-        if (child->is_element() && child->tag() == MARKUP_NAME_RT) {
+        if (layout_ruby_annotation_node(child)) {
             annotation_size += child_size;
         } else {
             base_size += child_size;
@@ -3287,7 +3287,8 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view,
     if (parent && parent->is_element() &&
         resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
         while (node && node->is_element() &&
-               (node->tag() == MARKUP_NAME_RT || node->tag() == MARKUP_NAME_RP)) {
+               (layout_ruby_annotation_node(node) ||
+                resolve_display_value(node).outer == CSS_VALUE_NONE)) {
             node = node->next_sibling;
         }
     }
