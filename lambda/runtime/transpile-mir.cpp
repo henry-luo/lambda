@@ -24303,13 +24303,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         // representation proof (D2.6.2, D3.3.1).
                         mir_cache_typed_array_layout(mt, declared_var);
                     }
-                    if (checked_declaration_boundary &&
+                    if ((checked_declaration_boundary || map_contract_constructed ||
+                            initializer_success_admitted) &&
                             declared_var->type_id == LMD_TYPE_ARRAY_NUM &&
                             declared_var->typed_array_cache_valid &&
                             !declared_var->elem_type_guarded && !cow_binding) {
-                        // The checked declaration has already admitted the
-                        // exact T[] value. Reuse that dominating proof until a
-                        // whole binding write explicitly discards it.
+                        // D3.3.3v3: destination construction and a checked
+                        // declaration establish the same live T[] certificate.
                         declared_var->typed_array_contract_proven =
                             lambda_array_contract_canonical(declared_var->full_type);
                     }
