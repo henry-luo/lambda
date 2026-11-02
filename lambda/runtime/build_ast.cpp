@@ -1871,9 +1871,12 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     }
     // S7.7.2v2: the same array proof used by native boundary planning also
     // proves admission; otherwise safe typed arrays acquire spurious errors.
-    if (lambda_array_contract_element(target) &&
-            lambda_array_contract_compatible(source, target, false)) {
-        return STATIC_BOUNDARY_PROVEN;
+    if (lambda_array_contract_element(target)) {
+        // S7.5.2v4/S7.8.2: an error in an element contract is distinct from
+        // an error replacing the entire array; the latter cannot be admitted.
+        if (source->type_id == LMD_TYPE_ERROR) return STATIC_BOUNDARY_REJECTED;
+        if (lambda_array_contract_compatible(source, target, false))
+            return STATIC_BOUNDARY_PROVEN;
     }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
