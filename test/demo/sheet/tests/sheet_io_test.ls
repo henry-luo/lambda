@@ -5,12 +5,12 @@ import v: ~~.mod_view
 
 let book=m.sample()
 io.restore(parse(format(book,'json')^,'json')^)^==book
-io.restore({}) ^ {true} ~ {false}
-io.restore({*:book,version:2}) ^ {true} ~ {false}
-io.restore({*:book,sheets:[]}) ^ {true} ~ {false}
-io.restore({*:book,sheets:[{*:m.empty_sheet(),rows:0}]}) ^ {true} ~ {false}
-io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:-1,col:0,raw:"a",style:{}}]}]}) ^ {true} ~ {false}
-io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:0,col:0,raw:"a",style:{}},{row:0,col:0,raw:"b",style:{}}]}]}) ^ {true} ~ {false}
+match (io.restore({}) ^ { ^ }) { case error: true default: false }
+match (io.restore({*:book,version:2}) ^ { ^ }) { case error: true default: false }
+match (io.restore({*:book,sheets:[]}) ^ { ^ }) { case error: true default: false }
+match (io.restore({*:book,sheets:[{*:m.empty_sheet(),rows:0}]}) ^ { ^ }) { case error: true default: false }
+match (io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:-1,col:0,raw:"a",style:{}}]}]}) ^ { ^ }) { case error: true default: false }
+match (io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:0,col:0,raw:"a",style:{}},{row:0,col:0,raw:"b",style:{}}]}]}) ^ { ^ }) { case error: true default: false }
 let st=m.paste(m.select(m.initial(m.blank()),0,0),"hello, world\tHe said \"yes\"\n=2+3\tline")
 io.csv(m.current(st))=="\"hello, world\",\"He said \"\"yes\"\"\"\r\n\"5\",\"line\"\r\n"
 v.formatted(131966.666666,{format:"currency"})=="$131966.67"
@@ -26,4 +26,4 @@ f.cell(m.current(m.sort_rows(sorted,true)),0,0).raw=="2"
 
 let precise=m.set_value(m.select(m.initial(m.blank()),0,0),"1000000.125")
 io.csv(m.current(precise))=="\"1000000.125\"\r\n"
-io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:0,col:0,raw:"a",style:{size:"bad"}}]}]}) ^ {true} ~ {false}
+match (io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:0,col:0,raw:"a",style:{size:"bad"}}]}]}) ^ { ^ }) { case error: true default: false }

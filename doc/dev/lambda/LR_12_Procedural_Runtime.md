@@ -109,7 +109,13 @@ The parking builtins (`pn_wait1`/`pn_wait2`, `pn_receive`, `pn_select`, `pn_slee
 
 **Scopes and both tiers.** `start` records the child in the current lexical task scope through `lambda_task_start_function_scoped`, the same entry in both tiers. In a body with `owns_task_scopes`, MIR brackets each content block with `lambda_task_scope_enter`/`lambda_task_scope_leave`. Its exit-edge helper (`transpile_task_scope_unwind`) joins on normal exits and cancels, then joins, on error exits, covering `return`, `break`, `continue`, and propagated-error edges. T0's `eval_scoped_content` leaves the scope once after the block, which covers every exit because T0 leaves blocks structurally. In both tiers, local-fault landings unwind task scopes (`lambda_task_scope_unwind`). T0 evaluates `start` itself (`eval_start`) and calls the same runtime builtins as MIR. Strict `LAMBDA_EXEC_BACKEND=interp` therefore no longer rejects task-backed bodies, and promotion reads hit counters, never colour (D8.1.1v16). A fixed-arity `pn` may admit TG8 raw variants whether or not it can suspend (D8.3.4v4). Returning a handle marks it escaped; sending or copying the handle does not transfer its scope ownership. The analyzer rejects a started procedure that captures a mutable outer `var`, because a resumed child must never borrow shared mutable state.
 
-A statement handler over a possibly-suspending `pn` call is an ordinary handler: the call parks and resumes in place, and its error reaches the handler as a non-suspending call's does (S7.6.7v4). A value-producing handler over a possibly-suspending operand is still rejected at compile time (`validate_handler_await_node`).
+A handler over a possibly-suspending `pn` call parks and resumes in place;
+its selected outcome remains a value even in a receiving or final-result
+position (S7.6.1v9, S7.6.7v5). `is_statement` retains the procedure fault
+regime independently of result production. `validate_handler_await_node`
+still rejects a potentially suspending operand without that procedure
+classification. M1 qualification is recorded in
+[the error-handling plan](../../../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
 `concurrency_js.cpp` is the JS membrane. A `pn` that `wait`s on a JavaScript Promise registers two reactions and parks through `lambda_task_suspend` (`lambda_wait_js_promise`). The reaction resumes it with the fulfilment, or with the rejection converted to a Lambda error. A Lambda handle can be observed as a Promise through `toPromise`, and module namespaces wrap every exported `pn` as a Promise-returning JavaScript function that starts it as a fresh task. Both sides share the same scheduler and libuv loop; no exception representation crosses the boundary.
 

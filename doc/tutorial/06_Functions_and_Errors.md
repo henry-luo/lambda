@@ -276,7 +276,7 @@ The message lists the ways to engage the error: propagate it with `^` or handle 
 
 ## Branching and Wrapping
 
-The two-arm form `e ^ { … } ~ { … }` handles both outcomes: the first block runs on an error, with `^` bound to it, and the second on success, with `~` bound to the value. Inside a handler, `error("…", ^)` builds a new error that wraps the current one, adding context while keeping the cause in its `source` field. Save this as `report.ls`:
+A single handler recovers from errors. Use `match` to transform success and error outcomes separately (S7.6.2v5). Inside a handler, `error("…", ^)` builds a new error that wraps the current one, adding context while keeping the cause in its `source` field. Save this as `report.ls`:
 
 ```lambda
 // report.ls
@@ -293,8 +293,10 @@ fn parse_line(line: string) float^ {
 
 let lines = ["Clean Code,37.90", "SICP,free"];
 [for (line in lines)
-    parse_line(line) ^ { ^.message ++ " (" ++ ^.source.message ++ ")" }
-                     ~ { "ok: " ++ ~ }]
+    match (parse_line(line) ^ { ^ }) {
+        case error: ~.message ++ " (" ++ ~.source.message ++ ")"
+        default: "ok: " ++ ~
+    }]
 ```
 
 ```bash
@@ -305,7 +307,7 @@ lambda report.ls
 ["ok: 37.9", "rejected SICP (bad price: free)"]
 ```
 
-`parse_line` knows which line failed, which `parse_price` does not, so it raises a new error with that context and the original as its source; the report reads both messages. These handlers work on `fn` calls; on a procedure call, a handler is a statement of its own (S7.6.7v3), as [Lambda_Error_Handling.md](../Lambda_Error_Handling.md) describes.
+`parse_line` knows which line failed, which `parse_price` does not, so it raises a new error with that context and the original as its source; the report reads both messages. These handlers preserve values on both `fn` and `pn` calls, including suspension (S7.6.7v5), as [Lambda_Error_Handling.md](../Lambda_Error_Handling.md) describes.
 
 ## What You Learned
 
@@ -314,7 +316,7 @@ lambda report.ls
 - `xs.sort()` calls a built-in method-style, and functions may call themselves.
 - An `fn` is pure and cannot call a `pn` (E224).
 - Errors are values: `error("…")` makes one, `is error` tests for one, `^ { … }` supplies an error default, and a `T | error` function returns them as data.
-- A `T^` function `raise`s errors its callers must engage: `^` propagates, `^ { … }` handles with `^.message` and `^.code`, `^ { … } ~ { … }` branches, and ignoring the error is compile error E228.
+- A `T^` function `raise`s errors its callers must engage: `^` propagates, `^ { … }` handles with `^.message` and `^.code`, `match` branches on an outcome, and ignoring the error is compile error E228.
 - `error("…", ^)` wraps an error with context.
 
 The references are [Lambda_Func.md](../Lambda_Func.md) and [Lambda_Error_Handling.md](../Lambda_Error_Handling.md). Next, [Chapter 7](07_Procedures_IO_and_Tasks.md) turns to procedures, I/O and tasks.

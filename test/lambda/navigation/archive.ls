@@ -15,6 +15,6 @@ let checks={
     empty:empty.status=="unreachable" and empty.projection_tests==0 and len(empty.points)==0,
     errors:[for (invalid in [{*:stored,frame:'z_up'},{*:stored,settings_hash:source_hash},{*:stored,source_hash:"bad"},
         {*:stored,cells:[cells[0],cells[0]]},{*:stored,cells:[{*:cells[0],levels:[0,1]}]},{*:stored,cells:[{*:cells[0],groups:0}]}])
-        nav.validate(invalid) ^ {true} ~ {false}]==fill(6,true)
+        match (nav.validate(invalid) ^ { ^ }) { case error: true default: false }]==fill(6,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]

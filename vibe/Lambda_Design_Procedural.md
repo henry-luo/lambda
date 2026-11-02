@@ -106,10 +106,10 @@ type. Other statements follow their own result contracts; this clarification
 does not assign a new result to assignment or loop statements.
 
 A handler has an ordinary normal result, regardless of its operand's `fn`/`pn`
-effect (S7.6.1v5, S7.6.7v5). A final handler supplies the block's result; a
+effect (S7.6.1v9, S7.6.7v5). A final handler supplies the block's result; a
 later result can replace it. Producing a fallback value in the handler body
 differs from writing `return fallback`, which exits the enclosing callable.
-The new behavior and its pending implementation are recorded in
+The M1 implementation and qualification are recorded in
 [TE-16.1](Lambda_Design_Type_Error_Handling.md#te-161--handler-results-follow-procedural-sequencing).
 
 `return` is how a scoped resource escapes its block, and the escape must be visible in the declared return type (S12.4.2, §7.3).

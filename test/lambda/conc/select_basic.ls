@@ -14,5 +14,5 @@ pn main() {
     print(wait(chosen)^)
     cancel(slow_handle)
     var done = null
-    wait(slow_handle) ^ { done = ^ } ~ { done = ~ }
+    { let __error_outcome_1 = wait(slow_handle) ^ { ^ }; if (__error_outcome_1 is error) { done = __error_outcome_1 } else match __error_outcome_1 { case any { done = ~ } } }
 }

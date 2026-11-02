@@ -24,7 +24,7 @@ fn tail_line(text) {
 pn run(program, args, what) bool^ {
     var failure = null
     var result = null
-    io.exec(program, args, {timeout_ms: 180000}) ^ { failure = ^ } ~ { result = ~ }
+    { let __error_outcome_1 = io.exec(program, args, {timeout_ms: 180000}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { result = ~ } } }
     if (failure is error) raise error(what ++ ": " ++ failure.message)
     if (result.timed_out) raise error(what ++ ": timed out")
     if (result.exit_code != 0) raise error(what ++ ": exit " ++ string(result.exit_code) ++ ": " ++ tail_line(result.stderr))

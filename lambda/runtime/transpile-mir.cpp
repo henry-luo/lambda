@@ -23109,35 +23109,7 @@ static MirValue transpile_local_fault_expression(MirTranspiler* mt,
 }
 
 // Lower both handler forms through the boxed Item lane. A handler consumes
-// only an ItemError result; an optional value body replaces success pass-through.
-static void emit_handler_statement_result(MirTranspiler* mt, MIR_reg_t result) {
-    // Statement handlers expose no selected-arm value to surrounding code.
-    uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
-    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, result, (int64_t)null_value);
-}
-
-static bool handler_body_consumes_error_value(AstNode* node) {
-    AstNode* effective = ast_unwrap_primary(node);
-    if (!effective) return false;
-    if (effective->node_type == AST_NODE_CURRENT_ERROR) return true;
-    if (effective->node_type == AST_NODE_CONTENT) {
-        // A braced body yields its last statement: `{ e = ^ }` hands the
-        // handled error to `e`, not a fresh one. Unrecognised, a `pn ... T^`
-        // returned that error from the statement, so the handler caught nothing.
-        AstNode* last = NULL;
-        for (AstNode* item = ((AstListNode*)effective)->item; item; item = item->next) last = item;
-        return last && handler_body_consumes_error_value(last);
-    }
-    if (effective->node_type != AST_NODE_ASSIGN_STAM) return false;
-    AstAssignStamNode* assign = (AstAssignStamNode*)effective;
-    AstNode* rhs = ast_unwrap_primary(assign->value);
-    // Only an assignment of the handler's current/value binding consumes the
-    // selected input (`value = ^` or `value = ~`). An assignment of a fresh
-    // fallible call must still propagate that call's ERROR result.
-    return rhs && (rhs->node_type == AST_NODE_CURRENT_ERROR ||
-        rhs->node_type == AST_NODE_CURRENT_ITEM);
-}
-
+// selected errors/falsy values and preserves the ordinary success path.
 static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler, int destination_root = -1) {
     MIR_reg_t checkpoint = destination_root >= 0
         ? emit_call_1(mt, "output_content_checkpoint", MIR_T_I64, MIR_T_P,
@@ -23167,54 +23139,29 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler,
     MIR_reg_t result = new_reg(mt, "handler_result", MIR_T_I64);
     MIR_label_t handle = new_label(mt);
     MIR_label_t done = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
-
-    // Each arm runs only on its own path (D8.3.4), so a `raise` or `return` in
-    // one does not end the handler: the join is reachable unless every arm
-    // exits. Without this, a `raise` in the error arm marked an enclosing if
-    // branch as returned and the if-join discarded the handled value.
-    bool entry_returned = mt->block_returned;
-    bool value_arm_exits = false;
-    if (handler->value_body) {
-        mt->block_returned = false;
-        // The value arm binds `~` to one subject as T0's value_scope does:
-        // `~key` and `~~` null, `~` its own root. Riding the pipe context lets
-        // a nested pipe's `~` shadow it (S10.1.3); a flag that outranked the
-        // pipe context made that `~` read the handled value instead.
-        MirPipeContext saved_context = mir_pipe_context_save(mt);
-        mt->in_pipe = true;
-        mt->pipe_item_reg = operand;
-        mt->pipe_index_reg = emit_null_item_reg(mt);
-        mt->pipe_parent_reg = emit_null_item_reg(mt);
-        mt->pipe_root_reg = operand;
-        MIR_reg_t value_body_result = transpile_box_item(mt, handler->value_body);
-        mir_pipe_context_restore(mt, saved_context);
-        value_arm_exits = mt->block_returned;
-        if (handler->is_statement) {
-            // A statement handler discards only a normal value-body result.
-            // An error created by that selected body is a fresh completion
-            // and must unwind this activation instead of becoming statement
-            // null (S7.6.1).
-            if (!handler_body_consumes_error_value(handler->value_body)) {
-                emit_return_if_item_error(mt, value_body_result);
-            }
-            emit_handler_statement_result(mt, result);
-        } else {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx,
-                    value_body_result)));
-        }
-    } else if (handler->is_statement) {
-        emit_handler_statement_result(mt, result);
+    if (handler->catches_falsy) {
+        MIR_reg_t truthy = emit_item_truth_test(mt, operand);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, truthy)));
     } else {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
     }
+
+    // The success path always remains reachable; recovery may leave its own branch.
+    bool entry_returned = mt->block_returned;
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, done)));
 
     emit_label(mt, handle);
+    if (handler->filter) {
+        // A miss preserves the exact input, including errors from an earlier handler.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
+        emit_match_pattern_test(mt, handler->filter, operand, done);
+    }
     if (destination_root >= 0) {
         // recovery owns only its operand's bytes, including encoder failures.
         emit_call_void_2(mt, "output_content_rewind", MIR_T_P,
@@ -23229,24 +23176,14 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler,
     MIR_reg_t body_value = destination_root >= 0
         ? mir_emit_output_expr(mt, handler->body, destination_root)
         : transpile_box_item(mt, handler->body);
-    bool error_arm_exits = mt->block_returned;
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
-    if (handler->is_statement) {
-        // The selected statement arm is outside the operand's recovery
-        // boundary; preserve fresh body errors for the enclosing caller.
-        if (!handler_body_consumes_error_value(handler->body)) {
-            emit_return_if_item_error(mt, body_value);
-        }
-        emit_handler_statement_result(mt, result);
-    } else {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
-    }
+    // A fresh recovery error is an ordinary result for the actual receiver.
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
     emit_label(mt, done);
     // the one-arm form passes a non-error operand through, which never exits
-    mt->block_returned = entry_returned ||
-        (handler->value_body && value_arm_exits && error_arm_exits);
+    mt->block_returned = entry_returned;
     return result;
 }
 
@@ -25267,12 +25204,10 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
 static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     MirValue statement = em_lower_value(&mt->em, item, MIR_VALUE_ANY);
     MIR_reg_t stmt_result = statement.reg;
-    // `e = ^` in a handler stores the handled error: its value is that error,
-    // not a failure of the statement. Propagating it made every statement
-    // handler in a `pn ... T^` re-raise what it had just caught.
-    bool stores_handled = item->node_type == AST_NODE_ASSIGN_STAM && handler_body_consumes_error_value(item);
+    // S7.7.4v2: admitted whole-variable stores capture errors; field/index
+    // failures still leave fallible procedures through the shared predicate.
     if (mt->current_func_can_raise && statement.rep == VALUE_REP_ITEM &&
-            side_effect_result_can_error(item->node_type) && !stores_handled) {
+            side_effect_result_can_error(item->node_type)) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
         // native lanes cannot carry ItemError; only a boxed producer has a tag.
         emit_return_if_item_error(mt, stmt_result);
@@ -33154,7 +33089,8 @@ static MIR_reg_t mir_emit_output_expr(MirTranspiler* mt, AstNode* node, int dest
         status = transpile_for(mt, (AstForNode*)value, false, destination_root).reg;
     } else if (value->node_type == AST_NODE_UNARY && ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE) {
         status = mir_emit_output_expr(mt, ((AstUnaryNode*)value)->operand, destination_root);
-    } else if (value->node_type == AST_NODE_HANDLER_EXPR && !((AstHandlerNode*)value)->value_body) {
+    } else if (value->node_type == AST_NODE_HANDLER_EXPR &&
+            !((AstHandlerNode*)value)->catches_falsy && !((AstHandlerNode*)value)->filter) {
         status = emit_handler_result(mt, (AstHandlerNode*)value, destination_root);
     } else if (value->node_type == AST_NODE_LIST || value->node_type == AST_NODE_CONTENT) {
         MirFlowScope flow(mt);

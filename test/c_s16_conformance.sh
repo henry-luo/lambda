@@ -554,4 +554,19 @@ run A 'decimal literal type' 'type T = 1.5m\n'
 run A 'datetime literal type' "type T = t'2025-01-01'\n"
 run A 'binding error union suffix' 'let v: int^ = 1\n'
 run A 'parameter error union suffix' 'fn f(x: int^) int | error => x\n'
+
+# S7.6.2v5/S7.6.8/S7.6.9: single-body handlers and combined fallback.
+run A "combined fallback" 'null or^ { 1 }\n'
+run A "fallback line continuation" 'null\nor^ { 1 }\n'
+run R "fallback brace next line" 'null or^\n{ 1 }\n'
+run A "filtered handler chain" '1 ^error { 2 } ^error { 3 }\n'
+run R "filter brace next line" '1 ^error\n{ 2 }\n'
+run R "filter selector next line" '1 ^\nerror { 2 }\n'
+run R "retired success arm" '1 ^ { 2 } ~ { 3 }\n'
+run R "retired multiline success arm" '1 ^ { 2 }\n~ { 3 }\n'
+
+cp "$ROOT/test/lambda/mod_handler_error_types.ls" "$WORK/mod_handler_error_types.ls"
+run A "qualified error filter" 'import types: .mod_handler_error_types\n1 ^types.Failure { 2 }\n'
+run R "qualified filter crosses line" '1 ^types.\nFailure { 2 }\n'
+run A "propagation divided by block" 'fn f() int^ => 4\nf()^ / { 2 }\n'
 echo "pass=$pass fail=$fail"

@@ -2780,6 +2780,15 @@ TEST_F(NegativeScriptTest, SemanticError_ReturnErrorIdentifiesUncontainedOrigin)
         nullptr) << result.output;
 }
 
+TEST_F(NegativeScriptTest, FilteredHandlerSelectorNamesAType) {
+    ExpectErrorMessage("test/lambda/negative/semantic/filtered_handler_value_selector.ls",
+        "an error handler selector must name a type or pattern");
+}
+
+TEST_F(NegativeScriptTest, FilteredHandlerRetainsUnmatchedErrorObligation) {
+    ExpectErrorMessage("test/lambda/negative/semantic/filtered_handler_unhandled.ls", "error[E228]");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgment) {
     ExpectErrorMessage("test/lambda/negative/semantic/unhandled_error_expression.ls",
         "handle with 'risky(...) ^ { ... }'");

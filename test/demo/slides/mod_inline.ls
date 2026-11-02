@@ -86,11 +86,11 @@ on slide_inline_read(evt) {
     dom.set_attribute(evt.target,"data-inline-error","")
     dom.set_attribute(evt.target,"data-inline-changed",string(changed))
     if (changed) {
-        insert.fragment(html.export_text(editor.doc,draft.envelope),"html") ^ {
-            dom.set_attribute(evt.target,"data-inline-error",^.message)
-        } ~ {
+        { let __error_outcome_1 = insert.fragment(html.export_text(editor.doc,draft.envelope),"html") ^ { ^ }; if (__error_outcome_1 is error) {
+            dom.set_attribute(evt.target,"data-inline-error",__error_outcome_1.message)
+        } else match __error_outcome_1 { case any {
             dom.set_attribute(evt.target,"data-inline-mark",join([for (node in ~) format(node,'mark')],"\n"))
-        }
+        } } }
     }
     return 'handled'
 }

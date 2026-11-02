@@ -18,9 +18,8 @@ pub pn run(root,request) {
     let helper = paths.resolve_path(paths.dirname(resources.entry_path()^),request.helper)
     var reply = null
     // handlers discard success values (S7.6.7v4); capture both outcomes before dispatch.
-    io.exec(sys.proc.self.argv#[0],["--no-log","run",helper],
-        {env:{[request.environment]:request.path},timeout_ms:60000,max_output_bytes:16777216}) ^ { reply = {error:^.message} }
-        ~ { process_reply(~,request.label) ^ { reply = {error:^.message} } ~ { reply = ~ } }
+    { let __error_outcome_1 = io.exec(sys.proc.self.argv#[0],["--no-log","run",helper],
+        {env:{[request.environment]:request.path},timeout_ms:60000,max_output_bytes:16777216}) ^ { ^ }; if (__error_outcome_1 is error) { reply = {error:__error_outcome_1.message} } else match __error_outcome_1 { case any { { let __error_outcome_2 = process_reply(~,request.label) ^ { ^ }; if (__error_outcome_2 is error) { reply = {error:__error_outcome_2.message} } else match __error_outcome_2 { case any { reply = ~ } } } } } }
     let owner = dom.get_element_by_id(root,request.owner)
     if (owner!=null) dom.dispatch(owner,{type:request.event,bubbles:false,detail:{seq:request.seq,reply:reply}})
 }

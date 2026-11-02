@@ -19,15 +19,15 @@ let saved = editor.mark_saved(both,both.doc)
 let configured = editor.exec(saved,{id:"guide.configure",snap:true,visible:false})^
 check(not editor.dirty(configured) and configured.hist == saved.hist and configured.snap_enabled and not configured.guides_visible)
 check(guides.items(editor.open_session(project.decode(project.encode(both.doc)^)^)^.doc) == guides.items(both.doc))
-check(editor.exec(st,{id:"guide.add",axis:"z",position:1}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"guide.add",axis:"x",position:100.5}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"guide.add",axis:"y",position:81}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"guide.configure",snap:1}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"guide.add",axis:"z",position:1}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"guide.add",axis:"x",position:100.5}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"guide.add",axis:"y",position:81}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"guide.configure",snap:1}) ^ { ^ }) { case error: true default: false })
 let moved = editor.exec(both,{id:"guide.update",guide:"guide-1",position:45})^
 check(guides.lookup(moved.doc,"guide-1").position == 45)
 check(editor.exec(moved,{id:"history.undo"})^.doc == both.doc)
-check(editor.exec(both,{id:"guide.update",guide:"guide-1",position:-1}) ^ { true } ~ { false })
-check(editor.exec(both,{id:"guide.remove",guide:"missing"}) ^ { true } ~ { false })
+check(match (editor.exec(both,{id:"guide.update",guide:"guide-1",position:-1}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(both,{id:"guide.remove",guide:"missing"}) ^ { ^ }) { case error: true default: false })
 check(len(guides.items(editor.exec(both,{id:"guide.remove",guide:"guide-1"})^.doc)) == 1)
 check(len(guides.items(editor.exec(both,{id:"guide.clear"})^.doc)) == 0)
 let scaled = editor.exec(both,{id:"document.resize_image",width:50,height:40})^
@@ -65,4 +65,4 @@ check(not render.frame(cached)^.changed and render.frame(cached)^.raster == cach
 let after = editor.exec(both,{id:"pixels.fill",color:[0,0,1,1]})^
 check(render.frame({*:after,painted_doc:both.doc,painted_raster:cached.painted_raster})^.changed)
 let duplicate = img.with_children(st.doc,[*content(st.doc),<metadata role:'photos_guides',<guide id:"g",axis:"x",position:2> <guide id:"g",axis:"x",position:3>>])^
-check(editor.open_session(duplicate) ^ { true } ~ { false })
+check(match (editor.open_session(duplicate) ^ { ^ }) { case error: true default: false })

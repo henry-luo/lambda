@@ -25,7 +25,7 @@ let spaced = model.execute(both,"para.set",props)^
 all([for (p in spaced.doc.content) model.css_get(attrs_get(p.attrs,'style'),"margin-left") == "18pt"])
 model.paragraph_settings(spaced) == props
 model.execute(spaced,"edit.undo")^.doc == paragraphs.doc
-model.execute(both,"para.set",{*:props,before:-1}) ^ { true } ~ { false }
+match (model.execute(both,"para.set",{*:props,before:-1}) ^ { ^ }) { case error: true default: false }
 
 let table = model.execute(base,"insert.table",{rows:2,cols:2,header:true})^
 let above = model.execute(table,"table.insertRowAbove")^
@@ -53,8 +53,8 @@ model.css_get(attrs_get(aligned.doc.content[1].content[0].content[0].attrs,'styl
 let removed = model.execute(table,"table.deleteTable")^
 removed.doc.content[1].tag == 'p'
 model.execute(removed,"edit.undo")^.doc == table.doc
-model.execute(base,"insert.table",{rows:0,cols:2}) ^ { true } ~ { false }
-model.execute(base,"insert.table",{rows:2,cols:13}) ^ { true } ~ { false }
+match (model.execute(base,"insert.table",{rows:0,cols:2}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"insert.table",{rows:2,cols:13}) ^ { ^ }) { case error: true default: false }
 
 let grouped = node('doc',[node('table',[
     node('thead',[node('tr',[node('th',[text("A")]),node('th',[text("B")])])]),
@@ -73,7 +73,7 @@ attrs_get(image.node.attrs,'height') == null
 let resized = model.execute(picture,"picture.size",{width:160,height:80,alt:"Small logo"})^
 attrs_get(model.current_node(resized,'img').node.attrs,'alt') == "Small logo"
 model.execute(resized,"edit.undo")^.doc == picture.doc
-model.execute(base,"insert.picture",{src:"x",width:0,height:0}) ^ { true } ~ { false }
+match (model.execute(base,"insert.picture",{src:"x",width:0,height:0}) ^ { ^ }) { case error: true default: false }
 files.restore(files.archive(resized.doc,"Pictures"))^.doc == resized.doc
 
 let linked = model.execute(edit_set_selection(base,text_selection(pos([0,0],0),pos([0,0],5))),"insert.link",{href:"https://example.com",label:""})^

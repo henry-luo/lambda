@@ -1,6 +1,6 @@
 # Lambda Design: Syntax — Line Delimiters and Expression Continuation
 
-> **2026-11-02 local imperative `fn`; implemented, qualification in progress:**
+> **2026-11-02 local imperative `fn`; implemented and qualified:**
 > S12.1.2v3/S16.6.5v2 admit local control in `fn` without granting `pn`
 > calls. S16.6.7v3–S16.6.9v2 separate callable block bodies and control
 > statements from effect colour. Escaping closures retain snapshots;
@@ -14,7 +14,7 @@
 > retain their separate grammar. Rule, migration, and legacy rationale:
 > [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
 
-> **2026-11-02 handler convenience; implementation pending.**
+> **2026-11-02 handler convenience; implemented in M1.**
 > **S7.6.8–S7.6.9** add `expr or^ { ... }` and named filtered handlers,
 > including left-associative chains. `or^` has ordinary `or` precedence;
 > filtered handlers retain postfix precedence. Bodies are structural and
@@ -2392,8 +2392,8 @@ list occurs — fourteen contexts, all the same role:
 
 These are the current ruled content-body sites. The C parser's
 `parse_content` call sites and the grammar's `content` / `element_content` /
-`_body_block` / `_braced` references still include the retired handler success
-arm pending the TE-16.2 migration. Everywhere else `;` is a syntax error, verified
+`_body_block` / `_braced` references exclude the retired handler success arm
+(**S7.6.2v5**, removed in M1). Everywhere else `;` is a syntax error, verified
 in both parsers: object-type members, map items, array items, call
 arguments, parameter lists, and attribute lists all take `,`.
 

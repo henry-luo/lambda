@@ -39,8 +39,7 @@ pub pn run(action,jobs,options={}) any^ {
     var results = []
     for (job in ready) {
         var outcome = null
-        run_job(action,job) ^ { outcome = {source:job.source,target:job.target,ok:false,error:^.message} }
-            ~ { outcome = {*:~,ok:true} }
+        { let __error_outcome_1 = run_job(action,job) ^ { ^ }; if (__error_outcome_1 is error) { outcome = {source:job.source,target:job.target,ok:false,error:__error_outcome_1.message} } else match __error_outcome_1 { case any { outcome = {*:~,ok:true} } } }
         results = [*results,outcome]
         if (not outcome.ok and options.continue_on_error == false) { break }
     }

@@ -538,8 +538,8 @@ A name that is called is a function, never a field: in `user that len(name) > 2`
 never a field either.
 
 The same rule holds in every body that binds `~` to one value: a
-[match arm](#current-item-reference-), a handler's value arm
-`e ^ { … } ~ { … }`, and a type constraint `T that cond` (S10.1.7v2). Each reads
+[match arm](#current-item-reference-) and a type constraint `T that cond`
+(S10.1.7v4). Error handlers retain the enclosing `~` context. Each binding body reads
 its own current item. The innermost body wins, and the outer current item is
 back when that body ends.
 

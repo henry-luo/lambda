@@ -35,8 +35,8 @@ let checks = [
     len(m.scene(cloned).targets) == 5,
     m.scene(cloned).objects[2].source.id == "copy-2",
     restored.doc == start.doc and restored.base == "file:///old/",
-    m.properties(changed,{width:-1.0}) ^ { true } ~ { false },
-    m.set_text(rich,"<b",true) ^ { true } ~ { false },
+    match (m.properties(changed,{width:-1.0}) ^ { ^ }) { case error: true default: false },
+    match (m.set_text(rich,"<b",true) ^ { ^ }) { case error: true default: false },
     content(resolved)[0][0].src == "file:///slides/decks/images/a.png",
     content(resolved)[1][0][0].src == "file:///slides/b.png",
     picture[0][0].src == "images/a.png"

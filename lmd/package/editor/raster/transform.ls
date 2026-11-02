@@ -10,7 +10,7 @@ pub fn matrix(node) => model.value(node.transform,identity)
 fn supported(node) => (name(node) == 'layer' and not model.adjustment(node)) or (name(node) == 'stack' and
     not any([for (child in content(node)) name(child) in ['mask','effect','style']]) and
     all([for (child in content(node) where model.composition(child)) supported(child)]))
-pub fn available(st) => target(st) ^ { false } ~ { true }
+pub fn available(st) => match (target(st) ^ { ^ }) { case error: false default: true }
 pub fn target(st) any^ {
     let rows = model.unlocked_roots(st)^;
     if (not all([for (row in rows) supported(row.node)]))

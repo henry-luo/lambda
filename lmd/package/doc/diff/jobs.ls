@@ -11,7 +11,7 @@ pn capture(path,repo,comparison,preferred,generation,options) map^ {
     var document = null
     var message = ""
     if (selected != null) {
-        git.load_file(opened,manifest,selected,options) ^ { message = ^.message } ~ { document = ~ }
+        { let __error_outcome_1 = git.load_file(opened,manifest,selected,options) ^ { ^ }; if (__error_outcome_1 is error) { message = __error_outcome_1.message } else match __error_outcome_1 { case any { document = ~ } } }
     }
     return {kind:"capture",generation:generation,repo:opened,manifest:manifest,selected:selected,document:document,message:message}
 }

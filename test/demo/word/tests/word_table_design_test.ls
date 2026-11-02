@@ -49,8 +49,8 @@ design.cell_paint({*:design.settings(blue.doc.content[1]),header:false},0,0,3,3)
 design.cell_paint({*:design.settings(blue.doc.content[1]),total:true},2,1,3,3).weight==600
 design.cell_paint({*:design.settings(blue.doc.content[1]),bandedColumns:true},1,1,3,3).fill==design.style("blue").band
 all([for (s in design.styles) name(design.thumbnail({*:design.settings(blue.doc.content[1]),style:s.id}))=='svg'])
-model.execute(base,"table.style",{style:"missing"}) ^ { true } ~ { false }
-model.execute(base,"table.designOption",{option:"missing",value:true}) ^ { true } ~ { false }
-model.execute(base,"table.designOption",{option:"header",value:"true"}) ^ { true } ~ { false }
-model.execute(base,"table.shading",{color:"bad"}) ^ { true } ~ { false }
-model.execute(model.open_editor(node('doc',[node('p',[text("Outside")])])),"table.style",{style:"blue"}) ^ { true } ~ { false }
+match (model.execute(base,"table.style",{style:"missing"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"table.designOption",{option:"missing",value:true}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"table.designOption",{option:"header",value:"true"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"table.shading",{color:"bad"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(model.open_editor(node('doc',[node('p',[text("Outside")])])),"table.style",{style:"blue"}) ^ { ^ }) { case error: true default: false }

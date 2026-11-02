@@ -17,13 +17,13 @@ let blue = exports.prepare(img.of_raster(img.blank({width:1,height:1})^),"png",{
 img.sample(img.render_frame(blue.image)^,0,0)^ == [0,0,255,255]
 exports.destination("photo.PNG","jpeg")^ == "photo.jpg" and exports.destination("photo.jpg","png")^ == "photo.png"
 exports.settings(doc,"jpg",{background:[1,1,1,1]})^.format == "jpeg"
-exports.settings(doc,"jpeg") ^ { true } ~ { false }
-exports.settings(doc,"jpeg",{alpha:"preserve"}) ^ { true } ~ { false }
-exports.settings(doc,"png",{alpha:"flatten",background:"transparent"}) ^ { true } ~ { false }
-exports.settings(doc,"png",{background:"#ffffff"}) ^ { true } ~ { false }
-exports.settings(doc,"png",{width:0}) ^ { true } ~ { false }
-exports.settings(doc,"png",{width:4001,height:4001}) ^ { true } ~ { false }
-exports.settings(doc,"jpeg",{quality:101,background:"#ffffff"}) ^ { true } ~ { false }
-exports.settings(doc,"png",{quality:75}) ^ { true } ~ { false }
-exports.settings(doc,"png",{width:2.5}) ^ { true } ~ { false }
-exports.settings(doc,"png",{unexpected:true}) ^ { true } ~ { false }
+match (exports.settings(doc,"jpeg") ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"jpeg",{alpha:"preserve"}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{alpha:"flatten",background:"transparent"}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{background:"#ffffff"}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{width:0}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{width:4001,height:4001}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"jpeg",{quality:101,background:"#ffffff"}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{quality:75}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{width:2.5}) ^ { ^ }) { case error: true default: false }
+match (exports.settings(doc,"png",{unexpected:true}) ^ { ^ }) { case error: true default: false }

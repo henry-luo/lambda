@@ -1395,10 +1395,10 @@ static uint32_t plan_need(AstNode* node) {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         uint32_t operand = plan_need(handler->operand);
         uint32_t body = 1 + plan_need(handler->body);
-        uint32_t value = handler->value_body
-            ? 1 + plan_need(handler->value_body) : 0;
+        uint32_t filter = handler->filter ? 2 + plan_need(handler->filter) : 0;
         uint32_t best = operand > body ? operand : body;
-        return value > best ? value : best;
+        if (filter > best) best = filter;
+        return best;
     }
     case AST_NODE_IF_EXPR:
     case AST_NODE_CONDITIONAL_EXPR: {

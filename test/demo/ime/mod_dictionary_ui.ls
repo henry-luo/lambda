@@ -93,7 +93,7 @@ pub pn command(body,st,action,target) map^ {
         let next = {*:initial(),filter:field(body,"dictionary-search")}
         var result = {items:[],next:null}
         var message = "";
-        model.browse(dom.ime_session(body).engine,next.filter) ^ { message = ^.message } ~ { result = ~ }
+        { let __error_outcome_1 = model.browse(dom.ime_session(body).engine,next.filter) ^ { ^ }; if (__error_outcome_1 is error) { message = __error_outcome_1.message } else match __error_outcome_1 { case any { result = ~ } } }
         // a rejected query owns an empty page; retaining the previous cursor would expose stale results.
         let rendered = present(body,next,result)^;
         text(body,"dictionary-message",message)
@@ -131,8 +131,7 @@ pub pn command(body,st,action,target) map^ {
 }
 
 pub pn dispatch(body,st,action,target) map {
-    var next = st;
-    command(body,st,action,target) ^ {
+    let next = command(body,st,action,target) ^ {
         let message = ^.message;
         // load and validation failures must be readable even when opening did not finish.
         if (action == "open" and not opened(body)) {
@@ -140,7 +139,8 @@ pub pn dispatch(body,st,action,target) map {
             show(body)
         }
         text(body,"dictionary-message",message)
-    } ~ { next = ~ }
+        st
+    }
     return next
 }
 

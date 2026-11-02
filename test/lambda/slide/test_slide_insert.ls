@@ -68,7 +68,7 @@ let svg_object = added("object",{format:"svg",source:"<svg viewBox=\"0 0 20 20\"
         let st = added(kind);
         m.initial(parse(format(st.doc,'mark')^,'mark')^).doc == st.doc
     }]),ins.settings(m.chosen(h.command(added("symbol"),"clear-format")^).source).kind == "symbol",saved({*:m.initial(parse(format(table.doc,'mark'),'mark')^),selected:table.selected}) == saved(table)],
-    invalid:[slide.compile(<presentation <slide <text metadata:"bad","Text">>>) ^ {true} ~ {false},ins.insert(base,"table",{rows:0}) ^ {true} ~ {false},ins.insert(base,"chart",{data:"bad"}) ^ {true} ~ {false},
-        ins.insert(base,"link",{href:"javascript:bad()"}) ^ {true} ~ {false},ins.insert(base,"comment",{text:""}) ^ {true} ~ {false},
-        ins.insert(base,"object",{format:"svg",source:"<div/>"}) ^ {true} ~ {false},ins.insert(base,"action",{command:"bad"}) ^ {true} ~ {false}]
+    invalid:[match (slide.compile(<presentation <slide <text metadata:"bad","Text">>>) ^ { ^ }) { case error: true default: false },match (ins.insert(base,"table",{rows:0}) ^ { ^ }) { case error: true default: false },match (ins.insert(base,"chart",{data:"bad"}) ^ { ^ }) { case error: true default: false },
+        match (ins.insert(base,"link",{href:"javascript:bad()"}) ^ { ^ }) { case error: true default: false },match (ins.insert(base,"comment",{text:""}) ^ { ^ }) { case error: true default: false },
+        match (ins.insert(base,"object",{format:"svg",source:"<div/>"}) ^ { ^ }) { case error: true default: false },match (ins.insert(base,"action",{command:"bad"}) ^ { ^ }) { case error: true default: false }]
 }

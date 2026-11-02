@@ -197,7 +197,7 @@ fn first_error(stderr) => if (stderr == null) null else (let text = parse(stderr
 pn launch(root, id, key) {
     var code = -1
     var reason = null
-    io.exec(EXE, ["demo", key], {timeout_ms: 0}) ^ { code = -1 } ~ { code = ~.exit_code; reason = first_error(~.stderr) }
+    { let __error_outcome_1 = io.exec(EXE, ["demo", key], {timeout_ms: 0}) ^ { ^ }; if (__error_outcome_1 is error) { code = -1 } else match __error_outcome_1 { case any { code = ~.exit_code; reason = first_error(~.stderr) } } }
     let owner = dom.get_element_by_id(root, "demo-index")
     if (owner != null) dom.dispatch(owner, {type: "demoexit", bubbles: false,
         detail: {id: id, name: key, code: code, reason: reason}})

@@ -400,7 +400,7 @@ fn cloud_marks(data, encoding, options, width, height, visual = null, paints = n
             })
         else record];
     // Chart entry points return value errors; preserve the direct API's validation diagnostic (S7.4.1–S7.4.2).
-    let image: element | error = cloud.render(words, {*:options, width: width, height: height});
+    let image: element^ = cloud.render(words, {*:options, width: width, height: height});
     image
 }
 

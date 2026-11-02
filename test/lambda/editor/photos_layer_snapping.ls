@@ -20,7 +20,7 @@ check(guides.snap_move(enabled,box,47,0,4,false,boxes).dx == 47)
 check(guides.snap_move(enabled,box,47,0,1,true,boxes).dx == 47)
 let off = editor.exec(enabled,{id:"guide.configure",layers:false})^
 check(guides.snap_move(off,box,47,0,1,false,boxes).x == null and off.hist == enabled.hist and not editor.dirty(off))
-check(editor.exec(st,{id:"guide.configure",layers:1}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"guide.configure",layers:1}) ^ { ^ }) { case error: true default: false })
 fn pointer(x,y,alt=false) => {point:{x:x,y:y},screen:{x:x,y:y},pointer:1,alt:alt}
 let draft = interaction.preview(interaction.begin(enabled,pointer(12,12))^,pointer(59,12))^
 check(model.selection_bounds(draft).x == 60 and draft.gesture.snapped.x == 70)

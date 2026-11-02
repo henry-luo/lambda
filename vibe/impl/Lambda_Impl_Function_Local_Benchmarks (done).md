@@ -1,6 +1,7 @@
 # Function-local state: benchmark migration and performance qualification
 
-**Date:** 2026-11-02. **Status:** complete and qualified.
+**Date:** 2026-11-02. **Status:** original migration complete and qualified;
+master integration correctness qualified, with the AUTO timing caveat below.
 **Authority:** S12.1.2v3 (local control), S9.1.3v2 (value/inout parameters),
 S9.1.4v2 (captures), D6.1.2v2 (call colour), D8.1.1v18 (tier promotion).
 **Workspace:** `temp/fn-local-worktree`, branch `codex/fn-local-state`.
@@ -200,3 +201,59 @@ audit passes for 18,561 native functions. Logs are under
 `process_contracts_final.log`. The complete interpreter sweep, unchanged
 preexisting mismatches and its exact source scope are recorded in the
 [decomposition follow-up](<Lambda_Impl_Function_Local_Decomposition (done).md>).
+
+## Remote master integration — 2026-11-03
+
+Integrate feature commit `bd71b925f` with remote master `e9414e352`, including
+the newer M1 handler implementation. Runtime sources merge automatically;
+documentation reconciliation preserves local-control and capture rules while
+retaining M1's value-producing handlers and current implementation status
+(S12.1.2v3, S7.6.1v9, S9.1.4v2). Formal-spec patch versions become semantics
+80.0.4 and design 59.0.4; no additional language ruling is introduced.
+
+The merged `make test-lambda-baseline` passes **8,541/8,541**, including 282 MIR
+emission checks, 20 size checks, 301 error tests and 353 MIR GC stress tests.
+All 105 migrated benchmark sources also compile through the production
+frontend. Production/reference syntax conformance passes **455/455** and
+**442/442** respectively. Function/procedural documentation checks retain
+31/26 clean examples with their expected-error cases honored; the precise-root
+audit checks 18,561 native functions without a hazard.
+
+The complete interpreter sweep covers **1,432 scripts: 1,412 match, 11 excluded,
+9 mismatches, zero timeouts**. Its mismatch paths are exactly the earlier
+base-controlled set listed in the decomposition follow-up; no new mismatch
+appears. All 20 fn-local fixtures match with zero fallback. The sweep refuses
+to refresh its partition while those existing mismatches remain. Forced-GC,
+poisoned, threshold-2 probes additionally verify local loop control and early
+returns through M1 handlers, immutable escaping readers produced by a filtered
+handler, chained fresh recovery errors, and rejection of escaping writers.
+
+Integration evidence is under `temp/fn_master_integration/`: `baseline.log`,
+`benchmark_compile.json`, the two syntax logs, `handler_probes.json`,
+`sweep_full.tsv`, `sweep_summary.json` and `debug_snapshot.json`. The archived
+merged debug SHA-256 is
+`4b253a322303ea8b34027c1990b89b2e51bd69772f7fd0c6b2b17b925fd4da01`.
+The 222-row release report above remains the pre-integration qualification.
+The [merged source-only comparison](../../test/benchmark/function_local_master_results.json)
+uses the same merged release on both sides and covers 18 representative
+scripts in JIT and AUTO. All outputs and warmups match. **35/36 timing rows
+pass; typed JSON generation on AUTO remains unqualified.** Other rows retain
+nine pairs. The JSON AUTO row retains all 61 pairs, including its earlier
+uncertain 9-, 21- and 31-pair samples: median ratio **1.0698**, paired delta
+**+3.209 ms**, paired interval **1.0318–1.0876**. Its median exceeds the
+5%/0.1 ms budget and its interval crosses 5%; preserve `needs_more_runs`
+rather than relabeling it as a pass.
+
+Controls for that workload measure JIT at 0.9936x, pure interpretation at
+0.9942x and synchronous promotion at 1.0107x. Fresh default-promotion cohorts
+range from approximately 1.0000x to 1.0838x. These controls indicate sensitivity
+to asynchronous promotion timing; they do not settle the default AUTO
+qualification. Their raw measurements are embedded in the merged report.
+Workloads, source selection, thresholds and runtime policy remain unchanged.
+
+Merged release SHA-256:
+`a0bcb3d1f251ef690da8a1b271a9d4998a36662d4c47238a66d277a8910e2752`.
+The aggregate geometric-mean paired ratios across the 18 scripts are 0.9978
+for JIT and 0.9999 for AUTO; the individual JSON caveat remains visible despite
+those aggregate results. The earlier complete 222-row qualification and this
+narrower integration experiment describe different hosts/comparison scopes.

@@ -479,7 +479,7 @@ a procedure that succeeds with `3`, and `bad()` raises an error.
 ## TE-16.2 — One error handler; no success or finally suffix
 
 **Decided 2026-11-02, USER. Authority: S7.6.1v9, S7.6.2v5, S7.6.6v6,
-S10.1.7v4, S16.4.3v4. Implementation and corpus migration pending.**
+S10.1.7v4, S16.4.3v4. Implemented in M1.**
 
 ### Decision
 
@@ -558,7 +558,8 @@ precedence explicitly.
 
 **Decided 2026-11-02, USER. Authority: S7.6.8, S7.5.6, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2,
-S16.4.3v4. Handler implementation pending. The `empty` keyword is rejected
+S16.4.3v4. Handler implementation complete in M1; general acknowledgement
+remains pending. The `empty` keyword is rejected
 below under S7.5.7; ordinary user-defined aliases remain available.**
 
 ### One fallback for an error or ordinary falsy value
@@ -664,7 +665,7 @@ meaning of emptiness or confusing it with no result, `none`, or falsiness.
 
 **Decided 2026-11-02, USER. Authority: S7.6.9, S7.6.2v5, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.6v2, S16.4.3v4.
-Implementation pending.**
+Handler implementation complete in M1; general acknowledgement remains pending.**
 
 ### Select an error type or pattern
 
@@ -973,7 +974,8 @@ These topics await further decisions; they do not alter current rulings.
 
 The phased work and qualification criteria are recorded in
 [Type and Error Handling Implementation Plan](impl/Lambda_Impl_Type_Error_Handling.md).
-All phases are pending; the plan includes the requested `T | error` to `T^`
+M1 completes handler forms/results and their caller migration; the full plan
+remains in progress. It includes the requested `T | error` to `T^`
 binding-annotation cleanup, continued whole-variable reassignment outcomes,
 migration of callers that relied on skips or retained old variable values, and
 success-arm and typed-caret retirement, ordinary-error unification, combined fallback, filtered
@@ -981,14 +983,13 @@ handlers/chaining, explicit classification, and caller migration.
 
 ### Handler convenience status
 
-**2026-11-02; new syntax and acknowledgement work pending.** The current parser
-only recognizes a body immediately after the postfix caret; `or^` and named
-selectors need lexer/parser, shared AST/type, and interpreter/MIR changes.
-Existing `is (error | null)` was probed on the interpreter with null, an error,
-false, and zero, yielding `[true, true, false, false]`. This verifies the
-classification expression, not conformance of the new acknowledgement rules.
-S7.5.7 rejects a predefined `empty` name; an ordinary user-defined alias
-uses existing type syntax and needs no new keyword implementation.
+**2026-11-02, M1 implemented.** Production/reference parsing, shared AST,
+interpreter, and MIR support `or^`, named/qualified filters, and left-associative
+chains. Runtime selection and conservative residual types are qualified by the
+M1 tests. Explicit `is (error | null)` classification still uses the existing
+operator; generalizing its acknowledgement check remains part of P1.
+S7.5.7 needs no keyword implementation: `empty` is an ordinary user alias.
+See the [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
 ### Typed-caret retirement
 
@@ -1013,13 +1014,12 @@ implementation is not evidence of conformance to TE-13.2.
 
 ### Success-arm retirement
 
-**2026-11-02, source inspection only; removal pending.** The production parser
-still accepts the suffix in `lambda/runtime/parser/lambda_parser.c`, and the
-Lambda-owned reference grammar still includes it in `handler_expr` in
-`lambda/tree-sitter-lambda/grammar.js`. AST and evaluator/lowering paths retain
-`value_body`; active demos and fixtures still use the syntax. The implementation
-plan must remove the surface and obsolete arm handling together with caller
-migration and explicit syntax-rejection coverage.
+**2026-11-02, M1 implemented.** Both parsers reject the old suffix, even across
+lines; the AST and both execution tiers have no `value_body` storage or lowering.
+510 authored uses were migrated to one-handler expressions, error checks, or
+explicit branching. Parser conformance and existing handler goldens qualify
+single evaluation, result preservation, and restored lexical subjects.
+See the [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
 ### Validation outcomes
 
@@ -1032,14 +1032,14 @@ claimed by this document.
 
 ### Reassignment outcomes
 
-**2026-11-02, design only; implementation pending.** TE-18.2 supersedes the
-previous retained-value/block-exit behavior for whole-variable reassignment.
-The shared admission decision, acknowledgement walk, effective type facts,
-interpreter stores, and MIR lowering need coordinated updates. Field/element
-stores retain their separate contract. Qualification must cover errors replacing
-old values, reachable recovery/effects, known rejection versus deferred warnings,
-branch/loop joins, and safe storage on both tiers. No new runtime verification
-is claimed.
+**2026-11-02, partial in M1.** A successful whole-variable store captures its
+admitted error outcome and continues, including inside a fallible procedure.
+This removes the separate statement-error propagation of an already stored
+error on both tiers. Field/element stores retain their own contract.
+Deferred annotation failures still use the old retained-value/block-exit path;
+their continued error storage, effective type facts, inferred acknowledgement,
+and warnings remain P1/P2 work. See the
+[M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
 ### Initializer acknowledgement
 
@@ -1053,20 +1053,14 @@ undecidable admission while preserving ordinary runtime contract enforcement.
 
 ### Handler results
 
-**2026-11-02, existing executable, interpreter and JIT REPL probes.** Normal
-value sequencing already preserves a final `null`; declarations leave the
-earlier result unchanged. Procedure handlers do not yet satisfy TE-16.1:
-value-position synchronous handlers yielded `null` on both success and
-recovery, and a final procedure handler after `11` left `11` as the result.
-The suspending value-position path has not been qualified under the new ruling.
-
-`resolve_handler` (`lambda/runtime/build_ast.cpp`) classifies handlers from the
-callee's effect. `eval_handler` (`lambda/runtime/interp.cpp`) and
-`emit_handler_statement_result` (`lambda/runtime/transpile-mir.cpp`) erase
-normal procedure-handler results. `interp_proc_block_last_value`
-(`lambda/runtime/interp_plan.cpp`) and `transpile_content_value`
-(`lambda/runtime/transpile-mir.cpp`) exclude these handlers when selecting the
-block result. These are implementation gaps, not exceptions to the ruling.
+**2026-11-02, M1 implemented.** Procedure handlers preserve operand/recovery
+values in bindings and as final results, including suspension. `null` is a real
+replacement result; declarations still contribute no result. Interpreter and
+MIR use the same sequencing classification. Normal-result erasure and implicit
+return of fresh recovery errors were removed while preserving procedure fault
+protection. Focused tests cover explicit return, chained recovery, nested
+subjects, and forced GC. See the
+[M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
 ## Appendix S — Superseded rules
 
@@ -1397,7 +1391,7 @@ preserved by TE-16.2.
 > `~` arm preserves the one-arm rule: success passes through unchanged. In expression position the
 > result type is `type(error_arm) | type(value_arm)`; in a procedural sequence
 > the selected arm's normal result updates the block result before execution
-> continues (**S7.6.1v5, S12.1.2v2**). The complete two-arm construct
+> continues (**S7.6.1v5, S12.1.2v3**). The complete two-arm construct
 > remains primary-like at the member-access/postfix tier, so, for example,
 > `e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
 >
@@ -1440,7 +1434,7 @@ preserved by TE-16.2.
 >   same handler. **The handler produces its normal result for both `fn` and
 >   `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside an arm exits the enclosing procedure, not just
 >   the arm; `raise`, `break`, and `continue` retain their ordinary targets.
@@ -1543,7 +1537,7 @@ preserved by TE-16.2.
 ~~Ordinary errors have distinct soft/value and hard/raised categories; only
 the latter require caller acknowledgement, and only a declared caret return
 licenses `raise`.~~ Replaced by **TE-13.2 / S7.4.1v2–S7.4.2v2,
-S7.4.6v2, S7.5.1v4–S7.5.5**.
+S7.4.6v3, S7.5.1v4–S7.5.5**.
 
 The earlier design aimed to support two workflows: batch transformations that
 retain per-item errors, and commands whose failures demand immediate attention.
@@ -1622,7 +1616,7 @@ scope of their current formal successors.
 >   again by the same handler. **The handler produces its normal result for both
 >   `fn` and `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside the body exits the enclosing procedure, not just
 >   the handler; `raise`, `break`, and `continue` retain their ordinary targets.
@@ -2254,7 +2248,7 @@ belongs specifically to `or^`.
 >   again by the same handler. **The handler produces its normal result for both
 >   `fn` and `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside the body exits the enclosing procedure, not just
 >   the handler; `raise`, `break`, and `continue` retain their ordinary targets.
@@ -2690,3 +2684,58 @@ The exact provisional follow-up and formal rules replaced by this decision:
 >   address, but that is a native ownership boundary, not this return ABI.
 >   (Reinstates SF14-v1 two-lane returns; retires v1's caller-donated canonical
 >   homes — retired-ABI record in Appendix A.) [RV1–RV13, Return_Value §2–§5]
+
+
+### Implementation status before M1 (historical)
+
+The following source-inspection/probe notes predate M1. Current status is in
+Appendix A and the implementation plan; these notes preserve the starting gaps.
+
+#### Earlier Handler convenience status
+
+> **2026-11-02; new syntax and acknowledgement work pending.** The current parser
+> only recognizes a body immediately after the postfix caret; `or^` and named
+> selectors need lexer/parser, shared AST/type, and interpreter/MIR changes.
+> Existing `is (error | null)` was probed on the interpreter with null, an error,
+> false, and zero, yielding `[true, true, false, false]`. This verifies the
+> classification expression, not conformance of the new acknowledgement rules.
+> S7.5.7 rejects a predefined `empty` name; an ordinary user-defined alias
+> uses existing type syntax and needs no new keyword implementation.
+
+#### Earlier Success-arm retirement
+
+> **2026-11-02, source inspection only; removal pending.** The production parser
+> still accepts the suffix in `lambda/runtime/parser/lambda_parser.c`, and the
+> Lambda-owned reference grammar still includes it in `handler_expr` in
+> `lambda/tree-sitter-lambda/grammar.js`. AST and evaluator/lowering paths retain
+> `value_body`; active demos and fixtures still use the syntax. The implementation
+> plan must remove the surface and obsolete arm handling together with caller
+> migration and explicit syntax-rejection coverage.
+
+#### Earlier Reassignment outcomes
+
+> **2026-11-02, design only; implementation pending.** TE-18.2 supersedes the
+> previous retained-value/block-exit behavior for whole-variable reassignment.
+> The shared admission decision, acknowledgement walk, effective type facts,
+> interpreter stores, and MIR lowering need coordinated updates. Field/element
+> stores retain their separate contract. Qualification must cover errors replacing
+> old values, reachable recovery/effects, known rejection versus deferred warnings,
+> branch/loop joins, and safe storage on both tiers. No new runtime verification
+> is claimed.
+
+#### Earlier Handler results
+
+> **2026-11-02, existing executable, interpreter and JIT REPL probes.** Normal
+> value sequencing already preserves a final `null`; declarations leave the
+> earlier result unchanged. Procedure handlers do not yet satisfy TE-16.1:
+> value-position synchronous handlers yielded `null` on both success and
+> recovery, and a final procedure handler after `11` left `11` as the result.
+> The suspending value-position path has not been qualified under the new ruling.
+>
+> `resolve_handler` (`lambda/runtime/build_ast.cpp`) classifies handlers from the
+> callee's effect. `eval_handler` (`lambda/runtime/interp.cpp`) and
+> `emit_handler_statement_result` (`lambda/runtime/transpile-mir.cpp`) erase
+> normal procedure-handler results. `interp_proc_block_last_value`
+> (`lambda/runtime/interp_plan.cpp`) and `transpile_content_value`
+> (`lambda/runtime/transpile-mir.cpp`) exclude these handlers when selecting the
+> block result. These are implementation gaps, not exceptions to the ruling.

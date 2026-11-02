@@ -43,7 +43,7 @@ pn repaint(st) map^ {
 }
 
 pn painted(st) map {
-    let next: map | error = repaint(st)
+    let next: map^ = repaint(st)
     if (next is error) {*:st,note:"Cannot paint this photo: " ++ next.message} else next
 }
 
