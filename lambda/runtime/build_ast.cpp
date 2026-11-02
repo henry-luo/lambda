@@ -1974,9 +1974,9 @@ bool lambda_boundary_is_redundant(Type* source, Type* target) {
 // not completed yet is defect-capable, so no slot the JIT treats as a boxed
 // join is laid out as a native lane.
 // ---------------------------------------------------------------------------
-static bool ast_boundary_cannot_fail(Type* source, Type* target) {
-    if (!source || !target) return false;
-    return static_boundary_relation(source, target) == STATIC_BOUNDARY_PROVEN;
+static bool ast_boundary_cannot_fail(AstNode* source, Type* target) {
+    return source && target &&
+        lambda_ast_boundary_relation(source, target) == STATIC_BOUNDARY_PROVEN;
 }
 
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
@@ -2032,7 +2032,7 @@ static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
             parameter = parameter ? parameter->next : NULL) {
         if (!args[i] || !args[i]->type) continue;
         if (parameter && parameter->has_explicit_contract && parameter->contract_type) {
-            if (!ast_boundary_cannot_fail(args[i]->type, parameter->contract_type)) return true;
+            if (!ast_boundary_cannot_fail(args[i], parameter->contract_type)) return true;
             // S7.7.3: an argument's error is the call's value unless the
             // parameter admits it
             if (!lambda_type_accepts_error(parameter->contract_type) &&
@@ -2062,7 +2062,7 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
             if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
             AstDeclaratorNode* declarator = (AstDeclaratorNode*)d;
             if (!declarator->declared_type || declarator->is_type_definition) continue;
-            if (!declarator->init || !ast_boundary_cannot_fail(declarator->init->type,
+            if (!declarator->init || !ast_boundary_cannot_fail(declarator->init,
                     declarator->declared_type)) scan->found = true;
         }
         break;
@@ -2070,13 +2070,13 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         Type* declared = assign->target_entry ? assign->target_entry->declared_type : NULL;
         if (declared && (!assign->value ||
-                !ast_boundary_cannot_fail(assign->value->type, declared))) scan->found = true;
+                !ast_boundary_cannot_fail(assign->value, declared))) scan->found = true;
         break;
     }
     case AST_NODE_RETURN_STAM: {
         AstNode* value = ((AstReturnNode*)node)->value;
         if (scan->return_contract && value &&
-                !ast_boundary_cannot_fail(value->type, scan->return_contract)) scan->found = true;
+                !ast_boundary_cannot_fail(value, scan->return_contract)) scan->found = true;
         break;
     }
     case AST_NODE_CALL_EXPR:
@@ -2095,7 +2095,7 @@ static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature) {
     walk_lambda_ast(fn->body, ast_find_defect_origin, &scan, false);
     AstNode* body = boundary_unwrap_primary(fn->body);
     if (!scan.found && scan.return_contract && body && body->node_type != AST_NODE_CONTENT &&
-            !ast_boundary_cannot_fail(body->type, scan.return_contract)) {
+            !ast_boundary_cannot_fail(body, scan.return_contract)) {
         scan.found = true;   // the tail is the value the declared return checks
     }
     signature->may_defect = scan.found;
@@ -2134,6 +2134,31 @@ StaticBoundaryResult lambda_static_boundary_relation(Type* source, Type* target,
     return call_argument && lambda_type_accepts_error(source)
         ? static_parameter_boundary_relation(source, target)
         : static_boundary_relation(source, target);
+}
+
+// S11.1.1v3: an empty literal vacuously meets an uncounted array contract.
+// This proves admission success only; the runtime still reifies its storage.
+static bool empty_array_contract_admits(Type* target) {
+    target = unwrap_simple_type_type(target);
+    if (lambda_type_is_union(target)) {
+        TypeBinary* choice = (TypeBinary*)target;
+        return empty_array_contract_admits(choice->left) ||
+            empty_array_contract_admits(choice->right);
+    }
+    LambdaArrayContractInfo info;
+    return lambda_array_contract_info(target, &info) &&
+        info.array_contract == target && !info.counted_axes;
+}
+
+StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
+        Type* proof_type) {
+    AstNode* value = boundary_unwrap_primary(source);
+    if (value && value->node_type == AST_NODE_ARRAY &&
+            !((AstListNode*)value)->item && empty_array_contract_admits(target)) {
+        return STATIC_BOUNDARY_PROVEN;
+    }
+    return static_boundary_relation(proof_type ? proof_type : source ? source->type : NULL,
+        target);
 }
 
 static AstNode* boundary_unwrap_primary(AstNode* node) {
@@ -3781,7 +3806,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             : lambda_static_boundary_relation(arg->type, full_type, true);
         if (expected_param->has_explicit_contract &&
                 relation == STATIC_BOUNDARY_DEFERRED &&
-                !ast_boundary_cannot_fail(arg->type, full_type)) {
+                !ast_boundary_cannot_fail(arg, full_type)) {
             parameter_short_circuits_error = true;
         }
         bool compatible = relation != STATIC_BOUNDARY_REJECTED;
@@ -6465,6 +6490,8 @@ static Type* return_value_proof_type(Transpiler* tp, AstNode* value) {
     return node->type ? node->type : &TYPE_ANY;
 }
 
+static bool procedural_body_exits(AstNode* node);
+
 static bool validate_declared_return_boundary(AstNode* node, void* data) {
     ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
     if (!node) return true;
@@ -6484,7 +6511,9 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
         if (!actual) return true;
     }
     // S11.4.2v3: raised and returned errors cross the same complete contract.
-    StaticBoundaryResult relation = static_boundary_relation(actual, scan->expected);
+    StaticBoundaryResult relation = node->node_type == AST_NODE_RETURN_STAM
+        ? lambda_ast_boundary_relation(((AstReturnNode*)node)->value, scan->expected, actual)
+        : static_boundary_relation(actual, scan->expected);
     scan->admission_may_fail |= relation == STATIC_BOUNDARY_DEFERRED &&
         scan->expected != &TYPE_ANY_NO_ERROR;
     if (relation == STATIC_BOUNDARY_REJECTED) {
@@ -6519,8 +6548,11 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
     if (!expected || expected == &TYPE_ANY) return;
     Type* actual = signature->is_proc ? signature->inferred_return :
         return_value_proof_type(tp, fn->body);
-    StaticBoundaryResult body_relation = actual
-        ? static_boundary_relation(actual, expected) : STATIC_BOUNDARY_PROVEN;
+    // A completed pn crosses its contract at the owned return/raise sites below.
+    // Its aggregate type erases literal evidence and is not another boundary.
+    bool checks_tail = !signature->is_proc || !procedural_body_exits(fn->body);
+    StaticBoundaryResult body_relation = actual && checks_tail
+        ? lambda_ast_boundary_relation(fn->body, expected, actual) : STATIC_BOUNDARY_PROVEN;
     if (body_relation != STATIC_BOUNDARY_REJECTED &&
             !lambda_type_accepts_error(expected) && ordinary_outcome_has_error(tp, fn->body)) {
         // S7.5.1v6: widening an outcome to any does not erase a known error.
@@ -11329,9 +11361,9 @@ static AstDeclaratorNode* build_declarator_binding_syntax(Transpiler* tp,
 }
 
 static bool note_deferred_local_admission(Transpiler* tp, SourceSpan span,
-        Type* source, Type* target, String* name) {
+        AstNode* source, Type* target, String* name) {
     if (!target) return false;
-    StaticBoundaryResult relation = static_boundary_relation(source, target);
+    StaticBoundaryResult relation = lambda_ast_boundary_relation(source, target);
     if (relation != STATIC_BOUNDARY_DEFERRED)
         return relation == STATIC_BOUNDARY_REJECTED && tp->static_warning;
     record_semantic_warning_span(tp, span, ERR_DEFERRED_ADMISSION,
@@ -11403,7 +11435,7 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
         admission_may_fail = note_deferred_local_admission(tp, span,
-            value ? value->type : NULL, declared, assignment->name);
+            value, declared, assignment->name);
     }
     if (invalid_annotation && tp->static_warning && value && value->type) {
         // A downgraded unknown annotation is no storage contract. Retaining
@@ -14121,7 +14153,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
                 "assignment to '%.*s' is incompatible with its declared type (expected %s, got %s)",
                 (int)ident->name->len, ident->name->chars, expected_name, actual_name);
         }
-        if (note_deferred_local_admission(tp, span, value->type,
+        if (note_deferred_local_admission(tp, span, value,
                 entry->declared_type, ident->name)) {
             mark_binding_admission_outcome(tp, entry);
         }

@@ -943,3 +943,24 @@ kind changes through `float^` propagation and an incorrect reordered-record
 field read after propagation. The user has been asked whether error unions
 apply T's normal conversion/reification or preserve matching members. No
 runtime admission rule changes while that decision is pending.
+
+
+### Closed empty-array admission evidence (2026-11-03)
+
+S11.1.1v3 uncounted homogeneous arrays admit an empty literal without an
+element check. Shared AST admission analysis retains that expression evidence
+for declarations, arguments, explicit returns and defect summaries. The proof
+does not remove runtime representation admission (D3.2.4v4), infer emptiness
+from a mutable binding's historical length, or bypass counted/constrained
+contracts. A definitely completed procedure is checked at its owned return
+sites; its aggregate inferred type is not a second runtime boundary that can
+erase the literal proof and introduce a spurious error outcome.
+
+The return-outcome fixture constructs independent typed integer and boolean
+arrays, then passes them to borrowed parameters without unnecessary result
+propagation. Diagnostic checks pass **247/247**, the focused tier/GC matrix
+**128/128**, and full MIR GC **350/350**. Existing MIR checks remain
+**264/279** with all assertions retained. Evidence:
+`temp/error-handling/m3-empty-array-proof-{diag,gc,mir}.json` and
+`m3-empty-array-proof-focused.log`. Caller migration remains in progress;
+the incremental inventory compiles **3,741/3,772** and needs a final full audit.

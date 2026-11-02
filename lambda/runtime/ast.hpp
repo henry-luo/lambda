@@ -170,6 +170,10 @@ static inline AstCallNode* ast_pipe_sys_call(AstNode* node, const SysFuncInfo** 
     return (AstCallNode*)right;
 }
 
+// Static admission may use closed expression evidence without removing reification.
+StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
+    Type* proof_type = NULL);
+
 static inline bool ast_block_may_carry_defect(AstNode* node,
     AstCallDefectPredicate call_may_defect, void* ctx, int depth);
 
@@ -872,8 +876,7 @@ static inline bool ast_block_may_carry_defect(AstNode* node,
         for (; decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR; decl = decl->next) {
             AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
             if (named->declared_type && !lambda_type_accepts_error(named->declared_type) &&
-                    (lambda_static_boundary_relation(named->init ? named->init->type : NULL,
-                        named->declared_type, false) != STATIC_BOUNDARY_PROVEN ||
+                    (lambda_ast_boundary_relation(named->init, named->declared_type) != STATIC_BOUNDARY_PROVEN ||
                      ast_value_may_carry_defect(named->init, call_may_defect, ctx, depth + 1))) {
                 // S7.7.2: this block may complete with its declaration's error.
                 return true;

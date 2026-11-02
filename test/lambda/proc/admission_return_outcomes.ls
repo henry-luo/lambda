@@ -29,7 +29,16 @@ fn mutual_right(flag: bool) Verdict => if (flag) mutual_left(false) else false
 type Verdict = bool
 type Selected = int
 fn dependent(value: number as Selected) Selected => value
+// Empty literal evidence proves success without promising an untyped carrier.
+pn empty_vector() int[] { return [] }
+fn empty_flags() bool[] => []
+pn fill_vector(var values: int[]) any { push(values, 3) }
+pn fill_flags(var values: bool[]) any { push(values, true) }
 pn main() {
+    var vector = empty_vector()
+    var flags = empty_flags()
+    fill_vector(vector)^
+    fill_flags(flags)^
     let inferred = checked_array("bad")
     let admitted: float[]^ = checked_array("bad")
     var changed: float[]^ = []
@@ -46,5 +55,5 @@ pn main() {
      dependent(1.5) == 1.5, present([error("nested")]),
      type(widened_plain(7)) == float, type(widened_union(7)) == int, type(propagated_union()) == int,
      type(mixed_union(true)) == int, type(mixed_union(false)) == float,
-     type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7)]
+     type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7), vector, flags]
 }
