@@ -1450,3 +1450,23 @@ unrelated int53 boxing guard (D3.3.4/S7.1.3v2). No generated code or bounds
 policy changed. The full emission gate passes **277/280**; evidence:
 `m3-shrinking-opcode-mir.json`. The preceding aggregate count remains the
 observed count above, rather than a synthetic rerun total.
+
+### Nullable record declaration layout (2026-11-03)
+
+S11.4.6v3/D3.2.4v3: declaration admission now uses the existing
+`mir_map_contract_needs_reification` helper, as assignments, arguments and
+returns already do. Its former inline gate inspected only the wrapper's
+TypeId, so it missed the packed record inside `N?`. A more precise semantic
+membership proof consequently skipped the representation boundary too. This
+left literal-shaped maps behind named-record readers; it also delayed the
+COW fixture's reification until its caller, adding forty copies/share marks.
+
+The new nullable-record layout fixture uses extra leading fields and nested
+links to detect incorrect packed offsets for both `let` and `var`. The shared
+gate preserves the required admission independently of its proven semantic
+membership. It does not change error-union member conversion policy.
+
+Qualification: **184/184** focused tier/GC executions, **55/55** native
+optimization checks with original counters, **351/351** full MIR GC cases,
+and **277/280** MIR emission checks. Evidence:
+`m3-nullable-record-declaration-{focused.log,native.json,gc.json,mir.json}`.

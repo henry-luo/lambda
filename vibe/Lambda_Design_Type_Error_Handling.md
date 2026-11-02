@@ -1070,11 +1070,15 @@ S7.6.3v3/S7.7.2v2 counted fill qualification keeps producer propagation before
 destination validation: `let a: int[2] = fill(n, 1)^` retains a length mismatch
 at `a` and continues, while an invalid fill count propagates. Uncounted numeric
 literal fill success has a static membership proof; runtime storage admission
-is still required. The focused tier/GC matrix passes 176/176.
+is still required. The focused tier/GC matrix passes 184/184.
 S7.6.3v3/D2.4.1 dynamic dispatch preserves its boxed outcome until propagation
 checks it, including when a loop continuation calls an existing module
 definition. The deterministic handoff regression checks both normal values
 and errors under forced/poison GC (D8.1.1v18).
+S11.4.6v3/D3.2.4v3 declarations use the same named-record reification gate
+as assignments, arguments and returns, including a record inside `N?`.
+Semantic membership does not establish its packed offsets. The native
+optimization gate passes 55/55 with its original copy/share budgets.
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

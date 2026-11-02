@@ -9750,6 +9750,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 static MirValue transpile_expr_with_map_contract(MirTranspiler* mt,
         AstNode* value, Type* target, bool* constructed);
 static Type* mir_direct_map_contract(AstNode* value, Type* target);
+static bool mir_map_contract_needs_reification(Type* contract,
+    AstNode* source_node, TypeId val_tid);
 static bool mir_map_literal_matches_contract(AstMapNode* map_node, TypeMap* expected,
     bool require_identity = false, MirTranspiler* mt = NULL);
 
@@ -23865,9 +23867,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      boundary_numeric_admission_is_dynamic(expr_tid,
                          declared_value_type->type_id) ||
                      declared_range_contract ||
-                     (declared_value_type->type_id == LMD_TYPE_MAP &&
-                      expr_tid == LMD_TYPE_MAP &&
-                      asn->init && asn->init->type != declared_value_type) ||
+                     // S11.4.6v3/D3.2.4v3: a nullable named record still
+                     // owns a packed layout; membership alone cannot prove it.
+                     mir_map_contract_needs_reification(declared_value_type,
+                         asn->init, expr_tid) ||
                      // Every declared T[] crossing establishes a value-level
                      // certificate. A literal is not exempt: its raw carrier
                      // alone cannot prove nested rank or a named map layout.
