@@ -399,9 +399,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_single_use_string_constructor(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
-        # the 25-piece object contributes directly to its owner prefix.
-        self.assertRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 1, 26,")
-        self.assertNotRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 0, 25,")
+        # coalesced literal runs and integer lanes join directly into the owner.
+        self.assertRegex(body, r"\tcall\tfn_strcat_values_[^\n]+, 1, 8,")
+        self.assertNotRegex(body, r"\tcall\tfn_strcat_(?:many|values)_[^\n]+, 0, (?:7|25),")
+        self.assertNotRegex(body, r"\tcall\t(?:fn_string_p|mvp_\d+_json_num_)")
 
     def test_assignment_failure_names_binding(self):
         source = Path(self.scratch.name) / "assignment.ls"

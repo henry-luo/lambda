@@ -8,26 +8,28 @@ with bounded inlining, guarded numeric loops, checked mutation and precise
 Coverage now extends to **28 rows**, including floating recursion, FFT,
 allocation-heavy search, dynamic arrays, character processing, numerical kernels
 and JSON generation. All 28 original goldens pass; allocation workloads also
-pass forced GC with freed-memory poisoning. The latest 100-run paired campaign
-qualifies **26/28** against Full MIR and **15/28** against both gates using the
-original execution windows. A separate matched 10,000-invocation Sumfp batch
-resolves that row's clock limit, bringing combined qualification to **27/28**
-against Full MIR and **16/28** against both. The original zero-duration samples
-remain recorded and unqualified.
+pass forced GC with freed-memory poisoning. The latest 100-sample campaign
+qualifies **27/28** against Full MIR and **17/28** against C2MIR and both gates
+using the original execution windows. A separate matched 10,000-invocation
+Sumfp batch resolves that row's clock limit, bringing combined qualification to
+**28/28 against Full MIR and 18/28 within 10% of C2MIR (and both gates)**, up
+from 27/28 and 16/28 respectively. Original zero-duration samples remain
+recorded and unqualified. These are execution-window timings, excluding
+compilation, with unchanged one-sided 95% confidence gates.
 
-The latest pass lowers native-bit primitive fills, folds small constant fills
-for proven direct read-only consumers, keeps nested bitwise operations in native
-lanes, reuses closed array guards inside conditional arms and extends read-only
-array tail calls (**D4.1.1v2–D4.1.3**, **D5.3**, **S4.1.2**, **S9.1.2–S9.1.3**).
-NQueens improves another **16.6%** against the interleaved previous MVP and now
-qualifies against Full MIR; Beng Mandelbrot now qualifies against both. Fannkuch
-has a faster median than Full MIR but still misses its confidence gate. Twelve
-rows miss the C2MIR allowance. All **40 focused test groups** pass. The full
-baseline remains **8,501/8,502**, with the previously recorded AUTO-tier
-cold-float snapshot failure. Brainfuck also records a 3.3% before/after
-slowdown in this campaign. The 28-row performance milestone remains open.
-See the
-[implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
+The latest pass places small numeric payloads beside their existing nonmoving
+headers, fuses integer formatting into string joins, and coalesces adjacent
+literal fragments into Input-owned constants (**D4.1.1v2**, **D4.3.1–D4.3.2v2**,
+**D5.3.3**, **S4.1.2**, **S9.1.2**). Runtime types and data layouts remain
+unchanged. JSON generation improves **43.5%** against the interleaved previous
+MVP and qualifies at **1.046× C2MIR** (confidence upper bound **1.070×**).
+NQueens improves **19.5%** and Queens **8.0%**, but both still miss the C2MIR
+gate. Pnpoly's qualification returns without evidence of a new code-driven
+speedup. Ten C2MIR gaps remain; the all-28 performance milestone is open.
+All **40 focused test groups** pass. The aggregate baseline records **8,514/8,517**;
+Hotwire passes isolated reruns, DOCX remains timeout-sensitive under concurrent
+load, and the known AUTO-tier cold-float snapshot mismatch persists. See the
+[implementation, complete measurements and validation](impl/Lambda_Impl_MIR_MVP.md).
 
 **Destination:** `lambda/runtime/mvp/`
 

@@ -5,6 +5,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "heap_api.h"
+#include "gc/gc_object_zone.h"
 #include "context_capsule.h"
 #include "root_vector.h"
 #include "../../lib/log.h"
@@ -302,22 +303,33 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
                                                int64_t extra, bool zeroed,
         int ndim, const int64_t* dimensions) {
     if (length < 0 || extra < 0 || length > INT64_MAX - extra) return NULL;
-    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    size_t bytes = 0, combined = 0;
+    bool valid_size = elem_size > 0 &&
+        lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes);
+    int payload_class = ndim == 1 && valid_size &&
+        lam::checked_add(sizeof(ArrayNum), bytes, &combined)
+        ? gc_object_zone_class_index(combined) : -1;
+    ArrayNum *arr = (ArrayNum*)(payload_class >= 0
+        ? heap_calloc_class(combined, LMD_TYPE_ARRAY_NUM, payload_class)
+        : heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM));
     if (!arr) return NULL;
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->set_elem_type(elem_type);
+    arr->extra = extra;
+    if (payload_class >= 0) {
+        // small owned lanes fit in the existing nonmoving object slot (D4.3.1).
+        // no second allocation/safepoint is needed; growth still uses the data zone.
+        arr->data = bytes ? (uint8_t*)arr + sizeof(ArrayNum) : NULL;
+        arr->length = length; arr->capacity = length + extra;
+        return arr;
+    }
     // The data-zone allocation can force GC before this helper returns the new
     // header to generated code, so the native construction interval needs an
     // exact root of its own.
     RootFrame roots(1);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
-    arr->extra = extra;
-    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
-    size_t bytes;
-    if (elem_size <= 0 ||
-            !lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes)) {
-        return arr;
-    }
+    if (!valid_size) return arr;
     if (ndim>1) {
         size_t shape_bytes=sizeof(ArrayNumShape)+2*(size_t)ndim*sizeof(int64_t);
         ArrayNumShape* shape=(ArrayNumShape*)heap_data_calloc(shape_bytes);

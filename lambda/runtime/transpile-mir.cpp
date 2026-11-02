@@ -2095,19 +2095,6 @@ static bool mir_is_positive_int_literal(MirTranspiler* mt, AstNode* node) {
     return mir_int_literal_value(mt, node, &value) && value > 0;
 }
 
-static TypeString* mir_string_literal_type(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY &&
-            ((AstPrimaryNode*)node)->expr) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    if (!node || node->node_type != AST_NODE_PRIMARY ||
-            ((AstPrimaryNode*)node)->expr || !node->type ||
-            !node->type->is_literal || node->type->type_id != LMD_TYPE_STRING) {
-        return NULL;
-    }
-    TypeString* literal = (TypeString*)node->type;
-    return literal->string ? literal : NULL;
-}
 
 static MirVarEntry* find_var(MirTranspiler* mt, const char* name);
 static MirVarEntry* mir_var_for_binding(MirTranspiler* mt,
@@ -15080,7 +15067,7 @@ static AstFieldNode* mir_pair_char_index_expr(MirTranspiler* mt,
 static AstFieldNode* mir_ascii_literal_compare_index(MirTranspiler* mt,
         AstBinaryNode* binary, bool native_index) {
     if (!binary || (binary->op != OPERATOR_EQ && binary->op != OPERATOR_NE)) return NULL;
-    TypeString* literal = mir_string_literal_type(binary->right);
+    TypeString* literal = ast_string_literal_type(binary->right);
     if (!literal || literal->string->len != 1 ||
             (unsigned char)literal->string->chars[0] >= 0x80) return NULL;
     AstFieldNode* index = native_index ? mir_pair_char_index_expr(mt, binary->left)
@@ -16588,7 +16575,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     };
 
     if (item_equality) {
-        TypeString* literal = mir_string_literal_type(bi->right);
+        TypeString* literal = ast_string_literal_type(bi->right);
         bool guarded_string = mir_guarded_string_operand(mt, bi->left, left_tid) &&
             mir_guarded_string_operand(mt, bi->right, right_tid);
         bool scalar_fast_path = bi->op != OPERATOR_REF_EQ &&
@@ -17589,7 +17576,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     // ======================================================================
     {
         TypeString* literal = (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE)
-            ? mir_string_literal_type(bi->right) : NULL;
+            ? ast_string_literal_type(bi->right) : NULL;
         AstFieldNode* left_char = mir_pair_char_index_expr(mt, bi->left);
         AstFieldNode* right_char = mir_pair_char_index_expr(mt, bi->right);
         if (left_char && right_char &&
@@ -22592,7 +22579,7 @@ static bool mir_ascii_scan_plan(MirTranspiler* mt, AstWhileNode* loop,
                 ? (AstBinaryNode*)compare_node : NULL;
         TypeString* literal = char_compare &&
             (char_compare->op == OPERATOR_EQ || char_compare->op == OPERATOR_NE)
-                ? mir_string_literal_type(char_compare->right) : NULL;
+                ? ast_string_literal_type(char_compare->right) : NULL;
         if (!literal || literal->string->len != 1 ||
                 (unsigned char)literal->string->chars[0] >= 0x80) return false;
         condition_index = mir_ascii_char_index_expr(mt, char_compare->left);

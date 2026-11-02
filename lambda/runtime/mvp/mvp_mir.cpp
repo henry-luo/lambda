@@ -646,15 +646,19 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
     return value(c, r, b->contract->type_id, b->rep, b->contract, node);
 }
 
+static AstNode* function_result_expression(MvpFunction* f) {
+    AstNode* body = mvp_single_statement(f->ast->body);
+    if (body && body->node_type == AST_NODE_RETURN_STAM) body = ((AstReturnNode*)body)->value;
+    else if (f->ast->node_type == AST_NODE_PROC) return NULL;
+    return ast_unwrap_primary_to_leaf(body);
+}
+
 static AstNode* string_recipe_body(MvpFunction* f) {
     if (!f || f->result_contract != &TYPE_STRING || f->abi.effects.may_return_error || f->abi.effects.may_reenter)
         return NULL;
     for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next)
         if (mvp_contract(p)->type_id != LMD_TYPE_STRING) return NULL;
-    AstNode* body = mvp_single_statement(f->ast->body);
-    if (body && body->node_type == AST_NODE_RETURN_STAM) body = ((AstReturnNode*)body)->value;
-    else if (f->ast->node_type == AST_NODE_PROC) return NULL;
-    return ast_unwrap_primary_to_leaf(body);
+    return function_result_expression(f);
 }
 
 static int recipe_parameter(MvpFunction* f, AstNode* node) {
@@ -696,19 +700,46 @@ static int string_recipe_size(LambdaMvpModule* m, AstNode* node, MvpFunction* sc
     return total;
 }
 
+static AstNode* integer_string_argument(MvpCompiler* c, AstNode* node) {
+    node = ast_unwrap_primary_to_leaf(node);
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return NULL;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNode* target = ast_unwrap_primary_to_leaf(call->function);
+    MvpFunction* f = mvp_function(c->module, ast_direct_call_function(call));
+    if (f) {
+        AstNamedNode* p = f->ast->param;
+        AstNode* body = function_result_expression(f);
+        // the generic string() effect includes reentry; this exact int-only
+        // wrapper can only invoke the canonical scalar renderer (S4.1.2).
+        if (f->result_contract != &TYPE_STRING || !p || p->next || lambda_type_param(p->type)->is_var_param ||
+                mvp_contract(p) != &TYPE_INT || !body || body->node_type != AST_NODE_CALL_EXPR) return NULL;
+        AstCallNode* converted = (AstCallNode*)body;
+        if (recipe_parameter(f, converted->argument) != 0) return NULL;
+        target = ast_unwrap_primary_to_leaf(converted->function);
+    }
+    if (!target || target->node_type != AST_NODE_SYS_FUNC ||
+            ((AstSysFuncNode*)target)->fn_info->fn != SYSFUNC_STRING ||
+            mvp_value_contract(c->module, call->argument) != &TYPE_INT) return NULL;
+    return call->argument;
+}
+
 static MirValue string_recipe_argument(MvpCompiler* c, AstNode* node, MvpFunction* scope, MirValue* actuals) {
     int p = recipe_parameter(scope, node);
-    return p >= 0 ? actuals[p] : convert(c, expression(c, node), VALUE_REP_RAW_GC_POINTER);
+    if (p >= 0) return actuals[p];
+    // a transparent integer formatter has no observable work beyond its input;
+    // retain that input once, in argument order, until the destination join.
+    if (AstNode* input = integer_string_argument(c, node)) return expression(c, input);
+    return convert(c, expression(c, node), VALUE_REP_RAW_GC_POINTER);
 }
 
 static void string_recipe_parts(MvpCompiler* c, AstNode* node, MvpFunction* scope,
-        MirValue* actuals, MIR_op_t* parts, int* count) {
+        MirValue* actuals, MirValue* parts, int* count) {
     AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int size = 0;
     ast_collect_join_leaves(node, leaves, &size);
     for (int i = 0; i < size; i++) {
         AstNode* leaf = ast_unwrap_primary_to_leaf(leaves[i]);
         if (leaf->node_type != AST_NODE_CALL_EXPR) {
-            parts[(*count)++] = reg(c, string_recipe_argument(c, leaf, scope, actuals).reg);
+            parts[(*count)++] = string_recipe_argument(c, leaf, scope, actuals);
             continue;
         }
         AstCallNode* call = (AstCallNode*)leaf;
@@ -720,10 +751,46 @@ static void string_recipe_parts(MvpCompiler* c, AstNode* node, MvpFunction* scop
     }
 }
 
+static String* string_fragment_literal(MirValue fragment) {
+    TypeString* literal = ast_string_literal_type((AstNode*)fragment.provenance_node);
+    return literal ? literal->string : NULL;
+}
+
+static int coalesce_string_literals(MvpCompiler* c, MirValue* fragments, int count) {
+    int written = 0;
+    for (int first = 0; first < count;) {
+        int last = first;
+        size_t bytes = 0;
+        while (last < count) {
+            String* text = string_fragment_literal(fragments[last]);
+            if (!text || text->len > UINT32_MAX - bytes) break;
+            bytes += text->len;
+            last++;
+        }
+        if (last - first < 2) { fragments[written++] = fragments[first++]; continue; }
+        // recipe parameters retain literal provenance; adjacent immutable bytes
+        // share one Input-owned constant without changing dynamic evaluation order.
+        StrBuf* buffer = strbuf_new_cap(bytes + 1);
+        if (!buffer) { mvp_reject(c->module, NULL, "string constant allocation failed"); return 0; }
+        for (int i = first; i < last; i++) {
+            String* text = string_fragment_literal(fragments[i]);
+            strbuf_append_str_n(buffer, text->chars, text->len);
+        }
+        MarkBuilder builder(c->module->tp);
+        String* joined = builder.createString(buffer->str, buffer->length);
+        strbuf_free(buffer);
+        if (!joined) { mvp_reject(c->module, NULL, "string constant allocation failed"); return 0; }
+        MIR_reg_t r = em_load_const(&c->em, em_add_const(&c->em, joined), MIR_T_P);
+        fragments[written++] = value(c, r, LMD_TYPE_STRING, VALUE_REP_RAW_GC_POINTER, &TYPE_STRING);
+        first = last;
+    }
+    return written;
+}
+
 static MirValue string_concat(MvpCompiler* c, AstNode* node, MvpBinding* owner,
         MvpBinding* replacement, AstNode* initializer) {
     AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int count = 0;
-    if (!ast_collect_join_leaves(node, leaves, &count) || count < 2) return {};
+    if (!ast_collect_join_leaves(node, leaves, &count) || !count) return {};
     if (owner && mvp_local_binding(c->module, leaves[0]) != owner) return {};
     for (int i = 0; i < count; i++)
         if (mvp_value_contract(c->module, leaves[i])->type_id != LMD_TYPE_STRING) return {};
@@ -735,25 +802,33 @@ static MirValue string_concat(MvpCompiler* c, AstNode* node, MvpBinding* owner,
         expanded += recipes[i] ? recipes[i] : 1;
     }
     if (expanded > LAMBDA_STRING_CONCAT_MAX_PARTS) memset(recipes, 0, sizeof(recipes));
-    MIR_op_t args[LAMBDA_STRING_CONCAT_MAX_PARTS]; int parts = 0;
+    if (count == 1 && (!recipes[0] || expanded < 2)) return {};
+    MirValue fragments[LAMBDA_STRING_CONCAT_MAX_PARTS]; int parts = 0;
     for (int i = 0; i < count; i++) {
         if (recipes[i]) {
-            string_recipe_parts(c, leaves[i], NULL, NULL, args, &parts);
+            string_recipe_parts(c, leaves[i], NULL, NULL, fragments, &parts);
             continue;
         }
-        MirValue part = owner && i == 0 ? read_binding(c, owner, leaves[i], false) : expression(c, leaves[i]);
-        part = convert(c, part, VALUE_REP_RAW_GC_POINTER);
-        args[parts++] = reg(c, part.reg);
+        fragments[parts++] = owner && i == 0 ? read_binding(c, owner, leaves[i], false) :
+            string_recipe_argument(c, leaves[i], NULL, NULL);
     }
-    count = parts;
+    count = coalesce_string_literals(c, fragments, parts);
+    if (!count) return {};
+    if (count == 1) return fragments[0];
+    bool formatted = false;
+    for (int i = 0; i < count; i++) formatted |= fragments[i].semantic_type == LMD_TYPE_INT;
+    MIR_op_t args[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    for (int i = 0; i < count; i++) args[i] = reg(c, convert(c, fragments[i],
+        formatted ? VALUE_REP_ITEM : VALUE_REP_RAW_GC_POINTER).reg);
     // only assignment may consume its prefix. Ordinary reads freeze buffers before any alias escapes.
     MIR_reg_t joined;
-    if (owner && count == 2) joined = em_call_2(&c->em, "fn_strcat", MIR_T_P,
+    if (owner && count == 2 && !formatted) joined = em_call_2(&c->em, "fn_strcat", MIR_T_P,
         MIR_T_P, args[0], MIR_T_P, args[1], true);
     else {
         MIR_var_t fixed[] = {{MIR_T_I64, "owned", 0}, {MIR_T_I64, "count", 0}};
         MIR_op_t values[] = {imm(c, owner != NULL), imm(c, count)};
-        joined = em_emit_vararg_call(&c->em, "fn_strcat_many", MIR_T_P, 1, 2, fixed, values, count, args);
+        joined = em_emit_vararg_call(&c->em, formatted ? "fn_strcat_values" : "fn_strcat_many",
+            MIR_T_P, 1, 2, fixed, values, count, args);
     }
     return value(c, joined, LMD_TYPE_STRING, VALUE_REP_RAW_GC_POINTER, &TYPE_STRING, node);
 }
@@ -1735,7 +1810,13 @@ static MIR_reg_t native_bitwise_tree(MvpCompiler* c, AstNode* source, MIR_label_
 
 static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     MvpFunction* f = mvp_function(c->module, ast_direct_call_function(node));
-    if (f) return direct_call(c, f, node->argument, discard);
+    if (f) {
+        if (f->result_contract == &TYPE_STRING) {
+            MirValue joined = string_concat(c, node, NULL, NULL, NULL);
+            if (joined.reg) return joined;
+        }
+        return direct_call(c, f, node->argument, discard);
+    }
     SysFuncInfo* info = ((AstSysFuncNode*)ast_unwrap_primary_to_leaf(node->function))->fn_info;
     if (info->fn == SYSFUNC_ORD) {
         AstFieldNode* index = mvp_string_index(c->module, node->argument);

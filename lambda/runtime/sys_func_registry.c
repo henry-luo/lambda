@@ -2367,6 +2367,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_strcat5", FPTR(fn_strcat5)},
     {"fn_strcat6", FPTR(fn_strcat6)},
     {"fn_strcat_many", FPTR(fn_strcat_many)},
+    {"fn_strcat_values", FPTR(fn_strcat_values)},
     {"fn_string_freeze", FPTR(fn_string_freeze),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER), JIT_IMPORT_ARGS_BORROWED_AUDITED}},

@@ -44,6 +44,10 @@ def compiler_identity():
     paths += [ROOT / path for path in (
         "build_lambda_config.json", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
         "lambda/lambda.h", "lambda/lambda-data.hpp", "lambda/runtime/lambda-data-runtime.cpp",
+        "lambda/core/print.h", "lambda/core/print.cpp",
+        "lambda/runtime/heap_api.h", "lambda/runtime/lambda-mem.cpp",
+        "lambda/runtime/gc/gc_object_zone.h", "lambda/runtime/gc/gc_object_zone.c",
+        "lambda/runtime/gc/gc_heap.c", "lambda/runtime/lambda-root-frame.hpp",
         "lambda/io/mark_builder.hpp", "lambda/io/mark_builder.cpp",
         "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
