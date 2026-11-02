@@ -46540,12 +46540,16 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     // diverge even for read-only typed-array loops (D3.2.2,
                     // D8.3.2).
                     param_var->elem_type_guarded = elem_type_invalidated;
-                }
-                if (param_var && !param_var->is_var_param && !elem_type_invalidated) {
-                    // Value parameters cannot publish a detached replacement
-                    // to their caller; the body proof above also excludes a
-                    // representation-changing alias before this cache is used.
-                    mir_cache_typed_array_layout(mt, param_var);
+                    if (!elem_type_invalidated) {
+                        // the boxed entry completed the same full admission
+                        // as a native witness edge (D3.3.3v3). Retain that
+                        // proof even when the return outcome selects this ABI.
+                        param_var->typed_array_contract_proven =
+                            lambda_array_contract_canonical(param_var->full_type);
+                        // var-home reloads refresh a detached replacement's
+                        // header; ownership guards remain separate from layout.
+                        mir_cache_typed_array_layout(mt, param_var);
+                    }
                 }
             }
         }

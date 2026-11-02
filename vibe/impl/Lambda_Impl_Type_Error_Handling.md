@@ -1201,3 +1201,20 @@ and MIR emission **270/280**. Native optimization checks remain **49/55**;
 no assertions or budgets changed. Evidence:
 `temp/error-handling/m3-local-admission-lanes-before.json` and
 `m3-retained-local-analysis-{focused.log,mir.json,gc.json,opt.json}`.
+
+### Boxed-entry array proof parity (2026-11-03)
+
+D3.3.3v3 full array admission now leaves the same contract proof and refreshed
+header cache in a boxed body as in a native-witness body. Selecting the boxed
+ABI for an ordinary error-union result had lost that proof. Borrowed roots
+retain their ownership checks, and var-home publication reloads detached
+headers; bindings whose deferred reassignments may publish errors still use
+Item storage (S7.7.4v2). No union conversion policy changes.
+
+The existing `tune26_var_call_contract` guard now passes without a repeated
+`item_at` fallback. Focused tier/GC executions pass **160/160**, MIR GC
+**351/351**, and MIR emission **271/280**, with unchanged expectations.
+Evidence: `temp/error-handling/m3-boxed-array-proof-{focused.log,mir.json,gc.json}`.
+The nine remaining emission guards all pass on the base compiler with their
+original sources (`m3-base-mir-proof-review.json`); their current differences
+remain under review.
