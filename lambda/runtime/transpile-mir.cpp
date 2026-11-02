@@ -33326,6 +33326,11 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
     int boxed_fn_root = module_fn_rooted
         ? -1 : create_gc_root_slot(mt, boxed_fn);
 
+    // S7.5.4: match T0 by forwarding a callee error before evaluating arguments.
+    bool callee_may_error = lambda_type_accepts_error(call_node->function->type);
+    MirRejectedJoin callee_failure = {};
+    if (callee_may_error) callee_failure = emit_rejected_join_open(mt, &boxed_fn, 1);
+
     // Count and box args
     AstNode* arg = injected ? injected : call_node->argument;
     int arg_count = em_linked_node_count(call_node->argument) + (injected ? 1 : 0);
@@ -33511,7 +33516,9 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
             mir_unwrap_decl_type(contract), "function return");
     }
 
-    return dyn_result;
+    return callee_may_error
+        ? emit_rejected_join_close(mt, callee_failure, dyn_result, LMD_TYPE_ANY)
+        : dyn_result;
 }
 
 static MirValue emit_dynamic_call_value(MirTranspiler* mt, AstCallNode* call_node,

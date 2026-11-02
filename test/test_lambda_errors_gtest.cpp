@@ -2805,6 +2805,11 @@ TEST_F(NegativeScriptTest, AssignmentRetainsItsDeclaredAdmissionTarget) {
         "assignment to 'value' is incompatible with its declared type (expected int, got int | error)");
 }
 
+TEST_F(NegativeScriptTest, ComputedCalleeErrorNeedsAnAdmittingReturn) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_computed_callee_return.ls",
+        "error[E208]");
+}
+
 TEST_F(NegativeScriptTest, LoopCarriedValidationErrorCannotUseCleanReturn) {
     ExpectErrorMessage("test/lambda/negative/semantic/loop_error_clean_return.ls", "error[E208]");
 }

@@ -3556,6 +3556,12 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
     if (call && !validate_duplicate_call_arguments(tp, call,
             ast_direct_call_function(call))) return false;
+    // S7.5.4: a computed callee error is the call's outcome, before dispatch.
+    bool callee_error = call && ordinary_outcome_has_error(tp, call->function);
+    if (callee_error) {
+        call->parameter_admission_may_fail = true;
+        call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
+    }
     // An unknown callable's actual arity/parameter guards can fail at runtime
     // (S7.7.3), even when its open result normalizes to any.
     TypeFunc* func_type = call && call->function
@@ -3575,7 +3581,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     int line = 0;
     NameEntry* var_arg_root_entries[64];
     int var_arg_root_count = 0;
-    bool parameter_short_circuits_error = false;
+    bool parameter_short_circuits_error = callee_error;
     Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
     bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
@@ -6626,8 +6632,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             }
             immediate_acknowledgment = true;
         }
-        // a computed callee (`make()(x)`) is an operand like any other
-        validate_enforcing_calls_in_expression(tp, call->function, false,
+        // a computed callee error reaches this call's receiving context
+        validate_enforcing_calls_in_expression(tp, call->function, immediate_acknowledgment,
             return_acknowledgment);
         TypeFunc* signature = call_function_signature(call);
         AstNode* callee = ast_unwrap_primary(call->function);

@@ -19,5 +19,11 @@ let h = call(returned_union, [])
 let i = returns_any()
 let composed = int("2") + 1
 let classified = error("classification") is (error | null);
+fn failed_target() any^ => error("target failure")
+fn failed_argument() int^ => error("argument failure")
+let target_error = failed_target()()
+let priority_error = failed_target()(failed_argument())
+let method_error = string(error("text target")).lower();
 [a.message, b.message, c.message, d.message, e.message, f.message,
- g.message, h.message, i.message, composed, classified]
+ g.message, h.message, i.message, composed, classified,
+ target_error.message, priority_error.message, method_error.message]
