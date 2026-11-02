@@ -8,6 +8,11 @@ view ordinary_union: <view_union>() element | error { failed() }
 view propagated: <view_propagated>() element^ { failed()^ }
 view numeric: <view_numeric>() float { opaque(7) }
 view dynamic_template: <view_dynamic> { ~.failure }
+fn initial_state(fail: bool) int^ => if (fail) error("state outcome") else 7
+view state_good: <view_state_good>() int^ state value:(initial_state(false)^) { value }
+view state_bad: <view_state_bad>() int^ state value:(initial_state(true)^) { 999 }
+let good_state = apply(<view_state_good>)
+let bad_state = apply(<view_state_bad>)
 let numeric_result = apply(<view_numeric>)
 let dynamic_result = apply(<view_dynamic failure:error("dynamic")>)
 let good_result = apply(<view_good>)
@@ -16,4 +21,5 @@ let open_result = apply(<view_open>)
 let union_result = apply(<view_union>)
 let propagated_result = apply(<view_propagated>);
 [good_result, bad_result is error, open_result.message, union_result.message,
- propagated_result.message, type(numeric_result) == float, dynamic_result is error]
+ propagated_result.message, type(numeric_result) == float, dynamic_result is error,
+ good_state, bad_state.message]

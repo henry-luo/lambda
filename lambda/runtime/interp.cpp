@@ -8763,7 +8763,9 @@ static Item interp_eval_view_activation(Context* host, Script* module,
         }
     }
     if (setup_ok) result.set(eval_expr(frame, body));
-    if (setup_ok && !handler && view->signature) {
+    // state setup can explicitly return too; its outcome crosses the same
+    // view boundary before the activation completes (S12.1.3v2/S7.6.3v3).
+    if ((setup_ok || frame->signal == EvalSignal::RETURNED) && !handler && view->signature) {
         if (frame->signal == EvalSignal::RETURNED) {
             result.set(interp_signal_payload(frame));
             frame->signal = EvalSignal::NORMAL;

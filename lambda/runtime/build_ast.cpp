@@ -6896,8 +6896,6 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         AstViewNode* view = (AstViewNode*)node;
         validate_view_return_contract(tp, view);
         validate_enforcing_calls_in_expression(tp, view->pattern, false, false);
-        for (AstStateEntry* state = view->state; state; state = state->next_state)
-            validate_enforcing_calls_in_expression(tp, state->value, false, false);
         for (AstEventHandler* handler = view->handler; handler; handler = handler->next_handler)
             validate_enforcing_calls_in_expression(tp, (AstNode*)handler, false, false);
         return;
@@ -6961,6 +6959,17 @@ static void validate_view_return_contract(Transpiler* tp, AstViewNode* view) {
     body.param = view->param;
     body.body = view->body;
     int errors_before = tp->error_count;
+    bool returns_error = lambda_type_accepts_error(view->signature->return_contract);
+    for (AstStateEntry* state = view->state; state; state = state->next_state) {
+        // S12.1.3v2/S7.6.3v3: state setup runs in this view activation;
+        // explicit propagation uses its return contract, like an fn default.
+        body.body = state->value;
+        if (!returns_error) walk_lambda_ast(state->value, validate_raise_channel, tp, false);
+        view->signature->may_return_error |= validate_explicit_return_boundaries(tp,
+            &body, view->signature->return_contract);
+        validate_enforcing_calls_in_expression(tp, state->value, false, returns_error);
+    }
+    body.body = view->body;
     if (!lambda_type_accepts_error(view->signature->return_contract))
         walk_lambda_ast(view->body, validate_raise_channel, tp, false);
     if (tp->error_count != errors_before) return;
@@ -18878,8 +18887,7 @@ static bool resolver_return_is_closed(LambdaResolver* r, AstFuncNode* fn,
                 param = (AstNamedNode*)param->next) {
             AstNode* annotation = (AstNode*)syntax_tail((AstNode*)param,
                 sizeof(AstNamedNode))[0];
-            if ((param->name && str_cmp(param->name->chars, param->name->len,
-                    name->chars, name->len) == 0) ||
+            if (same_name_string(param->name, name) ||
                     (annotation && source_span_has_word(r->tp, annotation->source_span, "as")))
                 return false;
         }

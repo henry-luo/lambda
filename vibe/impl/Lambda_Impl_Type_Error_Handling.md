@@ -816,3 +816,23 @@ its isolated repeat and the subsequent full diagnostic run pass.
 The full source audit is **2,847/3,772** compiled, with **925** requiring
 review. This is migration evidence, not qualification; shared package failures
 still cascade into importers. No MIR expectation or budget is relaxed.
+
+### View state propagation (2026-11-03)
+
+S12.1.3v2/S7.6.3v3 view state setup now checks explicit propagation against
+the view's own return contract. The previous checker lost that context while
+visiting state initializers; it rejected existing `lower_slots(...)^` setup
+even on an error-admitting view. Setup propagation validates its error against
+the complete return contract and bypasses rendering. T0 now admits an explicit
+setup return before completing the activation, matching the existing MIR
+view return context. State-slot receiving policy is unchanged.
+
+The view-outcome fixture covers successful setup and an original error returned
+before a body that would produce `999`; a paired negative rejects setup
+propagation through a clean result. Diagnostic checks pass **247/247** and
+the tier/GC matrix passes **128/128**. Reference/production parser conformance
+passes **448/448**, **461/461**. After caller migration passes 37–40, a full
+audit compiles **3,355/3,772** authored non-negative sources; **417** remain for
+review. MIR checks pass **245/279**: remaining native-proof regressions and a
+string-builder representation failure still require root-cause work. These
+figures do not replace the required aggregate qualification.

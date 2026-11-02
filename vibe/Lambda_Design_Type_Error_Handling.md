@@ -1041,6 +1041,12 @@ receiver. JIT pair forwarding must preserve return admission. This does not
 make an unused interior failed binding a returned error, or treat an open
 recursive inference as an ordinary-error producer.
 
+View state setup is part of the view's pure activation (S12.1.3v2). An explicit
+postfix propagation in a state initializer uses that view's error-admitting
+return contract (S7.6.3v3), and exits before rendering the body. A clean return
+contract still rejects it. The propagated outcome crosses the same return
+admission as a body result. This does not change state-slot receiving rules.
+
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available
 to forward calls; parameter defaults and dependent return slots retain their

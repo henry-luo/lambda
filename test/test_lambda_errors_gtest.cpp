@@ -2684,6 +2684,8 @@ TEST_F(NegativeScriptTest, ViewBodiesOwnTheirReturnContract) {
         "function 'plain' may return error");
     ExpectErrorMessage("test/lambda/negative/semantic/error_view_return_mismatch.ls",
         "body returns type int, declared return type string");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_view_state_clean_propagation.ls",
+        "propagation requires an enclosing return contract that admits error");
 }
 
 TEST_F(NegativeScriptTest, WholeArrayErrorsRequireAnAdmittingReceiver) {
