@@ -1588,7 +1588,7 @@ static Type* mir_native_param_contract(const NativeFuncInfo* info, int index) {
 
 
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
-        AstNode* node, TypeId expected);
+        AstNode* node, TypeId expected, bool exact_kind = false);
 static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int depth);
 static TypeId mir_callsite_result_scalar_type(MirTranspiler* mt, AstFuncNode* fn);
 // With `mt` and a native `keep_lane`, an assignment counts only when its value
@@ -6785,7 +6785,7 @@ static void emit_capture_writeback(MirTranspiler* mt, AstFuncNode* fn_node,
 
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
-        AstNode* node, TypeId expected);
+        AstNode* node, TypeId expected, bool exact_kind);
 
 // All generated admissions share one lazy diagnostic/site ABI, including
 // native and terminal rejection paths (S7.4.4 / S11.4.1v3).
@@ -9750,7 +9750,7 @@ static TypeId mir_direct_native_return_type(MirTranspiler* mt,
 static NativeFuncInfo* mir_direct_native_info(MirTranspiler* mt,
         AstCallNode* call);
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
-        AstNode* node, TypeId expected);
+        AstNode* node, TypeId expected, bool exact_kind);
 static bool mir_assignment_has_native_int_lane(
         MirTranspiler* mt, AstAssignStamNode* assign);
 static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
@@ -25170,6 +25170,13 @@ static bool mir_tail_transfers_control(AstNode* node) {
 // plain conversion.
 static MirValue mir_require_native_return(MirTranspiler* mt, AstNode* node,
         MirValue value, ValueRep lane) {
+    if (value.rep == VALUE_REP_INT_LANE && lane == VALUE_REP_F64) {
+        // plain float admission widens int; this is a numeric conversion,
+        // not the representation-only move accepted by em_require_rep.
+        return mir_value_from_reg(mt, node,
+            emit_scalar_native_lane(mt, value, LMD_TYPE_FLOAT), lane,
+            mt->current_return_type, LMD_TYPE_FLOAT);
+    }
     if (value.rep == VALUE_REP_ITEM && !value.maybe_pending &&
             value.semantic_contract && mt->current_return_type &&
             mt->native_return_tid != LMD_TYPE_ANY &&
@@ -37342,6 +37349,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             mir_boundary_join_success_redundant(mt, ret_node->value,
                 mir_unwrap_decl_type(mt->current_return_type));
         if (join_error_arm_only) emit_return_if_item_error(mt, val);
+        bool return_error_checked = join_error_arm_only;
         if (!join_error_arm_only &&
                 return_contract_needs_checked_boundary(mt->current_return_type) &&
                 !map_contract_constructed && !empty_array_result_admitted &&
@@ -37357,6 +37365,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             MIR_reg_t checked = emit_checked_value_boundary(mt, value_producer,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, checked);
+            return_error_checked = true;
             val = checked;
             value_producer = mir_value_from_reg(mt, ret_node->value, checked,
                 VALUE_REP_ITEM);
@@ -37364,6 +37373,12 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         }
 
         if (native_ret != LMD_TYPE_ANY) {
+            // D5.2.1v5: redundant admission still leaves an admitted error
+            // for the native ABI's separate error lane, never its success word.
+            if (!return_error_checked && value_producer.rep == VALUE_REP_ITEM &&
+                    (!value_producer.semantic_contract ||
+                     lambda_type_accepts_error(value_producer.semantic_contract)))
+                emit_return_if_item_error(mt, val);
             // P4-3.4: Native return — emit unboxed value matching function's return type
             MIR_reg_t native_val;
             if (val_tid == native_ret) {
@@ -43110,7 +43125,7 @@ static void mir_cached_defect_origin_set(FnAnalysis* analysis, uint32_t epoch,
 static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         TypeId expected, int* return_count, bool wide_free = false,
-        MirDefectOriginScan* defect_scan = NULL);
+        MirDefectOriginScan* defect_scan = NULL, bool exact_kind = false);
 
 // S7.7.1: a declared return is a boundary. A body the contract cannot prove
 // hands back the check's error, and a boxed return carries it to the caller
@@ -43566,7 +43581,7 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
         AstFuncNode* fn_node);
 
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
-        AstNode* node, TypeId expected) {
+        AstNode* node, TypeId expected, bool exact_kind) {
     // A literal is represented by a primary node without an inner expression.
     // Do not unwrap that leaf to NULL, or `value + 1` loses the native int
     // proof solely because its literal has no child AST node.
@@ -43575,6 +43590,10 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         node = ((AstPrimaryNode*)node)->expr;
     }
     if (!node) return false;
+    // error-only exits contribute no normal carrier to an ordinary union.
+    if (exact_kind && node->type && node->type->type_id == LMD_TYPE_ERROR) {
+        return true;
+    }
 
     if (node->node_type == AST_NODE_IF_EXPR) {
         AstIfNode* branch = (AstIfNode*)node;
@@ -43583,8 +43602,8 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
             !mir_expr_may_be_null(mt, node) &&
             (!mir_if_recovers_scalar_kind(node, expected) ||
              mir_expr_proves_presence(mt, node)) &&
-            mir_expr_proves_native_return_lane(mt, branch->then, expected) &&
-            mir_expr_proves_native_return_lane(mt, branch->otherwise, expected);
+            mir_expr_proves_native_return_lane(mt, branch->then, expected, exact_kind) &&
+            mir_expr_proves_native_return_lane(mt, branch->otherwise, expected, exact_kind);
     }
 
     // TE-17 I3: a defect-capable call publishes a boxed join; a system row's C
@@ -43744,7 +43763,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
             TypeId inferred_parameter_tid = mir_native_analysis_param_type(mt,
                 (AstNamedNode*)binding);
             if (inferred_parameter_tid == expected ||
-                    (expected == LMD_TYPE_FLOAT &&
+                    (!exact_kind && expected == LMD_TYPE_FLOAT &&
                      inferred_parameter_tid == LMD_TYPE_INT)) {
                 // Inferred parameter lanes are installed before return proof,
                 // but the source TypeParam remains ANY. Reusing the resolved
@@ -43756,7 +43775,8 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
             if (mir_contract_native_scalar_type(
                     mir_named_contract((AstNamedNode*)binding), &parameter_tid)) {
                 return parameter_tid == expected ||
-                    (expected == LMD_TYPE_FLOAT && parameter_tid == LMD_TYPE_INT);
+                    (!exact_kind && expected == LMD_TYPE_FLOAT &&
+                     parameter_tid == LMD_TYPE_INT);
             }
         }
         if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -43808,7 +43828,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                         variable->mir_type != type_to_mir(expected))) &&
                         mt->lane_proof_depth < 8 &&
                         mir_expr_proves_native_return_lane(mt,
-                            ((AstDeclaratorNode*)binding)->init, expected)) {
+                            ((AstDeclaratorNode*)binding)->init, expected, exact_kind)) {
                     mt->lane_proof_bindings[mt->lane_proof_depth++] = ident->entry;
                     bool widened = mir_nested_control_writes_binding(proof_body,
                         ident->entry, mt, expected, false,
@@ -43824,7 +43844,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                 return false;
             }
             AstNode* initializer = ((AstDeclaratorNode*)binding)->init;
-            return mir_expr_proves_native_return_lane(mt, initializer, expected);
+            return mir_expr_proves_native_return_lane(mt, initializer, expected, exact_kind);
         }
         return false;
     }
@@ -43832,7 +43852,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     if (node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
-            return mir_expr_proves_native_return_lane(mt, unary->operand, expected);
+            return mir_expr_proves_native_return_lane(mt, unary->operand, expected, exact_kind);
         }
         return false;
     }
@@ -43854,8 +43874,8 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     AstBinaryNode* binary = (AstBinaryNode*)node;
     if (expected == LMD_TYPE_STRING && binary->op == OPERATOR_JOIN) {
         return !mir_expr_may_carry_defect(mt, node) &&
-            mir_expr_proves_native_return_lane(mt, binary->left, expected) &&
-            mir_expr_proves_native_return_lane(mt, binary->right, expected);
+            mir_expr_proves_native_return_lane(mt, binary->left, expected, exact_kind) &&
+            mir_expr_proves_native_return_lane(mt, binary->right, expected, exact_kind);
     }
     // a scalar success type cannot certify the error arm of an arithmetic join
     if (mir_arith_operand_may_defect(mt, binary)) return false;
@@ -43895,6 +43915,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
               binary->op == OPERATOR_MOD));
     }
     if (expected == LMD_TYPE_FLOAT) {
+        if (exact_kind && node_tid != expected) return false;
         bool left_numeric = left_tid == LMD_TYPE_INT || left_tid == LMD_TYPE_FLOAT ||
             mir_expr_proves_native_return_lane(mt, binary->left, LMD_TYPE_INT) ||
             mir_expr_proves_native_return_lane(mt, binary->left, LMD_TYPE_FLOAT);
@@ -44020,7 +44041,7 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
 // coincidence (D3.3.1, D3.3.2).
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         TypeId expected, int* return_count, bool wide_free,
-        MirDefectOriginScan* defect_scan) {
+        MirDefectOriginScan* defect_scan, bool exact_kind) {
     while (node) {
         AstNode* current = ast_unwrap_primary(node);
         if (!current) {
@@ -44046,13 +44067,14 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
                     ? mir_solve_value_proves_lane(defect_scan, ret->value,
                         expected, 0)
                     : mir_expr_proves_native_return_lane(mt, ret->value,
-                        expected));
+                        expected, exact_kind));
             if (!value_proven) return false;
             (*return_count)++;
             break;
         }
         case AST_NODE_RAISE_STAM:
-            return false;
+            if (!exact_kind) return false;
+            break;
         case AST_NODE_FUNC:
         case AST_NODE_PROC:
         case AST_NODE_FUNC_EXPR:
@@ -44062,24 +44084,24 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
             AstIfNode* branch = (AstIfNode*)current;
             if (branch->then && !mir_proc_return_values_prove(mt,
                     branch->then, expected, return_count, wide_free,
-                    defect_scan)) return false;
+                    defect_scan, exact_kind)) return false;
             if (branch->otherwise && !mir_proc_return_values_prove(mt,
                     branch->otherwise, expected, return_count, wide_free,
-                    defect_scan)) return false;
+                    defect_scan, exact_kind)) return false;
             break;
         }
         case AST_NODE_LOOP: {
             AstWhileNode* loop = (AstWhileNode*)current;
             if (loop->body && !mir_proc_return_values_prove(mt,
                     loop->body, expected, return_count, wide_free,
-                    defect_scan)) return false;
+                    defect_scan, exact_kind)) return false;
             break;
         }
         case AST_NODE_FOR_EXPR: {
             AstForNode* loop = (AstForNode*)current;
             if (loop->then && !mir_proc_return_values_prove(mt,
                     loop->then, expected, return_count, wide_free,
-                    defect_scan)) return false;
+                    defect_scan, exact_kind)) return false;
             break;
         }
         case AST_NODE_MATCH_EXPR: {
@@ -44088,7 +44110,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
                     arm = (AstMatchArm*)arm->next) {
                 if (arm->body && !mir_proc_return_values_prove(mt,
                         arm->body, expected, return_count, wide_free,
-                        defect_scan)) return false;
+                        defect_scan, exact_kind)) return false;
             }
             break;
         }
@@ -44097,7 +44119,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
             AstListNode* list = (AstListNode*)current;
             if (list->item && !mir_proc_return_values_prove(mt,
                     list->item, expected, return_count, wide_free,
-                    defect_scan)) return false;
+                    defect_scan, exact_kind)) return false;
             break;
         }
         default:
@@ -44334,6 +44356,20 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
             // (RETURN_LANE_ERROR / Context.mir_return_lane, wired in
             // emit_boxed_abi_wrapper), so a native carrier does not lose it.
             // `function_return_may_defer` stays the real guard.
+            if (lambda_type_is_union(mir_unwrap_decl_type(return_contract)) &&
+                    (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
+                     ret_tid == LMD_TYPE_INT64 || ret_tid == LMD_TYPE_UINT64)) {
+                // S7.4.2v3: an ordinary union preserves a conforming member.
+                // A native return must prove its actual kind, not merely that
+                // numeric admission could convert it to the declared arm.
+                int returns = 0;
+                bool exact = is_proc
+                    ? mir_proc_return_values_prove(mt, fn_node->body, ret_tid,
+                        &returns, false, NULL, true)
+                    : mir_expr_proves_native_return_lane(mt,
+                        function_body_result_expr(fn_node), ret_tid, true);
+                if (!exact) return LMD_TYPE_ANY;
+            }
             if (mir_is_native_scalar_value_type(ret_tid) ||
                     (has_native_contract &&
                      mir_direct_pointer_lane_abi_type(ret_tid))) {

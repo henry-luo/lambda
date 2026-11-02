@@ -1052,7 +1052,13 @@ call consumes its producer's actual Item/native representation. A native tail
 join applies the callable's return admission before opening a success lane;
 an ordinary error is never decoded as an integer or pointer. The full MIR GC
 corpus passes 350/350; aggregate and remaining caller/native-proof qualification
-remain open in the implementation record.
+remain open in the implementation record. Scalar error-union admission reuses
+identity proofs without dropping the native error channel. Ordinary unions
+retain an already-conforming numeric member, while plain numeric contracts
+perform their required conversion (S7.4.2v3/S11.4.5). Native return selection
+therefore requires the actual normal carrier across all returns and branches;
+a success-type name alone is insufficient. The qualified MIR emission count
+is 255/279; remaining checks are recorded without relaxing expectations.
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

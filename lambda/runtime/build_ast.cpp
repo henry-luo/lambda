@@ -1938,14 +1938,28 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
 
 // See type_contract.hpp. A proven relation is necessary but not sufficient:
 // admission also converts. Requiring both sides to be unadorned global scalar
-// carriers of the same TypeId is what makes admission provably the identity —
-// constraints, unions, occurrences and named map shapes all reach runtime
-// admission and may convert or re-pack. An earlier revision elided on PROVEN
+// carriers of the same TypeId makes admission provably the identity. A pure
+// error alternative preserves that identity on each outcome; other unions,
+// constraints, occurrences and named maps may convert or re-pack. Eliding on PROVEN
 // alone and silently skipped the int->float widening in a `var x: float = <int>`
 // declaration, which made mbrot/permute/nqueens compute wrong answers.
 bool lambda_boundary_is_redundant(Type* source, Type* target) {
     if (!source || !target) return false;
     if (static_boundary_relation(source, target) != STATIC_BOUNDARY_PROVEN) return false;
+    if (lambda_type_is_union(source)) {
+        TypeBinary* outcomes = (TypeBinary*)source;
+        return lambda_boundary_is_redundant(outcomes->left, target) &&
+            lambda_boundary_is_redundant(outcomes->right, target);
+    }
+    if (lambda_type_is_union(target)) {
+        TypeBinary* outcomes = (TypeBinary*)target;
+        Type* normal = outcomes->left == &TYPE_ERROR ? outcomes->right
+            : outcomes->right == &TYPE_ERROR ? outcomes->left : NULL;
+        // S7.4.2v3: adding the broad error arm introduces no conversion.
+        // Keep numeric-union choice, literal checks and reification intact.
+        if (normal) return lambda_boundary_is_redundant(source,
+            source->type_id == LMD_TYPE_ERROR ? &TYPE_ERROR : normal);
+    }
     if (!is_global_simple_type(source) || !is_global_simple_type(target)) return false;
     return source->type_id == target->type_id;
 }

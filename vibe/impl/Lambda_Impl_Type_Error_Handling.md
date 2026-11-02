@@ -869,3 +869,27 @@ audit compiled **3,444/3,772** sources (**328** requiring review), before the
 latest caller fixes and restored contracts. These figures are intermediate;
 the aggregate, remaining native-proof checks and renderer/demo migration are
 still outstanding.
+
+
+### Scalar outcomes and numeric return carriers (2026-11-03)
+
+S7.4.2v3 ordinary error unions reuse scalar identity-admission proofs on each
+outcome. This removes redundant checks without skipping numeric conversions,
+literal checks or container reification. S11.4.5 plain `float` return admission
+widens an integer through the numeric conversion helper. Ordinary union
+admission preserves an already-conforming member; `float^` therefore cannot
+promise a physical float result from an integer or mixed-kind body. The native
+return proof now checks the actual normal kind across branches and explicit
+returns, retaining the Item ABI when necessary (D2.4.1–D2.4.3). Skipping a
+redundant check still routes an admitted error through the native error lane
+(D5.2.1v5).
+
+The return-outcome fixture checks plain float conversion, union member-kind
+preservation through return and propagation, mixed numeric branches, and
+forwarded explicit native errors. Diagnostic checks pass **247/247**, focused
+tier/GC checks **128/128**, and the full MIR GC gate **350/350**. Existing MIR
+emission checks improve to **255/279** with no relaxed assertions. Evidence:
+`temp/error-handling/m3-exact-union-final-{diag,gc,mir}.json` and
+`m3-return-numeric-conversion-focused.log`. The incremental caller audit is
+**3,541/3,772** compiled; a final full audit and aggregate qualification remain
+required.
