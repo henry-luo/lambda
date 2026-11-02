@@ -1162,3 +1162,24 @@ Qualification: **152/152** focused tier/GC executions, **247/247** diagnostics,
 HTML-interaction golden passes. Evidence:
 `temp/error-handling/m3-method-receiver-qualified-{focused.log,gc.json,mir.json}`,
 `m3-method-receiver-diag.json`, and `m3-graphviz-method-outcomes.json`.
+
+### Explicitly propagated scalar-array results (2026-11-03)
+
+S7.6.3v3/S7.7.2v2 scalar-array result elision now admits an explicitly
+propagated call. An ordinary fallible initializer remains outside this plan,
+since its cold arm must retain the outcome rather than exit the callable.
+Previously the eligibility check rejected `^`, disabling the existing valid
+fast arm after caller migration. The fixed-read result guard and its complete
+runtime golden now pass, including a short-source failure followed by caller
+continuation. Full MIR emission passes **269/279** without changed assertions;
+the focused matrix remains **152/152**.
+
+The runtime-golden audit passes 252/262 before one final caller correction:
+`checked_rebind` intended to recover an invalid numeric conversion, so it now
+uses `or^ { 5 }` (S7.6.8) before its strict assignment. Its unchanged golden and
+MIR guard pass on interp and JIT. The previous `or` preserved the error under
+S3.4, so adding propagation had completed the function instead of recovering.
+The remaining audit differences have base-compiler comparisons recorded in
+`temp/error-handling/m3-base-mir-runtime-review.json`; they are not hidden by
+GC consistency checks. Evidence: `m3-propagated-array-qualified-{mir.json,runtime.log}`,
+`m3-propagated-array-rvo-focused.log`, and `m3-rebind-fallback-mir.json`.

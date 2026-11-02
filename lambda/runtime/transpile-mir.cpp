@@ -32809,7 +32809,9 @@ static bool mir_try_scalar_array_call_binding(MirTranspiler* mt,
     AstNode* init = ast_unwrap_primary(declaration->init);
     if (!init || init->node_type != AST_NODE_CALL_EXPR) return false;
     AstCallNode* call = (AstCallNode*)init;
-    if (call->propagate) return false;
+    // S7.6.3v3/S7.7.2v2: only explicit propagation may take the cold
+    // error exit; an ordinary fallible initializer must retain its outcome.
+    if (!call->propagate && mir_call_may_defect(mt, call)) return false;
     LambdaArrayContractInfo destination = {};
     if (!lambda_array_contract_info(declaration->declared_type, &destination) ||
             destination.rank != 1 || destination.counted_axes ||

@@ -27,7 +27,8 @@ pn last_element() int^ {
 
 pn checked_rebind(source) int^ {
     var checked: int = 7
-    checked = (int(source) or 5)^
+    // S7.6.8: recover an invalid conversion before checked assignment.
+    checked = int(source) or^ { 5 }
     return checked
 }
 
