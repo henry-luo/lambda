@@ -25,23 +25,6 @@ void tc_notify_selection_changed(DomElement* elem) {
     dom_queue_textcontrol_selectionchange(elem);
 }
 
-// ---- DomNode text walker (textarea initial value) ----------------------
-// Local to this TU so radiant code does not need to depend on lambda/js/.
-static void tc_collect_text(DomNode* n, StrBuf* sb) {
-    if (!n) return;
-    if (n->is_text()) {
-        DomText* t = n->as_text();
-        if (t->text) strbuf_append_str(sb, t->text);
-        return;
-    }
-    if (n->is_element()) {
-        DomElement* e = n->as_element();
-        for (DomNode* c = e->first_child; c; c = c->next_sibling) {
-            tc_collect_text(c, sb);
-        }
-    }
-}
-
 // ---- public: identification --------------------------------------------
 
 
@@ -163,7 +146,7 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
     if (!elem) return nullptr;
     if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
         StrBuf* sb = strbuf_new_cap(64);
-        tc_collect_text((DomNode*)elem, sb);
+        dom_collect_text_content((DomNode*)elem, sb);
         size_t len = sb->str ? strlen(sb->str) : 0;
         const char* attr_value = nullptr;
         if (len == 0) {

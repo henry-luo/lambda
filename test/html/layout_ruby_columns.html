@@ -1,0 +1,22 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font: 20px/5 Ahem; }
+ruby { ruby-align: center; }
+rt, .annotation, .annotation-level { font-size: 10px; }
+.base { display: ruby-base; }
+.annotation { display: ruby-text; }
+.base-level { display: ruby-base-container; }
+.annotation-level { display: ruby-text-container; }
+</style>
+<div id="result">
+<div class="row" id="pairs-row"><ruby id="pairs">X<rt id="pairs-a1">abc</rt>XX<rt id="pairs-a2">d</rt></ruby></div>
+<div class="row"><ruby id="explicit"><span class="base" id="explicit-b1">X</span><span class="base" id="explicit-b2">XX</span><span class="annotation" id="explicit-a1">abc</span><span class="annotation" id="explicit-a2">d</span></ruby></div>
+<div class="row"><ruby id="missing-annotation"><span class="base" id="missing-annotation-b1">X</span><span class="base" id="missing-annotation-b2">XX</span><span class="annotation" id="missing-annotation-a1">abc</span></ruby></div>
+<div class="row"><ruby id="missing-base"><span class="base" id="missing-base-b1">X</span><span class="annotation" id="missing-base-a1">abc</span><span class="annotation" id="missing-base-a2">dddd</span></ruby></div>
+<div class="row"><ruby id="annotation-only"><span class="annotation" id="annotation-only-a1">abc</span><span class="annotation" id="annotation-only-a2">d</span></ruby></div>
+<div class="row"><ruby id="levels"><span class="base-level"><span class="base" id="levels-b1">X</span><span class="base" id="levels-b2">XX</span></span><span class="annotation-level"><span class="annotation" id="levels-a1">abc</span><span class="annotation" id="levels-a2">d</span></span><span class="annotation-level"><span class="annotation" id="levels-c1">e</span><span class="annotation" id="levels-c2">fffff</span></span></ruby></div>
+<div class="row"><ruby id="spanning"><span class="base-level"><span class="base" id="spanning-b1">X</span><span class="base" id="spanning-b2">XX</span></span><span class="annotation-level" id="spanning-a">abcdefghi</span></ruby></div>
+<div class="row"><ruby id="nested">X<span>XX</span><rt id="nested-a">abcdefg</rt></ruby></div>
+</div>

@@ -1,0 +1,32 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/100px Ahem; }
+rt, .annotation { font-size: 10px; }
+.annotation { display: ruby-text; }
+.atomic { display: inline-block; width: 80px; height: 0; }
+.tall { height: 50px; }
+.zero { line-height: 0; }
+.high { line-height: 2000px; }
+.under { ruby-position: under; }
+</style>
+<div id="result">
+<div id="ordinary-zero-row"><span id="ordinary-zero"><i class="atomic" id="ordinary-zero-atomic"></i></span></div>
+<div id="ordinary-tall-row"><span id="ordinary-tall"><i class="atomic tall" id="ordinary-tall-atomic"></i></span></div>
+<div><span id="ordinary-nested"><span><i class="atomic"></i></span></span></div>
+<div id="ruby-zero-row"><ruby>XX<rt id="ruby-zero"><i class="atomic" id="ruby-zero-atomic"></i></rt></ruby></div>
+<div><ruby>XX<rt class="zero" id="ruby-zero-leading"><i class="atomic"></i></rt></ruby></div>
+<div><ruby>XX<rt class="high" id="ruby-high-leading"><i class="atomic"></i></rt></ruby></div>
+<div id="ruby-tall-row"><ruby>XX<rt id="ruby-tall"><i class="atomic tall" id="ruby-tall-atomic"></i></rt></ruby></div>
+<div><ruby class="under">XX<rt id="ruby-under"><i class="atomic"></i></rt></ruby></div>
+<div><ruby>XX<span class="annotation" id="ruby-role"><i class="atomic"></i></span></ruby></div>
+<div><ruby>XX<rt id="ruby-nested"><span><i class="atomic"></i></span></rt></ruby></div>
+<div><ruby>XX<rt id="ruby-font-zero" style="font-size:0"><i class="atomic"></i></rt></ruby></div>
+<div><ruby>XX<rt id="ruby-small-child"><i class="atomic" style="font-size:2px"></i></rt></ruby></div>
+<div><ruby>XX<rt id="ruby-large-child"><i class="atomic" style="font-size:30px"></i></rt></ruby></div>
+<div><span class="zero" id="ordinary-zero-leading"><i class="atomic"></i></span></div>
+<div><span id="ordinary-font-zero" style="font-size:0"><i class="atomic"></i></span></div>
+<div id="ruby-zero-container-row"><ruby class="zero">XX<rt><i class="atomic"></i></rt></ruby></div>
+<div class="zero" id="ruby-zero-font-tall-row"><ruby>XX<rt id="ruby-zero-font-tall" style="font-size:0"><i class="atomic tall" id="ruby-zero-font-tall-atomic"></i></rt></ruby></div>
+<div class="zero" id="ruby-no-annotation-row"><ruby>XX</ruby></div>
+</div>

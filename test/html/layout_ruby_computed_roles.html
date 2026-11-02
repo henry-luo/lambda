@@ -1,0 +1,11 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font: 20px/5 Ahem; }
+</style>
+<div id="result">
+  <div class="row" id="native-row"><ruby id="native">XX<rt id="native-annotation">x</rt></ruby></div>
+  <div class="row" id="custom-row"><span style="display:ruby" id="custom">XX<span style="display:ruby-text;font-size:50%" id="custom-annotation">x</span></span></div>
+  <div class="row" id="inline-row"><ruby id="inline-annotation">XX<rt style="display:inline;font-size:20px">z</rt></ruby></div>
+</div>
