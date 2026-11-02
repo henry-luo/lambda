@@ -549,8 +549,8 @@ static const char* kShapeIdentitySource =
     "    print(acc)\n"
     "}\n";
 
-// The union field classifies ANY, so mir_map_contract_storage_valid refuses
-// the contract and every declared crossing must take the reify path.
+// The dynamic union field classifies ANY, so neither storage adoption nor
+// the all-values-proven construction path can bypass its declared crossing.
 static const char* kAnyBearingSource =
     "type Person = {name: string, choice: int | string}\n"
     "\n"
@@ -561,7 +561,7 @@ static const char* kAnyBearingSource =
     "pn main() {\n"
     "    var out = \"\"\n"
     "    for (i in 1 to 5) {\n"
-    "        let p: Person = {name: \"n\" ++ i, choice: i}\n"
+    "        let p: Person = {name: \"n\" ++ i, choice: parse(string(i), \"json\")}\n"
     "        out = describe(p)\n"
     "    }\n"
     "    print(out)\n"
@@ -1201,11 +1201,9 @@ TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
     EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 1u);
 }
 
-// The refusal control: an ANY-bearing contract must keep reifying at declared
-// crossings on BOTH tiers. A zero here without concrete storage classification
-// for the union field means the adoption gate started admitting a shape whose
-// direct reads would misaddress (Tune19 §11.3) — a memory-safety regression,
-// not an optimization.
+// The refusal control: dynamic fields in an ANY-bearing layout must reify at
+// declared crossings on both tiers. Fully proven literal values may instead
+// use descriptor-aware construction; this control must not prove those values.
 TEST(LambdaOptAdmission, AnyBearingContractRefusedJit) {
     FixtureRun run = run_fixture("any_bearing", "jit", kAnyBearingSource, true);
     ASSERT_TRUE(run.ok);

@@ -1399,3 +1399,46 @@ After the integer proof: **276/280** MIR emission checks, **52/55** native
 optimization checks, **168/168** focused tier/GC executions, **351/351** MIR GC
 and **247/247** diagnostics. Evidence:
 `temp/error-handling/m3-int-outcome-final-{mir.json,native.json,focused.log,gc.json,diagnostics.json}`.
+
+### Dynamic union controls, typed reads and loop call carriers (2026-11-03)
+
+S11.4.6v3/D3.2.2v3: the ANY-bearing refusal control now obtains its union
+field from parsed input. The former literal value was completely proven and
+safely used descriptor-aware `map_fill` construction, so it no longer exercised
+the refusal path. The dynamic control keeps its original five admissions and
+five reifications on both tiers. The shared admission regression also checks
+the literal's actual union field, a dynamically admitted string member and an
+invalid boolean member retained as the receiving binding's error.
+
+The typed nucleotide benchmark now admits a dynamic line read into a checked
+string, then explicitly propagates before using that string (S7.7.2v2,
+S7.6.3v3). This preserves its normal output and exposes the string fact to the
+existing concatenation path: generic joins fall from 177 to 93, within the
+unchanged `<100` bound. Native optimization checks pass **54/55**; the COW
+move-out regression remains open.
+
+Its forced-GC promotion check exposed a separate dynamic-call descriptor bug.
+Loop-only promotion reproduced the failure, while function-only promotion and
+execution without promotion passed. A reduced loop showed the dispatcher
+returning a boxed int directly into an array index. `emit_dynamic_call_value`
+had kept the Item for `^`, then described it as a native scalar; propagation
+therefore skipped both its error guard and normal unbox. The descriptor now
+records that boxed result until `transpile_call` consumes it (S7.6.3v3,
+D2.4.1–D2.4.3). The failure was an invalid index, not lost GC ownership; no
+rooting policy or vendor code changed.
+
+`admission_loop_call_outcomes` covers success and post-handoff failure. Its
+native gate forces synchronous loop publication at thresholds one and five,
+with forced/poison GC and function promotion disabled. It passes, as do
+**176/176** focused tier/GC executions, **8/8** benchmark tier/GC executions
+(including synchronous promotion), and **276/280** MIR checks. Evidence:
+`m3-loop-call-carrier-{handoff.json,focused.log,benchmark.json,mir.json,native.json}`.
+
+The rebuilt aggregate now completes **6,437/6,448**, including main
+**2,000/2,002**, diagnostics **321/321**, REPL **50/50**, full MIR GC
+**351/351** and HTTP **152/152**. Its 11 failures are four MIR checks, the
+COW move-out check, four ratchets, the pending vendor MIR optimizer defect
+and the existing MVP alias difference. The new synchronous handoff test and
+both new script fixtures pass. Required input suites again pass
+**2,112/2,112**. Evidence: `m3-qualified-loop-call-lambda.log`, its per-suite
+results directory, and `m3-loop-call-carrier-input-{wpt,markdown,yaml,ascii,math}.log`.

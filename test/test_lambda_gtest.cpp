@@ -915,6 +915,21 @@ TEST(LambdaTierParityTests, ForStatementLoopHandoffResumesWalk) {
     }
 }
 
+// D8.1.1v18/S7.6.3v3: a module callee uses boxed dispatch in a satellite.
+TEST(LambdaTierParityTests, PropagatedLoopCallsKeepBoxedResults) {
+    static const char* const thresholds[] = {"1", "5"};
+    ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
+    ScopedTestEnv functions("LAMBDA_FUNC_JIT_THRESHOLD", "1000000");
+    ScopedTestEnv collect("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    for (const char* threshold : thresholds) {
+        ScopedTestEnv loops("LAMBDA_LOOP_JIT_THRESHOLD", threshold);
+        SCOPED_TRACE(threshold);
+        test_lambda_script_against_file("test/lambda/proc/admission_loop_call_outcomes.ls",
+            "test/lambda/proc/admission_loop_call_outcomes.txt", true, "auto");
+    }
+}
+
 // LR07-46 (D5.3.3): a map filter loop re-stored its frame top beneath the key
 // list's RootFrame on the JIT only (a crash, or lost string members), while the
 // auto tier ran it in T0 and printed the golden.

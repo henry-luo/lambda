@@ -33673,7 +33673,10 @@ static MirValue emit_dynamic_call_value(MirTranspiler* mt, AstCallNode* call_nod
         dyn_result = emit_unbox_contract_lane(mt, dyn_result, call_tid,
             ((AstNode*)call_node)->type);
     }
-    return mir_call_value_from_result(mt, call_node, dyn_result, false);
+    // S7.6.3v3/D2.4.1: propagation has not opened this dispatcher's Item
+    // result yet. Marking it native skips the error guard and uses tagged
+    // integers as indices when a loop satellite calls a module definition.
+    return mir_call_value_from_result(mt, call_node, dyn_result, call_node->propagate);
 }
 
 static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,

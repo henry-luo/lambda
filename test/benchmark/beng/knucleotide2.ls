@@ -13,7 +13,9 @@ pn extract_three(text: string) string^ {
     var in_three: int = 0
     var i: int = 0
     while (i < num_lines) {
-        let line = lines[i]
+        // S7.7.2v2/S7.6.3v3: use the admitted string after a dynamic read.
+        let checked_line: string = lines[i]
+        let line: string = checked_line^
         if (len(line) > 0 and slice(line, 0, 1) == ">") {
             if (in_three == 1) {
                 // hit next header, stop

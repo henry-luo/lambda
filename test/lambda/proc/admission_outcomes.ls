@@ -1,5 +1,6 @@
 // S7.7.2v2/S7.7.4v2: failed local validation stores an outcome and continues.
 type CheckedRecord = {value: int}
+type ChoiceRecord = {name: string, choice: int | string}
 fn opaque(value) => value
 fn opaque_any(value) any => value
 fn counted_empty() int[1] => []
@@ -33,8 +34,12 @@ pn main() {
     let returned = inferred_return(null);
     let propagated = inferred_propagation()
     let propagated_value = inferred_unary_propagation();
+    let numeric_choice: ChoiceRecord = {name: "fixed", choice: 1}
+    let string_choice: ChoiceRecord = {name: "checked", choice: opaque("ok")}
+    let invalid_choice: ChoiceRecord = {name: "rejected", choice: opaque(true)};
     [bad is error, good, changed is error, comma_bad is error, comma_good,
      nested, arr is error, small is error, inferred.message, broad.message,
      checked_after_handler is error, after_binding, broad_source is error, returned is error,
-     propagated.message, propagated_value.message, message_recovery(), empty_counted is error, empty_returned is error, failed_literal is error, failed_record is error]
+     propagated.message, propagated_value.message, message_recovery(), empty_counted is error, empty_returned is error, failed_literal is error, failed_record is error,
+     numeric_choice.choice, string_choice.choice, invalid_choice is error]
 }
