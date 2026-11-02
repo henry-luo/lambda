@@ -56,7 +56,7 @@ pn render(body,st) map^ {
 }
 
 pub pn close(body) {
-    node(body,"dictionary-dialog")^.close("")
+    node(body,"dictionary-dialog")^.close("")^
     let previous = dom.get_attribute(node(body,"dictionary-dialog"),"data-previous-ime");
     if (previous == "inherit") dom.remove_attribute(body,"data-ime")
     else dom.set_attribute(body,"data-ime",previous)
@@ -69,7 +69,7 @@ pn show(body) {
     dom.set_attribute(node(body,"dictionary-dialog"),"data-previous-ime",if (previous == null) "inherit" else previous)
     dom.set_attribute(body,"data-ime","off")
     ime.suspend_popup(body,true)^
-    node(body,"dictionary-dialog")^.show_modal()
+    node(body,"dictionary-dialog")^.show_modal()^
     dom.focus_set(node(body,"dictionary-search"),false)
 }
 
@@ -130,17 +130,17 @@ pub pn command(body,st,action,target) map^ {
     return st
 }
 
-pub pn dispatch(body,st,action,target) map {
-    let next = command(body,st,action,target) ^ {
+pub pn dispatch(body,st,action,target) map^ {
+    let next = (command(body,st,action,target) ^ {
         let message = ^.message;
         // load and validation failures must be readable even when opening did not finish.
         if (action == "open" and not opened(body)) {
             dom.set_inner_html(node(body,"dictionary-rows"),"")
-            show(body)
+            show(body)^
         }
         text(body,"dictionary-message",message)
         st
-    }
+    })^
     return next
 }
 

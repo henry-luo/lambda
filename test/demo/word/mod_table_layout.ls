@@ -48,7 +48,7 @@ fn styles(tx,paths,properties) => reduce([tx,*paths],(acc,path)=>reduce([acc,*pr
 fn selected_paths(editor) => [for (e in tables.selected(editor)) e.path]
 fn row_paths(editor) {
     let b = grid.bounds(tables.selected(editor));
-    [for (r,row in grid.rows(editor.doc,tables.context(editor).table_path) where r>=b.top and r<b.bottom) row.path]
+    [for (r,row in ((grid.rows(editor.doc,tables.context(editor).table_path)) ^ { [] }) where ((r>=b.top and r<b.bottom) ^ { false })) row.path]
 }
 fn with_caret(tx,path) any^ {
     let leaf = format.leaves(node_at(tx.doc_after,path),path)[0]
@@ -126,9 +126,9 @@ fn insert_axis(editor,axis,before) map^ {
     let expanded = expand(all_cells,axis,at,1)
     let extent = grid.bounds(all_cells)
     let ref = if (axis=="row") (if (before) b.top else b.bottom-1) else if (before) b.left else b.right-1
-    let blanks = [for (i in 0 to (if (axis=="row") extent.right else extent.bottom)-1)
+    let blanks = [for (i in ((0 to (if (axis=="row") extent.right else extent.bottom)-1) ^ { [] }))
         for (r in [if (axis=="row") at else i], c in [if (axis=="row") i else at]
-        where grid.at(expanded,r,c)==null)
+        where ((grid.at(expanded,r,c)==null) ^ { false }))
         {row:r,col:c,end_row:r+1,end_col:c+1,node:blank((grid.at(all_cells,if (axis=="row") ref else r,if (axis=="col") ref else c) or picked[0]).node,
             if (axis=="row") 'td' else null)^}]
     grid_transaction(editor,if (axis=="row") insert_rows(rows,at,1,rows[ref]) else rows,[*expanded,*blanks],
@@ -145,7 +145,7 @@ fn delete_axis(editor,axis) map^ {
         where z>a) {*:e,[axis]:a,[end]:z}]
     let rows = grid.rows(editor.doc,tables.context(editor).table_path)
     if (len(remaining)==0) replace_table(editor,[node('p',[])]) else
-        grid_transaction(editor,if (axis=="row") [for (i,row in rows where i<lo or i>=hi) row] else rows,remaining,
+        grid_transaction(editor,if (axis=="row") [for (i,row in rows where ((i<lo or i>=hi) ^ { false })) row] else rows,remaining,
             min(b.top,grid.bounds(remaining).bottom-1),min(b.left,grid.bounds(remaining).right-1))^
 }
 fn split_table(editor) map^ {
@@ -156,8 +156,8 @@ fn split_table(editor) map^ {
     if (cut==0) raise error("Place the caret below the first row to split the table.")
     else if (any([for (e in all_cells) e.row<cut and e.end_row>cut])) raise error("Split merged cells that cross this row first.")
     else {
-        let first = grid.rebuild(ctx.table,ctx.table_path,take(rows,cut),[for (e in all_cells where e.row<cut) e])^
-        let second = grid.rebuild(ctx.table,ctx.table_path,drop(rows,cut),[for (e in all_cells where e.row>=cut) {*:e,row:e.row-cut,end_row:e.end_row-cut}])^
+        let first = grid.rebuild(ctx.table,ctx.table_path,take(rows,cut),[for (e in all_cells where ((e.row<cut) ^ { false })) e])^
+        let second = grid.rebuild(ctx.table,ctx.table_path,drop(rows,cut),[for (e in all_cells where ((e.row>=cut) ^ { false })) {*:e,row:e.row-cut,end_row:e.end_row-cut}])^
         let tx = replace_table(editor,[first,node('p',[]),node_attrs('table',attrs_set(second.attrs,'id',null),second.content)])
         // the separator is the editing destination after splitting a table.
         with_caret(tx,[*parent_path(ctx.table_path),last_index(ctx.table_path)+1])
@@ -192,7 +192,7 @@ fn distribute(editor,axis,p) map^ {
         let average = if (valid) sum(slice(sizes,lo,hi))/(hi-lo) else table_width(editor)/grid.bounds(all_cells).right
         let tx = tx_begin(editor.doc,editor.selection)
         if (axis=="row") styles(tx,row_paths(editor),[{key:"height",value:string(average) ++ "pt"}])
-        else reduce([tx,*[for (e in all_cells where e.col<hi and e.end_col>lo) e]],(acc,e)any^ =>
+        else reduce([tx,*[for (e in all_cells where ((e.col<hi and e.end_col>lo) ^ { false })) e]],(acc,e)any^ =>
             style(acc,e.path,"width",string(average*(e.end_col-e.col)) ++ "pt"))
     }
 }
@@ -201,8 +201,8 @@ fn auto_fit(editor,p) map^ {
     if (not contains(["contents","window","fixed"],p.mode)) raise error("Choose an AutoFit mode.") else {
         let all_cells = tables.entries(editor)
         let cols = grid.bounds(all_cells).right
-        let widths = if (measured_sizes(p.widths,cols) and len(p.widths)==cols) p.widths else [for (i in 1 to cols) table_width(editor)/cols]
-        let tx = styles(tx_begin(editor.doc,editor.selection),[for (e in tables.entries(editor)) e.path],[{key:"width",value:null}])
+        let widths = if (measured_sizes(p.widths,cols) and len(p.widths)==cols) p.widths else [for (i in ((1 to cols) ^ { [] })) table_width(editor)/cols]
+        let tx = styles(tx_begin(editor.doc,editor.selection),[for (e in ((tables.entries(editor)) ^ { [] })) e.path],[{key:"width",value:null}])
         // freezing columns also freezes the measured table width; expanding to the window would resize them again.
         let fit = styles(tx,[ctx.table_path],[{key:"width",value:if (p.mode=="contents") "auto" else if (p.mode=="window") "100%" else string(sum(widths)) ++ "pt"},
             {key:"table-layout",value:if (p.mode=="fixed") "fixed" else "auto"}])
@@ -237,7 +237,7 @@ fn convert_text(editor,p) map^ {
         let b = grid.bounds(all_cells)
         let separator = if (p.separator=="commas") ", " else "\t"
         let paragraphs = if (p.separator=="paragraphs") [for (e in all_cells) node('p',e.node.content)] else
-            [for (r in 0 to b.bottom-1) node('p',[for (c in 0 to b.right-1) *[
+            [for (r in ((0 to b.bottom-1) ^ { [] })) node('p',[for (c in ((0 to b.right-1) ^ { [] })) *[
                 *if (c==0) [] else [text(separator)],
                 *[for (e in [grid.at(all_cells,r,c)] where e.row==r and e.col==c) *e.node.content]]])]
         replace_table(editor,paragraphs)
@@ -274,15 +274,15 @@ fn repeat_header(editor,p) map^ {
     let b = grid.bounds(tables.selected(editor))
     let enabled = if (p.enabled is bool) p.enabled else not settings(editor).repeat
     if (enabled and b.top!=0) raise error("Select the first row, or consecutive rows starting at the top, to repeat them.")
-    else if (enabled and any([for (e in tables.entries(editor)) e.row<b.bottom and e.end_row>b.bottom]))
+    else if (enabled and any([for (e in ((tables.entries(editor)) ^ { [] })) e.row<b.bottom and e.end_row>b.bottom]))
         raise error("A merged cell crosses the last header row. Include the complete cell.")
     else {
         let header = if (enabled) [node_attrs('thead',if (ctx.table.content[0].tag=='thead') ctx.table.content[0].attrs else [],
-            [for (i,row in rows where i<b.bottom) row.node])] else []
+            [for (i,row in rows where ((i<b.bottom) ^ { false })) row.node])] else []
         let all_cells = tables.entries(editor)
         let cut = if (enabled) b.bottom else 0
         let body = grid.rebuild(ctx.table,ctx.table_path,drop(rows,cut),
-            [for (e in all_cells where e.row>=cut) {*:e,row:e.row-cut,end_row:e.end_row-cut}])^
+            [for (e in all_cells where ((e.row>=cut) ^ { false })) {*:e,row:e.row-cut,end_row:e.end_row-cut}])^
         replace_table(editor,[node_attrs('table',attrs_set(ctx.table.attrs,'data-word-repeat-header',string(enabled)),
             [*header,*[for (part in body.content) if (part.tag=='thead') node_attrs('tbody',part.attrs,part.content) else part]])])
     }
@@ -291,7 +291,7 @@ fn repeat_header(editor,p) map^ {
 fn address(raw) any^ {
     let chars = split(upper(trim(raw)),"")
     let alphabet = split("ABCDEFGHIJKLMNOPQRSTUVWXYZ","")
-    let letters = take(chars,len([for (c in chars where contains(alphabet,c)) c]))
+    let letters = take(chars,len([for (c in chars where ((contains(alphabet,c)) ^ { false })) c]))
     let digits = drop(chars,len(letters))
     let col = reduce([0,*letters],(n,c)=>n*26+index(alphabet,c)+1)
     let row = float(join(digits,""))
@@ -315,8 +315,8 @@ fn formula_cells(editor,raw) array^ {
         if (len(pair)>2 or a==null or z==null or a.row>=b.bottom or z.row>=b.bottom or a.col>=b.right or z.col>=b.right)
             raise error("Use ABOVE, BELOW, LEFT, RIGHT, a cell such as A1, or a range such as A1:B3.")
         else {
-            let picked = [for (e in all_cells where grid.intersects(e,{top:min(a.row,z.row),bottom:max(a.row,z.row)+1,
-                left:min(a.col,z.col),right:max(a.col,z.col)+1})) e]
+            let picked = [for (e in all_cells where ((grid.intersects(e,{top:min(a.row,z.row),bottom:max(a.row,z.row)+1,
+                left:min(a.col,z.col),right:max(a.col,z.col)+1})) ^ { false })) e]
             if (is_picked(target,picked)) raise error("The formula range includes its own cell.") else picked
         }
     }
@@ -385,6 +385,6 @@ pub pn measure(editor,node,zoom) {
     let sizes = [for (e in all_cells) for (i in [index([for (c in source) c.path],e.path)])
         {*:e,rect:dom.bounding_box(live[i])}]
     let b = grid.bounds(all_cells)
-    return {heights:[for (r in 0 to b.bottom-1) (grid_line(sizes,"row",r+1)-grid_line(sizes,"row",r))*0.75/zoom],
-        widths:[for (c in 0 to b.right-1) (grid_line(sizes,"col",c+1)-grid_line(sizes,"col",c))*0.75/zoom]}
+    return {heights:[for (r in ((0 to b.bottom-1) ^ { [] })) (grid_line(sizes,"row",r+1)-grid_line(sizes,"row",r))*0.75/zoom],
+        widths:[for (c in ((0 to b.right-1) ^ { [] })) (grid_line(sizes,"col",c+1)-grid_line(sizes,"col",c))*0.75/zoom]}
 }

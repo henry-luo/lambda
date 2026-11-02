@@ -8,8 +8,8 @@ let result = normalize.normalize(source)
 let canonical = result.graph
 let repeated = normalize.normalize(canonical)
 let html = transform.to_html(source)
-let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
-  where string(name(child)) == "node") child]
+let html_nodes = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[i]
+  where ((string(name(child)) == "node") ^ { false })) child]
 
 {
   source_stage: source["ir-stage"],
@@ -19,7 +19,7 @@ let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
   canonical_stage: canonical["ir-stage"],
   canonical_valid: result.valid,
   canonical_diagnostics: result.diagnostics,
-  canonical_nodes: [for (node in model.nodes(canonical)) [
+  canonical_nodes: [for (node in ((model.nodes(canonical)) ^ { [] })) [
     node.id, model.label_source(node), node.shape, node["source-line"]
   ]],
   idempotent: repeated.graph == canonical,

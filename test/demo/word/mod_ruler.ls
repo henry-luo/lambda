@@ -45,7 +45,7 @@ pub fn indent_value(p,width,handle,delta) {
 fn marks(extent,origin,zoom,vertical=false) {
     let step = 96/2.54/4;
     // retain offscreen ticks so a moving margin can rebase zero during its preview.
-    [for (n in -int(ceil(extent/step)) to int(ceil(extent/step)))
+    [for (n in ((-int(ceil(extent/step)) to int(ceil(extent/step))) ^ { [] }))
         <span class:"ruler-mark" ++ (if (n%4==0) " ruler-number" else if (n%2==0) " ruler-half" else ""),
             style:(if (vertical) "top:" else "left:") ++ string((origin+n*step)*zoom) ++ "px",
             ["data-ruler-cm"]:string(n/4), if (n%4==0) string(abs(n/4)) else null>]
@@ -87,13 +87,13 @@ pub fn vertical(doc,zoom,disabled=false) {
                 *[for (s in sides where s.vertical) margin_handle(p,s,(if (s.id=="top") g.top else g.height-g.bottom)*zoom,disabled,i+1)]>]>
 }
 fn pixels(node,key) any^ => model.points(dom.computed_style(node,key))/0.75
-fn block_nodes(node) => [for (n in dom.query_selector_all(controller.surface(dom.document_element(node)),model.block_selector)
+fn block_nodes(node) => [for (n in ((dom.query_selector_all(controller.surface(dom.document_element(node)),model.block_selector)) ^ { [] })
     where dom.query_selector(n,model.block_selector)==null) n]
 fn block_node(editor,node,path) {
-    let i = [for (i,e in model.blocks(editor.doc) where e.path==path) i][0];
+    let i = [for (i,e in ((model.blocks(editor.doc)) ^ { [] }) where e.path==path) i][0];
     block_nodes(node)[i]
 }
-pub fn paragraph_geometry(editor,node,zoom) {
+pub fn paragraph_geometry(editor,node,zoom) any^ {
     let entry = model.paragraph_block(editor)
     let target = block_node(editor,node,entry.path)
     let box = dom.bounding_box(target)
@@ -116,12 +116,12 @@ pn indent_position(editor,node,zoom) {
     let g = paragraph_geometry(editor,node,zoom)
     for (s in indents) {
         let handle = dom.get_element_by_id(root,"ruler-indent-" ++ s.id)
-        dom.style_set_property(handle,"visibility",if (g==null) "hidden" else "visible")
+        dom.style_set_property(handle,"visibility",if ((g==null)^) "hidden" else "visible")
         if (g!=null) {
             let x = if (s.id=="right") g.right else g.left+if (s.id=="first") g.values.first/0.75*zoom else 0
             let value = if (s.id=="hanging") g.values.indent else g.values[s.id]
-            dom.style_set_property(handle,"left",string(x-box.x) ++ "px")
-            attribute(handle,"aria-valuenow",string(rounded_tenth(value)))
+            dom.style_set_property(handle,"left",string(x-box.x)^ ++ "px")
+            attribute(handle,"aria-valuenow",string(rounded_tenth(value)))^
             attribute(handle,"aria-valuetext",string(rounded_tenth(value)) ++ " pt")
         }
     }
@@ -135,8 +135,8 @@ pub pn sync(node) {
     // page bounds include zoom, page gaps and content-driven height.
     for (i,sheet in dom.query_selector_all(root,"#edit-surface .word-page")) {
         let bounds = dom.bounding_box(sheet)
-        dom.style_set_property(rulers[i],"top",string(bounds.y-viewport.y) ++ "px")
-        dom.style_set_property(rulers[i],"height",string(bounds.height) ++ "px")
+        dom.style_set_property(rulers[i],"top",string(bounds.y-viewport.y)^ ++ "px")
+        dom.style_set_property(rulers[i],"height",string(bounds.height)^ ++ "px")
         let bottom = dom.query_selector(rulers[i],".ruler-trailing")
         dom.style_set_property(dom.query_selector(rulers[i],"[data-ruler-margin=bottom]"),"top",string(bounds.height-dom.bounding_box(bottom).height) ++ "px")
     }
@@ -176,14 +176,14 @@ pn paint_rulers(doc,node,zoom) {
         let g = page.geometry(doc,page_no)
         let p = page.resolved(initial,page_no)
         for (s in sides where s.vertical==vertical) {
-            dom.style_set_property(dom.query_selector(region,if (contains(["left","top"],s.id)) ".ruler-leading" else ".ruler-trailing"),
-                if (vertical) "height" else "width",string(g[s.id]*zoom) ++ "px")
+            dom.style_set_property(dom.query_selector(region,if (contains(["left","top"],s.id)^) ".ruler-leading" else ".ruler-trailing"),
+                if (vertical) "height" else "width",string(g[s.id]*zoom)^ ++ "px")
             let handle = dom.query_selector(region,"[data-ruler-margin=" ++ s.id ++ "]")
             dom.style_set_property(handle,if (vertical) "top" else "left",string((if (s.sign==1) g[s.id]*zoom
-                else (if (vertical) dom.bounding_box(region).height else g.width*zoom)-g[s.id]*zoom)) ++ "px")
-            attribute(handle,"aria-valuenow",string(p[s.id]))
-            attribute(handle,"aria-valuetext",string(p[s.id]) ++ " mm")
-            attribute(handle,"aria-label",margin_name(p,s,page_no) ++ " page margin")
+                else (if (vertical) dom.bounding_box(region).height else g.width*zoom)-g[s.id]*zoom))^ ++ "px")
+            attribute(handle,"aria-valuenow",string(p[s.id]))^
+            attribute(handle,"aria-valuetext",string(p[s.id]) ++ " mm")^
+            attribute(handle,"aria-label",margin_name(p,s,page_no) ++ " page margin")^
             attribute(handle,"title",margin_name(p,s,page_no) ++ " page margin — drag to resize")
         }
         for (tick in dom.query_selector_all(region,".ruler-mark"))
@@ -194,13 +194,13 @@ pn paint_rulers(doc,node,zoom) {
 pn preview(editor,node,drag,params) {
     if (drag.margin) {
         let tx = page.transaction(editor.doc,editor.selection,{*:page.settings(editor.doc),*:params}) ^ { return }
-        for (i,sheet in dom.query_selector_all(controller.surface(dom.document_element(node)),".word-page")) {
+        for (i,sheet in dom.query_selector_all(controller.surface(dom.document_element(node))^,".word-page")) {
             let g = page.geometry(tx.doc_after,i+1)
             for (s in sides) dom.style_set_property(sheet,"padding-" ++ s.id,string(g[s.id]) ++ "px")
             for (story in dom.query_selector_all(sheet,".word-story"))
                 for (side in ["left","right"]) dom.style_set_property(story,side,string(g[side]) ++ "px")
         }
-        paint_rulers(tx.doc_after,node,drag.zoom)
+        paint_rulers(tx.doc_after,node,drag.zoom)^
     } else {
         for (e in drag.targets) {
             let n = block_node(editor,node,e.path)
@@ -213,9 +213,9 @@ pn preview(editor,node,drag,params) {
             }
         }
     }
-    sync(stage(node))
-    indent_position(editor,node,drag.zoom)
-    guide_position(node,drag)
+    sync(stage(node))^
+    indent_position(editor,node,drag.zoom)^
+    guide_position(node,drag)^
     refresh(node)
 }
 pn guide_position(node,drag) {
@@ -239,10 +239,10 @@ pn end_drag(editor,node,drag,release=true) {
         }
         else attribute(entry.node,"style",entry.style)
     }
-    paint_rulers(editor.doc,node,drag.zoom)
-    sync(stage(node))
-    indent_position(editor,node,drag.zoom)
-    attribute(dom.get_element_by_id(dom.document_element(node),"ruler-guide"),"style","visibility:hidden")
+    paint_rulers(editor.doc,node,drag.zoom)^
+    sync(stage(node))^
+    indent_position(editor,node,drag.zoom)^
+    attribute(dom.get_element_by_id(dom.document_element(node),"ruler-guide"),"style","visibility:hidden")^
     refresh(node)
     if (release) dom.release_pointer_capture(owner(node),drag.pointer)
     dom.remove_attribute(dom.document_element(node),"data-word-ruler-drag")
@@ -255,7 +255,7 @@ view <word_rulers> state drag:null {
         <div id:"ruler-guide",class:"ruler-guide",style:"visibility:hidden",["aria-hidden"]:"true">>
 }
 on render(evt) {
-    if (evt.event_phase==2) refresh(evt.target)
+    if (evt.event_phase==2) refresh(evt.target)^
     return 'pass'
 }
 on mousedown(evt) {
@@ -266,17 +266,17 @@ on pointerdown(evt) {
     let control = dom.closest(evt.target,".ruler-control")
     if (evt.button!=0 or ~.disabled or ~.read_only or control==null) { return 'pass' }
     let initial = gesture(~.editor,evt.target,control,~.zoom)
-    if (initial==null or (not initial.margin and initial.geometry==null)) { return 'prevent-default' }
-    let targets = [for (e in model.selected_blocks(~.editor)) {path:e.path,
+    if ((initial==null or (not initial.margin and initial.geometry==null))^) { return 'prevent-default' }
+    let targets = [for (e in model.selected_blocks(~.editor)^) {path:e.path,
         values:model.paragraph_indents({*:~.editor,selection:{kind:'node',path:e.path}}),
         padding:{indent:pixels(block_node(~.editor,evt.target,e.path),"padding-left"),right:pixels(block_node(~.editor,evt.target,e.path),"padding-right")}}]
     // publish the claim before focus can send selectionchange; template attributes update after this handler.
-    attribute(dom.document_element(evt.target),"data-word-ruler-drag",initial.control)
-    drag = {*:initial,pointer:evt.pointerId,x:evt.clientX,y:evt.clientY,targets:targets,
-        styles:[for (n in dom.query_selector_all(controller.surface(dom.document_element(evt.target)),".word-page,.word-story," ++ model.block_selector))
-            {node:n,style:dom.get_attribute(n,"style")}]}
-    controller.focus(dom.document_element(evt.target))
-    owner(evt.target).set_pointer_capture(evt.pointerId)
+    attribute(dom.document_element(evt.target),"data-word-ruler-drag",initial.control)^
+    drag = ({*:initial,pointer:evt.pointerId,x:evt.clientX,y:evt.clientY,targets:targets,
+        styles:[for (n in ((dom.query_selector_all(controller.surface(dom.document_element(evt.target)),".word-page,.word-story," ++ model.block_selector)) ^ { [] }))
+            {node:n,style:dom.get_attribute(n,"style")}]})^
+    controller.focus(dom.document_element(evt.target))^
+    owner(evt.target)^.set_pointer_capture(evt.pointerId)^
     dom.style_set_property(dom.get_element_by_id(dom.document_element(evt.target),"selection-toolbar"),"visibility","hidden")
     return 'prevent-default'
 }
@@ -294,21 +294,21 @@ on pointerup(evt) {
     end_drag(~.editor,evt.target,before)
     if (changed) emit("word_command",{id:if (before.margin) "layout.pageSetup" else "para.indents",params:params,
         selection:before.selection,node:owner(evt.target),event:evt})
-    else { controller.focus(dom.document_element(evt.target)); controller.restore(~.editor); emit("word_ruler_end",{target:owner(evt.target)}) }
+    else { controller.focus(dom.document_element(evt.target))^; controller.restore(~.editor)^; emit("word_ruler_end",{target:owner(evt.target)}) }
     return 'prevent-default'
 }
 on pointercancel(evt) {
     if (drag==null) { return 'pass' }
     let before = drag
     drag = null
-    end_drag(~.editor,evt.target,before)
-    controller.focus(dom.document_element(evt.target))
-    controller.restore(~.editor)
+    end_drag(~.editor,evt.target,before)^
+    controller.focus(dom.document_element(evt.target))^
+    controller.restore(~.editor)^
     emit("word_ruler_end",{target:owner(evt.target)})
     return 'prevent-default'
 }
 on lostpointercapture(evt) {
-    if (drag!=null) { let before = drag; drag = null; end_drag(~.editor,evt.target,before,false) }
+    if (drag!=null) { let before = drag; drag = null; end_drag(~.editor,evt.target,before,false)^ }
     return 'pass'
 }
 on keydown(evt) {
@@ -316,9 +316,9 @@ on keydown(evt) {
         if (evt.key=="Escape") {
             let before = drag
             drag = null
-            end_drag(~.editor,evt.target,before)
-            controller.focus(dom.document_element(evt.target))
-            controller.restore(~.editor)
+            end_drag(~.editor,evt.target,before)^
+            controller.focus(dom.document_element(evt.target))^
+            controller.restore(~.editor)^
             emit("word_ruler_end",{target:owner(evt.target)})
         }
         return 'prevent-default'
@@ -327,7 +327,7 @@ on keydown(evt) {
     if (control==null or ~.read_only or ~.disabled) { return 'pass' }
     let before = gesture(~.editor,evt.target,control,~.zoom)
     let keys = if (before.vertical) ["ArrowUp","ArrowDown"] else ["ArrowLeft","ArrowRight"]
-    if (not contains(keys,evt.key)) { return 'pass' }
+    if ((not contains(keys,evt.key))^) { return 'pass' }
     let amount = (if (evt.key==keys[0]) -1 else 1)*(if (before.margin) 0.5*96/25.4 else 96/72)*(if (evt.shiftKey) 10 else 1)
     emit("word_command",{id:if (before.margin) "layout.pageSetup" else "para.indents",params:value(~.editor,before,amount),
         selection:before.selection,node:owner(evt.target),event:evt,ruler_focus:before.control})
@@ -341,22 +341,22 @@ pub pn refresh(node) {
 }
 fn visible_page(editor,node) any^ {
     let viewport = dom.bounding_box(stage(node))
-    let visible = [for (i,sheet in dom.query_selector_all(controller.surface(dom.document_element(node)),".word-page"),
+    let visible = [for (i,sheet in ((dom.query_selector_all(controller.surface(dom.document_element(node)),".word-page")) ^ { [] }),
         let box=dom.bounding_box(sheet) where box.y+box.height>viewport.y+1 and box.y<viewport.y+viewport.height) i+1]
     let caret = navigation.current_page(editor)
     if (contains(visible,caret)) caret else visible[0] or caret
 }
 pub pn position(editor,node,zoom) {
-    sync(stage(node))
+    sync(stage(node))^
     if (not dragging(node)) {
         let ruler = dom.get_element_by_id(dom.document_element(node),"horizontal-ruler")
         let page_no = visible_page(editor,node)
-        if (dom.get_attribute(ruler,"data-page")!=string(page_no)) {
-            attribute(ruler,"data-page",string(page_no))
-            paint_rulers(editor.doc,node,zoom)
+        if ((dom.get_attribute(ruler,"data-page")!=string(page_no))^) {
+            attribute(ruler,"data-page",string(page_no))^
+            paint_rulers(editor.doc,node,zoom)^
         }
     }
-    indent_position(editor,node,zoom)
+    indent_position(editor,node,zoom)^
     let id = dom.get_attribute(dom.document_element(node),"data-word-ruler-drag")
     if (id!=null) {
         let control = dom.get_element_by_id(dom.document_element(node),id)

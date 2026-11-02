@@ -2,7 +2,7 @@ type Result = {text: string, count: int}
 
 fn result(text: string, count: int) Result => {text: text, count: count}
 
-fn render(depth: int) Result^ {
+fn render(depth: int) Result {
     if (depth <= 0) result("x", 1)
     else {
         let child = render(depth - 1)

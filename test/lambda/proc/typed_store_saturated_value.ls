@@ -35,7 +35,7 @@ pn main() {
     copy_loop(c, a, 3)^
     print("loop=" ++ string(c) ++ "\n")
     // an out-of-range read is null, which the typed store must still reject
-    copy_cell(b, a, 0, 9)^
+    copy_cell(b, a, 0, 9) ^ { null }
     print("after_oob=" ++ string(b) ++ "\n")
     // floats carry their own infinities the same way
     var f: float[] = [1.0, 2.0]

@@ -15,7 +15,7 @@ view <demo> state phase:"none", notices:0 {
 }
 on click(evt) {
     let command=dom.get_attribute(evt.target,"id")
-    if (not contains(["pause","resume","seek","reverse","cancel","play"],command)) { return 'pass' }
+    if ((not contains(["pause","resume","seek","reverse","cancel","play"],command))^) { return 'pass' }
     let host=dom.query_selector(dom.closest(evt.target,"#demo"),".lambda-chart")
     dom.dispatch(host,{type:"chart_action",bubbles:true,detail:{command:command,position:500}})
     return 'handled'

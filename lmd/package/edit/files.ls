@@ -109,7 +109,7 @@ pub fn dialog_view(dialog, session) any^ {
 // conflict dialog a refused save opens (or null).
 pub pn save_now(session, doc, node) {
   let result = sess.save(session, doc, session.path, false)
-  sync_window(node, result.session, doc)
+  sync_window(node, result.session, doc)^;
   {session: result.session, status: result.status,
    dialog: if (result.conflict != null) {kind: result.conflict, path: result.session.path} else null}
 }
@@ -133,8 +133,8 @@ pub pn dialog_action(action, node, st) {
   }
   if (action == "reload") {
     let result = sess.reload(session)
-    if (not result.ok) { return {*: st, status: result.status, handled: true, reloaded: null} }
-    sync_window(node, result.session, result.doc)
+    if ((not result.ok)^) { return {*: st, status: result.status, handled: true, reloaded: null} }
+    sync_window(node, result.session, result.doc)^
     return {*: st, session: result.session, status: result.status, dialog: null, handled: true,
             reloaded: result.doc}
   }
@@ -146,15 +146,15 @@ pub pn dialog_action(action, node, st) {
                else if (dialog != null and dialog.path != null) dialog.path
                else session.path
   let closing = (dialog != null and dialog.kind == 'close') or st.after_save == 'close'
-  if (target == "") { return {*: st, status: "Choose a file name.", handled: true, reloaded: null} }
+  if ((target == "")^) { return {*: st, status: "Choose a file name.", handled: true, reloaded: null} }
   let result = sess.save(session, st.doc, target, action == "overwrite")
-  sync_window(node, result.session, st.doc)
+  sync_window(node, result.session, st.doc)^
   let saved = {*: st, session: result.session, status: result.status, handled: true, reloaded: null}
-  if (result.ok) {
+  if (result.ok^) {
     if (closing) { dom.request_window_close(node) }
     return {*: saved, dialog: null, after_save: null}
   }
-  if (result.conflict != null) {
+  if ((result.conflict != null)^) {
     return {*: saved, dialog: {kind: result.conflict, path: target}, after_save: if (closing) 'close' else null}
   }
   // a refused Save As keeps its dialog, showing the path it tried

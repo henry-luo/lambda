@@ -25,4 +25,4 @@ let vl = {
 
 let spec = vega.convert(vl)
 let svg = chart.render_spec(spec)
-format(svg, 'xml')
+format(svg, 'xml')^

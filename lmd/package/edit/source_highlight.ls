@@ -156,11 +156,11 @@ fn link_def_marks(t, at) any^ {
 }
 
 // YAML front matter: the lines from a first-line `---` to its closing line.
-pub fn front_matter_end(b) {
+pub fn front_matter_end(b) any^ {
   if (b.count < 2 or trim_end(buf.line(b, 0)) != "---") -1
   else {
     let limit = min(b.count, 400)
-    let closes = [for (i in 1 to limit - 1 where trim_end(buf.line(b, i)) == "---" or trim_end(buf.line(b, i)) == "...") i];
+    let closes = [for (i in 1 to limit - 1 where ((trim_end(buf.line(b, i)) == "---" or trim_end(buf.line(b, i)) == "...") ^ { false })) i];
     if (len(closes) == 0) -1 else closes[0]
   }
 }

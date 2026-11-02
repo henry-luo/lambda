@@ -31,20 +31,20 @@ fn link_kind(e) any^ {
         (if (as == "style") "stylesheet" else if (as == "font") "font" else "image")
     else null
 }
-fn refs_of(e) {
+fn refs_of(e) any^ {
     let tag = e.tag
     let own = if (tag == "link") (let k = link_kind(e), if (k == null) [] else [{ref: n.attr(e, "href"), kind: k}])
         else if (tag == "img") [*(if (n.attr(e, "src") == null) [] else [{ref: n.attr(e, "src"), kind: "image"}]),
-            *[for (u in n.srcset_urls(n.attr(e, "srcset"))) {ref: u, kind: "image"}]]
-        else if (tag == "source") [for (u in n.srcset_urls(n.attr(e, "srcset"))) {ref: u, kind: "image"}]
+            *[for (u in ((n.srcset_urls(n.attr(e, "srcset"))) ^ { [] })) {ref: u, kind: "image"}]]
+        else if (tag == "source") [for (u in ((n.srcset_urls(n.attr(e, "srcset"))) ^ { [] })) {ref: u, kind: "image"}]
         else if (tag == "video" and n.attr(e, "poster") != null) [{ref: n.attr(e, "poster"), kind: "image"}]
         else if (tag == "style") [for (u in ((rewrite.css_refs(e.text)) ^ { [] })) {ref: u, kind: "image"}]
         else []
-    let inline = [for (u in rewrite.css_refs(n.attr(e, "style"))) {ref: u, kind: "image"}];
+    let inline = [for (u in ((rewrite.css_refs(n.attr(e, "style"))) ^ { [] })) {ref: u, kind: "image"}];
     [*own, *inline]
 }
 // every resource reference of the document, as written, in document order
-pub fn refs(html) => [for (e in n.all_elements(html)) for (r in refs_of(e)) r]
+pub fn refs(html) => [for (e in n.all_elements(html)) for (r in ((refs_of(e)) ^ { [] })) r]
 
 // document.baseURI: the first <base href> resolved against the final URL
 pub fn base_of(html, url) any^ {

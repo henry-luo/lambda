@@ -28,7 +28,7 @@ fn command(st, action) any^ {
 
 fn toggle(action, label, on) => <button type:"button", class:(if (on) "toggle on" else "toggle"), 'data-act':action, label>
 
-view <world_app> state st: initial() {
+view <world_app>() any^ state st: (initial()^) {
     <body <div class:"app",
         <header class:"bar",
             <div class:"title", <h1 st.world.realm> <span class:"seed", "seed " ++ string(st.seed)>>

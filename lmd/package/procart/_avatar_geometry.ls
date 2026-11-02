@@ -24,7 +24,7 @@ let PROFILES={
 fn signed_power(x,p) float => (if (x<0.0) -1.0 else 1.0)*abs(x)**p
 fn secant(profile,i,axis) float => (profile[i+1][axis]-profile[i][axis])/(profile[i+1][0]-profile[i][0])
 // monotone Hermite radii remove ring facets without overshooting the authored silhouette.
-fn tangent(profile,i,axis) float {
+fn tangent(profile,i,axis) float^ {
  if (i==0) secant(profile,0,axis) else if (i==len(profile)-1) secant(profile,i-1,axis)
  else {
   let before=secant(profile,i-1,axis),after=secant(profile,i,axis),

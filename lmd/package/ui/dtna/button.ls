@@ -76,7 +76,7 @@ on render(evt) {
     'pass'
 }
 on dtna_button_tick(evt) {
-    if (((evt.detail == clock.token and clock.token > 0)^)^) { clock = advance(~,evt,clock) }
+    if ((evt.detail == clock.token and clock.token > 0)^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on click(evt) {

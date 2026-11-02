@@ -12,7 +12,7 @@ let LAYERS = [{id:"flower",label:"Wildflowers",note:"Six species, from poppies t
     {id:"tree",label:"Trees",note:"A branching grove"},{id:"stone",label:"Stones",note:"Weathered granite"},
     {id:"grass",label:"Grass & reeds",note:"Fine blades, tufts & pond reeds"},{id:"pond",label:"Stillwater pond",note:"Water, lily pads & a sandy bank"}]
 
-view <meadow_app> state st:INITIAL {
+view <meadow_app> () any^ state st:INITIAL {
     <body <div class:"app glasshouse meadow-app",
         <header class:"bar",
             <div class:"title",<h1 "Procart"> <span class:"seed","Meadow / seed "++string(st.model.seed)>>;

@@ -35,7 +35,7 @@ pn benchmark() int^ {
             if (bx[j] > 500) {
                 bx[j] = 500
                 var axv: int = abs(bxv[j])
-                bxv[j] = 0 - axv
+                bxv[j] = (0 - axv)^
                 bounced = 1
             }
             if (bx[j] < 0) {
@@ -47,7 +47,7 @@ pn benchmark() int^ {
             if (by[j] > 500) {
                 by[j] = 500
                 var ayv: int = abs(byv[j])
-                byv[j] = 0 - ayv
+                byv[j] = (0 - ayv)^
                 bounced = 1
             }
             if (by[j] < 0) {

@@ -11,7 +11,7 @@ import plotdata: .plotdata
 import kinds: .plotkinds
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 fn plotted_points(plot) => children_named(plot, "point")
 
@@ -97,9 +97,9 @@ pub fn plot_points(plot, axis_node = null, program_data = null, base_uri = null)
                 }
             } else {
                 let trees = [for (child in plot
-                    where child is element and string(name(child)) != "option" and
+                    where ((child is element and string(name(child)) != "option" and
                         string(name(child)) != "point" and
-                        string(name(child)) != "node") child]
+                        string(name(child)) != "node") ^ { false })) child]
                 if (len(trees) == 1)
                     sample_curve(trees[0], null, domain[0], domain[1],
                         count, 0, [], pgfmath.for_expression(program_data, trees[0]),
@@ -181,7 +181,7 @@ fn clip_bound(p, q, interval) {
     }
 }
 
-fn clipped_segment(a, b, width, height) {
+fn clipped_segment(a, b, width, height) any^ {
     let dx = b[0] - a[0]
     let dy = b[1] - a[1]
     let left = clip_bound(0.0 - dx, a[0], [0.0, 1.0])
@@ -346,7 +346,7 @@ fn fill_between_svg(series, series_list, paths, color, xs, ys, width, height) an
 // Cycle colors and legend slots skip fill between plots, which consume no cycle entry.
 fn series_styles(series_list) any^ {
     let ordinals = [for (index, series in series_list)
-        len([for (earlier in slice(series_list, 0, index)
+        len([for (earlier in ((slice(series_list, 0, index)) ^ { [] })
             where earlier.kind != "fill_between") earlier])];
     [for (index, series in series_list)
         {*:series, ordinal: ordinals[index],
@@ -356,7 +356,7 @@ fn series_styles(series_list) any^ {
 fn render_series(styled, axis_node, bars, paths, xs, ys, width, height) any^ {
     let bar_count = len([for (series in styled where series.kind == "bar") series])
     let bar_ordinals = [for (index, series in styled)
-        len([for (earlier in slice(styled, 0, index) where earlier.kind == "bar") earlier])];
+        len([for (earlier in ((slice(styled, 0, index)) ^ { [] }) where earlier.kind == "bar") earlier])];
     [for (index, series in styled, part in
         if (series.kind == "fill_between")
             fill_between_svg(series, styled, paths, series.color, xs, ys, width, height)^
@@ -378,7 +378,7 @@ fn label_at(raw, x, y, extra = "") any^ {
 
 fn legend_nodes(axis_node) any^ {
     let explicit = [for (child in axis_node
-        where child is element and string(name(child)) == "legend_entry") child]
+        where ((child is element and string(name(child)) == "legend_entry") ^ { false })) child]
     let raw = opts.value(axis_node, "legend entries", null)
     if (raw == null) explicit
     else [*explicit, *[for (entry in ((util.split_top_level(raw, ",")) ^ { [] })
@@ -464,7 +464,7 @@ fn minor_ticks(axis_scale, count, horizontal, limit) any^ {
     else {
         let major = scale.scale_ticks(axis_scale, 5);
         <g class: "minor-ticks",
-            for (at in 0 to (len(major) - 2), between in 1 to count,
+            for (at in ((0 to (len(major) - 2)) ^ { [] }), between in 1 to count,
                  let value = major[at] +
                      (major[at + 1] - major[at]) * float(between) /
                      float(count + 1),
@@ -601,8 +601,8 @@ fn annotation_label(node, point, left, top, tangent = null) any^ {
 }
 
 fn axis_definitions(axis_node) => [for (child in axis_node
-    where child is element and
-        (string(name(child)) == "node" or string(name(child)) == "coordinate")) child]
+    where ((child is element and
+        (string(name(child)) == "node" or string(name(child)) == "coordinate")) ^ { false })) child]
 
 fn axis_path_point(point, definitions, xs, ys, pw, ph) any^ {
     if (point.coord_system != null) axis_position(point, xs, ys, pw, ph)^
@@ -691,7 +691,7 @@ fn plot_annotations(series_list, index, xs, ys, left, top, acc) any^ {
     }
 }
 
-fn value_domain(values, low, high) {
+fn value_domain(values, low, high) any^ {
     let lo = if (low != null) float(low) else float(min(values))
     let hi = if (high != null) float(high) else float(max(values))
     if (lo == hi) [lo - 1.0, hi + 1.0] else [lo, hi]
@@ -919,7 +919,7 @@ fn render_cartesian_axis(axis_node, options, picture, extra_keys = []) any^ {
     let definitions = axis_definitions(axis_node)
     let annotation_paths = [for (path in paths where ((not invisible_named_path(path)) ^ { false }))
         axis_path_geometry(path, definitions, xs, ys, pw, ph)^]
-    let direct_labels = [for (node in definitions where string(name(node)) == "node")
+    let direct_labels = [for (node in definitions where ((string(name(node)) == "node") ^ { false }))
         annotation_label(node, axis_position(node, xs, ys, pw, ph)^, left, top)^]
     let path_labels = [for (item in annotation_paths where item.label != null)
         annotation_label(item.label.node, item.label.point, left, top)^]

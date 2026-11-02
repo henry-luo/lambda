@@ -6,7 +6,7 @@ import svg: .mod_svg_snapshot
 fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
 fn render(source, display = false) any^ => math.render_box(ast(source), {display:display})^
 fn close(a, b) => abs(a - b) < 0.00002
-fn glyphs(box) => [for (g in svg.geometry(box.element) where g.text != "") g]
+fn glyphs(box) => [for (g in ((svg.geometry(box.element)) ^ { [] }) where g.text != "") g]
 fn digit(box) => [for (g in glyphs(box) where g.text == "2") g][0]
 fn rise(box) => (glyphs(box)[0].y - digit(box).y) / 1000.0
 
@@ -15,10 +15,10 @@ let explicit = font.prepare(ast("b^2"), {font_family:"Computer Modern Serif"})^
 let ordinary = render("b^2")
 let display = render("b^2", true)
 let cramped = render("\\sqrt{b^2}", true)
-let cramped_base = [for (g in glyphs(cramped) where g.text == "b") g][0]
+let cramped_base = [for (g in ((glyphs(cramped)) ^ { [] }) where g.text == "b") g][0]
 let nested = render("x^{y^2}")
 let ruled = render("\\frac{a}{b}", true)
-let rule = [for (g in svg.geometry(ruled.element) where name(g.node) == 'rect') g][0]
+let rule = [for (g in ((svg.geometry(ruled.element)) ^ { [] }) where ((name(g.node) == 'rect') ^ { false })) g][0]
 let sup_sub = render("b_M^g")
 let pair = glyphs(sup_sub)
 let g = [for (a in pair where a.text == "g") a][0]
@@ -30,8 +30,8 @@ let no_quad = render("\\scriptstyle ab")
 let sub = render("b_2")
 let sum = render("\\sum_a^b", true)
 let inline_sum = render("\\sum_a^b")
-let sum_glyph = [for (g in glyphs(sum) where g.text == "∑") g][0]
-let inline_glyph = [for (g in glyphs(inline_sum) where g.text == "∑") g][0]
+let sum_glyph = [for (g in ((glyphs(sum)) ^ { [] }) where g.text == "∑") g][0]
+let inline_glyph = [for (g in ((glyphs(inline_sum)) ^ { [] }) where g.text == "∑") g][0]
 let bigcup = glyphs(render("\\bigcup", true))[0]
 let infinity_rows = [for (style in ["\\textstyle", "\\scriptstyle", "\\scriptscriptstyle"])
     glyphs(render(style ++ " x\\rightarrow\\infty"))]

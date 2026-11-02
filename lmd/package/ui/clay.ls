@@ -20,7 +20,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"clay",variables,styles.css,"dtna-root clay-root")
 }
-view clay_page: <clay.page> { page(content(~),c.props(~))^ }
+view clay_page: <clay.page> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => catalog.descriptor('button',props,child)^
 pub fn button_group(props = {}, child = null) element^ => catalog.descriptor('button-group',props,child)^

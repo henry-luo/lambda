@@ -60,11 +60,12 @@ type World = {qpc: int, hc: int, ct: int, cti: int, tl: int, np: int,
 
 // --- Packet: owned by w.pkts, addressed by slot id ---
 
-pn create_packet(var w: World, link: int, identity: int, pkind: int) int {
+pn create_packet(var w: World, link: int, identity: int, pkind: int) int^ {
     var pid = w.np
     w.np = pid + 1
-    var packet: Packet = {link: link, identity: identity, pkind: pkind,
+    let _admitted_packet_66: Packet = {link: link, identity: identity, pkind: pkind,
                           datum: 0, data: [0, 0, 0, 0]}
+    var packet: Packet = _admitted_packet_66^
     w.pkts[pid] = packet
     return pid
 }
@@ -218,7 +219,7 @@ pn release_task(var w: World, tid: int, ct: int) int {
 
 // --- Task functions ---
 
-pn task_fn_idle(var w: World, work: int, tid: int) int {
+pn task_fn_idle(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     var ic = w.datas[tid].icount - 1
     w.datas[tid].icount = ic
@@ -361,21 +362,22 @@ pn schedule(var w: World) any {
     }
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     // one world value: the single owner of every task, data record, and packet
-    var w: World = {qpc: 0, hc: 0, ct: NONE, cti: 0, tl: NONE, np: 0,
+    let _admitted_w_366: World = {qpc: 0, hc: 0, ct: NONE, cti: 0, tl: NONE, np: 0,
                     tasks: fill(6, null), datas: fill(6, null),
                     pkts: fill(8, null)}
+    var w: World = _admitted_w_366^
 
     // createIdler(IDLER, 0, null, createRunning) — pp=false, tw=false, th=false
-    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)
+    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)^
     var idle_data: IdleData = {control: 1, icount: 1000}
     w.datas[IDLER] = idle_data
 
     // createWorker(WORKER, 1000, workQ, createWaitingWithPacket)
     var workq = create_packet(w, NONE, WORKER, WORK_PACKET_KIND)
     workq = create_packet(w, workq, WORKER, WORK_PACKET_KIND)
-    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)
+    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)^
     var worker_data: WorkerData = {destination: HANDLER_A, wcount: 0}
     w.datas[WORKER] = worker_data
 
@@ -383,7 +385,7 @@ pn benchmark() int {
     workq = create_packet(w, NONE, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)^
     var handler_a_data: HandlerData = {work_in: NONE, device_in: NONE}
     w.datas[HANDLER_A] = handler_a_data
 
@@ -391,26 +393,26 @@ pn benchmark() int {
     workq = create_packet(w, NONE, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)^
     var handler_b_data: HandlerData = {work_in: NONE, device_in: NONE}
     w.datas[HANDLER_B] = handler_b_data
 
     // createDevice(DEVICE_A, 4000, null, createWaiting) — pp=false, tw=true, th=false
-    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)^
     var device_a_data: DeviceData = {pending: NONE}
     w.datas[DEVICE_A] = device_a_data
 
     // createDevice(DEVICE_B, 5000, null, createWaiting)
-    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)^
     var device_b_data: DeviceData = {pending: NONE}
     w.datas[DEVICE_B] = device_b_data
 
-    schedule(w)
+    schedule(w)^
 
     var qpc = w.qpc
     var hc = w.hc
-    if (qpc == 2322) {
-        if (hc == 928) {
+    if ((qpc == 2322)^) {
+        if ((hc == 928)^) {
             return 1
         }
     }
@@ -422,12 +424,12 @@ pn benchmark() int {
     return 0
 }
 
-pub pn run_richards_benchmark(iterations: int) bool {
+pub pn run_richards_benchmark(iterations: int) bool^ {
     var pass = true
     var k: int = 0
     while (k < iterations) {
         var result = benchmark()
-        if (result == 0) {
+        if ((result == 0)^) {
             pass = false
         }
         k = k + 1

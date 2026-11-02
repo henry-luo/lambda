@@ -2,8 +2,8 @@ import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 import svg: lambda.chart.svg
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn areas(tree) => elements(tree) |: ~.class == "marks areas"
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn areas(tree) any^ => elements(tree) |: ~.class == "marks areas"
 fn paths(tree) any^ => content(areas(tree)[0]) |> ~.d
 let data = [{x: 0, g: "A", v: 1}, {x: 1, g: "A", v: 2}, {x: 2, g: "A", v: 1},
     {x: 0, g: "B", v: 3}, {x: 1, g: "B", v: 1}, {x: 2, g: "B", v: 4}]

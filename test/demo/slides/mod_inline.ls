@@ -10,9 +10,9 @@ import insert: .mod_insert
 import c: lambda.slide.common
 import spelling: lambda.edit.spelling
 
-fn has_text(node) => if (node is string) len(node)>0 else if (not (node is element) or
+fn has_text(node) any^ => if (node is string) len(node)>0 else if (not (node is element) or
     name(node) in ['svg','math','canvas','audio','video','script','style']) false
-    else any([for (child in content(node)) has_text(child)])
+    else any([for (child in ((content(node)) ^ { [] })) has_text(child)])
 pub fn can_edit(obj) any^ => obj!=null and (insert.settings(obj.source)==null or insert.settings(obj.source).kind=="table") and
     (obj.tag=='text' or (obj.tag=='content' and has_text(obj.source)))
 
@@ -26,7 +26,7 @@ pub pn place_caret(host,point,plain=false) {
 }
 
 fn children(n) any^ => rendering.surface_children(n,(child)=>apply(child,{template:"slide_inline_node"}))
-view slide_inline_node: map {
+view slide_inline_node: map () any^ {
     if (~.kind=='node' and ~.tag=='doc') <div class:"slide-inline-document",*children(~)>
     else if (~.kind=='node' and ~.tag=='p' and rendering.attr_get(~,'edit implied')==true)
         <p class:"slide-inline-implied",*children(~)>
@@ -59,7 +59,7 @@ on slide_inline_ready(evt) {
     // a staged bookmark restore would overwrite the entry click after this handler returns.
     editor = edit_mount(editor,host,"html5_subset")
     dom.focus_set(host,false)
-    if (draft.point!=null) place_caret(host,draft.point)
+    if (draft.point!=null) place_caret(host,draft.point)^
     else {
         let selection = dom.document_selection(host)
         dom.selection_select_all_children(selection,host)
@@ -77,7 +77,7 @@ on editaction(evt) {
 on selectionchange(evt) {
     if (draft==null) { return 'pass' }
     let accepted = controller.adopt(editor,evt,"html5_subset","canvas-rich-text")
-    if (accepted.changed) { editor = accepted.editor }
+    if (accepted.changed^) { editor = accepted.editor }
     return 'pass'
 }
 on slide_inline_read(evt) {

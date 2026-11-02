@@ -57,7 +57,7 @@ pn main() {
     fill_range(b, 3)^
     print("filled=" ++ string(b) ++ "\n")
     var c: int[] = [9, 9]
-    fill_range(c, 5)^
+    fill_range(c, 5) ^ { null }
     print("short_store=" ++ string(c) ++ "\n")
     print("grid=" ++ string(grid(a, 1)) ++ " " ++ string(grid(a, 7)) ++ "\n")
     print("done\n")

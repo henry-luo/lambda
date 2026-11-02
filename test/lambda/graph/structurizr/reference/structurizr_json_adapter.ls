@@ -5,7 +5,7 @@ import structurizr: lambda.graph.structurizr.structurizr
 
 fn children(value, wanted = null) => [
   for (child in model.element_children(value)
-    where wanted == null or model.tag(child) == wanted) child
+    where ((wanted == null or model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn first(values) => if (len(values) > 0) values[0] else null
@@ -33,9 +33,9 @@ fn kind_label(kind) any^ {
 }
 
 fn tags(raw, kind, relationship = false) => sort([
-  for (tag in split(if (raw == null) "" else string(raw), ","), let value = trim(tag)
-    where value != "" and value != "Element" and
-      value != if (relationship) "Relationship" else kind_label(kind)) value
+  for (tag in ((split(if (raw == null) "" else string(raw), ",")) ^ { [] }), let value = trim(tag)
+    where ((value != "" and value != "Element" and
+      value != if (relationship) "Relationship" else kind_label(kind)) ^ { false })) value
 ])
 
 fn segment(kind, name) => kind ++ ":" ++ string(name)
@@ -64,7 +64,7 @@ fn container_entries(value, parent) {
 }
 
 fn containers(system, parent) => [
-  for (value in values(system, "containers"), entry in container_entries(value, parent)) entry
+  for (value in values(system, "containers"), entry in ((container_entries(value, parent)) ^ { [] })) entry
 ]
 
 fn people(value) => [for (person in values(value, "people"))
@@ -82,7 +82,7 @@ fn system_entries(system) {
 }
 
 fn systems(value) => [for (system in values(value, "softwareSystems"),
-  entry in system_entries(system)) entry]
+  entry in ((system_entries(system)) ^ { [] })) entry]
 
 fn custom_elements(value) => [for (custom in values(value, "customElements"))
   record(custom, custom.id, "custom", null, custom.name,
@@ -99,11 +99,11 @@ fn by_raw_id(records, id) => first([
 
 fn deployment_instances(node, parent, logical) => [
   *[for (value in values(node, "softwareSystemInstances"),
-      let target = by_raw_id(logical, value.softwareSystemId) where target != null)
+      let target = by_raw_id(logical, value.softwareSystemId) where ((target != null) ^ { false }))
       record(value, value.id, "software-system-instance", parent, target.name,
         target.description, target.technology, target.key)],
   *[for (value in values(node, "containerInstances"),
-      let target = by_raw_id(logical, value.containerId) where target != null)
+      let target = by_raw_id(logical, value.containerId) where ((target != null) ^ { false }))
       record(value, value.id, "container-instance", parent, target.name,
         target.description, target.technology, target.key)],
   *[for (value in values(node, "infrastructureNodes"))
@@ -117,7 +117,7 @@ fn deployment_node(value, parent, logical) {
     record(value, value.id, "deployment-node", parent, value.name,
       model.optional(value, "description"), model.optional(value, "technology")),
     *deployment_instances(value, key, logical),
-    for (child in values(value, "children"), entry in deployment_node(child, key, logical)) entry
+    for (child in values(value, "children"), entry in ((deployment_node(child, key, logical)) ^ { [] })) entry
   ]
 }
 
@@ -127,8 +127,8 @@ fn deployment_elements(value, logical) {
   [
     *[for (environment in environments)
       record({}, "environment:" ++ environment, "deployment-environment", null, environment)],
-    *[for (node in roots, entry in deployment_node(node,
-      segment("deployment-environment", node.environment), logical)) entry]
+    *[for (node in roots, entry in ((deployment_node(node,
+      segment("deployment-environment", node.environment), logical)) ^ { [] })) entry]
   ]
 }
 
@@ -137,8 +137,8 @@ fn json_elements(workspace) {
   [*logical, *deployment_elements(workspace.model, logical)]
 }
 
-fn canonical_parent_key(entries, value) {
-  let parent = first([for (entry in entries where string(entry.id) == string(value.parent)) entry]);
+fn canonical_parent_key(entries, value) any^ {
+  let parent = first([for (entry in entries where ((string(entry.id) == string(value.parent)) ^ { false })) entry]);
   if (parent == null) null else canonical_key(entries, parent)
 }
 
@@ -156,8 +156,8 @@ fn canonical_elements(workspace) {
     name: value.name, description: model.optional(value, "description"),
     technology: model.optional(value, "technology"),
     model_ref: model.optional(value, "model-ref"),
-    tags: sort([for (tag in children(value, "tag"), let name = string(tag.name)
-      where name != "Element" and name != kind_label(string(value.kind))) name])
+    tags: sort([for (tag in ((children(value, "tag")) ^ { [] }), let name = string(tag.name)
+      where ((name != "Element" and name != kind_label(string(value.kind))) ^ { false })) name])
   }]
 }
 
@@ -172,29 +172,29 @@ fn semantic_elements(records) => sort([for (entry in records
 
 fn logical_sources(value) => [
   *values(value, "people"), *values(value, "softwareSystems"), *[
-    for (system in values(value, "softwareSystems"), container in values(system, "containers"))
+    for (system in values(value, "softwareSystems"), container in ((values(system, "containers")) ^ { [] }))
       container
   ], *[
-    for (system in values(value, "softwareSystems"), container in values(system, "containers"),
-      component in values(container, "components")) component
+    for (system in values(value, "softwareSystems"), container in ((values(system, "containers")) ^ { [] }),
+      component in ((values(container, "components")) ^ { [] })) component
   ], *values(value, "customElements")
 ]
 
 fn logical_relationships(value) => [
-  for (source in logical_sources(value), relationship in values(source, "relationships"))
+  for (source in logical_sources(value), relationship in ((values(source, "relationships")) ^ { [] }))
     relationship
 ]
 
 fn deployment_sources(value) => [
   value, *values(value, "infrastructureNodes"), *values(value, "softwareSystemInstances"),
   *values(value, "containerInstances"), *[
-    for (child in values(value, "children"), source in deployment_sources(child)) source
+    for (child in values(value, "children"), source in ((deployment_sources(child)) ^ { [] })) source
   ]
 ]
 
 fn deployment_relationships(value) => [
-  for (root in values(value, "deploymentNodes"), source in deployment_sources(root),
-    relationship in values(source, "relationships")) relationship
+  for (root in values(value, "deploymentNodes"), source in ((deployment_sources(root)) ^ { [] }),
+    relationship in ((values(source, "relationships")) ^ { [] })) relationship
 ]
 
 fn all_relationships(value) => [
@@ -204,7 +204,7 @@ fn all_relationships(value) => [
 fn model_relationships(value) => [
   *logical_relationships(value), *[
     for (relationship in deployment_relationships(value)
-      where model.optional(relationship, "linkedRelationshipId") == null) relationship
+      where ((model.optional(relationship, "linkedRelationshipId") == null) ^ { false })) relationship
   ]
 ]
 
@@ -226,10 +226,10 @@ fn view_relation_signature(value, member, records, kind) {
 }
 
 fn json_relationships(workspace, records) => sort([
-  for (value in model_relationships(workspace.model)) relation_signature(value, records)
+  for (value in ((model_relationships(workspace.model)) ^ { [] })) relation_signature(value, records)
 ])
 
-fn canonical_relationships(workspace, records) {
+fn canonical_relationships(workspace, records) any^ {
   let blocks = children(workspace, "c4-model");
   let relationships = if (len(blocks) == 0) [] else children(blocks[0], "c4-relationship");
   sort([for (value in relationships, let source = by_raw_id(records, value.source),
@@ -237,12 +237,12 @@ fn canonical_relationships(workspace, records) {
       if (source == null) string(value.source) else source.key,
       if (destination == null) string(value.destination) else destination.key,
       model.optional(value, "description"), model.optional(value, "technology"),
-      sort([for (tag in children(value, "tag"), let name = string(tag.name)
-        where name != "Relationship") name])
+      sort([for (tag in ((children(value, "tag")) ^ { [] }), let name = string(tag.name)
+        where ((name != "Relationship") ^ { false })) name])
     ]])
 }
 
-fn direction(value) {
+fn direction(value) any^ {
   let layout = model.optional(value, "automaticLayout");
   let raw = if (layout == null) null else text(layout, "rankDirection");
   if (raw == "LeftRight") "LR" else if (raw == "RightLeft") "RL"
@@ -259,16 +259,16 @@ fn view_values(value) => [
 ]
 
 fn view_by_key(value, key) => first([
-  for (entry in view_values(value) where string(entry.value.key) == string(key)) entry
+  for (entry in view_values(value) where ((string(entry.value.key) == string(key)) ^ { false })) entry
 ])
 
 fn raw_tags(value) => [
-  for (tag in split(if (model.optional(value, "tags") == null) ""
-    else string(value.tags), ","), let name = trim(tag) where name != "") name
+  for (tag in ((split(if (model.optional(value, "tags") == null) ""
+    else string(value.tags), ",")) ^ { [] }), let name = trim(tag) where name != "") name
 ]
 
 fn has_any_tag(value, wanted) => len([
-  for (tag in raw_tags(value) where contains(wanted, tag)) tag
+  for (tag in raw_tags(value) where ((contains(wanted, tag)) ^ { false })) tag
 ]) > 0
 
 fn filtered_members(entry, views, records) {
@@ -278,7 +278,7 @@ fn filtered_members(entry, views, records) {
   let wanted = values(value, "tags");
   let include = lower(string(value.mode)) == "include";
   [for (member in members, let target = by_raw_id(records, member.id)
-    where target != null and has_any_tag(target.raw, wanted) == include) member]
+    where ((target != null and has_any_tag(target.raw, wanted) == include) ^ { false })) member]
 }
 
 fn json_view_members(entry, views, records) any^ {
@@ -297,14 +297,14 @@ fn json_view_relations(entry, views, records, relationships) any^ {
     let wanted = values(value, "tags");
     let include = lower(string(value.mode)) == "include";
     [for (member in candidates, let relation = first([for (candidate in relationships
-        where string(candidate.id) == string(member.id)) candidate])
-      where relation != null and has_any_tag(relation, wanted) == include and
+        where ((string(candidate.id) == string(member.id)) ^ { false })) candidate])
+      where ((relation != null and has_any_tag(relation, wanted) == include and
         contains(member_ids, string(relation.sourceId)) and
-        contains(member_ids, string(relation.destinationId))) member]
+        contains(member_ids, string(relation.destinationId))) ^ { false })) member]
   }
 }
 
-fn json_view_scope(entry, records) {
+fn json_view_scope(entry, records) any^ {
   let value = entry.value;
   let raw = if (entry.kind == "component") model.optional(value, "containerId")
     else if (contains(["systemContext", "container"], entry.kind))
@@ -315,18 +315,18 @@ fn json_view_scope(entry, records) {
 }
 
 fn json_views(workspace, records, relationships) => sort([
-  for (entry in view_values(workspace.views), let value = entry.value,
+  for (entry in ((view_values(workspace.views)) ^ { [] }), let value = entry.value,
     let layout = model.optional(value, "automaticLayout")) [
     string(value.key), entry.kind, json_view_scope(entry, records),
     model.optional(value, "environment"), if (layout == null) "TB" else direction(value),
     if (layout == null) 300 else model.optional(layout, "rankSeparation"),
     if (layout == null) 300 else model.optional(layout, "nodeSeparation"),
-    sort([for (member in json_view_members(entry, workspace.views, records),
+    sort([for (member in ((json_view_members(entry, workspace.views, records)) ^ { [] }),
       let target = by_raw_id(records, member.id))
       if (target == null) string(member.id) else target.key]),
-    sort([for (member in json_view_relations(entry, workspace.views, records, relationships),
+    sort([for (member in ((json_view_relations(entry, workspace.views, records, relationships)) ^ { [] }),
       let relation = first([for (candidate in relationships
-        where string(candidate.id) == string(member.id)) candidate]) where relation != null)
+        where ((string(candidate.id) == string(member.id)) ^ { false })) candidate]) where relation != null)
       view_relation_signature(relation, member, records, entry.kind)])
   ]
 ])
@@ -337,7 +337,7 @@ fn canonical_view_values(workspace) any^ {
 }
 
 fn canonical_views(workspace, records) => sort([
-  for (vw in canonical_view_values(workspace), let graph = structurizr.project(workspace, vw.key),
+  for (vw in ((canonical_view_values(workspace)) ^ { [] }), let graph = structurizr.project(workspace, vw.key),
     let scope = by_raw_id(records, model.optional(vw, "scope")),
     let environment = by_raw_id(records, model.optional(vw, "environment"))) [
     string(vw.key), string(vw.kind), if (scope == null) null else scope.key,
@@ -345,13 +345,13 @@ fn canonical_views(workspace, records) => sort([
     model.optional(vw, "direction"),
     model.optional(vw, "rank-sep"), model.optional(vw, "node-sep"),
     sort([*[
-      for (node in model.nodes(graph), let target = by_raw_id(records, node.id))
+      for (node in ((model.nodes(graph)) ^ { [] }), let target = by_raw_id(records, node.id))
         if (target == null) string(node.id) else target.key
     ], *[
-      for (group in model.subgraphs(graph), let target = by_raw_id(records, group.id)
-        where string(vw.kind) == "deployment" and target != null) target.key
+      for (group in ((model.subgraphs(graph)) ^ { [] }), let target = by_raw_id(records, group.id)
+        where ((string(vw.kind) == "deployment" and target != null) ^ { false })) target.key
     ]]),
-    sort([for (edge in model.edges(graph), let source = by_raw_id(records, edge.from),
+    sort([for (edge in ((model.edges(graph)) ^ { [] }), let source = by_raw_id(records, edge.from),
       let destination = by_raw_id(records, edge.to)) {
       source: if (source == null) string(edge.from) else source.key,
       destination: if (destination == null) string(edge.to) else destination.key,
@@ -363,18 +363,18 @@ fn canonical_views(workspace, records) => sort([
 ])
 
 fn style_properties(value, names) => sort([
-  for (name in names, let found = model.optional(value, name) where found != null)
+  for (name in names, let found = model.optional(value, name) where ((found != null) ^ { false }))
     [name, string(found)]
 ])
 
-fn json_styles(workspace) {
+fn json_styles(workspace) any^ {
   let configuration = model.optional(workspace.views, "configuration");
   let styles = if (configuration == null) null else model.optional(configuration, "styles");
   if (styles == null) { [] } else { sort([
-    *[for (value in values(styles, "elements")) ["element", string(value.tag),
+    *[for (value in ((values(styles, "elements")) ^ { [] })) ["element", string(value.tag),
       style_properties(value, ["shape", "icon", "width", "height", "background", "color",
         "stroke", "strokeWidth", "border", "opacity", "fontSize", "metadata", "description"])]],
-    *[for (value in values(styles, "relationships")) ["relationship", string(value.tag),
+    *[for (value in ((values(styles, "relationships")) ^ { [] })) ["relationship", string(value.tag),
       style_properties(value, ["thickness", "color", "style", "routing", "fontSize",
         "width", "position", "opacity", "dashed"])] ]
   ]) }
@@ -383,8 +383,8 @@ fn json_styles(workspace) {
 fn canonical_styles(workspace) {
   let blocks = children(workspace, "c4-styles");
   if (len(blocks) == 0) { [] } else { sort([
-    for (value in children(blocks[0], "c4-style")) [string(value["target-kind"]),
-      string(value.tag), sort([for (property in children(value, "property"))
+    for (value in ((children(blocks[0], "c4-style")) ^ { [] })) [string(value["target-kind"]),
+      string(value.tag), sort([for (property in ((children(value, "property")) ^ { [] }))
         [string(property.name), property.value]])]
   ]) }
 }

@@ -45,8 +45,8 @@ pn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-pn vec_normalise(v: float[]) float[] {
-    var l: float = vec_length(v)
+pn vec_normalise(v: float[]) float[]^ {
+    var l: float = vec_length(v)^
     return [v[0] / l, v[1] / l, v[2] / l]
 }
 

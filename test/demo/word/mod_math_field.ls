@@ -215,7 +215,7 @@ pub fn geometry(root,options) array^ {
 }
 pub fn caret_box(geometry,caret) => [for (g in geometry where ((same(g.caret,caret)) ^ { false })) g][0]
 fn outside(v,lo,hi) => if (v<lo) lo-v else if (v>hi) v-hi else 0
-pub fn nearest(geometry,x,y) => sort(geometry,(g)any^ =>abs(g.x-x)+2*outside(y,g.top,g.bottom))[0].caret
+pub fn nearest(geometry,x,y) any^ => sort(geometry,(g)any^ =>abs(g.x-x)+2*outside(y,g.top,g.bottom))[0].caret
 // the row an enclosing structure stacks above or below this one: numerator/denominator,
 // superscript/subscript, root index/body.
 fn stacked_row(root,path,down) any^ {
@@ -233,7 +233,7 @@ fn stacked_row(root,path,down) any^ {
 pub fn vertical(root,geometry,caret,down) any^ {
     let at = caret_box(geometry,caret)
     let target = stacked_row(root,caret.path,down)
-    let pool = if (at==null) [] else if (target!=null) [for (g in geometry where g.caret.path==target) g]
+    let pool = if (at==null) [] else if (target!=null) [for (g in geometry where ((g.caret.path==target) ^ { false })) g]
         else [for (g in geometry where if (down) g.top>at.top+1 and g.bottom>at.bottom+1 else g.top<at.top-1 and g.bottom<at.bottom-1) g];
     if (len(pool)==0) null else sort(pool,(g)=>abs(g.x-at.x)*4+abs(g.top-at.top))[0].caret
 }
@@ -251,7 +251,7 @@ fn escape(ch,text) any^ =>
     else if (text and (ch=="^" or ch=="_")) "\\" ++ ch ++ "{}"
     else if (ch=="\\") "\\backslash "
     else null
-fn atom(ch,text) => (let e=escape(ch,text), if (e==null) {k:"char",t:ch} else {k:"cmd",t:trim(e)})
+fn atom(ch,text) any^ => (let e=escape(ch,text), if (e==null) {k:"char",t:ch} else {k:"cmd",t:trim(e)})
 fn insert(root,caret,items,inside=null) {
     let next = edit_row(root,caret.path,caret.index,0,items);
     {row:next,caret:if (inside!=null) inside else {path:caret.path,index:caret.index+len(items)}}

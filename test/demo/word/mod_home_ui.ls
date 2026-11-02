@@ -112,7 +112,7 @@ pub fn menu(st,ui) any^ {
         let list_node = model.current_node(editor,if (kind=="ordered") 'ol' else 'ul').node
         let current = if (list_node==null) null else home.list_style(list_node) or (if (kind=="ordered") "decimal" else "disc");
         <div <div class:"context-caption",if (kind=="ordered") "Numbering Library" else "Bullet Library">;
-            <div class:"list-style-grid",*[for (s in home.list_styles(kind))
+            <div class:"list-style-grid",*[for (s in ((home.list_styles(kind)) ^ { [] }))
                 ui.button("context-list-" ++ s.id,"para.listStyle",s.label,<span class:"list-glyph",s.glyph>,{kind:kind,style:s.id},current==s.id,ro,"list-style-choice")]>>
     }
     else if (menu=="home-sort") <div

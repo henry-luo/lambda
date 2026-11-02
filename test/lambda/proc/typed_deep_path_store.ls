@@ -7,8 +7,9 @@ type Grid = {rows: Cell[][], label: string}
 type Deep = {grid: Grid, count: int}
 
 pn make_grid() Grid^ {
-    var g: Grid = {rows: [[{n: 1, f: 1.5, tags: [1]}, {n: 2, f: 2.5, tags: []}],
+    let _admitted_g_10: Grid = {rows: [[{n: 1, f: 1.5, tags: [1]}, {n: 2, f: 2.5, tags: []}],
                           [{n: 3, f: 3.5, tags: [3]}]], label: "g"}
+    var g: Grid = _admitted_g_10^
     return g
 }
 
@@ -27,7 +28,8 @@ pn bump(var d: Deep, i: int, j: int) {
     d.grid.rows[i][j].f = 0
 }
 pn var_param_root() {
-    var d: Deep = {grid: make_grid(), count: 0}
+    let _admitted_d_30: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_30^
     var k = 0
     while (k < 3) {
         bump(d, 0, 0)^
@@ -41,7 +43,8 @@ pn var_param_root() {
 
 // the stored copy is a snapshot: a deep write must not reach it (S9.1.2)
 pn snapshot_isolation() {
-    var d: Deep = {grid: make_grid(), count: 0}
+    let _admitted_d_44: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_44^
     let before = d.grid.rows[0][1]
     d.grid.rows[0][1].n = 55
     print(before.n) print(" ") print(d.grid.rows[0][1].n) print("\n")
@@ -52,7 +55,8 @@ pn set_n(var d: Deep, v: any) {
     d.grid.rows[0][0].n = v
 }
 pn rejected() {
-    var d: Deep = {grid: make_grid(), count: 0}
+    let _admitted_d_55: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_55^
     set_n(d, 8)^
     let bad = set_n(d, "x") ^ { print("rejected ") }
     print(d.grid.rows[0][0].n) print("\n")
@@ -69,7 +73,8 @@ pn set_parent(var nodes: Node[], i: int, p: any) {
     nodes[i].parentDfn = p
 }
 pn array_roots() {
-    var nodes: Node[] = []
+    let _admitted_nodes_72: Node[] = []
+    var nodes: Node[] = _admitted_nodes_72
     var i = 0
     while (i < 4) {
         push(nodes, node_new(i))^
@@ -89,7 +94,8 @@ pn array_roots() {
 type Slot = {mark: int}
 type Holder = {cells: Slot?[], slots: Slot[]}
 pn holder_new() Holder^ {
-    var h: Holder = {cells: [null, {mark: 4}], slots: [{mark: 0}, {mark: 0}]}
+    let _admitted_h_92: Holder = {cells: [null, {mark: 4}], slots: [{mark: 0}, {mark: 0}]}
+    var h: Holder = _admitted_h_92^
     return h
 }
 pn may_defect_index(var h: Holder) int {
@@ -118,7 +124,7 @@ pn boxed_indices() {
 pn main() {
     local_root()^
     var_param_root()^
-    snapshot_isolation()
+    snapshot_isolation()^
     rejected()^
     array_roots()^
     boxed_indices()

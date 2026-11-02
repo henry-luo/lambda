@@ -41,11 +41,11 @@ pn main() {
     radiant.layout(root)
     let before = inspect(root)
     let surface = controller.surface(root)
-    surface.set_attribute("data-chart-label", "after")
+    surface.set_attribute("data-chart-label", "after")^
     dom.set_state(dom.get_element_by_id(root, "field"), "value", "after")
     let after = inspect(root)
     let selected_range = dom.document_create_range(root)
-    selected_range.select_node_contents(dom.get_element_by_id(root, "label"))
+    selected_range.select_node_contents(dom.get_element_by_id(root, "label"))^
     print({before: before, after_value: after.value, after_chart: after.chart,
         range_write: selected_range.set_start is pn, range_read: selected_range.to_string is fn,
         range_text: selected_range.to_string()})

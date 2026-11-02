@@ -7,7 +7,8 @@ pn tune30_norms(v: float[], n: int) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < n) {
-        total = total + math.sqrt(v[i]) + math.sin(v[i])
+        let _admitted_total_10: float = total + math.sqrt(v[i]) + math.sin(v[i])
+        total = _admitted_total_10^
         i = i + 1
     }
     return total

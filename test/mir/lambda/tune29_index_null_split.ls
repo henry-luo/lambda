@@ -15,14 +15,18 @@ pn nullable_var(x: int?, y: int) int? {
 }
 
 pn eq_pair(a: int[], i: int, j: int) bool^ {
-    let p: int = a[i]
-    let q: int = a[j]
+    let _admitted_p_18: int = a[i]
+    let p: int = _admitted_p_18^
+    let _admitted_q_19: int = a[j]
+    let q: int = _admitted_q_19^
     return p == q
 }
 
 pn ne_pair(a: int[], i: int, j: int) bool^ {
-    let p: int = a[i]
-    let q: int = a[j]
+    let _admitted_p_24: int = a[i]
+    let p: int = _admitted_p_24^
+    let _admitted_q_25: int = a[j]
+    let q: int = _admitted_q_25^
     return p != q
 }
 

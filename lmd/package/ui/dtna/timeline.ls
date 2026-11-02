@@ -62,7 +62,7 @@ pub fn specification(props) any^ {
 }
 fn source(node) => {spec:specification(c.props(node)),legacy_list:c.props(node).timeline_options==null}
 // the dtna source owns its instance; all state, effects and presentation delegate to core.
-view dtna_timeline: <dtna.timeline> state live_state:{interaction:null,token:0} { live.presentation(source(~),live_state) }
+view dtna_timeline: <dtna.timeline> () any^ state live_state:{interaction:null,token:0} { live.presentation(source(~),live_state) }
 on render(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }
 on timeline_frame(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }
 on click(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }

@@ -16,9 +16,9 @@ pub fn prepare(ast, base_uri, opts, language) {
             option_valid: registry.bib_profile_valid(opts)}
         let prepared = model.prepare(ast, loaded.entries, settings)
         // Invalid print options cannot provide a citation destination.
-        let context = {*:prepared, prints: [for (record in prepared.prints)
+        let context = {*:prepared, prints: [for (record in ((prepared.prints) ^ { [] }))
             {*:record, valid: len(registry.bib_print_issues(record.node)) == 0}]}
-        let language_issues = [for (entry in loaded.entries
+        let language_issues = [for (entry in ((loaded.entries) ^ { [] })
             where entry.fields.langid != null and
                 not (style.supported_language(entry.fields.langid) ^ { false }))
             {*:util.diagnostic("unsupported-bib-language", "biblatex", entry.fields.langid,
@@ -83,7 +83,7 @@ fn compact_form(form) => form == "cite" or form == "parencite" or
     form == "autocite" or form == "footcite" or form == "cites" or
     form == "parencites" or form == "autocites"
 
-fn citation_number(context, request, key) {
+fn citation_number(context, request, key) any^ {
     let entry = model.labelled_entry(context, request.section, key)
     if (entry == null) 999999 else entry.number
 }
@@ -115,7 +115,7 @@ fn numeric_runs(keys, context, request, index, runs) any^ {
 fn compact_numeric_keys(context, request, keys) any^ {
     let known = [for (key in unique_keys(keys, 0, [])
         where ((model.labelled_entry(context, request.section, key) != null) ^ { false })) key]
-    let ordered = sort(known, (key) => citation_number(context, request, key))
+    let ordered = sort(known, (key) any^ => citation_number(context, request, key))
     let runs = numeric_runs(ordered, context, request, 0, []);
     <span class: "latex-citation-keys",
         for (i, run in runs) {
@@ -220,7 +220,7 @@ pub fn render_citation(node, context, footnotes) any^ {
         >
     } else if (request.tag == "nocite") null
     else <span class: "latex-cites", id: "cite-" ++ string(request.offset),
-        for (i, item in request.items) {
+        for (i, item in ((request.items) ^ { [] })) {
             if (i > 0) { "; " }
             item_piece(context, request, item, request.tag)
         }
@@ -303,7 +303,7 @@ pub fn render_bibliography(node, context) any^ {
         id: "bibliography-" ++ string(record.index),
         bibliography_heading(record, context.settings);
         <ol class: "latex-bib-list",
-            for (entry in record.entries)
+            for (entry in ((record.entries) ^ { [] }))
                 bibliography_item(entry, record, context.settings, context.requests)
         >
     >
@@ -319,7 +319,7 @@ pub fn render_footcite_content(node, context) any^ {
     else if (not request.valid or request.starred or not valid_profile(context.settings))
         util.unsupported_element("biblatex", "Unsupported footnote citation", node.source_offset)
     else <span class: "latex-cites",
-        for (i, item in request.items) {
+        for (i, item in ((request.items) ^ { [] })) {
             if (i > 0) { "; " }
             item_piece(context, request, item, "footcite")
         }

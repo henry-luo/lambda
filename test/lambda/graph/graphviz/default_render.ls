@@ -4,7 +4,7 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn placement(result, index) {

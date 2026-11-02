@@ -59,9 +59,9 @@ pub fn attr(n, key) string? {
 pub fn set_attr(n, key: any, value: any) => {*: n, attrs: if (attr(n, key) == null) [*n.attrs, [key, value]]
     else [for (a in n.attrs) if (a[0] == key) [key, value] else a]}
 pub fn drop_attrs(n, names) => {*: n, attrs: [for (a in n.attrs where not (a[0] in names)) a]}
-pub fn class_name(n) string => attr(n, "class") or ""
-pub fn id_of(n) string => attr(n, "id") or ""
-pub fn match_string(n) string => class_name(n) ++ " " ++ id_of(n)
+pub fn class_name(n) string^ => attr(n, "class") or ""
+pub fn id_of(n) string^ => attr(n, "id") or ""
+pub fn match_string(n) string^ => class_name(n) ++ " " ++ id_of(n)
 
 // descendants with one of the tags, in document order (getElementsByTagName)
 pub fn find_all(n, tags) => [for (k in n.kids where ((is_el(k)) ^ { false }))
@@ -171,13 +171,13 @@ fn hash_url(href) => href is \("#" !("\n" | "\r" | "\u2028" | "\u2029") ...)
 
 // inline style declarations, last one wins (node.style.<property>)
 pub fn style(n, property) {
-    let decls = [for (d in split(attr(n, "style") or "", ";"), let at = index_of(d, ":")
+    let decls = [for (d in ((split(attr(n, "style") or "", ";")) ^ { [] }), let at = index_of(d, ":")
         where ((at != null and lower(trim_text(slice(d, 0, at))) == property) ^ { false }))
         lower(trim_text(replace(slice(d, at + 1), "!important", "")))];
     if (len(decls) == 0) null else decls[len(decls) - 1]
 }
 // _isProbablyVisible; isProbablyReaderable's checker skips visibility
-pub fn visible(n, check_visibility = true) => style(n, "display") != "none" and
+pub fn visible(n, check_visibility = true) any^ => style(n, "display") != "none" and
     (not check_visibility or style(n, "visibility") != "hidden") and attr(n, "hidden") == null and
     (attr(n, "aria-hidden") != "true" or contains(class_name(n), "fallback-image"))
 

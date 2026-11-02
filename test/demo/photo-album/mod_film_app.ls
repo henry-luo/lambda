@@ -104,7 +104,7 @@ pub pn start(owner, fs, now_ms) {
 // one bar frame; frames continue only while the film plays
 pub pn frame(owner, fs, now_ms) {
     let c = paint(owner, fs, now_ms)
-    if (((c.running)^)^) { return {*:fs, frame:dom.request_frame(owner, "film_frame")} }
+    if ((c.running)^) { return {*:fs, frame:dom.request_frame(owner, "film_frame")} }
     // the film ended or was paused by the player: the soundtrack stops with it
     return {*:sync_sound(owner, fs, c), frame:0}
 }
@@ -112,7 +112,7 @@ pub pn frame(owner, fs, now_ms) {
 pn after(owner, fs, now_ms) {
     let c = paint(owner, fs, now_ms)
     let synced = sync_sound(owner, fs, c)
-    if (((c.running and fs.frame == 0)^)^) { return {*:synced, frame:dom.request_frame(owner, "film_frame")} }
+    if ((c.running and fs.frame == 0)^) { return {*:synced, frame:dom.request_frame(owner, "film_frame")} }
     return synced
 }
 

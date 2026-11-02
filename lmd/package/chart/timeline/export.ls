@@ -71,7 +71,7 @@ pub fn dataset(raw, options = {}, current = null) {
         snapshot:{window:frozen.window,active_id:frozen.active_id,selected_ids:frozen.selected_ids,
             expanded_events:frozen.expanded_events,locale:spec.locale,timezone:spec.scale.timezone,revision:frozen.revision,
             time_ms:c.option(opts,"time_ms",frozen.playback.elapsed),
-            resources:[for (key,entry in c.attrs(frozen.resources)) {id:string(key),revision:entry.revision,status:entry.status,url:entry.descriptor.url}]}}
+            resources:[for (key,entry in ((c.attrs(frozen.resources)) ^ { [] })) {id:string(key),revision:entry.revision,status:entry.status,url:entry.descriptor.url}]}}
 }
 fn columns(spec, options) any^ {
     let fields=c.option(options,"fields",default_fields);
@@ -93,7 +93,7 @@ pub fn data(raw, kind = "json", options = {}, current = null) any^ {
     let opts=options_for(spec,options);
     let payload=dataset(raw,opts,current);
     let cols=columns(spec,opts);
-    let rows=if (payload is error or cols is error) [] else [for (item in payload.events,
+    let rows=if (payload is error or cols is error) [] else [for (item in ((payload.events) ^ { [] }),
         let row=map([for (column in cols) (column.field,table_value(item,column.field,opts))]),
         let failure=util.first_error([for (key,value in row) value])) if (failure is error) failure else row];
     let failure=util.first_error([spec,opts,payload,cols,*rows]);

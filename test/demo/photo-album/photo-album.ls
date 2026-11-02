@@ -171,7 +171,7 @@ pn step_open(owner, st, now_ms) {
     // the animation yields to any viewer change: another photo, zoom or close
     if (p >= 1.0 or not st.viewer.open or st.viewer.id != a.id or st.viewer.zoom != 1.0) {
         updates.style(image, "opacity", "1")^
-        (updates.style(image, "transform", box_transform(st.viewer.x, st.viewer.y, st.viewer.zoom)))^
+        updates.style(image, "transform", box_transform(st.viewer.x, st.viewer.y, st.viewer.zoom))^
         return {*:st, opening:null}
     }
     let e = 1.0 - (1.0 - p) * (1.0 - p) * (1.0 - p)
@@ -476,7 +476,7 @@ pn publish(owner, st) {
         updates.attr(t, "data-focused", st.focus == id)
     }
     if (st.focus > 0 and not st.viewer.open) updates.attr(node(owner, "port"), "aria-activedescendant", "tile-" ++ string(st.focus))^
-    publish_viewer(owner, st)
+    publish_viewer(owner, st)^
     updates.show(owner, "show-sheet", st.sheet != null, "flex")^
     updates.show(owner, "show-layer", st.show, "flex")^
     attr_show(owner, st)
@@ -528,12 +528,12 @@ pn command(owner, st, action, now_ms = 0.0) {
     if (action == "clear-selection") { return {*:st, selected:[], anchor:0} }
     if (action == "favorite-selected") {
         let all_favorite = all([for (id in st.selected) contains(st.favorites, id)])
-        let rest = [for (id in st.favorites where not contains(st.selected, id)) id]
+        let rest = [for (id in st.favorites where ((not contains(st.selected, id)) ^ { false })) id]
         return {*:st, favorites:if (all_favorite) rest else [*rest, *st.selected]}
     }
     if (action == "zoom-in" or action == "zoom-out") {
         let target = float(G.zoom_step(int(st.target), if (action == "zoom-in") 1 else -1))
-        dom.set_state(node(owner, "zoom"), "value", string(int(target)))
+        dom.set_state(node(owner, "zoom"), "value", string(int(target))^)
         return relayout(owner, {*:st, target:target}, centre_tile(st), st.height / 2)
     }
     return st
@@ -550,22 +550,22 @@ pn after_favorites(owner, before, st) {
 pn dispatch(owner, st, action, now_ms = 0.0) {
     let next = after_favorites(owner, st, command(owner, st, action, now_ms))
     let published = publish(owner, next)
-    if (st.viewer.open and not next.viewer.open and next.book != null) {
+    if ((st.viewer.open and not next.viewer.open and next.book != null)^) {
         dom.focus_set(node(owner, "book"), false)
         return published
     }
-    if (st.viewer.open and not next.viewer.open and places_mode(next)) {
+    if ((st.viewer.open and not next.viewer.open and places_mode(next))^) {
         dom.focus_set(places_focus(owner), false)
         return published
     }
-    if (st.viewer.open and not next.viewer.open) {
+    if ((st.viewer.open and not next.viewer.open)^) {
         let shown = reveal(owner, published, st.viewer.id)
         dom.focus_set(node(owner, "port"), false)
         return publish(owner, shown)
     }
-    if (next.viewer.open and not st.viewer.open) dom.focus_set(node(owner, "viewer"), false)
-    if (next.sheet != null and st.sheet == null) dom.focus_set(node(owner, "show-name"), false)
-    if ((st.show and not next.show) or (st.sheet != null and next.sheet == null and not next.show)) dom.focus_set(home(owner, next), false)
+    if ((next.viewer.open and not st.viewer.open)^) dom.focus_set(node(owner, "viewer"), false)
+    if ((next.sheet != null and st.sheet == null)^) dom.focus_set(node(owner, "show-name"), false)
+    if (((st.show and not next.show) or (st.sheet != null and next.sheet == null and not next.show))^) dom.focus_set(home(owner, next)^, false)
     return published
 }
 
@@ -607,7 +607,7 @@ on scroll(evt) {
 
 // The slideshow player. A live player carries its own handlers, so it is created by this view's
 // template when the album asks it to load a saved deck, and removed again on close.
-view <album_show> state shown:null {
+view <album_show> () any^ state shown:null {
     <div id:"show",class:"show",
         (if (shown == null) null else slide.player(shown.deck, {instance:"album-show", width:shown.width, height:shown.height,
             base_uri:shown.base, autostart:true})^)>
@@ -652,7 +652,7 @@ on album_places_show(evt) {
 
 // The film's player, created from the deck the album dispatches with album_film_open. It has no
 // controls: the album's film bar drives it with slide_command events (lambda.slide host control).
-view <album_film> state shown:null {
+view <album_film> () any^ state shown:null {
     <div id:"film-stage",class:"film-stage",
         (if (shown == null) null else slide.player(shown.deck, {instance:"album-film", width:shown.width, height:shown.height,
             controls:false, autoplay_dwell_ms:F.DWELL_MS})^)>

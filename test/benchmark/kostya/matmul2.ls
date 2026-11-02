@@ -41,9 +41,9 @@ pn main() {
     var seed: int = 42
     var i: int = 0
     while (i < size) {
-        seed = next_rand(seed)
+        seed = next_rand(seed)^
         a[i] = float(seed % 2000) / 1000.0 - 1.0
-        seed = next_rand(seed)
+        seed = next_rand(seed)^
         b[i] = float(seed % 2000) / 1000.0 - 1.0
         i = i + 1
     }

@@ -20,7 +20,7 @@ pub fn normalize(field) array {
     if (b[1] == b[0]) transform(field, (v) => 0.0) else (field - b[0]) / (b[1] - b[0])
 }
 
-pub fn remap(field, lo: float, hi: float) array => normalize(field) * (hi - lo) + lo
+pub fn remap(field, lo: float, hi: float) array^ => normalize(field) * (hi - lo) + lo
 pub fn clamp(field, lo: float, hi: float) array => transform(field, (v) => max(lo, min(hi, v)))
 pub fn terrace(field, steps: int) array => transform(field, (v) => floor(v * float(steps)) / float(steps))
 // 1 where v >= level, else 0: the runtime's threshold.
@@ -84,7 +84,7 @@ fn envelope_add(f, st, q: int) map^ {
         if (cut <= st.cuts[n - 1]) envelope_add(f, {sites: slice(st.sites, 0, n - 1), cuts: slice(st.cuts, 0, n - 1)}, q)
         else {sites: [*st.sites, q], cuts: [*st.cuts, cut]})
 }
-fn cut_at(cuts, x: float, lo: int, hi: int) int =>
+fn cut_at(cuts, x: float, lo: int, hi: int) int^ =>
     if (lo + 1 >= hi) lo else (let m = (lo + hi) div 2,
         if (cuts[m] <= x) cut_at(cuts, x, m, hi) else cut_at(cuts, x, lo, m))
 fn distance_line(f) array {

@@ -70,7 +70,7 @@ fn sequence_geometry(geometry, host, displayed = null) any^ {
     let previous=sort([for (item in displayed.plan.events) {id:item.id,item:item}],{by:(row)=>row.id});
     let boxes=sort([for (node in dom.query_selector_all(root,"li[data-timeline-id]"),
         let id=events.attribute(node,"data-timeline-id"),let box=dom.bounding_box(node),
-        let old=event_index.lookup(previous,id).item where events.closest(node,"[data-timeline-host]")==host)
+        let old=event_index.lookup(previous,id).item where ((events.closest(node,"[data-timeline-host]")==host) ^ { false }))
         {id:id,bounds:{left:box.left-(if (old.target_bounds!=null) old.bounds.left-old.target_bounds.left else 0),
             top:box.top-(if (old.target_bounds!=null) old.bounds.top-old.target_bounds.top else 0),width:box.width,height:box.height}}],{by:(row)=>row.id});
     let plan=geometry.plan;
@@ -106,7 +106,7 @@ pub pn handle(model, clock, evt) {
         return ({*:clock,source:changed.source,interaction:changed.state,token:0,disposition:'pass',
             prepared:prepared.record(changed.source,changed.state,changed.normalized_spec,clock.prepared),
             native_media_requests:[*c.items(clock.native_media_requests),*native_media.queued(changed.requests)],
-            effects:[*changed.notifications,*[for (request in changed.requests) {name:"timeline_request",detail:request}]]})^
+            effects:[*changed.notifications,*[for (request in ((changed.requests) ^ { [] })) {name:"timeline_request",detail:request}]]})^
     }
     if (tick and (clock.token==0 or evt.detail!=clock.token)) { return {*:clock,effects:[]} }
     if ((evt.type=="render" and (evt.event_phase!=2 or clock.token>0 and clock.interaction.focus_pending!=true and

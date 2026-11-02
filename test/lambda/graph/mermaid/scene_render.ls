@@ -17,7 +17,7 @@ fn run_case(test_case) {
 }
 
 let cases = [for (test_case in conformance.manifest_cases(
-  "test/lambda/graph/mermaid/manifest.mark") where scene_case(test_case)) test_case]
+  "test/lambda/graph/mermaid/manifest.mark") where ((scene_case(test_case)) ^ { false })) test_case]
 let results = [for (test_case in cases) run_case(test_case)]
 
 {

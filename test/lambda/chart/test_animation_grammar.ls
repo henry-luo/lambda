@@ -6,8 +6,8 @@ import affine: lambda.chart.svg_transform
 import coord: lambda.chart.coordinate
 fn check(label, valid) => if (valid) null else label
 fn near(a,b) => abs(a-b)<0.0001
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn keyed(image,key) => (elements(image) |: ~["data-chart-key"]==format(key,'json'))[0]
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn keyed(image,key) any^ => (elements(image) |: ~["data-chart-key"]==format(key,'json'))[0]
 fn policy(node,phase) => (parse(node["data-chart-animation"],'json') ^ {~})[phase]
 let encoding={x:{field:"x",dtype:"quantitative",scale:{domain:[0,10]},axis_enabled:false},y:{field:"y",dtype:"quantitative",scale:{domain:[0,10]},axis_enabled:false},key:{field:"id"}}
 let previous={width:200,height:160,padding:10,data:[{id:"a",x:2,y:2},{id:"b",x:8,y:5}],mark:{kind:"point"},encoding:encoding,

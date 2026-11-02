@@ -15,7 +15,7 @@ fn placement_by_index(items, index) {
 
 fn children_named(value, tag) => [
   for (i in 0 to (len(value) - 1), let child = value[i]
-    where child is element and string(name(child)) == tag) child
+    where ((child is element and string(name(child)) == tag) ^ { false })) child
 ]
 
 fn contains_node(cluster, node) =>
@@ -208,7 +208,7 @@ let default_finish = default_points[len(default_points) - 1]
     abs(default_start.y - default_left.y) < 0.001 and
     abs(default_finish.x - (default_right.x - default_right.width / 2.0)) < 0.001 and
     abs(default_finish.y - default_right.y) < 0.001,
-  shapes: [for (node in result.nodes) node.shape],
+  shapes: [for (node in ((result.nodes) ^ { [] })) node.shape],
   paint: len(cluster_layers) == 2 and
     cluster_layers[0].content[0]["data-graph-role"] == "cluster" and
     cluster_layers[0].content[0]["data-cluster-id"] == "outer"

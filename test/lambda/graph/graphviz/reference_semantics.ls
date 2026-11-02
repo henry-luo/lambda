@@ -4,7 +4,7 @@ import normalize: lambda.graph.normalize
 import adapter: .reference.graphviz_json_adapter
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn label(value) any^ => model.label_source(value)
@@ -30,7 +30,7 @@ let expected = adapter.from_dot_json(reference)
 let comparison = graph_transform.compare_scenes(actual, expected, {relations: false})
 let rendered = graph_transform.render_scene(source, 640, 480)
 let expected_geometry = adapter.from_dot_json(reference, true,
-  [for (edge in model.edges(canonical.graph)) edge.id])
+  [for (edge in ((model.edges(canonical.graph)) ^ { [] })) edge.id])
 let geometry = graph_transform.compare_scenes(rendered.scene, expected_geometry, {
   // Engines use different font metrics and separation constants; topology and
   // relative geometry remain strict while absolute boxes allow one rank gap.

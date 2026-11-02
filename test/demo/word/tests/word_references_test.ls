@@ -47,8 +47,8 @@ let active = edit_set_selection(bib,text_selection(pos(refs.entries(bib.doc)[0].
 let localized = model.execute(active,"references.editCitation",{locator:"24–26"})^
 contains(doc_text(refs.entries(localized.doc)[0].node),"24–26")
 refs.current(localized)==null
-contains([for (a in context.describe(active).actions) a.command],"ui.editCitation")
-not contains([for (a in context.describe(active).actions) a.command],"ui.link")
+contains([for (a in context.describe(active)^.actions) a.command],"ui.editCitation")
+not contains([for (a in context.describe(active)^.actions) a.command],"ui.link")
 let removed = model.execute(active,"references.removeCitation")^
 len(refs.entries(removed.doc))==0 and not contains(doc_text(refs.bibliographies(removed.doc)[0].node),"Lovelace")
 model.execute(removed,"edit.undo")^.doc==bib.doc

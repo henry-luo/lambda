@@ -32,7 +32,7 @@ let suffixes = [".txt", ".text", ".log", ".ls", ".json", ".jsonl", ".yaml", ".ym
                 ".c", ".h", ".cpp", ".hpp", ".py", ".rb", ".sh", ".lua", ".sql", ".rst", ".org"]
 
 fn import_text(text) => {doc: buf.from_text(text), envelope: null}
-fn export_text(doc, envelope) => buf.to_text(doc)
+fn export_text(doc, envelope) any^ => buf.to_text(doc)
 // the buffer keeps the file's bytes, so a save always writes back exactly
 fn check_roundtrip(doc, envelope) => null
 // versions only grow, so comparing them is O(1) (design §5.1)
@@ -69,7 +69,7 @@ let TEXT_PAD = 14.0
 fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0, char_w: 0.0}
 
 // Rendered rows for a surface `height` pixels tall.
-fn rows_for(height) => max(1, int(height / LINE_H) + OVERSCAN)
+fn rows_for(height) any^ => max(1, int(height / LINE_H) + OVERSCAN)
 
 fn visible(vw) => max(1, vw.rows - OVERSCAN)
 
@@ -85,16 +85,16 @@ fn wrapping(vw) => vw.wrap and vw.cols > 0
 // Rows line `l` takes. The surface breaks wrapped lines at any character
 // (`word-break: break-all`), so a monospace line's rows are its columns
 // divided by the width.
-fn line_rows(b, vw, l) =>
+fn line_rows(b, vw, l) any^ =>
   if (not wrapping(vw)) 1 else max(1, (display_len(buf.line(b, l)) + vw.cols - 1) div vw.cols)
 
 // The wrapped row a position lies on within its line.
-fn pos_row(b, vw, p) =>
+fn pos_row(b, vw, p) any^ =>
   if (not wrapping(vw)) 0
   else min(display_len(slice(buf.line(b, p.line), 0, p.col)) div vw.cols, line_rows(b, vw, p.line) - 1)
 
 // Lines rendered from the view's top: enough to fill `rows`.
-fn fill_count(b, vw, l, filled, n) =>
+fn fill_count(b, vw, l, filled, n) any^ =>
   if (l >= b.count or filled >= vw.rows) n
   else fill_count(b, vw, l + 1, filled + line_rows(b, vw, l), n + 1)
 
@@ -102,7 +102,7 @@ fn window_count(b, vw) any^ => fill_count(b, vw, vw.top, 0 - vw.row, 0)
 
 // The (line, row) `n` rows after (line, row), or before it for n < 0,
 // stopping at the document's ends.
-fn row_step(b, vw, line, row, n) {
+fn row_step(b, vw, line, row, n) any^ {
   if (n == 0) {line: line, row: row}
   else if (n > 0) {
     let below = line_rows(b, vw, line) - row - 1
@@ -140,7 +140,7 @@ fn rows_through(b, vw, line, r) any^ =>
 
 // The view that keeps position `p` visible: unchanged when it already is,
 // else scrolled just enough, as the caret moves in every editor.
-fn follow(b, vw, p) => follow_left(b, follow_rows(b, vw, p), p)
+fn follow(b, vw, p) any^ => follow_left(b, follow_rows(b, vw, p), p)
 
 fn follow_rows(b, vw, p) any^ {
   let r = pos_row(b, vw, p)
@@ -171,7 +171,7 @@ fn col_of_display(text, d) any^ =>
 
 // Unwrapped, the text column scrolls sideways to keep `p` in view, with a
 // few columns of context; wrapped lines never need it.
-fn follow_left(b, vw, p) {
+fn follow_left(b, vw, p) any^ {
   if (wrapping(vw) or vw.cols <= 0) (if (vw.left == 0) vw else {*: vw, left: 0})
   else {
     let x = display_col(buf.line(b, p.line), p.col)
@@ -184,7 +184,7 @@ fn follow_left(b, vw, p) {
 
 // The farthest the text column scrolls: the widest rendered line's end, in view.
 fn max_left(b, vw) {
-  let widths = [for (l in vw.top to vw.top + window_count(b, vw) - 1) display_len(buf.line(b, l))]
+  let widths = [for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) display_len(buf.line(b, l))]
   max(0, (if (len(widths) == 0) 0 else max(widths)) - vw.cols + 2)
 }
 
@@ -208,7 +208,7 @@ fn wheel_step(px) {
 // leaf index in a source path always means the same column range.
 fn leaf(t, c, s) => {text: t, cls: c, start: s}
 
-fn leaves_from(t, runs, i, at, acc) {
+fn leaves_from(t, runs, i, at, acc) any^ {
   if (i >= len(runs)) {
     if (at < len(t) or len(acc) == 0) [*acc, leaf(slice(t, at, len(t)), null, at)] else acc
   } else {
@@ -232,8 +232,8 @@ fn row_leaves(b, hs, line) any^ {
 
 // rich_text's `view map` renders a text leaf with a `cls` as a classed span
 fn window_doc(b, vw, hs) =>
-  node('doc', [for (l in vw.top to vw.top + window_count(b, vw) - 1)
-                 node('src_line', [for (lf in row_leaves(b, hs, l)) {*: text(lf.text), cls: lf.cls}])])
+  node('doc', [for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] }))
+                 node('src_line', [for (lf in ((row_leaves(b, hs, l)) ^ { [] })) {*: text(lf.text), cls: lf.cls}])])
 
 // The rows of the top line above the surface are hidden by shifting the
 // text and the gutter up together.
@@ -249,7 +249,7 @@ fn surface_style(vw) any^ =>
   else null
 
 // A wrapped line's number keeps the height of all its rows.
-fn line_number(b, vw, l) {
+fn line_number(b, vw, l) any^ {
   let n = line_rows(b, vw, l)
   if (n == 1) <div class: "src-num", ["data-line"]: string(l), string(l + 1)>
   else <div class: "src-num", ["data-line"]: string(l), style: "height: " ++ string(float(n) * LINE_H) ++ "px",
@@ -258,7 +258,7 @@ fn line_number(b, vw, l) {
 
 fn gutter(b, vw) =>
   <div class: "src-gutter", ["aria-hidden"]: "true", style: shift_style(vw),
-    *[for (l in vw.top to vw.top + window_count(b, vw) - 1) line_number(b, vw, l)]
+    *[for (l in ((vw.top to vw.top + window_count(b, vw) - 1) ^ { [] })) line_number(b, vw, l)]
   >
 
 // The scrollbar shows where the window is; a press on the track pages.
@@ -322,7 +322,7 @@ fn model_selection(b, top, hs, ssel) =>
 
 fn caret(p) => {anchor: p, head: p, goal: null}
 // S7.7.3: selection endpoints are position maps, not error-capable arguments.
-fn collapsed(sel: {anchor: map, head: map}) => buf.pos_cmp(sel.anchor, sel.head) == 0
+fn collapsed(sel: {anchor: map, head: map}) any^ => buf.pos_cmp(sel.anchor, sel.head) == 0
 fn sel_from(sel) any^ => buf.pos_min(sel.anchor, sel.head)
 fn sel_to(sel) any^ => buf.pos_max(sel.anchor, sel.head)
 
@@ -363,25 +363,25 @@ fn next_pos(b, p) any^ =>
   else p
 
 // Skip spaces, then one run of word or punctuation characters.
-fn word_left_col(text, col) {
+fn word_left_col(text, col) any^ {
   let skip = col - len(trim_end(slice(text, 0, col)))
   let start = col - skip
   if (start == 0) 0
   else {
     let word = is_word_char(slice(text, start - 1, start))
-    let run = [for (i in 0 to start - 1 where is_word_char(slice(text, start - 1 - i, start - i)) != word) i]
+    let run = [for (i in ((0 to start - 1) ^ { [] }) where ((is_word_char(slice(text, start - 1 - i, start - i)) != word) ^ { false })) i]
     if (len(run) == 0) 0 else start - run[0]
   }
 }
 
-fn word_right_col(text, col) {
+fn word_right_col(text, col) any^ {
   let n = len(text)
   let rest = slice(text, col, n)
   let start = col + (len(rest) - len(trim_start(rest)))
   if (start >= n) n
   else {
     let word = is_word_char(slice(text, start, start + 1))
-    let run = [for (i in start to n - 1 where is_word_char(slice(text, i, i + 1)) != word) i]
+    let run = [for (i in ((start to n - 1) ^ { [] }) where ((is_word_char(slice(text, i, i + 1)) != word) ^ { false })) i]
     if (len(run) == 0) n else run[0]
   }
 }
@@ -550,7 +550,7 @@ fn edit_step(st, d) {
 
 // Undo pops from one stack and pushes its inverse on the other; redo is the
 // same move in the other direction.
-fn replay(b, inverses, i, acc, steps) {
+fn replay(b, inverses, i, acc, steps) any^ {
   if (i < 0) {b: b, inverses: acc, steps: steps}
   else {
     let r = buf.apply_delta(b, inverses[i])
@@ -608,7 +608,7 @@ fn indent_unit(b) =>
 
 // The lines a re-indent covers: a selection ending at column 0 leaves its
 // last line alone, as in every editor.
-fn span_last(sel) {
+fn span_last(sel) any^ {
   let from = sel_from(sel)
   let to = sel_to(sel)
   if (to.line > from.line and to.col == 0) to.line - 1 else to.line
@@ -681,7 +681,7 @@ fn exact(hs, b, vw) any^ {
 // window is exact; returns the outstanding request's token (0 for none). The
 // frame event targets the body, the element this template renders.
 pn request_exact(node, hs, b, vw, token) {
-  if (token != 0 or not needs_exact(hs, b, vw)) { return token }
+  if ((token != 0 or not needs_exact(hs, b, vw))^) { return token }
   let body = dom.query_selector(dom.root_node(node), "body")
   if (body == null) { return 0 }
   dom.request_frame(body, "source_frame")
@@ -719,7 +719,7 @@ fn find_state(b, sel, q) {
     let c = b.chunks[k]
     let row = from.line - b.starts[k]
     let above = if (row == 0) 0 else count_in(join(take(c, row), "\n"), lq)
-    let left = len([for (m in find(lower(c[row]), lq) where m.index < from.col) m])
+    let left = len([for (m in find(lower(c[row]), lq) where ((m.index < from.col) ^ { false })) m])
     {query: q, total: sum(per),
      index: if (is_match(b, sel, lq)) sum(take(per, k)) + above + left + 1 else 0}
   }
@@ -753,7 +753,7 @@ fn prev_match(b, lq, line, col, steps) any^ {
 
 // The selection, window and paint state after a find step from `from`, or
 // null when the query matches nothing.
-fn find_moved(b, vw, hs, q, forward, from) {
+fn find_moved(b, vw, hs, q, forward, from) any^ {
   let found = if (q == "") null
               else if (forward) next_match(b, lower(q), from.line, from.col, 0)
               else prev_match(b, lower(q), from.line, from.col, 0)
@@ -897,7 +897,7 @@ pn rich_view(session, b) {
   let loaded = format.import_text(text) ^ { {error: ^.message} }
   if (not (loaded.error is null)) { return {status: "Cannot show the " ++ format.name ++ " view: " ++ loaded.error} }
   let mismatch = format.check_roundtrip(loaded.doc, loaded.envelope)
-  if (mismatch != null) {
+  if ((mismatch != null)^) {
     return {status: "The " ++ format.name ++ " view cannot keep this text exactly: " ++ mismatch}
   }
   let saved = if (not sess.is_dirty(session, b)) loaded.doc
@@ -936,7 +936,7 @@ pn project(vw, b, hs, sel, rev) {
   let next = rev + 1
   if (vw.handle != null) {
     dom.finish_model_edit(vw.handle,
-      edit_result.model_applied(false, true, false, "", source_selection_of(b, vw, hs, sel), next))
+      edit_result.model_applied(false, true, false, "", source_selection_of(b, vw, hs, sel), next)^)
   }
   next
 }
@@ -987,7 +987,7 @@ on editaction(evt) {
                let d = intent_edit(b, target, input_type, evt.data)
                if (d == null) null else edit_step(st, d)
              }
-  if (next == null) {
+  if ((next == null)^) {
     let known = history or composing or contains(insert_types, input_type) or contains(delete_types, input_type)
     return if (known) edit_result.model_applied(false, false, false, "", source_selection_of(b, vw, hs, sel), rev)
            else edit_result.decline(true, false, "unsupported", 0)
@@ -1001,7 +1001,7 @@ on editaction(evt) {
   frame = request_exact(evt.target, hs, b, vw, frame)
   rev = rev + 1
   status = ""
-  files.sync_window(evt.target, session, b)
+  files.sync_window(evt.target, session, b)^
   let applied = edit_result.model_applied(true, true, true, "", source_selection_of(b, vw, hs, sel), rev)
   if (input_type == "deleteByCut") edit_result.with_clipboard_text(applied, copied) else applied
 }
@@ -1020,7 +1020,7 @@ on edit_cmd(req) {
   let cmd = req.cmd
   if (cmd == "view_rich") {
     let next = rich_view(session, b)
-    if (next.mode != null) {
+    if ((next.mode != null)^) {
       emit("edit_switch", next)
       return
     }
@@ -1037,14 +1037,14 @@ on edit_cmd(req) {
   else if (cmd == "save_as") { dialog = {kind: 'save_as', path: session.path} }
   else if (cmd == "undo" or cmd == "redo") {
     let next = history_step({b: b, sel: sel, hist: hist}, cmd == "undo")
-    if (next != null) {
+    if ((next != null)^) {
       b = next.b
       sel = next.sel
       hist = next.hist
       vw = follow(b, vw, sel.head)
       hs = settle(hs, next.steps, b)
       frame = request_exact(req.node, hs, b, vw, frame)
-      files.sync_window(req.node, session, b)
+      files.sync_window(req.node, session, b)^
     }
     files.focus_surface(req.node)
     rev = project(vw, b, hs, sel, rev)
@@ -1057,7 +1057,7 @@ on edit_dialog(req) {
   status = filed.status
   dialog = filed.dialog
   after_save = filed.after_save
-  if (filed.reloaded != null) {
+  if ((filed.reloaded != null)^) {
     b = filed.reloaded
     sel = caret(buf.loc(0, 0))
     vw = {*: vw, top: 0, row: 0}
@@ -1072,21 +1072,21 @@ on edit_dialog(req) {
 }
 on keydown(evt) {
   // assigning unchanged state rebuilds the rows before the pending text input
-  if (vw.handle == null) { vw = mounted(vw, evt.target, rev) }
+  if ((vw.handle == null)^) { vw = mounted(vw, evt.target, rev) }
   let primary = evt.metaKey == true or evt.ctrlKey == true
-  if (primary and lower(string(evt.key)) == "s") {
+  if ((primary and lower(string(evt.key)) == "s")^) {
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
     else {
       let saved = files.save_now(session, b, evt.target)
       session = saved.session
       status = saved.status
       // the status redraw replaces the rows the native selection is in
-      if (saved.dialog != null) { dialog = saved.dialog }
+      if ((saved.dialog != null)^) { dialog = saved.dialog }
       else { rev = project(vw, b, hs, sel, rev) }
     }
     return 'prevent-default'
   }
-  if (dialog != null) {
+  if ((dialog != null)^) {
     if (evt.key != "Escape") { return 'pass' }
     dialog = null
     after_save = null
@@ -1094,9 +1094,9 @@ on keydown(evt) {
     return 'prevent-default'
   }
   // Cmd/Ctrl+/ switches to the rich view (OQ7), as Typora's source mode does
-  if (primary and evt.key == "/" and session.rich_format != null) {
+  if ((primary and evt.key == "/" and session.rich_format != null)^) {
     let next = rich_view(session, b)
-    if (next.mode != null) {
+    if ((next.mode != null)^) {
       emit("edit_switch", next)
       return 'prevent-default'
     }
@@ -1105,17 +1105,17 @@ on keydown(evt) {
   }
   let find_key = primary and lower(string(evt.key)) == "g"
   // keys typed into the find field edit it natively, except the find keys
-  if (hs.find != null and dom.matches(evt.target, "#src-find-input")) {
+  if ((hs.find != null and dom.matches(evt.target, "#src-find-input"))^) {
     if (evt.key == "Escape") {
       hs = {*: hs, find: null}
-      files.focus_surface(evt.target)
+      files.focus_surface(evt.target)^
       rev = project(vw, b, hs, sel, rev)
       return 'prevent-default'
     }
     if (evt.key != "Enter" and not find_key) { return 'pass' }
     let forward = evt.shiftKey != true
     let moved = find_moved(b, vw, hs, hs.find.query, forward, if (forward) sel_to(sel) else sel_from(sel))
-    if (moved != null) {
+    if ((moved != null)^) {
       sel = moved.sel
       vw = moved.vw
       hs = moved.hs
@@ -1127,7 +1127,7 @@ on keydown(evt) {
   // a click places the caret without a selectionchange; adopt it first
   let adopted = action_selection(b, vw, hs, sel, evt)
   // Alt+Z toggles soft wrap (as in VS Code), keeping the caret in view
-  if (evt.altKey == true and not primary and lower(string(evt.key)) == "z") {
+  if ((evt.altKey == true and not primary and lower(string(evt.key)) == "z")^) {
     // a vertical motion's goal is a column unwrapped and an x within a row wrapped
     sel = {*: adopted, goal: null}
     vw = follow(b, {*: vw, wrap: not vw.wrap, row: 0}, adopted.head)
@@ -1137,7 +1137,7 @@ on keydown(evt) {
   }
   // Cmd+F opens find seeded with a one-line selection, then hands focus to
   // the field: its autofocus applies once the surface has none
-  if (primary and lower(string(evt.key)) == "f") {
+  if ((primary and lower(string(evt.key)) == "f")^) {
     let seed = if (not collapsed(adopted) and sel_from(adopted).line == sel_to(adopted).line)
                  buf.text_between(b, adopted.anchor, adopted.head)
                else if (hs.find != null) hs.find.query else ""
@@ -1147,11 +1147,11 @@ on keydown(evt) {
     dom.clear_editing_focus(dom.get_element_by_id(dom.root_node(evt.target), "edit-surface"))
     return 'prevent-default'
   }
-  if (find_key and hs.find != null) {
+  if ((find_key and hs.find != null)^) {
     let forward = evt.shiftKey != true
     let moved = find_moved(b, vw, hs, hs.find.query, forward, if (forward) sel_to(adopted) else sel_from(adopted))
     sel = if (moved == null) adopted else moved.sel
-    if (moved != null) {
+    if ((moved != null)^) {
       vw = moved.vw
       hs = moved.hs
       frame = request_exact(evt.target, hs, b, vw, frame)
@@ -1167,7 +1167,7 @@ on keydown(evt) {
              else if (evt.key == "Tab") typed_step(st, indent_unit(b))
              else null
   let moved_sel = if (next == null) navigate(b, adopted, vw, evt) else null
-  if (next == null and moved_sel == null) {
+  if ((next == null and moved_sel == null)^) {
     // A key this surface does not handle changes no state: the render would
     // replace the rows its native default (paste) is about to target, and the
     // editaction that follows adopts the DOM selection itself. An undo with
@@ -1178,11 +1178,11 @@ on keydown(evt) {
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
-  if (next != null) {
+  if ((next != null)^) {
     b = next.b
     sel = next.sel
     hist = next.hist
-    files.sync_window(evt.target, session, b)
+    files.sync_window(evt.target, session, b)^
   }
   else {
     sel = moved_sel
@@ -1197,7 +1197,7 @@ on keydown(evt) {
 // The editor owns its scroll position (CED13): the wheel moves the window by
 // lines, and the selection is projected again because rows changed under it.
 on wheel(evt) {
-  if (dialog != null) { return 'pass' }
+  if ((dialog != null)^) { return 'pass' }
   vw = mounted(vw, evt.target, rev)
   let step = wheel_step(wheel_px + float(evt.deltaY or 0))
   wheel_px = step.rest
@@ -1206,7 +1206,7 @@ on wheel(evt) {
   let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
   wheel_dx = dx - float(cols) * vw.char_w
   let next = scrolled_left(b, scrolled(b, vw, step.lines), cols)
-  if (next.top != vw.top or next.row != vw.row or next.left != vw.left) {
+  if ((next.top != vw.top or next.row != vw.row or next.left != vw.left)^) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
@@ -1220,7 +1220,7 @@ on mousedown(evt) {
   // A press on a line number selects the line, as in every editor; Shift
   // extends the selection to it (design §6.3).
   let num = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
-  if (dialog == null and num != null and dom.node_type(num) == 1 and dom.matches(num, ".src-num")) {
+  if ((dialog == null and num != null and dom.node_type(num) == 1 and dom.matches(num, ".src-num"))^) {
     vw = mounted(vw, evt.target, rev)
     let l = int(dom.get_attribute(num, "data-line"))
     let start = buf.loc(l, 0)
@@ -1230,11 +1230,11 @@ on mousedown(evt) {
     hist = closed(hist)
     vw = follow(b, vw, sel.head)
     frame = request_exact(evt.target, hs, b, vw, frame)
-    files.focus_surface(evt.target)
+    files.focus_surface(evt.target)^
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
-  if (evt.shiftKey == true and evt.source_pos != null and dialog == null) {
+  if ((evt.shiftKey == true and evt.source_pos != null and dialog == null)^) {
     vw = mounted(vw, evt.target, rev)
     sel = {anchor: sel.anchor, head: from_source(b, vw.top, hs, evt.source_pos), goal: null}
     hist = closed(hist)
@@ -1262,7 +1262,7 @@ on mousemove(evt) {
   if (drag == null) { return 'pass' }
   let lines = int((evt.y - drag.y) * float(b.count) / max(1.0, drag.height))
   let next = scrolled_to(b, vw, drag.top + lines)
-  if (next.top != vw.top or next.row != vw.row) {
+  if ((next.top != vw.top or next.row != vw.row)^) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
   }
@@ -1277,10 +1277,10 @@ on mouseup(evt) {
 // Typing in the find field searches as you type, from the selection's start
 // so a match already selected stays selected.
 on input(evt) {
-  if (hs.find == null or dom.node_type(evt.target) != 1 or not dom.matches(evt.target, "#src-find-input")) { return }
+  if ((hs.find == null or dom.node_type(evt.target) != 1 or not dom.matches(evt.target, "#src-find-input"))^) { return }
   let q = string(dom.get_state(evt.target, "value") or "")
   let moved = find_moved(b, vw, hs, q, true, sel_from(sel))
-  if (moved == null) { hs = {*: hs, find: find_state(b, sel, q)} }
+  if ((moved == null)^) { hs = {*: hs, find: find_state(b, sel, q)} }
   else {
     sel = moved.sel
     vw = moved.vw
@@ -1290,17 +1290,17 @@ on input(evt) {
   rev = project(vw, b, hs, sel, rev)
 }
 on click(evt) {
-  if (hs.find == null or dom.node_type(evt.target) != 1) { return 'pass' }
+  if ((hs.find == null or dom.node_type(evt.target) != 1)^) { return 'pass' }
   if (dom.matches(evt.target, ".src-find-close")) {
     hs = {*: hs, find: null}
-    files.focus_surface(evt.target)
+    files.focus_surface(evt.target)^
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
   let forward = dom.matches(evt.target, ".src-find-next")
   if (not forward and not dom.matches(evt.target, ".src-find-prev")) { return 'pass' }
   let moved = find_moved(b, vw, hs, hs.find.query, forward, if (forward) sel_to(sel) else sel_from(sel))
-  if (moved != null) {
+  if ((moved != null)^) {
     sel = moved.sel
     vw = moved.vw
     hs = moved.hs
@@ -1313,9 +1313,9 @@ on click(evt) {
 // assignment, so no frame mixes rows from before and after the parse. A
 // composing row is not re-rendered until its commit, which asks again.
 on source_frame(evt) {
-  if (evt.detail != frame) { return 'pass' }
+  if ((evt.detail != frame)^) { return 'pass' }
   frame = 0
-  if (comp != null or not needs_exact(hs, b, vw)) { return 'handled' }
+  if ((comp != null or not needs_exact(hs, b, vw))^) { return 'handled' }
   hs = exact(hs, b, vw)
   rev = project(vw, b, hs, sel, rev)
   'handled'
@@ -1327,13 +1327,13 @@ on load(evt) {
   frame = request_exact(evt.target, hs, b, vw, frame)
 }
 on resize(evt) {
-  if (vw.handle == null) { return }
+  if ((vw.handle == null)^) { return }
   vw = follow(b, measured(vw, dom.root_node(evt.target)), sel.head)
   frame = request_exact(evt.target, hs, b, vw, frame)
   rev = project(vw, b, hs, sel, rev)
 }
 on closerequest(evt) {
-  if (not sess.is_dirty(session, b)) {
+  if ((not sess.is_dirty(session, b))^) {
     dom.request_window_close(evt.target)
     return
   }

@@ -15,7 +15,7 @@ fn captured(src,opts) binary^ {
     else input(paths.resolve_path(opts.base,src),'binary')^
 }
 pub fn records(nodes,opts) => [for (i,src in unique([for (entry in nodes where ((c.tag(entry.node)=="img") ^ { false })) entry.node.src or ""])) {
-    // S7.4.2: the caught image failure has an explicit raised channel.
+    // S7.4.2v3: the image helper discloses its ordinary error outcome.
     fn read_image() map^ {
         let bytes = captured(src,opts)^
         let kind = mime(bytes)

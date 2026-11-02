@@ -110,7 +110,7 @@ fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int)
     if (nx * ny > 4000000) raise error("procart.sample.poisson: more than 4,000,000 cells; raise the radius")
     else {
         // step = pass * 9 + phase
-        let grid = reduce([[for (c in 0 to (nx * ny - 1)) 0], *[for (step in ((0 to (attempts * phases - 1)) ^ { [] })) step]],
+        let grid = reduce([[for (c in ((0 to (nx * ny - 1)) ^ { [] })) 0], *[for (step in ((0 to (attempts * phases - 1)) ^ { [] })) step]],
             (g, step: int) any^ => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
         [for (q in grid where q is array) if (d.density == null) q else [q[0], q[1]]]
     }
@@ -195,7 +195,7 @@ pub fn best_candidate(k: u64, options) array^ {
 }
 
 // --- density-weighted sampling over a field: P(cell) is proportional to its value ---
-fn first_above(cumulative, target: float, lo: int, hi: int) int {
+fn first_above(cumulative, target: float, lo: int, hi: int) int^ {
     if (lo >= hi) lo
     else (let mid = (lo + hi) div 2, if (cumulative[mid] > target) first_above(cumulative, target, lo, mid)
         else first_above(cumulative, target, mid + 1, hi))

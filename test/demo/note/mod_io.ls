@@ -8,7 +8,7 @@ import component: lambda.ui.core.component
 
 let max_book_bytes = 64000000
 
-pub fn archive(book) => {format:"lambda-notes",version:1,sequence:book.sequence,folders:book.folders,
+pub fn archive(book) any^ => {format:"lambda-notes",version:1,sequence:book.sequence,folders:book.folders,
     notes:[for (n in book.notes) {*:n,doc:format(n.doc,'mark')^}]}
 fn valid_attrs(attrs) => attrs is array and all([for (a in attrs) a is map and a.name is symbol and
     (a.value is string or a.value is number or a.value is bool)])
@@ -53,10 +53,10 @@ pub fn decode(source) map^ {
         }
     }
 }
-pub fn encode(book) => format(archive(book),'json')^
+pub fn encode(book) any^ => format(archive(book),'json')^
 pub let descriptor = {name:"Notes notebook",suffixes:[".note.json"],
-    export_text:(book,envelope)=>encode(book),
-    check_roundtrip:(book,envelope)=>if (decode(encode(book))^==book) null else "notebook content changed"}
+    export_text:(book,envelope)any^ =>encode(book),
+    check_roundtrip:(book,envelope) string?^ =>if (decode(encode(book))^==book) null else "notebook content changed"}
 pub fn file_state(st) map^ => session.new_session(st.path,descriptor,st.disk_text,{doc:st.saved,envelope:{}})^
 pub fn read_book(path) map^ {
     if (not ends_with(lower(path),".note.json")) raise error("Notes: open a .note.json notebook.") else {

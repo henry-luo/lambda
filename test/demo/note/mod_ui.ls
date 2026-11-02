@@ -8,7 +8,7 @@ import model: .mod_model
 import images: .mod_images
 import context: ~~.mod_context_menu
 
-pub fn icon(name) => icons.render({name:name,width:19,height:19})^
+pub fn icon(name) any^ => icons.render({name:name,width:19,height:19})^
 pub pn task_hit(st,evt) {
     if (st.dialog!=null or st.selected=="" or model.current(st).deleted) { return null }
     let surface = dom.get_element_by_id(dom.root_node(evt.target),"edit-surface")
@@ -91,7 +91,7 @@ pub fn note_list(st) {
             if (len(rows)==0) <div class:"list-empty",icon(if (st.query!="") "search" else "file-text");
                 <strong if (st.query!="") "No matching notes" else "No Notes">
                 <p if (st.query!="") "Try a different search." else "Your next idea starts here.">> else null;
-            *[for (group in [{label:"Pinned",notes:pinned},{label:if (len(pinned)>0) "Notes" else "",notes:ordinary}] where len(group.notes)>0)
+            *[for (group in [{label:"Pinned",notes:pinned},{label:if (len(pinned)>0) "Notes" else "",notes:ordinary}] where ((len(group.notes)>0) ^ { false }))
                 <div class:"note-group",
                     if (group.label!="") <div class:"group-label",if (group.label=="Pinned") icon("pushpin") else null;group.label> else null;
                     *[for (n in group.notes) apply(<note_row note:n,selected:st.selected==n.id,folder:model.folder_name(st,n.folder)>) ]>]

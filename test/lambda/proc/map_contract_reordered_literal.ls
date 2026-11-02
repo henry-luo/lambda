@@ -74,7 +74,7 @@ pn main() {
     var root: N? = null
     var i = 0
     while (i < 20) {
-        root = insert(root, ((i * 7) % 20) * 1.5)
+        root = insert(root, ((i * 7) % 20) * 1.5)^
         i = i + 1
     }
     let keys = walk(root)

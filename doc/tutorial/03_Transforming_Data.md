@@ -267,9 +267,9 @@ The collection functions round out the toolkit. `sum`, `avg`, `min` and `max` re
 λ> let prices = books |> ~.price
 λ> [sum(prices), avg(prices), min(prices), max(prices)]
 [374.4, 74.88, 37.9, 190]
-λ> sort(prices, 'desc')
+λ> sort(prices, 'desc')^
 [190, 55, 49, 42.5, 37.9]
-λ> take(sort(prices, 'desc'), 3)
+λ> take(sort(prices, 'desc'), 3)^
 [190, 55, 49]
 λ> let tags = [for (b in books) for (t in b.tags) t]
 λ> unique(tags)

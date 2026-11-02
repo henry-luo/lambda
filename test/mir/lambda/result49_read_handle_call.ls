@@ -9,7 +9,7 @@ fn retain_box(box: Box) Box => box
 
 pn read_across(var box: Box, id: int) int^ {
     let first: int = box.cells[id].x
-    let seen: int = observe(box)
+    let seen: int = observe(box)^
     let second: int = box.cells[id].y
     first + seen + second
 }
@@ -23,7 +23,7 @@ pn key_across(var box: Box, id: int) int^ {
 
 pn read_across_gc(var box: Box, id: int) int^ {
     let first: int = box.cells[id].x
-    let seen: int = observe_alloc(box)
+    let seen: int = observe_alloc(box)^
     let second: int = box.cells[id].y
     first + seen + second
 }

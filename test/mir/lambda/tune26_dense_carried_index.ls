@@ -6,7 +6,8 @@ pn tune26_dense_carried_index(values: float[], n: int) float^ {
     var i: int = 0
     var total: float = 0.0
     while (i < n) {
-        total = total + values[previous_index] * 2.0 + values[i]
+        let _admitted_total_9: float = total + values[previous_index] * 2.0 + values[i]
+        total = _admitted_total_9^
         previous_index = i
         i = i + 1
     }

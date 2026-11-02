@@ -2,7 +2,8 @@
 type Entry = {value: int}
 
 pn concatenate(left: array, right: array) array^ {
-    let result: array = left ++ right
+    let _admitted_result_5: array = left ++ right
+    let result: array = _admitted_result_5^
     return result
 }
 
@@ -12,7 +13,8 @@ pn choose(flag: bool, left: array, right: array) array^ {
 
 pn narrow(values: int[]) int { return values[0] }
 pn shaped(value: Entry) int { return value.value }
-pn require_array(value) array^ { var checked: array = value; return checked }
+pn require_array(value) array^ { let _admitted_checked_15: array = value
+    var checked: array = _admitted_checked_15^; return checked }
 
 pn extend(var value: map, key: string, child) {
     value[key] = child

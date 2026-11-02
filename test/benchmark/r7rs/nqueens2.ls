@@ -2,16 +2,16 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn ok(row: int, dist: int, placed: int[], placed_len: int) int {
+pn ok(row: int, dist: int, placed: int[], placed_len: int) int^ {
     if (dist > placed_len) {
         return 1
     }
     var idx: int = placed_len - dist
     var p: int = placed[idx]
-    if (p == row + dist) {
+    if ((p == row + dist)^) {
         return 0
     }
-    if (p == row - dist) {
+    if ((p == row - dist)^) {
         return 0
     }
     return ok(row, dist + 1, placed, placed_len)

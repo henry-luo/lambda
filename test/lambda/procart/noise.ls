@@ -33,7 +33,7 @@ let f = noise.field(g, 24, 16);
 [len(f), len(f[0]), sum([for (row in f) sum(row)]), noise.field(noise.make(rng.key(2), spec)^, 24, 16) == f,
  noise.field(noise.make(rng.key(3), spec)^, 24, 16) != f];
 [for (fr in ['none', 'fbm', 'ridged', 'billow']) (let gen = noise.make(rng.key(2), {*:spec, fractal: fr})^,
-    let vs = [for (row in noise.field(gen, 24, 16)) for (v in row) v], [fr, gen.octaves, all([for (v in vs) v >= -1.0 and v <= 1.0])])];
+    let vs = [for (row in ((noise.field(gen, 24, 16)) ^ { [] })) for (v in row) v], [fr, gen.octaves, all([for (v in vs) v >= -1.0 and v <= 1.0])])];
 [for (kind in ['simplex', 'perlin', 'value', 'white', 'cellular']) (let gen = noise.make(rng.key(2), {kind: kind, frequency: 0.1})^,
     [kind, noise.sample(gen, 3.0, 4.0), noise.sample3(gen, 3.0, 4.0, 5.0)])];
 [for (cell in ['f1', 'f2', 'f2-f1']) noise.sample(noise.make(rng.key(2), {kind: 'cellular', cell: cell, frequency: 0.1})^, 3.0, 4.0)];

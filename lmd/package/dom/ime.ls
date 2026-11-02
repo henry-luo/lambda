@@ -54,7 +54,7 @@ fn is_enabled(body,status) bool {
     if (override == "off") false else if (override == "chinese") true else status.enabled
 }
 
-fn accepts(body,status) bool => is_enabled(body,status) and status.target != null and
+fn accepts(body,status) bool^ => is_enabled(body,status) and status.target != null and
     not dom.get_state(status.target,"disabled") and not dom.get_state(status.target,"readonly")
 
 pn present_popup(body,target,frame,mode) {

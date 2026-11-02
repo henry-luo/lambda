@@ -12,20 +12,20 @@ pub let SAMPLES = ["algebra", "arithmetic_lualatex", "biblatex_biber", "booktabs
     "spacetime_diagrams", "thai_polyglossia", "tikzpeople", "timeline",
     "ubc_math_220", "unit_circle", "vietnamese_document", "xltabular"]
 
-pub fn record(file, target, include_html = false) {
-    let ast = latex.parse_file("test/latex/samples/" ++ file ++ ".tex")
+pub fn record(file, target, include_html = false) any^ {
+    let ast = latex.parse_file("test/latex/samples/" ++ file ++ ".tex")^
     if (ast == null) {file: file, target: target, parsed: false}
     else {
         let result = latex.render_result(ast, {standalone: true,
-            base_uri: "test/latex/samples", target: target})
+            base_uri: "test/latex/samples", target: target})^
         let serialization = html.to_html(result.elements) ^ { {message: ^.message} }
         let serialized = if (serialization is string) serialization else ""
         let visible = trim(replace(util.text_of(result.body), "\n", " "))
         {file: file, target: target, parsed: true,
-         packages: [for (entry in result.packages) entry.key],
+         packages: [for (entry in result.packages^) entry.key],
          diagnostics: result.diagnostics,
-         unsupported: len([for (issue in result.diagnostics
-             where issue.code == "unsupported-output") issue]),
+         unsupported: len([for (issue in result.diagnostics^
+             where (issue.code == "unsupported-output")^) issue]),
          resources: result.assets,
          visible: slice(visible, 0, min([len(visible), 120])),
          output_chars: len(serialized), serialization_error: if (serialization is map) serialization.message else null,

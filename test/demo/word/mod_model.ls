@@ -156,26 +156,26 @@ pub fn plain_text(n) any^ => if (is_text(n)) (if (changes.deleted(n.marks)) "" e
     else join([for (child in n.content) plain_text(child)],
         if (contains(['ul','ol','table','thead','tbody','li'],n.tag) or html.schema[n.tag].content[0].role == 'block') "\n"
         else if (n.tag == 'tr') "\t" else "")
-pub fn word_count(doc) => len([for (s in split(replace(replace(replace(plain_text(doc),"\n"," "),"\t"," "),"\r"," ")," ") where s != "") s])
+pub fn word_count(doc) => len([for (s in ((split(replace(replace(replace(plain_text(doc),"\n"," "),"\t"," "),"\r"," ")," ")) ^ { [] }) where s != "") s])
 
 let text_blocks = rendering.surface_block_tags
 pub let block_selector = join([for (tag in text_blocks) string(tag)],",")
 pub fn blocks(n,path=[]) any^ {
-    let children = if (not is_node(n)) [] else [for (i,child in n.content) for (entry in blocks(child,[*path,i])) entry];
+    let children = if (not is_node(n)) [] else [for (i,child in n.content) for (entry in ((blocks(child,[*path,i])) ^ { [] })) entry];
     // a cell with real paragraphs formats those paragraphs; a bare-text cell is its own block.
     if (is_node(n) and contains(text_blocks,n.tag) and len(children)==0) [{path:path,node:n}] else children
 }
-pub fn headings(doc) => [for (entry in descendants(doc) where contains(['h1','h2','h3','h4','h5','h6'],entry.node.tag))
+pub fn headings(doc) => [for (entry in descendants(doc) where ((contains(['h1','h2','h3','h4','h5','h6'],entry.node.tag)) ^ { false }))
     {path:entry.path,label:doc_text(entry.node),level:string(entry.node.tag)}]
 
 pub let selection_path = inline_format.selection_path
-pub fn current_node(editor,tag) {
+pub fn current_node(editor,tag) any^ {
     let path = commands.ancestor_tag(editor.doc,selection_path(editor.selection),tag)
     if (path == null) null else {path:path,node:node_at(editor.doc,path)}
 }
 pub let table_context = tables.context
-pub fn current_block(editor) => [for (entry in blocks(editor.doc)
-    where path_is_prefix(entry.path,selection_path(editor.selection))) entry][last]
+pub fn current_block(editor) => [for (entry in ((blocks(editor.doc)) ^ { [] })
+    where ((path_is_prefix(entry.path,selection_path(editor.selection))) ^ { false })) entry][last]
 pub fn select_paragraph(editor) any^ {
     // span formatting runs while leaving neighboring paragraphs outside the range.
     let block = current_block(editor)
@@ -195,21 +195,21 @@ let styled_marks = inline_format.styled_marks
 let leaf_segment = inline_format.leaf_segment
 let char_transaction = inline_format.transaction
 
-pub fn selected_blocks(editor) {
+pub fn selected_blocks(editor) any^ {
     let sel = editor.selection
     let entries = blocks(editor.doc)
     if (sel.kind == 'all') entries
     else if (sel.kind == 'node' or sel.kind=='multi-node') [for (entry in entries where
-        any([for (path in selection_paths(sel)) path_is_prefix(path,entry.path) or path_is_prefix(entry.path,path)])) entry]
+        any([for (path in ((selection_paths(sel)) ^ { [] })) path_is_prefix(path,entry.path) or path_is_prefix(entry.path,path)])) entry]
     else {
         let lo = pos_min(sel.anchor,sel.head)
         let hi = pos_max(sel.anchor,sel.head);
-        [for (entry in entries where path_is_prefix(entry.path,lo.path) or
+        [for (entry in entries where ((path_is_prefix(entry.path,lo.path) or
             (path_compare(entry.path,lo.path)>0 and path_compare(entry.path,hi.path)<=0 and
-             not (hi.offset == 0 and path_is_prefix(entry.path,hi.path)))) entry]
+             not (hi.offset == 0 and path_is_prefix(entry.path,hi.path)))) ^ { false })) entry]
     }
 }
-fn block_transaction(tx,entries,key,value,style,i=0) {
+fn block_transaction(tx,entries,key,value,style,i=0) any^ {
     if (i >= len(entries)) tx else {
         let entry = entries[i]
         let next = if (style == null) tx_step(tx,step_set_attr(entry.path,'style',css_set(attrs_get(node_at(tx.doc_after,entry.path).attrs,'style'),key,value)))
@@ -217,7 +217,7 @@ fn block_transaction(tx,entries,key,value,style,i=0) {
         block_transaction(next,entries,key,value,style,i+1)
     }
 }
-pub fn paragraph_block(editor) => current_block(editor) or selected_blocks(editor)[0]
+pub fn paragraph_block(editor) any^ => current_block(editor) or selected_blocks(editor)[0]
 fn property_value(s,params) any^ {
     let value = if (s.value != null) s.value else params[s.param]
     if (s.property == "font-size") {
@@ -259,14 +259,14 @@ fn table_transaction(tx) any^ {
 
 fn valid_count(value,lo,hi) => value is number and value >= lo and value <= hi and value == floor(value)
 fn valid_measure(value,lo,hi) => value is number and value >= lo and value <= hi
-fn properties_transaction(tx,entries,properties,i=0) => if (i >= len(properties)) tx else
+fn properties_transaction(tx,entries,properties,i=0) any^ => if (i >= len(properties)) tx else
     properties_transaction(block_transaction(tx,entries,properties[i].key,properties[i].value,null),entries,properties,i+1)
 
 // CSS lengths in imported documents may use pixels; dialog and ruler values use points.
 pub fn points(value,fallback=0) {
     let s = trim(value or "")
     let units = [{unit:"pt",scale:1},{unit:"px",scale:0.75},{unit:"mm",scale:72/25.4},{unit:"cm",scale:72/2.54},{unit:"in",scale:72}]
-    let unit = [for (u in units where ends_with(s,u.unit)) u][0]
+    let unit = [for (u in units where ((ends_with(s,u.unit)) ^ { false })) u][0]
     let magnitude = float(if (unit==null) s else slice(s,0,len(s)-len(unit.unit))) ^ { fallback };
     magnitude*(unit.scale or 1)
 }
@@ -286,13 +286,13 @@ fn indentation_properties(p) array^ {
     else [for (s in indent_properties where p[s.id]!=null) {key:s.css,value:string(p[s.id]) ++ "pt"}]
 }
 fn wrapped_position(point,paths) {
-    let cell = [for (path in paths where path_is_prefix(path,point.path)) path][0];
+    let cell = [for (path in paths where ((path_is_prefix(path,point.path)) ^ { false })) path][0];
     if (cell==null) point else {*:point,path:[*cell,0,*slice(point.path,len(cell))]}
 }
 fn indentation_transaction(editor,p) map^ {
     let properties = indentation_properties(p)^
     let entries = selected_blocks(editor)
-    let wrapped = [for (e in entries where contains(['td','th'],e.node.tag)) e.path]
+    let wrapped = [for (e in entries where ((contains(['td','th'],e.node.tag)) ^ { false })) e.path]
     let tx = reduce([tx_begin(editor.doc,editor.selection),*entries],(tx,e)any^ =>{
         // CSS margins do not indent a table cell. Give its inline text a paragraph without changing the grid.
         let cell = contains(['td','th'],e.node.tag)
@@ -373,7 +373,7 @@ fn table_navigate(editor,forward) map^ {
     let ctx = table_context(editor)
     if (ctx == null) raise error("Word: place the caret inside a table first") else {
         let cells = blocks(ctx.table,ctx.table_path)
-        let index = [for (i,entry in cells where path_equal(entry.path,ctx.cell_path)) i][0]
+        let index = [for (i,entry in cells where ((path_equal(entry.path,ctx.cell_path)) ^ { false })) i][0]
         if (forward and index == len(cells)-1) edit_apply(editor,table_layout.transaction(editor,"table.insertRowBelow")^)
         else if (not forward and index == 0) editor
         else {
@@ -387,13 +387,13 @@ fn table_navigate(editor,forward) map^ {
 
 pub fn can_comment(editor) any^ => editor.selection.kind=='text' and not pos_equal(editor.selection.anchor,editor.selection.head)
 fn segment_text(entries,sel) => join([for (entry in entries,let segment=leaf_segment(entry,sel)
-    where segment!=null and segment.to>segment.from) slice(entry.leaf.text,segment.from,segment.to)],"")
+    where ((segment!=null and segment.to>segment.from) ^ { false })) slice(entry.leaf.text,segment.from,segment.to)],"")
 // the selected characters, joined across text leaves; comments quote it.
 pub fn selected_text(editor) any^ => segment_text(leaves(editor.doc),editor.selection)
 // one line per selected paragraph, so Review lookups never fuse words across blocks.
-pub fn selected_lines(editor) => join([for (b in selected_blocks(editor),let line=segment_text(leaves(b.node,b.path),editor.selection)
-    where line!="") line],"\n")
-pub fn cell_alignment(editor) {
+pub fn selected_lines(editor) => join([for (b in ((selected_blocks(editor)) ^ { [] }),let line=segment_text(leaves(b.node,b.path),editor.selection)
+    where ((line!="") ^ { false })) line],"\n")
+pub fn cell_alignment(editor) any^ {
     let ctx = table_context(editor)
     let css = attrs_get(node_at(editor.doc,ctx.cell_path).attrs,'style')
     let vertical = css_get(css,"vertical-align") or "top"
@@ -402,12 +402,12 @@ pub fn cell_alignment(editor) {
         (if (vertical=="middle") "center" else vertical) ++ (if (horizontal=="right") "Right" else if (horizontal=="center") "Center" else "Left")
 }
 pub fn comment_selection(editor,id) any^ {
-    let entries = [for (entry in leaves(editor.doc) where review.has_anchor(entry.leaf.marks,id)) entry]
+    let entries = [for (entry in ((leaves(editor.doc)) ^ { [] }) where ((review.has_anchor(entry.leaf.marks,id)) ^ { false })) entry]
     if (len(entries)==0) null else text_selection(pos(entries[0].path,0),pos(entries[last].path,len(entries[last].leaf.text)))
 }
 pub fn next_comment_id(editor,show_resolved,forward) {
-    let entries = [for (c in review.comments(editor.doc) where show_resolved or not c.resolved) c]
-    let current = [for (i,c in entries where review.has_anchor(current_marks(editor),c.id)) i][0]
+    let entries = [for (c in ((review.comments(editor.doc)) ^ { [] }) where show_resolved or not c.resolved) c]
+    let current = [for (i,c in entries where ((review.has_anchor(current_marks(editor),c.id)) ^ { false })) i][0]
     let start = current or (if (forward) -1 else 0)
     if (len(entries)==0) null else entries[(start+(if (forward) 1 else -1)+len(entries))%len(entries)].id
 }
@@ -450,7 +450,7 @@ fn list_selection(editor,tx) any^ {
 // a style choice wraps unlisted text first, so the list and its marker style form one undo step.
 fn list_style_transaction(editor,p) map^ {
     let tag = if (p.kind=="ordered") 'ol' else 'ul'
-    let style = [for (s in home.list_styles(p.kind) where s.id==p.style) s][0]
+    let style = [for (s in ((home.list_styles(p.kind)) ^ { [] }) where s.id==p.style) s][0]
     if (style==null) raise error("Word: choose a list style")
     else {
         let run = if (current_node(editor,tag)!=null) null
@@ -583,23 +583,23 @@ fn folded_chars(chars) {
         folded:if (i==0) 0 else folded_ends[i-1],fold_end:folded_ends[i],text:parts[i]}]
 }
 fn search_spans(words,needle,match_case) {
-    if (match_case) [for (offset in decorations.find_in_leaf(words,needle)) {from:offset,to:offset+len(needle)}]
+    if (match_case) [for (offset in ((decorations.find_in_leaf(words,needle)) ^ { [] })) {from:offset,to:offset+len(needle)}]
     else {
         let chars = folded_chars(split(words,""))
         let query = lower(needle);
-        [for (offset in decorations.find_in_leaf(join([for (c in chars) c.text],""),query),
+        [for (offset in ((decorations.find_in_leaf(join([for (c in chars) c.text],""),query)) ^ { [] }),
             let first = [for (c in chars where c.folded<=offset and offset<c.fold_end) c][0],
-            let end_char = [for (c in chars where c.folded<offset+len(query) and offset+len(query)<=c.fold_end) c][0])
+            let end_char = [for (c in chars where ((c.folded<offset+len(query) and offset+len(query)<=c.fold_end) ^ { false })) c][0])
             {from:first.source,to:end_char.end}]
     }
 }
-pub fn search(doc,needle,match_case=true) => if (needle == "") [] else [for (entry in blocks(doc),
+pub fn search(doc,needle,match_case=true) => if (needle == "") [] else [for (entry in ((blocks(doc)) ^ { [] }),
     let runs = leaves(entry.node,entry.path))
-    for (hit in search_spans(doc_text(entry.node),needle,match_case))
+    for (hit in ((search_spans(doc_text(entry.node),needle,match_case)) ^ { [] }))
     text_selection(offset_pos(runs,hit.from),offset_pos(runs,hit.to))]
 // Replace from the end so earlier source positions survive run joins; record
 // the composed operation once, using the existing editor insertion primitive.
-fn replace_hits(tx,hits,replacement,i) {
+fn replace_hits(tx,hits,replacement,i) any^ {
     if (i < 0) tx else {
         let next = commands.cmd_insert_text({doc:tx.doc_after,selection:hits[i],schema:html.schema},replacement)
         if (next == null) tx else replace_hits({*:tx,doc_after:next.doc_after,

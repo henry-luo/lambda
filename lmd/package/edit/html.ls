@@ -126,8 +126,8 @@ fn trim_run_end(items) any^ {
 // Import: parsed Mark tree -> editor model
 // ---------------------------------------------------------------------------
 
-fn first_named(el, tag) {
-  let found = [for (c in ((content(el)) ^ { [] }) where type(c) == element and name(c) == tag) c]
+fn first_named(el, tag) any^ {
+  let found = [for (c in ((content(el)) ^ { [] }) where ((type(c) == element and name(c) == tag) ^ { false })) c]
   if (len(found) > 0) found[0] else null
 }
 
@@ -386,11 +386,11 @@ fn import_parsed(source, parsed) map {
 // ---------------------------------------------------------------------------
 
 // Source attributes; the adapter's own bookkeeping names hold a space.
-fn attrs_html(attrs) =>
-  join([for (a in attrs where a.value != null and not contains(string(a.name), " "))
+fn attrs_html(attrs) any^ =>
+  join([for (a in attrs where ((a.value != null and not contains(string(a.name), " ")) ^ { false }))
           " " ++ string(a.name) ++ "=\"" ++ escape_attr(string(a.value)) ++ "\""], "")
 
-fn open_tag(tag, attrs) => "<" ++ string(tag) ++ attrs_html(attrs) ++ ">"
+fn open_tag(tag, attrs) any^ => "<" ++ string(tag) ++ attrs_html(attrs) ++ ">"
 fn close_tag(tag) => "</" ++ string(tag) ++ ">"
 
 // Retained source: an element (or comment) through the HTML formatter, a

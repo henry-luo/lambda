@@ -28,7 +28,7 @@ let outline = input("test/demo/photo-album/world-outline.json", 'json')^;
     nested: all([for (z in 1 to P.BANDS - 1) nested_at(z)]),
     library_order: all([for (c in ((world.clusters) ^ { [] }), i in ((1 to len(c.ids) - 1) ^ { [] }) where ((len(c.ids) > 1) ^ { false })) position[string(c.ids[i - 1])] < position[string(c.ids[i])]]),
     features: [len(world.features.features), world.features.features[0].properties],
-    biggest: (let c = [for (c in ((P.shown(world, 0.0)) ^ { [] }) order by len(c.ids) desc) c][0], [len(c.ids), P.label(full, c)]),
+    biggest: (let c = [for (c in ((P.shown(world, 0.0)) ^ { [] }) order by len(c.ids)^ desc) c][0], [len(c.ids), P.label(full, c)]),
     single: P.label(small, [for (c in ((P.shown(places, 11.0)) ^ { [] }) where ((len(c.ids) == 1) ^ { false })) c][0]),
     band_of: [P.band_of(-1.0), P.band_of(3.7), P.band_of(30.0)],
     outline: [len(outline.features), all([for (f in outline.features) f.geometry.coordinates[0][0] == f.geometry.coordinates[0][len(f.geometry.coordinates[0]) - 1]])]

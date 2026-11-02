@@ -46,7 +46,7 @@ pub fn describe(editor,region=null) {
     let bookmark = insert.bookmark_name(block.node)
     let marks = model.current_marks(editor)
     let revision = changes.change_id(marks)
-    let comments = [for (c in review.comments(editor.doc) where contains(review.ids(marks),c.id)) c]
+    let comments = [for (c in ((review.comments(editor.doc)) ^ { [] }) where ((contains(review.ids(marks),c.id)) ^ { false })) c]
     let dimensions = transform.settings(image.node)
     let kind = if (region!=null) region else if (graphic!=null) graphic.kind else if (table!=null) "table"
         else if (item!=null) "list" else if (link!=null) "link" else if (model.current_node(editor,'hr')!=null) "rule" else "text"

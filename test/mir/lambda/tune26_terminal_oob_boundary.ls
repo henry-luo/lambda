@@ -1,7 +1,9 @@
 // S4.1/D5.2/D5.3: a non-null typed read keeps its diagnostic on the OOB arm.
 pn read_sum(xs: float[], ys: float[], index: int) float^ {
-    let left: float = xs[index]
-    let right: float = ys[index]
+    let _admitted_left_3: float = xs[index]
+    let left: float = _admitted_left_3^
+    let _admitted_right_4: float = ys[index]
+    let right: float = _admitted_right_4^
     return left + right
 }
 

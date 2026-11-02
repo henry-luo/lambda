@@ -3,7 +3,8 @@
 type Cell = {value: int}
 type Holder = {cells: Cell[], note: string}
 
-let saved: Cell[] = [{value: 3}]
+let _admitted_saved_6: Cell[] = [{value: 3}]
+let saved: Cell[] = _admitted_saved_6^
 
 fn from_global() Holder => {cells: saved, note: "global"}
 fn from_param(cells: Cell[]) Holder => {cells: cells, note: "param"}

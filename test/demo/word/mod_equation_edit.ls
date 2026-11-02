@@ -18,7 +18,7 @@ pub pn request(node) {
     dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_equation_ready")
 }
 pub pn focus(st,node) {
-    if (not active(st)) { return }
+    if ((not active(st))^) { return }
     let field = dom.get_element_by_id(dom.root_node(node),st.equation_edit.focus or "equation-editor-source")
     dom.focus_set(field,false)
     if (st.equation_edit.selection!=null and st.equation_edit.focus=="equation-editor-source")

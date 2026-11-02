@@ -139,12 +139,12 @@ pn hyphenate_text(text, data, var result_cache, var marker_cache) string^ {
     return result
 }
 
-pn verify_hyphen_cases(data) bool {
+pn verify_hyphen_cases(data) bool^ {
     var result_cache = {}
     var marker_cache = {}
     var index: int = 0
     while (index < len(hyphen_cases)) {
-        if (hyphenate_text(hyphen_cases[index][0], data, result_cache, marker_cache) != hyphen_cases[index][1]) {
+        if ((hyphenate_text(hyphen_cases[index][0], data, result_cache, marker_cache) != hyphen_cases[index][1])^) {
             return false
         }
         index = index + 1
@@ -154,7 +154,7 @@ pn verify_hyphen_cases(data) bool {
 
 pub pn run_hyphen_benchmark() {
     let data = input(hyphen_data_path, {type: "json"}) ^ { null }
-    if (data == null or not verify_hyphen_cases(data)) {
+    if ((data == null or not verify_hyphen_cases(data))^) {
         print("hyphen: FAIL fixture verification\n")
         return
     }

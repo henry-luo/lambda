@@ -6,7 +6,7 @@ pn bump(var trace: int[], value) {
     return value
 }
 
-pn build(value: int, next: Node?) Node^ {
+pn build(value: int, next: Node?) Node {
     var result: Node = {value: value, next: next}
     return result
 }

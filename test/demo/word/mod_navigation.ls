@@ -18,10 +18,10 @@ pub fn pages(doc) {
 }
 pub fn current_page(editor) {
     let index = model.selection_path(editor.selection)[0] or 0;
-    [for (entry in pages(editor.doc) where entry.start<=index) entry.number][last] or 1
+    [for (entry in ((pages(editor.doc)) ^ { [] }) where entry.start<=index) entry.number][last] or 1
 }
-pub fn current_heading(editor) => [for (heading in model.headings(editor.doc)
-    where path_compare(heading.path,model.selection_path(editor.selection))<=0) heading.path][last]
+pub fn current_heading(editor) => [for (heading in ((model.headings(editor.doc)) ^ { [] })
+    where ((path_compare(heading.path,model.selection_path(editor.selection))<=0) ^ { false })) heading.path][last]
 pub fn page_position(doc,page_number) any^ {
     let entry = if (page_number is int and page_number>=1) pages(doc)[page_number-1] else null
     if (entry==null) null else {
@@ -32,17 +32,17 @@ pub fn page_position(doc,page_number) any^ {
 pub fn excerpt(doc,hit) {
     let block = model.current_block({doc:doc,selection:hit})
     let words = doc_text(block.node)
-    let offset = sum([for (leaf in model.leaves(block.node,block.path)
-        where path_compare(leaf.path,hit.anchor.path)<0) len(leaf.leaf.text)])+hit.anchor.offset
-    let end = sum([for (leaf in model.leaves(block.node,block.path)
-        where path_compare(leaf.path,hit.head.path)<0) len(leaf.leaf.text)])+hit.head.offset
+    let offset = sum([for (leaf in ((model.leaves(block.node,block.path)) ^ { [] })
+        where ((path_compare(leaf.path,hit.anchor.path)<0) ^ { false })) len(leaf.leaf.text)])+hit.anchor.offset
+    let end = sum([for (leaf in ((model.leaves(block.node,block.path)) ^ { [] })
+        where ((path_compare(leaf.path,hit.head.path)<0) ^ { false })) len(leaf.leaf.text)])+hit.head.offset
     let start = max(0,offset-28)
     let finish = min(len(words),end+55);
     {before:(if (start>0) "…" else "") ++ slice(words,start,offset),match:slice(words,offset,end),
         after:slice(words,end,finish) ++ (if (finish<len(words)) "…" else "")}
 }
-fn leaf_text_node(node) => if (node==null or dom.node_type(node)==3) node else leaf_text_node(dom.child_nodes(node)[0])
-fn rendered_point(editor,host,point) {
+fn leaf_text_node(node) any^ => if (node==null or dom.node_type(node)==3) node else leaf_text_node(dom.child_nodes(node)[0])
+fn rendered_point(editor,host,point) any^ {
     let leaves = model.leaves(editor.doc)
     let index = [for (i,leaf in leaves where leaf.path==point.path) i][0]
     let span = if (index==null) null else dom.query_selector_all(host,".word-text-run")[index]

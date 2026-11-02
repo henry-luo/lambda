@@ -25,14 +25,14 @@ fn page_number(text, count) {
     if (raw == "last") count else int(raw) ^ { 0 }
 }
 
-fn pages_of(item, count) {
+fn pages_of(item, count) any^ {
     let dash = index_of(item, "-")
     if (item == "{}") [null]
     else if (dash == null) [page_number(item, count)]
     else {
         let first = if (dash == 0) 1 else page_number(slice(item, 0, dash), count)
         let final = if (dash == len(item) - 1) count else page_number(slice(item, dash + 1, len(item)), count)
-        if (first <= final) [for (p in first to final) p] else [for (k in 0 to first - final) first - k]
+        if (first <= final) [for (p in ((first to final) ^ { [] })) p] else [for (k in ((0 to first - final) ^ { [] })) first - k]
     }
 }
 

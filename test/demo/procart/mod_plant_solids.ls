@@ -123,7 +123,7 @@ pub fn whorls(plant) int => if (plant.solids == null) 3 else 1
 // whorls grow around the Y axis; stems, leaves and flowers have real depth.
 fn branches(plant,show_leaves,show_blooms) array {
     let scale = branch_scale(plant);
-    [for (whorl in 0 to (whorls(plant)-1),let turn = float(whorl)*2.0*math.pi/float(whorls(plant)))
+    [for (whorl in ((0 to (whorls(plant)-1)) ^ { [] }),let turn = float(whorl)*2.0*math.pi/float(whorls(plant)))
         *[*[for (s in plant.segments where whorl == 0 or s[4] > 0)
             stem(spatial(s[0],s[1],turn,scale),spatial(s[2],s[3],turn,scale),max(0.014,s[5]*0.09*scale),plant.recipe.stem)],
           *(if (show_leaves) [for (l in plant.leaves)

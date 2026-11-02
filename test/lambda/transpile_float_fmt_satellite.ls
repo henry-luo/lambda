@@ -10,4 +10,4 @@ fn render_many(count, result) any^ {
     else { render_many(count - 1, fmt(12.345)) }
 }
 
-render_many(96, "")
+render_many(96, "")^

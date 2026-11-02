@@ -92,7 +92,7 @@ pub fn split_front_matter(text) any^ {
 // Import: parser Mark tree -> editor model
 // ---------------------------------------------------------------------------
 
-fn unsupported_in(item) {
+fn unsupported_in(item) any^ {
   if (type(item) != element) []
   else {
     let tag = name(item)
@@ -105,7 +105,7 @@ fn unsupported_in(item) {
 }
 
 fn doc_body(parsed) {
-  let found = [for (c in ((content(parsed)) ^ { [] }) where type(c) == element and name(c) == 'body') c]
+  let found = [for (c in ((content(parsed)) ^ { [] }) where ((type(c) == element and name(c) == 'body') ^ { false })) c]
   if (len(found) > 0) found[0] else parsed
 }
 
@@ -171,7 +171,7 @@ fn table_part(part) {
 fn li_node(li) any^ {
   let task = li["data-checked"] != null
   // the task checkbox is spelled by the list marker, not kept as content
-  let kids = [for (c in ((content(li)) ^ { [] }) where not (type(c) == element and name(c) == 'input')) c]
+  let kids = [for (c in ((content(li)) ^ { [] }) where ((not (type(c) == element and name(c) == 'input')) ^ { false })) c]
   node_attrs('li', attr_list([['checked', if (task) li["data-checked"] == "true" else null]]),
              [for (c in kids)
                 for (x in (((if (is_block_element(c)) block_nodes(c) else inline_items(c, []))) ^ { [] })) x])
@@ -181,7 +181,7 @@ fn list_node(item) any^ {
   let tag = name(item)
   let start_at = if (tag == 'ol' and item.start != null and item.start != "1") item.start else null
   node_attrs(tag, attr_list([['start', start_at], ['loose', if (item.loose == "true") true else null]]),
-             [for (li in ((content(item)) ^ { [] }) where type(li) == element and name(li) == 'li') li_node(li)])
+             [for (li in ((content(item)) ^ { [] }) where ((type(li) == element and name(li) == 'li') ^ { false })) li_node(li)])
 }
 
 fn block_nodes(item) any^ {
@@ -287,7 +287,7 @@ pub fn import_text(source) map^ {
   }
   // The generated note section has no single source span; definitions remain in the gaps.
   let has_notes = count(parsed?<footnotes>) > 0
-  let items = [for (c in ((content(doc_body(parsed))) ^ { [] }) where type(c) == element and name(c) != 'footnotes') c]
+  let items = [for (c in ((content(doc_body(parsed))) ^ { [] }) where ((type(c) == element and name(c) != 'footnotes') ^ { false })) c]
   // without its lines a block could be neither kept as written nor checked
   if (any([for (it in items) it.sourcepos == null]) or false) {
     raise error("the Markdown parser did not report where each block is")
@@ -347,7 +347,7 @@ fn export_item_content(items, i, n, run, acc) any^ {
   else { export_item_content(items, i + 1, n, [], [*acc, *export_inline(run, 0), *export_block(items[i])]) }
 }
 
-fn export_li(li) {
+fn export_li(li) any^ {
   let checked = attr_get(li, 'checked')
   let kids = export_item_content(li.content, 0, len(li.content), [], [])
   if (checked == null) <li *kids>
@@ -410,7 +410,7 @@ fn export_blocks(nodes) => [for (n in nodes) for (b in ((export_block(n)) ^ { []
 fn drop_final_newlines(s) any^ => if (ends_with(s, "\n")) drop_final_newlines(slice(s, 0, len(s) - 1)) else s
 
 // A run of editable blocks as the formatter writes it, or nothing.
-fn run_text(run) {
+fn run_text(run) any^ {
   let md = if (len(run) == 0) "" else drop_final_newlines(format(<doc <body *export_blocks(run)>>, 'markdown'))
   if (md == "") [] else [md]
 }
@@ -424,7 +424,7 @@ fn export_parts(nodes, i, run, acc) any^ {
 }
 
 // Serialize an editor document (plus its envelope) to Markdown source.
-pub fn export_text(doc, envelope) {
+pub fn export_text(doc, envelope) any^ {
   let parts = export_parts(doc.content, 0, [], [])
   let md = if (len(parts) == 0) "" else join(parts, "\n\n") ++ "\n"
   let front = if (envelope != null and envelope.front_matter != null) envelope.front_matter else ""

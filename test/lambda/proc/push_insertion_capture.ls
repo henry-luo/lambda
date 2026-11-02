@@ -78,24 +78,24 @@ pn moved() int^ {
     return bag[0].size
 }
 
-pn reused_in_loop() int {
+pn reused_in_loop() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
     var i = 0
     while (i < 3) {
-        push(bag, x)
+        push(bag, x)^
         i = i + 1
     }
     bag[0].size = 7
     return bag[0].size * 100 + bag[1].size * 10 + bag[2].size
 }
 
-pn fresh_in_loop() int {
+pn fresh_in_loop() int^ {
     var bag: Box[] = []
     var i = 0
     while (i < 3) {
         var x: Box = {size: i, tag: 0}
-        push(bag, x)
+        push(bag, x)^
         i = i + 1
     }
     bag[0].size = 7

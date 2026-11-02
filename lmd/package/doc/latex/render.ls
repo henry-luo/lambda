@@ -58,7 +58,7 @@ import dc_ieee: .docclass.ieee
 // Main dispatcher — called recursively on every AST node
 // ============================================================
 
-pub fn render_node(node, info) {
+pub fn render_node(node, info) any^ {
     if (node == null) null
     else if (node is string) render_text(node, info)
     else if (node is int or node is float) string(node)
@@ -69,7 +69,7 @@ pub fn render_node(node, info) {
 
 // render children of a node — used by postprocess for footnote bodies
 // render a footnote's text for the footnote list; an explicit [n] is its number, not text
-pub fn render_note_body(node, info) {
+pub fn render_note_body(node, info) any^ {
     render_children_skip_brack(node, info)
 }
 
@@ -120,7 +120,7 @@ fn render_symbol(s, info) {
 // through to the core arms.
 pub let PACKAGE_RENDER = {
     amsmath: {DeclareMathOperator: render_nothing, 'DeclareMathOperator*': render_nothing,
-        eqref: (el, info) => render_number_ref(el, info, true)},
+        eqref: (el, info) any^ => render_number_ref(el, info, true)},
     polyglossia: {textenglish: render_textenglish, otherlanguage: render_otherlanguage},
     gfsporson: {textporson: render_textporson},
     csquotes: {enquote: render_enquote},
@@ -134,9 +134,9 @@ pub let PACKAGE_RENDER = {
     slashbox: {backslashbox: (el, info) => render_diagonal_cell(el, "backslash"),
         slashbox: (el, info) => render_diagonal_cell(el, "slash")},
     diagbox: {diagbox: (el, info) => render_diagonal_cell(el, "backslash")},
-    fancyhdr: {fancyplain: (el, info) => render_children(el, 1, info)},
-    cleveref: {cref: (el, info) => render_cref(el, info, false),
-        Cref: (el, info) => render_cref(el, info, true)},
+    fancyhdr: {fancyplain: (el, info) any^ => render_children(el, 1, info)},
+    cleveref: {cref: (el, info) any^ => render_cref(el, info, false),
+        Cref: (el, info) any^ => render_cref(el, info, true)},
     doi: {doi: (el, info) => render_doi(el)},
     hyperref: {hypersetup: render_nothing, hypertarget: render_hypertarget,
         hyperlink: render_hyperlink,
@@ -152,8 +152,8 @@ pub let PACKAGE_RENDER = {
         restylefloat: render_nothing, floatplacement: render_nothing, listof: render_listof},
     bookmark: {bookmark: (el, info) any^ => hyperref.bookmark_command(el, info.hyperref_settings)},
     pifont: {ding: render_ding,
-        dinglist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, 0)),
-        dingautolist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, i))},
+        dinglist: (el, info) => render_generic_list(el, info, (groups, i) any^ => ding_label(groups, 0)),
+        dingautolist: (el, info) => render_generic_list(el, info, (groups, i) any^ => ding_label(groups, i))},
     marvosym: map([for (k, v at dingbats.MARVOSYM, x in [string(k), render_marvosym]) x]),
     // label macros are definitions (analysis) when they carry an argument
     algpseudocode: map(["algorithmic", render_algorithmic, "Comment", render_alg_comment,
@@ -171,9 +171,9 @@ pub let PACKAGE_RENDER = {
         sideways: render_turn},
     pdflscape: {landscape: render_landscape},
     lscape: {landscape: render_landscape},
-    algorithm2e: map(["KwTo", (el, info) => alg_word("to", info),
+    algorithm2e: map(["KwTo", (el, info) any^ => alg_word("to", info),
         "KwRet", (el, info) => <span class: "latex-alg-return", alg_word("return", info) " "
-            for c in render_children(el, 0, info) { c }>,
+            for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
         "tcp", render_alg2e_comment, "tcc", render_alg2e_comment,
         "tcp*", render_alg2e_comment, "tcc*", render_alg2e_comment] ++
         [for (setting in algorithm2e.SETTINGS, x in [setting, render_nothing]) x]),
@@ -194,7 +194,7 @@ pub let PACKAGE_RENDER = {
     setspace: map([for (tag in paragraph.SETSPACE_DECLARATIONS, x in [tag, render_nothing]) x] ++
         [for (tag in paragraph.SETSPACE_ENVIRONMENTS, x in [tag, render_spacing_env]) x]),
     ragged2e: map([for (tag in paragraph.RAGGED_DECLARATIONS, x in [tag, render_nothing]) x] ++
-        [for (tag in paragraph.RAGGED_ENVIRONMENT_NAMES, x in [tag, (el, info) =>
+        [for (tag in paragraph.RAGGED_ENVIRONMENT_NAMES, x in [tag, (el, info) any^ =>
             render_env_div(el, info, "latex-" ++ string(name(el)), paragraph.ragged_css(string(name(el))))]) x]),
     lipsum: map([for (tag in filler.COMMANDS.lipsum, x in [tag, (el, info) => filler.render(el)]) x]),
     blindtext: map([for (tag in filler.COMMANDS.blindtext, x in [tag, (el, info) => filler.render(el)]) x]),
@@ -203,7 +203,7 @@ pub let PACKAGE_RENDER = {
     boxedminipage: {boxedminipage: render_boxed_minipage},
     // framed blocks on the frame-box model (frames.ls)
     framed: map([for (tag in frames.FRAMED, x in [tag, render_framed]) x]),
-    mdframed: {mdframed: (el, info) => render_mdframed(el, info, {}),
+    mdframed: {mdframed: (el, info) any^ => render_mdframed(el, info, {}),
         newmdenv: render_nothing, mdfdefinestyle: render_nothing},
     // code blocks through the listings renderer (codeblocks.ls)
     fancyvrb: map([for (tag in codeblocks.FANCYVRB_ENVIRONMENTS, x in [tag, render_fancyvrb]) x] ++
@@ -244,7 +244,7 @@ pub let PACKAGE_RENDER = {
     minitoc: map([for (command in contents.MINITOC_COMMANDS, x in [command,
         if (contents.mini_kind(command) != null) render_minitoc else render_nothing]) x]),
     threeparttable: {threeparttable: render_threeparttable, measuredfigure: render_threeparttable,
-        tablenotes: render_tablenotes, tnote: (el, info) => tnote_label(trim(util.text_of(el)), info)},
+        tablenotes: render_tablenotes, tnote: (el, info) any^ => tnote_label(trim(util.text_of(el)), info)},
     appendix: {appendices: render_appendices,
         subappendices: (el, info) => render_env_div(el, info, "latex-subappendices", null),
         appendixpage: (el, info) => render_appendix_page(), addappheadtotoc: render_contents_anchor},
@@ -259,16 +259,16 @@ pub let PACKAGE_RENDER = {
     ams: map([for (command in ["author"] ++ profiles.AMS_ADDRESSES, x in [command, render_nothing]) x] ++
         [for (field in ["dedicatory", "subjclass", "keywords", "translator"], x in [field, render_front_field]) x]),
     memoir: map(["epigraph", render_epigraph] ++ [for (setting in profiles.MEMOIR_SETTINGS, x in [setting, render_nothing]) x]),
-    IEEEtran: {IEEEauthorblockN: (el, info) => <div class: "latex-author-name", for c in render_children(el, 0, info) { c }>,
-        IEEEauthorblockA: (el, info) => <div class: "latex-affil", for c in render_children(el, 0, info) { c }>,
+    IEEEtran: {IEEEauthorblockN: (el, info) => <div class: "latex-author-name", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
+        IEEEauthorblockA: (el, info) => <div class: "latex-affil", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
         IEEEPARstart: render_parstart, IEEEkeywords: field_block, IEEEproof: render_proof_env,
-        IEEEmembership: (el, info) => <span class: "latex-membership", for c in render_children(el, 0, info) { c }>,
-        IEEEspecialpapernotice: (el, info) => <div class: "latex-paper-notice", for c in render_children(el, 0, info) { c }>,
+        IEEEmembership: (el, info) => <span class: "latex-membership", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
+        IEEEspecialpapernotice: (el, info) => <div class: "latex-paper-notice", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
         IEEEoverridecommandlockouts: render_nothing, IEEEpeerreviewmaketitle: render_nothing},
     llncs: {institute: render_front_field, keywords: render_front_field, subtitle: render_nothing,
         titlerunning: render_nothing, authorrunning: render_nothing,
         inst: (el, info) => <sup class: "latex-affil-mark", trim(util.text_of(el))>,
-        email: (el, info) => <span class: "latex-email", for c in render_children(el, 0, info) { c }>,
+        email: (el, info) => <span class: "latex-email", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
         orcidID: (el, info) => <sup class: "latex-orcid", <a href: "https://orcid.org/" ++ trim(util.text_of(el)),
             "[" ++ trim(util.text_of(el)) ++ "]">>},
     elsarticle: map([for (command in ["author", "address", "affiliation", "ead", "cortext", "fntext", "tnotetext", "journal"],
@@ -286,16 +286,16 @@ pub let PACKAGE_RENDER = {
         [for (place in profiles.ACMART_PLACES, x in [place, render_place]) x]),
     letter: map([for (field in profiles.LETTER_FIELDS, x in [field, render_nothing]) x] ++
         ["letter", render_letter, "makelabels", render_nothing,
-         "opening", (el, info) => <div class: "latex-letter-opening", for c in render_children(el, 0, info) { c }>,
+         "opening", (el, info) => <div class: "latex-letter-opening", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
          "closing", render_closing,
-         "ps", (el, info) => <div class: "latex-letter-ps", for c in render_children(el, 0, info) { c }>,
+         "ps", (el, info) => <div class: "latex-letter-ps", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>,
          "encl", render_letter_list, "cc", render_letter_list]),
     // the item commands are split out by their lists; elsewhere they are reported
     exam: map([for (k, v at profiles.EXAM_LISTS, x in [string(k), render_exam_list]) x] ++
         [for (setting in profiles.EXAM_SETTINGS, x in [setting, render_nothing]) x] ++
         ["solution", render_solution, "part", render_exam_part, "numpoints", render_numpoints,
          "numquestions", (el, info) => string(len([for (s in info.settings where s.key == "exam:question") s])),
-         "points", (el, info) => trim(util.setting_at(info.settings, "exam:pointname", el.source_offset) or "points")])
+         "points", (el, info) any^ => trim(util.setting_at(info.settings, "exam:pointname", el.source_offset) or "points")])
 }
 
 fn render_nothing(el, info) => null
@@ -335,7 +335,7 @@ fn render_ulem_emph(el, info) any^ {
     let options = registry.options_for(info.packages, "ulem")
     if (decorations.emph_underlined(info.settings, el.source_offset,
         options != null and util.option_enabled(options.normalem)))
-        <span class: "latex-uline", style: "text-decoration:underline", for c in render_children(el, 0, info) { c }>
+        <span class: "latex-uline", style: "text-decoration:underline", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
     else render_styled(el, info, "em")
 }
 
@@ -346,7 +346,7 @@ fn render_ding(el, info) any^ {
 }
 
 // a dinglist label, or dingautolist's label for item `step`: \ding{n + step}
-fn ding_label(groups, step) {
+fn ding_label(groups, step) any^ {
     let start = if (len(groups) == 0) null else int(trim(util.text_of(groups[0]))) ^ { null }
     let glyph = if (start == null) null else dingbats.ding(string(start + step))
     if (glyph == null) null else <span class: "latex-item-label", glyph>
@@ -359,7 +359,7 @@ fn render_marvosym(el, info) => <span class: "latex-marvosym", dingbats.MARVOSYM
 // ============================================================
 
 fn render_algorithmic(el, info) {
-    <div class: "latex-algorithmic", for (line in algorithmic.lines(el)) render_alg_line(line, info)>
+    <div class: "latex-algorithmic", for (line in ((algorithmic.lines(el)) ^ { [] })) render_alg_line(line, info)>
 }
 
 fn render_alg_line(line, info) {
@@ -369,12 +369,12 @@ fn render_alg_line(line, info) {
         [for (i, word in desc.words, item in (if (i > 0) [" ", alg_word(word, info)] else [alg_word(word, info)])) item]
     let condition = if (desc.call == true and len(args) > 0)
         [<span class: "latex-alg-name", render_node(args[0], info)>, "(",
-            *[for (arg in slice(args, 1, len(args))) render_node(arg, info)], ")"]
-        else [for (arg in args, let r = render_node(arg, info) where r != null) r]
+            *[for (arg in ((slice(args, 1, len(args))) ^ { [] })) render_node(arg, info)], ")"]
+        else [for (arg in args, let r = render_node(arg, info) where ((r != null) ^ { false })) r]
     let after = if (desc.after == null) [] else [alg_word(desc.after, info)]
-    let groups = [for (group in [words, condition, after] where len(group) > 0) group]
+    let groups = [for (group in [words, condition, after] where ((len(group) > 0) ^ { false })) group]
     let parts = [for (i, group in groups, item in (if (i > 0) [" ", *group] else group)) item]
-    let body = [for (node in line.items, let r = render_node(node, info) where r != null) r];
+    let body = [for (node in line.items, let r = render_node(node, info) where ((r != null) ^ { false })) r];
     <div class: "latex-alg-line", id: if (line.label != null) util.slugify(line.label) else null,
         style: "padding-left:" ++ string(line.depth * 1.5) ++ "em",
         <span class: "latex-alg-number", if (line.shown != null) string(line.shown) ++ ":" else "">
@@ -383,12 +383,12 @@ fn render_alg_line(line, info) {
 }
 
 // a keyword's label: the document's \algorithmic<word> definition, else its default
-fn alg_word(word, info) {
+fn alg_word(word, info) any^ {
     let defined = util.lookup(info.alg_labels, word)
     let macro = macros.find_macro(info.macros, "algorithmic" ++ word)
-    if (defined != null) <span class: "latex-alg-keyword", for c in render_children(defined, 0, info) { c }>
+    if (defined != null) <span class: "latex-alg-keyword", for c in ((render_children(defined, 0, info)) ^ { [] }) { c }>
     else if (macro != null and macro.body != null)
-        <span class: "latex-alg-keyword", for c in render_children(macro.body, 0, info) { c }>
+        <span class: "latex-alg-keyword", for c in ((render_children(macro.body, 0, info)) ^ { [] }) { c }>
     else <strong class: "latex-alg-keyword", algorithmic.word_text(word)>
 }
 
@@ -398,14 +398,14 @@ fn render_alg_inline(el, info) any^ {
 }
 
 fn render_alg_comment(el, info) =>
-    <span class: "latex-alg-comment", "▷ " for c in render_children(el, 0, info) { c }>
+    <span class: "latex-alg-comment", "▷ " for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 
 // \Call{name}{arguments}
 fn render_alg_call(el, info) {
     let args = util.command_args(el);
     <span class: "latex-alg-call",
         <span class: "latex-alg-name", if (len(args) > 0) render_node(args[0], info) else null>
-        "(" for (arg in slice(args, 1, len(args))) render_node(arg, info) ")">
+        "(" for (arg in ((slice(args, 1, len(args))) ^ { [] })) render_node(arg, info) ")">
 }
 
 // ============================================================
@@ -420,8 +420,8 @@ fn render_subfig(el, info) any^ {
     let args = util.command_args(el)
     let start = util.last_argument_start(el)
     let body = slice(args, start, len(args))
-    let options = [for (node in slice(args, 0, start)
-        where node is element and string(name(node)) == "brack_group") node]
+    let options = [for (node in ((slice(args, 0, start)) ^ { [] })
+        where ((node is element and string(name(node)) == "brack_group") ^ { false })) node]
     let caption_text = if (len(options) == 0) [] else render_children(options[len(options) - 1], 0, info)
     let items = collect_children(body, 0, len(body), [], {*:info, caption_type: kind, caption_number: letter})
     if (info.caption_type == null or letter == null)
@@ -451,10 +451,10 @@ fn render_wrapfloat(el, info) any^ {
 
 // paralist's lists: compact, run-in or inline forms of itemize, enumerate and
 // description; an enumerate form takes a label template such as [(a)]
-fn render_paralist(el, info) {
+fn render_paralist(el, info) any^ {
     let spec = paralist.ENVIRONMENTS[string(name(el))]
     let lead = util.leading_option(el)
-    let flat = util.flatten_paragraphs(<paralist for c in lead.children { c }>)
+    let flat = util.flatten_paragraphs(<paralist for c in ((lead.children) ^ { [] }) { c }>)
     let tpl = if (spec.kind == "enumerate") paralist.template(lead.option) else null
     if (spec.form == "compact" and tpl == null) compact_list(flat, info, spec.kind)
     else (let items = labelled_items(flat, info, spec.kind, tpl),
@@ -472,9 +472,9 @@ fn render_paralist(el, info) {
 fn compact_list(flat, info, kind) {
     let style = enumitem.list_style({nosep: "true"}, kind)
     match kind {
-        case "enumerate": <ol class: "latex-enumerate", style: style, for li in split_list_items(flat, info) { li }>
-        case "description": <dl class: "latex-description", style: style, for item in split_desc_items(flat, info) { item }>
-        default: <ul class: "latex-itemize", style: style, for li in split_list_items(flat, info) { li }>
+        case "enumerate": <ol class: "latex-enumerate", style: style, for li in ((split_list_items(flat, info)) ^ { [] }) { li }>
+        case "description": <dl class: "latex-description", style: style, for item in ((split_desc_items(flat, info)) ^ { [] }) { item }>
+        default: <ul class: "latex-itemize", style: style, for li in ((split_list_items(flat, info)) ^ { [] }) { li }>
     }
 }
 
@@ -482,27 +482,27 @@ fn compact_list(flat, info, kind) {
 // template's label or the default one
 fn labelled_items(flat, info, kind, tpl) {
     if (kind == "description") (let parts = split_desc_items(flat, info),
-        [for (i, part in parts where name(part) == 'dt')
-            {label: <strong for c in content(part) { c }>,
+        [for (i, part in parts where ((name(part) == 'dt') ^ { false }))
+            {label: <strong for c in ((content(part)) ^ { [] }) { c }>,
              body: if (i + 1 < len(parts) and name(parts[i + 1]) == 'dd') content(parts[i + 1]) else []}])
-    else [for (li in split_list_items(flat, info, (i) => <span class: "latex-item-label",
-            if (tpl != null) paralist.label(tpl, i + 1) else paralist.default_label(kind, i + 1)>))
+    else [for (li in ((split_list_items(flat, info, (i) => <span class: "latex-item-label",
+            if (tpl != null) paralist.label(tpl, i + 1) else paralist.default_label(kind, i + 1)>)) ^ { [] }))
         (let children = content(li), {label: children[0], body: slice(children, 1, len(children))})]
 }
 
 fn render_fancy_frame(el, info) {
     let tag = string(name(el));
-    <span class: "latex-" ++ tag, style: boxes.fancybox_css(tag), for c in render_children(el, 0, info) { c }>
+    <span class: "latex-" ++ tag, style: boxes.fancybox_css(tag), for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }
 
 // \begin{boxedminipage}[position]{width}: the width is the header group
 fn render_boxed_minipage(el, info) any^ {
     let lead = util.leading_option(el)
-    let header = util.environment_header(<boxedminipage for c in lead.children { c }>, 1)
+    let header = util.environment_header(<boxedminipage for c in ((lead.children) ^ { [] }) { c }>, 1)
     let width = if (len(header.groups) > 0) util.css_dimension(trim(util.group_source(header.groups[0]))) else null
     if (width == null) util.unsupported_element("boxedminipage", "boxedminipage needs a width", el.source_offset)
     else <div class: "latex-boxedminipage", style: boxes.boxed_minipage_css(width),
-        for c in collect_children(header.body, 0, len(header.body), [], info) { c }>
+        for c in ((collect_children(header.body, 0, len(header.body), [], info)) ^ { [] }) { c }>
 }
 
 // framed's framed, shaded and leftbar blocks
@@ -510,7 +510,7 @@ fn render_framed(el, info) any^ {
     let tag = string(name(el))
     let css = frames.framed_css(tag, info.custom_colors)
     if (css == null) util.unsupported_element("framed", tag ++ " needs a defined shadecolor", el.source_offset)
-    else <div class: "latex-" ++ replace(tag, "*", ""), style: css, for c in render_children(el, 0, info) { c }>
+    else <div class: "latex-" ++ replace(tag, "*", ""), style: css, for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }
 
 // an mdframed block: a \newmdenv's keys, then a style= style's, then its own
@@ -524,7 +524,7 @@ fn render_mdframed(el, info, defaults) any^ {
     if (frame == null) util.unsupported_element("mdframed", "Unknown mdframed color", el.source_offset)
     else <div class: "latex-mdframed", style: frame.css,
         if (frame.title != null) <div class: "latex-mdframed-title", string(frame.title)>;
-        for c in collect_children(lead.children, 0, len(lead.children), [], info) { c }>
+        for c in ((collect_children(lead.children, 0, len(lead.children), [], info)) ^ { [] }) { c }>
 }
 
 // fancyvrb's Verbatim family and minted's environment: the raw body's head holds the
@@ -549,7 +549,7 @@ fn render_spacing_env(el, info) any^ {
     let stretch = paragraph.environment_stretch(tag, value, info.class_options)
     if (stretch == null) util.unsupported_element("setspace", "spacing needs a positive stretch", el.source_offset)
     else <div class: "latex-" ++ tag, style: paragraph.stretch_css(stretch),
-        for c in collect_children(header.body, 0, len(header.body), [], info) { c }>
+        for c in ((collect_children(header.body, 0, len(header.body), [], info)) ^ { [] }) { c }>
 }
 
 // turn and rotate turn their content by an angle; sideways by a quarter turn
@@ -565,7 +565,7 @@ fn render_turn(el, info) any^ {
 }
 
 // landscape content stays on the continuous page (registry target diagnostics for PDF)
-fn render_landscape(el, info) => <div class: "latex-landscape", for c in render_children(el, 0, info) { c }>
+fn render_landscape(el, info) => <div class: "latex-landscape", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 
 // ============================================================
 // algorithm2e: the algorithm body itself is the pseudocode
@@ -596,14 +596,14 @@ fn render_alg2e_body(body, info) {
     let lines = algorithm2e.numbered(folded.lines, settings.numbered);
     [<div class: "latex-algorithmic latex-algorithm2e",
         for (line in lines) render_alg2e_line(line, info, settings)>,
-     *[for (block in folded.blocks) render_node(block, info)]]
+     *[for (block in ((folded.blocks) ^ { [] })) render_node(block, info)]]
 }
 
 fn render_alg2e_line(line, info, settings) {
     let words = if (line.words == null) [] else
         [for (i, word in line.words, item in (if (i > 0) [" ", alg_word(word, info)] else [alg_word(word, info)])) item]
     let rendered = [for (node in (if (line.nodes != null) line.nodes else line.condition),
-        let r = render_node(node, info) where r != null) r]
+        let r = render_node(node, info) where ((r != null) ^ { false })) r]
     let parts = if (line.kind == "io") [<strong class: "latex-alg-keyword", line.label>, " ", *rendered]
         else if (line.kind == "statement")
             rendered ++ (if (line.semicolon and settings.semicolons) [";"] else [])
@@ -659,7 +659,7 @@ fn render_includepdf(el, info) any^ {
         let keys = pdfpages.page_keys(opts)
         let framed = util.option_enabled(opts.frame);
         <div class: "latex-includepdf",
-            for (k, page in pdfpages.page_list(opts.pages, graphicx.pdf_page_count(parsed)))
+            for (k, page in ((pdfpages.page_list(opts.pages, graphicx.pdf_page_count(parsed))) ^ { [] }))
                 <div class: "latex-pdfpage", style: if (framed) "border:0.4pt solid" else null,
                     if (page == null) null else graphicx.render_pdf_page(parsed, src, page, keys,
                         "latex-pdfpage-" ++ string(el.source_offset) ++ "-" ++ string(k), el.source_offset)>>
@@ -670,20 +670,20 @@ fn render_includepdf(el, info) any^ {
 fn render_hypertarget(el, info) {
     let args = util.command_args(el);
     <span id: util.slugify(trim(util.text_of(args[0]))),
-        for (arg in slice(args, 1, len(args))) render_node(arg, info)>
+        for (arg in ((slice(args, 1, len(args))) ^ { [] })) render_node(arg, info)>
 }
 
 fn render_hyperlink(el, info) {
     let args = util.command_args(el);
     <a href: "#" ++ util.slugify(trim(util.text_of(args[0]))),
-        for (arg in slice(args, 1, len(args))) render_node(arg, info)>
+        for (arg in ((slice(args, 1, len(args))) ^ { [] })) render_node(arg, info)>
 }
 
-fn render_ensuremath(el, info) =>
+fn render_ensuremath(el, info) any^ =>
     render_inline_ast(math_bridge.ensuremath_ast(el), el, info, "Cannot parse the ensuremath argument")
 
 // \nicefrac, \sfrac, \ce and \pu set math in any mode
-fn render_math_command(el, info) =>
+fn render_math_command(el, info) any^ =>
     render_inline_ast(math_bridge.command_ast(el), el, info, "Cannot parse \\" ++ string(name(el)))
 
 fn render_inline_ast(ast, el, info, message) any^ {
@@ -800,8 +800,8 @@ fn render_element(el, info) any^ {
         case 'textup': render_font(el, info, "latex-up")
         case 'textmd': render_font(el, info, "latex-md")
         case 'textnormal': render_font(el, info, "latex-normal")
-        case 'textsuperscript': <sup for c in render_children(el, 0, info) { c }>
-        case 'textsubscript': <sub for c in render_children(el, 0, info) { c }>
+        case 'textsuperscript': <sup for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
+        case 'textsubscript': <sub for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
         case 'ensuremath': render_ensuremath(el, info)
         case 'verb': render_verb(el)
         case 'verb_command': render_verb_command(el)
@@ -809,7 +809,7 @@ fn render_element(el, info) any^ {
         // ---- font families ----
         case 'textsf': if (info.polyglossia != null and info.language == "thai")
             <span class: "latex-sf", style: language.font_style(info.polyglossia,
-                "thaifontsf", "sans-serif"), for c in render_children(el, 0, info) { c }>
+                "thaifontsf", "sans-serif"), for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
             else render_font(el, info, "latex-sf")
         case 'textsc': render_font(el, info, "latex-sc")
         case 'textsl': render_font(el, info, "latex-sl")
@@ -958,7 +958,7 @@ fn render_element(el, info) any^ {
         case 'dotfill': <span class: "latex-dotfill">
         case 'hrulefill': <span class: "latex-hrulefill">
         case 'rule': boxes.render_rule(el)
-        case 'centerline': <div class: "latex-centerline", for c in render_children(el, 0, info) { c }>
+        case 'centerline': <div class: "latex-centerline", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
         case 'indent': <span class: "latex-indent">
         case 'cleardoublepage': <hr class: "latex-pagebreak">
         // with a bibliography, the citation handler takes \nocite; without one it has no effect
@@ -1179,7 +1179,7 @@ fn joins(node, before) any^ {
 }
 
 // render children but skip brack_group elements (used by box commands)
-fn render_children_skip_brack(el, info) {
+fn render_children_skip_brack(el, info) any^ {
     let children = util.command_args(el)
     collect_children_skip_brack(children, 0, len(children), [], info)
 }
@@ -1198,7 +1198,7 @@ fn collect_children_skip_brack(el, i, n, acc, info) any^ {
     }
 }
 
-fn collect_children(el, i, n, acc, info) {
+fn collect_children(el, i, n, acc, info) any^ {
     if (i >= n) { acc }
     else {
         let child = el[i]
@@ -1237,13 +1237,13 @@ fn autopunct_mark(child, next, info) any^ {
 }
 
 // Transparent paragraphs carry declarations into later block siblings.
-fn after_render_info(child, info) {
+fn after_render_info(child, info) any^ {
     if (child is element and string(name(child)) == "paragraph")
         fold_paragraph_declarations(child, 0, info)
     else info
 }
 
-fn fold_paragraph_declarations(node, index, info) {
+fn fold_paragraph_declarations(node, index, info) any^ {
     if (index >= len(node)) info
     else fold_paragraph_declarations(node, index + 1,
         next_render_info(node[index], info))
@@ -1325,13 +1325,13 @@ fn render_page_style(el, info) any^ {
 // Document structure
 // ============================================================
 
-fn render_document(el, info) {
+fn render_document(el, info) any^ {
     let doc_body = util.find_child(el, 'document')
     if (doc_body != null) { render_body(doc_body, info) }
     else { document_article(render_children(el, 0, info), info) }
 }
 
-fn render_body(el, info) => document_article(render_children(el, 0, info), info)
+fn render_body(el, info) any^ => document_article(render_children(el, 0, info), info)
 
 fn document_article(items, info) {
     <article class: document_class(info),
@@ -1370,11 +1370,11 @@ fn render_running_band(slots, band, info) {
     <div class: tag,
         for (slot in ["left", "center", "right"])
             <div class: "latex-running-" ++ slot ++ " latex-running-" ++ band ++ "-" ++ slot,
-                for (item in running_slot(slots[slot], info)) item>
+                for (item in ((running_slot(slots[slot], info)) ^ { [] })) item>
     >
 }
 
-fn document_style(info) {
+fn document_style(info) any^ {
     let background = if (info.page_color == null) ""
         else "background-color:" ++ info.page_color ++ ";"
     let selected_family = macros.find_macro(info.macros, "familydefault")
@@ -1415,7 +1415,7 @@ pub fn role_features(info, role) any^ {
 
 // the article's classes; the twocolumn class option sets the document in two columns
 // and a class profile's base and family, whose styles it shares (.latex-book, .latex-koma)
-fn document_class(info) {
+fn document_class(info) any^ {
     let family = registry.class_family(info.docclass)
     "latex-document latex-" ++ info.docclass ++
         (if (info.docbase != "article" and info.docbase != info.docclass) " latex-" ++ info.docbase else "") ++
@@ -1432,7 +1432,7 @@ fn render_column_switch(el, info) any^ {
     if (tag == "twocolumn" and two_column(info)) {
         let header = util.find_child(el, 'brack_group')
         if (header == null) null
-        else <div class: "latex-span-all", for c in render_children(header, 0, info) { c }>
+        else <div class: "latex-span-all", for c in ((render_children(header, 0, info)) ^ { [] }) { c }>
     }
     else util.unsupported_element("latex",
         "Changing the column count mid-document is not supported; use the twocolumn class option",
@@ -1445,7 +1445,7 @@ fn render_foreignlanguage(el, info) any^ {
     if (not registry.active(info.packages, "babel") or not language.supported(selected))
         render_generic_default(el, info)
     else <span lang: language.code(selected),
-        for (arg in slice(args, 1, len(args))) {
+        for (arg in ((slice(args, 1, len(args))) ^ { [] })) {
             render_node(arg, {*:info, text_language: selected})
         }>
 }
@@ -1500,7 +1500,7 @@ fn render_textporson(el, info) any^ {
 fn render_maketitle(info) any^ {
     // \thanks notes in the title block are marked with footnote symbols, in source order
     let thanks = [for (el in [info.title_el, info.author_el, info.date_el],
-        note in thanks_notes(el)) note]
+        note in ((thanks_notes(el)) ^ { [] })) note]
     let title_info = {*:info, thanks_marks: [for (i, note in thanks)
         {key: string(note.source_offset), val: util.fnsymbol(i + 1)}]}
     // titling styles each part from its \pre…/\post… code and fills the hook slots;
@@ -1528,7 +1528,7 @@ fn render_maketitle(info) any^ {
         if (len(thanks) > 0 or len(notes) > 0) {
             <div class: "latex-thanks",
                 for (i, note in thanks)
-                    <p <sup util.fnsymbol(i + 1)> " " for c in render_children(note, 0, info) { c }>
+                    <p <sup util.fnsymbol(i + 1)> " " for c in ((render_children(note, 0, info)) ^ { [] }) { c }>
                 for n in notes { n }>
         }
     >
@@ -1536,10 +1536,10 @@ fn render_maketitle(info) any^ {
     if (len(after) == 0) header else [header, *after]
 }
 
-fn thanks_notes(node) {
+fn thanks_notes(node) any^ {
     if (not (node is element)) []
     else if (string(name(node)) == "thanks") [node]
-    else [for (child in node, note in thanks_notes(child)) note]
+    else [for (child in node, note in ((thanks_notes(child)) ^ { [] })) note]
 }
 
 fn render_thanks_ref(el, info) any^ {
@@ -1586,16 +1586,16 @@ fn render_authblk(info) {
             <div class: "latex-affiliations", style: if (fonts.affil == "") null else fonts.affil,
                 for (e in entries where e.kind == "affil")
                     <div class: affil_class(e), mark_sup(e.marks); if (len(e.marks) == 0) null else " ";
-                        for c in render_children_skip_brack(e.el, info) { c }>>>
+                        for c in ((render_children_skip_brack(e.el, info)) ^ { [] }) { c }>>>
     }
     else <div class: "author latex-authblk",
-        for (block in frontmatter.blocks(entries))
+        for (block in ((frontmatter.blocks(entries)) ^ { [] }))
             <div class: "latex-authblock",
                 <div class: "latex-authors", style: if (fonts.author == "") null else fonts.author,
                     for c in frontmatter.joined([for (e in block.authors) render_children_skip_brack(e.el, info)], seps) { c }>
                 for (e in block.affils)
                     <div class: affil_class(e), style: if (fonts.affil == "") null else fonts.affil,
-                        for c in render_children_skip_brack(e.el, info) { c }>>>
+                        for c in ((render_children_skip_brack(e.el, info)) ^ { [] }) { c }>>>
 }
 
 fn mark_sup(marks) => if (len(marks) == 0) null else <sup class: "latex-affil-mark", join(marks, ",")>
@@ -1615,7 +1615,7 @@ fn affil_class(entry) => if (entry.email == true) "latex-affil latex-email" else
 fn render_title_part(el, info) {
     let part = slice(string(name(el)), 3, len(string(name(el))))
     let source = if (part == "title") info.title_el else if (part == "author") info.author_el else info.date_el;
-    <span class: "latex-the" ++ part, for c in (if (source == null) [] else render_children(source, 0, info)) { c }>
+    <span class: "latex-the" ++ part, for c in (((if (source == null) [] else render_children(source, 0, info))) ^ { [] }) { c }>
 }
 
 // appendix's environment: the anchor of its toc option's contents head, the page
@@ -1624,7 +1624,7 @@ fn render_appendices(el, info) {
     let options = registry.options_for(info.packages, "appendix")
     let page = if (options != null and util.option_enabled(options.page)) render_appendix_page() else null;
     <div class: "latex-appendices", render_contents_anchor(el, info); page;
-        for c in render_children(el, 0, info) { c }>
+        for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }
 
 // \appendixpage: the appendices' title, set like a part
@@ -1637,7 +1637,7 @@ fn appendix_name(names, place) {
 }
 
 // the anchor a ToC or list entry from \addcontentsline links to
-fn render_contents_anchor(el, info) {
+fn render_contents_anchor(el, info) any^ {
     let id = util.lookup(info.contents_anchors, string(el.source_offset))
     if (id == null) null else <a id: id>
 }
@@ -1687,7 +1687,7 @@ fn list_title(named, info, given) {
 // Headings
 // ============================================================
 
-fn render_heading(el, info, html_level) {
+fn render_heading(el, info, html_level) any^ {
     let title_el = el.title
     let title_text = if (title_el != null) util.text_of(title_el) else ""
     let title_id = util.slugify(title_text)
@@ -1763,7 +1763,7 @@ fn build_heading_el(level, id, num_span, children, outline_title, running_marks,
 // ============================================================
 
 // a setspace declaration earlier in the group spaces the paragraphs after it
-fn render_paragraph(el, info) {
+fn render_paragraph(el, info) any^ {
     let rendered = render_paragraph_content(el, info)
     if (info.line_stretch == null or rendered == null) rendered
     else <div class: "latex-spacing", style: paragraph.stretch_css(info.line_stretch),
@@ -1810,7 +1810,7 @@ fn has_parbreak(el, i, n) any^ {
     else has_parbreak(el, i + 1, n)
 }
 
-fn split_at_parbreaks(el, info) {
+fn split_at_parbreaks(el, info) any^ {
     split_parbreaks_rec(el, 0, len(el), [], [], info)
 }
 
@@ -1871,7 +1871,7 @@ fn render_paragraph_with_decl(el, info, decl) any^ {
     if (len(items) == 0) { null }
     else if (font_decl.is_font_decl(decl_tag)) {
         let style = font_decl.decl_css(decl);
-        if (style == null) <p for c in font_decl.wrap_font_decl(decl, items) { c }>
+        if (style == null) <p for c in ((font_decl.wrap_font_decl(decl, items)) ^ { [] }) { c }>
         else <p style: style, for c in items { c }>
     }
     else if (color.is_color_decl(decl_tag)) {
@@ -1880,11 +1880,11 @@ fn render_paragraph_with_decl(el, info, decl) any^ {
     else <p style: font_switch_css(decl, info) or paragraph_decl_css(decl, info), for c in items { c }>
 }
 
-fn split_around_blocks(items) {
+fn split_around_blocks(items) any^ {
     split_blocks_rec(items, 0, len(items), [], [])
 }
 
-fn split_blocks_rec(items, i, n, current, acc) {
+fn split_blocks_rec(items, i, n, current, acc) any^ {
     if (i >= n) { flush_inline(current, acc) }
     else {
         let item = items[i]
@@ -1911,11 +1911,11 @@ fn flush_inline(items, acc) any^ {
     else acc ++ [<p for c in items { c }>]
 }
 
-fn has_block_child(items) {
+fn has_block_child(items) any^ {
     check_block_rec(items, 0, len(items))
 }
 
-fn check_block_rec(items, i, n) {
+fn check_block_rec(items, i, n) any^ {
     if (i >= n) false
     else if (is_block_element(items[i])) true
     else check_block_rec(items, i + 1, n)
@@ -2008,12 +2008,12 @@ fn render_accent(el, info) any^ {
     sym.resolve_diacritic(cmd_name, base)
 }
 
-fn render_math_env(el, info) {
+fn render_math_env(el, info) any^ {
     let env_name = util.attr_or(el, "name", "equation")
     bold_math(math_bridge.render_math_env_el(el, env_name), info, true)
 }
 
-fn render_numbered_equation(el, info) {
+fn render_numbered_equation(el, info) any^ {
     let equation_number = util.lookup(info.equation_nums, string(el.source_offset))
     let rendered = if (registry.active(info.packages, "amsmath"))
         amsmath.render_environment(el,
@@ -2045,14 +2045,14 @@ fn render_itemize(el, info) {
         for li in items { li }>
 }
 
-fn render_enumerate(el, info) {
+fn render_enumerate(el, info) any^ {
     let flat = util.flatten_paragraphs(el)
     // the enumerate and paralist packages read [(a)] as a label template
     let tpl = if (el.options_raw == null or registry.active(info.packages, "enumitem") or
         not (registry.active(info.packages, "enumerate") or registry.active(info.packages, "paralist"))) null
         else paralist.template(el.options_raw)
     if (tpl != null) <ul class: "latex-list latex-enumerate",
-        for (item in labelled_items(flat, info, "enumerate", tpl)) <li item.label; for c in item.body { c }>>
+        for (item in ((labelled_items(flat, info, "enumerate", tpl)) ^ { [] })) <li item.label; for c in item.body { c }>>
     else render_plain_enumerate(el, flat, info)
 }
 
@@ -2086,7 +2086,7 @@ fn is_item_node(child) {
 
 // default_label(i) labels item i when it has no \item[label] of its own (the
 // list environments); null leaves such items unlabelled
-fn split_list_items(flat, info, default_label = null) {
+fn split_list_items(flat, info, default_label = null) any^ {
     split_items_rec(flat, 0, len(flat), [], false, [], info, default_label)
 }
 
@@ -2122,11 +2122,11 @@ fn render_tabbing(el, info) {
     let rows = split_nodes(util.flatten_paragraphs(el), 0, [], [],
         (node) => node is symbol and string(node) == "row_sep");
     <table class: "latex-tabbing",
-        <tbody for (row in rows where not is_blank_row(row) and
-            not any([for (node in row) node is element and string(name(node)) == "kill"]))
-            <tr for (cell in split_nodes(row, 0, [], [], (node) => node is element and
-                (string(name(node)) == "=" or string(name(node)) == ">")))
-                <td for (node in cell, let item = render_node(node, info) where item != null) item>>>>
+        <tbody for (row in rows where ((not is_blank_row(row) and
+            not any([for (node in row) node is element and string(name(node)) == "kill"])) ^ { false }))
+            <tr for (cell in ((split_nodes(row, 0, [], [], (node) => node is element and
+                (string(name(node)) == "=" or string(name(node)) == ">"))) ^ { [] }))
+                <td for (node in cell, let item = render_node(node, info) where ((item != null) ^ { false })) item>>>>
 }
 
 fn is_blank_row(row) => all([for (node in row) node is string and len(trim(node)) == 0])
@@ -2143,27 +2143,27 @@ fn split_nodes(nodes, i, current, acc, is_separator) any^ {
 // unless \item[x] gives one; trivlist passes null. Spacing declarations are not modelled.
 fn render_generic_list(el, info, label_for) {
     let flat = util.flatten_paragraphs(el)
-    let item_positions = [for (i, node in flat where is_item_node(node)) i]
+    let item_positions = [for (i, node in flat where ((is_item_node(node)) ^ { false })) i]
     let start = if (len(item_positions) == 0) len(flat) else item_positions[0]
-    let groups = [for (node in slice(flat, 0, start)
-        where node is element and string(name(node)) == "curly_group") node];
-    <ul class: "latex-list", for li in split_list_items(slice(flat, start, len(flat)), info,
-        if (label_for == null) null else (i) any^ => label_for(groups, i)) { li }>
+    let groups = [for (node in ((slice(flat, 0, start)) ^ { [] })
+        where ((node is element and string(name(node)) == "curly_group") ^ { false })) node];
+    <ul class: "latex-list", for li in ((split_list_items(slice(flat, start, len(flat)), info,
+        if (label_for == null) null else (i) any^ => label_for(groups, i))) ^ { [] }) { li }>
 }
 
 // the list environment's label: its first argument, rendered
 fn list_label(groups, info) =>
     if (len(groups) == 0) null
-    else <span class: "latex-item-label", for c in render_children(groups[0], 0, info) { c }>
+    else <span class: "latex-item-label", for c in ((render_children(groups[0], 0, info)) ^ { [] }) { c }>
 
 // get custom label from \item[label] as a rendered span, or null
-fn get_item_custom_label(item_node) {
+fn get_item_custom_label(item_node) any^ {
     let opt = util.find_child(item_node, 'brack_group')
     if (opt != null) { <span class: "latex-item-label", util.text_of(opt) ++ " "> }
     else { null }
 }
 
-fn split_desc_items(flat, info) {
+fn split_desc_items(flat, info) any^ {
     split_desc_rec(flat, 0, len(flat), [], null, [], info)
 }
 
@@ -2353,15 +2353,15 @@ fn render_minitoc(el, info) any^ {
 
 // The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
 // leading multicols_preface child; the preface spans all columns.
-fn render_multicols(el, info) {
+fn render_multicols(el, info) any^ {
     let cols = if (el.columns != null) trim(el.columns) else "2"
     let preface = util.find_child(el, 'multicols_preface')
     let columns = <div class: "latex-multicols", style: "column-count:" ++ cols,
-        for c in render_children(el, if (preface == null) 0 else 1, info) { c }
+        for c in ((render_children(el, if (preface == null) 0 else 1, info)) ^ { [] }) { c }
     >
     if (preface == null) columns
     else <div class: "latex-multicols-block",
-        <div class: "latex-multicols-preface", for c in render_children(preface, 0, info) { c }>
+        <div class: "latex-multicols-preface", for c in ((render_children(preface, 0, info)) ^ { [] }) { c }>
         columns
     >
 }
@@ -2382,7 +2382,7 @@ fn render_theorem_env(el, info, display_name, env_type) {
 }
 
 // route theorem-like env through custom defs if available, else default numbered
-fn render_theorem_like(el, info, display_name, env_type) {
+fn render_theorem_like(el, info, display_name, env_type) any^ {
     let thm_def = util.lookup(info.theorem_defs, env_type)
     if (thm_def != null) render_custom_theorem(el, info, thm_def)
     else render_theorem_env(el, info, display_name, env_type)
@@ -2398,7 +2398,7 @@ fn render_proof_env(el, info) {
     >
 }
 
-fn get_theorem_num(el, info, env_type) {
+fn get_theorem_num(el, info, env_type) any^ {
     let thm_text = trim(util.text_of(el))
     find_theorem_num(info.theorems, thm_text, env_type, 0)
 }
@@ -2421,7 +2421,7 @@ fn check_theorem_match(theorems, text, env_type, i) {
 // threeparttable (and measuredfigure): the caption and the notes are held to the
 // table's width as table captions of the wrapper (css.ls)
 fn render_threeparttable(el, info) {
-    <div class: "latex-threeparttable", for c in render_children(el, 0, info) { c }>
+    <div class: "latex-threeparttable", for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }
 
 // threeparttable's options, from the package and then the environment
@@ -2441,8 +2441,8 @@ fn tnote_label(label, info, local = {}) any^ {
 fn render_tablenotes(el, info) {
     let lead = util.leading_option(el)
     let local = util.parse_kv_options(lead.option)
-    let parts = split_desc_items(util.flatten_paragraphs(<tablenotes for c in lead.children { c }>), info)
-    let notes = [for (i, part in parts where name(part) == 'dt')
+    let parts = split_desc_items(util.flatten_paragraphs(<tablenotes for c in ((lead.children) ^ { [] }) { c }>), info)
+    let notes = [for (i, part in parts where ((name(part) == 'dt') ^ { false }))
         {label: util.text_of(part),
          body: if (i + 1 < len(parts) and name(parts[i + 1]) == 'dd') trim_leading(content(parts[i + 1])) else []}]
     let style = (if (tpt_option(info, local, "normal")) "font-size:1em;" else "") ++
@@ -2495,13 +2495,13 @@ fn render_tabular(el, info) {
                 caption_number: string(get_float_num(el, info, "table"))})>
         }
         if (len(sections.head) > 0) {
-            <thead for row in sections.head { row }>
+            <thead for row in ((sections.head) ^ { [] }) { row }>
         }
         <tbody
-            for row in sections.body { row }
+            for row in ((sections.body) ^ { [] }) { row }
         >
         if (len(sections.foot) > 0) {
-            <tfoot for row in sections.foot { row }>
+            <tfoot for row in ((sections.foot) ^ { [] }) { row }>
         }
     >
 }
@@ -2515,7 +2515,7 @@ fn table_width_style(el) {
 
 fn render_makecell(el, info) {
     let args = [for (arg in util.command_args(el)
-        where not (arg is element and name(arg) == 'brack_group')) arg];
+        where ((not (arg is element and name(arg) == 'brack_group')) ^ { false })) arg];
     <span class: "latex-makecell",
         for (arg in args) {
             if (arg is symbol and string(arg) == "row_sep") { <br> }
@@ -2526,7 +2526,7 @@ fn render_makecell(el, info) {
 
 fn render_diagonal_cell(el, direction) {
     let args = [for (arg in util.command_args(el)
-        where not (arg is element and name(arg) == 'brack_group')) arg]
+        where ((not (arg is element and name(arg) == 'brack_group')) ^ { false })) arg]
     let first = if (len(args) > 0) util.rich_text_of(args[0]) else ""
     let second = if (len(args) > 1) util.rich_text_of(args[1]) else ""
     let width = util.optional_raw(el)
@@ -2575,7 +2575,7 @@ fn parse_col_spec(el, ctx) any^ {
     else []
 }
 
-fn find_curly_group(el, i) {
+fn find_curly_group(el, i) any^ {
     if (i >= len(el)) null
     else check_curly(el, i)
 }
@@ -2588,7 +2588,7 @@ fn check_curly(el, i) any^ {
 
 // The document parser may split one table into paragraphs. Keep all table
 // tokens in source order so later rows and head/foot markers are not dropped.
-fn table_content(el) => [for (child in content(el), token in table_tokens(child)) token]
+fn table_content(el) => [for (child in ((content(el)) ^ { [] }), token in ((table_tokens(child)) ^ { [] })) token]
 
 fn table_tokens(child) {
     if (child is element and name(child) == 'paragraph')
@@ -2596,11 +2596,11 @@ fn table_tokens(child) {
     else [child]
 }
 
-fn split_rows(content, col_spec, info) {
+fn split_rows(content, col_spec, info) any^ {
     collect_rows(content, 0, len(content), [], [], col_spec, info)
 }
 
-fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
+fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) any^ {
     if (i >= n) finalize_rows(current_cells, acc_rows, col_spec, info)
     else {
         // helpers finish one token; the sole self-tail call keeps table width off the native stack.
@@ -2611,7 +2611,7 @@ fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
 
 fn table_state(cells, rows) => {cells: cells, rows: rows}
 
-fn finalize_rows(current_cells, acc_rows, col_spec, info) {
+fn finalize_rows(current_cells, acc_rows, col_spec, info) any^ {
     let final_row = make_row(current_cells, col_spec, info)
     if (final_row != null) {
         append_row(acc_rows, final_row)
@@ -2620,14 +2620,14 @@ fn finalize_rows(current_cells, acc_rows, col_spec, info) {
     }
 }
 
-fn route_child(child, current_cells, acc_rows, col_spec, info) {
+fn route_child(child, current_cells, acc_rows, col_spec, info) any^ {
     if (child is string) handle_text_content(current_cells, acc_rows, col_spec, info, child)
     else if (child is symbol) handle_symbol_child(current_cells, acc_rows, col_spec, info, child)
     else if (child is element) handle_element_child(current_cells, acc_rows, col_spec, info, child)
     else table_state(current_cells, acc_rows)
 }
 
-fn handle_symbol_child(current_cells, acc_rows, col_spec, info, child) {
+fn handle_symbol_child(current_cells, acc_rows, col_spec, info, child) any^ {
     let sv = string(child)
     if (sv == "alignment_tab") table_state(current_cells ++ [null], acc_rows)
     else if (sv == "row_sep") handle_row_break(current_cells, acc_rows, col_spec, info)
@@ -2738,13 +2738,13 @@ fn handle_multirow_child(current_cells, acc_rows, col_spec, info, child) {
     table_state(new_cells, acc_rows)
 }
 
-fn render_span_content(child, start, info) {
+fn render_span_content(child, start, info) any^ {
     if (start >= len(child)) null
     else if (start == len(child) - 1) render_one_span(child[start], info)
     else render_span_seq(child, start, len(child), info, [])
 }
 
-fn render_one_span(c, info) {
+fn render_one_span(c, info) any^ {
     if (c is element) render_node(c, info)
     else c
 }
@@ -2781,13 +2781,13 @@ fn joined_style(extra) => if (extra == "") "" else ";" ++ extra
 
 // colortbl's order: a \cellcolor over the row's color over the column's
 fn cell_decoration(c, column, info) any^ {
-    let own = [for (item in (if (c is array) c else [c]) where is_span_cell(item, "cellcolor")) item.color]
+    let own = [for (item in (if (c is array) c else [c]) where ((is_span_cell(item, "cellcolor")) ^ { false })) item.color]
     colspec.decoration_css(column, info.rule_color, info.row_colored or len(own) > 0) ++
         (if (len(own) == 0) "" else "background-color:" ++ own[len(own) - 1] ++ ";")
 }
 
 fn without_cell_colors(c) {
-    if (c is array) [for (item in c where not is_span_cell(item, "cellcolor")) item]
+    if (c is array) [for (item in c where ((not is_span_cell(item, "cellcolor")) ^ { false })) item]
     else if (is_span_cell(c, "cellcolor")) null else c
 }
 
@@ -2829,12 +2829,12 @@ fn make_row_inner(cells, col_spec, marker, info) {
         for td in tds { td }>
 }
 
-fn build_tds(cells, col_spec, ci, col, acc, info) {
+fn build_tds(cells, col_spec, ci, col, acc, info) any^ {
     if (ci >= len(cells)) acc
     else dispatch_td(cells, col_spec, ci, col, acc, info)
 }
 
-fn dispatch_td(cells, col_spec, ci, col, acc, info) {
+fn dispatch_td(cells, col_spec, ci, col, acc, info) any^ {
     let cell = cells[ci]
     if (is_span_cell(cell, "multicol")) emit_multicol_td(cells, col_spec, ci, col, acc, cell, info)
     else if (is_span_cell(cell, "multirow")) emit_multirow_td(cells, col_spec, ci, col, acc, cell, info)
@@ -2856,13 +2856,13 @@ fn multicol_td(cell, info) {
         joined_style(cell_decoration(cell.content, cell.column, info)), c>
 }
 
-fn emit_multirow_td(cells, col_spec, ci, col, acc, cell, info) {
+fn emit_multirow_td(cells, col_spec, ci, col, acc, cell, info) any^ {
     let align = get_align(col_spec, col)
     let td = multirow_td(cell, align, info)
     build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td], info)
 }
 
-fn multirow_td(cell, align, info) {
+fn multirow_td(cell, align, info) any^ {
     let c = without_cell_colors(cell.content)
     let css_align = if (align is map and align.kind == "si-decimal") "right"
         else if (align is map) align.align else align
@@ -2871,12 +2871,12 @@ fn multirow_td(cell, align, info) {
     else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ css_align ++ joined_style(extra), c> }
 }
 
-fn emit_regular_td(cells, col_spec, ci, col, acc, cell, info) {
+fn emit_regular_td(cells, col_spec, ci, col, acc, cell, info) any^ {
     let td = cell_to_td_aligned(cell, get_align(col_spec, col), info)
     build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td], info)
 }
 
-fn append_to_last_cell(cells, content) {
+fn append_to_last_cell(cells, content) any^ {
     if (content == null) cells
     else if (len(cells) == 0) [[content]]
     else set_last_cell(cells, content)
@@ -2918,7 +2918,7 @@ fn render_ref(el, info) any^ {
     else render_number_ref(el, info)
 }
 
-fn render_pageref(el, info) => page_ref(trim(util.text_of(el)), info, el.source_offset)
+fn render_pageref(el, info) any^ => page_ref(trim(util.text_of(el)), info, el.source_offset)
 
 // the page of a label; paged output fills the anchor with the page number
 fn page_ref(key, info, offset) any^ {
@@ -2929,7 +2929,7 @@ fn page_ref(key, info, offset) any^ {
     else <a class: "latex-target-page", href: "#" ++ entry.id>
 }
 
-fn render_number_ref(el, info, parenthesized = false) => number_ref(trim(util.text_of(el)), info, parenthesized)
+fn render_number_ref(el, info, parenthesized = false) any^ => number_ref(trim(util.text_of(el)), info, parenthesized)
 
 fn number_ref(ref_name, info, parenthesized = false) {
     let label_info = util.lookup(info.labels, ref_name)
@@ -2941,7 +2941,7 @@ fn number_ref(ref_name, info, parenthesized = false) {
             if (label_info != null) label_info.tag_form else null) else value>
 }
 
-fn render_autoref(el, info) {
+fn render_autoref(el, info) any^ {
     let ref_name = trim(util.text_of(el))
     let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
@@ -2967,7 +2967,7 @@ fn reference_type_name(label_type, plural, capital) any^ {
 fn autoref_prefix(label_type) any^ =>
     reference_type_name(label_type, false, true) ++ "\u00A0"
 
-fn cref_types(entries, at, found) {
+fn cref_types(entries, at, found) any^ {
     if (at >= len(entries)) found
     else {
         let type_name = entries[at].type
@@ -3008,8 +3008,8 @@ fn cref_group(entries, label_type, capital) {
     >
 }
 
-fn render_cref(el, info, capital) =>
-    cref_keys([for (key in util.split_top_level(trim(util.text_of(el)), ",")) trim(key)], info, capital)
+fn render_cref(el, info, capital) any^ =>
+    cref_keys([for (key in ((util.split_top_level(trim(util.text_of(el)), ",")) ^ { [] })) trim(key)], info, capital)
 
 fn cref_keys(keys, info, capital) {
     let entries = [for (key in keys) util.lookup(info.labels, key)]
@@ -3094,15 +3094,15 @@ fn render_gls(el, info) any^ {
 
 // \printglossary, \printglossaries and \printacronyms: the listed entries of each
 // type, sorted by their sort keys, as a description list
-fn render_print_glossary(el, info) {
+fn render_print_glossary(el, info) any^ {
     let options = registry.options_for(info.packages, "glossaries")
     let types = terms.printed_types(string(name(el)), util.optional_raw(el), options, info.terms.gls_titles)
-    let lists = [for (t in types, let printed = glossary_list(el, info, t, options) where printed != null) printed]
+    let lists = [for (t in types, let printed = glossary_list(el, info, t, options) where ((printed != null) ^ { false })) printed]
     if (len(lists) == 1) lists[0] else <div class: "latex-glossaries", for c in lists { c }>
 }
 
 fn glossary_list(el, info, t, options) any^ {
-    let entries = sort([for (e in info.terms.gls_entries where e.type == t.type and (contains(info.terms.gls_listed, e.label) or false)) e],
+    let entries = sort([for (e in info.terms.gls_entries where ((e.type == t.type and (contains(info.terms.gls_listed, e.label) or false)) ^ { false })) e],
         (e) => lower(e.sort))
     let postdot = renamed_title(info, "glspostdescription", if (util.option_on(options, "nopostdot")) "" else ".")
     let title = if (t.title != null) [t.title]
@@ -3112,7 +3112,7 @@ fn glossary_list(el, info, t, options) any^ {
         list_heading(info, title, string(el.source_offset) ++ ":" ++ t.type);
         <dl class: "latex-glossary-list",
             for (e in entries, item in [
-                <dt id: "gls-" ++ util.slugify(e.label), <strong for c in render_fragment(e.name, info) { c }>>,
+                <dt id: "gls-" ++ util.slugify(e.label), <strong for c in ((render_fragment(e.name, info)) ^ { [] }) { c }>>,
                 <dd for c in [*render_fragment(e.description, info), *postdot,
                     *(if (util.option_on(options, "nonumberlist")) [] else glossary_locators(e, info))] { c }>]) item>>
 }
@@ -3133,8 +3133,8 @@ fn render_ac(el, info) any^ {
     let options = registry.options_for(info.packages, "acronym")
     if (entry == null) util.unsupported_element("acronym", "Undefined acronym " ++ label, el.source_offset)
     else {
-        let items = [for (part in terms.ac_parts(entry, form, use != null and use.first, util.option_on(options, "dua")),
-            item in ac_part(part, info)) item]
+        let items = [for (part in ((terms.ac_parts(entry, form, use != null and use.first, util.option_on(options, "dua"))) ^ { [] }),
+            item in ((ac_part(part, info)) ^ { [] })) item]
         if (util.option_on(options, "nohyperlinks") or util.option_on(options, "nolist"))
             <span class: "latex-acronym", for c in items { c }>
         else <a class: "latex-acronym", href: "#acro-" ++ util.slugify(label), for c in items { c }>
@@ -3142,7 +3142,7 @@ fn render_ac(el, info) any^ {
 }
 
 // a part of an \ac use, in the font its macro (\acsfont, …) gives when redefined
-fn ac_part(part, info) {
+fn ac_part(part, info) any^ {
     let font = if (part.font == null) null else macros.last_macro(info.macros, part.font)
     let css = if (font == null) null else font_decl.argument_font_css(font.source)
     let items = render_fragment(part.source, info);
@@ -3154,16 +3154,16 @@ fn ac_part(part, info) {
 fn render_acronym_list(el, info) any^ {
     let options = registry.options_for(info.packages, "acronym")
     let used = [for (u in info.terms.ac_uses) u.val.label]
-    let defined = [for (node in util.flatten_paragraphs(util.leading_option(el).children)
-        where node is element and string(name(node)) == "acro") node]
+    let defined = [for (node in ((util.flatten_paragraphs(util.leading_option(el).children)) ^ { [] })
+        where ((node is element and string(name(node)) == "acro") ^ { false })) node]
     let labels = [for (node in defined) trim(util.raw_argument(node, "required", 0) or "")]
-    let shown = [for (label in labels where not util.option_on(options, "printonlyused") or
-        (contains(used, label) or false)) last_term(info.terms.ac_entries, label)]
+    let shown = [for (label in labels where ((not util.option_on(options, "printonlyused") or
+        (contains(used, label) or false)) ^ { false })) last_term(info.terms.ac_entries, label)]
     if (util.option_on(options, "nolist") or len(shown) == 0) null
     else <dl class: "latex-acronyms",
         for (entry in shown, item in [
-            <dt id: "acro-" ++ util.slugify(entry.label), <strong for c in render_fragment(entry.short, info) { c }>>,
-            <dd for c in render_fragment(entry.long, info) { c }>]) item>
+            <dt id: "acro-" ++ util.slugify(entry.label), <strong for c in ((render_fragment(entry.short, info)) ^ { [] }) { c }>>,
+            <dd for c in ((render_fragment(entry.long, info)) ^ { [] }) { c }>]) item>
 }
 
 // \printnomenclature: the entries sorted by prefix and symbol under \nomname
@@ -3173,8 +3173,8 @@ fn render_nomenclature(el, info) any^ {
     else <section class: "latex-nomenclature",
         list_heading(info, renamed_title(info, "nomname", "Nomenclature"), string(el.source_offset));
         <dl class: "latex-nomenclature-list",
-            for (e in entries, item in [<dt for c in render_fragment(e.symbol, info) { c }>,
-                <dd for c in render_fragment(e.description, info) { c }>]) item>>
+            for (e in entries, item in [<dt for c in ((render_fragment(e.symbol, info)) ^ { [] }) { c }>,
+                <dd for c in ((render_fragment(e.description, info)) ^ { [] }) { c }>]) item>>
 }
 
 // \index: an anchor the index's locators link back to
@@ -3185,7 +3185,7 @@ fn render_index_anchor(el, info) => <a class: "latex-index-anchor", id: "idx-" +
 fn render_index(el, info) any^ {
     let index_key = trim(util.optional_raw(el) or "")
     let wanted = if (index_key == "") "idx" else index_key
-    let occurrences = [for (o in info.terms.index_entries where o.name == wanted and len(o.entry.levels) > 0) o]
+    let occurrences = [for (o in info.terms.index_entries where ((o.name == wanted and len(o.entry.levels) > 0) ^ { false })) o]
     let paths = unique_paths(occurrences)
     let setup = util.setting_at(info.settings, "index:" ++ wanted, el.source_offset)
     let title = if (setup != null and setup.title != null) [string(setup.title)] else renamed_title(info, "indexname", "Index")
@@ -3202,14 +3202,14 @@ fn render_index(el, info) any^ {
 
 // each entry path and every path above it, sorted, with the displays of its first use
 fn unique_paths(occurrences) any^ {
-    let all = [for (o in occurrences, depth in 1 to len(o.entry.levels))
+    let all = [for (o in occurrences, depth in ((1 to len(o.entry.levels)) ^ { [] }))
         {key: terms.index_key(slice(o.entry.levels, 0, depth)), levels: slice(o.entry.levels, 0, depth)}]
     let distinct = [for (i, p in all where not any([for (j, q in all where j < i) q.key == p.key])) p];
     sort(distinct, (p) => p.key)
 }
 
-fn index_item(p, occurrences, info) {
-    let own = [for (o in occurrences where terms.index_key(o.entry.levels) == p.key) o]
+fn index_item(p, occurrences, info) any^ {
+    let own = [for (o in occurrences where ((terms.index_key(o.entry.levels) == p.key) ^ { false })) o]
     let located = [for (o in own where o.entry.refer == null and o.entry.range != "close") o]
     // makeindex prints a page once; a section is printed once likewise
     let pages = [for (i, o in located where o.entry.range == "open" or not any([for (j, q in located
@@ -3218,7 +3218,7 @@ fn index_item(p, occurrences, info) {
     let display = p.levels[len(p.levels) - 1].display
     let locators = [for (i, o in pages, item in [if (i == 0) null else ", ", index_locator(o, own, info)]) item];
     <div class: "latex-index-item latex-index-level-" ++ string(len(p.levels)),
-        for c in render_fragment(display, info) { c }
+        for c in ((render_fragment(display, info)) ^ { [] }) { c }
         if (len(locators) == 0) null else ", "
         for c in locators { c }
         for (o in refs, item in [", ", <em if (o.entry.refer == "see") "see" else "see also">, " ",
@@ -3259,7 +3259,7 @@ fn render_vref(el, info) {
     <span class: "latex-vref", for c in parts { c }>
 }
 
-fn render_nameref(el, info) {
+fn render_nameref(el, info) any^ {
     let ref_name = trim(util.text_of(el))
     let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
@@ -3352,13 +3352,13 @@ fn render_bibliography(el, info) {
     >
 }
 
-fn render_bib_items(el, info) {
+fn render_bib_items(el, info) any^ {
     collect_bib_entries(el, 0, len(el), info, [], null)
 }
 
 // walk children of thebibliography: each bibitem starts a new entry,
 // content between bibitems is the entry text
-fn collect_bib_entries(el, i, n, info, acc, current_key) {
+fn collect_bib_entries(el, i, n, info, acc, current_key) any^ {
     if (i >= n) finalize_bib_entries(acc, current_key, [])
     else collect_bib_entry_at(el, i, n, info, acc, current_key)
 }
@@ -3381,7 +3381,7 @@ fn collect_bib_in_paragraph(el, i, n, info, acc, current_key, para) any^ {
     collect_bib_entries(el, i + 1, n, info, result.acc, result.key)
 }
 
-fn collect_bib_from_para(para, i, n, info, acc, current_key) {
+fn collect_bib_from_para(para, i, n, info, acc, current_key) any^ {
     if (i >= n) make_bib_state(acc, current_key)
     else collect_bib_from_para_at(para, i, n, info, acc, current_key)
 }
@@ -3397,12 +3397,12 @@ fn start_bib_from_para(para, i, n, info, acc, bibitem) any^ {
     collect_bib_from_para(para, i + 1, n, info, acc, key)
 }
 
-fn accumulate_bib_content(para, i, n, info, acc, current_key, child) {
+fn accumulate_bib_content(para, i, n, info, acc, current_key, child) any^ {
     if (current_key == null) collect_bib_from_para(para, i + 1, n, info, acc, current_key)
     else add_bib_content(para, i, n, info, acc, current_key, child)
 }
 
-fn add_bib_content(para, i, n, info, acc, current_key, child) {
+fn add_bib_content(para, i, n, info, acc, current_key, child) any^ {
     let rendered = render_node(child, info)
     let new_entry = make_bib_item_entry(current_key, rendered)
     let new_acc = acc ++ [new_entry]
@@ -3417,17 +3417,17 @@ fn make_bib_item_entry(key, content) {
     {key: key, content: content}
 }
 
-fn finalize_bib_entries(entries, last_key, acc) {
+fn finalize_bib_entries(entries, last_key, acc) any^ {
     if (len(entries) == 0) acc
     else group_bib_entries(entries, acc)
 }
 
-fn group_bib_entries(entries, acc) {
+fn group_bib_entries(entries, acc) any^ {
     // group entries by key into <li> elements
     build_bib_list(entries, 0, len(entries), null, [], [])
 }
 
-fn build_bib_list(entries, i, n, cur_key, cur_content, acc) {
+fn build_bib_list(entries, i, n, cur_key, cur_content, acc) any^ {
     if (i >= n) finish_bib_list(cur_key, cur_content, acc)
     else process_bib_entry(entries, i, n, cur_key, cur_content, acc)
 }
@@ -3460,12 +3460,12 @@ fn make_bib_li(key, content) {
 // ============================================================
 
 // a footnote's number by source offset, else by its text when offsets are absent
-fn render_footnote(el, info) {
+fn render_footnote(el, info) any^ {
     let exact = [for (entry in info.footnotes where entry.offset != null and
         entry.offset == el.source_offset) entry.number]
     let key = util.slugify(trim(util.text_of(el)))
     let by_text = [for (entry in info.footnotes
-        where util.slugify(trim(util.text_of(entry.node))) == key) entry.number]
+        where ((util.slugify(trim(util.text_of(entry.node))) == key) ^ { false })) entry.number]
     footnote_ref(if (len(exact) > 0) exact[0] else if (len(by_text) > 0) by_text[0] else 0, info)
 }
 
@@ -3567,7 +3567,7 @@ fn parse_char_code(s) any^ {
     else int(s)
 }
 
-fn hex_to_int(s, i, n, acc) {
+fn hex_to_int(s, i, n, acc) any^ {
     if (i >= n) acc
     else {
         let c = s[i]
@@ -3584,7 +3584,7 @@ fn hex_digit(c) {
     else -1
 }
 
-fn oct_to_int(s, i, n, acc) {
+fn oct_to_int(s, i, n, acc) any^ {
     if (i >= n) acc
     else {
         let c = s[i]
@@ -3597,7 +3597,7 @@ fn oct_to_int(s, i, n, acc) {
 // Control symbols, groups, misc
 // ============================================================
 
-fn render_control_symbol(el) {
+fn render_control_symbol(el) any^ {
     let t = util.text_of(el)
     let resolved = sym.resolve_special(t)
     if (resolved != null) resolved else t
@@ -3695,7 +3695,7 @@ fn color_segments(el, i, n, info, style, current, acc) any^ {
 }
 
 // find the declaration element node by tag name within a parent
-fn find_decl_el(el, tag_str) {
+fn find_decl_el(el, tag_str) any^ {
     find_decl_el_rec(el, 0, len(el), tag_str)
 }
 
@@ -3713,7 +3713,7 @@ fn render_includegraphics(el, info) any^ {
     else render_legacy_includegraphics(el)
 }
 
-fn render_legacy_includegraphics(el) {
+fn render_legacy_includegraphics(el) any^ {
     // extract optional arguments [key=val,...] from brack_group
     let brack = util.find_child(el, 'brack_group')
     let opts = util.parse_kv_options(if (brack != null) util.text_of(brack) else null)
@@ -3763,7 +3763,7 @@ fn render_marginpar(el, info) {
 // D7.2.7: the TeX engine has already expanded every user macro, so an element
 // reaching here is a command it passed through on purpose: a custom theorem
 // environment, or an unsupported command that the fallback reports.
-fn render_generic(el, info) {
+fn render_generic(el, info) any^ {
     let thm_def = util.lookup(info.theorem_defs, string(name(el)))
     if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
     else { render_generic_default(el, info) }
@@ -3784,7 +3784,7 @@ fn render_custom_theorem(el, info, thm_def) {
     >
 }
 
-fn render_items(items, i, n, info, acc) {
+fn render_items(items, i, n, info, acc) any^ {
     if (i >= n) { acc }
     else {
         let item = items[i]
@@ -3812,28 +3812,28 @@ fn is_front(el, info) {
 }
 
 // a field \maketitle prints when it was given before it; after it, where it stands
-fn render_front_field(el, info) => if (is_front(el, info)) null else field_block(el, info)
+fn render_front_field(el, info) any^ => if (is_front(el, info)) null else field_block(el, info)
 
-fn front_fields(info) => [for (s in info.settings where starts_with(s.key, "front:") and s.key != "front:maketitle") s.value]
+fn front_fields(info) any^ => [for (s in info.settings where ((starts_with(s.key, "front:") and s.key != "front:maketitle") ^ { false })) s.value]
 
 fn slot_of(el) => profiles.FIELD_SLOTS[string(name(el))] or "after"
 
-fn fields_in(fields, slot, info) => [for (f in fields where slot_of(f) == slot) field_block(f, info)]
+fn fields_in(fields, slot, info) any^ => [for (f in fields where ((slot_of(f) == slot) ^ { false })) field_block(f, info)]
 
 // the fields after the title block: the teaser, the abstract, then the others in
 // source order, every CCS concept where the first is given, and the journal last
-fn after_title(fields, info) {
-    let ccs = [for (f in fields where string(name(f)) == "ccsdesc") f];
-    [for (f in fields where slot_of(f) == "teaser") field_block(f, info)] ++
-    [for (f in fields where string(name(f)) == "abstract") field_block(f, info)] ++
-    [for (f in fields where slot_of(f) == "after" and string(name(f)) != "abstract" and
-        (string(name(f)) != "ccsdesc" or f.source_offset == ccs[0].source_offset))
+fn after_title(fields, info) any^ {
+    let ccs = [for (f in fields where ((string(name(f)) == "ccsdesc") ^ { false })) f];
+    [for (f in fields where ((slot_of(f) == "teaser") ^ { false })) field_block(f, info)] ++
+    [for (f in fields where ((string(name(f)) == "abstract") ^ { false })) field_block(f, info)] ++
+    [for (f in fields where ((slot_of(f) == "after" and string(name(f)) != "abstract" and
+        (string(name(f)) != "ccsdesc" or f.source_offset == ccs[0].source_offset)) ^ { false }))
         if (string(name(f)) == "ccsdesc") ccs_block(ccs, info) else field_block(f, info)] ++
-    [for (f in fields where slot_of(f) == "end") field_block(f, info)]
+    [for (f in fields where ((slot_of(f) == "end") ^ { false })) field_block(f, info)]
 }
 
 // a class's field as a block, with the head its class prints before it
-fn field_block(el, info) {
+fn field_block(el, info) any^ {
     let tag = string(name(el))
     let head = profiles.field_head(tag, registry.class_family(info.docclass))
     let css_class = if (tag == "keyword" or tag == "IEEEkeywords") "latex-keywords" else "latex-" ++ tag
@@ -3842,27 +3842,27 @@ fn field_block(el, info) {
     else if (tag == "ccsdesc") ccs_block([el], info)
     else if (tag == "institute") institutes_block(el, info)
     else if (tag == "highlights" or tag == "graphicalabstract")
-        <div class: css_class, <div class: "latex-field-head", head> for c in render_children(el, 0, info) { c }>
+        <div class: css_class, <div class: "latex-field-head", head> for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
     else if (tag == "subjclass") subjclass_block(el, info, head)
     else if (head != null)
-        <div class: css_class, <span class: "latex-field-head", head> " " for c in field_items(el, info) { c }>
-    else <div class: css_class, style: field_css(info, tag), for c in field_items(el, info) { c }>
+        <div class: css_class, <span class: "latex-field-head", head> " " for c in ((field_items(el, info)) ^ { [] }) { c }>
+    else <div class: css_class, style: field_css(info, tag), for c in ((field_items(el, info)) ^ { [] }) { c }>
 }
 
 // the AMS classes' \subjclass[year]{codes}
 fn subjclass_block(el, info, head) {
     let year = util.optional_raw(el) or "2020";
-    <div class: "latex-subjclass", <em year ++ " " ++ head> " " for c in field_items(el, info) { c }>
+    <div class: "latex-subjclass", <em year ++ " " ++ head> " " for c in ((field_items(el, info)) ^ { [] }) { c }>
 }
 
 // a field's content: its paragraphs run together, llncs's \and a centred dot and
 // elsarticle's \sep a comma, each taking the space around it
-fn field_items(el, info) {
-    let nodes = [for (node in util.flatten_paragraphs(util.command_args(el))
-        where not (node is element and string(name(node)) == "brack_group")) node]
+fn field_items(el, info) any^ {
+    let nodes = [for (node in ((util.flatten_paragraphs(util.command_args(el))) ^ { [] })
+        where ((not (node is element and string(name(node)) == "brack_group")) ^ { false })) node]
     let n = len(nodes);
     [for (i, node in nodes, let item = field_item(node, info, i > 0 and is_separator(nodes[i - 1]),
-        i + 1 < n and is_separator(nodes[i + 1])) where item != null) item]
+        i + 1 < n and is_separator(nodes[i + 1])) where ((item != null) ^ { false })) item]
 }
 
 fn is_separator(node) {
@@ -3884,7 +3884,7 @@ fn field_css(info, part) any^ {
     if (code == null) null else font_decl.declarations(code, info.custom_colors).css
 }
 
-fn koma_style(info, part) {
+fn koma_style(info, part) any^ {
     let css = field_css(info, part)
     if (css == null) null else {css: css, before: "", after: ""}
 }
@@ -3898,19 +3898,19 @@ fn ccs_block(els, info) {
 }
 
 // llncs's \institute{A \and B}: one affiliation per part, numbered when there are several
-fn institutes_block(el, info) {
-    let parts = [for (part in profiles.split_at_and(util.command_args(el)) where len(part) > 0) part]
+fn institutes_block(el, info) any^ {
+    let parts = [for (part in ((profiles.split_at_and(util.command_args(el))) ^ { [] }) where ((len(part) > 0) ^ { false })) part]
     let marked = len(parts) > 1;
     <div class: "latex-institutes", for (i, part in parts)
         <div class: "latex-affil", mark_sup(if (marked) [string(i + 1)] else []); " ";
-            for (node in profiles.trim_edges(part), let item = render_node(node, info) where item != null) item>>
+            for (node in ((profiles.trim_edges(part)) ^ { [] }), let item = render_node(node, info) where ((item != null) ^ { false })) item>>
 }
 
 // elsarticle's notes: \cortext, \fntext and \tnotetext with the marks their references print
-fn note_lines(fields, info) {
-    [for (f in fields where slot_of(f) == "notes")
+fn note_lines(fields, info) any^ {
+    [for (f in fields where ((slot_of(f) == "notes") ^ { false }))
         <p <sup note_mark(info, string(name(f)), trim(util.optional_raw(f) or ""))> " "
-            for c in render_children_skip_brack(f, info) { c }>]
+            for c in ((render_children_skip_brack(f, info)) ^ { [] }) { c }>]
 }
 
 fn note_mark(info, kind, label) any^ {
@@ -3947,17 +3947,17 @@ fn ieee_blocks(el) any^ {
     if (not (el is element)) false else util.find_descendant(el, 'IEEEauthorblockN') != null
 }
 
-fn render_ieee_authors(el, info) {
+fn render_ieee_authors(el, info) any^ {
     <div class: "author latex-authblocks",
-        for (group in profiles.split_at_and(util.command_args(el)) where len(group) > 0)
-            <div class: "latex-authblock", for (node in group, let item = render_node(node, info) where item != null) item>>
+        for (group in ((profiles.split_at_and(util.command_args(el))) ^ { [] }) where ((len(group) > 0) ^ { false }))
+            <div class: "latex-authblock", for (node in group, let item = render_node(node, info) where ((item != null) ^ { false })) item>>
 }
 
 // \IEEEPARstart{T}{his}: a drop cap and the rest of the word in capitals
-fn render_parstart(el, info) {
+fn render_parstart(el, info) any^ {
     <span class: "latex-parstart",
-        <span class: "latex-dropcap", for c in render_fragment(util.raw_argument(el, "required", 0) or "", info) { c }>
-        <span class: "latex-parstart-rest", for c in render_fragment(util.raw_argument(el, "required", 1) or "", info) { c }>>
+        <span class: "latex-dropcap", for c in ((render_fragment(util.raw_argument(el, "required", 0) or "", info)) ^ { [] }) { c }>
+        <span class: "latex-parstart-rest", for c in ((render_fragment(util.raw_argument(el, "required", 1) or "", info)) ^ { [] }) { c }>>
 }
 
 // KOMA-Script's \addchap, \addsec and \addpart: unnumbered headings, anchored for their
@@ -3970,8 +3970,8 @@ fn render_addhead(el, info) any^ {
 }
 
 // \minisec{title}: a run of bold text on its own line, outside the contents
-fn render_minisec(el, info) =>
-    <div class: "latex-minisec", style: koma_font(info, "minisec", el.source_offset), for c in render_children(el, 0, info) { c }>
+fn render_minisec(el, info) any^ =>
+    <div class: "latex-minisec", style: koma_font(info, "minisec", el.source_offset), for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 
 fn koma_font(info, level, offset) any^ {
     let code = util.setting_at(info.settings, "sectsty:" ++ level, offset)
@@ -3979,30 +3979,30 @@ fn koma_font(info, level, offset) any^ {
 }
 
 // memoir's \epigraph{text}{source}
-fn render_epigraph(el, info) {
+fn render_epigraph(el, info) any^ {
     <div class: "latex-epigraph",
-        <div class: "latex-epigraph-text", for c in render_fragment(util.raw_argument(el, "required", 0) or "", info) { c }>
-        <div class: "latex-epigraph-source", for c in render_fragment(util.raw_argument(el, "required", 1) or "", info) { c }>>
+        <div class: "latex-epigraph-text", for c in ((render_fragment(util.raw_argument(el, "required", 0) or "", info)) ^ { [] }) { c }>
+        <div class: "latex-epigraph-source", for c in ((render_fragment(util.raw_argument(el, "required", 1) or "", info)) ^ { [] }) { c }>>
 }
 
 // the letter environment: the sender's address and the date, the recipient (the
 // environment's argument), then the letter
-fn render_letter(el, info) {
+fn render_letter(el, info) any^ {
     let recipient = letter_recipient(el)
     // the first paragraph keeps what follows the recipient
-    let opening = if (recipient == null) [] else [<paragraph for c in slice(util.children_array(el[0]), 1, len(el[0])) { c }>]
+    let opening = if (recipient == null) [] else [<paragraph for c in ((slice(util.children_array(el[0]), 1, len(el[0]))) ^ { [] }) { c }>]
     let body = opening ++ slice(util.children_array(el), if (recipient == null) 0 else 1, len(el))
     let sender = letter_field(info, "address", el)
-    let place = [for (field in ["location", "telephone"], let given = letter_field(info, field, el) where given != null) given]
+    let place = [for (field in ["location", "telephone"], let given = letter_field(info, field, el) where ((given != null) ^ { false })) given]
     let date_items = if (info.date_el == null) [] else render_children(info.date_el, 0, info);
     <div class: "latex-letter",
         if (sender != null or len(place) > 0) {
-            <div class: "latex-letter-from", for c in (if (sender == null) [] else render_children(sender, 0, info)) { c }
-                for (given in place) <div for c in render_children(given, 0, info) { c }>>
+            <div class: "latex-letter-from", for c in (((if (sender == null) [] else render_children(sender, 0, info))) ^ { [] }) { c }
+                for (given in place) <div for c in ((render_children(given, 0, info)) ^ { [] }) { c }>>
         }
         if (len(date_items) > 0) { <div class: "latex-letter-date", for c in date_items { c }> }
-        if (recipient != null) { <div class: "latex-letter-to", for c in render_children(recipient, 0, info) { c }> }
-        for c in collect_children(body, 0, len(body), [], info) { c }
+        if (recipient != null) { <div class: "latex-letter-to", for c in ((render_children(recipient, 0, info)) ^ { [] }) { c }> }
+        for c in ((collect_children(body, 0, len(body), [], info)) ^ { [] }) { c }
     >
 }
 
@@ -4017,22 +4017,22 @@ fn letter_recipient(el) any^ {
 fn letter_field(info, field, el) any^ => util.setting_at(info.settings, "letter:" ++ field, el.source_offset)
 
 // \closing{text}: the closing and the signature, \signature or else \name, under it
-fn render_closing(el, info) {
+fn render_closing(el, info) any^ {
     let signed = letter_field(info, "signature", el) or letter_field(info, "name", el);
-    <div class: "latex-letter-closing", <div for c in render_children(el, 0, info) { c }>
-        if (signed != null) { <div class: "latex-signature", for c in render_children(signed, 0, info) { c }> }>
+    <div class: "latex-letter-closing", <div for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
+        if (signed != null) { <div class: "latex-signature", for c in ((render_children(signed, 0, info)) ^ { [] }) { c }> }>
 }
 
 // \cc{names} and \encl{items}: a labelled list
-fn render_letter_list(el, info) {
+fn render_letter_list(el, info) any^ {
     let tag = string(name(el));
     <div class: "latex-letter-" ++ tag, <span class: "latex-letter-label", tag ++ ": ">
-        for c in render_children(el, 0, info) { c }>
+        for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }
 
 // exam's lists split at their item commands; points print after the label, and a
 // correct choice is marked when answers print
-fn render_exam_list(el, info) {
+fn render_exam_list(el, info) any^ {
     let env = string(name(el))
     let groups = exam_groups(util.flatten_paragraphs(el), profiles.EXAM_LISTS[env])
     let answers = exam_answers(info, el)
@@ -4041,11 +4041,11 @@ fn render_exam_list(el, info) {
     <ol class: "latex-exam-list latex-" ++ env, for (g in groups)
         <li class: if (answers and string(name(g.head)) == "CorrectChoice") "latex-correct" else null,
             exam_points(g.head, bracketed, point_name);
-            for (node in g.body, let item = render_node(node, info) where item != null) item>>
+            for (node in g.body, let item = render_node(node, info) where ((item != null) ^ { false })) item>>
 }
 
-fn exam_groups(nodes, item_tag) {
-    let heads = [for (i, node in nodes where is_exam_item(node, item_tag)) i];
+fn exam_groups(nodes, item_tag) any^ {
+    let heads = [for (i, node in nodes where ((is_exam_item(node, item_tag)) ^ { false })) i];
     [for (k, start in heads, let stop = if (k + 1 < len(heads)) heads[k + 1] else len(nodes))
         {head: nodes[start], body: slice(nodes, start + 1, stop)}]
 }
@@ -4055,7 +4055,7 @@ fn is_exam_item(node, item_tag) {
     else string(name(node)) == item_tag or (item_tag == "choice" and string(name(node)) == "CorrectChoice")
 }
 
-fn exam_points(head, bracketed, point_name) {
+fn exam_points(head, bracketed, point_name) any^ {
     let points = profiles.points_of(head)
     if (points == null) null
     else <span class: "latex-points", profiles.points_label(points, bracketed, point_name)>
@@ -4082,5 +4082,5 @@ fn render_numpoints(el, info) any^ {
 // a solution prints only when answers do
 fn render_solution(el, info) any^ {
     if (not exam_answers(info, el)) null
-    else <div class: "latex-solution", <strong "Solution:"> " " for c in render_children(el, 0, info) { c }>
+    else <div class: "latex-solution", <strong "Solution:"> " " for c in ((render_children(el, 0, info)) ^ { [] }) { c }>
 }

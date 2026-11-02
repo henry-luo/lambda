@@ -13,7 +13,7 @@ fn accept_error(value: int | error) int^ {
 }
 
 fn binding_acknowledgment() int^ {
-  let binding: int | error = risky(0 - 1)
+  let binding: int^ = risky(0 - 1)
   binding
 }
 

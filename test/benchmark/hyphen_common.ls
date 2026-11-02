@@ -33,7 +33,7 @@ pub pn is_ascii_letter(ch: string) bool {
     return (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
 }
 
-pub pn is_word_char(ch: string) bool {
+pub pn is_word_char(ch: string) bool^ {
     return is_ascii_letter(ch) or ch == "'"
 }
 

@@ -88,7 +88,7 @@ let kept = md.import_text(kept_source)^
 let kept_nodes = [for (b in kept.doc.content where b.tag == 'md_source') b];
 "kept blocks:"; [for (b in kept.doc.content) b.tag]
 "kept source:"; [for (b in kept_nodes) attr_get(b, 'markdown')]
-"kept views:"; [for (b in kept_nodes where attr_get(b, view_attr) != null) format(attr_get(b, view_attr), 'html')]
+"kept views:"; [for (b in kept_nodes where ((attr_get(b, view_attr) != null) ^ { false })) format(attr_get(b, view_attr), 'html')]
 "kept blocks save byte for byte:"; md.export_text(kept.doc, kept.envelope) == kept_source
 "gate on kept blocks passes:"; md.check_roundtrip(kept.doc, kept.envelope) == null
 

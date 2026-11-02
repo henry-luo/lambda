@@ -20,8 +20,8 @@ fn inherited(node,owner,master=false) any^ {
     let index = c.value(c.attr(ph,"idx"),"0");
     let kind = c.value(c.attr(ph,"type"),"obj")
     let master_kind = if (kind=="ctrTitle") "title" else if (kind in ["subTitle","obj"]) "body" else kind;
-    if (ph==null) null else [for (item in tree(owner),let other=placeholder(item) where other!=null and
-        (if (master) c.value(c.attr(other,"type"),"obj")==master_kind else c.value(c.attr(other,"idx"),"0")==index)) item][0]
+    if (ph==null) null else [for (item in ((tree(owner)) ^ { [] }),let other=placeholder(item) where ((other!=null and
+        (if (master) c.value(c.attr(other,"type"),"obj")==master_kind else c.value(c.attr(other,"idx"),"0")==index)) ^ { false })) item][0]
 }
 fn chain(node,ctx) {
     let layout = inherited(node,ctx.layout)
@@ -30,7 +30,7 @@ fn chain(node,ctx) {
 }
 fn box(nodes,ctx,group=false) any^ {
     let transforms = [for (node in nodes,let value=if (group) c.child(c.child(node,"grpSpPr"),"xfrm",c.A)
-        else if (node.tag=="graphicFrame") c.child(node,"xfrm") else c.child(c.child(node,"spPr"),"xfrm",c.A) where value!=null) value]
+        else if (node.tag=="graphicFrame") c.child(node,"xfrm") else c.child(c.child(node,"spPr"),"xfrm",c.A) where ((value!=null) ^ { false })) value]
     let value = transforms[last]
     let off = c.child(value,"off",c.A)
     let ext = c.child(value,"ext",c.A)
@@ -60,18 +60,18 @@ fn decoration(props,style,ctx) {
 }
 fn shape(node,nodes,bounds,id,ctx) map^ {
     let props = properties(nodes)
-    let style = [for (item in nodes,let value=c.child(item,"style") where value!=null) value][last]
+    let style = [for (item in nodes,let value=c.child(item,"style") where ((value!=null) ^ { false })) value][last]
     let fill = fills.fill(props,style,ctx,bounds)^
     let paint = {*:decoration(props,style,ctx),fill:fill.color}
     let preset = c.attr(c.child(props,"prstGeom",c.A),"prst")
     let kind = if (preset in ["ellipse","arc"]) 'ellipse' else if (node.tag=="cxnSp" or preset=="line") 'line' else 'rect'
-    let bodies = [for (item in nodes,let body=c.child(item,"txBody") where body!=null) body]
+    let bodies = [for (item in nodes,let body=c.child(item,"txBody") where ((body!=null) ^ { false })) body]
     let ph = c.attr(placeholder(node),"type")
     let styles = [ctx.default_text,c.child(c.child(ctx.master.root,"txStyles"),
         if (ph in ["title","ctrTitle"]) "titleStyle" else if (ph in ["body","obj"]) "bodyStyle" else "otherStyle")]
     let attrs = placement(bounds,id,{name:c.attr(c.descendants(node,"cNvPr",c.P)[0],"name")})
     let radius = if (preset=="roundRect") min(bounds.width,bounds.height)*0.1666666667 else 0.0
-    let has_text = any([for (t in c.descendants(bodies[last],"t",c.A)) c.text(t)!=""]) or
+    let has_text = any([for (t in ((c.descendants(bodies[last],"t",c.A)) ^ { [] })) c.text(t)!=""]) or
         placeholder(node)!=null or c.truth(c.attr(c.child(c.child(node,"nvSpPr"),"cNvSpPr"),"txBox"))
     let custom = c.child(props,"custGeom",c.A)
     let paths = geometry.paths(custom,bounds)
@@ -127,7 +127,7 @@ fn table(node,bounds,id,ctx) any^ {
     result([<content *:placement(bounds,id),<table style:"border-collapse:collapse;table-layout:fixed;width:100%;height:100%;color:#000000;font-size:24px;",
         <colgroup *[for (column in columns) <col style:"width:" ++ c.px(c.pixels(c.attr(column,"w"))) ++ ";">]>
         <tbody *[for (row in rows) <tr style:"height:" ++ c.px(c.pixels(c.attr(row,"h"))) ++ ";",
-            *[for (cell in c.children(row,"tc",c.A),let props=c.child(cell,"tcPr",c.A))
+            *[for (cell in ((c.children(row,"tc",c.A)) ^ { [] }),let props=c.child(cell,"tcPr",c.A))
                 <td style:"border:1px solid #cbd5e1;padding:0;" ++
                     c.css({background:theme.drawing_color(c.child(props,"solidFill",c.A),ctx.theme,null,true),
                         ["vertical-align"]:c.value({ctr:"middle",b:"bottom"}[c.attr(props,"anchor")],"top")}),
@@ -182,7 +182,7 @@ fn objects(items,ctx,prefix,depth=0) map^ {
     result([for (item in converted) *item.nodes],[for (item in converted) *item.diagnostics])
 }
 fn background(ctx) any^ {
-    let backgrounds = [for (owner in [ctx.master,ctx.layout,ctx],let bg=c.child(c.child(owner.root,"cSld"),"bg") where bg!=null) bg]
+    let backgrounds = [for (owner in [ctx.master,ctx.layout,ctx],let bg=c.child(c.child(owner.root,"cSld"),"bg") where ((bg!=null) ^ { false })) bg]
     let bg = backgrounds[last]
     let ref = c.child(bg,"bgRef")
     let idx = int(c.num(c.attr(ref,"idx")))
@@ -194,22 +194,22 @@ fn background(ctx) any^ {
 }
 fn notes(pkg,ctx) array^ {
     let owner = package.linked(pkg,ctx,"notesSlide","notes")^;
-    [for (node in tree(owner),let ph=c.attr(placeholder(node),"type") where node.tag=="sp" and not (ph in ["sldImg","sldNum","dt","ftr","hdr"]))
-        <notes join([for (p in c.children(c.child(node,"txBody"),"p",c.A))
-            join([for (t in c.descendants(p,"t",c.A)) c.text(t)],"")],"\n")>]
+    [for (node in ((tree(owner)) ^ { [] }),let ph=c.attr(placeholder(node),"type") where ((node.tag=="sp" and not (ph in ["sldImg","sldNum","dt","ftr","hdr"])) ^ { false }))
+        <notes join([for (p in ((c.children(c.child(node,"txBody"),"p",c.A)) ^ { [] }))
+            join([for (t in ((c.descendants(p,"t",c.A)) ^ { [] })) c.text(t)],"")],"\n")>]
 }
 pub fn build(pkg) map^ {
     let scenes = [for (i,item in pkg.slides) {
         let ctx = {*:package.context(pkg,item)^,types:pkg.types,default_text:c.child(pkg.root,"defaultTextStyle")}
         let sources = [*if (c.attr(ctx.root,"showMasterSp") in ["0","false"]) [] else [ctx.master,ctx.layout],ctx]
         let converted = [for (j,owner in sources where owner!=null)
-            objects([for (node in tree(owner) where owner.main==ctx.main or placeholder(node)==null) node],
+            objects([for (node in ((tree(owner)) ^ { [] }) where ((owner.main==ctx.main or placeholder(node)==null) ^ { false })) node],
                 {*:ctx,main:owner.main,relationships:owner.relationships},"s" ++ string(i) ++ "-" ++ string(j))^]
         let bg = background(ctx)
         let transition = c.child(ctx.root,"transition")
         let timing = c.child(ctx.root,"timing")
-        let title = [for (node in tree(ctx),let ph=c.attr(placeholder(node),"type") where ph in ["title","ctrTitle"])
-            join([for (t in c.descendants(node,"t",c.A)) c.text(t)],"")][0]
+        let title = [for (node in ((tree(ctx)) ^ { [] }),let ph=c.attr(placeholder(node),"type") where ((ph in ["title","ctrTitle"]) ^ { false }))
+            join([for (t in ((c.descendants(node,"t",c.A)) ^ { [] })) c.text(t)],"")][0]
         let csld = c.child(ctx.root,"cSld")
         let speaker = notes(pkg,ctx)^;
         {node:<slide id:item.id,title:c.value(title,c.value(c.attr(csld,"name"),"Slide " ++ string(i+1))),background:bg.color,
@@ -221,6 +221,6 @@ pub fn build(pkg) map^ {
     let document = <presentation title:c.get(pkg.metadata,"title","Imported presentation"),width:pkg.width,height:pkg.height,
         theme:{base:'light',foreground:"#000000",font_family:"Arial, sans-serif"},*[for (scene in scenes) scene.node]>;
     {document:document,text:join([for (scene in scenes)
-        join([for (node in content(scene.node) where name(node) in ['text','content','group']) text.plain(node)],"\n")],"\n\n"),
+        join([for (node in ((content(scene.node)) ^ { [] }) where ((name(node) in ['text','content','group']) ^ { false })) text.plain(node)],"\n")],"\n\n"),
         diagnostics:[for (scene in scenes) *scene.diagnostics]}
 }

@@ -14,7 +14,7 @@ import semantic: .packages.semantic
 // The math typesetter paints a command it cannot map as its name, which reads as
 // success, so each one is reported (Lambda_Pkg_Math §3.1, §10.2). Declared
 // operators are rendered by name on purpose, and Lua is reported as unsupported-lua.
-pub fn issues(node, operators, packages) {
+pub fn issues(node, operators, packages) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -30,7 +30,7 @@ pub fn issues(node, operators, packages) {
                 where ((key != "directlua" and util.lookup(operators, "\\" ++ key) == null) ^ { false }))
             util.diagnostic("unsupported-math-command", "math", key,
                 "Unsupported math command \\" ++ key, node.source_offset)] ++
-            [for (ast in asts, let regular = math.regular_bold_symbols(ast) or [] where len(regular) > 0)
+            [for (ast in asts, let regular = math.regular_bold_symbols(ast) or [] where ((len(regular) > 0) ^ { false }))
                 util.diagnostic("math-bold-symbol-approximation", "amsmath", join(regular, ""),
                     "\\boldsymbol draws " ++ join(regular, " ") ++
                     " at regular weight: no bundled face has them in bold", node.source_offset)]
@@ -38,7 +38,7 @@ pub fn issues(node, operators, packages) {
 }
 
 // \ensuremath{…} typesets its raw argument as inline math in any mode
-pub fn ensuremath_ast(node) {
+pub fn ensuremath_ast(node) any^ {
     let raw = util.raw_argument(node, "required", 0)
     if (raw == null) null else parse(raw, {type: "math", flavor: "latex"}) ^ { null }
 }

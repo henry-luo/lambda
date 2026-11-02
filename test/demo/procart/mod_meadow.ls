@@ -49,7 +49,7 @@ pub fn check_parameters(o) bool^ {
 fn tree_parts(plant,k) array {
     let scale = solid.branch_scale(plant),recipe = plant.recipe;
     [*solid.pieces(plant,false,false),
-     *[for (whorl in 0 to (solid.whorls(plant)-1),let turn = float(whorl)*2.0*math.pi/float(solid.whorls(plant)))
+     *[for (whorl in ((0 to (solid.whorls(plant)-1)) ^ { [] }),let turn = float(whorl)*2.0*math.pi/float(solid.whorls(plant)))
         for (i,tip in plant.tips,let key = rng.at(rng.derive(k,whorl),i),let r = recipe.canopy_radius*rng.between(key,0.8,1.2))
             solid.oval(solid.spatial(tip.x,tip.y,turn,scale),[r*1.15,r*0.8,r],
                 rng.pick(rng.at(key,1),recipe.canopy_colors),"canopy")]]
@@ -175,7 +175,7 @@ fn scene_frame(model,children,lens) element {
          'data-weather':e.config.weather,'data-time':string(e.config.time),
          style:"display:block;width:100%;height:auto;touch-action:none"})
 }
-pub fn viewport(model,visibility={},motion=true,lens=home()) element^ {
+pub fn viewport(model,visibility={},motion=true,lens=home()^) element^ {
     let e=model.environment
     let visible=[for (item in model.instances where ((visibility[item.kind] != false and len(item.parts)>0) ^ { false })) item]
     // calm plants batch by species; wind retains a separate root pivot for each specimen.

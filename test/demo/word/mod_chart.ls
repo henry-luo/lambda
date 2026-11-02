@@ -9,7 +9,7 @@ pub let types = [{id:"column",label:"Column",icon:"chart"},{id:"bar",label:"Bar"
 pub let defaults = {type:"column",title:"Studio activity",data:"Design, 12\nPrint, 18\nBuild, 9\nShare, 15",color:"#2563eb",width:520,height:320,rotation:0}
 pub fn rows(source) array^ {
     if (not (source is string) or len(source)>4000) raise error("Word: enter chart data as Label, Value, one per line") else {
-        let lines = [for (line in split(source,"\n") where trim(line)!="") split(line,",")]
+        let lines = [for (line in ((split(source,"\n")) ^ { [] }) where trim(line)!="") split(line,",")]
         let records = [for (line in lines) {label:trim(line[0]),value:float(trim(line[1])) ^ { null }}]
         if (len(lines)<1 or len(lines)>20 or any([for (line in lines) len(line)!=2]) or
             any([for (row in records) row.label=="" or len(split(row.label,""))>40 or not geom.finite_number(row.value)]) or

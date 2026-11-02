@@ -88,7 +88,7 @@ pub fn overlapping(sample, options = {}) map^ {
 }
 
 // --- the solver ---
-fn neighbour(c: int, d: int, w: int, h: int, wrap: bool) int {
+fn neighbour(c: int, d: int, w: int, h: int, wrap: bool) int^ {
     let x = c % w + dx(d)
     let y = c div w + dy(d);
     if (wrap) ((y + h) % h) * w + (x + w) % w else if (x < 0 or y < 0 or x >= w or y >= h) -1 else y * w + x
@@ -110,7 +110,7 @@ fn recount(model, counts, old, kept) array {
 
 // keep the patterns of cell c that every neighbour's domain still supports.
 fn revise(st, c: int, w: int, h: int, wrap: bool) array {
-    let supports = [for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where m >= 0) st.counts[m][opposite(d)]];
+    let supports = [for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where ((m >= 0) ^ { false })) st.counts[m][opposite(d)]];
     if (len(supports) == 0) st.domains[c]
     // counts are non-negative, so their product is positive exactly where every neighbour supports p
     else (let joint = reduce(supports, (a, b) => a * b), [for (p in st.domains[c] where joint[p] > 0) p])

@@ -10,16 +10,16 @@ let rounds: int = 15
 // map(select(.status != "pending") | .user.region //= "unknown"
 //   | .total = (total | cents) | .skus = ([.items[].sku] | unique)
 //   | del(.note) | with_entries(select(.value != null)))
-pn transform_order(o: map) map {
+pn transform_order(o: map) map^ {
     var user: map = o.user
-    user["region"] = jq_alt(user["region"], "unknown")
+    user["region"] = jq_alt(user["region"], "unknown")^
     // def total: reduce .items[] as $it (0; . + $it.qty * $it.price)
     // jq numbers are doubles, so the float sums start from 0.0
     var total: float = 0.0
     for i of o.items {
         total = total + o.items[i].qty * o.items[i].price
     }
-    let skus: string[] = jq_unique_strings([for (it in o.items) string(it.sku)])
+    let skus: string[] = jq_unique_strings([for (it in o.items) string(it.sku)])^
     // .total and .skus land after the input keys; then note and nulls go
     var r: map = {}
     for (k, v at o) {
@@ -27,13 +27,13 @@ pn transform_order(o: map) map {
         let value = if (key == "user") user else v
         if (key != "note" and value != null) { r[key] = value }
     }
-    r["total"] = int(floor(total * 100))
+    r["total"] = int(floor(total * 100))^
     r["skus"] = skus
     r
 }
 
 // group_by(.user.region) | map({region, n, revenue, top, paid}) | map(digest) | add
-fn region_digest(region: string, grp) int {
+fn region_digest(region: string, grp) int^ {
     let revenue: int = sum([for (o in grp) o.total])
     let top: int = sort(grp, (o) => [0 - o.total, o.id])[0].id
     let paid: int = len([for (o in grp where o.status == "paid") o])
@@ -43,18 +43,18 @@ fn region_digest(region: string, grp) int {
 // reduce (.[] | .items[]) as $it ({}; .[$it.sku] += $it.qty) | to_entries
 // | sort_by([0 - .value, .key]) | .[:5] | from_entries | to_entries
 // | map(.value + (.key | explode | add)) | add
-pn top_skus_digest(orders: array) int {
+pn top_skus_digest(orders: array) int^ {
     var counts: map = {}
     for i of orders {
         let items = orders[i].items
         for j of items {
             let sku: string = items[j].sku
-            counts[sku] = jq_alt(counts[sku], 0) + items[j].qty
+            counts[sku] = (jq_alt(counts[sku], 0) + items[j].qty)^
         }
     }
     let entries = [for (k, v at counts) {key: string(k), value: v}]
     let ranked: array = sort(entries, (e) => [0 - e.value, e.key]) ^ { [] }
-    let top5: array = jq_slice_array(ranked, null, 5)
+    let top5: array = jq_slice_array(ranked, null, 5)^
     var top_map: map = {}
     for t of top5 {
         top_map[top5[t].key] = top5[t].value
@@ -63,12 +63,12 @@ pn top_skus_digest(orders: array) int {
 }
 
 // [foreach .[] as $o (0; . + $o.total; . % 1000003)] | last
-pn running_last(orders: array) int {
+pn running_last(orders: array) int^ {
     var acc: int = 0
     var outs: int[] = []
     for i of orders {
         acc = acc + orders[i].total
-        outs.push(acc % 1000003)
+        outs.push(acc % 1000003)^
     }
     outs[len(outs) - 1]
 }
@@ -78,7 +78,7 @@ pn double_qty(v) {
     if (v is array) {
         var out: array = []
         for i of v {
-            out.push(double_qty(v[i]))
+            out.push(double_qty(v[i]))^
         }
         return out
     }
@@ -87,7 +87,7 @@ pn double_qty(v) {
         let keys: string[] = [for (k at v) string(k)]
         for j of keys {
             let child = double_qty(v[keys[j]])
-            r[keys[j]] = if (keys[j] == "qty") child * 2 else child
+            r[keys[j]] = (if (keys[j] == "qty") child * 2 else child)^
         }
         return r
     }
@@ -97,26 +97,26 @@ pn double_qty(v) {
 // [.. | numbers], in jq's pre-order
 pn collect_numbers(v, var out: array) {
     if (v is int or v is float) {
-        out.push(v)
+        out.push(v)^
         return null
     }
     if (v is array) {
         for i of v {
-            collect_numbers(v[i], out)
+            collect_numbers(v[i], out)^
         }
         return null
     }
     if (v is map) {
         let keys: string[] = [for (k at v) string(k)]
         for j of keys {
-            collect_numbers(v[keys[j]], out)
+            collect_numbers(v[keys[j]], out)^
         }
     }
     return null
 }
 
 // add over numbers: left to right, as jq sums the array
-pn sum_in_order(numbers: array) float {
+pn sum_in_order(numbers: array) float^ {
     var total: float = 0.0
     for i of numbers {
         total = total + numbers[i]
@@ -130,26 +130,26 @@ pn round_digest(orders_in: array, r: int) int^ {
     let orders: array = [for (o in orders_in where o.status != "pending") transform_order(o)]
     let by_region: int = sum([for (o in orders group by o.user.region as region into g order by region)
         region_digest(region, g)])
-    let top_skus: int = top_skus_digest(orders)
-    let running: int = running_last(orders)
-    let csvlen: int = len(join([for (o in orders) string(o.id) ++ "," ++ o.user.name ++ "," ++ string(o.total)], "\n"))
+    let top_skus: int = top_skus_digest(orders)^
+    let running: int = running_last(orders)^
+    let csvlen: int = len(join([for (o in orders) string(o.id) ++ "," ++ o.user.name ++ "," ++ string(o.total)], "\n"))^
     var paths: array = []
-    jq_collect_paths(jq_slice_array(orders, null, 200), [], true, paths)
+    jq_collect_paths(jq_slice_array(orders, null, 200), [], true, paths)^
     let npaths: int = len(paths)
     var numbers: array = []
-    collect_numbers(double_qty(jq_slice_array(orders, null, 200)), numbers)
-    let doubled: int = int(floor(sum_in_order(numbers)))
-    let tagpairs: int = len(jq_unique_strings([for (o in orders) tag_pair(o.user.tags)]))
+    collect_numbers(double_qty(jq_slice_array(orders, null, 200)), numbers)^
+    let doubled: int = int(floor(sum_in_order(numbers)))^
+    let tagpairs: int = len(jq_unique_strings([for (o in orders) tag_pair(o.user.tags)]))^
     let splits: int = sum([for (o in orders) len(split(upper(o.user.name), "R"))])
     // tojson | fromjson (Lambda's JSON writer has no compact mode, so the text
     // is indented; the parsed values are the same)
-    let roundtrip: int = sum([for (o in jq_slice_array(orders, null, 300)) (parse(format(o, 'json'), 'json') ^ { null }).id])
+    let roundtrip: int = sum([for (o in jq_slice_array(orders, null, 300)^) (parse(format(o, 'json'), 'json') ^ { null }).id])
     let parsed: int = sum([for (o in orders) jq_tonumber_or(jq_slice_string(o.user.name, 4, null), 0)])
     // {} | bump(.a) | bump(.a) | bump(.b) | .a * 10 + .b
     var c: map = {}
-    c["a"] = jq_alt(c["a"], 0) + 1
-    c["a"] = jq_alt(c["a"], 0) + 1
-    c["b"] = jq_alt(c["b"], 0) + 1
+    c["a"] = (jq_alt(c["a"], 0) + 1)^
+    c["a"] = (jq_alt(c["a"], 0) + 1)^
+    c["b"] = (jq_alt(c["b"], 0) + 1)^
     let counts: int = c["a"] * 10 + c["b"];
     (by_region + top_skus + running + csvlen + npaths + doubled + tagpairs +
         splits + roundtrip + parsed + counts + r) % jq_modulus
@@ -165,7 +165,7 @@ pn main() {
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 878885883) {
+    if ((checksum == 878885883)^) {
         print("jq_records: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_records: FAIL checksum=" ++ string(checksum) ++ "\n")

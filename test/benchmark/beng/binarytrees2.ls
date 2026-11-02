@@ -19,7 +19,7 @@ pn make_tree(depth: int) Node {
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-pn check(node: Node) int {
+pn check(node: Node) int^ {
     if (node.left == null) {
         return 1
     }

@@ -8,9 +8,9 @@ let ast = latex.parse_file(path);
 let result = latex.render_result(ast, {base_uri: "test/lambda/latex/fixtures/local_packages"});
 let out = html.to_html(result.elements) ^ { "" };
 
-"packages:"; [for (entry in result.packages) entry.key]
+"packages:"; [for (entry in ((result.packages) ^ { [] })) entry.key]
 "engine packages:"; ast.tex_packages
-"diagnostics:"; [for (issue in result.diagnostics) issue.code]
+"diagnostics:"; [for (issue in ((result.diagnostics) ^ { [] })) issue.code]
 "class macros:"; index_of(out, "Course MATH 220") != null
 "package option:"; index_of(out, "status DRAFT") != null
 "begin-document hook:"; index_of(out, "started yes") != null

@@ -23,7 +23,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"blade",variables,styles.css,"dtna-root blade-root")
 }
-view blade_page: <blade.page> { page(content(~),c.props(~))^ }
+view blade_page: <blade.page> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => catalog.descriptor('button',props,child)^
 pub fn button_group(props = {}, child = null) element^ => catalog.descriptor('button-group',props,child)^

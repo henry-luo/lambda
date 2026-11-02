@@ -154,7 +154,8 @@ pn KeyExpansion(key) {
         i = i + 1
     }
 
-    i = Nk
+    let _admitted_i_157: int = Nk
+    i = _admitted_i_157^
     while (i < total) {
         // temp = w[i-1]
         var t: int = 0
@@ -179,7 +180,7 @@ pn KeyExpansion(key) {
             var ri = int(i / Nk)
             t = 0
             while (t < 4) {
-                temp[t] = bxor(temp[t], RconFlat[ri * 4 + t])
+                temp[t] = bxor(temp[t], RconFlat[ri * 4 + t])^
                 t = t + 1
             }
         } else if (Nk > 6 and i % Nk == 4) {
@@ -246,7 +247,7 @@ pn derive_key_schedule(password, nBits: int) {
     var pwBytes = fill(nBytes, 0)
     var i: int = 0
     while (i < nBytes) {
-        pwBytes[i] = band(ord(password[i]), 0xFF)
+        pwBytes[i] = band(ord(password[i]), 0xFF)^
         i = i + 1
     }
     var key = AesCipher(pwBytes, KeyExpansion(pwBytes))
@@ -274,7 +275,7 @@ pn run() {
     var pt_bytes = fill(pt_len, 0)
     var i: int = 0
     while (i < pt_len) {
-        pt_bytes[i] = ord(plainText[i])
+        pt_bytes[i] = ord(plainText[i])^
         i = i + 1
     }
 
@@ -332,7 +333,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 40) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

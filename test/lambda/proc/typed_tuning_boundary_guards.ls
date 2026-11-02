@@ -30,7 +30,7 @@ pn positives(value) Positive[]^ {
     return values
 }
 pn negatives(values) Negative[] { return values }
-pn nonempty(count) NonEmpty { return fill(count, 1) }
+pn nonempty(count) NonEmpty^ { return fill(count, 1) }
 pn positive_store(value) Positive[]^ {
     var values: Positive[] = fill(2, 1)^
     values[0] = value

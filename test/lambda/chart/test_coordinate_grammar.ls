@@ -4,8 +4,8 @@ import paths: lambda.chart.path_geometry
 import util: lambda.chart.util
 import affine: lambda.chart.svg_transform
 import text: lambda.chart.text
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
 fn close(a, b) any^ => near(a[0], b[0]) and near(a[1], b[1])
 fn title_direction(image, label) {
@@ -30,7 +30,7 @@ let transposed = chart.render_spec({*:spec, coordinate: {transform: [{type: "tra
 let restored = chart.render_spec({*:spec, coordinate: {transform: [{type: "transpose"}, {type: "transpose"}, {type: "reflect_x"}]}});
 let letter_title = chart.render_spec({*:spec, coordinate: {transform: [{type: "transpose"}]},
     encoding: {*:spec.encoding, x: {*:spec.encoding.x, title: "x"}}});
-let transposed_ticks = [for (tick in classes(transposed, "tick")) for (child in content(tick) where name(child) == 'text') child];
+let transposed_ticks = [for (tick in ((classes(transposed, "tick")) ^ { [] })) for (child in ((content(tick)) ^ { [] }) where ((name(child) == 'text') ^ { false })) child];
 let markup = chart.render(<chart width: 300, height: 240, padding: 20, <data values: spec.data> <mark type: "bar">
     <coordinate type: "polar"> <encoding <x field: "a", dtype: "nominal", title: "category"> <y field: "value", dtype: "quantitative">>>);
 let vector_spec = {width: 300, height: 300, padding: 25, data: [{a: 1, b: 3, c: 5}, {a: 2, b: 2, c: 4}], mark: {kind: "line"},
@@ -66,7 +66,7 @@ let checks = {
     transposed_letter_title: close(title_direction(letter_title, "x"), [1.0, 0.0]),
     composed_title_orientation: close(title_direction(restored, "value"), [0.0, -1.0]) and close(title_direction(restored, "category"), [1.0, 0.0]),
     tick_label_angle_preserved: len([for (tick in transposed_ticks, let matrix = affine.matrix(tick.transform)
-        where near(matrix[0], math.sqrt(0.5)) and near(matrix[1], math.sqrt(0.5))) tick]) == 3,
+        where ((near(matrix[0], math.sqrt(0.5)) and near(matrix[1], math.sqrt(0.5))) ^ { false })) tick]) == 3,
     markup_parity: image == markup,
     family_rendering: all([for (kind in ["cartesian", "polar", "theta", "radial", "helix"])
         chart.render_spec({*:spec, coordinate: {type: kind}}) is element]),

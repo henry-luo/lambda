@@ -20,9 +20,9 @@ fn started(st, e) => st.places[e.id] != null or e.id in st.opened
 fn matches(e, query) => (let q = lower(trim(query)),
     contains(lower(e.title ++ " " ++ e.subtitle ++ " " ++ e.author ++ " " ++ join(e.genres, " ")), q) ^ { false })
 
-pub fn shelf(lib, st, section) => if (section == "home" or section == "all") lib
-    else if (section == "reading") [for (e in lib where started(st, e)) e]
-    else if (section == "unread") [for (e in lib where not started(st, e)) e]
+pub fn shelf(lib, st, section) any^ => if (section == "home" or section == "all") lib
+    else if (section == "reading") [for (e in lib where ((started(st, e)) ^ { false })) e]
+    else if (section == "unread") [for (e in lib where ((not started(st, e)) ^ { false })) e]
     else [for (e in lib where section in e.genres) e]
 
 // most recently opened first; never-opened books keep catalog order after them
@@ -62,9 +62,9 @@ fn continue_card(st, e) => (let place = st.places[e.id],
             <span class:"continue-chapter", if (place == null) "From the beginning" else place.chapter>;
             (meter(place))>>)
 
-fn collection_tile(lib, name) => (let books = shelf(lib, {}, name),
+fn collection_tile(lib, name) any^ => (let books = shelf(lib, {}, name),
     <button type:"button", class:"collection", 'data-section':name,
-        <span class:"collection-covers", for (e in take(books, 3)) <span class:"mini-cover", (cover(e))>>
+        <span class:"collection-covers", for (e in ((take(books, 3)) ^ { [] })) <span class:"mini-cover", (cover(e))>>
         <span class:"collection-name", name>
         <span class:"collection-count", count_label(len(books))>>)
 
@@ -74,8 +74,8 @@ fn heading(title, books, st, sortable) => <header class:"shelf-head",
         for (key in ["recent", "title", "author"]) <button type:"button", class:"sort-option", 'data-sort':key,
             'aria-pressed':string(st.sort == key), {recent: "Recent", title: "Title", author: "Author"}[key]>>>
 
-fn home(lib, st) => (let current = take([for (e in recent(st, lib) where started(st, e)) e], 3),
-    let next = [for (e in lib where not started(st, e)) e],
+fn home(lib, st) any^ => (let current = take([for (e in recent(st, lib) where ((started(st, e)) ^ { false })) e], 3),
+    let next = [for (e in lib where ((not started(st, e)) ^ { false })) e],
     <div class:"home",
         <header class:"shelf-head", <div class:"shelf-heading", <h1 "Home">;
             <p class:"shelf-count", "Classics from Project Gutenberg">>>
@@ -88,7 +88,7 @@ fn home(lib, st) => (let current = take([for (e in recent(st, lib) where started
 
 fn section_title(section) => {home: "Home", all: "All Books", reading: "In Progress", unread: "Unread"}[section] or section
 
-fn content(lib, st) => if (trim(st.query) != "") (let found = [for (e in lib where matches(e, st.query)) e],
+fn content(lib, st) any^ => if (trim(st.query) != "") (let found = [for (e in lib where ((matches(e, st.query)) ^ { false })) e],
         <div class:"results", (heading("Results for “" ++ trim(st.query) ++ "”", found, st, false));
             if (len(found) == 0) <p class:"row-empty", "No books match your search."> else grid(st, found)>)
     else if (st.section == "home") home(lib, st)

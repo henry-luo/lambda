@@ -15,7 +15,7 @@ pub fn unsupported_keys(opts) {
           where not any([for (allowed in KEYS) string(key) == allowed])) string(key)]
 }
 
-pub fn source(el) => trim(util.text_of_skip_brack(el))
+pub fn source(el) any^ => trim(util.text_of_skip_brack(el))
 
 pub fn resolved_source(src, base_uri) any^ {
     if (base_uri == null or base_uri == "" or starts_with(src, "/") or
@@ -202,7 +202,7 @@ fn rotation_origin(spec) any^ {
         let horizontal = if (contains(letters, "l")) "left" else if (contains(letters, "r")) "right" else "center"
         let vertical = if (contains(letters, "t")) "top"
             else if (contains(letters, "b") or contains(letters, "B")) "bottom" else "center"
-        let valid = all([for (i in 0 to len(letters) - 1) contains("lrtbBc", slice(letters, i, i + 1))])
+        let valid = all([for (i in ((0 to len(letters) - 1) ^ { [] })) contains("lrtbBc", slice(letters, i, i + 1))])
         if (letters == "" or not valid) null else horizontal ++ " " ++ vertical
     }
 }

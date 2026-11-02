@@ -24,7 +24,7 @@ fn kinds(k) => len([for (s in ((film.shots) ^ { [] }) where s.kind == k) s]);
     shots: {single: kinds("single"), split: kinds("split"), quick: kinds("quick"), chapter: kinds("chapter")},
     motions: [for (s in ((slice(film.shots, 0, 14)) ^ { [] })) [s.kind, s.motion, s.transition, s.beats]],
     every_photo_once: len(used) == 40 and sort(used) == sort(film.ids),
-    chronological: film.ids == [for (id in ((film.ids) ^ { [] }) order by L.photo(lib, id).taken, id) id],
+    chronological: film.ids == [for (id in ((film.ids) ^ { [] }) order by (L.photo(lib, id).taken)^, id) id],
     quick_runs_cut: all([for (s in ((film.shots) ^ { [] }) where s.kind == "quick") s.transition == "cut"]),
     chapter_openers_morph: all([for (i, s in ((film.shots) ^ { [] }) where ((i > 0 and film.shots[i - 1].kind == "chapter") ^ { false })) s.transition == "morph"]),
     // the deck's clock puts every shot on its beat, and the film's length is the deck's

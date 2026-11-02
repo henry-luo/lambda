@@ -12,13 +12,13 @@ import arrows: .arrows
 import coords: .coords
 import shapes: .shapes
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn drawing_nodes(picture) => [for (child in picture
-    where child is element and
+fn drawing_nodes(picture) any^ => [for (child in picture
+    where ((child is element and
         (string(name(child)) == "path" or string(name(child)) == "node" or
-         string(name(child)) == "coordinate")) child]
+         string(name(child)) == "coordinate")) ^ { false })) child]
 
 fn shift_centimeters(value) any^ {
     let raw = trim(value)
@@ -42,7 +42,7 @@ fn foreach_range(first, step, ending, index, acc) any^ {
 }
 
 fn foreach_items(source, program_data) any^ {
-    let parts = [for (part in latex_util.split_top_level(source, ",")) trim(part)]
+    let parts = [for (part in ((latex_util.split_top_level(source, ",")) ^ { [] })) trim(part)]
     if (len(parts) == 4 and parts[2] == "...") {
         let first = pgfmath.evaluate_source(parts[0], program_data)^
         let second = pgfmath.evaluate_source(parts[1], program_data)^
@@ -246,19 +246,19 @@ fn path_data_points(path, coordinates, dx = 0.0, dy = 0.0,
         [for (point in arc_chain_points(path.source, basis_x, basis_y)^)
             {x: point.x + dx + offset[0], y: point.y + dy + offset[1],
              move: point.move}]
-    else [for (point in children_named(path, "point"))
+    else [for (point in ((children_named(path, "point")) ^ { [] }))
         path_point(point, coordinates, dx + offset[0],
             dy + offset[1], basis_x, basis_y, program_data)^]
 }
 
 fn path_points(records, coordinates) any^ => [for (record in records,
-    point in if (string(name(record.source)) == "path")
+    point in ((if (string(name(record.source)) == "path")
         path_data_points(record.source, coordinates, record.dx, record.dy,
-            record.basis_x, record.basis_y, record.program)^ else [])
+            record.basis_x, record.basis_y, record.program)^ else []) ^ { [] }))
         point]
 
 fn node_points(records, coordinates) any^ => [for (record in records
-    where string(name(record.source)) == "node") target_point(record, coordinates)^]
+    where ((string(name(record.source)) == "node") ^ { false })) target_point(record, coordinates)^]
 
 // Arc geometry stays in script; the parser only preserves its angle/radius source.
 fn arc_points(path) any^ {
@@ -474,12 +474,12 @@ fn grid_paths(mapped, path, color, stroke_width, dash, px_per_cm,
     if (nx < 0 or ny < 0 or nx + ny > 1024)
         raise error("TikZ grid exceeds 1024 lines");
     <g
-        for (i in 0 to (nx - 1))
+        for (i in ((0 to (nx - 1)) ^ { [] }))
             <path d: svg.M(x_first + float(i) * xstep, y_min) ++ " " ++
                 svg.L(x_first + float(i) * xstep, y_max),
                 fill: "none", stroke: color, 'stroke-width': stroke_width,
                 'stroke-dasharray': dash>
-        for (i in 0 to (ny - 1))
+        for (i in ((0 to (ny - 1)) ^ { [] }))
             <path d: svg.M(x_min, y_first + float(i) * ystep) ++ " " ++
                 svg.L(x_max, y_first + float(i) * ystep),
                 fill: "none", stroke: color, 'stroke-width': stroke_width,
@@ -880,8 +880,8 @@ fn render_drawing(picture, external_declarations = [],
     let path_coordinates = path_points(records, coordinates)^ ++ arc_coordinates
     let node_coordinates = node_points(records, coordinates)^
     let clips = [for (record in records where
-        string(name(record.source)) == "path" and
-        record.source.action == "clip") record]
+        ((string(name(record.source)) == "path" and
+        record.source.action == "clip") ^ { false })) record]
     if (len(clips) > 1) raise error("multiple TikZ clips are unsupported")
     let clip_positions = [for (index, record in records where
         record.source.action == "clip") index]
@@ -971,7 +971,7 @@ fn calc_refs(source) any^ => coords.refs(coords.parse_calc(source, coords.calc_f
 
 // Measured nodes (shapes, outlines, positioning, node references) need Radiant layout.
 fn measured_picture(content) any^ {
-    let nodes = [for (child in content where string(name(child)) == "node") child]
+    let nodes = [for (child in content where ((string(name(child)) == "node") ^ { false })) child]
     let node_ids = [for (node in nodes where node.id != null) node.id]
     let is_node = (id) => any([for (node_id in node_ids) node_id == id])
     let shaped = [for (node in nodes where ((opts.has(node, "draw") or opts.has(node, "fill") or
@@ -1012,19 +1012,19 @@ fn render_picture(picture, options,
     let valid_tip = if (arrow_tip != null and arrows.parse_key("-" ++ arrow_tip) == null)
         raise error("unsupported TikZ arrow tip: " ++ arrow_tip) else true
     let axes = [for (child in picture
-        where child is element and
+        where ((child is element and
             (string(name(child)) == "axis" or
              string(name(child)) == "semilogxaxis" or
              string(name(child)) == "semilogyaxis" or
              string(name(child)) == "loglogaxis" or
-             string(name(child)) == "polaraxis")) child]
+             string(name(child)) == "polaraxis")) ^ { false })) child]
     let paths = drawing_nodes(picture)
-    let content = [for (child in picture where child is element and
-        string(name(child)) != "option") child]
+    let content = [for (child in picture where ((child is element and
+        string(name(child)) != "option") ^ { false })) child]
     let groups = children_named(picture, "groupplot")
     let people_nodes = if (people_active) [for (child in paths where
-        string(name(child)) == "node" and
-        len([for (shape in people.names() where ((opts.has(child, shape)) ^ { false })) shape]) > 0)
+        ((string(name(child)) == "node" and
+        len([for (shape in people.names() where ((opts.has(child, shape)) ^ { false })) shape]) > 0) ^ { false }))
         child] else []
     if (len(axes) == 1 and len(paths) == 0 and len(content) == 1)
         plots.render_axis(axes[0], options, picture)^
@@ -1033,13 +1033,13 @@ fn render_picture(picture, options,
     else if (len(people_nodes) > 0)
         people.render_picture(picture, custom_colors)^
     else if (len(axes) == 0 and len(content) > 0 and
-        len([for (child in content where string(name(child)) == "scope" or
+        len([for (child in content where ((string(name(child)) == "scope" or
             string(name(child)) == "path" or string(name(child)) == "node" or
             string(name(child)) == "coordinate" or
             string(name(child)) == "foreach" or
             string(name(child)) == "pgf_definition" or
             string(name(child)) == "tikzmath" or string(name(child)) == "pic" or
-            string(name(child)) == "tikzset") child]) == len(content))
+            string(name(child)) == "tikzset") ^ { false })) child]) == len(content))
         if (measured_picture(content)^)
             named.render(picture, custom_colors)^
         else render_drawing(picture, external_declarations,
@@ -1058,7 +1058,7 @@ fn render_parsed(parsed, options = null,
         external_declarations, custom_colors, clip_prefix ++ "-0",
         people_active)^
     else <div class: "tikz-fragment-gallery",
-        for (index in 0 to (len(wrapper) - 1))
+        for (index in ((0 to (len(wrapper) - 1)) ^ { [] }))
             <div style: "margin-bottom:20px;",
                 render_picture(wrapper[index], options,
                     external_declarations, custom_colors,

@@ -77,6 +77,9 @@ pn main() {
     tune32_bool_count(0, 2)^
     tune32_bool_snapshot(4)^
     tune32_bool_snapshot(0)^
-    tune32_bool_count(-1, 0)^
-    tune32_bool_snapshot(-1)
+    // S7.6.3v3: a propagated failed fill completes its callable; retain it here.
+    let rejected_count = tune32_bool_count(-1, 0)
+    let rejected_snapshot = tune32_bool_snapshot(-1)
+    print(rejected_count is error); print("\n")
+    print(rejected_snapshot is error); print("\n")
 }

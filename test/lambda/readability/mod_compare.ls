@@ -10,7 +10,7 @@ let URL = "http://fakehost/test/page.html"
 // htmlTransform: collapse white space as HTML does; expected.html is
 // pretty-printed, which the harness evens out by printing both sides
 fn collapse(s) any^ => n.trim_text(replace(s, \("\s"+), " ") ^ { s })
-fn desc(e) {
+fn desc(e) any^ {
     let id = n.id_of(e)
     let cls = n.class_name(e);
     e.tag ++ (if (id != "") "#" ++ id else "") ++ (if (cls != "") ".(" ++ cls ++ ")" else "")

@@ -4,8 +4,8 @@ import field: lambda.chart.field
 import indicator: lambda.chart.indicator
 import scale: lambda.chart.scale
 import util: lambda.chart.util
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
 fn distance(a, b) => math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
 let tree = [{id: "root"}, {id: "a", parent: "root", value: 3}, {id: "b", parent: "root", value: 1}, {id: "c", parent: "a", value: 2}, {id: "d", parent: "a", value: 1}];

@@ -4,18 +4,18 @@ let merge_rounds = 11000
 let line_count = 768
 let modulus = 1000000007
 
-pn build_base() string[] {
+pn build_base() string[]^ {
     var lines: array = []
     var index = 0
     while (index < line_count) {
         lines.push("section " ++ string(index) ++
-            " records the base document with stable words for merging and review")
+            " records the base document with stable words for merging and review")^
         index = index + 1
     }
     lines
 }
 
-pn make_variant(base: string[], side: string) string[] {
+pn make_variant(base: string[], side: string) string[]^ {
     var lines: array = []
     for index of base {
         var line = base[index]
@@ -27,7 +27,7 @@ pn make_variant(base: string[], side: string) string[] {
         } else if (side == "right" and index % 29 == 0) {
             line = line ++ " right-only annotation"
         }
-        lines.push(line)
+        lines.push(line)^
     }
     lines
 }
@@ -36,7 +36,7 @@ pn make_variant(base: string[], side: string) string[] {
 fn word_at(words: string[] as W, index: int) string =>
     if (index < len(words)) words[index] else ""
 
-pn merge_words(base_line: string, left_line: string, right_line: string) string {
+pn merge_words(base_line: string, left_line: string, right_line: string) string^ {
     if (left_line == right_line) { return left_line }
     if (left_line == base_line) { return right_line }
     if (right_line == base_line) { return left_line }
@@ -52,15 +52,15 @@ pn merge_words(base_line: string, left_line: string, right_line: string) string 
         let base_word = word_at(base_words, index)
         let left_word = word_at(left_words, index)
         let right_word = word_at(right_words, index)
-        if (left_word == right_word) words.push(left_word)
-        else if (left_word == base_word) words.push(right_word)
-        else if (right_word == base_word) words.push(left_word)
+        if ((left_word == right_word)^) words.push(left_word)^
+        else if ((left_word == base_word)^) words.push(right_word)^
+        else if ((right_word == base_word)^) words.push(left_word)^
         else {
-            words.push("<<<<<<< LEFT")
-            words.push(left_word)
-            words.push("=======")
-            words.push(right_word)
-            words.push(">>>>>>> RIGHT")
+            words.push("<<<<<<< LEFT")^
+            words.push(left_word)^
+            words.push("=======")^
+            words.push(right_word)^
+            words.push(">>>>>>> RIGHT")^
         }
         index = index + 1
     }
@@ -68,16 +68,16 @@ pn merge_words(base_line: string, left_line: string, right_line: string) string 
 }
 
 // S11.4.8v2/D8.3.4v2: direct typed document arrays select a task-free pn raw body.
-pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: string[]) string {
+pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: string[]) string^ {
     var merged: array = []
     for index of base_lines {
         let base_line = base_lines[index]
         let left_line = left_lines[index]
         let right_line = right_lines[index]
-        if (left_line == right_line) merged.push(left_line)
-        else if (left_line == base_line) merged.push(right_line)
-        else if (right_line == base_line) merged.push(left_line)
-        else merged.push(merge_words(base_line, left_line, right_line))
+        if (left_line == right_line) merged.push(left_line)^
+        else if (left_line == base_line) merged.push(right_line)^
+        else if (right_line == base_line) merged.push(left_line)^
+        else merged.push(merge_words(base_line, left_line, right_line))^
     }
     join(merged, "\n")
 }

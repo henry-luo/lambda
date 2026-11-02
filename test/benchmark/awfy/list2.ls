@@ -56,7 +56,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 10) {
+    if ((result == 10)^) {
         print("List: PASS\n")
     } else {
         print("List: FAIL result=")

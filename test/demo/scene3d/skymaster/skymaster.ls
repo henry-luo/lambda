@@ -103,7 +103,7 @@ pn slide(owner, st, id, x) {
     let scene = scene_of(owner)
     if (id == "speed") {
         let speed = round((SPEEDS[0] + f * (SPEEDS[1] - SPEEDS[0])) * 20.0) / 20.0
-        (runtime.time_scale(scene, speed))^
+        runtime.time_scale(scene, speed)^
         return {*: st, speed: speed}
     }
     // scrubbing pauses on the chosen instant; play resumes from there

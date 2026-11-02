@@ -5,8 +5,8 @@ import svg: lambda.chart.svg
 import primitive: lambda.chart.primitive
 import animation: lambda.chart.animation
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn tags(node, tag) => elements(node) |: name(~) == tag
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(node, tag) any^ => elements(node) |: name(~) == tag
 fn near(a, b) => abs(a - b) < 0.001
 fn close(a, b) any^ => near(a[0], b[0]) and near(a[1], b[1])
 fn normalized(point) => point |> ~ / paths.distance([0.0, 0.0], point)
@@ -32,12 +32,12 @@ fn axis(image) {
 fn aligned(a, b) => a[0] * b[0] + a[1] * b[1] > 0.995
 fn inside(vertices, point) => geometry.contains_point(vertices, point) or
     min([for (i, a in vertices) geometry.distance_segment(point, a, vertices[(i + 1) % len(vertices)])]) < 0.05
-fn follows_curve(image, source) {
+fn follows_curve(image, source) any^ {
     let vertices = outline(image);
     let middle = int((len(vertices) - 1) / 2);
     let curve = paths.sample(source, (point) => point, 0.01)[0].points;
-    all([for (i in 1 to middle, let center = geometry.interpolate(vertices[i], vertices[len(vertices) - i], 0.5))
-        min([for (j in 1 to (len(curve) - 1)) geometry.distance_segment(center, curve[j - 1], curve[j])]) < 0.03])
+    all([for (i in ((1 to middle) ^ { [] }), let center = geometry.interpolate(vertices[i], vertices[len(vertices) - i], 0.5))
+        min([for (j in ((1 to (len(curve) - 1)) ^ { [] })) geometry.distance_segment(center, curve[j - 1], curve[j])]) < 0.03])
 }
 fn covered_join(image) {
     let body = tags(image, 'path')[0];

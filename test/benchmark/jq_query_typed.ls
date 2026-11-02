@@ -27,8 +27,8 @@ pub pn jq_collect_paths(v, prefix: array, numbers_only: bool, var out: array) {
         while (i < len(v)) {
             let path: array = prefix ++ [i]
             let child = v[i]
-            if (not numbers_only or child is int or child is float) { out.push(path) }
-            jq_collect_paths(child, path, numbers_only, out)
+            if (not numbers_only or child is int or child is float) { out.push(path)^ }
+            jq_collect_paths(child, path, numbers_only, out)^
             i = i + 1
         }
         return null
@@ -36,11 +36,11 @@ pub pn jq_collect_paths(v, prefix: array, numbers_only: bool, var out: array) {
     if (v is map) {
         let keys: string[] = [for (k at v) string(k)]
         var j: int = 0
-        while (j < len(keys)) {
+        while ((j < len(keys))^) {
             let path: array = prefix ++ [keys[j]]
             let child = v[keys[j]]
-            if (not numbers_only or child is int or child is float) { out.push(path) }
-            jq_collect_paths(child, path, numbers_only, out)
+            if (not numbers_only or child is int or child is float) { out.push(path)^ }
+            jq_collect_paths(child, path, numbers_only, out)^
             j = j + 1
         }
     }
@@ -52,7 +52,7 @@ pub pn jq_flatten_into(v, var out: int[]) {
     if (v is array) {
         var i: int = 0
         while (i < len(v)) {
-            jq_flatten_into(v[i], out)
+            jq_flatten_into(v[i], out)^
             i = i + 1
         }
         return null
@@ -69,7 +69,7 @@ pub pn jq_contains(a, b) bool^ {
             var found: bool = false
             var i: int = 0
             while (i < len(a) and not found) {
-                found = jq_contains(a[i], b[j])
+                found = jq_contains(a[i], b[j])^
                 i = i + 1
             }
             if (not found) { return false }
@@ -80,9 +80,9 @@ pub pn jq_contains(a, b) bool^ {
     if (a is map and b is map) {
         let keys: string[] = [for (k at b) string(k)]
         var j: int = 0
-        while (j < len(keys)) {
+        while ((j < len(keys))^) {
             if (a[keys[j]] == null) { return false }
-            if (not jq_contains(a[keys[j]], b[keys[j]])) { return false }
+            if ((not jq_contains(a[keys[j]], b[keys[j]]))^) { return false }
             j = j + 1
         }
         return true
@@ -108,12 +108,12 @@ pub pn jq_range(from: int, upto: int, by: int) int[]^ {
     var x: int = from
     if (by > 0) {
         while (x < upto) {
-            out.push(x)
+            out.push(x)^
             x = x + by
         }
     } else if (by < 0) {
         while (x > upto) {
-            out.push(x)
+            out.push(x)^
             x = x + by
         }
     }

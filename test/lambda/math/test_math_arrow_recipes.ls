@@ -5,7 +5,7 @@ import svg: .mod_svg_snapshot
 
 fn ast(source) any^ => parse(source,{type:"math",flavor:"latex"})^
 fn box(source) any^ => math.render_box(ast(source),{font_size:960.0 / 72.27})^
-fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where g.text != "") g]
 fn close(a,b) => abs(a - b) < 0.00003
 
 let empty = box("\\xrightarrow{}")
@@ -28,14 +28,14 @@ let checks = [
     {name:"mathtools double-arrow control spaces force both limits",ok:
         double_empty.depth > empty.depth},
     {name:"single and double shafts use glyph leaders with natural heads",ok:
-        len([for (g in glyphs(wide) where g.text == "−") g]) > 2 and
-        len([for (g in glyphs(double_wide) where g.text == "=") g]) > 2 and
-        all([for (ch in ["⇐","⇒"]) len([for (g in glyphs(double_wide) where g.text == ch) g]) == 1])},
+        len([for (g in ((glyphs(wide)) ^ { [] }) where g.text == "−") g]) > 2 and
+        len([for (g in ((glyphs(double_wide)) ^ { [] }) where g.text == "=") g]) > 2 and
+        all([for (ch in ["⇐","⇒"]) len([for (g in ((glyphs(double_wide)) ^ { [] }) where g.text == ch) g]) == 1])},
     {name:"arrow construction keeps matched encodings and natural glyph proportions",ok:
-        all([for (b in [empty,wide,double_wide,marked,under],g in glyphs(b))
+        all([for (b in [empty,wide,double_wide,marked,under],g in ((glyphs(b)) ^ { [] }))
             g.node["font-family"] == "KaTeX_Main" and g.sx == 1.0 and g.sy == 1.0])},
     {name:"extensible-arrow filler retains display size inside scriptscript style",ok:
-        all([for (g in glyphs(script) where contains(["−","→"],g.text)) g.node["font-size"] == 1000])},
+        all([for (g in ((glyphs(script)) ^ { [] }) where ((contains(["−","→"],g.text)) ^ { false })) g.node["font-size"] == 1000])},
     {name:"over and under marks retain the filler minimum and body baseline",ok:
         marked.width > body.width and close(marked.width,under.width) and
         marked.height > body.height and under.depth > body.depth},

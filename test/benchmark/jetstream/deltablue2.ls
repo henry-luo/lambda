@@ -126,29 +126,29 @@ pn constraint_is_input(p: Planner, ci: int, vi: int) bool^ {
     return vi == c.v2
 }
 
-pn constraint_execute(var p: Planner, ci: int) int {
+pn constraint_execute(var p: Planner, ci: int) int^ {
     var c: Constraint = (p.constraints)[ci]
-    if (c.kind == C_STAY) {
+    if ((c.kind == C_STAY)^) {
         return 0
     }
-    if (c.kind == C_EDIT) {
+    if ((c.kind == C_EDIT)^) {
         return 0
     }
-    if (c.kind == C_EQUAL) {
+    if ((c.kind == C_EQUAL)^) {
         var in_idx = constraint_input(p, ci)
         var out_idx = constraint_output(p, ci)
         var in_var: Variable = (p.vars)[in_idx]
-        p.vars[out_idx].value = in_var.value
+        p.vars[out_idx].value = in_var.value^
         return 0
     }
     // C_SCALE
     var in_idx = constraint_input(p, ci)
     var out_idx = constraint_output(p, ci)
     var in_var: Variable = (p.vars)[in_idx]
-    if (c.direction == FORWARD) {
-        p.vars[out_idx].value = in_var.value * c.scale + c.offset
+    if ((c.direction == FORWARD)^) {
+        p.vars[out_idx].value = (in_var.value * c.scale + c.offset)^
     } else {
-        p.vars[out_idx].value = (in_var.value - c.offset) / c.scale
+        p.vars[out_idx].value = ((in_var.value - c.offset) / c.scale)^
     }
     return 0
 }
@@ -162,13 +162,13 @@ pn constraint_recalc(var p: Planner, ci: int) any {
     }
 }
 
-pn constraint_choose_method(var p: Planner, ci: int, mark: int) int {
+pn constraint_choose_method(var p: Planner, ci: int, mark: int) int^ {
     var c: Constraint = (p.constraints)[ci]
-    if (c.kind == C_STAY) {
+    if ((c.kind == C_STAY)^) {
         // unary: only output is v1
         var v: Variable = (p.vars)[c.v1]
-        if (v.mark != mark) {
-            if (stronger(c.strength, v.walk_str)) {
+        if ((v.mark != mark)^) {
+            if (stronger(c.strength, v.walk_str)^) {
                 p.constraints[ci].direction = FORWARD
                 p.constraints[ci].satisfied = true
                 return 0
@@ -178,10 +178,10 @@ pn constraint_choose_method(var p: Planner, ci: int, mark: int) int {
         p.constraints[ci].satisfied = false
         return 0
     }
-    if (c.kind == C_EDIT) {
+    if ((c.kind == C_EDIT)^) {
         var v: Variable = (p.vars)[c.v1]
-        if (v.mark != mark) {
-            if (stronger(c.strength, v.walk_str)) {
+        if ((v.mark != mark)^) {
+            if (stronger(c.strength, v.walk_str)^) {
                 p.constraints[ci].direction = FORWARD
                 p.constraints[ci].satisfied = true
                 return 0
@@ -194,18 +194,18 @@ pn constraint_choose_method(var p: Planner, ci: int, mark: int) int {
     // binary constraint (equal or scale)
     var v1: Variable = (p.vars)[c.v1]
     var v2: Variable = (p.vars)[c.v2]
-    if (v1.mark == mark) {
-        if (v2.mark != mark) {
-            if (stronger(c.strength, v2.walk_str)) {
+    if ((v1.mark == mark)^) {
+        if ((v2.mark != mark)^) {
+            if (stronger(c.strength, v2.walk_str)^) {
                 p.constraints[ci].direction = FORWARD
                 p.constraints[ci].satisfied = true
                 return 0
             }
         }
     }
-    if (v2.mark == mark) {
-        if (v1.mark != mark) {
-            if (stronger(c.strength, v1.walk_str)) {
+    if ((v2.mark == mark)^) {
+        if ((v1.mark != mark)^) {
+            if (stronger(c.strength, v1.walk_str)^) {
                 p.constraints[ci].direction = BACKWARD
                 p.constraints[ci].satisfied = true
                 return 0
@@ -213,14 +213,14 @@ pn constraint_choose_method(var p: Planner, ci: int, mark: int) int {
         }
     }
     // Try both
-    if (weaker(v1.walk_str, v2.walk_str)) {
-        if (stronger(c.strength, v1.walk_str)) {
+    if (weaker(v1.walk_str, v2.walk_str)^) {
+        if (stronger(c.strength, v1.walk_str)^) {
             p.constraints[ci].direction = BACKWARD
             p.constraints[ci].satisfied = true
             return 0
         }
     } else {
-        if (stronger(c.strength, v2.walk_str)) {
+        if (stronger(c.strength, v2.walk_str)^) {
             p.constraints[ci].direction = FORWARD
             p.constraints[ci].satisfied = true
             return 0
@@ -234,7 +234,7 @@ pn constraint_choose_method(var p: Planner, ci: int, mark: int) int {
 pn incremental_add(var p: Planner, ci: int) int^ {
     p.current_mark = p.current_mark + 1
     var mark = p.current_mark
-    constraint_choose_method(p, ci, mark)
+    constraint_choose_method(p, ci, mark)^
     var c: Constraint = (p.constraints)[ci]
     if ((c.satisfied == false)^) {
         return 0
@@ -314,7 +314,7 @@ pn chain_test(n: int) int^ {
         var c: Constraint = (p.constraints)[i + n + 1]
         if ((c != null)^) {
             if ((c.satisfied == true)^) {
-                constraint_execute(p, i + n + 1)
+                constraint_execute(p, i + n + 1)^
             }
         }
         i = i + 1

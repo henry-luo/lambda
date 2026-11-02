@@ -57,12 +57,12 @@ pub fn render_cards(spec, snapshot = null) any^ {
     if (normalized is error) normalized else present.cards(normalized,snapshot)
 }
 
-pub fn model(spec, viewport = null, options = {}) {
+pub fn model(spec, viewport = null, options = {}) any^ {
     let validated=schema.validate(spec);
     if (validated is error) validated else <timeline.chart spec:spec,viewport:viewport,options:options,
         prepared:prepared.record(spec,null,validated)>
 }
-pub fn interactive(spec, viewport = null, options = {}) => apply(model(spec,viewport,options))
+pub fn interactive(spec, viewport = null, options = {}) any^ => apply(model(spec,viewport,options))
 pub pn load(request, options = {}) { resource.load(request,options) }
 pub fn export_data(spec, format = "json", options = {}, snapshot = null) any^ => exports.data(spec,format,options,snapshot)
 pub fn export_document(spec, format = "html", viewport = null, options = {}, snapshot = null) any^ => exports.document(spec,format,viewport,options,snapshot)
@@ -70,7 +70,7 @@ pub pn save(spec, destination, format = null, viewport = null, options = {}, sna
     exports.save(spec,destination,format,viewport,options,snapshot)
 }
 // the authored source is stable; mutable view state belongs to its live instance.
-view <timeline.chart> state live_state:{interaction:null,token:0} {
+view <timeline.chart> () any^ state live_state:{interaction:null,token:0} {
     live.presentation(~,live_state)
 }
 on render(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }

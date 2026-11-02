@@ -4,14 +4,14 @@ import svg: .mod_svg_snapshot
 
 fn ast(source) any^ => parse(source, {type: "math", flavor: "latex"})^
 fn box(source) any^ => math.render_box(ast(source))^
-fn glyphs(b) => [for (g in svg.geometry(b.element) where contains(["→", "←", "⇀", "↽"], g.text)) g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where ((contains(["→", "←", "⇀", "↽"], g.text)) ^ { false })) g]
 
 let commands = ["xrightleftarrows", "xrightequilibrium", "xleftequilibrium"]
 let arrows = [for (cmd in commands) box("\\" ++ cmd ++ "{}")]
 let parts = [for (b in arrows) glyphs(b)]
 let labelled = [for (cmd in commands) box("\\" ++ cmd ++ "{verylonglabel}")]
-let shafts = [for (b in labelled) [for (g in svg.geometry(b.element)
-    where name(g.node) == 'rect') g]]
+let shafts = [for (b in labelled) [for (g in ((svg.geometry(b.element)) ^ { [] })
+    where ((name(g.node) == 'rect') ^ { false })) g]]
 let labels = box("\\xrightequilibrium[below]{verylonglabel}")
 let label_glyphs = glyphs(labels)
 let scripted = box("\\scriptstyle\\xrightleftarrows{}")

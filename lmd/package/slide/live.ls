@@ -229,11 +229,11 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools, voic
     { let __error_outcome_2 = present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { ^ }; if (__error_outcome_2 is error) { displayed = {problem: __error_outcome_2.message, painted: null} } else match __error_outcome_2 { case any { displayed = {problem: null, painted: ~} } } }
     let audio = sound.sync(owner,voice,plan,result.ps,c.as_text(event.command) == "stop")
     let sound_state = if (audio.error != null) "error" else if (audio.token == null) "silent" else dom.audio_state(owner,audio.token)
-    if (((dom.get_attribute(owner,"data-slide-sound") != sound_state)^)^) dom.set_attribute(owner,"data-slide-sound",sound_state)
-    if (((audio.error != null)^)^) {
-        if (((dom.get_attribute(owner,"data-slide-sound-error") != audio.error)^)^) dom.set_attribute(owner,"data-slide-sound-error",audio.error)^
+    if ((dom.get_attribute(owner,"data-slide-sound") != sound_state)^) dom.set_attribute(owner,"data-slide-sound",sound_state)
+    if ((audio.error != null)^) {
+        if ((dom.get_attribute(owner,"data-slide-sound-error") != audio.error)^) dom.set_attribute(owner,"data-slide-sound-error",audio.error)^
     } else if (dom.has_attribute(owner,"data-slide-sound-error")) dom.remove_attribute(owner,"data-slide-sound-error")
-    if (((audio.error != null and audio.error != voice.error)^)^) set_text(dom.query_selector(owner,".slide-status"),audio.error)^
+    if ((audio.error != null and audio.error != voice.error)^) set_text(dom.query_selector(owner,".slide-status"),audio.error)^
     // audio has a native clock; keep polling its one voice after visual playback parks.
     let needs_delivery = player.needs_frame(result.ps) or (audio.token != null and not result.ps.paused)
     let scheduled = if (result.problem is null and displayed.problem is null and needs_delivery) dom.request_frame(owner, "slide_frame") else 0
@@ -280,7 +280,7 @@ pn sync_console(owner, plan, index, key) {
     for (node in dom.child_nodes(notes)) show(node, dom.get_attribute(node, "id") == note_id)
     let canvas = dom.query_selector(owner, ".slide-preview-canvas")
     let next = index + 1
-    if (((next < len(plan.slides))^)^) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
+    if ((next < len(plan.slides))^) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
     for (node in dom.child_nodes(canvas)) show(node, dom.get_attribute(node, "id") == layer_id(key ++ "-preview", next))
     show(dom.query_selector(owner, ".slide-preview-stage"), next < len(plan.slides), "block", false)^
     show(dom.query_selector(owner, ".slide-preview-end"), next >= len(plan.slides))^
@@ -428,7 +428,7 @@ on slide_fullscreen(evt) {
 }
 on input(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner == null or not dom.matches(evt.target, ".slide-speed-input"))^)^) { return 'pass' }
+    if ((owner == null or not dom.matches(evt.target, ".slide-speed-input"))^) { return 'pass' }
     let next = commit_event(owner, ~.plan, session.ps,
         {command: 'speed', rate: dom.range_value(evt.target), time_ms: evt.time_stamp},
         ~.options, session.token, session.painted, session.tools, session.sound)
@@ -437,7 +437,7 @@ on input(evt) {
 }
 on click(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner == null)^)^) { return 'pass' }
+    if ((owner == null)^) { return 'pass' }
     toolbar.hide_hint(owner)
     let tool = dom.closest(evt.target, "[data-slide-tool]")
     let button = dom.closest(evt.target, "[data-slide-command]")
@@ -464,7 +464,7 @@ on click(evt) {
 }
 on keydown(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner == null or evt.ctrlKey or evt.altKey or evt.metaKey or evt.shiftKey)^)^) { return 'pass' }
+    if ((owner == null or evt.ctrlKey or evt.altKey or evt.metaKey or evt.shiftKey)^) { return 'pass' }
     toolbar.hide_hint(owner)
     if (evt.key == "Enter" and dom.matches(evt.target, ".slide-picker")) {
         session = action(owner, ~.plan, session, "go", dom.get_state(evt.target, "value"), evt.time_stamp, ~.options)^
@@ -495,45 +495,45 @@ on keydown(evt) {
 on mousemove(evt) {
     if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
     let owner = event_owner(evt.target, ~.options)
-    if (((owner == null)^)^) { return 'pass' }
+    if ((owner == null)^) { return 'pass' }
     track_pointer(owner, evt)^
     return 'handled'
 }
 // the bottom-right hot corner (shown only while the toolbar is hidden) brings the toolbar back
 on mouseover(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner!=null)^)^) toolbar.show_hint(owner,evt.target)^
+    if ((owner!=null)^) toolbar.show_hint(owner,evt.target)^
     if (session.tools.toolbar) { return 'pass' }
     if (not dom.matches(evt.target, ".slide-toolbar-reveal")) {
         if (not session.reveal_armed) { session = {*: session, reveal_armed: true} }
         return 'pass'
     }
     if (not session.reveal_armed) { return 'pass' }
-    if (((owner == null)^)^) { return 'pass' }
+    if ((owner == null)^) { return 'pass' }
     session = action(owner, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
     return 'handled'
 }
 on mouseout(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
+    if ((owner!=null)^) toolbar.hide_hint(owner)^
     if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
-    if (((owner == null)^)^) { return 'pass' }
+    if ((owner == null)^) { return 'pass' }
     track_pointer(owner, evt)^
     return 'pass'
 }
 on focusin(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner!=null)^)^) toolbar.show_hint(owner,evt.target)^
+    if ((owner!=null)^) toolbar.show_hint(owner,evt.target)^
     return 'pass'
 }
 on focusout(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
+    if ((owner!=null)^) toolbar.hide_hint(owner)^
     return 'pass'
 }
 on scroll(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
+    if ((owner!=null)^) toolbar.hide_hint(owner)^
     return 'pass'
 }
 

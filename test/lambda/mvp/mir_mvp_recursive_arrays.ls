@@ -1,13 +1,13 @@
 // S9.1.2–S9.1.3: recursive readers may borrow; retained or mutated values remain snapshots.
-pn sum_tail(a: int[], n: int) int {
+pn sum_tail(a: int[], n: int) int^ {
     if (n == 0) { return 0 }
     return a[n - 1] + sum_tail(a, n - 1)
 }
-pn even_read(a: int[], n: int) int {
+pn even_read(a: int[], n: int) int^ {
     if (n == 0) { return a[0] }
     return odd_read(a, n - 1)
 }
-pn odd_read(a: int[], n: int) int {
+pn odd_read(a: int[], n: int) int^ {
     if (n == 0) { return a[1] }
     return even_read(a, n - 1)
 }
@@ -15,7 +15,7 @@ pn retain(a: int[], n: int) int[] {
     if (n == 0) { return a }
     return retain(a, n - 1)
 }
-pn plain_write(a: int[], n: int) int {
+pn plain_write(a: int[], n: int) int^ {
     a[0] = a[0] + 1
     if (n == 0) { return a[0] }
     return plain_write(a, n - 1)

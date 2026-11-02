@@ -98,7 +98,7 @@ pub pn sync(node,id) {
 pub fn opens_with(evt) any^ => not (evt.metaKey or evt.ctrlKey or evt.altKey) and
     (evt.key in ["ArrowDown","ArrowUp","Enter"," "] or len(evt.key)==1)
 pub pn trigger_key(node,id,evt,disabled=false) {
-    if (((not disabled and opens_with(evt))^)^) {
+    if ((not disabled and opens_with(evt))^) {
         show(node,id,if (len(evt.key)==1 and evt.key!=" ") evt.key else "")^
         return 'prevent-default'
     }
@@ -202,7 +202,7 @@ on word_font_layout(evt) {
     return 'handled'
 }
 on word_font_preview(evt) {
-    if (((not opened or evt.detail!=frame)^)^) { return 'handled' }
+    if ((not opened or evt.detail!=frame)^) { return 'handled' }
     frame = null
     if (focus_pending) {
         // measure after the popup's initial layout, never from its render notification.
@@ -214,13 +214,13 @@ on word_font_preview(evt) {
     // Spread cold font decoding across frames; stale windows cancel their pending work.
     let entries = window_entries(current,rows,first)
     ready = next_ready(ready,entries)
-    if (((len(ready)<len(entries))^)^) { frame = schedule(evt.target,null) }
+    if ((len(ready)<len(entries))^) { frame = schedule(evt.target,null) }
     return 'handled'
 }
 on word_font_scroll(evt) {
     scroll_y = evt.detail.y
     let next = window_start(len(rows),scroll_y)
-    if (((next!=first)^)^) {
+    if ((next!=first)^) {
         first = next
         let preview = preview_window(evt.target,frame,current,rows,first,ready)
         ready = preview.ready
@@ -234,7 +234,7 @@ on input(evt) {
     rows = matching(choices(current),query)
     active = if (len(rows)==0) -1 else 0
     first = 0
-    if (((scroll_y!=0)^)^) dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,0)
+    if ((scroll_y!=0)^) dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,0)
     scroll_y = 0
     let preview = preview_window(evt.target,frame,current,rows,first,ready)
     ready = preview.ready
@@ -242,7 +242,7 @@ on input(evt) {
     return 'handled'
 }
 on word_font_close(evt) {
-    if (((frame!=null)^)^) dom.cancel_frame(evt.target,frame)
+    if ((frame!=null)^) dom.cancel_frame(evt.target,frame)
     frame = null
     opened = false
     rows = []
@@ -268,16 +268,16 @@ on keydown(evt) {
         return if (evt.key=="Escape") 'prevent-default' else 'pass'
     }
     if (evt.key=="Enter") {
-        if (((active>=0)^)^) choose(evt.target,source_id,choices(current)[rows[active]].value)^
+        if ((active>=0)^) choose(evt.target,source_id,choices(current)[rows[active]].value)^
         return 'prevent-default'
     }
     if (evt.key in ["ArrowUp","ArrowDown","PageUp","PageDown","Home","End"]) {
         active = next_index(active,evt.key,len(rows))
-        if (((active>=0)^)^) {
+        if ((active>=0)^) {
             let scroller = dom.get_element_by_id(dom.root_node(evt.target),"word-font-list")
             scroll_y = revealed_y(active,scroll_y,dom.bounding_box(scroller).height)
             let next = window_start(len(rows),scroll_y)
-            if (((next!=first)^)^) {
+            if ((next!=first)^) {
                 first = next
                 let preview = preview_window(evt.target,frame,current,rows,first,ready)
                 ready = preview.ready

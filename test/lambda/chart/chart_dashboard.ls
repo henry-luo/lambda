@@ -31,7 +31,7 @@ fn render_svg(c) any^ {
 }
 
 // ── Build one HTML card ─────────────────────────────────────────────────────
-fn make_card(c) {
+fn make_card(c) any^ {
     let label   = if (c.label) c.label else ""
     let svg_str = render_svg(c)
     "<div class=\"card\"><p class=\"card-label\">" ++ label ++ "</p>" ++ svg_str ++ "</div>"
@@ -63,10 +63,10 @@ let css =
         "letter-spacing:1.2px;color:#999;margin-bottom:10px;padding-left:2px}" ++
     "svg{display:block;max-width:100%;height:auto;margin:0 auto}" ++
     "@media(max-width:1100px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}" ++
-    "@media(max-width:700px){.grid{grid-template-columns:1fr}}"
+    "@media(max-width:700px){.grid{grid-template-columns:1fr}}";
 
 // ── Assemble HTML page ──────────────────────────────────────────────────────
-"<!DOCTYPE html>" ++
+("<!DOCTYPE html>" ++
 "<html lang=\"en\">" ++
 "<head>" ++
 "<meta charset=\"UTF-8\">" ++
@@ -77,4 +77,4 @@ let css =
 "<body>" ++
 "<header><h1>" ++ title ++ "</h1><p>" ++ examples ++ " · " ++ subtitle ++ "</p></header>" ++
 "<main><div class=\"grid\">" ++ cards_html ++ "</div></main>" ++
-"</body></html>"
+"</body></html>")^

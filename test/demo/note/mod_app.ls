@@ -28,14 +28,14 @@ pub fn primary(evt) => evt.metaKey==true or evt.ctrlKey==true
 pub pn stamp() { return format(now(),"YYYY-MM-DD HH:mm") }
 pub pn adopt(st,evt) {
     if (st.selected=="" or st.dialog!=null) { return st }
-    if (model.selected_image(st.editor)!=null and dom.closest(evt.target,"#edit-surface")==null) { return st }
+    if ((model.selected_image(st.editor)!=null and dom.closest(evt.target,"#edit-surface")==null)^) { return st }
     let accepted = controller.adopt(st.editor,evt)
     return if (accepted.changed) {*:st,editor:model.clean(accepted.editor)} else st
 }
 pub pn finish(st,node,restore=false) {
     dom.set_close_guard(node,model.dirty(st))
     dom.set_window_title(node,(if (model.dirty(st)) "● " else "") ++ "Notes")
-    controller.restore(st.editor,restore and st.dialog==null and st.selected!="")
+    controller.restore(st.editor,restore and st.dialog==null and st.selected!="")^
     // a model move rebuilds the image tools; measure their replacement after the outer commit.
     if (model.selected_image(st.editor)!=null)
         dom.request_frame(dom.get_element_by_id(dom.root_node(node),"notes"),"note_image_position")
@@ -52,7 +52,7 @@ pn continued(st,action,node) {
     return {*:st,dialog:file_dialog("open"),pending:"",menu:""}
 }
 pn save_book(st,path,node,overwrite=false) {
-    if (starts_with(path,"temp/note/")) { io.mkdir("temp/note") ^ { null } }
+    if (starts_with(path,"temp/note/")^) { io.mkdir("temp/note") ^ { null } }
     let book = model.snapshot(st)
     let result = session.save(storage.file_state(st)^,book,path,overwrite)
     let next = if (result.ok) {*:st,path:result.session.path,disk_text:result.session.disk_text,saved:book,
@@ -60,7 +60,7 @@ pn save_book(st,path,node,overwrite=false) {
         dialog:if (result.conflict!=null) {kind:"overwrite",title:if (result.conflict=='changed') "Notebook Changed" else "Replace Notebook?",
             message:result.status,value:path,confirm:"Replace",error:""}
             else file_dialog("save",path) |> {*:~,error:result.status}};
-    if (result.ok and st.pending!="") { return continued(next,st.pending,node) }
+    if ((result.ok and st.pending!="")^) { return continued(next,st.pending,node) }
     return next
 }
 pn dialog_command(st,id,node) {
@@ -104,9 +104,9 @@ pn edit_command(st,id,params,node) {
         last_highlight:if (action=="highlight") model.color_value(next,"highlight") else st.last_highlight}
 }
 pub pn command(st,id,params,node) {
-    if (starts_with(id,"dialog.")) { return dialog_command(st,id,node) }
+    if (starts_with(id,"dialog.")^) { return dialog_command(st,id,node) }
     if (st.dialog!=null) { return st }
-    if (starts_with(id,"edit.")) { return edit_command(st,id,params,node) }
+    if (starts_with(id,"edit.")^) { return edit_command(st,id,params,node) }
     if (id=="note.new") {
         controller.focus(node)
         return {*:model.create(st,stamp()),menu:"",status:"New note"}
@@ -125,7 +125,7 @@ pub pn command(st,id,params,node) {
     if (id=="folder.select") { return {*:model.scope(st,params.folder),menu:""} }
     if (id=="sidebar.toggle") { return {*:st,sidebar:not st.sidebar} }
     if (id=="list.sort") { return {*:st,sort:if (st.sort=="updated") "title" else "updated"} }
-    if (starts_with(id,"menu.")) {
+    if (starts_with(id,"menu.")^) {
         let kind = slice(id,5)
         return {*:st,menu:if (st.menu==kind) "" else kind,picker_error:"",
             picker_value:if (kind=="color" or kind=="highlight") model.color_value(st.editor,kind) else st.picker_value}

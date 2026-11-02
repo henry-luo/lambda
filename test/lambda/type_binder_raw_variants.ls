@@ -2,14 +2,14 @@
 fn identity(T: type, value: T) T => value;
 // This definition deliberately precedes its binder callee: its direct edge
 // must use the raw forward declaration, not wait for body emission order.
-fn increment_caller(value: int) int => increment(value);
+fn increment_caller(value: int) int^ => increment(value);
 fn increment(value: number as N) N => value + 1;
 // Exact non-scalar keys use the established raw container-pointer lane.
 fn map_size(value: map as M) int => len(value);
 fn array_size(value: array as A) int => len(value);
 // A dynamic local edge is eligible for the optional caller guard hoist.
 fn selected_dynamic(value: any as T) type => T;
-fn selected_dynamic_caller(value: any) type => selected_dynamic(value) or any;
+fn selected_dynamic_caller(value: any) type^ => selected_dynamic(value) or any;
 // Shape-bearing containers require descriptor equality, not a map/element tag.
 type Point { x: int, y: int }
 type Note { label: string, string* }

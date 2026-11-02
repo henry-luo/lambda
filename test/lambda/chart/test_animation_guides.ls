@@ -3,16 +3,16 @@ import animation: lambda.chart.animation
 import text: lambda.chart.text
 import collision: lambda.chart.collision
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn titles(image, label) => elements(image) |: name(~) == 'text' and content(~) == [label]
-fn axis(image, key) => (elements(image) |: ~.class == "axis " ++ key ++ "-axis")[0]
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn titles(image, label) any^ => elements(image) |: name(~) == 'text' and content(~) == [label]
+fn axis(image, key) any^ => (elements(image) |: ~.class == "axis " ++ key ++ "-axis")[0]
 fn tick_count(image) any^ => len(content(axis(image, "y")) |: ~.class == "tick")
 fn near(a, b) => abs(a - b) < 0.0001
 fn single_titles(image) any^ => len(titles(image, "value")) == 1 and len(titles(image, "category")) == 1
-fn readable_ticks(image) => all([for (tick in elements(image) where tick.class == "tick")
+fn readable_ticks(image) any^ => all([for (tick in ((elements(image)) ^ { [] }) where tick.class == "tick")
     len(elements(tick) |: name(~) == 'text') <= 1]);
 fn spaced_ticks(image, key) {
-    let boxes = text.svg_bounds(<g *[for (tick in content(axis(image, key)) where tick.class == "tick") tick]>);
+    let boxes = text.svg_bounds(<g *[for (tick in ((content(axis(image, key))) ^ { [] }) where tick.class == "tick") tick]>);
     not any([for (i, box in boxes) for (j, other in boxes where j > i) collision.overlaps(box, other, 1.99)])
 }
 
@@ -55,10 +55,10 @@ let checks = {
     reverse_tick_count_change: all([for (clock_ms in [250, 500, 750], let image = chart.render_frame(reverse, clock_ms))
         single_titles(image) and readable_ticks(image)]),
     title_position_interpolates: near(titles(halfway, "value")[0].x, (titles(source, "value")[0].x + titles(target, "value")[0].x) / 2.0),
-    title_never_paired_with_tick: not any([for (node in elements(axis(halfway, "y")) where node.class == "chart-crossfade")
+    title_never_paired_with_tick: not any([for (node in ((elements(axis(halfway, "y"))) ^ { [] }) where node.class == "chart-crossfade")
         len(titles(node, "value")) > 0]),
     changed_title_crossfades: len(titles(changed, "value")) == 1 and len(titles(changed, "score")) == 1 and
-        any([for (node in elements(changed) where node.class == "chart-crossfade")
+        any([for (node in ((elements(changed)) ^ { [] }) where node.class == "chart-crossfade")
             len(titles(node, "value")) == 1 and len(titles(node, "score")) == 1]),
     domain_visibility_keeps_title: single_titles(no_domain),
     axis_visibility_keeps_channel: len(titles(no_x, "category")) == 0 and len(titles(no_x, "value")) == 1 and

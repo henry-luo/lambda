@@ -188,7 +188,7 @@ pn run() bool^ {
     var expected_key_sum = (COUNT * (COUNT - 1)) / 2
     var expected_value_sum = 42 * COUNT
 
-    if (result != expected_result) {
+    if ((result != expected_result)^) {
         print("hash-map: FAIL result=" ++ result ++ " expected=" ++ expected_result ++ "\n")
         return false
     }

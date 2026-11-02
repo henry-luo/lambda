@@ -50,4 +50,4 @@ on statechange(evt) { playing = string(evt.to) }
 
 ui.page("Mixamo dance", "LAMBDA MOTION / RETARGETING",
     "One Mixamo character, three motions. Beta dances its own clip, takes a samba recorded on a differently built Mixamo rig, and jumps to a CMU-style BVH, all through one character schema and the shared mixer.",
-    apply(<dance>))
+    apply(<dance>))^

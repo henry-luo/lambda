@@ -18,22 +18,22 @@ pub fn settings(node) any^ {
 }
 // inline SVG definitions need fresh IDs after edits, duplication and reopening.
 fn graphic_id(st) any^ => m.free_id([for (scene in st.plan.slides) for (obj in scene.targets,
-    let id = settings(obj.source).params.graphic_id where id != null) id],"slides-svg-",st.serial)
+    let id = settings(obj.source).params.graphic_id where ((id != null) ^ { false })) id],"slides-svg-",st.serial)
 fn parameters(st,kind,params) map^ {
     let spec = data.spec(kind);
     if (spec == null or not (params is map)) raise error("Slides: choose supported insert settings") else {*:spec.defaults,*:params,*:if (kind in ["wordart","shape"]) {graphic_id:graphic_id(st)} else {}}
 }
-fn stored(p) => map([for (key,value in p where string(key) != "preview") (string(key),value)])
+fn stored(p) => map([for (key,value in p where ((string(key) != "preview") ^ { false })) (string(key),value)])
 fn authored(kind,p,existing=null) => {metadata:{*:c.value(existing,{}),slide_insert:{kind:kind,params:stored(p)}}}
 // keep the table dialog's data synchronized with direct cell edits in the same undo transaction.
 pub fn inline_source(node) any^ {
     let saved = settings(node);
     if (saved.kind!="table") node else {
-        let wrapper = [for (child in content(node) where child is element) child][0]
+        let wrapper = [for (child in ((content(node)) ^ { [] }) where child is element) child][0]
         let table = c.children(wrapper,'table')[0];
         if (table==null) m.attrs(node,{metadata:{*:node.metadata,slide_insert:null}}) else {
-            let rows = [for (part in content(table) where part is element) *if (name(part)=='tr') [part] else c.children(part,'tr')]
-            let cells = [for (row in rows) [for (cell in content(row) where cell is element and name(cell) in ['td','th']) cell]]
+            let rows = [for (part in ((content(table)) ^ { [] }) where part is element) *if (name(part)=='tr') [part] else c.children(part,'tr')]
+            let cells = [for (row in rows) [for (cell in ((content(row)) ^ { [] }) where ((cell is element and name(cell) in ['td','th']) ^ { false })) cell]]
             let values = {*:saved.params,rows:len(rows),columns:len(cells[0]),
                 data:join([for (row in cells) join([for (cell in row) trim(m.text(cell))],"\t")],"\n")};
             m.attrs(node,authored("table",values,node.metadata))
@@ -181,19 +181,19 @@ fn note(st,p,id) {
         <aside ["data-slide-insert"]:"comment",
             <strong p.author>; <p p.text>>>
 }
-pub fn comments(st) => [for (note in m.scene(st).notes where m.is_comment(note)) {id:note.id,*:settings(note).params}]
+pub fn comments(st) => [for (note in m.scene(st).notes where ((m.is_comment(note)) ^ { false })) {id:note.id,*:settings(note).params}]
 pub fn remove_comment(st,id) any^ {
     let scene = m.scene(st);
-    m.commit_doc(st,m.scene_doc(st,c.objects(scene.source),{},[for (child in content(scene.source)
-        where not contains(c.objects(scene.source),child) and not (m.is_comment(child) and child.id == id)) child]))^
+    m.commit_doc(st,m.scene_doc(st,c.objects(scene.source),{},[for (child in ((content(scene.source)) ^ { [] })
+        where ((not contains(c.objects(scene.source),child) and not (m.is_comment(child) and child.id == id)) ^ { false })) child]))^
 }
 fn comment(st,p,target) any^ {
     if (trim(p.author) == "" or trim(p.text) == "") raise error("Slides: enter a comment and author")
     else {
         let ids = [for (entry in comments(st)) entry.id]
         let id = if (target != "") target else m.free_id(ids,"comment-")
-        let existing = [for (child in content(m.scene(st).source) where not contains(c.objects(m.scene(st).source),child) and
-            not (m.is_comment(child) and child.id == target)) child];
+        let existing = [for (child in ((content(m.scene(st).source)) ^ { [] }) where ((not contains(c.objects(m.scene(st).source),child) and
+            not (m.is_comment(child) and child.id == target)) ^ { false })) child];
         {*:m.commit_doc(st,m.scene_doc(st,c.objects(m.scene(st).source),{},[*existing,note(st,p,id)]))^,serial:st.serial+1}
     }
 }
@@ -209,15 +209,15 @@ fn fields(st,kind,p) any^ {
     let classes = if (kind == "number") ["slides-page-number"] else ["slides-footer-header","slides-footer-footer","slides-footer-date","slides-page-number"]
     let changed = [for (i,scene in st.plan.slides) {
         let local = {*:st,index:i}
-        let objects = [for (obj in scene.objects where not contains(classes,obj.source.class)) obj.source]
+        let objects = [for (obj in scene.objects where ((not contains(classes,obj.source.class)) ^ { false })) obj.source]
         let added = [
             *(if (kind == "footer" and p.header != "") [field_object(local,kind,p,"header",p.header,st.plan.width*0.0625,st.plan.width*0.875)] else []),
             *(if (kind == "footer" and p.footer != "") [field_object(local,kind,p,"footer",p.footer,st.plan.width*0.0625,st.plan.width*0.53)] else []),
             *(if (kind == "footer" and p.date_text != "") [field_object(local,kind,p,"date",p.date_text,st.plan.width*0.62,st.plan.width*0.23)] else []),
             *(if (kind == "number" or p.show_number) [field_object(local,kind,p,"number",string(i+1),st.plan.width*0.88,st.plan.width*0.06)] else [])
         ]
-        let removed = [for (obj in scene.objects where contains(classes,obj.source.class) and not any([for (item in added) item.id == obj.id])) obj.id]
-        let rest = [for (child in content(scene.source) where not contains(c.objects(scene.source),child))
+        let removed = [for (obj in scene.objects where ((contains(classes,obj.source.class) and not any([for (item in added) item.id == obj.id])) ^ { false })) obj.id]
+        let rest = [for (child in ((content(scene.source)) ^ { [] }) where ((not contains(c.objects(scene.source),child)) ^ { false }))
             (let next = m.prune(child,removed), *if (next == null) [] else [next])];
         if (not p.all_slides and i != st.index) m.scenes(st.doc)[i]
         else <slide *:map(scene.source),master:false,*[*objects,*added,*rest]>

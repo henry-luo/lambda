@@ -22,8 +22,10 @@ pn count_items(b: Box) int {
 }
 
 pn main() {
-    let full: Box = {items: [{k: 3}, null], main: {k: 7}, spare: {k: 9}, n: 2}
-    let bare: Box = {items: [], main: {k: 1}, spare: null, n: 0}
+    let _admitted_full_25: Box = {items: [{k: 3}, null], main: {k: 7}, spare: {k: 9}, n: 2}
+    let full: Box = _admitted_full_25^
+    let _admitted_bare_26: Box = {items: [], main: {k: 1}, spare: null, n: 0}
+    let bare: Box = _admitted_bare_26^
     print(read_required(full)); print(" ")
     print(read_optional(full)); print(" ")
     print(read_optional(bare)); print(" ")

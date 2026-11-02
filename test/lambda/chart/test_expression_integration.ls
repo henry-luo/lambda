@@ -3,9 +3,9 @@ import transform: lambda.chart.transform
 import vega: lambda.chart.vega
 import parse: lambda.chart.parse
 
-fn has_fill(node, fill) {
+fn has_fill(node, fill) any^ {
     if (not (node is element)) false
-    else node.fill == fill or len([for (child in content(node) where has_fill(child, fill)) true]) > 0
+    else node.fill == fill or len([for (child in ((content(node)) ^ { [] }) where ((has_fill(child, fill)) ^ { false })) true]) > 0
 }
 let data = [{label: "a", value: 2}, {label: "b", value: 4}, {label: "c", value: 6}];
 let vl = {data: {values: data}, mark: "point", transform: [

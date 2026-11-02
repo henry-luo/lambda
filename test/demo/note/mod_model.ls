@@ -21,7 +21,7 @@ pub fn image_html(entry) any^ => html.inline_html([entry.node])
 
 pub let color_properties = {color:"color",highlight:"background-color"}
 pub let default_colors = {color:"#000000",highlight:"#fff09b"}
-pub fn clipboard_command(id) => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
+pub fn clipboard_command(id) any^ => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
 pub fn color_value(editor,kind) any^ => inline_format.char_value(editor,color_properties[kind],default_colors[kind])
 pub fn format_color(editor,kind,value) map^ {
     let chosen = lower(trim(string(value)))
@@ -41,15 +41,15 @@ pub fn note(id,folder,doc,updated,pinned=false) =>
 pub fn current(st) => [for (n in st.notes where n.id==st.selected) n][0]
 pub fn lines(n) => [for (block in n.editor.doc.content) trim(doc_text(block))]
 pub fn title(n) => lines(n)[0] or "New Note"
-pub fn preview(n) any^ => slice(join([for (s in drop(lines(n),1) where s!="") s]," "),0,130) or "No additional text"
+pub fn preview(n) any^ => slice(join([for (s in ((drop(lines(n),1)) ^ { [] }) where s!="") s]," "),0,130) or "No additional text"
 pub fn folder_name(st,id) => [for (f in st.folders where f.id==id) f.name][0] or "Notes"
 pub fn scope_name(st) any^ => if (st.folder=="all") "All Notes" else if (st.folder=="trash") "Recently Deleted" else folder_name(st,st.folder)
 pub fn in_scope(n,folder) => if (folder=="trash") n.deleted else not n.deleted and (folder=="all" or n.folder==folder)
-pub fn count(st,folder) => len([for (n in st.notes where in_scope(n,folder)) n])
+pub fn count(st,folder) => len([for (n in st.notes where ((in_scope(n,folder)) ^ { false })) n])
 pub fn visible(st) {
     let query = lower(trim(st.query))
-    let rows = [for (n in st.notes where in_scope(n,st.folder) and
-        (query=="" or contains(lower(join(lines(n)," ")),query))) n];
+    let rows = [for (n in st.notes where ((in_scope(n,st.folder) and
+        (query=="" or contains(lower(join(lines(n)," ")),query))) ^ { false })) n];
     let ordered = sort(rows,{dir:if (st.sort=="title") 'asc' else 'desc',
         by:(n)=>if (st.sort=="title") lower(title(n)) else n.updated});
     [*[for (n in ordered where n.pinned) n],*[for (n in ordered where not n.pinned) n]]
@@ -100,7 +100,7 @@ pub fn navigate(st,delta) any^ {
 pub fn selection_path(editor) any^ => inline_format.selection_path(editor.selection)
 pub fn task_path(editor,path=null) any^ => commands.ancestor_tag(editor.doc,path or selection_path(editor),'li')
 pub fn tasks(doc,path=[]) => [for (entry in descendants(doc,path),let n=entry.node
-    where is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
+    where ((is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) ^ { false })) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
 pub fn toggle_task(editor,path=null) any^ {
     let target = path or task_path(editor)
     let item = node_at(editor.doc,target);
@@ -115,7 +115,7 @@ pub fn checklist(editor) any^ {
         let selected = {*:editor,doc:tx.doc_after,selection:tx.sel_after}
         let path = commands.ancestor_tag(selected.doc,selection_path(selected),'ul')
         let items = node_at(selected.doc,path)
-        let remove = all([for (item in items.content) attrs_get(item.attrs,'checked')!=null]);
+        let remove = all([for (item in ((items.content) ^ { [] })) attrs_get(item.attrs,'checked')!=null]);
         // wrapping and task attributes form one undoable command.
         if (path==null) editor else edit_apply(editor,checklist_steps(tx,items,path,0,if (remove) null else false))
     }

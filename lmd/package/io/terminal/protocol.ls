@@ -189,10 +189,10 @@ pub pn feed(decoder, bytes) {
     let stepped = feed_byte(current, byte)
     current = stepped.decoder
     for (event in ((((((stepped.events) ^ { [] })))))) {
-      if (((was_paste and event.kind == "text")^)^) {
+      if ((was_paste and event.kind == "text")^) {
         current = paste_append(current, event.text)
         // Chunk a long paste to bound retained decoder state and undo units.
-        if (((current.paste_count >= 4096)^)^) {
+        if ((current.paste_count >= 4096)^) {
           let flushed = paste_finish(current)
           current = flushed.decoder
           for (part in ((((((flushed.events) ^ { [] })))))) { push(events, part) }

@@ -206,7 +206,7 @@ fn node(n, c) any^ {
             group(util.content_items(n[c.style]), c)^ else node(n[c.style], c)^
         case 'overunder_command': overunder(n, c)^
         case 'extended_arrow': arrow(n, c)^
-        case 'image_command': graphics.render(n, c.base_uri, (raw) => dimension(raw, c))^
+        case 'image_command': graphics.render(n, c.base_uri, (raw) any^ => dimension(raw, c))^
         case 'environment': matrix(n, c)^
         case 'matrix_command': matrix(n, c)^
         case 'phantom_command': phantom(n, c)^
@@ -505,7 +505,7 @@ fn fraction(n, c) any^ {
 fn center_axis(b, c) any^ => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
 
 // TeX make_left_right uses delimiterfactor=901 and delimitershortfall=5pt.
-fn delimiter_target(extent, c) => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
+fn delimiter_target(extent, c) any^ => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
 
 fn tex_delimiter(recipe, target, c, atom) any^ {
     let size = if (c.style == "scriptscript") 2 else if (c.style == "script") 1 else 0
@@ -911,7 +911,7 @@ fn equation_tag(n, c) any^ {
     if (n.starred) body else bx.row([character("(",c,"mord")^, body, character(")",c,"mord")^])
 }
 
-fn modulo_items(n, c) {
+fn modulo_items(n, c) any^ {
     let key = command_name(string(n.cmd))
     let body = if (n.body is element and name(n.body) == 'group') util.content_items(n.body)
         else if (n.body == null) [] else [n.body]
@@ -981,7 +981,7 @@ fn matrix(n, c) any^ {
     // AMS starts each right-hand cell with an empty ordinary atom for relation glue.
     let cells = [for (row in rows) [for (col, cell in row.cells)
         group([*if (aligned and col % 2 == 1) [<group>] else [],
-            *[for (item in cell.items where not (item is element and name(item) == 'array_rule')) item]], child)^]]
+            *[for (item in cell.items where ((not (item is element and name(item) == 'array_rule')) ^ { false })) item]], child)^]]
     let count = max([0, *[for (row in cells) len(row)]])
     let widths = [for (col in 0 to (count - 1)) max([0.0, *[for (row in cells) row[col].width or 0.0]])]
     // Array struts keep simple rows apart: 12pt baseline with 70/30 height/depth at 10pt.
@@ -991,7 +991,7 @@ fn matrix(n, c) any^ {
     let gap_x = font.UNITS * scale(child)
     let gaps = [for (col in 0 to (count - 1)) if (col == 0) 0.0
         else if (aligned) (if (col % 2 == 1 or key == "alignedat" or key == "alignat") 0.0 else 2.0 * gap_x) else gap_x]
-    let declared = [for (ch in split(string(n.columns or ""), "") where contains("lcr", ch)) ch]
+    let declared = [for (ch in ((split(string(n.columns or ""), "")) ^ { [] }) where ((contains("lcr", ch)) ^ { false })) ch]
     let aligns = [for (col in 0 to (count - 1)) declared[col] or n.alignment or
         (if (aligned) (if (col % 2 == 0) "r" else "l")
          else if (contains(["cases", "rcases", "dcases", "lgathered"], shape)) "l"
@@ -1020,7 +1020,7 @@ fn matrix(n, c) any^ {
         <path d:"M" ++ string(boundary - (if (col > 0 and col < count) gaps[col] / 2.0 else 0.0) + repeated) ++ " " ++ string(top) ++ " v" ++ string(total),
             fill:"none", stroke:"currentColor", 'stroke-width':thickness, 'stroke-dasharray':if (ch == ":") "150 100" else "none">)]
     let horizontals = [for (r,row in rows, i,mark in [
-        *[for (cell in row.cells, item in cell.items where item is element and name(item) == 'array_rule') {item:item,trailing:false}],
+        *[for (cell in row.cells, item in cell.items where ((item is element and name(item) == 'array_rule') ^ { false })) {item:item,trailing:false}],
         *[for (item in row.trailing_rules) {item:item,trailing:true}]])
         <path d:"M0 " ++ string(top + sum(slice(heights,0,r)) + sum(slice(depths,0,r)) + float(r) * gap_y +
             sum(slice(extra_gaps,0,r)) + (if (mark.trailing) heights[r] + depths[r] else 0.0) + float(i) * 3.0 * thickness) ++ " H" ++ string(width),
@@ -1106,7 +1106,7 @@ fn space(n, c) {
     {*:bx.empty(if (em != null) em * (if (contains(["quad", "qquad", "enspace"], key)) font.UNITS * text_scale(c) else math_quad(c)) else dimension(string(n.value or "0em"), c)), type: "skip"}
 }
 
-fn dimension(raw, c) {
+fn dimension(raw, c) any^ {
     let dim = util.dimension_from_string(raw)
     let units = match dim.unit {
         case "em": font.UNITS * text_scale(c)

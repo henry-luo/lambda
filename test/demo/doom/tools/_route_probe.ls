@@ -30,4 +30,4 @@ fn move_segment(acc, segment) {
     {game: result, rows: [*acc.rows, row]}
 }
 let result = reduce([{game: REQUEST.initial or INITIAL, rows: []}, *ROUTE], move_segment);
-format(result, 'json')
+format(result, 'json')^

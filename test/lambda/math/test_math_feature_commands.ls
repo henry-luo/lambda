@@ -17,8 +17,8 @@ let annotations = [for (cmd in ["overbracket", "underbracket", "overbrace", "und
     let options = {display:display},
     let base = box(source, options),
     let result = box(source ++ suffix, options),
-    let label = [for (g in svg.geometry(result.element) where g.text == "n") g][0],
-    let side = [for (g in svg.geometry(box(source ++ "\\nolimits" ++ suffix, options).element) where g.text == "n") g][0],
+    let label = [for (g in ((svg.geometry(result.element)) ^ { [] }) where g.text == "n") g][0],
+    let side = [for (g in ((svg.geometry(box(source ++ "\\nolimits" ++ suffix, options).element)) ^ { [] }) where g.text == "n") g][0],
     let script_label = box("\\scriptstyle n", options),
     {centered:abs(label.x + script_label.width * 500.0 - result.width * 500.0) < 0.01,
         clear:if (starts_with(cmd, "over")) label.y + script_label.depth * 1000.0 < 0.0 - base.height * 1000.0
@@ -26,7 +26,7 @@ let annotations = [for (cmd in ["overbracket", "underbracket", "overbrace", "und
         side:side.x >= base.width * 1000.0 - 0.01})]
 let checks = [
     {name:"array infix fraction stays in its cell", ok:paint(arrays) == "ab123xy" and len(svg.nodes(box(arrays).element,'rect')) == 1},
-    {name:"array solid and dashed rules survive", ok:len(paths(arrays)) == 6 and len([for (p in paths(arrays) where p["stroke-dasharray"] == "150 100") p]) == 2},
+    {name:"array solid and dashed rules survive", ok:len(paths(arrays)) == 6 and len([for (p in ((paths(arrays)) ^ { [] }) where p["stroke-dasharray"] == "150 100") p]) == 2},
     {name:"substack creates two rows without literal commands", ok:paint("\\sum_{\\substack{a<b\\\\c<d}}") == "∑a<bc<d"},
     {name:"subarray consumes its column specification", ok:paint("\\begin{subarray}{c}a\\\\b\\end{subarray}") == "ab"},
     {name:"bracket annotations are painted", ok:paint("\\overbracket{a+b}^{\\text{note}}=\\underbracket{x+y}_{\\text{label}}") == "a+bnote=x+ylabel"},
@@ -43,7 +43,7 @@ let checks = [
     {name:"equation tag retains embedded math", ok:paint("\\tag{$+$hi}x") == "(+hi)x"},
     {name:"nonprinting controls do not become text", ok:paint("a\\nonumber b\\allowbreak c\\nobreak d\\newline e") == "abcde"},
     {name:"row breaks outside alignments do not paint backslashes", ok:paint(breaks) == "abc"},
-    {name:"row breaks use the existing separator AST", ok:len([for (n in content(ast(breaks)) where n == 'row_sep') n]) == 3},
+    {name:"row breaks use the existing separator AST", ok:len([for (n in ((content(ast(breaks))) ^ { [] }) where n == 'row_sep') n]) == 3},
     {name:"row breaks survive math serialization without painted backslashes", ok:
         paint(format(ast(breaks),{type:"math",flavor:"latex"})^) == "abc"},
     {name:"literal backslash remains a math symbol", ok:paint("a\\backslash b") == "a∖b"},
@@ -54,7 +54,7 @@ let checks = [
     // CMSY's single/double bars use the corresponding KaTeX_Main Unicode encodings.
     {name:"double-bar escape stays distinct from a single bar", ok:paint("\\left\\|x\\right\\|") == "∥x∥" and paint("\\left|x\\right|") == "∣x∣"},
     {name:"missing symbol aliases resolve", ok:paint("\\mapsfrom\\pounds\\textdollar\\intop") == "↤£$∫"},
-    {name:"colorbox preserves border and background", ok:len([for (r in svg.nodes(box("\\fcolorbox{blue}{red}{C}").element,'rect') where r.fill == "red" and r.stroke == "blue") r]) == 1},
+    {name:"colorbox preserves border and background", ok:len([for (r in ((svg.nodes(box("\\fcolorbox{blue}{red}{C}").element,'rect')) ^ { [] }) where r.fill == "red" and r.stroke == "blue") r]) == 1},
     {name:"bottom smash keeps height", ok:box("\\smash[b]{y}").height == box("y").height and box("\\smash[b]{y}").depth == 0.0},
     {name:"genfrac survives roundtrip", ok:paint(format(ast("\\genfrac{}{}{2pt}{0}{a}{b}"),{type:"math",flavor:"latex"})^) == "ab"},
     {name:"diagram survives roundtrip", ok:paint(format(ast(cd),{type:"math",flavor:"latex"})^) == paint(cd)},

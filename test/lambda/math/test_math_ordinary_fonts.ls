@@ -88,7 +88,7 @@ let checks = [
         default_sum.path == bundled_facts.glyphs[0].path and default_sum.font_family == "KaTeX_Size1" and
         bundled_facts.glyphs[1].font_family == "KaTeX_AMS"},
     {name: "default specialist alphabets keep their faces", ok: len(unique([for (g in default_styles) g.font_family])) == 4 and
-        len([for (g in default_styles where g.has_math == true or len(g.path) == 0) g]) == 0},
+        len([for (g in default_styles where ((g.has_math == true or len(g.path) == 0) ^ { false })) g]) == 0},
     {name: "default structures render without a MATH font", ok: len([for (box in default_rendered where box is error or
         box.width <= 0 or box.width - box.width != 0 or box.height - box.height != 0) box]) == 0},
     {name: "parsed named symbols paint measured glyphs", ok: len([for (result in symbol_results where result.ok != true) result]) == 0},

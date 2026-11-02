@@ -286,10 +286,10 @@ pub fn render_picture(picture, custom_colors = []) any^ {
         else "font-family:sans-serif;font-style:italic;"
     let pin_distance = opts.dimension_px(opts.value(picture,
         "pin distance", "1cm"))^
-    let nodes = [for (child in picture where child is element and
-        string(name(child)) == "node") child]
-    let other = [for (child in picture where child is element and
-        string(name(child)) != "node" and string(name(child)) != "option") child]
+    let nodes = [for (child in picture where ((child is element and
+        string(name(child)) == "node") ^ { false })) child]
+    let other = [for (child in picture where ((child is element and
+        string(name(child)) != "node" and string(name(child)) != "option") ^ { false })) child]
     let valid_nodes = if (len(nodes) == 0 or len(other) > 0)
         raise error("tikzpeople picture needs only named nodes") else true
     let entries = [for (node in nodes) record(node, custom_colors)^]

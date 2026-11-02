@@ -37,7 +37,7 @@ fn substitute_arguments(source, values, at) any^ {
 }
 
 fn handler_of(key) any^ {
-    let found = [for (suffix in tikz_opts.STYLE_HANDLERS where ends_with(key, suffix)) suffix]
+    let found = [for (suffix in tikz_opts.STYLE_HANDLERS where ((ends_with(key, suffix)) ^ { false })) suffix]
     if (len(found) == 0) null else found[0]
 }
 
@@ -46,7 +46,7 @@ fn handler_of(key) any^ {
 fn declaration_styles(raw) any^ {
     let values = util.parse_kv_options(util.strip_tex_comments(raw))
     let invalid = [for (key, value at values
-        where handler_of(string(key)) == null) string(key)]
+        where ((handler_of(string(key)) == null) ^ { false })) string(key)]
     if (len(invalid) > 0)
         raise error("unsupported TikZ style declaration: " ++ invalid[0])
     else [for (key, value at values)
@@ -88,7 +88,7 @@ fn expand_style_part(raw, styles, depth) any^ {
 }
 
 fn expand_style_options(raw, styles, depth) any^ {
-    util.str_join([for (part in util.split_top_level(raw, ","))
+    util.str_join([for (part in ((util.split_top_level(raw, ",")) ^ { [] }))
         expand_style_part(part, styles, depth)^], ",")
 }
 
@@ -157,7 +157,7 @@ fn render_expanded(island, definitions, declarations,
             definitions, 0, 0, "")^
         let styles = collect_styles(declarations)^
         let source = expand_style_brackets(expanded,
-            [for (style in styles where textual(style, styles)) style], 0, "")^
+            [for (style in styles where ((textual(style, styles)) ^ { false })) style], 0, "")^
         let preamble = parser_preamble(declarations, styles)^
         let math_program = expand_math_declarations(math_declarations,
             definitions)^

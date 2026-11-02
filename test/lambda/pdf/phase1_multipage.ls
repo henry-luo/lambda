@@ -11,7 +11,7 @@ pn main() {
     let n = pdf.pdf_page_count(doc)
     var pages = []
     var i = 0
-    while (i < n) {
+    while ((i < n)^) {
         let xml = format(pdf.pdf_to_svg(doc, i, null), 'xml')
         pages = pages ++ [{
             has_svg: contains(xml, "<svg "),

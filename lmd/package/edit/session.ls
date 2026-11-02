@@ -93,9 +93,7 @@ pub pn save(session, doc, target, overwrite) {
   if ((conflict == 'exists')^) {
     return outcome(false, session, basename(target) ++ " already exists.", 'exists')
   }
-  // `output` is a procedure: its failure is an error value to test, since a
-  // braced handler on a pn call is a statement and yields no binding value;
-  // the error-admitting binding acknowledges the raised channel (S7.5.1)
+  // S7.5.1v6: retain output's ordinary outcome to report a failed save.
   let written: any^ = output(text, target, {format: 'text', atomic: true})
   if (written is error) {
     return outcome(false, session, "Not saved: could not write " ++ target ++ ".", null)

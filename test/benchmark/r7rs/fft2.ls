@@ -10,20 +10,22 @@ pn four1(data: float[], n: int) any {
     var i: int = 0
     var j: int = 0
     while (i < n) {
-        if ((i < j)^) ((({
+        if ((i < j)^) {
             var temp = data[i]
             data[i] = data[j]
             data[j] = temp
             temp = data[i + 1]
             data[i + 1] = ((data[j + 1]))
             data[j + 1] = temp
-        })^)^)^
+        }
         // C14c: `div` keeps truncation semantics but takes its result domain
         // from `/`, so int div int is a float. An int binding needs int().
-        var m: int = int(n div 2)
+        let _admitted_m_23: int = int(n div 2)
+        var m: int = _admitted_m_23^
         while ((m >= 2 and j >= m)^) {
             j = j - m
-            m = int(m div 2)^
+            let _admitted_m_26: int = int(m div 2)^
+            m = _admitted_m_26^
         }
         j = j + m
         i = i + 2

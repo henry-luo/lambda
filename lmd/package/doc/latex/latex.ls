@@ -56,13 +56,13 @@ pub fn parse_file(file_path) {
 }
 
 // parse and render a LaTeX file to HTML string
-pub fn render_file_to_html(file_path) {
+pub fn render_file_to_html(file_path) any^ {
     let ast = parse_file(file_path)
     render_to_html(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string to HTML string
-pub fn render_string_to_html(latex_source) {
+pub fn render_string_to_html(latex_source) any^ {
     let ast = parse_source(latex_source, null)
     render_to_html(ast, null)
 }
@@ -168,8 +168,8 @@ pub fn render_result(ast, options) {
     }
     // an aliased style is supported through CSL, so its unsupported-style report is dropped
     let package_issues = if (style_alias == null) loaded.diagnostics
-        else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
-            issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
+        else [for (issue in loaded.diagnostics where ((not (issue.code == "unsupported-bib-style" and
+            issue.item == style_alias.biblatex_style)) ^ { false })) issue] ++ style_alias.diagnostics
     let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
         registry.font_issues(loaded.packages) ++
@@ -239,19 +239,19 @@ fn resource_base(options) any^ {
 
 fn output_diagnostics(node) {
     if (node is array or node is list)
-        [for (child in node, issue in output_diagnostics(child)) issue]
+        [for (child in node, issue in ((output_diagnostics(child)) ^ { [] })) issue]
     else if (node == null or not (node is element)) []
     else {
         let message = node["data-latex-error"]
         let own = if (message != null)
             [util.diagnostic("unsupported-output", node["data-latex-package"], null,
               message, node["data-latex-offset"])] else []
-        own ++ [for (child in node, issue in output_diagnostics(child)) issue]
+        own ++ [for (child in node, issue in ((output_diagnostics(child)) ^ { [] })) issue]
     }
 }
 
 // fontspec's features for the sans and mono families, on the elements set in them
-fn family_features(info) {
+fn family_features(info) any^ {
     let sans = dispatcher.role_features(info, "sans")
     let mono = dispatcher.role_features(info, "mono");
     (if (sans == "") "" else ".latex-document .latex-sf,.latex-document .latex-sffamily{" ++ sans ++ "}\n") ++
@@ -285,7 +285,7 @@ fn declared_length(node, key) any^ {
     else declared_length_child(node, key, 0)
 }
 
-fn declared_length_child(node, key, index) {
+fn declared_length_child(node, key, index) any^ {
     if (index >= len(node)) null
     else {
         let value = declared_length(node[index], key)
@@ -350,13 +350,13 @@ pub fn render_string(latex_source) {
 // Post-processing — append footnotes
 // ============================================================
 
-fn postprocess(html, info) {
+fn postprocess(html, info) any^ {
     let fn_section = render_footnotes_section(info)
     if (fn_section != null) wrap_with_footnotes(html, fn_section) else html
 }
 
 // the first \boldmath or \mathversion{bold}
-fn bold_math_request(ast) {
+fn bold_math_request(ast) any^ {
     let boldmath = util.find_descendant(ast, "boldmath")
     let version = util.find_descendant(ast, "mathversion")
     if (boldmath != null) boldmath

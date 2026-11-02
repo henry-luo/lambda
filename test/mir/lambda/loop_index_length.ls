@@ -4,7 +4,8 @@ pn sum(a: float[]) float^ {
     var i: int = 0
     var total: float = 0.0
     while (i < len(a)) {
-        total = total + a[i]
+        let _admitted_total_7: float = total + a[i]
+        total = _admitted_total_7^
         i = i + 1
     }
     return total
@@ -31,7 +32,7 @@ pn early_write(a: float[]) float? {
     return seen
 }
 
-pn resized(a: float[]) float?^ {
+pn resized(a: float[]) float? {
     var i: int = 0
     var seen: float? = null
     while ((i < len(a))^) {

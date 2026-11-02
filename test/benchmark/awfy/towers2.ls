@@ -4,13 +4,15 @@
 type TState = {moves: int}
 
 pn push_disk(var piles: int[], var tops: int[], disk_size: int, pile: int) any {
-    let t: int = tops[pile]
+    let _admitted_t_7: int = tops[pile]
+    let t: int = _admitted_t_7^
     piles[pile * 14 + t] = disk_size
     tops[pile] = (t + 1)^
 }
 
-pn pop_disk_from(piles: int[], var tops: int[], pile: int) int {
-    let t: int = tops[pile] - 1
+pn pop_disk_from(piles: int[], var tops: int[], pile: int) int^ {
+    let _admitted_t_13: int = tops[pile] - 1
+    let t: int = _admitted_t_13^
     tops[pile] = t
     let disk_size = piles[pile * 14 + t]
     return disk_size

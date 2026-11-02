@@ -5,12 +5,12 @@
 // lowering could read the join's bits as the result.
 fn chk(v: int) { v * 2 }
 fn dyn(v) => v
-// a declared binding skips on it (S7.7.2); an unannotated one holds it
-fn decl_len(m: string | error) { let n: int = len(m); [n, "reached"] }
-fn decl_string(x: int | error) { let s: string = string(x); [s, "reached"] }
-fn decl_ord(m: string | error) { let o: int? = ord(m); [o, "reached"] }
-fn decl_index(m: string | error) { let i: int? = index_of(m, "b"); [i, "reached"] }
-fn decl_split(m: string | error) { let p: string[] = split(m, ","); [len(p), "reached"] }
+// S7.5.2v4/S7.7.2v2: both admitted and inferred bindings retain the outcome.
+fn decl_len(m: string | error) { let n: int^ = len(m); [n, "reached"] }
+fn decl_string(x: int | error) { let s: string^ = string(x); [s, "reached"] }
+fn decl_ord(m: string | error) { let o: int?^ = ord(m); [o, "reached"] }
+fn decl_index(m: string | error) { let i: int?^ = index_of(m, "b"); [i, "reached"] }
+fn decl_split(m: string | error) { let p: string[]^ = split(m, ","); [len(p), "reached"] }
 fn free_count(m: string | error) { let c = count(m); [c, "reached"] }
 fn free_symbol(m: string | error) { let y = symbol(m); [y, "reached"] }
 fn free_normalize(m: string | error) { let z = normalize(m); [z, "reached"] }
@@ -21,8 +21,8 @@ fn defect_arg(s) { let n = len(string(chk(dyn(s)))); [n, "reached"] }
 fn handled(m: string | error) { len(m) ^ { 0 - 1 } }
 fn msg(m: string | error) any^ { let v = len(m); if (v is error) v.message else v }
 pn assigned(m: string | error) {
-    var n: int = 0
-    n = len(m)^;
+    var n: int^ = 0
+    n = len(m);
     [n, "reached"]
 }
 pn main() {

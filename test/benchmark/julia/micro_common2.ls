@@ -156,7 +156,7 @@ pn iteration_pi_sum() int[]^ {
     while (i < 500) { digest = digest + values[i] * float(i + 1); i = i + 1 }
     return [int(floor(values[0] * 1e12)), int(floor(values[499] * 1e12)), int(floor(digest * 1e6)), 5124750]
 }
-pn formatted_output() int[] {
+pn formatted_output() int[]^ {
     var size: int = 0
     var digest: int = 0
     var writes: int = 0
@@ -173,7 +173,7 @@ pn formatted_output() int[] {
         if (i % 256 == 0 or i == 100000) {
             // retain the byte count as data; a sink error must fail the output oracle.
             let written: any | error = output(buffer, sink)
-            if (type(written) == error or written != len(buffer)) { return [-1, digest, writes, i] }
+            if ((type(written) == error or written != len(buffer))^) { return [-1, digest, writes, i] }
             writes = writes + 1
             buffer = ""
         }

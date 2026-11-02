@@ -2,7 +2,7 @@
 // needs no aggregate identity; an escaping record still materializes.
 type Pair = {left: int, right: bool}
 
-fn project(x: int) int^ {
+fn project(x: int) int {
     let pair: Pair = {left: x, right: true}
     if (pair.right) pair.left else 0
 }

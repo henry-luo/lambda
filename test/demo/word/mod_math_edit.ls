@@ -9,7 +9,7 @@ import equation: .mod_equation
 pub fn active(st) any^ => st.math!=null and st.math.path==image.selected(st.editor).path and
     st.math.revision==st.editor.model_revision
 // a caret session on the selected equation; point is the click as fractions of the image box.
-pub fn start(editor,point=null,caret=null) {
+pub fn start(editor,point=null,caret=null) any^ {
     let selected = image.selected(editor)
     let p = equation.settings(selected.node)
     let parsed = if (p==null or p.linear) null else (field.parse_field(p.source) ^ { null })
@@ -21,12 +21,12 @@ pub fn start(editor,point=null,caret=null) {
 }
 pub fn source(row) any^ => field.source(row)
 // the caret line as percentages of the equation box, which the object frame overlays.
-pub fn caret(st) {
+pub fn caret(st) any^ {
     let g = if (active(st)) field.caret_box(st.math.geometry.slots,st.math.caret) else null
     let box = st.math.geometry;
     if (g==null) null else {left:100*g.x/box.width,top:100*g.top/box.height,height:100*(g.bottom-g.top)/box.height}
 }
-fn step(m,dir) {
+fn step(m,dir) any^ {
     let next = field.move(m.row,m.caret,dir);
     if (next==null) {kind:"leave",after:dir=="right"} else {kind:"move",caret:next}
 }

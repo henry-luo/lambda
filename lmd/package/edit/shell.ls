@@ -113,7 +113,7 @@ let unit_families = ["delete", "drag_delete", "cut", "copy", "history_undo", "hi
 // The view-only part a model path is or lies in (the outermost), or null.
 fn view_only_part(session, doc, path) any^ {
   let parts = if (len(path) == 0) []
-              else [for (i in 1 to len(path) where member(session.format.view_only_tags, node_tag_at(doc, take(path, i))))
+              else [for (i in 1 to len(path) where ((member(session.format.view_only_tags, node_tag_at(doc, take(path, i)))) ^ { false }))
                       take(path, i)]
   if (len(parts) == 0) null else parts[0]
 }
@@ -144,7 +144,7 @@ let view_only_status = "This part is view-only and is saved as written; press De
 
 fn primary_key(evt) => evt.metaKey == true or evt.ctrlKey == true
 
-fn key_is(evt, letter) => lower(string(evt.key)) == letter
+fn key_is(evt, letter) any^ => lower(string(evt.key)) == letter
 
 // ---------------------------------------------------------------------------
 // Drawing input: drawing.ls owns the model edits; these read the rendered
@@ -171,7 +171,7 @@ fn element_attr(node, key) {
 
 // The top-level object a pressed node belongs to ({index, node}), or null
 // for the canvas background.
-fn object_hit(node) {
+fn object_hit(node) any^ {
   if (node == null) null else {
     let index = element_attr(node, "data-edit-path")
     if (index != null) {index: int(index), node: node}
@@ -194,7 +194,7 @@ fn apply_edit(editor, tx) any^ => if (tx == null) editor else edit_apply(editor,
 
 fn shifted(b, dx, dy) any^ => if (b == null) null else dr.box(b.x + dx, b.y + dy, b.w, b.h)
 
-fn style_dialog(ds, doc) {
+fn style_dialog(ds, doc) any^ {
   let first = if (len(ds.picked) > 0) doc.content[ds.picked[0].index] else null
   if (first == null) {kind: 'style', fill: ds.style.fill, stroke: ds.style.stroke, width: ds.style.width}
   else {kind: 'style', fill: dr.paint_value(first, "fill"), stroke: dr.paint_value(first, "stroke"),
@@ -202,7 +202,7 @@ fn style_dialog(ds, doc) {
 }
 
 // The view fits the drawing into the main area.
-fn fit_zoom(node, doc) {
+fn fit_zoom(node, doc) any^ {
   let main = dom.query_selector(doc_root(node), ".edit-main")
   let r = if (main == null) null else dom.bounding_box(main)
   let vb = dr.view_box(doc)
@@ -248,15 +248,15 @@ on editaction(evt) {
   }
   editor = mounted(editor, evt.target, session.format)
   // A command the format cannot write is declined, not applied and lost later.
-  if (member(session.format.unsupported_input_types, evt.input_type)) {
+  if (member(session.format.unsupported_input_types, evt.input_type)^) {
     status = "Not available in " ++ session.format.name ++ " documents."
     return edit_result.decline(true, false, "unsupported", 0)
   }
   let target = edit_action_selection(editor, evt)
-  if (writes_view_only(session, editor.doc, target, evt.input_type)) {
+  if (writes_view_only(session, editor.doc, target, evt.input_type)^) {
     status = view_only_status
     // The status redraw replaces the caret's DOM node even though no edit ran.
-    controller.restore(editor)
+    controller.restore(editor)^
     return edit_result.decline(true, false, "view-only", 0)
   }
   // The caret decides (a deletion's target range runs past the part). The
@@ -267,7 +267,7 @@ on editaction(evt) {
                 if (session.format.surface == 'rich_text') session.format.schema_preset else null)
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
-  if (not (run.result.failure is null)) { status = "Could not apply " ++ evt.input_type ++ "." }
+  if ((not (run.result.failure is null))^) { status = "Could not apply " ++ evt.input_type ++ "." }
   files.sync_window(evt.target, session, editor.doc)
   return run.result
 }
@@ -282,7 +282,7 @@ on edit_cmd(req) {
   editor = mounted(editor, req.node, session.format)
   let cmd = req.cmd
   if (cmd == "view_source") {
-    emit("edit_switch", source_view(session, editor))
+    emit("edit_switch", source_view(session, editor)^)
     return
   }
   if (cmd == "save") {
@@ -296,7 +296,7 @@ on edit_cmd(req) {
   }
   else if (is_drawing(session)) {
     let picked = dr.picked_indices(ds)
-    if (starts_with(cmd, "tool_")) { ds = {*: ds, tool: symbol(slice(cmd, 5, len(cmd))), gesture: null} }
+    if (starts_with(cmd, "tool_")^) { ds = {*: ds, tool: symbol(slice(cmd, 5, len(cmd))), gesture: null} }
     else if (cmd == "style") { dialog = style_dialog(ds, editor.doc) }
     else if (cmd == "undo" or cmd == "redo") {
       editor = run_request(editor, if (cmd == "undo") "historyUndo" else "historyRedo", {}).editor
@@ -311,11 +311,11 @@ on edit_cmd(req) {
       let copies = dr.duplicate_tx(editor.doc, picked)
       editor = apply_edit(editor, copies.tx)
       let boxes = [for (q in ds.picked) shifted(q.box, 10.0, 10.0)]
-      ds = {*: ds, picked: [for (j, pick of copies.picked) {index: pick, box: boxes[j]}]}
+      ds = ({*: ds, picked: [for (j, pick of ((copies.picked) ^ { [] })) {index: pick, box: boxes[j]}]})^
     }
     else if ((cmd == "front" or cmd == "back") and len(picked) == 1) {
       let moved = dr.order_tx(editor.doc, picked[0], cmd == "front")
-      if (moved != null) {
+      if ((moved != null)^) {
         editor = apply_edit(editor, moved.tx)
         ds = {*: ds, picked: [{*: ds.picked[0], index: moved.index}]}
       }
@@ -337,7 +337,7 @@ on edit_cmd(req) {
                        else item.input_type
       let run = run_request(editor, input_type, item.payload)
       editor = run.editor
-      if (not (run.result.failure is null)) { status = "Could not apply " ++ item.title ++ "." }
+      if ((not (run.result.failure is null))^) { status = "Could not apply " ++ item.title ++ "." }
       else { status = "" }
       files.sync_window(req.node, session, editor.doc)
     }
@@ -350,12 +350,12 @@ on edit_dialog(req) {
   // the file dialogs' actions are shared with the source surface (files.ls)
   let filed = files.dialog_action(action, req.node,
     {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})
-  if (filed.handled) {
+  if (filed.handled^) {
     session = filed.session
     status = filed.status
     dialog = filed.dialog
     after_save = filed.after_save
-    if (filed.reloaded != null) {
+    if ((filed.reloaded != null)^) {
       editor = controller.replace(editor,edit_open(filed.reloaded, session.format.schema, null))
       ds = {*: ds, picked: [], gesture: null}
     }
@@ -365,9 +365,9 @@ on edit_dialog(req) {
                    ["stroke", trim(files.field_value(req.node, "edit-dialog-stroke"))],
                    ["stroke-width", trim(files.field_value(req.node, "edit-dialog-width"))]]
     dialog = null
-    if (len(ds.picked) > 0) {
+    if ((len(ds.picked) > 0)^) {
       editor = apply_edit(editor, dr.paint_tx(editor.doc, dr.picked_indices(ds), changes))
-      files.sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)^
     }
     else {
       // with nothing picked the dialog sets the paint of new shapes
@@ -380,14 +380,14 @@ on edit_dialog(req) {
     let words = trim(files.field_value(req.node, "edit-dialog-text"))
     let target = dialog
     dialog = null
-    if (words != "" and target.index != null) {
+    if ((words != "" and target.index != null)^) {
       editor = apply_edit(editor, dr.retext_tx(editor.doc, target.index, words))
-      files.sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)^
     }
     else if (words != "") {
       editor = apply_edit(editor, dr.insert_tx(editor.doc, dr.new_text(editor.doc, target.point, words, ds.style)))
       ds = {*: ds, tool: 'select', picked: [{index: len(editor.doc.content) - 1, box: null}]}
-      files.sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)^
     }
   }
   else if (action == "link_ok") {
@@ -397,7 +397,7 @@ on edit_dialog(req) {
       let run = run_request(editor, "insertLink", {href: href, title: "", label: href})
       editor = run.editor
       edited = true
-      files.sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)^
     }
   }
   else if (action == "image_ok") {
@@ -408,38 +408,38 @@ on edit_dialog(req) {
       let run = run_request(editor, "insertImage", {src: src, alt: alt})
       editor = run.editor
       edited = true
-      files.sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)^
     }
   }
   if (dialog == null) {
-    files.focus_surface(req.node)
+    files.focus_surface(req.node)^
     // an insert completed through the surface already; otherwise put the
     // caret back where the model has it (proposal §5 selection bookmark)
     if (not edited) { controller.restore(editor) }
   }
 }
 on keydown(evt) {
-  if (primary_key(evt) and key_is(evt, "s")) {
+  if ((primary_key(evt) and key_is(evt, "s"))^) {
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
     else {
       let saved = files.save_now(session, editor.doc, evt.target)
       session = saved.session
       status = saved.status
-      if (saved.dialog != null) { dialog = saved.dialog }
+      if ((saved.dialog != null)^) { dialog = saved.dialog }
     }
     return 'prevent-default'
   }
-  if (evt.key == "Escape" and dialog != null) {
+  if ((evt.key == "Escape" and dialog != null)^) {
     dialog = null
     after_save = null
     return 'prevent-default'
   }
   // Cmd/Ctrl+/ switches to the source view (OQ7)
-  if (primary_key(evt) and evt.key == "/" and dialog == null) {
-    emit("edit_switch", source_view(session, editor))
+  if ((primary_key(evt) and evt.key == "/" and dialog == null)^) {
+    emit("edit_switch", source_view(session, editor)^)
     return 'prevent-default'
   }
-  if (not is_drawing(session) or dialog != null) { return 'pass' }
+  if ((not is_drawing(session) or dialog != null)^) { return 'pass' }
   let picked = dr.picked_indices(ds)
   let nudge = if (evt.shiftKey == true) 10.0 else 1.0
   let dx = if (evt.key == "ArrowLeft") 0.0 - nudge else if (evt.key == "ArrowRight") nudge else 0.0
@@ -454,74 +454,74 @@ on keydown(evt) {
     editor = apply_edit(editor, dr.delete_tx(editor.doc, picked))
     ds = {*: ds, picked: []}
   }
-  else if (primary_key(evt) and key_is(evt, "z")) {
+  else if ((primary_key(evt) and key_is(evt, "z"))^) {
     editor = run_request(editor, if (evt.shiftKey == true) "historyRedo" else "historyUndo", {}).editor
     ds = {*: ds, picked: [], gesture: null}
   }
-  else if (primary_key(evt) and key_is(evt, "d") and len(picked) > 0) {
+  else if ((primary_key(evt) and key_is(evt, "d") and len(picked) > 0)^) {
     let copies = dr.duplicate_tx(editor.doc, picked)
     editor = apply_edit(editor, copies.tx)
-    ds = {*: ds, picked: [for (j, pick of copies.picked) {index: pick, box: shifted(ds.picked[j].box, 10.0, 10.0)}]}
+    ds = ({*: ds, picked: [for (j, pick of ((copies.picked) ^ { [] })) {index: pick, box: shifted(ds.picked[j].box, 10.0, 10.0)}]})^
   }
   else if ((dx != 0.0 or dy != 0.0) and len(picked) > 0) {
     editor = apply_edit(editor, dr.move_tx(editor.doc, picked, dx, dy))
     ds = {*: ds, picked: [for (q in ds.picked) {*: q, box: shifted(q.box, dx, dy)}]}
   }
-  else if (not primary_key(evt) and member(["v", "r", "e", "l", "t"], lower(string(evt.key)))) {
+  else if ((not primary_key(evt) and member(["v", "r", "e", "l", "t"], lower(string(evt.key))))^) {
     let key = lower(string(evt.key))
     ds = {*: ds, gesture: null,
           tool: if (key == "v") 'select' else if (key == "r") 'rect' else if (key == "e") 'ellipse'
                 else if (key == "l") 'line' else 'text'}
   }
   else { return 'pass' }
-  files.sync_window(evt.target, session, editor.doc)
+  files.sync_window(evt.target, session, editor.doc)^
   'prevent-default'
 }
 // A gesture runs from press to release (proposal §6): the press picks the
 // object, handle, or start point; the release commits one transaction; Escape
 // in between cancels. Without pointer moves the surface shows no preview.
 on mousedown(evt) {
-  if (not is_drawing(session) and evt.source_pos != null) {
+  if ((not is_drawing(session) and evt.source_pos != null)^) {
     let rich_surface = dom.get_element_by_id(doc_root(evt.target), "edit-surface")
     if (rich_surface != null and dom.contains(rich_surface, evt.target)) {
       let part = view_only_part(session, editor.doc, evt.source_pos.path)
-      if (part != null) {
+      if ((part != null)^) {
         // Native caret placement skips false islands; select their model node.
         editor = edit_set_selection(editor, node_selection(part))
-        controller.restore(editor)
+        controller.restore(editor)^
       }
     }
   }
-  if (not is_drawing(session) or dialog != null) { return 'pass' }
+  if ((not is_drawing(session) or dialog != null)^) { return 'pass' }
   let surface = dom.get_element_by_id(doc_root(evt.target), "edit-surface")
   if (surface == null or not dom.contains(surface, evt.target)) { return 'pass' }
   let canvas = canvas_node(evt.target)
   let p = user_point(canvas, evt.x, evt.y, editor.doc)
   let handle = element_attr(evt.target, "data-edit-handle")
   let hit = object_hit(evt.target)
-  if (ds.tool == 'select' and handle != null and len(ds.picked) == 1) {
+  if ((ds.tool == 'select' and handle != null and len(ds.picked) == 1)^) {
     ds = {*: ds, gesture: {kind: 'resize', handle: handle, start: p, box: ds.picked[0].box}}
   }
-  else if (ds.tool == 'select' and hit != null) {
+  else if ((ds.tool == 'select' and hit != null)^) {
     let entry = {index: hit.index, box: frame_of(canvas, hit, editor.doc)}
     let already = member(dr.picked_indices(ds), hit.index)
-    let picked = if (evt.shiftKey == true and already) [for (q in ds.picked where q.index != hit.index) q]
+    let picked = if (evt.shiftKey == true and already) [for (q in ds.picked where (q.index != hit.index)^) q]
                  else if (evt.shiftKey == true) [*ds.picked, entry]
                  else if (already) ds.picked
                  else [entry]
     ds = {*: ds, picked: picked, gesture: {kind: 'move', start: p}}
   }
   else if (ds.tool == 'select') { ds = {*: ds, picked: [], gesture: null} }
-  else if (ds.tool == 'text' and hit != null and dr.text_editable(editor.doc.content[hit.index])) {
+  else if ((ds.tool == 'text' and hit != null and dr.text_editable(editor.doc.content[hit.index]))^) {
     dialog = text_dialog_for(editor.doc, hit.index)
   }
   else if (ds.tool == 'text') { dialog = {kind: 'words', point: p, text: ""} }
   else { ds = {*: ds, gesture: {kind: 'create', start: p}} }
-  files.focus_surface(evt.target)
+  files.focus_surface(evt.target)^
   'prevent-default'
 }
 on mouseup(evt) {
-  if (not is_drawing(session) or ds.gesture == null) { return 'pass' }
+  if ((not is_drawing(session) or ds.gesture == null)^) { return 'pass' }
   let g = ds.gesture
   let p = user_point(canvas_node(evt.target), evt.x, evt.y, editor.doc)
   let dx = p.x - g.start.x
@@ -543,20 +543,20 @@ on mouseup(evt) {
     editor = apply_edit(editor, dr.insert_tx(editor.doc, shape))
     ds = {*: ds, tool: 'select', picked: [{index: len(editor.doc.content) - 1, box: dr.frame_box(shape, null)}]}
   }
-  files.sync_window(evt.target, session, editor.doc)
+  files.sync_window(evt.target, session, editor.doc)^
   'prevent-default'
 }
 on dblclick(evt) {
-  if (not is_drawing(session) or dialog != null) { return 'pass' }
+  if ((not is_drawing(session) or dialog != null)^) { return 'pass' }
   let hit = object_hit(evt.target)
-  if (hit == null or not dr.text_editable(editor.doc.content[hit.index])) { return 'pass' }
+  if ((hit == null or not dr.text_editable(editor.doc.content[hit.index]))^) { return 'pass' }
   dialog = text_dialog_for(editor.doc, hit.index)
   'prevent-default'
 }
 on closerequest(evt) {
   // the host sends this only while the close guard is armed, but a request
   // that races a save finds the session clean and simply closes
-  if (not sess.is_dirty(session, editor.doc)) {
+  if ((not sess.is_dirty(session, editor.doc))^) {
     dom.request_window_close(evt.target)
     return
   }

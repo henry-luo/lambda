@@ -15,6 +15,7 @@ pn main() {
     print(read_left(node)); print("\n")
     node.left = false
     print(read_left(node)); print("\n")
-    node.left = error("retained")^
+    let retained = error("retained")
+    node.left = retained
     print(type(read_left(node)) == error); print("\n")
 }

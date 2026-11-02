@@ -39,12 +39,12 @@ pn fit_window(owner) {
     let current = zoom_of(owner)
     let zoom = max(0.5, min(viewport.width / (box.width / current + FIT_MARGIN),
         viewport.height / (box.height / current + FIT_MARGIN)))
-    dom.set_attribute(owner, "data-zoom", string(zoom))
+    dom.set_attribute(owner, "data-zoom", string(zoom)^)
     dom.style_set_property(owner, "zoom", string(zoom))
 }
 pn stop_frame(owner, token) { if (token > 0) dom.cancel_frame(owner, token) }
 pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
-    stop_frame(owner, previous.token)
+    stop_frame(owner, previous.token)^
     var painted = null
     var problem = null
     var transients = next.transients
@@ -61,10 +61,10 @@ pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
     let token = if (problem is null and next.game.mode == "playing") dom.request_frame(owner, "doom_frame") else 0
     if (next.game.mode == "playing" and token == 0 and problem is null) { problem = "DOOM: frame request failed" }
     if (not (problem is null)) {
-        if (sounds != null) audio.close(owner, sounds)
+        if (sounds != null) audio.close(owner, sounds)^
         sounds = null
         dom.set_attribute(owner, "data-error", problem)
-        present.text(handles.status, problem)
+        present.text(handles.status, problem)^
     }
     if (not (problem is null) or next.game.mode != "playing" or next.game.spectator != "player" or next.game.autoplay)
         dom.set_relative_mouse(owner, false)
@@ -73,12 +73,12 @@ pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
         clock: if (reset_clock) sim.initial_clock() else next.clock}
 }
 pn load_map(owner, session_value, map_name, keep_inventory = false) any^ {
-    stop_frame(owner, session_value.token)
+    stop_frame(owner, session_value.token)^
     let level = data.load_level(BASE, map_name)^
     let prepared = world.prepare(level)
     let skill = if (keep_inventory) session_value.game.skill else
         int(dom.get_state(dom.get_element_by_id(owner, "skill-picker"), "value"))
-    if (not (skill is int) or skill < 1 or skill > 5) { raise error("DOOM: invalid difficulty") }
+    if ((not (skill is int) or skill < 1 or skill > 5)^) { raise error("DOOM: invalid difficulty") }
     let game = sim.initialize(prepared, if (keep_inventory)
         game_state.transition(session_value.game, level, RULES, VISUALS, map_name)
         else {*: game_state.new_game(level, RULES, VISUALS, skill), mode: "playing",
@@ -95,8 +95,8 @@ pn action(owner, session_value, command, timestamp_ms) any^ {
         dom.get_state(dom.get_element_by_id(owner, "map-picker"), "value"))^
         else {*: session_value, game: sim.action(session_value.map_data, session_value.game, command, RULES, VISUALS)}
     let committed = publish(owner, session_value, next, timestamp_ms, true)
-    if (committed.game.mode == "playing" and committed.game.spectator == "player" and not committed.game.autoplay and
-        not dom.set_relative_mouse(owner, true)) { raise error("DOOM: relative mouse capture failed") }
+    if ((committed.game.mode == "playing" and committed.game.spectator == "player" and not committed.game.autoplay and
+        not dom.set_relative_mouse(owner, true))^) { raise error("DOOM: relative mouse capture failed") }
     dom.focus_set(owner, false)
     return committed
 }
@@ -107,13 +107,13 @@ view <doom_session> state session: {game: ~.game, map_data: ~.map_data, clock: s
 }
 on doom_activate(evt) {
     if (evt.event_phase != 2 or session.handles != null) { return 'pass' }
-    fit_window(evt.target)
+    fit_window(evt.target)^
     session = publish(evt.target, session, session, evt.time_stamp, true)
     dom.focus_set(evt.target, false)
     return 'handled'
 }
 on doom_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.token)^) { return 'pass' }
     let started = if (PROFILE) clock() else 0
     let result = sim.frame(session.map_data, session.game, session.clock, evt.time_stamp, RULES)
     let simulated = if (PROFILE) clock() else 0
@@ -129,7 +129,7 @@ on doom_frame(evt) {
             " simulation_ms=" ++ string((simulated - started) * 1000) ++
             " presentation_ms=" ++ string((clock() - simulated) * 1000) ++
             " ticks=" ++ string(session.game.ticks) ++
-            " visible_planes=" ++ string(len([for (shown in session.visible where shown) shown])) ++
+            " visible_planes=" ++ string(len([for (shown in ((session.visible) ^ { [] }) where shown) shown])) ++
             " total_planes=" ++ string(len(session.map_data.planes)) ++ "\n")
     }
     return 'handled'
@@ -144,8 +144,8 @@ on click(evt) {
 on keydown(evt) {
     let owner = dom.closest(evt.target, "#doom")
     let command = controls.command(evt.key, session.game.spectator)
-    if (owner == null or command == "" or evt.altKey or evt.metaKey) { return 'pass' }
-    if (contains(["pause", "restart", "spectator"], command)) {
+    if ((owner == null or command == "" or evt.altKey or evt.metaKey)^) { return 'pass' }
+    if (contains(["pause", "restart", "spectator"], command)^) {
         // Movement clears on pause; physical command keys stay latched until
         // release, so native key repeat cannot trigger a second command.
         let commands = controls.set_key(session.commands, evt.key, true, session.game.spectator)
@@ -159,25 +159,25 @@ on keydown(evt) {
     return 'prevent-default'
 }
 on keyup(evt) {
-    if (controls.command(evt.key, session.game.spectator) == "") { return 'pass' }
+    if ((controls.command(evt.key, session.game.spectator) == "")^) { return 'pass' }
     session = {*: session, commands: controls.set_key(session.commands, evt.key, false, session.game.spectator),
         game: {*: session.game, input: controls.set_key(session.game.input, evt.key, false, session.game.spectator)}}
     return 'prevent-default'
 }
 on wheel(evt) {
     let owner = dom.closest(evt.target, "#doom")
-    if (owner == null or session.game.spectator == "player") { return 'pass' }
+    if ((owner == null or session.game.spectator == "player")^) { return 'pass' }
     session = publish(owner, session, {*: session, game: camera.wheel(session.game, evt.deltaY)}, evt.time_stamp)
     return 'prevent-default'
 }
 on pointerdown(evt) {
-    if (session.game.spectator != "top" or dom.closest(evt.target, "#viewport") == null or evt.button != 0) { return 'pass' }
+    if ((session.game.spectator != "top" or dom.closest(evt.target, "#viewport") == null or evt.button != 0)^) { return 'pass' }
     session = {*: session, drag: {x: evt.clientX, y: evt.clientY}}
     if (not dom.set_pointer_capture(evt.target, evt.pointerId)) { raise error("DOOM: pointer capture failed") }
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
     // drag distances are screen pixels; the camera works in unzoomed layout pixels
     let zoom = zoom_of(owner)
@@ -187,14 +187,14 @@ on pointermove(evt) {
 }
 on mousemove(evt) {
     let owner = dom.closest(evt.target, "#doom")
-    if (owner == null or session.game.mode != "playing" or session.game.spectator != "player" or
-        not dom.relative_mouse_active(owner)) { return 'pass' }
+    if ((owner == null or session.game.mode != "playing" or session.game.spectator != "player" or
+        not dom.relative_mouse_active(owner))^) { return 'pass' }
     session = {*: session, game: {*: session.game,
         input: controls.mouse(session.game.input, evt.movementX, evt.movementY)}}
     return 'prevent-default'
 }
 on mousedown(evt) {
-    if (session.game.mode != "playing" or session.game.spectator != "player" or evt.button != 0) { return 'pass' }
+    if ((session.game.mode != "playing" or session.game.spectator != "player" or evt.button != 0)^) { return 'pass' }
     let owner = dom.closest(evt.target, "#doom")
     if (owner == null or dom.closest(evt.target, "#viewport") == null) { return 'pass' }
     if (not dom.set_relative_mouse(owner, true)) { raise error("DOOM: relative mouse capture failed") }
@@ -212,22 +212,22 @@ on blur(evt) {
     // Moving focus to a game button must not pause before that button's click.
     if (internal_focus(evt)) { return 'pass' }
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
-    if (owner != null and session.game.mode == "playing") { session = action(owner, session, "pause", evt.time_stamp)^ }
+    if ((owner != null and session.game.mode == "playing")^) { session = action(owner, session, "pause", evt.time_stamp)^ }
     session = {*: session, commands: controls.empty(), drag: null, game: {*: session.game, input: controls.empty()}}
     return 'pass'
 }
 on doom_blur(evt) {
     let owner = dom.closest(evt.target, "#doom")
     dom.set_relative_mouse(owner, false)
-    if (session.game.mode == "playing") { session = action(owner, session, "pause", evt.time_stamp)^ }
+    if ((session.game.mode == "playing")^) { session = action(owner, session, "pause", evt.time_stamp)^ }
     session = {*: session, commands: controls.empty(), drag: null, game: {*: session.game, input: controls.empty()}}
     return 'handled'
 }
 on closerequest(evt) {
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
     if (owner != null) {
-        stop_frame(owner, session.token)
-        if (session.audio != null) audio.close(owner, session.audio)
+        stop_frame(owner, session.token)^
+        if ((session.audio != null)^) audio.close(owner, session.audio)^
         dom.set_relative_mouse(owner, false)
     }
     session = {*: session, token: 0, game: {*: session.game, input: controls.empty(), mode: "closed"}}

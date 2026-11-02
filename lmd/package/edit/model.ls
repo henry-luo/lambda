@@ -60,7 +60,7 @@ pub fn node_tag_at(doc, path) any^ {
 // A reference resolved against the document's folder: no scheme, not rooted,
 // not a same-document query or fragment (RFC 3986 §4.2). A colon before any
 // "/", "?" or "#" ends a scheme, since a relative first segment cannot hold one.
-pub fn is_relative_url(u: string) bool {
+pub fn is_relative_url(u: string) bool^ {
   if (u == "" or starts_with(u, "/") or starts_with(u, "#") or starts_with(u, "?")) false
   else {
     let colon = index_of(u, ":")

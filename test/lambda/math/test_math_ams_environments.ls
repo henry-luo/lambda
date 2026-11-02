@@ -5,7 +5,7 @@ import svg: .mod_svg_snapshot
 fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
 fn box(source) any^ => math.render_box(ast(source))^
 fn env(key, body, args = "") => "\\begin{" ++ key ++ "}" ++ args ++ body ++ "\\end{" ++ key ++ "}"
-fn glyphs(b) => [for (g in svg.geometry(b.element) where name(g.node) == 'text') g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where ((name(g.node) == 'text') ^ { false })) g]
 let centered = box(env("gathered", "a\\\\b"))
 let starred = box(env("pmatrix*", "a&bbb\\\\cc&d", "[r]"))
 let left = box(env("matrix*", "a\\\\bbb", "[l]"))
@@ -33,7 +33,7 @@ let checks = [
     {name:"starred options survive formatting", ok:roundtrip.alignment == "r" and roundtrip.name == "pmatrix*"},
     {name:"alignedat pair count survives formatting", ok:contains(format(<math pairs>, {type:"math", flavor:"latex"})^,"{1}")},
     {name:"nested matrices keep their own closing tokens", ok:svg.painted_text(nested_box.element) == "abcdefg" and
-        len([for (g in glyphs(nested_box) where g.text == "g") g]) == 1},
+        len([for (g in ((glyphs(nested_box)) ^ { [] }) where g.text == "g") g]) == 1},
     {name:"trailing row terminators do not add empty rows", ok:abs(box(env("matrix", "a\\\\b\\cr")).height -
         box(env("matrix", "a\\\\b")).height) < 0.00001},
     {name:"comments cannot close a matrix", ok:svg.painted_text(box(env("matrix", "a% \\end{matrix}\n\\\\b")).element) == "ab"}

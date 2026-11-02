@@ -13,11 +13,11 @@ pub pn export(html, dest, dir, options) map {
     if (done == true) {status: "ok"} else {status: "failed", message: string(done)}
 }
 
-pub pn pdf(html, dest, dir, settings) map {
+pub pn pdf(html, dest, dir, settings) map^ {
     export(html, dest, dir, {format: 'pdf', width: int(settings.width), height: int(settings.height), pagination: settings.pagination})
 }
 
-pub pn thumbnail(html, dest, dir) map { export(html, dest, dir, {format: 'png', *: THUMB}) }
+pub pn thumbnail(html, dest, dir) map^ { export(html, dest, dir, {format: 'png', *: THUMB}) }
 
 // the list thumbnail from an image (a poster, a gallery's first image): no
 // larger than the page thumbnail, aspect kept, never enlarged

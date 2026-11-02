@@ -103,12 +103,12 @@ pn main() {
     var a: int[] = [1, 2, 3, 4]
     var b: int[] = [1, 2, 3, 4]
     let saved: int[] = a
-    evolve(a, b, 2)
+    evolve(a, b, 2)^
     print(a); print(" "); print(saved); print("\n")
     var short: int[] = [1, 2]
-    evolve(short, b, 2)
+    evolve(short, b, 2)^
     print(short); print("\n")
-    evolve(a, short, 0)
+    evolve(a, short, 0)^
     print(a); print("\n")
     replacing(a)^
     print(a); print("\n")

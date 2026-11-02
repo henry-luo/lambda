@@ -10,7 +10,7 @@ fn props(kind) => if (kind == "tree") {id:"tree",items:[{key:1,label:"One"}]}
     else if (kind == "icon") {name:"home"}
     else if (contains(["breadcrumb","steps","timeline","descriptions"],kind)) {items:[]}
     else {}
-let rendered = [for (kind in catalog.kinds()) (
+let rendered = [for (kind in ((catalog.kinds()) ^ { [] })) (
     let descriptor = catalog.descriptor(kind,props(kind))^,
     let native = catalog.native(kind,props(kind))^,
     {kind:kind,qualified:starts_with(string(name(descriptor)),"clay."),same:ui.render(descriptor)^ == c.render(native)}

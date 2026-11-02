@@ -50,12 +50,12 @@ pub pn tick(owner,st,reflow=false) {
         if ((not item.visible and item.status == "ready") or
             (item.status == "ready" and dom.get_attribute(item.slot,"data-thumb-box") != box_key(item.box))) reset_slot(item.slot)
     }
-    if (((next.job>0)^)^) {
+    if ((next.job>0)^) {
         let request = next.request
         let current = [for (item in targets where ((((((((dom.same_node(item.slot,request.slot)) ^ { false }))^) ^ { false }))^) ^ { false })) item][0]
         if ((current == null or request.generation != next.generation or request.box != box_key(current.box))^) {
             next = cancel_jobs(owner,next)
-            if ((dom.contains(owner,request.slot)^)^) reset_slot(request.slot)^
+            if (dom.contains(owner,request.slot)^) reset_slot(request.slot)^
         } else {
             let done = radiant.image_job(owner,{action:"poll",channel:"thumbnail",token:next.job})^
             if (done != null) {
@@ -76,7 +76,7 @@ pub pn tick(owner,st,reflow=false) {
             }
         }
     }
-    if (((next.job==0)^)^) {
+    if ((next.job==0)^) {
         let pending = [for (item in targets where dom.get_attribute(item.slot,"data-thumb-state") == "pending") item]
         if (len(pending)>0) {
             let item = pending[0]

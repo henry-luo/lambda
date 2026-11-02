@@ -3,13 +3,13 @@
 let search_rounds = 1536
 let modulus = 1000000007
 
-pn build_corpus() string {
+pn build_corpus() string^ {
     var rows: array = []
     var index = 0
     while (index < 512) {
         rows.push("record-" ++ string(index) ++
             " alpha aaaaaaaaaaaaaaaaaaaaaaaa token-" ++ string(index % 23) ++
-            " omega needle-" ++ string(index % 11))
+            " omega needle-" ++ string(index % 11))^
         index = index + 1
     }
     join(rows, "\n")
@@ -21,10 +21,10 @@ let patterns: string[] = [
     "missing-marker", "record-2047 omega"
 ]
 
-pn to_codes(text: string) int[] {
+pn to_codes(text: string) int[]^ {
     var codes: array = []
     for index of text {
-        codes.push(ord(text[index]))
+        codes.push(ord(text[index]))^
     }
     codes
 }

@@ -42,7 +42,7 @@ pub fn step(map_data, game, input_state, dt, rules) {
         let moving = if (game.spectator == "top") observed else player.move(map_data, observed, input_state, dt, rules)
         let triggered = mechanics.teleport(map_data, mechanics.walk_triggers(map_data, moving, game.player, rules), game.player, rules)
         let used = if (contains(input_state.edges, "use")) mechanics.use(map_data, triggered, rules) else triggered
-        let equipped = reduce([used, *[for (edge in input_state.edges where starts_with(edge, "weapon_")) int(slice(edge, 7))]],
+        let equipped = reduce([used, *[for (edge in input_state.edges where ((starts_with(edge, "weapon_")) ^ { false })) int(slice(edge, 7))]],
             (acc, slot) any^ => combat.equip(acc, slot, rules))
         let picked = pickups.collect(pickups.expire(equipped), rules)
         let collected = if (picked.player.weapon == equipped.player.weapon) picked else
@@ -53,13 +53,13 @@ pub fn step(map_data, game, input_state, dt, rules) {
             pickups.hazard(map_data, combat.projectiles(map_data, enemies, rules), dt, rules), rules)
         let particles = unique([for (effect in [*(game.particles or []), *result.effects],
             let lifetime = events.visual_lifetime(effect.kind)
-            where lifetime > 0 and result.time - effect.at < lifetime) effect])
+            where ((lifetime > 0 and result.time - effect.at < lifetime) ^ { false })) effect])
         {*: result, particles: particles}
     }
 }
 pub fn frame(map_data, game, previous_clock, timestamp_ms, rules) {
     let next_clock = clock_frame(previous_clock, timestamp_ms, game.mode == "playing")
-    let stepped = reduce([{game: {*: game, effects: []}, input: game.input}, *[for (i in 1 to next_clock.steps) i]],
+    let stepped = reduce([{game: {*: game, effects: []}, input: game.input}, *[for (i in ((1 to next_clock.steps) ^ { [] })) i]],
         (acc, unused) => {
             // Reconsider targets at 7 Hz; movement/combat still run at all 35 ticks.
             let input_state = if (acc.game.autoplay and acc.game.ticks % 5 == 0)

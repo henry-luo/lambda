@@ -10,21 +10,21 @@ let svg_element = model.element_children(html)[0]
 let shapes = model.element_children(svg_element)
 let svg = transform.render_svg(graph, 1000, 800)
 let events = [for (child in model.element_children(graph)
-  where contains(["edge", "annotation", "sequence-block"], model.tag(child)))
+  where ((contains(["edge", "annotation", "sequence-block"], model.tag(child))) ^ { false }))
   model.tag(child)]
 let participant_boxes = [for (shape in shapes
-  where model.tag(shape) == "rect" and contains([
-    "#ec64ff", "#15d8c0", "#ff8b2b"], model.optional(shape, "stroke"))) shape]
+  where ((model.tag(shape) == "rect" and contains([
+    "#ec64ff", "#15d8c0", "#ff8b2b"], model.optional(shape, "stroke"))) ^ { false })) shape]
 let lifelines = [for (shape in shapes
-  where model.tag(shape) == "line" and shape.y1 != shape.y2) shape]
+  where ((model.tag(shape) == "line" and shape.y1 != shape.y2) ^ { false })) shape]
 let loops = [for (shape in shapes
-  where model.tag(shape) == "rect" and
+  where ((model.tag(shape) == "rect" and
     model.optional(shape, "stroke-dasharray") != null and
-    shape.width < svg_element.width / 2) shape]
+    shape.width < svg_element.width / 2) ^ { false })) shape]
 let self_messages = [for (shape in shapes
-  where model.tag(shape) == "path" and contains(string(shape.d), " C ")) shape]
+  where ((model.tag(shape) == "path" and contains(string(shape.d), " C ")) ^ { false })) shape]
 let notes = [for (shape in shapes
-  where model.tag(shape) == "rect" and shape.stroke == "#ffd21a") shape]
+  where ((model.tag(shape) == "rect" and shape.stroke == "#ffd21a") ^ { false })) shape]
 
 {
   valid: normalized.valid,

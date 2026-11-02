@@ -19,7 +19,7 @@ pub fn command(config,st,action) map^ {
 
 pub fn button(action,text,disabled=false) element => <button *:(if (disabled) {disabled:true} else {}),type:"button",'data-act':action,text>
 
-view <workshop> state st:initial(~.config) {
+view <workshop>() any^ state st:(initial(~.config)^) {
     <body <div class:"app glasshouse workshop",'data-workshop':~.config.id,
         <header class:"bar",
             <div class:"title",<h1 ~.config.title> <span class:"seed","seed "++string(st.seed)>>

@@ -62,8 +62,8 @@ let legend_clicked = i.update(legend_hover,{type:"click",frame:legend_frame,lege
 let legend_image = chart.render_spec({width:200,height:160,data:[{group:"A",x:2,y:3},{group:"B",x:8,y:7}],
     mark:{kind:"point"},params:legend_defs,encoding:{x:{field:"x"},y:{field:"y"},
     color:{field:"group",dtype:"nominal",condition:{param:"pick",empty:false,value:"red"}}}},null,legend_clicked)
-fn legend_entries(node) => if (node is element) [*(if (node.class == "legend-entry") [node] else []),
-    for (child in content(node)) for (entry in legend_entries(child)) entry] else []
+fn legend_entries(node) any^ => if (node is element) [*(if (node.class == "legend-entry") [node] else []),
+    for (child in ((content(node)) ^ { [] })) for (entry in ((legend_entries(child)) ^ { [] })) entry] else []
 let checks = [
     {name:"union",ok:p.selected(union.value,{group:"A"}) and p.selected(union.value,{group:"B"})},
     {name:"intersection",ok:not p.selected(intersection.value,{group:"A"}) and not p.selected(intersection.value,{group:"B"})},

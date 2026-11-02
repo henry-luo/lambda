@@ -14,7 +14,7 @@ fn open_read(node: Open) any => node.value
 pn extra(node: Open) any^ { return open_read(node.child) }
 
 pn main() {
-    let tree: Node = make(10)
+    let tree: Node = make(10)^
     var total = 0
     var i = 0
     while (i < 20) {

@@ -45,7 +45,7 @@ pub fn build(table,raw,pairs) map^ {
 
 // a leading match must belong to a complete lattice route; otherwise x in xi'an
 // could invent a separate first syllable and ignore the unsegmentable i' suffix.
-fn reachable(graph,at,suffix) array {
+fn reachable(graph,at,suffix) array^ {
     if (at < 0) suffix
     else {
         let viable = any([for (item in graph.edges[at]) suffix[item.end - at - 1]]);
@@ -66,7 +66,7 @@ pub fn caret_stops(graph) array^ {
     else [for (position in ((0 to len(graph.input)) ^ { [] })) position]
 }
 
-fn walk(graph,viable,pending,result,limit) map {
+fn walk(graph,viable,pending,result,limit) map^ {
     if (len(pending) == 0) {paths:result,truncated:false}
     else if (len(result) >= limit) {paths:result,truncated:true}
     else {

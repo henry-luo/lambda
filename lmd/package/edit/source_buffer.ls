@@ -89,8 +89,8 @@ pub fn pos_cmp(a, b) int =>
   else if (a.col != b.col) (if (a.col < b.col) -1 else 1)
   else 0
 
-pub fn pos_min(a, b) => if (pos_cmp(a, b) <= 0) a else b
-pub fn pos_max(a, b) => if (pos_cmp(a, b) >= 0) a else b
+pub fn pos_min(a, b) any^ => if (pos_cmp(a, b) <= 0) a else b
+pub fn pos_max(a, b) any^ => if (pos_cmp(a, b) >= 0) a else b
 
 pub fn clamp(b, p) any^ {
   let l = min(max(p.line, 0), b.count - 1)

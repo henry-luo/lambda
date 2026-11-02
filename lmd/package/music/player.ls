@@ -228,7 +228,7 @@ pn handle(node,session_value,evt) {
     let value=if (action!=null) 0.0 else control_value(owner,control)
     if (not dom.midi_command(owner,current.token,command,value)) {
         close_session(owner,current.token)^
-        (status(owner,"Playback command failed","error"))^
+        status(owner,"Playback command failed","error")^
         return {*:current,token:null,frame:0}
     }
     return synchronize(owner,{*:current,frame:0},node)

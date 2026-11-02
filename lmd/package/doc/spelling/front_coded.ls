@@ -6,7 +6,7 @@ import lines: lambda.io.line_index
 fn failure(message) error => error({code:7821,message:"spelling front coding: " ++ message})
 fn require(ok,message) bool^ => if (ok) true else raise failure(message)
 
-fn token_end(raw: binary, at: int, limit: int) int =>
+fn token_end(raw: binary, at: int, limit: int) int^ =>
     if (at >= limit or raw[at] == 59 or raw[at] == 124) at
     else token_end(raw,at + 1,limit)
 
@@ -48,7 +48,7 @@ fn inspect_line(raw: binary, at: int, limit: int, previous: string = "",
 }
 
 // compare restart keys in place, without allocating strings or scanning UTF-8 prefixes.
-fn first_compare(raw: binary, at: int, key: binary, i: int = 0) int {
+fn first_compare(raw: binary, at: int, key: binary, i: int = 0) int^ {
     let b = raw[at + i]
     let end = b == 59 or b == 124 or b == 10;
     if (i == len(key)) (if (end) 0 else 1)

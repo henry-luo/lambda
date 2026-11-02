@@ -3,12 +3,12 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn members(node) => [
   for (child in model.element_children(node)
-    where model.tag(child) == "class-member") child
+    where ((model.tag(child) == "class-member") ^ { false })) child
 ]
 
 let source = (input(
@@ -26,7 +26,7 @@ let rendered = transform.render_scene(source, 1000, 800)
     len(model.style_rules(source)), len(model.class_assignments(source)),
     len(model.style_assignments(source)), len(model.interactions(source))],
   nodes: [for (node in nodes) [node.id, node.label, node.generic,
-    [for (member in members(node)) [member.kind, member.visibility,
+    [for (member in ((members(node)) ^ { [] })) [member.kind, member.visibility,
       member.classifier, member.value, member.display]]]],
   edges: [for (edge in edges) [edge.from, edge.to, edge.relation,
     edge["arrow-tail"], edge["arrow-head"], edge.label]],
@@ -44,9 +44,9 @@ let rendered = transform.render_scene(source, 1000, 800)
     [for (interaction in model.interactions(source))
       [interaction.target, interaction.action, interaction.href, interaction.callback]]],
   canonical: [normalized.valid, len(model.nodes(normalized.graph)),
-    [for (node in model.nodes(normalized.graph))
+    [for (node in ((model.nodes(normalized.graph)) ^ { [] }))
       [node.id, model.tag(model.content_element(node))]]],
-  html: [for (node in model.nodes(html))
+  html: [for (node in ((model.nodes(html)) ^ { [] }))
     [node["data-node-id"], model.tag(node[0])]],
   render: [rendered.svg is string, len(children(rendered.scene, "node")),
     len(children(rendered.scene, "edge")), len(children(rendered.scene, "annotation")),

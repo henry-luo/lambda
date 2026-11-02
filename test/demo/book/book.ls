@@ -5,4 +5,4 @@
 import resources: ~~.mod_resources
 import app: .mod_app
 
-app.document(url_resolve(resources.entry_uri()^, "./"), true)
+app.document(url_resolve(resources.entry_uri()^, "./"), true)^

@@ -46,7 +46,7 @@ import font_picker: .mod_font_picker
 import ribbon: ~~.mod_ribbon
 
 pub let icon = icons.icon
-pub fn font_options(families,current) => text_format.font_options(families,current)
+pub fn font_options(families,current) any^ => text_format.font_options(families,current)
 let text_colors = take(home.font_colors,4)
 
 view <word_button> {
@@ -68,7 +68,7 @@ view <word_button> {
 on mousedown() { return 'prevent-default' }
 on click(evt) { emit("word_command",{id:~.command,params:~.params or {},selection:~.selection,node:evt.target,event:evt}) }
 on keydown(evt) {
-    if (~.nav_tab!=null and contains(["ArrowLeft","ArrowRight","Home","End"],evt.key)) {
+    if ((~.nav_tab!=null and contains(["ArrowLeft","ArrowRight","Home","End"],evt.key))^) {
         emit("word_command",{id:"ui.navigationTab",params:{tab:navmodel.next_tab(~.nav_tab,evt.key),focus:true},node:evt.target,event:evt})
         return 'prevent-default'
     }
@@ -81,7 +81,7 @@ on keydown(evt) {
 pub fn button(id,command,label,icon=null,params={},pressed=false,disabled=false,css="",title=null) =>
     apply(<word_button id:id, command:command, label:label, icon:icon, params:params,
         pressed:pressed, disabled:disabled, class:css,title:title>)
-pub fn command(id,label=null,icon=null,params={},pressed=false,disabled=false) =>
+pub fn command(id,label=null,icon=null,params={},pressed=false,disabled=false) any^ =>
     button(id,id,label or model.spec(id).label,icon,params,pressed,disabled)
 fn menu_item(id,command,label,graphic,disabled=false,shortcut=null,params={},selection=null) =>
     apply(<word_button id:"context-" ++ id,command:command,label:label,icon:graphic,
@@ -97,7 +97,7 @@ fn margin_preview(p) => <svg class:"margin-preview",width:"42",height:"54",viewB
         <g <rect x:string(x),y:"4",width:string(w),height:"48",fill:"#edf2fa",stroke:"#8292aa",'stroke-width':"0.8">
             <rect x:string(left),y:string(top),width:string(w*(1-(m.left+m.right)/210)),
                 height:string(48*(1-(m.top+m.bottom)/297)),fill:"#fff",stroke:"#6594d0",'stroke-width':"0.8">>]>
-fn editing_menu(st) {
+fn editing_menu(st) any^ {
     let finding = st.context.menu=="find"
     let borders = st.context.menu=="borders"
     let layout_menu = st.context.menu
@@ -117,7 +117,7 @@ fn editing_menu(st) {
             else if (layout_menu=="margins") <div
                 *[for (entry in page.margin_presets) apply(<word_button id:"margins-" ++ entry.id,
                     command:"layout.pageSetup",label:entry.label,preview:margin_preview(entry.values),
-                    content:<span <strong entry.label>; <span class:"margin-metrics",*[for (line in page.margin_summary(entry.values)) <span line>]>>,
+                    content:<span <strong entry.label>; <span class:"margin-metrics",*[for (line in ((page.margin_summary(entry.values)) ^ { [] })) <span line>]>>,
                     pressed:page.margin_preset_active(st.editor.doc,entry),disabled:st.read_only,
                     class:"context-item margin-preset",params:entry.values,selection:st.context.item_selection>)];
                 <div class:"context-rule",role:"separator">;
@@ -200,7 +200,7 @@ fn position_preview(p) => <svg width:"26",height:"30",viewBox:"0 0 26 30",["aria
     <path d:"M6 7h14 M6 11h14 M6 15h14 M6 19h14 M6 23h14",stroke:"#d4dce7",'stroke-width':"1">;
     <rect x:string({left:6,center:10,right:14}[p.h]),y:string({top:5,middle:12,bottom:19}[p.v]),
         width:"6",height:"6",rx:"1",fill:"#cbe1ff",stroke:"#3478cc">>
-fn shape_menu(st) {
+fn shape_menu(st) any^ {
     let item = shape_format.describe(model.current_node(st.editor,'img').node)
     let p = item.values
     let disabled = st.read_only or item==null
@@ -331,11 +331,11 @@ fn arrange_ribbon(editor,read_only,opened,picks=[]) {
         menu_button("object-group-menu","Group","object_group","object-group",opened,"ribbon-large",read_only or (disabled and len(picks)<2)),
         menu_button("object-rotate-menu","Rotate","rotate_right","object-rotate",opened,"ribbon-large",disabled or transform.settings(model.current_node(editor,'img').node)==null)])
 }
-pub fn selection_pane(st) => <aside id:"selection-pane",class:"selection-pane",
+pub fn selection_pane(st) any^ => <aside id:"selection-pane",class:"selection-pane",
     <div class:"navigation-heading",<strong class:"pane-heading","Selection">
         button("close-selection-pane","ui.selectionPane","Close Selection Pane","close",{},false,false,"icon-only")>;
     <p class:"pane-hint","Select an object to arrange it. Check several objects to group them. Use the eye to hide or show.">;
-    <div class:"object-list",*[for (e in reverse(sort(object_layout.entries(st.editor.doc),(e)=>e.page*100000+object_layout.layer(e.layout))))
+    <div class:"object-list",*[for (e in ((reverse(sort(object_layout.entries(st.editor.doc),(e)any^ =>e.page*100000+object_layout.layer(e.layout)))) ^ { [] }))
         <div class:"object-list-row",
             button("pick-object-" ++ string(e.index),"ui.objectPick","Include in group","check",{path:e.path},
                 contains(st.object_picks,e.path),st.read_only or transform.settings(e.node)==null,"icon-only object-pick");
@@ -344,7 +344,7 @@ pub fn selection_pane(st) => <aside id:"selection-pane",class:"selection-pane",
             button("show-object-" ++ string(e.index),"ui.objectVisibility",if (e.layout.hidden) "Show object" else "Hide object",
                 if (e.layout.hidden) "eye_off" else "eye",{path:e.path},false,st.read_only,"icon-only")>];
         if (len(object_layout.entries(st.editor.doc))==0) <p class:"pane-hint","No objects in this document."> else null>>
-pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=null) editing_menu(st) else {
+pub fn context_menu(st) any^ => if (st.context==null) null else if (st.context.menu!=null) editing_menu(st) else {
     let selected = if (st.read_only) st.context.copy_text!="" else context.has_selection(st.editor.selection)
     let disabled = st.read_only
     let item = focused.describe({*:st.editor,selection:st.context.item_selection or st.editor.selection},st.context.story);
@@ -353,7 +353,7 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
             style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
             if (len(item.actions)>0) <div class:"context-specific",role:"group",["aria-label"]:item.label,
                 <div class:"context-caption",item.label>;
-                *[for (entry in item.actions) menu_item(entry.id,entry.command,entry.label,entry.icon,
+                *[for (entry in ((item.actions) ^ { [] })) menu_item(entry.id,entry.command,entry.label,entry.icon,
                     disabled or entry.disabled,null,if (starts_with(entry.command,"table.select"))
                         {*:entry.params,path:st.context.cell_path} else entry.params,st.context.item_selection)];
                 <div class:"context-rule",role:"separator">> else null;
@@ -380,7 +380,7 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
             menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor))>>
         >,false)
 }
-fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
+fn mark_button(editor,id,graphic) any^ => button(id,id,model.spec(id).label,graphic,{},
     edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
 fn group_icon(label) => {
     Undo:"undo",Clipboard:"paste",Font:"grow_font",Paragraph:"paragraph",Styles:"format_painter",Editing:"search",
@@ -395,7 +395,7 @@ fn group(label:string,items) => ribbon.group(label,items,
         <span class:"group-chevron",icon("down",10)>>)
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
-fn selector(id,command,values,current,css="",param="value",disabled=false) {
+fn selector(id,command,values,current,css="",param="value",disabled=false) any^ {
     let control = apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
         options:values,value:current,disabled:disabled,on_change:{action:command,param:param}>);
     if (command=="format.font") font_picker.wrap(control,id,current,disabled) else control
@@ -472,9 +472,9 @@ fn table_design_ribbon(editor,read_only,opened_menu,pen) {
         group("Borders",[menu_button("table-borders-menu","Borders","border_all","borders",opened_menu,"",read_only),
             button("cell-borders","ui.cellBorders","Borders…","settings",{},false,read_only)])>
 }
-fn font_step(editor,grow) => home.font_step(home_ui.font_size(editor),grow)
+fn font_step(editor,grow) any^ => home.font_step(home_ui.font_size(editor),grow)
 
-pub fn selection_toolbar(st) => if (not mini.visible(st)) null else {
+pub fn selection_toolbar(st) any^ => if (not mini.visible(st)) null else {
     let editor = st.editor
     let align = model.css_get(attrs_get(model.current_block(editor).node.attrs,'style'),"text-align") or "left";
     mini.frame([
@@ -502,9 +502,9 @@ pub fn view_buttons(layout,read_only,status=false) => [for (choice in views.mode
         if (status) {enabled:true} else {},views.active(layout,read_only)==choice.id,false,if (status) "icon-only" else "ribbon-large")]
 fn equation_widgets() => {button:button,menu:menu_button,group:group,menu_item:menu_item}
 fn home_widgets() => {*:equation_widgets(),selector:selector,mark_button:mark_button,font_options:font_options}
-pub fn equation_pane(st) => equation_ui.pane(st,equation_widgets())
+pub fn equation_pane(st) any^ => equation_ui.pane(st,equation_widgets())
 
-pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null,show_ribbon_group_labels=false,home_state=home.defaults) {
+pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null,show_ribbon_group_labels=false,home_state=home.defaults) any^ {
     if (tab == "Home") home_ui.ribbon(editor,read_only,opened_menu,font_families,home_state,home_widgets())
     else if (tab == "Insert") <div class:"ribbon-groups insert-ribbon",
         group("Pages",[<div class:"ribbon-command-row",
@@ -610,7 +610,7 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
     >
 }
 
-pub fn navigation(editor,query,index,match_case=false,replacement="",search_mode="find",read_only=false,tab="headings") {
+pub fn navigation(editor,query,index,match_case=false,replacement="",search_mode="find",read_only=false,tab="headings") any^ {
     let hits = model.search(editor.doc,query,match_case)
     let headings = model.headings(editor.doc)
     let selected_heading = if (tab=="headings") navmodel.current_heading(editor) else null
@@ -638,7 +638,7 @@ pub fn navigation(editor,query,index,match_case=false,replacement="",search_mode
                 *[for (i,heading in headings) button("heading-" ++ string(i),"ui.heading",if (trim(heading.label)=="") "Untitled heading" else heading.label,null,{path:heading.path},
                     heading.path==selected_heading,false,"outline-item level-" ++ heading.level)]>
             else if (tab=="pages") <div class:"navigation-pages",
-                *[for (entry in navmodel.pages(editor.doc)) apply(<word_button id:"nav-page-" ++ string(entry.number),command:"ui.page",label:"Page " ++ string(entry.number),
+                *[for (entry in ((navmodel.pages(editor.doc)) ^ { [] })) apply(<word_button id:"nav-page-" ++ string(entry.number),command:"ui.page",label:"Page " ++ string(entry.number),
                     preview:surface.thumbnail(editor.doc,entry.content,156,entry.number),params:{page:entry.number},pressed:entry.number==selected_page,class:"page-card">)]>
             else <div class:"navigation-results",
                 if (len(hits)==0) <p class:"navigation-empty",if (query=="") "Search the document to see results here." else "No results found."> else null;
@@ -735,14 +735,14 @@ fn dialog_select(id,label,values,current,font=false) {
         *[for (entry in values) <option value:string(entry.value), *:if (string(entry.value)==string(current)) {selected:""} else {}, entry.label>]>;
     <label class:"dialog-field", <span label>;if (font) font_picker.wrap(control,id,current) else control>
 }
-fn form_dialog(d:map,title:string,description:string,fields:array,action:string,label:string) => files.dialog_frame(string(d.kind),title,description,
+fn form_dialog(d:map,title:string,description:string,fields:array,action:string,label:string) any^ => files.dialog_frame(string(d.kind),title,description,
     [if (d.error is null) null else <p id:"dialog-error",role:"alert",d.error>,*fields],
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
 
 fn icon_tabs(active) => <div class:"illustration-tabs",
     button("gallery-icons","ui.icon","Icons","star",{},active=="icon")
     button("gallery-emojis","ui.emoji","Emojis","emoji",{},active=="emoji")>
-fn illustration_dialog(d) {
+fn illustration_dialog(d) any^ {
     let entry = graphics.kind(d.kind)
     let p = graphics.parameters(d.kind,d.values)
     let preview = entry.graphic(p) ^ { null }
@@ -771,7 +771,7 @@ fn illustration_dialog(d) {
         button("illustration-preview","ui.previewGraphic","Preview","eye")],"illustration",if (d.editing) "Apply" else "Insert " ++ entry.label)
 }
 
-fn source_dialog(d:map) => form_dialog(d,if (d.source_id is string) "Edit Source" else "Create Source",
+fn source_dialog(d:map) any^ => form_dialog(d,if (d.source_id is string) "Edit Source" else "Create Source",
     "Add the publication details. Authors: Last, First; Last, First. Leave the year blank for an undated source.",[
     <div class:"dialog-grid",
         <label class:"dialog-field",<span "Type of source">
@@ -781,12 +781,12 @@ fn source_dialog(d:map) => form_dialog(d,if (d.source_id is string) "Edit Source
             apply(<control.select id:"source-corporate",class:"edit-dialog-field",label:"Author type",
                 options:[{value:"false",label:"Person(s)"},{value:"true",label:"Corporate author"}],value:string(d.values.corporate),
                 on_change:{action:"ui.sourceCorporate",param:"value"}>)>>,
-    <div class:"source-fields",*[for (f in references.visible_fields(d.values.kind,d.all_fields==true))
+    <div class:"source-fields",*[for (f in ((references.visible_fields(d.values.kind,d.all_fields==true)) ^ { [] }))
         dialog_field("source-" ++ f.key,f.label,d.values[f.key])]>,
     apply(<control.checkbox id:"source-all-fields",class:"table-style-option",label:"Show all bibliography fields",checked:d.all_fields==true,
         on_change:{action:"ui.sourceFields",param:"value"},"Show all bibliography fields">)],"source","OK")
 
-fn sources_dialog(d:map,editor:map,read_only:bool) {
+fn sources_dialog(d:map,editor:map,read_only:bool) any^ {
     let items = references.sources(editor.doc)
     let picker = d.kind=="citations";
     files.dialog_frame(d.kind,if (picker) "Insert Citation" else "Manage Sources",
@@ -815,7 +815,7 @@ fn print_input(id,label,placeholder,key,value) => <label class:"dialog-field pri
         on_change:{action:"ui.printSetting",param:"value",params:{key:key}}>)>
 fn print_option(id,label,key,checked) => apply(<control.checkbox id:id,class:"table-style-option",label:label,checked:checked,
     on_change:{action:"ui.printSetting",param:"value",params:{key:key}},label>)
-fn print_dialog(d:map,editor:map) {
+fn print_dialog(d:map,editor:map) any^ {
     let v = d.values
     let printed = print.document(editor.doc,v) ^ { editor.doc }
     let total = len(print.pages(printed,d.starts))
@@ -851,7 +851,7 @@ fn print_dialog(d:map,editor:map) {
             <div class:"print-actions",files.dialog_button("cancel","Cancel",false) files.dialog_button("print","Save",true)>>>],[])
 }
 
-pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (dialog == null) null
+pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) any^ => if (dialog == null) null
     else if (dialog.kind=="open") picker.dialog(dialog)
     else if (dialog.kind=="print") print_dialog(dialog,editor)
     else if (dialog.kind=="object_layout") form_dialog(dialog,"Object layout","Floating positions are measured from the object's paragraph. Objects move with their text.",[
@@ -918,7 +918,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
         "Link the selected text, or enter a new display label.",
         [dialog_field("link-address","Address",dialog.values.href),dialog_field("link-label","Display text",dialog.values.label),
             if (len(insert.bookmarks(editor.doc))==0) null else <div class:"internal-link-fields",
-                dialog_select("link-bookmark","Place in this document",[for (b in insert.bookmarks(editor.doc)) {value:b.name,label:b.name}],
+                dialog_select("link-bookmark","Place in this document",[for (b in ((insert.bookmarks(editor.doc)) ^ { [] })) {value:b.name,label:b.name}],
                     insert.link_bookmark(dialog.values.href) or "")
                 files.dialog_button("internal_link","Link to bookmark",false)>],"link",if (dialog.editing) "Apply" else "Insert link")
     else if (dialog.kind == "cover") form_dialog(dialog,"Insert cover page","Add an editable title page at the beginning of your document.",[
@@ -927,7 +927,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
     else if (dialog.kind == "bookmarks") files.dialog_frame("bookmarks","Bookmarks",
         "Name the current paragraph, then jump to it or link to it. One bookmark per paragraph; reusing a name moves it.",[
             if (dialog.error==null) null else <p id:"dialog-error",role:"alert",dialog.error>,
-            <div class:"bookmark-list", *[for (b in insert.bookmarks(editor.doc)) <div class:"bookmark-row",
+            <div class:"bookmark-list", *[for (b in ((insert.bookmarks(editor.doc)) ^ { [] })) <div class:"bookmark-row",
                 <div class:"bookmark-description",<strong b.name> <span b.label>>
                 button("bookmark-go-" ++ b.name,"ui.bookmarkText","Go to",null,{name:b.name})
                 button("bookmark-delete-" ++ b.name,"insert.deleteBookmark","Delete",null,{name:b.name},false,read_only)>]

@@ -13,7 +13,7 @@ function apply_all(f: function, xs) => for (x in xs) f(x)
 // a polymorphic parameter passed through keeps the colour its caller resolved
 function twice(f: function, x) any^ => f(f(x))
 // `fn (...)` slots keep their fixed colour and do not vote
-function mixed(g: fn (int) int, f: function, x) { g(f(x)) }
+function mixed(g: fn (int) int, f: function, x) any^ { g(f(x)^) }
 
 fn pure_caller(xs) => apply_all(sq, xs)
 // the argument's colour is known only at run time here
@@ -21,7 +21,7 @@ fn table_caller(table, xs) any^ => apply_all(table.f, xs)
 // an ordinary fn calling whatever it is given
 fn call_it(f, x) any^ => f(x)
 // a `function` value is `fn`, so it may cross an `fn (...)` contract
-fn run(h: fn (f, xs) any, f, xs) => h(f, xs)
+fn run(h: fn (f, xs) any, f, xs) any^ => h(f, xs)
 
 pn main() {
     print([use_early([1, 2]), pure_caller([3, 4])])

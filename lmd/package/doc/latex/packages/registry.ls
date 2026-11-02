@@ -408,7 +408,7 @@ pub fn class_family(cls) => if (CLASSES[cls] == null) null else (CLASSES[cls].fa
 
 // the commands of the classes a handler-table family entry serves
 pub fn family_commands(family) => [for (k, v in CLASSES,
-    command in (if (class_family(string(k)) == family) v.commands or [] else [])) command]
+    command in (((if (class_family(string(k)) == family) v.commands or [] else [])) ^ { [] })) command]
 
 // the numbering scheme of a class (docclass/<scheme>.ls)
 pub fn class_numbering(cls) => class_profile(cls).numbering or class_profile(cls).base
@@ -518,7 +518,7 @@ fn check_options(package, opts, node) {
                    "Unsupported " ++ package ++ " option: " ++ string(key), node)]
 }
 
-fn add_package(st, raw_name, opts, node) {
+fn add_package(st, raw_name, opts, node) any^ {
     let package = canonical(trim(raw_name))
     let known = CATALOG[package] != null
     let prior = util.lookup(st.packages, package)
@@ -539,7 +539,7 @@ fn add_package(st, raw_name, opts, node) {
                 caption.issues(opts, node.source_offset)
             else if (package == "unicode-math")
                 [for (key in ["math-style", "bold-style", "sans-style"]
-                    where opts[key] != null and string(opts[key]) != "TeX" and string(opts[key]) != "upright")
+                    where ((opts[key] != null and string(opts[key]) != "TeX" and string(opts[key]) != "upright") ^ { false }))
                     diagnostic("unsupported-option", "unicode-math", key ++ "=" ++ string(opts[key]),
                         "Math keeps TeX's letter styles, not " ++ key ++ "=" ++ string(opts[key]), node)]
             else if (package == "glossaries" and terms.style_issue(opts.style) != null)
@@ -584,7 +584,7 @@ pub fn bib_profile_valid(opts) any^ =>
     len(check_options("biblatex", opts, null)) == 0 and
     len(bib_options_issues(opts, null)) == 0
 
-pub fn bib_print_issues(node) {
+pub fn bib_print_issues(node) any^ {
     let opts = util.parse_kv_options(util.optional_raw(node))
     let allowed = ["title", "heading", "type", "nottype", "keyword", "notkeyword",
         "section", "segment"]
@@ -664,7 +664,7 @@ fn tikz_library_issues(node) {
             "Unsupported TikZ library: " ++ trim(raw), node)]
 }
 
-fn scan(node, packages, outside_body, cls) {
+fn scan(node, packages, outside_body, cls) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -819,7 +819,7 @@ pub fn collect(ast) {
         conflict_issues(loaded.packages) ++ class_option_issues(declared.doc_class, loaded.packages)}
 }
 
-fn class_packages(doc_class, packages) {
+fn class_packages(doc_class, packages) any^ {
     if (doc_class == null) []
     else [for (pkg in ((implies_of(CLASSES[doc_class.key], doc_class.val)) ^ { [] }) where ((not active(packages, pkg)) ^ { false }))
         {key: pkg, val: {}, offset: doc_class.offset}]
@@ -872,7 +872,7 @@ fn preamble_of(desc) => if (desc == null or desc.preamble == null) [] else desc.
 
 // HTML keeps a continuous table; the fixed-page PDF writer cannot repeat
 // longtable heads or split rows until the shared pagination path supports it.
-pub fn target_diagnostics(node, target, paged = false) {
+pub fn target_diagnostics(node, target, paged = false) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -939,7 +939,7 @@ pub fn target_diagnostics(node, target, paged = false) {
     }
 }
 
-pub fn assets(node, base_uri) {
+pub fn assets(node, base_uri) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -959,7 +959,7 @@ fn image_asset(source, offset) {
         else if (origin == "external-url") null else exists(source), offset: offset}
 }
 
-pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_active = false) {
+pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_active = false) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -970,7 +970,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
             let keys = if (tag == "cref" or tag == "Cref")
                 util.split_top_level(trim(util.text_of(node)), ",")
                 // the range commands name two labels
-                else if (vref) [for (i in 0 to 1, let raw = util.raw_argument(node, "required", i) where raw != null) raw]
+                else if (vref) [for (i in 0 to 1, let raw = util.raw_argument(node, "required", i) where ((raw != null) ^ { false })) raw]
                 else [trim(util.text_of(node))];
             [for (key in keys where ((util.lookup(labels, trim(key)) == null and
                 not (trim(key) == "LastPage" and active(packages, "lastpage"))) ^ { false }))

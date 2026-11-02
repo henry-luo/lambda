@@ -64,8 +64,8 @@ pn check_overlap(low: float, high: float) int {
     return 0
 }
 
-pn get_old_or_new(old: any, newp: Vec3) Vec3 {
-    if (old == null) { return newp }
+pn get_old_or_new(old: any, newp: Vec3) Vec3^ {
+    if ((old == null)^) { return newp }
     return old
 }
 
@@ -93,19 +93,19 @@ pn arr_get(a: Arr, idx: int) any {
     return r
 }
 
-pn arr_set(var a: Arr, idx: int, val: any) int {
+pn arr_set(var a: Arr, idx: int, val: any) int^ {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
     var i0 = shr(mid, 4)
     var l0 = (a.l0)
     var c1 = l0[i0]
-    if (c1 == null) {
+    if ((c1 == null)^) {
         var _d = 0
         c1 = fill(16, null)
     }
     var c2 = c1[i1]
-    if (c2 == null) {
+    if ((c2 == null)^) {
         var _d2 = 0
         c2 = fill(32, null)
     }
@@ -148,7 +148,8 @@ pn vec_size(v: array) int {
 // (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
 
 pn rbt_new() RbtTable^ {
-    var keys: int[] = []
+    let _admitted_keys_151: int[] = []
+    var keys: int[] = _admitted_keys_151
     var vals = vec_new()
     var table: RbtTable = {keys: keys, vals: vals}
     return table
@@ -180,7 +181,7 @@ pn rbt_put(var tree: RbtTable, key: int, value: any) any {
         tree.vals = vals
         return old
     }
-    push(keys, key)
+    push(keys, key)^
     push(vals, value)
     tree.keys = keys
     tree.vals = vals
@@ -225,8 +226,8 @@ pn rbt_remove(var tree: RbtTable, key: int) any {
         vals[i] = vals[i + 1]
         i = i + 1
     }
-    tree.keys = slice(keys, 0, tail_index)
-    tree.vals = slice(vals, 0, tail_index)
+    tree.keys = slice(keys, 0, tail_index)^
+    tree.vals = slice(vals, 0, tail_index)^
     return old
 }
 
@@ -349,16 +350,17 @@ pn recurse_draw(voxel_map: RbtTable, seen_tree: RbtTable, vx: int, vy: int,
 
     var voxel_key = v2d_key(vx, vy)
     var old_seen = rbt_put(seen, voxel_key, 1)
-    if (old_seen != null) {
+    if ((old_seen != null)^) {
         return [voxels, seen]
     }
 
     var stored_entries = rbt_get(voxels, voxel_key)
     var entries: array = vec_new()
-    if (stored_entries != null) {
-        entries = stored_entries
+    if ((stored_entries != null)^) {
+        let _admitted_entries_359: array = stored_entries
+        entries = _admitted_entries_359^
     }
-    vec_add(entries, motion_idx)
+    vec_add(entries, motion_idx)^
     rbt_put(voxels, voxel_key, entries)
 
     var grid_size = GOOD_VOXEL_SIZE
@@ -503,7 +505,7 @@ pn motion_new(cs: int, p1x: float, p1y: float, p1z: float,
 // CD Benchmark main logic
 // =====================================================
 
-pn simulate_frame(numAircraft: int, tval: float) array {
+pn simulate_frame(numAircraft: int, tval: float) array^ {
     var frame = vec_new()
     var i = 0
     while (i < numAircraft) {
@@ -512,19 +514,19 @@ pn simulate_frame(numAircraft: int, tval: float) array {
         var py1 = math.cos(tval) * 2 + i * 3
         var pz1 = 10
         var a1 = [cs1, px1, py1, pz1]
-        vec_add(frame, a1)
+        vec_add(frame, a1)^
         var cs2 = i + 1
         var py2 = math.sin(tval) * 2 + i * 3
         var a2 = [cs2, px1, py2, pz1]
-        vec_add(frame, a2)
+        vec_add(frame, a2)^
         i = i + 2
     }
     return frame
 }
 
-pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
+pn handle_new_frame(var stateTree: RbtTable, frame: array) int^ {
     var motions = vec_new()
-    var seenTree = rbt_new()
+    var seenTree = rbt_new()^
     var frameSz = vec_size(frame)
     var i = 0
     while (i < frameSz) {
@@ -535,14 +537,14 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
         var npz = aircraft[3]
         var newPos = v3d_new(npx, npy, npz)
         var oldPos = rbt_put(stateTree, csId, newPos)
-        rbt_put(seenTree, csId, 1)
+        rbt_put(seenTree, csId, 1)^
         // Use helper to avoid FLOAT assignments inside if blocks
         var usePos = get_old_or_new(oldPos, newPos)
         var opx = usePos[0]
         var opy = usePos[1]
         var opz = usePos[2]
         var m = motion_new(csId, opx, opy, opz, npx, npy, npz)
-        vec_add(motions, m)
+        vec_add(motions, m)^
         i = i + 1
     }
 
@@ -553,8 +555,8 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
         var curN = rbt_nd(stateTree, curId)
         var ck = curN[NK]
         var inSeen = rbt_get(seenTree, ck)
-        if (inSeen == null) {
-            vec_add(toRemove, ck)
+        if ((inSeen == null)^) {
+            vec_add(toRemove, ck)^
         }
         curId = rbt_successor(stateTree, curId)
     }
@@ -562,17 +564,18 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
     var ri = 0
     while (ri < trSz) {
         var rk = vec_at(toRemove, ri)
-        rbt_remove(stateTree, rk)
+        rbt_remove(stateTree, rk)^
         ri = ri + 1
     }
 
     // Reduce collision set
-    var voxelMap = rbt_new()
+    var voxelMap = rbt_new()^
     var motionsSz = vec_size(motions)
     var vxy: array = [0.0, 0.0]
     var mi = 0
     while (mi < motionsSz) {
-        var mot: Motion = vec_at(motions, mi)
+        let _admitted_mot_575: Motion = vec_at(motions, mi)
+        var mot: Motion = _admitted_mot_575^
         var mp1x = mot.p1x
         var mp1y = mot.p1y
         var mp2x = mot.p2x
@@ -580,7 +583,7 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
         voxel_hash_xy(mp1x, mp1y, vxy)
         var vvx = vxy[0]
         var vvy = vxy[1]
-        var motSeen = rbt_new()
+        var motSeen = rbt_new()^
         var drawn = recurse_draw(voxelMap, motSeen, vvx, vvy, mp1x, mp1y, mp2x, mp2y, mi)
         voxelMap = drawn[0]
         mi = mi + 1
@@ -589,21 +592,21 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
     // Collect voxels with >1 motion and check collisions
     var collisionCount = 0
     var vmCur = rbt_first(voxelMap)
-    while (vmCur != NIL) {
+    while ((vmCur != NIL)^) {
         var vmN = rbt_nd(voxelMap, vmCur)
         var motVec = vmN[NV]
         var mvsz = vec_size(motVec)
-        if (mvsz > 1) {
+        if ((mvsz > 1)^) {
             var ii = 0
-            while (ii < mvsz) {
+            while ((ii < mvsz)^) {
                 var mIdx1 = vec_at(motVec, ii)
                 var mot1 = vec_at(motions, mIdx1)
                 var jj = ii + 1
-                while (jj < mvsz) {
+                while ((jj < mvsz)^) {
                     var mIdx2 = vec_at(motVec, jj)
                     var mot2 = vec_at(motions, mIdx2)
                     var coll = find_intersection(mot1, mot2)
-                    if (coll != null) {
+                    if ((coll != null)^) {
                         collisionCount = collisionCount + 1
                     }
                     jj = jj + 1
@@ -619,7 +622,7 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
 
 pn cd(numAircraft: int) int^ {
     var numFrames = 200
-    var stateTree = rbt_new()
+    var stateTree = rbt_new()^
     var actualCollisions = 0
     var i = 0
     while (i < numFrames) {
@@ -658,10 +661,10 @@ pn main() {
     print(collisions)
     print("\n")
     var ok = verify_result(collisions, 100)
-    if (ok == 1) {
+    if ((ok == 1)^) {
         print("CD: PASS\n")
     }
-    if (ok == 0) {
+    if ((ok == 0)^) {
         print("CD: FAIL\n")
     }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

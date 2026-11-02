@@ -30,7 +30,7 @@ fn placed(status: any, name, bytes) map {
 }
 
 // one output: written beside the capture, or skipped or failed with the reason
-pn derive_one(name, dir, c, art, meta, req) map {
+pn derive_one(name, dir, c, art, meta, req) map^ {
     if (name == "html") {
         let html = derive.snapshot_html(c)
         return placed(write(dir ++ "/index.html", html), name, (len(html) ^ { null }))
@@ -53,7 +53,7 @@ pn derive_one(name, dir, c, art, meta, req) map {
 }
 
 // one output of a media, gallery, image or file record (media/info.json)
-pn derive_info(name, dir, info, transcript, art, meta, req) map {
+pn derive_info(name, dir, info, transcript, art, meta, req) map^ {
     if (name == "html") {
         let html = derive.info_page(info, transcript)
         return placed(write(dir ++ "/index.html", html), name, (len(html) ^ { null }))

@@ -9,7 +9,7 @@ pn concat_chain_tune22() string {
     return result
 }
 
-pn concat_mixed_tune22() string^ {
+pn concat_mixed_tune22() string {
     var result: string = ""
     result = result ++ "x" ++ 7
     return result

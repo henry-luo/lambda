@@ -7,7 +7,8 @@ pn dot_rows(a: float[], b: float[], n: int) float^ {
     while (i < n) {
         var k: int = 0
         while (k < n) {
-            acc = acc + a[i * n + k] * b[k * n + i]
+            let _admitted_acc_10: float = acc + a[i * n + k] * b[k * n + i]
+            acc = _admitted_acc_10^
             k = k + 1
         }
         i = i + 1

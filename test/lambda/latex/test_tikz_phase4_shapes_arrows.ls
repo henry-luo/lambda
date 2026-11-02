@@ -44,7 +44,7 @@ fn outline(node_source) any^ {
     let geom = shapes.geometry(shapes.shape_spec(node)^, box[0], box[1]);
     geom.kind ++ " " ++ (if (geom.vertices == null) "rx=" ++ string(r3(geom.rx)) ++ " ry=" ++
         string(r3(geom.ry))
-        else string(len(geom.vertices)) ++ " vertices " ++ string([for (vertex in geom.vertices)
+        else string(len(geom.vertices)) ++ " vertices " ++ string([for (vertex in ((geom.vertices) ^ { [] }))
             [r3(vertex[0]), r3(vertex[1])]])) ++
         " half=" ++ string(r3(geom.half_w)) ++ "x" ++ string(r3(geom.half_h))
 }

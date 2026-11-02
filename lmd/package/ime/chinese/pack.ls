@@ -16,7 +16,7 @@ pub fn from_bytes(manifest,lexicon,abbrev,profile = "zh-Hans") map^ {
 }
 
 // key probes compare ASCII in place; only returned postings are decoded.
-fn compare_at(raw: binary,at: int,key: binary,i: int = 0) int {
+fn compare_at(raw: binary,at: int,key: binary,i: int = 0) int^ {
     let byte = raw[at + i]
     let end = byte == 9 or byte == 10;
     if (i == len(key)) (if (end) 0 else 1)
@@ -33,14 +33,14 @@ pub fn lower_bound(table,key: string) int^ {
 pub fn equal(table,line: int,key: string) bool^ =>
     line < len(table.offsets) and compare_at(table.bytes,int(table.offsets[line]),binary(key)^) == 0
 
-fn prefix_at(raw: binary,at: int,key: binary,i: int = 0) bool =>
+fn prefix_at(raw: binary,at: int,key: binary,i: int = 0) bool^ =>
     if (i == len(key)) true
     else if (raw[at + i] != key[i]) false else prefix_at(raw,at,key,i + 1)
 
 pub fn prefix(table,line: int,key: string) bool^ =>
     line < len(table.offsets) and prefix_at(table.bytes,int(table.offsets[line]),binary(key)^)
 
-pub fn token_end(raw: binary,at: int,end: int,separator: int) int =>
+pub fn token_end(raw: binary,at: int,end: int,separator: int) int^ =>
     if (at >= end or raw[at] == separator) at else token_end(raw,at + 1,end,separator)
 
 pub fn line_key(table,line: int) string^ {

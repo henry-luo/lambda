@@ -21,7 +21,7 @@ pn mutable_argument() int^ { return mutate_plain(fill(2, 7)) }
 pn retain(a: int[]) any { return a }
 pn retained_argument() any { return retain(fill(2, 7)) }
 pn readonly_length(a: int[]) int { return len(a) }
-pn forward_read(a: int[]) int { return sum(a) }
+pn forward_read(a: int[]) int^ { return sum(a) }
 pn forwarded_argument() int^ { return forward_read(fill(2, 7)) }
 pn main() {
     print(freshly(2, 3)); print("\n")

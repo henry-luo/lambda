@@ -33,7 +33,8 @@ type IntQueue = {items: int[], first: int}
 // IntQueue: the node pool and the work list
 // =====================================================
 pn queue_new() IntQueue^ {
-    var q: IntQueue = {items: [], first: 0}
+    let _admitted_q_36: IntQueue = {items: [], first: 0}
+    var q: IntQueue = _admitted_q_36^
     return q
 }
 
@@ -51,20 +52,22 @@ pn queue_has(q: IntQueue, id: int) int {
 // BasicBlock / ControlFlowGraph
 // =====================================================
 pn bb_new(name: int) BasicBlock^ {
-    var b: BasicBlock = {bid: name, inEdges: [], outEdges: []}
+    let _admitted_b_54: BasicBlock = {bid: name, inEdges: [], outEdges: []}
+    var b: BasicBlock = _admitted_b_54^
     return b
 }
 
 pn cfg_new() ControlFlowGraph^ {
-    var c: ControlFlowGraph = {startNode: null, bbMap: [], numNodes: 0}
+    let _admitted_c_59: ControlFlowGraph = {startNode: null, bbMap: [], numNodes: 0}
+    var c: ControlFlowGraph = _admitted_c_59^
     return c
 }
 
 // block ids are created densely in increasing order, so a new id is always
 // the next slot of bbMap
-pn cfg_ensure_node(var cfg: ControlFlowGraph, name: int) int {
+pn cfg_ensure_node(var cfg: ControlFlowGraph, name: int) int^ {
     while (cfg.numNodes <= name) {
-        push(cfg.bbMap, bb_new(cfg.numNodes))
+        push(cfg.bbMap, bb_new(cfg.numNodes))^
         cfg.numNodes = cfg.numNodes + 1
         if (cfg.numNodes == 1) {
             cfg.startNode = cfg.bbMap[0]
@@ -75,8 +78,8 @@ pn cfg_ensure_node(var cfg: ControlFlowGraph, name: int) int {
 
 // Edges retain block ids; bbMap is the sole owner of every block's edge lists.
 pn cfg_add_edge(var cfg: ControlFlowGraph, fromName: int, toName: int) int^ {
-    cfg_ensure_node(cfg, fromName)
-    cfg_ensure_node(cfg, toName)
+    cfg_ensure_node(cfg, fromName)^
+    cfg_ensure_node(cfg, toName)^
     push(cfg.bbMap[fromName].outEdges, toName)^
     push(cfg.bbMap[toName].inEdges, fromName)
     return 0
@@ -90,10 +93,11 @@ pn cfg_get_num_nodes(cfg: ControlFlowGraph) int {
 // SimpleLoop / LoopStructureGraph: loops live in lsg.loops, by id
 // =====================================================
 pn loop_new(bb: BasicBlock?, isReducible: int, counter: int) SimpleLoop^ {
-    var l: SimpleLoop = {
+    let _admitted_l_93: SimpleLoop = {
         lid: counter, isRed: isReducible, parentId: -1, isRoot: 0,
         nestLvl: 0, depthLvl: 0, header: bb, bbs: [], children: []
     }
+    var l: SimpleLoop = _admitted_l_93^
     if (bb != null) {
         push(l.bbs, bb)^
     }
@@ -107,7 +111,8 @@ pn loop_set_parent(var lsg: LoopStructureGraph, lid: int, parentLid: int) int^ {
 }
 
 pn lsg_new() LoopStructureGraph^ {
-    var l: LoopStructureGraph = {loopCounter: 1, loops: [loop_new(null, 1, 0)]}
+    let _admitted_l_110: LoopStructureGraph = {loopCounter: 1, loops: [loop_new(null, 1, 0)]}
+    var l: LoopStructureGraph = _admitted_l_110^
     l.loops[0].isRoot = 1
     return l
 }
@@ -124,13 +129,13 @@ pn lsg_get_num_loops(lsg: LoopStructureGraph) int {
     return lsg.loopCounter
 }
 
-pn lsg_calc_nesting_rec(var lsg: LoopStructureGraph, lid: int, depth: int) int {
+pn lsg_calc_nesting_rec(var lsg: LoopStructureGraph, lid: int, depth: int) int^ {
     lsg.loops[lid].depthLvl = depth
     var s = len(lsg.loops[lid].children)
     var i = 0
     while (i < s) {
         var child = lsg.loops[lid].children[i]
-        lsg_calc_nesting_rec(lsg, child, depth + 1)
+        lsg_calc_nesting_rec(lsg, child, depth + 1)^
         var cnl1 = lsg.loops[child].nestLvl + 1
         if (cnl1 > lsg.loops[lid].nestLvl) {
             lsg.loops[lid].nestLvl = cnl1
@@ -140,14 +145,14 @@ pn lsg_calc_nesting_rec(var lsg: LoopStructureGraph, lid: int, depth: int) int {
     return 0
 }
 
-pn lsg_calc_nesting(var lsg: LoopStructureGraph) int {
+pn lsg_calc_nesting(var lsg: LoopStructureGraph) int^ {
     var lc = lsg.loopCounter
     var i = 0
     while (i < lc) {
         // Read the live store because loop_set_parent updates lsg.loops.
         if (lsg.loops[i].isRoot == 0) {
             if (lsg.loops[i].parentId == -1) {
-                loop_set_parent(lsg, i, 0)
+                loop_set_parent(lsg, i, 0)^
             }
         }
         i = i + 1
@@ -201,10 +206,10 @@ pn set_add_at(var sets: int[][], idx: int, val: int) int^ {
 
 // Recursive DFS
 pn hlf_do_dfs(var nodes: UnionFindNode[], var num_map: int[], var last_arr: int[],
-        cfg: ControlFlowGraph, current_bb: BasicBlock, current: int) int {
+        cfg: ControlFlowGraph, current_bb: BasicBlock, current: int) int^ {
     // S9.1.3: DFS carries its three evolving stores through explicit inout
     // borrows; only the scalar last-id needs a return value.
-    nodes[current] = uf_new(current, current_bb)
+    nodes[current] = uf_new(current, current_bb)^
     num_map[current_bb.bid] = current
     var last_id = current
     var edge_count = len(current_bb.outEdges)
@@ -223,18 +228,18 @@ pn hlf_do_dfs(var nodes: UnionFindNode[], var num_map: int[], var last_arr: int[
 
 pn hlf_process_edges(numMap: int[], var backPreds: int[][],
         var nonBackPreds: int[][], hlf_last: int[], nodeW: BasicBlock,
-        w: int) int {
+        w: int) int^ {
     var ieSz = len(nodeW.inEdges)
     var i = 0
     while (i < ieSz) {
         var v = numMap[nodeW.inEdges[i]]
         if (v != UNVISITED) {
             var anc = hlf_is_ancestor(hlf_last, w, v)
-            if (anc == 1) {
-                push(backPreds[w], v)
+            if ((anc == 1)^) {
+                push(backPreds[w], v)^
             }
-            if (anc == 0) {
-                set_add_at(nonBackPreds, w, v)
+            if ((anc == 0)^) {
+                set_add_at(nonBackPreds, w, v)^
             }
         }
         i = i + 1
@@ -243,13 +248,13 @@ pn hlf_process_edges(numMap: int[], var backPreds: int[][],
 }
 
 pn hlf_step_d(nodes: UnionFindNode[], backPreds: int[][], var hlf_type: int[],
-        w: int, var nodePool: IntQueue) int {
+        w: int, var nodePool: IntQueue) int^ {
     var bpSz = len(backPreds[w])
     var i = 0
     while (i < bpSz) {
         var v = backPreds[w][i]
         if (v != w) {
-            push(nodePool.items, uf_find_set(nodes, v))
+            push(nodePool.items, uf_find_set(nodes, v))^
         }
         if (v == w) {
             hlf_type[w] = BB_SELF
@@ -261,21 +266,21 @@ pn hlf_step_d(nodes: UnionFindNode[], backPreds: int[][], var hlf_type: int[],
 
 pn hlf_step_e(nodes: UnionFindNode[], var nonBackPreds: int[][], var hlf_type: int[],
         hlf_last: int[], w: int, var nodePool: IntQueue,
-        var workList: IntQueue, xdfn: int) int {
+        var workList: IntQueue, xdfn: int) int^ {
     var sz = len(nonBackPreds[xdfn])
     var i = 0
     while (i < sz) {
         var yddfn = uf_find_set(nodes, nonBackPreds[xdfn][i])
         var anc = hlf_is_ancestor(hlf_last, w, yddfn)
-        if (anc == 0) {
+        if ((anc == 0)^) {
             hlf_type[w] = BB_IRREDUCIBLE
-            set_add_at(nonBackPreds, w, yddfn)
+            set_add_at(nonBackPreds, w, yddfn)^
         }
-        if (anc == 1) {
-            if (yddfn != w) {
-                if (queue_has(nodePool, yddfn) == 0) {
-                    push(workList.items, yddfn)
-                    push(nodePool.items, yddfn)
+        if ((anc == 1)^) {
+            if ((yddfn != w)^) {
+                if ((queue_has(nodePool, yddfn) == 0)^) {
+                    push(workList.items, yddfn)^
+                    push(nodePool.items, yddfn)^
                 }
             }
         }
@@ -290,13 +295,16 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
     var size = cfg_get_num_nodes(cfg)
     if (size == 0) { return 0 }
 
-    var nonBackPreds: int[][] = []
-    var backPreds: int[][] = []
+    let _admitted_nonBackPreds_293: int[][] = []
+    var nonBackPreds: int[][] = _admitted_nonBackPreds_293
+    let _admitted_backPreds_294: int[][] = []
+    var backPreds: int[][] = _admitted_backPreds_294
     var numMap: int[] = fill(size + 100, UNVISITED)^
     var hlf_header: int[] = fill(size, 0)^
     var hlf_type: int[] = fill(size, BB_NONHEADER)^
     var hlf_last: int[] = fill(size, 0)^
-    var nodes: UnionFindNode[] = []
+    let _admitted_nodes_299: UnionFindNode[] = []
+    var nodes: UnionFindNode[] = _admitted_nodes_299
 
     // Create UF nodes and per-node structures
     var ni = 0
@@ -330,7 +338,8 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
         var nodeW = nodes[w].bb
         if (nodeW != null) {
             hlf_step_d(nodes, backPreds, hlf_type, w, nodePool)^
-            var workList: IntQueue = {items: [], first: 0}
+            let _admitted_workList_333: IntQueue = {items: [], first: 0}
+            var workList: IntQueue = _admitted_workList_333^
             var nps = len(nodePool.items)
             var cpi = 0
             while (cpi < nps) {
@@ -377,7 +386,8 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
                     if (parent_lid == -1) {
                         var found_bb = nodes[found_dfn].bb
                         if (found_bb != null) {
-                            var live_bb: BasicBlock = found_bb
+                            let _admitted_live_bb_380: BasicBlock = found_bb
+                            var live_bb: BasicBlock = _admitted_live_bb_380^
                             push(lsg.loops[found_lid].bbs, live_bb)^
                         }
                     }
@@ -411,12 +421,12 @@ pn build_connect(var cfg: ControlFlowGraph, start: int, end: int) int^ {
     return 0
 }
 
-pn build_straight(var cfg: ControlFlowGraph, start: int, n: int) int {
+pn build_straight(var cfg: ControlFlowGraph, start: int, n: int) int^ {
     var i = 0
     while (i < n) {
         var s1 = start + i
         var s2 = s1 + 1
-        build_connect(cfg, s1, s2)
+        build_connect(cfg, s1, s2)^
         i = i + 1
     }
     var r = start + n
@@ -437,9 +447,9 @@ pn build_base_loop(var cfg: ControlFlowGraph, from: int) int^ {
 }
 
 pn construct_simple_cfg(var cfg: ControlFlowGraph) int^ {
-    cfg_ensure_node(cfg, 0)
+    cfg_ensure_node(cfg, 0)^
     build_base_loop(cfg, 0)^
-    cfg_ensure_node(cfg, 1)
+    cfg_ensure_node(cfg, 1)^
     cfg_add_edge(cfg, 0, 2)
     return 0
 }
@@ -450,23 +460,23 @@ pn find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
 }
 
 pn add_dummy_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph,
-        numDummyLoops: int) int {
+        numDummyLoops: int) int^ {
     var i = 0
     while (i < numDummyLoops) {
-        find_loops(cfg, lsg)
+        find_loops(cfg, lsg)^
         i = i + 1
     }
     return 0
 }
 
 pn construct_cfg(var cfg: ControlFlowGraph, parLoops: int, pparLoops: int,
-        ppparLoops: int) int {
+        ppparLoops: int) int^ {
     var n = 2
     var pl = 0
     while (pl < parLoops) {
         var n1 = n + 1
-        cfg_ensure_node(cfg, n1)
-        build_connect(cfg, 2, n1)
+        cfg_ensure_node(cfg, n1)^
+        build_connect(cfg, 2, n1)^
         n = n1
         var i = 0
         while (i < pparLoops) {
@@ -478,11 +488,11 @@ pn construct_cfg(var cfg: ControlFlowGraph, parLoops: int, pparLoops: int,
                 j = j + 1
             }
             var bottom = build_straight(cfg, n, 1)
-            build_connect(cfg, n, top)
+            build_connect(cfg, n, top)^
             n = bottom
             i = i + 1
         }
-        build_connect(cfg, n, 1)
+        build_connect(cfg, n, 1)^
         pl = pl + 1
     }
     return 0
@@ -491,11 +501,11 @@ pn construct_cfg(var cfg: ControlFlowGraph, parLoops: int, pparLoops: int,
 pn lta_main(numDummyLoops: int, findLoopIterations: int, parLoops: int,
         pparLoops: int, ppparLoops: int) int^ {
     var cfg: ControlFlowGraph = cfg_new()^
-    cfg_ensure_node(cfg, 0)
+    cfg_ensure_node(cfg, 0)^
     construct_simple_cfg(cfg)^
     var lsg: LoopStructureGraph = lsg_new()^
-    add_dummy_loops(cfg, lsg, numDummyLoops)
-    construct_cfg(cfg, parLoops, pparLoops, ppparLoops)
+    add_dummy_loops(cfg, lsg, numDummyLoops)^
+    construct_cfg(cfg, parLoops, pparLoops, ppparLoops)^
     find_loops(cfg, lsg)^
     var i = 0
     while (i < findLoopIterations) {

@@ -70,7 +70,7 @@ fn label_round(lab, passable, w: int, h: int) array {
     [for (l in lowest) if (l < 0) -1 else lowest[l]]
 }
 
-fn settle(lab, passable, w: int, h: int) array => (let next = label_round(lab, passable, w, h), if (next == lab) lab else settle(next, passable, w, h))
+fn settle(lab, passable, w: int, h: int) array^ => (let next = label_round(lab, passable, w, h), if (next == lab) lab else settle(next, passable, w, h))
 
 // labels[y][x] is the region id of a floor cell (numbered in row-major order of first appearance), -1 elsewhere.
 pub fn regions(tiles, floor_tile = 0) map {

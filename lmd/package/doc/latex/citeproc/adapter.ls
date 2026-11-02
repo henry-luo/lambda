@@ -19,7 +19,7 @@ fn mode(tag) => if (tag == "citeauthor") "author-only"
     else if (tag == "fullcite") "full" else if (tag == "textcite" or tag == "textcites") "textual"
     else "normal"
 
-fn note(value) {
+fn note(value) any^ {
     let pieces = c.words(value)
     let labels = {'p.': "page", 'pp.': "page", 'chap.': "chapter", 'ch.': "chapter",
         'sec.': "section", '§': "section", 'vol.': "volume"}
@@ -58,7 +58,7 @@ pub fn prepare(ast, loaded, footnotes, options) {
             [c.issue("conflicting-citation-style", "CSL cannot be combined with bibliographystyle")])
     let entries = [for (ref in loaded.references) {*:ref.provenance, *:ref,
         kind: c.get(ref.provenance, "kind", ref.type), fields: c.get(ref.provenance, "fields", {})}]
-    let sections = [for (section in 0 to found.next_section) {
+    let sections = [for (section in ((0 to found.next_section) ^ { [] })) {
         let keys = model.selected_keys(found.requests, entries, section, 0, [])
         let selected = [for (key in keys, entry in entries where entry.key == key) entry];
         {section: section, entries: selected, bib_entries: selected}
@@ -67,15 +67,15 @@ pub fn prepare(ast, loaded, footnotes, options) {
         {*:record, valid: len(registry.bib_print_issues(record.node)) == 0}]
     let context = {processor: "csl", requests: found.requests, prints: prints,
         sections: sections, compiled: compiled, valid: compiled != null and len(conflicts) == 0}
-    let processed = if (not context.valid) [] else [for (section in 0 to found.next_section)
+    let processed = if (not context.valid) [] else [for (section in ((0 to found.next_section) ^ { [] }))
         {section: section, result: section_result(section, loaded.references, found, context, footnotes, compiled)}]
     let diagnostics = loaded.diagnostics ++ found.diagnostics ++ conflicts ++
         [for (part in processed, issue in part.result.diagnostics) {
-            let requests = [for (request in found.requests where any([for (group in request.items, key in group.keys)
+            let requests = [for (request in ((found.requests) ^ { [] }) where any([for (group in request.items, key in group.keys)
                 key == issue.item])) request];
             {*:issue, offset: if (len(requests) == 0) issue.offset else requests[0].offset}
         }] ++
-        [for (request in found.requests where request.starred)
+        [for (request in ((found.requests) ^ { [] }) where request.starred)
             c.issue("unsupported-citation-star", "Starred CSL citation variants are unsupported", null, request.tag)]
     {context: {*:context, processed: processed}, entries: loaded.entries,
         diagnostics: diagnostics, assets: loaded.assets,
@@ -91,7 +91,7 @@ fn result_for(context, section) {
 fn citation_for(context, node) {
     let request = model.request_at(context, node.source_offset)
     let result = result_for(context, request.section)
-    let found = [for (citation in result.citations where citation.id == string(node.source_offset)) citation]
+    let found = [for (citation in ((result.citations) ^ { [] }) where ((citation.id == string(node.source_offset)) ^ { false })) citation]
     if (len(found) == 0) null else found[0]
 }
 
@@ -135,7 +135,7 @@ pub fn render_bibliography(node, context) any^ {
                 if (opts.heading == "subbibliography") <h3 heading> else <h2 heading>
             }
             <ol class: "latex-bib-list " ++ css, style: spacing,
-                for (entry in result.bibliography where any([for (selected in record.entries) selected.key == entry.id]))
+                for (entry in ((result.bibliography) ^ { [] }) where any([for (selected in ((record.entries) ^ { [] })) selected.key == entry.id]))
                     <li class: "csl-entry", id: model.target_for_print(record, entry.id), entry.content>
             >
         >

@@ -1066,3 +1066,23 @@ exits. Broad qualification and the outstanding native proof regressions remain
 open. Evidence: `temp/error-handling/m3-propagation-final-diag.json`,
 `m3-join-owner-focused.log`, `m3-join-owner-mir.json`,
 `m3-propagation-wfc.json`, and `m3-bool-fill-propagation-gc.json`.
+
+### Authored caller migration checkpoint (2026-11-03)
+
+The remaining authored callers have been migrated to S7.5.1v6 acknowledgement,
+S7.6.3v3 explicit propagation and S7.7.2v2/S7.7.4v2 retained boundary outcomes.
+This includes packages, demos, benchmarks, tutorial examples, test modules and
+embedded native-test source. Known failed stores keep explicit local recovery;
+checked native accumulators stage admission before propagating so a nullable
+source cannot silently enter a strict lane. Redundant propagation chains were
+collapsed. The math corpus generator now acknowledges its generated formatting
+call. These are source migrations; native optimization guards and budgets are
+unchanged.
+
+The fresh compile inventory reports **3,760/3,775** non-negative authored files,
+with no timeouts. The remaining 15 are individually recorded in
+`temp/error-handling/m3-source-compile-reviewed.json`: schema/parser and duplicate
+name failures, a retired Python import, an invalid input arity, the established
+RSA branch-shape failure, and WIP modules requiring further review. This count
+is not a claim that all remaining failures are pre-existing. Aggregate runtime
+and optimization qualification is still in progress.

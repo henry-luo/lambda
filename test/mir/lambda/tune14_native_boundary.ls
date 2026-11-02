@@ -5,13 +5,16 @@
 
 pn tune14_float_sum(values: float[]) float^ {
     var total: float = 0.0
-    total = total + values[0]
-    total = total + values[1]
+    let _admitted_total_8: float = total + values[0]
+    total = _admitted_total_8^
+    let _admitted_total_9: float = total + values[1]
+    total = _admitted_total_9^
     return total
 }
 
 pn tune14_bitwise(values: int[]) int^ {
-    var value: int = values[0]
+    let _admitted_value_14: int = values[0]
+    var value: int = _admitted_value_14^
     value = shr(value, 1)
     value = band(value, 255)
     return value

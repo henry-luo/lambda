@@ -5,14 +5,14 @@ import geometry: lambda.chart.geometry
 import text: lambda.chart.text
 import collision: lambda.chart.collision
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
-fn words(node) => [for (child in elements(node) where name(child) == 'text') join(content(child), "")]
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
+fn words(node) => [for (child in ((elements(node)) ^ { [] }) where ((name(child) == 'text') ^ { false })) join(content(child), "")]
 fn clear_text(node) {
     let boxes = text.svg_bounds(node);
     not any([for (i, box in boxes) for (j, other in boxes where j > i) collision.overlaps(box, other, 1.99)])
 }
-fn needle_tracks(image, fraction) {
+fn needle_tracks(image, fraction) any^ {
     let pointer = classes(image, "gauge-pointer")[0];
     let hub = (elements(pointer) |: name(~) == 'circle')[0];
     let outline = paths.sample((elements(pointer) |: name(~) == 'path')[0].d)[0].points;

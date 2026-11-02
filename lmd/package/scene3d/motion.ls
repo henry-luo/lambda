@@ -112,7 +112,7 @@ fn turn_channel(ch) element {
         *: (if (ch.position != null) {position: [for (k in ((0 to keys - 1) ^ { [] })) *t.quaternion_rotate(z_to_y, ch.position[3 * k to 3 * k + 2])]} else {}),
         *: (if (ch.quaternion != null) {quaternion: [for (k in ((0 to keys - 1) ^ { [] })) *t.quaternion_multiply(z_to_y, ch.quaternion[4 * k to 4 * k + 3])]} else {})}, [])
 }
-fn z_up(c) element {
+fn z_up(c) element^ {
     let roots = [for (j in ((content(skeleton_of(c))) ^ { [] })) j.name];
     rebuild(c, fields(c), [for (x in ((content(c)) ^ { [] }))
         if (name(x) == 'skeleton') rebuild(x, fields(x), [for (j in ((content(x)) ^ { [] })) turn_root(j)])
@@ -220,7 +220,7 @@ fn hip_ratio(source, target) float^ {
     let to = hip_height(target)^
     let a = world_bones(target)^
     let b = world_bones(source)^
-    let ratios = sort([for (t, s in joint_map(source, target) where a[t] != null and b[s] != null and a[t] > 1e-12 and b[s] > 1e-12) a[t] / b[s]])
+    let ratios = sort([for (t, s in ((joint_map(source, target)) ^ { [] }) where a[t] != null and b[s] != null and a[t] > 1e-12 and b[s] > 1e-12) a[t] / b[s]])
     let fallback = if (len(ratios) == 0) 1.0 else ratios[len(ratios) div 2];
     if (from > 0.05 * sum([for (k, v in b) v]) and to > 0.05 * sum([for (k, v in a) v])) to / from else fallback
 }
@@ -368,7 +368,7 @@ pub fn attach(c, sources, options = {}) element^ {
 
 // ---- clip operations -----------------------------------------------------------
 
-fn map_clips(c, f) element => rebuild(c, fields(c), [for (x in ((content(c)) ^ { [] })) if (name(x) == 'clip') f(x) else x])
+fn map_clips(c, f) element^ => rebuild(c, fields(c), [for (x in ((content(c)) ^ { [] })) if (name(x) == 'clip') f(x) else x])
 
 // hold the root's translation on `axes` at its first key (Mixamo's "In Place")
 pub fn in_place(c, axes = ['x', 'z']) element^ {
@@ -378,7 +378,7 @@ pub fn in_place(c, axes = ['x', 'z']) element^ {
     let hold = (ch) any^ => if (ch.joint != root or ch.position == null) ch
         else <channel *: {*: fields(ch), position: [for (k in ((0 to len(ch.position) / 3 - 1) ^ { [] })) for (i in 0 to 2)
             if (contains(held, i)) ch.position[i] else ch.position[3 * k + i]]}>
-    let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) hold(ch)]))
+    let out = map_clips(c, (k) any^ => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) hold(ch)]))
     let checked = validate(out)^;
     out
 }
@@ -396,7 +396,7 @@ pub fn mirror(c) element^ {
         *: (if (ch.quaternion != null) {quaternion: [for (k in ((0 to len(ch.quaternion) / 4 - 1) ^ { [] }))
             *[ch.quaternion[4 * k], 0.0 - ch.quaternion[4 * k + 1], 0.0 - ch.quaternion[4 * k + 2], ch.quaternion[4 * k + 3]]]} else {}),
         *: (if (ch.scale != null) {scale: ch.scale} else {})>
-    let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) reflect(ch)]))
+    let out = map_clips(c, (k) any^ => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) reflect(ch)]))
     let checked = validate(out)^;
     out
 }

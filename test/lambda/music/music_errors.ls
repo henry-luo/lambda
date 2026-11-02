@@ -4,7 +4,7 @@ fn document(body) => "<score-partwise version='4.0'><part-list><score-part id='P
 let quarter="<note><pitch><step>C</step><octave>4</octave></pitch><duration>12</duration><type>quarter</type></note>"
 fn rejected(source) => ((music.parse(source) ^ { null }) or "rejected")=="rejected"
 fn bad(body) => rejected(document(body))
-fn bad_layout(body) => ((music.layout(music.parse(document(body))^) ^ { null }) or "rejected")=="rejected";
+fn bad_layout(body) any^ => ((music.layout(music.parse(document(body))^) ^ { null }) or "rejected")=="rejected";
 [
  rejected("<score-partwise><broken></score-partwise>"),
  rejected(document(quarter)++"<extra/>"),

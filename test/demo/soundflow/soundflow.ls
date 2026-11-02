@@ -44,10 +44,10 @@ pn hear(evt, session, next) {
 // a recording of the loops as they stand, and a picture of the drawing
 pn save(session) {
     let st = session.st
-    if (len(st.strokes) == 0) { return {*: session, st: {*: st, status: "Draw something to save first"}} }
+    if ((len(st.strokes) == 0)^) { return {*: session, st: {*: st, status: "Draw something to save first"}} }
     // never overwrite an earlier session's recording
     var n = session.saves + 1
-    while (exists(SAVE_DIR ++ "/soundflow-" ++ string(n) ++ ".wav")) { n = n + 1 }
+    while (exists(SAVE_DIR ++ "/soundflow-" ++ string(n) ++ ".wav")^) { n = n + 1 }
     let base = SAVE_DIR ++ "/soundflow-" ++ string(n)
     let seconds = m.export_seconds(st)
     var problem = ""
@@ -74,7 +74,7 @@ pn command(evt, session, action, value) {
     return {*: session, st: next}
 }
 
-view <soundflow_app> state session: initial() {
+view <soundflow_app> () any^ state session: initial() {
     scene.page(session.st, {status: sound.status(session.sound), enabled: session.sound.enabled,
         played: session.sound.played, tones: len([for (k at session.sound.tones) k])})
 }
@@ -98,7 +98,7 @@ on pointermove(evt) {
 }
 on pointerup(evt) {
     let st = session.st
-    if (st.drawing == null and st.drag == null) { return 'pass' }
+    if ((st.drawing == null and st.drag == null)^) { return 'pass' }
     session = hear(evt, session, if (st.drag != null) m.end_drag(st, evt.time_stamp) else m.finish(st, evt.time_stamp))
     return 'prevent-default'
 }
@@ -121,7 +121,7 @@ on sftick(evt) {
     let wall = evt.detail
     // while nothing moves, frames only warm the tone cache
     if (m.still(session.st, wall)^) {
-        let missing = len([for (n in wanted(session.st)^ where session.sound.tones[n.voice ++ ":" ++ string(n.note)] == null) n])
+        let missing = len([for (n in wanted(session.st)^ where ((session.sound.tones[n.voice ++ ":" ++ string(n.note)] == null) ^ { false })) n])
         if (missing > 0) { session = {*: session, sound: sound.warm(session.sound, wanted(session.st))} }
         return 'handled'
     }
@@ -150,7 +150,7 @@ on sfframe(evt) {
 on keydown(evt) {
     if (evt.ctrlKey or evt.metaKey or evt.altKey or evt.repeat) { return 'pass' }
     let action = key_action(evt.key)
-    if (action == null) { return 'pass' }
+    if ((action == null)^) { return 'pass' }
     dom.dispatch(dom.query_selector(dom.root_node(evt.target), "#soundflow"), {type: "sfkey", detail: action})
     return 'prevent-default'
 }

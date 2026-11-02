@@ -3,7 +3,7 @@ import tikz: lambda.doc.tikz.tikz
 import expr: lambda.doc.tikz.expression
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 let segmented = input("test/input/tikz/segmentada.pgf")^
 let polar = input("test/input/tikz/polar.pgf")^

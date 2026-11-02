@@ -39,7 +39,7 @@ pub pn value(owner,id,value,editing=null) {
     if (target == null or editing == id) { return null }
     if (dom.matches(target,"select")) {
         let options = dom.query_selector_all(target,"option")
-        let matches = [for (i,option in options where dom.get_attribute(option,"value") == text) i]
+        let matches = [for (i,option in options where (dom.get_attribute(option,"value") == text)^) i]
         if (len(matches)>0 and dom.get_state(target,"value") != text) dom.set_selected_index(target,matches[0])
     } else if (dom.get_state(target,"value") != text) dom.set_state(target,"value",text)
 }
@@ -51,7 +51,7 @@ pub pn fit(owner,st) {
     let paper = node(owner,"paper");
     for (key,n in {width:w,height:h,left:max(24.0,(box.width-w)/2.0),top:max(24.0,(box.height-h)/2.0)})
         u.style(paper,string(key),c.px(n))
-    u.style(node(owner,"slide-render"),"transform","scale(" ++ c.fmt(scale) ++ ")")
+    u.style(node(owner,"slide-render"),"transform","scale(" ++ c.fmt(scale) ++ ")")^
     u.text(owner,"zoom-label",string(round(scale*100.0)) ++ "%")
     return {*:st,scale:scale}
 }
@@ -87,7 +87,7 @@ pub pn fit_layout(owner,st,defer_layout=true) {
     let papers = dom.query_selector_all(node(owner,"thumbnails"),".thumb-paper")
     let preview = if (len(papers)>0) dom.bounding_box(papers[0]).width else st.thumbnail_width
     for (paper in papers) {
-        u.style(paper,"height",c.px(preview*st.plan.height/st.plan.width))
+        u.style(paper,"height",c.px(preview*st.plan.height/st.plan.width))^
         u.style(dom.query_selector(paper,".thumb-render"),"transform","scale(" ++ c.fmt(preview/st.plan.width) ++ ")")
     }
     return fit(owner,{*:resized,thumbnail_width:preview})
@@ -106,7 +106,7 @@ pub pn selection(owner,st) {
     let place = node(owner,"edit-place-" ++ st.selected)
     if (place != null) {
         let editable = inline_text.can_edit(m.chosen(st));
-        dom.set_attribute(place,"class","slide-object editor-selected" ++ (if (editable) " editor-text-target" else ""))
+        dom.set_attribute(place,"class","slide-object editor-selected" ++ (if (editable) " editor-text-target" else ""))^
         if (editable) dom.set_attribute(place,"title","Double-click or press F2 to edit text")
         let fragment = dom.parse_fragment(place,"<div class=\"editor-handle\" data-resize=\"true\"></div>")
         for (handle in dom.child_nodes(fragment)) dom.append_child(place,handle)
@@ -116,17 +116,17 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     // a slide switch replaces the notes and painted canvas, even when editing never began.
     let previous_index = dom.get_attribute(owner,"data-index")
     let replaced = opened or (previous_index!=null and previous_index!=string(st.index))
-    spelling.update(owner,"slides-notes",m.notes(st),st.show==true,null,replaced)
+    spelling.update(owner,"slides-notes",m.notes(st),st.show==true,null,replaced)^
     if (st.inline==null) spelling.update(owner,"slides-text",null)
     spelling.reposition(owner,"slides-notes")
     spelling.reposition(owner,"slides-text")
     let thumbnail_focus = canvas and any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
     let obj = m.chosen(st)
-    u.markup(node(owner,"import-warnings"),if (len(st.import_warnings)>0) format([pptx_view.warnings(st.import_warnings)],'html')^ else "")
-    u.show(owner,"import-warnings",len(st.import_warnings)>0)
+    u.markup(node(owner,"import-warnings"),if (len(st.import_warnings)>0) format([pptx_view.warnings(st.import_warnings)],'html')^ else "")^
+    u.show(owner,"import-warnings",len(st.import_warnings)>0)^
     let editing = st.editing.target
     let ribbon = node(owner,"ribbon")
-    u.markup(ribbon,format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))
+    u.markup(ribbon,format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))^
     let group_row = dom.query_selector(ribbon,".editor-ribbon")
     // Markup replacement discards group measurements; measure in the next layout frame.
     if (group_row!=null and dom.get_attribute(group_row,"data-layout-key")==null)
@@ -134,22 +134,22 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     let menu_tree = if (st.menu=="slide-context") home_ui.slide_context(st)
         else if (starts_with(c.value(st.menu,""),"animation-")) animations_ui.menu_tree(st,st.menu) else if (st.menu == "transition-options") transitions_ui.menu_tree(st) else if (starts_with(c.value(st.menu,""),"insert-")) insert_ui.menu_tree(st.menu)
         else home_ui.menu_tree(c.value(st.menu,""));
-    u.markup(node(owner,"home-menu"),if (len(menu_tree) == 0) "" else format(menu_tree,'html'))
-    u.show(owner,"home-menu",st.menu != null and st.menu != "")
-    u.attr(node(owner,"home-menu"),"aria-label",if (st.menu=="slide-context") "Slide actions" else "Home ribbon options")
+    u.markup(node(owner,"home-menu"),if (len(menu_tree) == 0) "" else format(menu_tree,'html'))^
+    u.show(owner,"home-menu",st.menu != null and st.menu != "")^
+    u.attr(node(owner,"home-menu"),"aria-label",if (st.menu=="slide-context") "Slide actions" else "Home ribbon options")^
     for (trigger in dom.query_selector_all(owner,".home-menu-trigger"))
         u.attr(trigger,"aria-expanded",dom.get_attribute(trigger,"id") == st.menu)
     let display = if (st.display_doc == st.doc and st.display_base == st.base) st else
         {*:st,display_doc:st.doc,display_base:st.base,display_plan:slide.compile(resources.slide_sources(st.doc,st.base))^}
     let visual_state = {*:st,plan:display.display_plan}
     if (canvas) {
-        u.markup(node(owner,"thumbnails"),format(v.thumbnails(visual_state)^,'html'))
-        u.markup(node(owner,"slide-render"),format([v.canvas(display.display_plan,st.index,"edit")^],'html'))
+        u.markup(node(owner,"thumbnails"),format(v.thumbnails(visual_state)^,'html'))^
+        u.markup(node(owner,"slide-render"),format([v.canvas(display.display_plan,st.index,"edit")^],'html'))^
     }
-    u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))
-    selection(owner,st)
-    if (canvas) spelling.update_canvas(owner,if (st.inline==null) null else st.selected,st.show==true,replaced)
-    u.attr(node(owner,"paper"),"class",if (st.grid) "grid" else "")
+    u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))^
+    selection(owner,st)^
+    if (canvas) spelling.update_canvas(owner,if (st.inline==null) null else st.selected,st.show==true,replaced)^
+    u.attr(node(owner,"paper"),"class",if (st.grid) "grid" else "")^
     for (key,val in {'data-index':st.index,'data-slides':len(st.plan.slides),'data-selected':st.selected,
         'data-insert-dialog':c.value(st.insert_form.kind,""),'data-dirty':st.doc != st.saved,'data-error':st.error,'data-dialog':st.dialog,'data-mode':if (st.show) "present" else "edit",'data-undo':len(st.undo),
         'data-x':obj.x,'data-y':obj.y,'data-width':obj.width,'data-height':obj.height,'data-editing':editing,'data-painter':st.painter == true}) u.attr(owner,string(key),val)
@@ -163,8 +163,8 @@ pub pn publish(owner,st,canvas=true,opened=false) {
             else if (st.dialog == "export") "Export final slides and speaker notes to an HTML handout."
             else if (st.dialog == "print") "Save as PDF, with one final slide per page." else "Save an editable .slides presentation.",
         'dialog-error':st.error}) u.text(owner,string(key),text)
-    u.text(owner,"file-confirm",if (st.dialog == "open") "Open" else if (st.dialog == "export") "Export" else "Save")
-    u.attr(node(owner,"file-dialog"),"aria-busy",st.open_task!=null)
+    u.text(owner,"file-confirm",if (st.dialog == "open") "Open" else if (st.dialog == "export") "Export" else "Save")^
+    u.attr(node(owner,"file-dialog"),"aria-busy",st.open_task!=null)^
     for (id in ["file-path","file-confirm"]) {
         if (st.open_task!=null) dom.set_attribute(node(owner,id),"disabled","")
         else dom.remove_attribute(node(owner,id),"disabled")
@@ -172,18 +172,18 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     for (id,shown in {'object-properties':obj != null,'slide-properties':obj == null,
         'text-properties':obj.tag == 'text' or obj.tag == 'content','font-properties':obj.tag == 'text',
         'shape-properties':obj.tag == 'shape','image-properties':obj.tag == 'image'}) u.show(owner,string(id),shown)
-    u.show(owner,"file-dialog",st.dialog != "","flex")
-    u.show(owner,"show-layer",st.show)
-    u.show(owner,"insert-dialog",st.insert_form != null,"flex")
+    u.show(owner,"file-dialog",st.dialog != "","flex")^
+    u.show(owner,"show-layer",st.show)^
+    u.show(owner,"insert-dialog",st.insert_form != null,"flex")^
     if (st.insert_form != null) {
-        u.markup(node(owner,"insert-dialog"),format([insert_ui.dialog(st)],'html'))
-        u.text(owner,"insert-error",st.error)
+        u.markup(node(owner,"insert-dialog"),format([insert_ui.dialog(st)],'html'))^
+        u.text(owner,"insert-error",st.error)^
     }
-    disable(node(owner,"edit-inserted"),insert_model.settings(obj.source) == null)
+    disable(node(owner,"edit-inserted"),insert_model.settings(obj.source) == null)^
     for (button in dom.query_selector_all(owner,"[data-tab]")) u.attr(button,"aria-selected",dom.get_attribute(button,"data-tab") == st.tab)
     for (id,disabled in {undo:len(st.undo)==0,redo:len(st.redo)==0,copy:obj==null,paste:st.clipboard==null,duplicate:obj==null,
         delete:obj==null,'apply-text':obj==null or not contains(['text','content'],obj.tag),front:obj==null,back:obj==null}) {
-        for (control in dom.query_selector_all(owner,"[data-action=" ++ string(id) ++ "]")) disable(control,disabled)
+        for (control in dom.query_selector_all(owner,"[data-action=" ++ string(id)^ ++ "]")) disable(control,disabled)
     }
     for (id,val in {'deck-title':st.plan.title,'speaker-notes':m.notes(st),'prop-slide-title':m.scene(st).source.title,
         'prop-slide-background':html.layer_background(st.plan,m.scene(st)),layout:c.value(m.scene(st).source.layout,'blank'),
@@ -193,13 +193,13 @@ pub pn publish(owner,st,canvas=true,opened=false) {
         for (key in ["x","y","width","height","rotation","opacity","font_size"]) value(owner,"prop-" ++ key,obj[key],editing)
         for (key in ["color","fill","stroke","stroke_width","radius","src","fit","style"])
             value(owner,"prop-" ++ key,if (key == "color" or key == "fill") obj.paint else c.value(obj.source[key],if (key == "fit") "contain" else ""),editing)
-        value(owner,"prop-text",if (m.plain(obj.source)) m.text(obj.source) else join([for (child in content(obj.source)) format(child,'mark')],"\n"),editing)
+        value(owner,"prop-text",if (m.plain(obj.source)) m.text(obj.source) else join([for (child in ((content(obj.source)) ^ { [] })) format(child,'mark')],"\n"),editing)^
     }
-    sync_animations(owner,st)
-    sync_transitions(owner,st)
+    sync_animations(owner,st)^
+    sync_transitions(owner,st)^
     sync_home(owner,st)
     // history and navigation replace thumbnails; keep keyboard input on the active slide's live node.
-    if (thumbnail_focus) slide_drag.focus(owner,st.index)
+    if (thumbnail_focus) slide_drag.focus(owner,st.index)^
     return request_layout(owner,fit(owner,display))
 }
 pn disable(control,disabled) {
@@ -217,14 +217,14 @@ pn sync_home(owner,st) {
         "character-spacing","text-highlight","font-color","bullets","numbering","list-options","indent","outdent","line-spacing","align-left","align-center","align-right","align-justify","vertical-align"])
         disable(node(owner,id),not text)
     for (id in ["shape-outline","quick-styles"]) disable(node(owner,id),not shape)
-    disable(node(owner,"shape-fill"),not shape or obj.source.kind == 'line' or inserted_shape.params.kind == "line")
-    disable(node(owner,"reset-layout"),not home.has_placeholders(st))
+    disable(node(owner,"shape-fill"),not shape or obj.source.kind == 'line' or inserted_shape.params.kind == "line")^
+    disable(node(owner,"reset-layout"),not home.has_placeholders(st))^
     for (id in ["cut","copy","arrange"]) disable(node(owner,id),obj == null)
-    disable(node(owner,"format-painter"),not (text or obj.tag == 'shape'))
-    disable(node(owner,"paste"),st.clipboard == null)
-    disable(node(owner,"paste-options"),st.clipboard == null)
-    disable(node(owner,"paste-text"),name(st.clipboard) != 'text')
-    u.attr(node(owner,"format-painter"),"aria-pressed",st.painter == true)
+    disable(node(owner,"format-painter"),not (text or obj.tag == 'shape'))^
+    disable(node(owner,"paste"),st.clipboard == null)^
+    disable(node(owner,"paste-options"),st.clipboard == null)^
+    disable(node(owner,"paste-text"),name(st.clipboard) != 'text')^
+    u.attr(node(owner,"format-painter"),"aria-pressed",st.painter == true)^
     for (id,color in {'font-color-preview':if (text) obj.paint else st.plan.palette.foreground,
         'text-highlight-preview':c.value(home.highlight_color(obj.source),"transparent"),
         'shape-fill-preview':if (inserted_shape.kind == "shape") inserted_shape.params.fill else if (shape and obj.paint != "none") obj.paint else "transparent",
@@ -232,17 +232,17 @@ pn sync_home(owner,st) {
         u.style(node(owner,string(id)),"background-color",color)
     for (action in ["bold","italic","underline","strike","subscript","superscript","align-left","align-center","align-right","align-justify"])
         u.attr(node(owner,action),"aria-pressed",home.pressed(st,action))
-    u.attr(node(owner,"bullets"),"aria-pressed",home.list_kind(st) == 'ul')
-    u.attr(node(owner,"numbering"),"aria-pressed",home.list_kind(st) == 'ol')
+    u.attr(node(owner,"bullets"),"aria-pressed",home.list_kind(st) == 'ul')^
+    u.attr(node(owner,"numbering"),"aria-pressed",home.list_kind(st) == 'ol')^
     let family = home.family(st)
     let control = node(owner,"home-font-family")
-    let found = [for (option in dom.query_selector_all(control,"option") where dom.get_attribute(option,"value") == family) option]
+    let found = [for (option in dom.query_selector_all(control,"option") where (dom.get_attribute(option,"value") == family)^) option]
     if (len(found) == 0) {
         let fragment = dom.parse_fragment(control,format(<option value:family,family>,'xml'))
         for (option in dom.child_nodes(fragment)) dom.append_child(control,option)
     }
-    value(owner,"home-font-family",family,st.editing.target)
-    font_picker.sync(owner,"home-font-family")
+    value(owner,"home-font-family",family,st.editing.target)^
+    font_picker.sync(owner,"home-font-family")^
     value(owner,"home-font-size",c.value(obj.font_size,st.plan.palette.body_size),st.editing.target)
 }
 pn checked(owner,id,enabled) {
@@ -252,23 +252,23 @@ pn checked(owner,id,enabled) {
 pn sync_animations(owner,st) {
     let row = animations.selected(st)
     let obj = m.chosen(st)
-    u.show(owner,"animation-pane",st.animation_pane == true)
+    u.show(owner,"animation-pane",st.animation_pane == true)^
     let items = animations_ui.rows(st)
-    u.markup(node(owner,"animation-list"),if (len(items)==0) "" else format(items,'html'))
-    u.show(owner,"animation-empty",len(items)==0)
-    u.show(owner,"animation-details",row != null)
-    u.attr(owner,"data-animation",c.value(row.key,""))
-    u.attr(owner,"data-animation-painter",st.animation_painter == true)
+    u.markup(node(owner,"animation-list"),if (len(items)==0) "" else format(items,'html'))^
+    u.show(owner,"animation-empty",len(items)==0)^
+    u.show(owner,"animation-details",row != null)^
+    u.attr(owner,"data-animation",c.value(row.key,""))^
+    u.attr(owner,"data-animation-painter",st.animation_painter == true)^
     for (entry in animation_catalog.catalog) {
-        disable(node(owner,"animate-" ++ string(entry.id)),not animations.compatible(obj,entry.id))
+        disable(node(owner,"animate-" ++ string(entry.id)),not animations.compatible(obj,entry.id))^
         u.attr(node(owner,"animate-" ++ string(entry.id)),"aria-pressed",row.effect.kind == entry.id)
     }
     for (id in ["animation-start","animation-duration","animation-delay","animation-trigger","animation-options","animation-remove","animation-up","animation-down"])
         disable(node(owner,id),row == null)
-    disable(node(owner,"animation-painter"),len(animations.copy(st))==0)
-    disable(node(owner,"animation-preview"),len(items)==0)
-    u.attr(node(owner,"animation-painter"),"aria-pressed",st.animation_painter == true)
-    u.attr(node(owner,"animation-pane-toggle"),"aria-pressed",st.animation_pane == true)
+    disable(node(owner,"animation-painter"),len(animations.copy(st))==0)^
+    disable(node(owner,"animation-preview"),len(items)==0)^
+    u.attr(node(owner,"animation-painter"),"aria-pressed",st.animation_painter == true)^
+    u.attr(node(owner,"animation-pane-toggle"),"aria-pressed",st.animation_pane == true)^
     if (row == null) { return }
     for (key,val in {start:c.value(row.cue.start,'click'),duration:c.num(row.effect,"duration",400.0)/1000.0,
         delay:c.num(row.effect,"delay",0.0)/1000.0,from:c.value(row.effect.from,'bottom'),color:c.value(row.effect.color,"#f5b942"),
@@ -280,29 +280,29 @@ pn sync_animations(owner,st) {
     for (key,shown in {from:kind in ['fly-in','fly-out','wipe-in','wipe-out','blinds-in','checkerboard-in'],
         color:kind in ['highlight','line-color'],scale:kind in ['zoom-in','zoom-out','grow','pulse'],angle:kind == 'spin',
         distance:kind in ['fly-in','fly-out'],opacity:kind == 'transparency'}) u.show(owner,"animation-field-" ++ string(key),shown,"flex")
-    u.show(owner,"animation-field-path-preset",kind == 'motion',"flex")
-    u.show(owner,"animation-field-orient",kind == 'motion',"flex")
+    u.show(owner,"animation-field-path-preset",kind == 'motion',"flex")^
+    u.show(owner,"animation-field-orient",kind == 'motion',"flex")^
     u.text(owner,"animation-group-help","Start, Trigger and order apply to this cue group; effect options apply to this effect.")
     u.text(owner,"animation-trigger-label",if (row.cue.trigger == null) "Plays in the slide build sequence." else "Triggered by clicking " ++ string(row.cue.trigger))
 }
 pn sync_transitions(owner,st) {
     let scene = m.scene(st)
     let custom = st.transition_custom == st.index or transitions.sound_kind(st) == "custom"
-    u.show(owner,"transition-sound-file",st.tab == "Transitions" and custom)
-    value(owner,"transition-sound-path",if (transitions.sound_kind(st) == "custom") scene.transition_sound.src else "",st.editing.target)
+    u.show(owner,"transition-sound-file",st.tab == "Transitions" and custom)^
+    value(owner,"transition-sound-path",if (transitions.sound_kind(st) == "custom") scene.transition_sound.src else "",st.editing.target)^
     if (st.tab != "Transitions") { return }
     for (entry in effects.catalog) u.attr(node(owner,"transition-" ++ string(entry.id)),"aria-pressed",transitions.kind(st) == entry.id)
-    value(owner,"transition-duration",scene.transition_duration/1000.0,st.editing.target)
-    value(owner,"transition-after",c.value(scene.advance_after,c.value(st.after_draft,2000.0))/1000.0,st.editing.target)
-    value(owner,"transition-sound",if (custom) "custom" else transitions.sound_kind(st))
-    checked(owner,"transition-click",scene.advance_on_click)
-    checked(owner,"transition-automatic",scene.advance_after != null)
-    disable(node(owner,"transition-after"),scene.advance_after == null)
-    disable(node(owner,"transition-duration"),not effects.animated({*:scene,transition_duration:1.0}))
+    value(owner,"transition-duration",scene.transition_duration/1000.0,st.editing.target)^
+    value(owner,"transition-after",c.value(scene.advance_after,c.value(st.after_draft,2000.0))/1000.0,st.editing.target)^
+    value(owner,"transition-sound",if (custom) "custom" else transitions.sound_kind(st))^
+    checked(owner,"transition-click",scene.advance_on_click)^
+    checked(owner,"transition-automatic",scene.advance_after != null)^
+    disable(node(owner,"transition-after"),scene.advance_after == null)^
+    disable(node(owner,"transition-duration"),not effects.animated({*:scene,transition_duration:1.0}))^
     disable(node(owner,"transition-options"),len(transitions_ui.menu_tree(st)) == 0)
 }
 pub pn change(owner,st,key,draft) any^ {
-    if (starts_with(key,"animation-")) { return animations.property(st,slice(key,10),draft)^ }
+    if (starts_with(key,"animation-")^) { return animations.property(st,slice(key,10),draft)^ }
     if (key == "transition-sound") {
         if (draft == "custom") { return {*:st,transition_custom:st.index} }
         if (draft == "none") { return {*:transitions.sound(st,null)^,transition_custom:false} }
@@ -316,15 +316,15 @@ pub pn change(owner,st,key,draft) any^ {
         if (trim(draft) == "") { return {*:transitions.sound(st,null)^,transition_custom:st.index} }
         return transitions.sound(st,{name:"Custom",src:url_resolve(st.base,trim(draft))^})^
     }
-    if (starts_with(key,"transition-")) {
+    if (starts_with(key,"transition-")^) {
         let changed = transitions.property(st,slice(key,11),draft)^;
         return {*:changed,after_draft:if (slice(key,11) in ["automatic","after"]) c.value(m.scene(changed).advance_after,st.after_draft) else st.after_draft}
     }
-    if (starts_with(key,"home-")) { return home.property(st,slice(key,5),draft)^ }
+    if (starts_with(key,"home-")^) { return home.property(st,slice(key,5),draft)^ }
     if (key == "deck-title") { return m.commit_doc(st,<presentation *:map(st.doc),title:draft,*content(st.doc)>)^ }
     if (key == "notes") { return m.set_notes(st,draft)^ }
     if (key == "slide-transition") { return transitions.choose(st,draft)^ }
-    if (starts_with(key,"slide-")) {
+    if (starts_with(key,"slide-")^) {
         let field = slice(key,6)
         let value = if (contains(["transition","layout"],field)) symbol(draft)
             else if (field == "transition_duration") float(draft)^ else draft;
@@ -337,12 +337,12 @@ pub pn change(owner,st,key,draft) any^ {
 }
 pub pn command(owner,st,action,base) any^ {
     let obj = m.chosen(st)
-    if (starts_with(action,"animation-choose:") or starts_with(action,"animation-add:")) {
+    if ((starts_with(action,"animation-choose:") or starts_with(action,"animation-add:"))^) {
         let parts = split(action,":");
         return animations.choose(st,symbol(parts[1]),parts[0] == "animation-add")^
     }
-    if (starts_with(action,"animation-select:")) { return animations.select(st,slice(action,17)) }
-    if (starts_with(action,"animation-trigger:")) { return animations.property(st,"trigger",slice(action,18))^ }
+    if (starts_with(action,"animation-select:")^) { return animations.select(st,slice(action,17)) }
+    if (starts_with(action,"animation-trigger:")^) { return animations.property(st,"trigger",slice(action,18))^ }
     if (action == "animation-pane-toggle") { return {*:st,animation_pane:st.animation_pane != true} }
     if (action in ["animation-pane-close","animation-options"]) { return {*:st,animation_pane:action == "animation-options"} }
     if (action == "animation-remove") { return animations.remove(st)^ }
@@ -350,20 +350,20 @@ pub pn command(owner,st,action,base) any^ {
     if (action == "animation-painter") { return {*:st,animation_clipboard:animations.copy(st),animation_painter:st.animation_painter != true,painter:false,status:"Click an object to copy these animations. Escape cancels."} }
     if (action == "paint-animation") { return animations.paint(st)^ }
     if (action == "animation-preview") { return start_show(owner,st,animations.preview(st),0,"animation")^ }
-    if (starts_with(action,"transition-choose:")) { return {*:transitions.choose(st,slice(action,18))^,status:"Transition applied to this slide."} }
-    if (starts_with(action,"transition-direction:") or starts_with(action,"transition-variant:")) {
+    if (starts_with(action,"transition-choose:")^) { return {*:transitions.choose(st,slice(action,18))^,status:"Transition applied to this slide."} }
+    if ((starts_with(action,"transition-direction:") or starts_with(action,"transition-variant:"))^) {
         let parts = split(action,":");
         return transitions.property(st,slice(parts[0],11),parts[1])^
     }
     if (action == "transition-apply-all") { return {*:transitions.apply_all(st)^,status:"Transition and timing applied to all slides."} }
     if (action == "transition-preview") { return start_show(owner,st,transitions.preview(st),0,"transition")^ }
-    if (starts_with(action,"insert-open-")) {
+    if (starts_with(action,"insert-open-")^) {
         let parts = split(slice(action,12),":");
         return open_insert(st,parts[0],parts[1])^
     }
     if (action == "insert-edit" or action == "edit-inserted") {
         let existing = insert_model.settings(obj.source);
-        if (existing == null) raise error("Slides: select an inserted object to edit")
+        if ((existing == null)^) raise error("Slides: select an inserted object to edit")
         return open_insert(st,existing.kind,null,true)^
     }
     if (action == "insert-cancel") { return {*:st,insert_form:null,error:""} }
@@ -373,28 +373,28 @@ pub pn command(owner,st,action,base) any^ {
         let resolved = resolve_insert(st,kind,values)^;
         return {*:insert_model.insert(st,kind,resolved,st.insert_form.target)^,insert_form:null,error:"",status:"Inserted " ++ insert_data.spec(kind).label}
     }
-    if (starts_with(action,"insert-symbol:")) {
+    if (starts_with(action,"insert-symbol:")^) {
         let parts = split(action,":")
         let char = insert_data.symbols[int(parts[1])].chars[int(parts[2])]
         let values = read_insert(owner,st)^;
         return {*:st,insert_form:{*:st.insert_form,values:{*:values,text:char}}}
     }
-    if (starts_with(action,"insert-edit-comment:")) {
-        let existing = [for (comment in insert_model.comments(st) where comment.id == slice(action,20)) comment][0];
+    if (starts_with(action,"insert-edit-comment:")^) {
+        let existing = [for (comment in insert_model.comments(st) where (comment.id == slice(action,20))^) comment][0];
         return {*:st,insert_form:{kind:"comment",values:{author:existing.author,text:existing.text},target:existing.id},error:""}
     }
-    if (starts_with(action,"insert-remove-comment:")) {
+    if (starts_with(action,"insert-remove-comment:")^) {
         let values = read_insert(owner,st)^;
         return {*:insert_model.remove_comment(st,slice(action,22))^,insert_form:{*:st.insert_form,values:values}}
     }
     if (action == "insert-image") { return open_insert(st,"picture")^ }
-    if (starts_with(action,"menu-")) {
+    if (starts_with(action,"menu-")^) {
         let key = slice(action,5)
         let trigger = node(owner,key)
         let box = dom.bounding_box(trigger)
         let menu = node(owner,"home-menu");
-        u.style(menu,"left",c.px(box.x))
-        u.style(menu,"top",c.px(box.y+box.height+5.0))
+        u.style(menu,"left",c.px(box.x))^
+        u.style(menu,"top",c.px(box.y+box.height+5.0))^
         dom.request_frame(owner,"home_menu_fit")
         return {*:st,menu:if (st.menu == key) "" else key}
     }
@@ -402,13 +402,13 @@ pub pn command(owner,st,action,base) any^ {
         dom.focus_set(node(owner,"object-list"),false)
         return {*:st,status:"Choose an object in the Format selection list."}
     }
-    if (home.handles(action)) { return home.command(if (action == "format-painter") {*:st,animation_painter:false} else st,action)^ }
+    if (home.handles(action)^) { return home.command(if (action == "format-painter") {*:st,animation_painter:false} else st,action)^ }
     if (action == "undo" or action == "redo") { return {*:m.history(st,action == "redo"),transition_custom:null} }
     if (action == "new") { return {*:m.commit_doc(st,m.starter(),0,"")^,base:base,path:"",import_warnings:[],transition_custom:null,status:"New presentation. Undo restores your previous deck."} }
     if (action == "add-slide" or action == "duplicate-slide") { return m.add_slide(st,action == "duplicate-slide")^ }
     if (action == "delete-slide") { return m.delete_slide(st)^ }
     if (action == "slide-up" or action == "slide-down") { return m.move_slide(st,if (action == "slide-up") -1 else 1)^ }
-    if (starts_with(action,"insert-")) { return {*:m.add_object(st,slice(action,7))^,status:"Object inserted. Edit its content and appearance in Format."} }
+    if (starts_with(action,"insert-")^) { return {*:m.add_object(st,slice(action,7))^,status:"Object inserted. Edit its content and appearance in Format."} }
     if (action == "copy") { return {*:st,clipboard:m.copy_object(st),status:"Object copied."} }
     if (action == "paste" or action == "duplicate") { return m.paste(st,if (action == "duplicate") m.copy_object(st) else null)^ }
     if (action == "delete" or action == "remove-object") { return m.remove_object(st)^ }
@@ -420,9 +420,9 @@ pub pn command(owner,st,action,base) any^ {
     if (action == "grid") { return {*:st,grid:not st.grid} }
     if (action == "fit" or action == "design-fit") { return {*:st,zoom:1.0} }
     if (action == "zoom-in" or action == "zoom-out") { return {*:st,zoom:min(3.0,max(0.25,st.zoom*(if (action == "zoom-in") 1.2 else 1.0/1.2)))} }
-    if (starts_with(action,"theme-")) { return m.commit_doc(st,<presentation *:map(st.doc),theme:symbol(slice(action,6)),*content(st.doc)>)^ }
+    if (starts_with(action,"theme-")^) { return m.commit_doc(st,<presentation *:map(st.doc),theme:symbol(slice(action,6)),*content(st.doc)>)^ }
     if (action == "apply-text") { return m.set_text(st,field(owner,"prop-text"),not m.plain(obj.source))^ }
-    if (starts_with(action,"animate-") and obj != null) { return animations.choose(st,symbol(slice(action,8)),true)^ }
+    if ((starts_with(action,"animate-") and obj != null)^) { return animations.choose(st,symbol(slice(action,8)),true)^ }
     if (action == "clear-animations") { return animations.remove(st,true)^ }
     if (action == "present" or action == "present-current") {
         return start_show(owner,st,st.doc,if (action == "present-current") st.index else 0)^
@@ -436,7 +436,7 @@ pub pn command(owner,st,action,base) any^ {
         return {*:st,show:false,preview:false,status:c.value(sound_error,st.status)}
     }
     if (contains(["open","save","export","print"],action)) {
-        value(owner,"file-path",if (action == "print") "temp/slides/print.pdf" else if (action == "export") "temp/slides/handout.html" else if (st.path != "" and action == "open") st.path else "temp/slides/presentation.slides")
+        value(owner,"file-path",if (action == "print") "temp/slides/print.pdf" else if (action == "export") "temp/slides/handout.html" else if (st.path != "" and action == "open") st.path else "temp/slides/presentation.slides")^
         return {*:st,dialog:action,error:""}
     }
     if (action == "file-cancel") {
@@ -448,7 +448,7 @@ pub pn command(owner,st,action,base) any^ {
         let path = trim(field(owner,"file-path"))
         let ext = if (st.dialog == "print") ".pdf" else if (st.dialog == "export") ".html" else ".slides"
         let pptx = st.dialog=="open" and ends_with(lower(path),".pptx")
-        if (not pptx and not ends_with(lower(path),ext)) raise error("Slides: choose a " ++ ext ++ (if (st.dialog=="open") " or .pptx" else "") ++ " file path")
+        if ((not pptx and not ends_with(lower(path),ext))^) raise error("Slides: choose a " ++ ext ++ (if (st.dialog=="open") " or .pptx" else "") ++ " file path")
         let uri = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",path)^;
         if (pptx) {
             let seq = st.open_seq+1
@@ -502,12 +502,12 @@ pub pn restore_menu_focus(owner,st,key) {
 }
 pub pn open_slide_context(owner,st,index,point=null) {
     let ready = finish_inline(owner,st)
-    if (ready.inline!=null) { return ready }
+    if ((ready.inline!=null)^) { return ready }
     let next = publish(owner,{*:m.select_slide(ready,index),menu:"slide-context",editing:null,error:""})
     let box = dom.bounding_box(slide_drag.thumbnail(owner,next.index))
     let at = if (point==null) {x:box.x+12.0,y:box.y+min(32.0,box.height)} else point
-    u.style(node(owner,"home-menu"),"left",c.px(at.x))
-    u.style(node(owner,"home-menu"),"top",c.px(at.y))
+    u.style(node(owner,"home-menu"),"left",c.px(at.x))^
+    u.style(node(owner,"home-menu"),"top",c.px(at.y))^
     dom.request_frame(owner,"home_menu_fit")
     return next
 }
@@ -516,13 +516,13 @@ pub pn dispatch(owner,st,action,base) {
     { let __error_outcome_2 = command(owner,result,action,base) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:result,error:__error_outcome_2.message,status:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     let published = publish(owner,if (starts_with(action,"menu-")) result else {*:result,menu:""},true,
         (action=="new" or (action=="file-confirm" and st.dialog=="open")) and result.doc!=st.doc);
-    if (st.menu=="slide-context" and published.menu=="") restore_menu_focus(owner,published,st.menu)
+    if ((st.menu=="slide-context" and published.menu=="")^) restore_menu_focus(owner,published,st.menu)^
     // both pointer and keyboard dismissal restore focus outside the hidden dialog.
-    if (st.dialog != "" and published.dialog == "") {
+    if ((st.dialog != "" and published.dialog == "")^) {
         let trigger = dom.query_selector(owner,"[data-action=" ++ st.dialog ++ "]");
         dom.focus_set(if (trigger == null) node(owner,"stage") else trigger,false)
     }
-    if (published.insert_form != null and published.insert_form != st.insert_form) dom.request_frame(owner,"insert_dialog_ready")
+    if ((published.insert_form != null and published.insert_form != st.insert_form)^) dom.request_frame(owner,"insert_dialog_ready")
     return published
 }
 pub fn open_insert(st,kind,variant=null,editing_object=false) any^ {
@@ -583,7 +583,7 @@ pub pn finish_inline(owner,st,accept=true) {
     if (st.inline == null) { return st }
     let control = node(owner,if (st.inline.kind=="rich") "canvas-rich-text" else "canvas-text")
     // removing or parking a focused surface must not commit its draft a second time.
-    if (control!=null) dom.set_attribute(control,"data-inline-finishing","true")
+    if ((control!=null)^) dom.set_attribute(control,"data-inline-finishing","true")
     if (st.inline.ready!=null and st.inline.ready>0) dom.cancel_frame(owner,st.inline.ready)
     var next = {*:st,inline:null}
     if (st.inline.kind=="rich") {
@@ -591,7 +591,7 @@ pub pn finish_inline(owner,st,accept=true) {
         if (accept) {
             dom.dispatch(host,{type:"slide_inline_read",bubbles:false})
             let failure = c.value(dom.get_attribute(host,"data-inline-error"),"");
-            if (failure!="") { return {*:st,error:failure,status:failure} }
+            if ((failure!="")^) { return {*:st,error:failure,status:failure} }
             if (dom.get_attribute(host,"data-inline-changed")=="true")
                 { let __error_outcome_3 = m.set_text(next,dom.get_attribute(host,"data-inline-mark"),true,insert_model.inline_source) ^ { ^ }; if (__error_outcome_3 is error) { next = {*:next,error:__error_outcome_3.message} } else match __error_outcome_3 { case any { next = ~ } } }
         }
@@ -601,7 +601,7 @@ pub pn finish_inline(owner,st,accept=true) {
     }
     if (st.inline.kind!="rich") {
         if (accept) { let __error_outcome_4 = m.set_text(next,field(owner,"canvas-text")) ^ { ^ }; if (__error_outcome_4 is error) { next = {*:next,error:__error_outcome_4.message} } else match __error_outcome_4 { case any { next = ~ } } }
-        if (control!=null) dom.remove(control)
+        if ((control!=null)^) dom.remove(control)
     }
     // unchanged markup is cached, so closing a draft must undo its temporary visibility change.
     u.style(node(owner,"edit-" ++ st.inline.selected),"visibility",st.inline.visibility)
@@ -609,9 +609,9 @@ pub pn finish_inline(owner,st,accept=true) {
 }
 pub pn begin_inline(owner,st,point=null) {
     let obj = m.chosen(st)
-    if (st.inline!=null or not inline_text.can_edit(obj)) { return st }
+    if ((st.inline!=null or not inline_text.can_edit(obj))^) { return st }
     let place = node(owner,"edit-place-" ++ st.selected)
-    let plain = obj.tag=='text' and all([for (child in content(obj.source)) child is string]);
+    let plain = obj.tag=='text' and all([for (child in ((content(obj.source)) ^ { [] })) child is string]);
     let visibility = dom.style_get_property(node(owner,"edit-" ++ st.selected),"visibility")
     u.style(node(owner,"edit-" ++ st.selected),"visibility","hidden")
     if (plain) {
@@ -621,7 +621,7 @@ pub pn begin_inline(owner,st,point=null) {
         let value = m.text(obj.source)
         let end = text_offsets.utf16_from_codepoint(value,len(value),0,0)
         dom.tc_set_selection(node(owner,"canvas-text"),end,end,"none")
-        spelling.update(owner,"slides-text",value)
+        spelling.update(owner,"slides-text",value)^
     } else {
         let host = node(owner,"rich-text-host")
         dom.dispatch(host,{type:"slide_inline_begin",bubbles:false,detail:{object:obj,point:point}})
@@ -638,7 +638,7 @@ pub pn plain_ready(owner,st,token) {
 }
 pub pn file_shortcut(owner,st,key,base) {
     let ready = finish_inline(owner,st)
-    if (ready.inline!=null) { return ready }
+    if ((ready.inline!=null)^) { return ready }
     let next = dispatch(owner,ready,{s:"save",o:"open",p:"print"}[key],base)
     dom.focus_set(node(owner,"file-path"),false)
     return next
@@ -646,7 +646,7 @@ pub pn file_shortcut(owner,st,key,base) {
 pub fn drag_geometry(st,x,y) {
     let d = st.drag
     let obj = d.object
-    let parents = [for (target in m.scene(st).targets where target.tag == 'group' and starts_with(st.selected,target.dom_key ++ "-")) target]
+    let parents = [for (target in m.scene(st).targets where ((target.tag == 'group' and starts_with(st.selected,target.dom_key ++ "-")) ^ { false })) target]
     let angle = sum([for (p in parents) p.rotation]) + (if (d.resize) obj.rotation else 0.0)
     let factor = math.prod([for (p in parents) p.scale]) * (if (d.resize) obj.scale else 1.0)
     let delta = geometry.rotate_point({x:(x-d.x)/st.scale/factor,y:(y-d.y)/st.scale/factor},{x:0.0,y:0.0},-angle)

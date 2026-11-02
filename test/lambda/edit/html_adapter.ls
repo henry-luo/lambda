@@ -63,7 +63,7 @@ let broken = node('doc', [node_attrs('p', [], [text_marked("y", [{name: 'q', val
 
 let covered = "<table><tbody><tr><td rowspan=\"2\" colspan=\"2\">A<br>B</td></tr><tr></tr></tbody></table>"
 let covered_doc = load(covered).doc
-let covered_rows = [for (entry in descendants(covered_doc) where entry.node.tag=='tr') entry.node]
+let covered_rows = [for (entry in ((descendants(covered_doc)) ^ { [] }) where entry.node.tag=='tr') entry.node]
 "rowspans preserve covered empty rows:";
 [covered_doc.content[0].tag=='table',len(covered_rows)==2,len(covered_rows[1].content)==0,
  stable(covered),gate(covered)==null]

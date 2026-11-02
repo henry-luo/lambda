@@ -70,7 +70,7 @@ pub fn units_for(keys,indices) array^ => if (len(keys)*len(indices)<=1000000)
 pub fn below(k: u64, n: int) int => int(floor(unit(k) * float(n)))
 pub fn between(k: u64, lo: float, hi: float) float => lo + unit(k) * (hi - lo)
 pub fn chance(k: u64, p: float) bool => unit(k) < p
-pub fn pick(k: u64, items) => items[below(k, len(items))]
+pub fn pick(k: u64, items) any^ => items[below(k, len(items))]
 
 pub fn weighted(k: u64, items, weights) {
     let cumulative = math.cumsum(weights)

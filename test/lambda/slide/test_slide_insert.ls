@@ -5,10 +5,10 @@ import slide: lambda.slide
 import h: ~~.~~.demo.slides.mod_home
 
 let base = m.initial()
-fn added(kind,p={}) => ins.insert(base,kind,p)^
+fn added(kind,p={}) any^ => ins.insert(base,kind,p)^
 fn current(st) => m.chosen(st).source
 fn saved(st) any^ => ins.settings(current(st))
-fn markup(st) => format(current(st),'xml')^
+fn markup(st) any^ => format(current(st),'xml')^
 let table = added("table",{rows:2,columns:2,data:"Name\tCount\nA\t4"})
 let moved = m.properties(table,{x:40.0,y:60.0,width:500.0})^
 let edited = ins.insert(moved,"table",{rows:3,columns:2},moved.selected)^
@@ -40,7 +40,7 @@ let art_one = added("wordart",{style:"gradient"})
 let art_two = ins.insert(art_one,"wordart",{style:"gradient"})^
 let art_first_edit = ins.insert({*:art_two,selected:art_one.selected},"wordart",{style:"gradient",fill:"#ff0000"},art_one.selected)^
 let art_second_edit = ins.insert({*:art_first_edit,selected:art_two.selected},"wordart",{style:"gradient",fill:"#00ff00"},art_two.selected)^
-let art_ids = [for (obj in m.scene(art_second_edit).objects where ins.settings(obj.source).kind == "wordart") ins.settings(obj.source).params.graphic_id]
+let art_ids = [for (obj in m.scene(art_second_edit).objects where ((ins.settings(obj.source).kind == "wordart") ^ { false })) ins.settings(obj.source).params.graphic_id]
 let art_reopened = ins.insert(m.initial(parse(format(art_second_edit.doc,'mark')^,'mark')^),"wordart",{style:"gradient"})^
 let svg_object = added("object",{format:"svg",source:"<svg viewBox=\"0 0 20 20\"><rect width=\"20\" height=\"20\"/></svg>"});
 {
@@ -55,7 +55,7 @@ let svg_object = added("object",{format:"svg",source:"<svg viewBox=\"0 0 20 20\"
         saved(zoom).params.preview == null,m.scenes(pinned.doc)[1].id == raw.plan.slides[1].id,len(pinned.undo) == 1],
     comments:[len(ins.comments(noted)) == 1,m.notes(noted) == "Speaker only",len(ins.comments(uncommented)) == 0,
         m.notes(uncommented) == "Speaker only",not contains(format(slide.snapshot(commented.doc)^,'html'),"Review this idea")],
-    fields:[all([for (scene in footer.plan.slides) len([for (obj in scene.objects where starts_with(obj.source.class,"slides-footer-")) obj]) == 3]),
+    fields:[all([for (scene in ((footer.plan.slides) ^ { [] })) len([for (obj in scene.objects where ((starts_with(obj.source.class,"slides-footer-")) ^ { false })) obj]) == 3]),
         len(m.scene(revised_footer).cues) == 1,
         all([for (scene in reordered.plan.slides) m.text([for (obj in scene.objects where obj.source.class == "slides-page-number") obj.source][0]) == string(scene.index+1)]),
         m.chosen(large_eq).height > m.chosen(small_eq).height],

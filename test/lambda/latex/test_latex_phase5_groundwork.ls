@@ -20,7 +20,7 @@ fn html_of(src) any^ {
     latex.render_to_html(ast, null)
 }
 
-fn issues(src) => [for (issue in result_of(src).diagnostics)
+fn issues(src) any^ => [for (issue in ((result_of(src).diagnostics) ^ { [] }))
     issue.code ++ " " ++ string(issue.package) ++ " " ++ string(issue.item)]
 
 // ---- M0.1 ownership, dispatch and conflicts ----
@@ -28,10 +28,10 @@ fn issues(src) => [for (issue in result_of(src).diagnostics)
 // class family's entry serves its classes' commands (M10)
 fn owned(key) any^ => if (registry.CATALOG[key] != null) registry.CATALOG[key].commands else registry.family_commands(key)
 "handlers owned by their package:"; [for (pkg, table in render.PACKAGE_RENDER, cmd, h in table
-    where string(cmd) != "*" and not contains(owned(string(pkg)), string(cmd)))
+    where ((string(cmd) != "*" and not contains(owned(string(pkg)), string(cmd))) ^ { false }))
     string(pkg) ++ "." ++ string(cmd)]
 "walk handlers owned:"; [for (pkg, table in analyze.PACKAGE_WALK, cmd, h in table
-    where not contains(owned(string(pkg)), string(cmd))) string(pkg) ++ "." ++ string(cmd)]
+    where ((not contains(owned(string(pkg)), string(cmd))) ^ { false })) string(pkg) ++ "." ++ string(cmd)]
 "owner while active:"; registry.owner([{key: "cleveref", val: {}}], "cref")
 "no owner while inactive:"; registry.owner([], "cref")
 "inactive command attribution:"; issues(doc("", "\\enquote{a} \\cref{x}"))
@@ -79,4 +79,4 @@ let lists = html_of(lists_src)
 let math_src = doc("\\usepackage{amsmath}\n\\DeclareMathOperator{\\Tr}{Tr}",
     "$\\abs{x} + \\alpha + \\Tr A$\n\\begin{align}a &= \\norm{b}\\label{eq:a}\\end{align}")
 "unmapped math:"; issues(math_src)
-"unmapped math located:"; all([for (issue in result_of(math_src).diagnostics) issue.offset != null])
+"unmapped math located:"; all([for (issue in ((result_of(math_src).diagnostics) ^ { [] })) issue.offset != null])

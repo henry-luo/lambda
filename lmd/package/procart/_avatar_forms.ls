@@ -20,7 +20,7 @@ fn chibi_plan(doc) map {
   upper:upper,lower:lower,arm:(if (plush) 0.13 else 0.14)*p.limbs,fore:(if (plush) 0.11 else 0.12)*p.limbs,
   arm_width:if (plush) 0.15 else if (robot) 0.12 else 0.11,leg_width:if (plush) 0.16 else 0.15}
 }
-pub fn plan(doc) map {
+pub fn plan(doc) map^ {
  if (chibi(doc)) chibi_plan(doc) else {
  let p=doc.parameters,plush=doc.form=="plush",robot=doc.form=="robot",fairy=doc.form=="fairy",spirit=doc.form=="genie"
  let upper=(if (plush) 0.15 else if (robot) 0.21 else 0.25)*p.limbs,
@@ -125,7 +125,7 @@ fn clothes(doc,p) array^ {
    [p.width*(if (fairy) 1.75 else 1.60),(if (fairy) 0.35 else if (doc.outfit=="hide") 0.32 else 0.46)*(if (chibi(doc)) 0.66 else 1.0),p.depth*1.65],a.clothes),
    piece("waist-ribbon","hips","ring",[0.0,0.12,0.0],[p.width*0.97,0.09,p.depth*1.05],a.trim)] else []),
   *(if (suit and not robot) [piece("coat-tails","hips","coat",[0.0,-0.07,-0.01],[p.width*1.1,if (chibi(doc)) 0.24 else 0.38,p.depth*1.05],a.clothes),
-   *[for (side in [-1.0,1.0] where not chibi(doc)) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
+   *[for (side in [-1.0,1.0] where ((not chibi(doc)) ^ { false })) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
     [side*p.width*0.34,0.18,0.025],tint(a.clothes,1.25)^,[0.0,0.0,side*0.18])],
    *[for (i in 0 to 2) piece("coat-button-"++string(i),"chest","round",[0.0,0.06-float(i)*0.085,p.depth*0.52],[0.018,0.018,0.01],a.trim)]] else []),
   *(if (plush and doc.outfit!="none") [piece("shirt-hem","hips","ring",[0.0,0.06,0.0],[p.width*1.02,0.12,p.depth*1.01],tint(a.clothes,0.85)^),

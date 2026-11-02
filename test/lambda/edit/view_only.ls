@@ -26,7 +26,7 @@ fn has_math(items) any^ {
 [for (s in ["<br>", "<img src=\"a.png\">", "<input type=\"checkbox\">"]) len(html_view(s))]
 
 // a Markdown block is sanitized whole, so raw tags pair around its text
-fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown') ^ { null }) where type(c) == element and name(c) == 'body') c][0]) where type(c) == element) c][0]
+fn md_block(src) any^ => [for (c in ((content([for (c in ((content(parse(src, 'markdown') ^ { null })) ^ { [] }) where ((type(c) == element and name(c) == 'body') ^ { false })) c][0])) ^ { [] }) where type(c) == element) c][0]
 "markdown block:";
 [shown(markdown_view(md_block("Press <kbd>K</kbd>, see [docs](https://example.com) and ![p](p.png)[^1].\n")))]
 "markdown block with raw script:";

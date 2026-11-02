@@ -16,12 +16,12 @@ import grid: .mod_table_grid
 
 pub let border_styles = ["solid","dashed","dotted","double","none"]
 pub let border_presets = ["all","outside","inside","top","bottom","left","right","none"]
-pub fn cells(doc) => [for (entry in descendants(doc) where contains(['td','th'],entry.node.tag)) entry]
+pub fn cells(doc) => [for (entry in descendants(doc) where ((contains(['td','th'],entry.node.tag)) ^ { false })) entry]
 fn cell_path(doc,path) any^ => if (path==null) null else commands.selected_table_context({doc:doc,selection:node_selection(path)}).cell_path
 pub fn context(editor) any^ {
     let path = format.selection_path(editor.selection)
     let table = commands.ancestor_tag(editor.doc,path,'table')
-    let cell = [for (entry in cells(editor.doc) where path_is_prefix(path,entry.path)) entry][0]
+    let cell = [for (entry in ((cells(editor.doc)) ^ { [] }) where ((path_is_prefix(path,entry.path)) ^ { false })) entry][0]
     let target = if (cell!=null) cell.path else path
     if (table==null) null else commands.selected_table_context({*:editor,selection:node_selection(target)})
 }
@@ -36,11 +36,11 @@ pub fn selected(editor) {
     let paths = selection_paths(sel)
     let lo = if (sel.kind=='text') pos_min(sel.anchor,sel.head) else null
     let hi = if (sel.kind=='text') pos_max(sel.anchor,sel.head) else null;
-    [for (entry in entries(editor) where sel.kind=='all' or
+    [for (entry in ((entries(editor)) ^ { [] }) where ((sel.kind=='all' or
         any([for (path in paths) path_is_prefix(path,entry.path) or path_is_prefix(entry.path,path)]) or
         (sel.kind=='text' and (path_is_prefix(entry.path,lo.path) or
             (path_compare(entry.path,lo.path)>0 and path_compare(entry.path,hi.path)<=0 and
-                not (hi.offset==0 and path_is_prefix(entry.path,hi.path)))))) entry]
+                not (hi.offset==0 and path_is_prefix(entry.path,hi.path)))))) ^ { false })) entry]
 }
 pub fn native_editor(editor) any^ {
     let first = if (structural(editor)) selected(editor)[0] else null
@@ -63,14 +63,14 @@ pub fn command_editor(editor) any^ {
 pub fn selection(editor,scope,path=null,head=null) any^ {
     let base = if (path==null) context(editor).cell_path else path
     let all_cells = entries({*:editor,selection:node_selection(base)})
-    let a = [for (entry in all_cells where entry.path==base) entry][0]
-    let b = [for (entry in all_cells where entry.path==(head or base)) entry][0]
+    let a = [for (entry in all_cells where ((entry.path==base) ^ { false })) entry][0]
+    let b = [for (entry in all_cells where ((entry.path==(head or base)) ^ { false })) entry][0]
     let bounds = grid.bounds(all_cells)
     let region = {top:if (contains(["column","table"],scope)) 0 else min(a.row,b.row),
         bottom:if (contains(["column","table"],scope)) bounds.bottom else max(a.end_row,b.end_row),
         left:if (contains(["row","table"],scope)) 0 else min(a.col,b.col),
         right:if (contains(["row","table"],scope)) bounds.right else max(a.end_col,b.end_col)}
-    let chosen = [for (entry in grid.rectangle(all_cells,region)) entry.path]
+    let chosen = [for (entry in ((grid.rectangle(all_cells,region)) ^ { [] })) entry.path]
     if (a==null or b==null or len(chosen)==0) editor.selection
     else if (scope=="table") node_selection(context({*:editor,selection:node_selection(base)}).table_path)
     else if (scope=="row" and a.row==b.row and all([for (p in chosen) parent_path(p)==a.row_path])) node_selection(a.row_path)
@@ -93,17 +93,17 @@ pub fn border_settings(editor) {
     let css = attrs_get(selected(editor)[0].node.attrs,'style')
     let raw = format.css_get(css,"border-top") or format.css_get(css,"border") or "0.75pt solid #d6e0e7"
     let parts = split(raw," ")
-    let style = [for (part in parts where contains(border_styles,part)) part][0]
+    let style = [for (part in parts where ((contains(border_styles,part)) ^ { false })) part][0]
     let width = (float(replace(replace(parts[0],"pt",""),"px","")) or 0.75)*if (ends_with(parts[0],"px")) 0.75 else 1
     // an absent edge has no usable pen; quick presets must be able to draw it again.
     {preset:"all",style:if (style=="none") "solid" else style or "solid",width:if (width>0) width else 0.75,
-        color:[for (part in parts where colors.hex_color(part)) part][0] or "#d6e0e7"}
+        color:[for (part in parts where ((colors.hex_color(part)) ^ { false })) part][0] or "#d6e0e7"}
 }
 let sides = [{id:"top",opposite:"bottom",r: -1,c:0},{id:"right",opposite:"left",r:0,c:1},
     {id:"bottom",opposite:"top",r:1,c:0},{id:"left",opposite:"right",r:0,c: -1}]
 fn set_border(tx,path,side,value) any^ => tx_step(tx,step_set_attr(path,'style',
     format.css_set(attrs_get(node_at(tx.doc_after,path).attrs,'style'),"border-" ++ side,value)))
-fn border_edges(tx,all_cells,picked,p,i=0,j=0) {
+fn border_edges(tx,all_cells,picked,p,i=0,j=0) any^ {
     if (i>=len(picked)) tx else if (j>=len(sides)) border_edges(tx,all_cells,picked,p,i+1,0) else {
         let cell = picked[i]
         let side = sides[j]
@@ -140,7 +140,7 @@ pub fn replace_transaction(editor,input_type,data,markup="") any^ {
     let start = pos([0],0)
     let parsed = if (input_type=="insertFromPaste" and markup!="") commands.cmd_paste_html(
         {*:editor,doc:node('doc',[node('p',[])]),selection:text_selection(start,start)},markup,data) else null
-    let table = [for (entry in descendants(parsed.doc_after) where entry.node.tag=='table') entry][0]
+    let table = [for (entry in ((descendants(parsed.doc_after)) ^ { [] }) where entry.node.tag=='table') entry][0]
     if (table!=null) {
         let source = entries({*:editor,doc:parsed.doc_after,selection:node_selection(table.path)})
         let targets = if (len(chosen)==1) entries(editor) else chosen
@@ -172,7 +172,7 @@ fn clipboard(editor,run) any^ {
     outcome.with_clipboard_html(run,html.export_text(fragment,{document:false,head:<head>}),text)
 }
 pub pn handle(editor,evt,read_only=false,selection=null) {
-    if (read_only or not structural(editor)) { return controller.handle(editor,evt,read_only,"html5_subset","edit-surface",selection) }
+    if ((read_only or not structural(editor))^) { return controller.handle(editor,evt,read_only,"html5_subset","edit-surface",selection) }
     let copied = contains(["copy","deleteByCut"],evt.input_type)
     if (evt.input_type=="copy") {
         return {editor:editor,result:clipboard(editor,outcome.model_applied(false,false,false,"",native_editor(editor).selection,editor.model_revision))}
@@ -229,7 +229,7 @@ pub fn preview(editor,gesture) => {*:editor,selection:selection(editor,"cell",ge
 pub fn extend(editor,key) {
     let bounds = anchor_range(editor)
     let all_cells = entries(editor)
-    let head = [for (entry in all_cells where entry.path==bounds.head) entry][0]
+    let head = [for (entry in all_cells where ((entry.path==bounds.head) ^ { false })) entry][0]
     let row = if (key=="ArrowDown") head.end_row else head.row+if (key=="ArrowUp") -1 else 0
     let col = if (key=="ArrowRight") head.end_col else head.col+if (key=="ArrowLeft") -1 else 0
     let next = grid.at(all_cells,row,col)

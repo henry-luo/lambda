@@ -7,8 +7,8 @@ import picking: lambda.chart.picking
 import coordinate: lambda.chart.coordinate
 import geometry: lambda.chart.geometry
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (entry in elements(child)) entry] else []
-fn frame(spec) {
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (entry in ((elements(child)) ^ { [] })) entry] else []
+fn frame(spec) any^ {
     let st = parameter.initial(parameter.definitions(behavior.prepare(spec)));
     let image = chart.render_spec(spec, null, st);
     parse((elements(image) |: ~["data-chart-frame"] != null)[0]["data-chart-frame"], 'json')^
@@ -27,7 +27,7 @@ fn bounded_projection(model,a,b) any^ {
     let points=coordinate.line(model,[a,b]);
     let count=len(points)-1;
     close(points[0],coordinate.pixel(model,a)) and close(points[count],coordinate.pixel(model,b)) and
-        all([for (i in 0 to (count-1)) for (t in [0.125,0.25,0.5,0.75,0.875])
+        all([for (i in ((0 to (count-1)) ^ { [] })) for (t in [0.125,0.25,0.5,0.75,0.875])
             paths.distance(coordinate.pixel(model,geometry.interpolate(a,b,(float(i)+t)/count)),
                 geometry.interpolate(points[i],points[i+1],t))<=model.precision+0.000000001])
 }
@@ -44,7 +44,7 @@ let checks = {
     bounded_projection: all([for (model in bounded_models,
         pair in [[[20.0,30.0],[250.0,170.0]],[[20.0,30.0],[20.0,170.0]],[[20.0,30.0],[250.0,30.0]],
             [[-50.0,-40.0],[350.0,240.0]]]) bounded_projection(model,pair[0],pair[1])]),
-    adaptive_fallback: all([for (model in slice(projection_models,5),let a=[20.0,30.0],let b=[250.0,170.0],
+    adaptive_fallback: all([for (model in ((slice(projection_models,5)) ^ { [] }),let a=[20.0,30.0],let b=[250.0,170.0],
         let actual=coordinate.line(model,[a,b]),let reference=paths.sample_curve((t) any^ => coordinate.pixel(model,geometry.interpolate(a,b,t)),model.precision,8))
         len(actual)==len(reference) and all([for (i,point in actual) close(point,reference[i])])]),
     straight_edges: all([for (family in ["cartesian","polar","theta","radial","helix"],

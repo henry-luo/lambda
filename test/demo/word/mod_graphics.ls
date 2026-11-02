@@ -16,7 +16,7 @@ pub let catalog = [
     {kind:"chart",label:"Chart",key:'data-word-chart',insert:"insert.chart",update:"chart.set",open:"ui.chart",edit:"ui.chartSettings",icon:"chart",defaults:chart.defaults,settings:chart.settings,transaction:chart.transaction,graphic:chart.graphic}]
 pub fn descriptor(n) any^ => if (group.settings(n)!=null)
     {kind:"group",label:"Group",key:group.key,edit:"ui.objectLayout",icon:"object_group",settings:group.settings}
-    else [for (entry in catalog where entry.settings(n)!=null) entry][0]
+    else [for (entry in catalog where ((entry.settings(n)!=null) ^ { false })) entry][0]
 pub fn command(id) => [for (entry in catalog where contains([entry.insert,entry.update,entry.open,entry.edit],id)) entry][0]
 pub fn kind(id) => [for (entry in catalog where entry.kind==id) entry][0]
 pub let illustration_kinds = ["icon","smartart","chart"]

@@ -5,4 +5,4 @@ fn fmt(num) any^ {
     else { string(rounded) }
 }
 
-fmt(12.345)
+fmt(12.345)^

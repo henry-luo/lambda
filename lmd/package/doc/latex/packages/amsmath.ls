@@ -85,7 +85,7 @@ fn expand_operators(source, definitions, i, result) any^ {
     }
 }
 
-fn split_tex(source, rows, i, depth, escaped, start, acc) {
+fn split_tex(source, rows, i, depth, escaped, start, acc) any^ {
     if (i >= len(source)) acc ++ [slice(source, start, len(source))]
     else {
         let ch = slice(source, i, i + 1)
@@ -120,7 +120,7 @@ fn math_cell(source, display, operators, offset) any^ {
 }
 
 // gather, multline and equation rows are one cell; alignments split at top-level &
-fn row_cells(source, gathered) =>
+fn row_cells(source, gathered) any^ =>
     if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, [])
 
 // the parsed math of every cell, expanded as for rendering, for the unmapped-command scan
@@ -128,10 +128,10 @@ pub fn cell_asts(el, operators) {
     let tag = string(name(el))
     let gathered = starts_with(tag, "gather") or starts_with(tag, "multline") or
         starts_with(tag, "equation")
-    let cells = [for (row in rows_for(el), cell in (((if (row.error is null)
+    let cells = [for (row in ((rows_for(el)) ^ { [] }), cell in (((if (row.error is null)
         row_cells(row.math, gathered) else [])) ^ { [] })) cell];
     [for (cell in cells, let ast = parse_cell(cell_expression(cell, operators))
-        where ast != null) ast]
+        where ((ast != null) ^ { false })) ast]
 }
 
 // cell_align(i) is the CSS alignment of the row's i-th cell; tag is the row's
@@ -156,7 +156,7 @@ pub fn tag_format(inner) any^ =>
 
 // a tag as printed: in parentheses, framed by the current mathtools tag form, or
 // bare for \tag*; null when the row is unnumbered
-pub fn tag_text(display, bare, form) {
+pub fn tag_text(display, bare, form) any^ {
     let style = if (form == null) null else tag_format(form.inner);
     if (display == null) null
     else if (bare) display
@@ -182,7 +182,7 @@ fn annotation_at(source, i, candidate) any^ {
     }
 }
 
-fn brace_close(source, i, depth, escaped) {
+fn brace_close(source, i, depth, escaped) any^ {
     if (i >= len(source)) null
     else {
         let ch = slice(source, i, i + 1)
@@ -231,7 +231,7 @@ fn strip_annotations(source, i, depth, st) any^ {
     }
 }
 
-pub fn rows_for(el) {
+pub fn rows_for(el) any^ {
     let tag = string(name(el))
     let parsed = alignat_body(if (el.source != null) el.source else "", tag)
     if (not (parsed.error is null))
@@ -272,7 +272,7 @@ fn alignat_body(source, tag) any^ {
     }
 }
 
-fn valid_ieee_columns(columns, index) {
+fn valid_ieee_columns(columns, index) any^ {
     if (index >= len(columns)) index > 0
     else {
         let ch = slice(columns, index, index + 1)
@@ -298,7 +298,7 @@ fn render_alignment(el, tag, rows, numbers, operators) any^ {
                     if (multline and i == 0) (c) => "left"
                     else if (multline and i == len(rows) - 1) (c) => "right"
                     else if (gathered) (c) => "center"
-                    else (c) => columns[c % len(columns)],
+                    else (c) any^ => columns[c % len(columns)],
                     if (row.label != null) util.slugify(row.label) else null,
                     row_tag(row, numbers, i), operators, el.source_offset)>
     }

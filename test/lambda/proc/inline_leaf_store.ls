@@ -43,7 +43,7 @@ pn main() {
     print("nested=" ++ string(y) ++ " " ++ string(x) ++ "\n")
     // an out-of-range store
     var small: int[] = [1, 2]
-    set_pair(small, y, 5, 3)^
+    set_pair(small, y, 5, 3) ^ { null }
     print("oob=" ++ string(small) ++ "\n")
     print("done\n")
 }

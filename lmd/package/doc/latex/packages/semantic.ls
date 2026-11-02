@@ -53,7 +53,7 @@ fn formula(source, predicate_mode) any^ {
 }
 
 fn render_rule(premises, conclusion, rule_name, narrow, predicate_mode) any^ {
-    let entries = [for (raw in util.split_top_level(premises, "&")
+    let entries = [for (raw in ((util.split_top_level(premises, "&")) ^ { [] })
         where trim(raw) != "") formula(raw, predicate_mode)^]
     let result = formula(conclusion, predicate_mode)^
     let label = if (rule_name == null) null else math_fragment(rule_name)^;
@@ -283,8 +283,8 @@ pub fn contains_diagram(node) any^ {
 
 pub fn render_tdiagram_picture(node) any^ {
     let paragraph = if (len(node) > 0 and node[0] is element) node[0] else node
-    let puts = [for (child in paragraph where child is element and
-        string(name(child)) == "put") child]
+    let puts = [for (child in paragraph where ((child is element and
+        string(name(child)) == "put") ^ { false })) child]
     if (len(puts) != 1)
         raise error("semantic T-diagram profile expects one picture put")
     else {

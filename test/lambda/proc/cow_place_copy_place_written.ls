@@ -68,7 +68,8 @@ pn main() {
     var old_w = w.kid
     w.kid.n = 7
     print(old_w.n)
-    var t: T = {nodes: [{v: 1}, {v: 2}]}
+    let _admitted_t_71: T = {nodes: [{v: 1}, {v: 2}]}
+    var t: T = _admitted_t_71^
     print(get_v(t, 0))
     t.nodes[0].v = 9
     print(get_v(t, 0))

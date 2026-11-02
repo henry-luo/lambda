@@ -8,10 +8,10 @@ import config: lambda.chart.config
 import layout: lambda.chart.layout
 import vega: lambda.chart.vega
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn tags(tree, tag) => elements(tree) |: name(~) == tag
-fn labelled_axis(tree) => tags(tree, 'g') |: ~.class == "tick"
-fn labels(tree) => [for (tick in labelled_axis(tree)) for (label in tags(tick, 'text')) label]
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(tree, tag) any^ => elements(tree) |: name(~) == tag
+fn labelled_axis(tree) any^ => tags(tree, 'g') |: ~.class == "tick"
+fn labels(tree) => [for (tick in ((labelled_axis(tree)) ^ { [] })) for (label in ((tags(tick, 'text')) ^ { [] })) label]
 fn close(a, b) => abs(a - b) < 0.001
 
 // The repository font gives an independent, fixed advance: 1000 units at 1000 units/em.
@@ -86,7 +86,7 @@ let checks = [
     {name: "preserved spaces", ok: metrics[7].width > 0},
     {name: "logical scaling", ok: close(larger[0].width, metrics[1].width * 2.0)},
     {name: "italic bounds contain advance", ok: italic[0].left <= 0 and italic[0].right >= italic[0].width},
-    {name: "pixel limits", ok: len([for (label in fitted where text.span(label.metric) > 70.001) label]) == 0},
+    {name: "pixel limits", ok: len([for (label in fitted where ((text.span(label.metric) > 70.001) ^ { false })) label]) == 0},
     {name: "different fitted prefixes", ok: len(fitted[0].text) > len(fitted[1].text)},
     {name: "unicode truncation", ok: ends_with(fitted[2].text, "…") and not contains(fitted[2].text, "�")},
     {name: "no room for ellipsis", ok: tiny[0].text == "" and tiny[0].metric.width == 0},

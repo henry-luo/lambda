@@ -11,7 +11,7 @@ let result = latex.render_result(ast, {base_uri: "test/lambda/latex/fixtures/loc
 let out = html.to_html(result.elements) ^ { "" };
 
 "engine packages:"; ast.tex_packages
-"diagnostics:"; [for (issue in result.diagnostics) issue.code]
+"diagnostics:"; [for (issue in ((result.diagnostics) ^ { [] })) issue.code]
 "xparse optional argument:"; index_of(out, "Hello, World! and Hello, Lambda!") != null
 "cs_new:"; index_of(out, "abab;") != null
 "int_eval:"; index_of(out, "7;") != null

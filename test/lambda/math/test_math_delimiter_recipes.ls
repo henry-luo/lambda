@@ -5,7 +5,7 @@ import svg: .mod_svg_snapshot
 
 fn ast(source) any^ => parse(source,{type:"math",flavor:"latex"})^
 fn box(source, options = {}) any^ => math.render_box(ast(source),options)^
-fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where g.text != "") g]
 fn close(a,b) => abs(a - b) < 0.00003
 
 let variants = [for (size in ["big","Big","bigg","Bigg"]) box("\\" ++ size ++ "l(")]
@@ -44,9 +44,9 @@ let checks = [
     {name:"finite angle variants stop at CMEX largest design",ok:
         len(glyphs(angles)) == 2 and close(angles.depth,variants[3].depth)},
     {name:"all constructed pieces retain natural proportions",ok:
-        all([for (b in [*variants,parens,brackets,braces,angles,nested,middle],g in glyphs(b)) g.sx == 1.0 and g.sy == 1.0])},
+        all([for (b in [*variants,parens,brackets,braces,angles,nested,middle],g in ((glyphs(b)) ^ { [] })) g.sx == 1.0 and g.sy == 1.0])},
     {name:"middle uses the enclosing delimiter demand",ok:
-        len([for (g in glyphs(middle) where g.text == "∣") g]) > 10 and close(middle.depth,parens.depth)},
+        len([for (g in ((glyphs(middle)) ^ { [] }) where g.text == "∣") g]) > 10 and close(middle.depth,parens.depth)},
     {name:"delimiter aliases share the same construction",ok:all([for (pair in aliases)
         close(pair[0].width,pair[1].width) and close(pair[0].height,pair[1].height)])},
     {name:"middle restores enclosing math style",ok:digits[0].node["font-size"] == 700 and digits[1].node["font-size"] == 1000},

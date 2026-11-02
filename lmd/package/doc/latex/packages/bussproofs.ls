@@ -3,8 +3,8 @@ import util: ~~.util
 import math: lambda.doc.math.math
 
 fn tree_commands(tree) => [for (paragraph in tree,
-    entry in if (paragraph is element and
-        string(name(paragraph)) == "paragraph") paragraph else []
+    entry in ((if (paragraph is element and
+        string(name(paragraph)) == "paragraph") paragraph else []) ^ { [] })
     where entry is element) entry]
 
 fn center_definition(raw) string^ {
@@ -32,8 +32,8 @@ fn center_definition(raw) string^ {
 }
 
 fn zero_arg_macros(definitions) => [for (definition in definitions
-    where definition.params == 0 and definition.body is element and
-        len(definition.body) == 1 and definition.body[0] is element)
+    where ((definition.params == 0 and definition.body is element and
+        len(definition.body) == 1 and definition.body[0] is element) ^ { false }))
     {command: "\\" ++ definition.name,
      replacement: "\\" ++ string(name(definition.body[0]))}]
 
@@ -152,12 +152,12 @@ fn render_branch(branch, replacements, center) any^ {
 }
 
 pub fn render(tree, macro_definitions) any^ {
-    let unknown = [for (child in tree where child is element and
+    let unknown = [for (child in tree where ((child is element and
         string(name(child)) != "paragraph" and
-        string(name(child)) != "comment") child]
+        string(name(child)) != "comment") ^ { false })) child]
     let text = [for (paragraph in tree,
-        fragment in if (paragraph is element and
-            string(name(paragraph)) == "paragraph") paragraph else []
+        fragment in ((if (paragraph is element and
+            string(name(paragraph)) == "paragraph") paragraph else []) ^ { [] })
         where fragment is string and trim(fragment) != "") fragment]
     if (len(unknown) > 0 or len(text) > 0)
         raise error("unsupported content inside bussproofs tree")

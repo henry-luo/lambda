@@ -55,7 +55,7 @@ pub pn adopt(editor, evt, preset = "html5_subset", id = "edit-surface") {
     let snapshot = selection_snapshot(evt,
         host != null and dom.contains(host, evt.target), is_control(evt.target),
         evt.source_selection != null and owns_selection(host,evt.target))
-    if (snapshot == null) { return {editor: editor, changed: false} }
+    if ((snapshot == null)^) { return {editor: editor, changed: false} }
     let bound = mount(editor, evt.target, preset, id)
     let accepted = accept_selection(bound, snapshot)
     // completion echoes can acknowledge a native revision without moving the
@@ -105,6 +105,6 @@ pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edi
 
 pub pn request(editor, input_type, payload = {}) {
     let run = edit_handle_request(editor, edit_request_from_toolbar(input_type, payload))
-    if (run.editor.surface_handle != null) dom.finish_model_edit(run.editor.surface_handle, run.result)
+    if ((run.editor.surface_handle != null)^) dom.finish_model_edit(run.editor.surface_handle, run.result)^
     run
 }

@@ -13,11 +13,11 @@ pn positive_sum(a: float[]) bool^ {
     while (i < 4) { total = total + a[i]; i = i + 1 }
     return total > 0.0
 }
-pn count_positive(a: float[]) int {
+pn count_positive(a: float[]) int^ {
     var count: int = 0
     var i: int = 0
     while (i < 3) {
-        if (positive_sum(a)) { count = count + 1 }
+        if (positive_sum(a)^) { count = count + 1 }
         i = i + 1
     }
     return count

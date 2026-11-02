@@ -81,7 +81,7 @@ pub fn prepare(source) map^ {
             let color = slice(value, color_start, body_open - 1)
             let body = slice(value, body_open + 1, len(value) - 1)
             let supported_color = len([for (candidate in ["black", "blue", "red", "green",
-                "darkgreen", "orange", "purple", "gray"] where candidate == color) candidate]) > 0
+                "darkgreen", "orange", "purple", "gray"] where ((candidate == color) ^ { false })) candidate]) > 0
             if (not supported_color) raise error("unsupported TikZ textcolor: " ++ color)
             else {
                 let prepared = prepare(body)^;

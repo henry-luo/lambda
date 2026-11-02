@@ -3,12 +3,12 @@ import latex: lambda.doc.latex.latex
 import math: lambda.doc.math.math
 import amssymb: lambda.doc.latex.packages.amssymb
 
-fn stylesheet_links(node) {
+fn stylesheet_links(node) any^ {
     if (node is array or node is list)
-        [for (child in node, link in stylesheet_links(child)) link]
+        [for (child in node, link in ((stylesheet_links(child)) ^ { [] })) link]
     else if (node is element) {
         let own = if (name(node) == 'link' and node.rel == "stylesheet") [node] else []
-        own ++ [for (child in node, link in stylesheet_links(child)) link]
+        own ++ [for (child in node, link in ((stylesheet_links(child)) ^ { [] })) link]
     } else []
 }
 

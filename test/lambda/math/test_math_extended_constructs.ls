@@ -2,7 +2,7 @@
 import math: lambda.doc.math.math
 import latex: lambda.doc.latex.latex
 
-fn box(source, options = null) => math.render_box(parse(source, 'math')^, options)^
+fn box(source, options = null) any^ => math.render_box(parse(source, 'math')^, options)^
 fn paints(result) any^ {
     let html = format(result.element, 'html');
     contains(html, "<path") or contains(html, "<text")

@@ -9,9 +9,9 @@ let KINDS = ["flower","tree","stone","grass"]
 let GENERATORS = {flower:"plant",tree:"plant",stone:"rock.faceted",grass:"grass.blades"}
 let FIELDS = ["id","recipe","seed","key_path","settings","count","spread","position","rotation","scale","matrix"]
 
-pub fn value(v,fallback) => common.value(v,fallback)
+pub fn value(v,fallback) any^ => common.value(v,fallback)
 fn fail(message) error => error("procart composition: "++message)
-pub fn bounded(v,lo,hi,whole=false) bool => common.bounded(v,lo,hi,whole)
+pub fn bounded(v,lo,hi,whole=false) bool^ => common.bounded(v,lo,hi,whole)
 
 pub fn transform(node) array^ {
     if (node.matrix != null) {

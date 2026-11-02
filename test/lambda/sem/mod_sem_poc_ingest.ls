@@ -156,7 +156,7 @@ fn func_term(n) any^ {
 // postfix `^` the dump does not record, which a well-typed program must have
 // written (E228) — unless the callee is a system function whose failures are
 // plain values (S7.4.5; the dump's `may_return_error` marks the `T^E` ones).
-// A typed receiving position (`let x: T | error = f()`) is not read.
+// A typed receiving position (`let x: T^ = f()`) is not read.
 fn call_term(n, engaged) any^ {
   let fnode = first(n, 'function')^
   let f = norm(fnode)^

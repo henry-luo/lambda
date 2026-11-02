@@ -6,10 +6,10 @@ import scale: lambda.chart.scale
 import config: lambda.chart.config
 import collision: lambda.chart.collision
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn tags(tree, tag) => elements(tree) |: name(~) == tag
-fn with_class(tree, cls) => elements(tree) |: ~.class == cls
-fn tick_labels(tree) => [for (tick in with_class(tree, "tick")) for (label in tags(tick, 'text')) label]
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(tree, tag) any^ => elements(tree) |: name(~) == tag
+fn with_class(tree, cls) any^ => elements(tree) |: ~.class == cls
+fn tick_labels(tree) => [for (tick in ((with_class(tree, "tick")) ^ { [] })) for (label in ((tags(tick, 'text')) ^ { [] })) label]
 fn label_strings(tree) => tick_labels(tree) |> join(content(~), "")
 
 let mapping = scale.linear_scale(0, 1, 0, 100)

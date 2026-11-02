@@ -7,7 +7,7 @@ fn render(source, display = false, options = {}) any^ => math.render_box(parse(s
     {*:options, display:display, font_size:960.0 / 72.27})^
 fn close(a,b) => abs(a - b) < 0.00001
 fn same(a,b) any^ => close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth)
-fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where g.text != "") g]
 let styles = ["display", "text", "script", "scriptscript"]
 let struts = [for (style in styles) {box:render("\\" ++ style ++ "style\\mathstrut"),
     phantom:render("\\" ++ style ++ "style\\vphantom("), paren:render("\\" ++ style ++ "style(")}]
@@ -58,7 +58,7 @@ let checks = [
     {name:"big relation delimiters receive relation glue", ok:
         close(render("a\\bigm\\uparrow b").width - render("a\\big\\uparrow b").width,10.0 / 18.0)},
     {name:"verbatim selects the existing typewriter face",ok:len(glyphs(verbatim)) == 8 and
-        all([for (g in glyphs(verbatim)) g.node["font-family"] == "Computer Modern Typewriter"])},
+        all([for (g in ((glyphs(verbatim)) ^ { [] })) g.node["font-family"] == "Computer Modern Typewriter"])},
     {name:"verbatim uses fixed glyph advances",ok:close(glyphs(verbatim)[1].x - glyphs(verbatim)[0].x,
         glyphs(verbatim)[5].x - glyphs(verbatim)[4].x)},
     {name:"literal commands do not request unrelated style faces",ok:

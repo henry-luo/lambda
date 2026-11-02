@@ -34,7 +34,7 @@ fn script_url(value) => starts_with(lower(trim(value)), "javascript:") ^ { false
 fn attr_html(name, value) any^ => " " ++ name ++ "=\"" ++ escape_attr(value) ++ "\""
 
 // A link shows its target as a tooltip; a control is disabled.
-fn safe_attrs(el, tag) {
+fn safe_attrs(el, tag) any^ {
   // an empty attribute value reads back as null
   let pairs = [for (k, v at map(el)) {name: lower(string(k)), value: if (v == null) "" else string(v)}]
   let kept = [for (p in pairs where ((not (starts_with(p.name, "on") or member(acting_attrs, p.name) or
@@ -64,19 +64,19 @@ pub fn safe_html(item) any^ {
 }
 
 fn first_named(items, tag) {
-  let found = [for (c in items where type(c) == element and name(c) == tag) c]
+  let found = [for (c in items where ((type(c) == element and name(c) == tag) ^ { false })) c]
   if (len(found) > 0) found[0] else null
 }
 
 // The body content of a parsed HTML document.
-fn body_items(doc) {
+fn body_items(doc) any^ {
   let html = if (doc == null) null else first_named(content(doc), 'html')
   let body = if (html == null) null else first_named(content(html), 'body')
   if (body == null) [] else [for (c in ((content(body)) ^ { [] })) c]
 }
 
 // The items of an HTML fragment.
-fn parsed_body(html_text) =>
+fn parsed_body(html_text) any^ =>
   if (trim(html_text) == "") [] else body_items(parse("<body>" ++ html_text ++ "</body>", 'html') ^ { null })
 
 // Elements that show something without text content.
@@ -166,7 +166,7 @@ fn md_html(item, slots) any^ {
   }
 }
 
-fn math_nodes(item) => if (type(item) != element) []
+fn math_nodes(item) any^ => if (type(item) != element) []
   else if (name(item) == 'math') [item]
   else [for (child in ((content(item)) ^ { [] }), formula in ((math_nodes(child)) ^ { [] })) formula]
 

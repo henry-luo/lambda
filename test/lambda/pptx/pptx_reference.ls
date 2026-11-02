@@ -1,7 +1,7 @@
 import pptx: lambda.doc.pptx
 import slide: lambda.slide
 let references = input("test/input/pptx/reference/oracle.json",'json')^
-fn compact(value) => join([for (ch in split(value,"")) if (trim(ch)=="") "" else ch],"")
+fn compact(value) => join([for (ch in ((split(value,"")) ^ { [] })) if (trim(ch)=="") "" else ch],"")
 let results = [for (reference in references) {
     let imported = pptx.convert("test/input/pptx/reference/" ++ reference.file)^
     let plan = slide.compile(imported.document)^;

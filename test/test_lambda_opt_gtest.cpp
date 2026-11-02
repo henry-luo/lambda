@@ -1178,7 +1178,7 @@ static const char* kTypedPathSource =
     "pn main() {\n"
     "    var world: World = {rows: [{value: 0, values: [0]}, null]}\n"
     "    var i = 0\n"
-    "    while (i < 100) { update(world, 0); i = i + 1 }\n"
+    "    while (i < 100) { update(world, 0)^; i = i + 1 }\n"
     "    print([world.rows[0].value, world.rows[0].values[0]])\n"
     "}\n";
 
@@ -1254,9 +1254,9 @@ static const char* kUnadoptedRecursiveSource =
     "    return e\n"
     "}\n"
     "\n"
-    "pn sum_chain(node: Node?) int {\n"
+    "pn sum_chain(node: Node?) int^ {\n"
     "    if (node == null) { return 0 }\n"
-    "    return node.val + sum_chain(node.next)\n"
+    "    return node.val + sum_chain(node.next)^\n"
     "}\n"
     "\n"
     "pn walk_len(node: Node?) int {\n"
@@ -1439,7 +1439,8 @@ TEST(LambdaOptAdmission, TypedConstructionPlanPreservesContainmentAndSnapshots) 
         FixtureRun run = run_fixture_script("typed_construction_plan", tier,
             "test/mir/lambda/typed_construction_plan.ls", true);
         ASSERT_TRUE(run.ok);
-        EXPECT_EQ(run.std_out, "[2, 3, 2, 5][7, 5]error4\n");
+        // S7.7.2v2: a failed binding retains its error and still writes the trace.
+        EXPECT_EQ(run.std_out, "[2, 3, 2, 5][7, 5]error99\n");
     }
 }
 

@@ -36,7 +36,8 @@ pn held_or_waiting(var w: World, tid: int) int {
 }
 
 pn main() {
-    var w: World = {n: 0, tasks: fill(3, null)}
+    let _admitted_w_39: World = {n: 0, tasks: fill(3, null)}
+    var w: World = _admitted_w_39^
     var waiting: Task = {link: 0, pp: false, tw: true, th: false}
     var running: Task = {link: 1, pp: true, tw: true, th: false}
     w.tasks[1] = waiting

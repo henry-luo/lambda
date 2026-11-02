@@ -24,7 +24,7 @@ pub pn measure(editor,node,paths,zoom) {
         {path:path,x:(box.x-origin.x)/zoom,y:(box.y-origin.y)/zoom,width:box.width/zoom,height:box.height/zoom,
             object_width:metrics.client_width,object_height:metrics.client_height}}]
 }
-fn remove_members(tx,paths,i) => if (i<=0) tx else
+fn remove_members(tx,paths,i) any^ => if (i<=0) tx else
     remove_members(tx_step(tx,step_replace(parent_path(paths[i]),last_index(paths[i]),last_index(paths[i])+1,[])),paths,i-1)
 fn member(editor,b,left,top) {
     let n=node_at(editor.doc,b.path)
@@ -51,7 +51,7 @@ pub fn transaction(editor,p) map^ {
     else if (not objects.dimensions_valid({width:width,height:height,rotation:0}))
         raise error("Word: the group must fit within 650 × 2000 px; move the objects closer together")
     else {
-        let data={width:width,height:height,items:[for (b in sort(boxes,(b)any^ =>layout.layer(layout.settings(node_at(editor.doc,b.path))))) member(editor,b,left,top)]}
+        let data={width:width,height:height,items:[for (b in sort(boxes,(b)any^ =>layout.layer(layout.settings(node_at(editor.doc,b.path))))^) member(editor,b,left,top)]}
         let src=objects.source(group.graphic(data))^
         let n=node_attrs('img',[{name:'src',value:src},{name:'alt',value:"Group of " ++ string(len(paths)) ++ " objects"},
             {name:'width',value:width},{name:'height',value:height},{name:group.key,value:format(data,'json')^}],[])
@@ -85,7 +85,7 @@ pub fn ungroup(editor,params={}) map^ {
     let n=selected.node
     let old=layout.settings(n)
     let p=if (layout.floating(n)) old else {*:old,wrap:"front",x:params.frame.x,y:params.frame.y}
-    let data=group.data(n)
+    let data=group.data(n)^
     if (group.settings(n)==null) raise error("Word: select a group first")
     else if (not layout.floating(n) and params.frame==null) raise error("Word: measure the group position before ungrouping")
     else {

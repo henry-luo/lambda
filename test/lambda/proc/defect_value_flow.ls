@@ -43,7 +43,7 @@ fn make(x) P {
     let k: int = x
     {n: k + 1, s: "ok"}
 }
-fn member_n(x) { make(x).n + 1 }
+fn member_n(x) any^ { make(x).n + 1 }
 fn member_s(x) any^ { len(make(x).s) }
 // value-family system functions pass it through; integer arithmetic and
 // equality over it stay exact

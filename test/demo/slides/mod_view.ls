@@ -34,7 +34,7 @@ pub fn printout(st,deck) element^ {
     let document = html.document({*:st.plan,base_uri:st.base},<main class:"slide-print",
         for (i,page in pages) <article style:if (i>0) "break-before:page;" else "",page>>);
     // fixed slide-sized sheets keep final builds together without speaker notes.
-    <html *:map(document),for (child in content(document))
+    <html *:map(document),for (child in ((content(document)) ^ { [] }))
         if (child is element and name(child)=='head') <head *:map(child),*content(child);
             <style "@page { size:" ++ c.px(st.plan.width) ++ " " ++ c.px(st.plan.height) ++ "; margin:0; }">>
         else child>

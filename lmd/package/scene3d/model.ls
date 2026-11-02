@@ -16,7 +16,7 @@ let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-sc
 let PHYSICAL_COLORS = ["sheen-color", "attenuation-color"]
 fn physical_range(key, v) bool => if (key == "clearcoat-normal-scale") true else if (key == "ior") v >= 1
     else if (key == "thickness") v >= 0 else if (key == "attenuation-distance") v > 0 else v >= 0 and v <= 1
-fn numeric(v) bool => t.numeric(v)
+fn numeric(v) bool^ => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
 fn fail(message) error => error("scene3d: " ++ message)
 fn text(v) bool => (v is string or v is symbol) and len(string(v)) > 0

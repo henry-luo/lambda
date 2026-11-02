@@ -321,7 +321,7 @@ fn walk_addhead(el, st) any^ {
 
 // \setkomafont and \addtokomafont: the fonts of headings, as sectsty's settings, and of
 // title-block parts; \setkomafont replaces the class's sans-serif bold
-fn walk_komafont(el, st) {
+fn walk_komafont(el, st) any^ {
     let target = trim(util.raw_argument(el, "required", 0) or "")
     let raw = util.raw_argument(el, "required", 1) or ""
     let keys = profiles.font_keys(target)
@@ -348,7 +348,7 @@ fn walk_komaoptions(el, st) {
 
 // memoir's \chapterstyle{name}: a named style as a titlesec chapter format; others
 // render as the default and are reported
-fn walk_chapterstyle(el, st) {
+fn walk_chapterstyle(el, st) any^ {
     let style = trim(util.text_of(el))
     let format = profiles.CHAPTER_STYLES[style]
     let recorded = record_setting(st, el, "titleformat:chapter", format or profiles.CHAPTER_STYLES.default)
@@ -374,7 +374,7 @@ fn walk_exam_item(el, st) any^ {
 fn record_pair(st, el, pair) any^ => if (pair == null) st else record_setting(st, el, pair.key, pair.value)
 
 // \titleformat: what the format cannot express is reported where it is given
-fn walk_titleformat(el, st) {
+fn walk_titleformat(el, st) any^ {
     let level = titles.level_of(util.raw_argument(el, "required", 0))
     let pair = titles.titleformat(el, util.setting_at(st.settings, "titleformat:" ++ level, el.source_offset))
     if (pair == null) st
@@ -434,7 +434,7 @@ fn record_setting(st, el, key, value) =>
 // number format that is not a mapped text command prints the number plain
 fn walk_newtagform(el, st) {
     // the brackets are raw text: "[" and "]" are not argument content
-    let args = [for (i in 0 to 2, let raw = util.raw_argument(el, "required", i) where raw != null) trim(raw)]
+    let args = [for (i in 0 to 2, let raw = util.raw_argument(el, "required", i) where ((raw != null) ^ { false })) trim(raw)]
     let inner = util.optional_raw(el)
     let issues = if (inner == null or amsmath.tag_format(inner) != null) [] else
         [util.diagnostic("unsupported-tag-format", "mathtools", trim(inner),
@@ -634,11 +634,11 @@ fn walk_documentclass(el, st) {
         else [for (option in ((util.split_top_level(raw_options, ",")) ^ { [] }) where trim(option) != "") trim(option)]
     let profile = registry.class_profile(cls)
     // a class's built-in theorem environments, as \newtheorem defines them
-    let defined = [for (thm in profile.theorems or []) {key: thm.name, val: {env_name: thm.name,
+    let defined = [for (thm in ((profile.theorems or []) ^ { [] })) {key: thm.name, val: {env_name: thm.name,
         label: thm.label, shared_counter: null, style: thm.style, numbered: true}}]
     if cls != "" { {*:st, docclass: cls, docbase: profile.base, class_options: options,
         theorem_defs: st.theorem_defs ++ defined,
-        counters: {*:st.counters, *:map([for (thm in profile.theorems or [], x in [thm.name, 0]) x])}} }
+        counters: {*:st.counters, *:map([for (thm in ((profile.theorems or []) ^ { [] }), x in [thm.name, 0]) x])}} }
     else { st }
 }
 
@@ -653,8 +653,8 @@ fn walk_addcontentsline(el, st) any^ {
     let file = if (len(args) > 0) trim(util.text_of(args[0])) else ""
     let level = if (len(args) > 1) trim(util.text_of(args[1])) else ""
     // \protect only guards the entry while TeX writes it to the file
-    let entry_args = [for (arg in (if (len(args) > 2) slice(args, 2, len(args)) else [])
-        where not (arg is element and string(name(arg)) == "protect")) arg]
+    let entry_args = [for (arg in (((if (len(args) > 2) slice(args, 2, len(args)) else [])) ^ { [] })
+        where ((not (arg is element and string(name(arg)) == "protect")) ^ { false })) arg]
     let numbered = len(entry_args) > 0 and entry_args[0] is element and
         string(name(entry_args[0])) == "numberline"
     let entry_number = if (numbered) trim(util.text_of(entry_args[0])) else null
@@ -673,7 +673,7 @@ fn walk_addcontentsline(el, st) any^ {
 }
 
 // a preamble setspace declaration sets the document's stretch, as \linespread does
-fn walk_setspace(el, st) {
+fn walk_setspace(el, st) any^ {
     let stretch = paragraph.declared_stretch(el, st.class_options)
     if (st.in_body or stretch == null) st else {*:st, line_spread: stretch}
 }
@@ -1059,7 +1059,7 @@ fn counter_assignment(el) any^ {
 
 // a \setcounter is also a source-order setting, for packages that read a depth
 // where they print (minitoc's minitocdepth)
-fn walk_setcounter(el, st) {
+fn walk_setcounter(el, st) any^ {
     let assignment = counter_assignment(el)
     if (assignment == null) st
     else if (assignment.name == "secnumdepth") {*:st, secnumdepth: assignment.value}
@@ -1120,7 +1120,7 @@ fn walk_newacronym(el, st) {
 }
 
 // \newglossary[log]{name}{in}{out}{title}, or \newglossary*{name}{title}
-fn walk_newglossary(el, st) {
+fn walk_newglossary(el, st) any^ {
     let type_name = trim(util.raw_argument(el, "required", 0) or "")
     let title = util.raw_argument(el, "required", if (el.starred == true) 1 else 3)
     if (type_name == "" or title == null) st else with_terms(st, {gls_titles: add_entry(st.terms.gls_titles, type_name, title)})
@@ -1186,7 +1186,7 @@ fn walk_nomenclature(el, st) {
 fn index_name(raw) => if (raw == null or trim(string(raw)) == "") "idx" else trim(string(raw))
 
 // \index[name]{entry}
-fn walk_index(el, st) {
+fn walk_index(el, st) any^ {
     let raw = util.raw_argument(el, "required", 0)
     if (raw == null) st
     else with_terms(st, {index_entries: st.terms.index_entries ++ [{name: index_name(util.optional_raw(el)),
@@ -1211,7 +1211,7 @@ fn walk_mtcsettitle(el, st) any^ {
     if (mini == "") st else record_setting(st, el, "mtctitle:" ++ mini, util.raw_argument(el, "required", 1) or "")
 }
 
-fn walk_addtocounter(el, st) {
+fn walk_addtocounter(el, st) any^ {
     let assignment = counter_assignment(el)
     if (assignment == null) st
     else {*:st, counters: {*:st.counters,
@@ -1229,7 +1229,7 @@ fn walk_stepcounter(el, st, referenced) {
 }
 
 // \newcounter{name}[parent]: a zeroed counter, reset whenever its parent steps
-fn walk_newcounter(el, st) {
+fn walk_newcounter(el, st) any^ {
     let args = util.command_args(el)
     let counter_name = if (len(args) > 0) trim(util.text_of(args[0])) else ""
     let parent = util.optional_raw(el)
@@ -1239,7 +1239,7 @@ fn walk_newcounter(el, st) {
             else add_entry(st.counter_resets, trim(parent), counter_name)}
 }
 
-fn walk_definecolor(el, st) {
+fn walk_definecolor(el, st) any^ {
     let definition = color.definition(el)
     if (definition.color_name == "") st
     else {
@@ -1250,7 +1250,7 @@ fn walk_definecolor(el, st) {
     }
 }
 
-fn walk_pagecolor(el, st) {
+fn walk_pagecolor(el, st) any^ {
     let css = color.page_color(el, st.analysis_colors)
     if (css == null) st else {*:st, page_color: css}
 }
@@ -1376,7 +1376,7 @@ fn walk_custom_theorem_numbered(el, st, thm_def) any^ {
 
 // Scope counters lazily against the current heading identity. This keeps
 // shared theorem counters and amsmath equation rows on the same reset path.
-fn scoped_counter(st, counter_name, raw_number) {
+fn scoped_counter(st, counter_name, raw_number) any^ {
     let parent = util.lookup(st.counter_within, counter_name)
     if (parent == null) {number: raw_number, positions: st.counter_positions}
     else {
@@ -1471,7 +1471,7 @@ fn walk_footnotetext(el, st) any^ {
 
 // the [n] of \footnote, \footnotemark or \footnotetext; citation footnotes read
 // their optional arguments as notes instead
-fn explicit_footnote_number(el) {
+fn explicit_footnote_number(el) any^ {
     let tag = string(name(el))
     let raw = util.optional_raw(el)
     if (raw == null or (tag != "footnote" and tag != "footnotemark" and tag != "footnotetext")) null
@@ -1514,7 +1514,7 @@ fn reset_list(counters, children, i, resets) any^ {
 // Slug deduplication
 // ============================================================
 
-fn make_unique_slug(base, counts) {
+fn make_unique_slug(base, counts) any^ {
     let current = util.lookup(counts, base)
     if (current == null) {
         {slug: base, counts: add_entry(counts, base, 1)}

@@ -37,7 +37,7 @@ pub fn pressed(st,action) any^ {
     else false
 }
 fn decoration(st,kind) any^ {
-    let values = [for (part in split(value(st,"text-decoration")," ") where part != "" and part != "none") part]
+    let values = [for (part in ((split(value(st,"text-decoration")," ")) ^ { [] }) where part != "" and part != "none") part]
     let next = if (contains(values,kind)) [for (part in values where part != kind) part] else [*values,kind];
     if (len(next) == 0) "none" else join(next," ")
 }
@@ -74,9 +74,9 @@ fn highlight_runs(children,color) => [for (child in children) {
     else [child]
 }]
 pub fn highlight(st,color) any^ => m.edit_object(st,(node) any^ => m.rebuild(node,map(node),highlight_runs(content(node),color)))^
-pub fn highlight_color(node) => if (not (node is element)) null else [for (child in content(node),
+pub fn highlight_color(node) => if (not (node is element)) null else [for (child in ((content(node)) ^ { [] }),
     let color = if (child.class == "slide-text-highlight") css.css_get(child.style,"background-color")
-        else if (child is element) highlight_color(child) else null where color != null) color][0]
+        else if (child is element) highlight_color(child) else null where ((color != null) ^ { false })) color][0]
 
 fn case_children(children,mode,initial) => reduce([{children:[],state:initial},*children],(acc,child) => {
     let out = if (child is string) text_format.case_text(child,mode,acc.state) else null
@@ -88,15 +88,15 @@ fn case_children(children,mode,initial) => reduce([{children:[],state:initial},*
 pub fn change_case(st,mode) any^ => m.edit_object(st,(node) any^ => m.rebuild(node,map(node),
     case_children(content(node),mode,{word:true,sentence:true}).children))^
 
-pub fn list_node(node) => if (not (node is element)) null else [for (child in content(node))
+pub fn list_node(node) => if (not (node is element)) null else [for (child in ((content(node)) ^ { [] }))
     *if (name(child) in ['ul','ol']) [child] else if (body_wrapper(child)) [list_node(child)] else []][0]
 pub fn list_kind(st) any^ => name(list_node(m.chosen(st).source))
 // split inside rich inline runs, preserving the marks on each resulting paragraph.
 fn line_tokens(children) => reduce([{lines:[[]],block:false},*children],(acc,child) => {
     let block = name(child) in ['p','div']
-    let parts = if (child is string) [for (part in split(child,"\n")) [part]]
+    let parts = if (child is string) [for (part in ((split(child,"\n")) ^ { [] })) [part]]
         else if (name(child) == 'br') [[],[]]
-        else if (child is element and m.rebuildable(child)) [for (part in line_tokens(content(child))) [m.rebuild(child,map(child),part)]]
+        else if (child is element and m.rebuildable(child)) [for (part in ((line_tokens(content(child))) ^ { [] })) [m.rebuild(child,map(child),part)]]
         else [[child]]
     let separate = (block or acc.block) and len(acc.lines[last])>0;
     {lines:if (separate) [*acc.lines,*parts] else [*slice(acc.lines,0,len(acc.lines)-1),[*acc.lines[last],*parts[0]],*slice(parts,1)],block:block}
@@ -106,13 +106,13 @@ pub fn set_list(st,kind,preset=null) any^ {
     let existing = list_node(obj.source)
     let tag = if (kind == "numbering") 'ol' else 'ul'
     let off = name(existing) == tag and preset == null
-    let children = if (existing != null) [for (item in content(existing)) content(item)] else line_tokens(body_children(content(obj.source)))
+    let children = if (existing != null) [for (item in ((content(existing)) ^ { [] })) content(item)] else line_tokens(body_children(content(obj.source)))
     let list_style = c.value(preset,if (tag == 'ol') "decimal" else "disc")
     let attrs = {style:"margin:0;padding-left:1.3em;white-space:normal;list-style-type:" ++ list_style ++ ";"}
     let items = [for (line in children) <li style:"white-space:pre-wrap;",*line>]
     let next = if (off) [for (i,line in children) *[*(if (i>0) ["\n"] else []),*line]]
         else if (tag == 'ol') [<ol *:attrs,*items>] else [<ul *:attrs,*items>];
-    m.edit_object(st,(node) any^ => m.rebuild(node,map(node),body(content(node),(items) => next,true)))^
+    m.edit_object(st,(node) any^ => m.rebuild(node,map(node),body(content(node),(items) any^ => next,true)))^
 }
 pub fn indent(st,increase=true) any^ {
     let current = float(replace(value(st,"padding-left","0"),"px","")) ^ { 0.0 };

@@ -14,8 +14,8 @@ pn relay(var values: Vec) int^ {
 
 pn dynamic_size(values) int^ { return size(values) }
 // S7.7.3: a discarded rejected call does not abort its caller.
-pn dynamic_probe(values) int^ {
-    if (true) { size(values)^ }
+pn dynamic_probe(values) int {
+    if (true) { let rejected = size(values) }
     return 7
 }
 
