@@ -1280,3 +1280,29 @@ The pre-migration GUI-enabled aggregate completed, including text/query
 438/438, scene units 378/378, DOM 165/165, page loads 111/111 and snapshots
 51/51. Its UI/native-view failures remain subject to the caller reruns and
 separate crash review; the aggregate is not reported as green.
+
+### Compact integer proof under a broad error union (2026-11-03)
+
+S7.4.2v3/S4.4.4 the existing compact-u32-to-int success proof now recognizes
+an `int | error` destination that preserves the complete error outcome. The
+normal arm must still be the plain int domain. Particular-error destinations,
+nullable/literal domains and other normal conversions retain their firewalls.
+This removes a redundant return check introduced when the SHA-style fixture
+disclosed its ordinary errors; it does not choose the open union-reification
+policy. The existing exact check counts for `tune21_u32_decl_lane` pass.
+
+Qualification: **272/280** MIR emission checks, **160/160** focused tier/GC
+executions, **351/351** full MIR GC cases, and **247/247** diagnostic/binder
+checks. No assertions or budgets changed. Evidence:
+`temp/error-handling/m3-u32-error-union-proof-{mir.json,focused.log,gc.json,diagnostics.json}`.
+
+The three slide abort scenarios reproduce on three isolated current runs.
+The original compiler/source/asset tree also aborts in the animation scenario
+on all three runs, while home-actions and media-insertion fail their UI
+assertions without aborting. The current home-actions debugger trace stops at
+`state_store_caret_move` requiring a laid-out ViewText from a DOM text position.
+The original animation backtrace is being compared before attributing or
+expanding the host caret issue. Artifacts:
+`m3-slide-abort-isolated-{1,2,3}.json`, `m3-slide-abort-base-{1,2,3}.json`,
+`m3-slide-home-backtrace.log`. These UI failures remain open qualification
+residue; their assertions are not suppressed.

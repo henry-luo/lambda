@@ -1060,7 +1060,7 @@ perform their required conversion. Whether an error union should apply T's
 normal admission is pending the ruling listed above (S7.4.2v3/S11.4.5). Native return selection
 therefore requires the actual normal carrier across all returns and branches;
 a success-type name alone is insufficient. The qualified MIR emission count
-is 271/280; remaining checks are recorded without relaxing expectations.
+is 272/280; remaining checks are recorded without relaxing expectations.
 S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
 float literal members and dynamic record fields: optimized admission retains
 the error at the receiving binding and continues. The constructor shares the

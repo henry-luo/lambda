@@ -8175,6 +8175,10 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
 static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
         AstCallNode* call, Type* target) {
     Type* wanted = mir_unwrap_decl_type(target);
+    // S7.4.2v3: int | error preserves both proven outcomes of this cast.
+    // particular-error contracts still need their error-admission firewall.
+    if (lambda_boundary_preserves_error(wanted))
+        wanted = mir_unwrap_decl_type(lambda_type_remove_error(NULL, wanted));
     if (!wanted || wanted->kind != TYPE_KIND_SIMPLE || wanted->is_literal ||
             wanted->is_const || wanted->type_id != LMD_TYPE_INT ||
             lambda_type_accepts_null(wanted) ||
