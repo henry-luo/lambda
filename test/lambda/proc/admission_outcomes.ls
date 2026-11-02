@@ -1,6 +1,8 @@
 // S7.7.2v2/S7.7.4v2: failed local validation stores an outcome and continues.
+type CheckedRecord = {value: int}
 fn opaque(value) => value
 fn opaque_any(value) any => value
+fn counted_empty() int[1] => []
 fn failed() int^ => error("propagated")
 pn inferred_propagation() { failed()^; 7 }
 pn inferred_unary_propagation() { let outcome = failed(); outcome^; 8 }
@@ -17,6 +19,11 @@ pn main() {
     let comma_bad: int = opaque("bad"), comma_good: int = opaque(8)
     let nested = { let value: int = opaque("bad"); value is error }
     let arr: int[] = opaque([1, "bad"])
+    let float_source: float[] = [1.0]
+    let failed_literal: float[] = [float_source[3]]
+    let failed_record: CheckedRecord = {value: opaque("bad")}
+    let empty_counted: int[1] = []
+    let empty_returned = counted_empty()
     let small: u32 = opaque(-1)
     let inferred = error("captured")
     let broad: any = error("captured too");
@@ -29,5 +36,5 @@ pn main() {
     [bad is error, good, changed is error, comma_bad is error, comma_good,
      nested, arr is error, small is error, inferred.message, broad.message,
      checked_after_handler is error, after_binding, broad_source is error, returned is error,
-     propagated.message, propagated_value.message, message_recovery()]
+     propagated.message, propagated_value.message, message_recovery(), empty_counted is error, empty_returned is error, failed_literal is error, failed_record is error]
 }

@@ -893,3 +893,26 @@ emission checks improve to **255/279** with no relaxed assertions. Evidence:
 `m3-return-numeric-conversion-focused.log`. The incremental caller audit is
 **3,541/3,772** compiled; a final full audit and aggregate qualification remain
 required.
+
+
+### Optimized constructor outcomes (2026-11-03)
+
+S7.7.2v2 also applies when a destination constructs an admitted value directly.
+Three MIR paths still completed the activation on failure: an empty counted
+array, a float literal containing an absent read, and a record literal with an
+invalid dynamic field. Empty and float-array construction now publish the
+admission outcome. Record construction reuses the call-admission join, shared
+through `MirAdmissionGuard`; only the destination checks enter that join.
+Field evaluation and procedural stores retain their own existing boundaries.
+The same join prevents a failed optimized fill from escaping its receiving
+initializer.
+
+The admission fixture now checks continuation and error retention for all
+three constructors, plus a failed empty-array return. Its tier/GC matrix
+passes **128/128**, diagnostics **247/247**, extended native tails **8/8**,
+and the full MIR GC corpus **350/350**. Current MIR emission checks pass
+**263/279**, including source migration that explicitly propagates deferred
+validation outcomes before typed mutation. Assertions remain unchanged.
+Evidence: `temp/error-handling/m3-construction-joins-{diag,mir-final,gc-final}.json`
+and `m3-construction-owned-checks-{focused,tail}.log`. Caller migration and
+aggregate qualification remain open.

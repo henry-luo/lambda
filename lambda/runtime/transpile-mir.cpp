@@ -220,7 +220,7 @@ struct MirFlowScope;
 struct MirRecordValue;
 struct MirStringReadScope;
 struct MirNumericJoinProof;
-struct MirParameterGuard;
+struct MirAdmissionGuard;
 struct MirSkipRegion;
 struct MirBindingBoundary;
 struct MirDefectOriginScan;
@@ -275,10 +275,10 @@ struct MirTranspiler {
     // a store tracks its retained RHS at the producer boundary, once.
     AstCompoundAssignNode* stored_value_capture;
     MirFlowScope* flow_scope;
-    MirParameterGuard* parameter_guard;
+    MirAdmissionGuard* admission_guard;
     MirSkipRegion* skip_region;
     MirBindingBoundary* binding_boundary;
-    bool checking_parameter;
+    bool checking_admission;
     // T29-1 (D4.4.4v4): registers of the synthesized place handles bound in the
     // MIR function `place_handle_func`; a slot's register is 0 until its bind
     // is emitted there. `place_handle_writing` marks an un-sharing bind.
@@ -740,21 +740,21 @@ struct MirTranspiler {
     NamePool* name_pool;
 };
 
-struct MirParameterGuard {
-    MirParameterGuard* parent;
+struct MirAdmissionGuard {
+    MirAdmissionGuard* parent;
     MIR_item_t function;
     MIR_label_t error;
     MIR_reg_t result;
 };
 
-struct MirParameterCheckScope {
+struct MirAdmissionCheckScope {
     MirTranspiler* mt;
     bool saved;
-    MirParameterCheckScope(MirTranspiler* owner, bool checking = true)
-        : mt(owner), saved(owner->checking_parameter) {
-        mt->checking_parameter = checking;
+    MirAdmissionCheckScope(MirTranspiler* owner, bool checking = true)
+        : mt(owner), saved(owner->checking_admission) {
+        mt->checking_admission = checking;
     }
-    ~MirParameterCheckScope() { mt->checking_parameter = saved; }
+    ~MirAdmissionCheckScope() { mt->checking_admission = saved; }
 };
 
 struct MirSkipRegion {
@@ -5512,9 +5512,10 @@ static void emit_jump_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg,
 static MIR_reg_t emit_load_string_literal(MirTranspiler* mt, const char* str);
 
 static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
-    MirParameterGuard* parameter = mt->checking_parameter ? mt->parameter_guard : NULL;
+    MirAdmissionGuard* parameter = mt->checking_admission ? mt->admission_guard : NULL;
     if (parameter && parameter->function == mt->em.func_item) {
-        // S7.7.3: failed admission belongs to the call, before any unboxing.
+        // S7.7.2v2/S7.7.3: failure belongs to this constructor or call,
+        // before any unboxing or publication as a successful value.
         if (!parameter->error) {
             parameter->error = new_label(mt);
             parameter->result = new_reg(mt, "parameter_failure", MIR_T_I64);
@@ -7135,8 +7136,8 @@ static bool defer_terminal_checked_null_rejection(MirTranspiler* mt,
     // A call-site or nested-block rejection rejoins this function rather than
     // its epilogue, so its cold boundary cannot be deferred as a terminal return.
     MirSkipRegion* region = mt ? mir_binding_skip_region(mt) : NULL;
-    if (mt && (mt->inline_frame || (mt->checking_parameter && mt->parameter_guard &&
-            mt->parameter_guard->function == mt->em.func_item) ||
+    if (mt && (mt->inline_frame || (mt->checking_admission && mt->admission_guard &&
+            mt->admission_guard->function == mt->em.func_item) ||
             (region && !region->function_body))) return false;
     if (!mt || !label || !expected ||
             mt->deferred_null_boundary_count >=
@@ -8498,7 +8499,7 @@ static bool mir_contract_needs_checked_boundary(Type* contract) {
 // error admission for a failed parameter boundary.
 static MIR_reg_t emit_parameter_boundary(MirTranspiler* mt, MIR_reg_t value,
         TypeId value_type, Type* expected, const char* site) {
-    MirParameterCheckScope checking(mt);
+    MirAdmissionCheckScope checking(mt);
     if (!mir_contract_needs_checked_boundary(mir_unwrap_decl_type(expected))) {
         // Same rule as the return firewall: explicit `any` admits every Item,
         // including an error, so the parameter only needs its public carrier.
@@ -24823,7 +24824,7 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
                 // literals that were never null (D3.2.2, D3.3.3v3).
                 generic = emit_checked_boundary(mt, generic, LMD_TYPE_ANY,
                     mt->array_contract_hint, "float literal member", VALUE_REP_NONE);
-                emit_return_if_item_error(mt, generic);
+                // the constructor's receiver retains this admission outcome.
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, generic)));
@@ -24932,7 +24933,8 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
         MIR_reg_t admitted = emit_call_2(mt, "lambda_array_empty_for_contract", MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, expected_reg),
             MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
-        emit_return_if_item_error(mt, admitted);
+        // S7.7.2v2: construction publishes the check's outcome; the receiving
+        // context owns propagation, including a failed counted-array binding.
         mt->empty_array_boundary_admitted = true;
         if (has_let) pop_scope(mt);
         return admitted;
@@ -26298,6 +26300,7 @@ static MIR_reg_t mir_admit_map_array_field_binding(MirTranspiler* mt,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, done)));
     emit_label(mt, checked);
+    MirAdmissionCheckScope checking(mt);
     MIR_reg_t fallback = emit_checked_boundary(mt, value, LMD_TYPE_ANY,
         mir_unwrap_decl_type(expected), site);
     emit_return_if_item_error(mt, fallback);
@@ -26414,16 +26417,35 @@ static Type* mir_direct_map_contract(AstNode* value, Type* target) {
         ? target : NULL;
 }
 
+static MirValue mir_finish_admission_guard(MirTranspiler* mt,
+        MirAdmissionGuard* guard, AstNode* node, MirValue value) {
+    mt->admission_guard = guard->parent;
+    if (guard->error) {
+        MIR_reg_t normal = em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
+        MIR_label_t done = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, guard->result), MIR_new_reg_op(mt->ctx, normal)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+        emit_label(mt, guard->error);
+        emit_label(mt, done);
+        value = mir_value_from_reg(mt, node, guard->result,
+            VALUE_REP_ITEM, &TYPE_ANY, LMD_TYPE_ANY);
+    }
+    return value;
+}
+
 static MirValue transpile_expr_with_map_contract(MirTranspiler* mt,
         AstNode* value, Type* target, bool* constructed) {
     MirMapContractScope scope(mt, value, target);
+    MirAdmissionGuard guard = {mt->admission_guard, mt->em.func_item, NULL, 0};
+    mt->admission_guard = &guard;
+    // S7.7.2v2: optimized field/member admission yields this expression's
+    // outcome, so a rejected constructor cannot exit its receiving binding.
     MirValue result = transpile_expr_value(mt, value);
+    result = mir_finish_admission_guard(mt, &guard, value, result);
     // a float literal proves its lane, but only the fill producer installs a
     // durable certificate; declarations still admit bare literal carriers
     bool admitted_array = scope.array_producer_constructed();
-    // a declaration/return owns the failure; call arguments instead use their
-    // existing error join and must never return from this activation (S7.7.3)
-    if (admitted_array) emit_return_if_item_error(mt, result.reg);
     if (constructed) *constructed = scope.contract != NULL || admitted_array;
     return result;
 }
@@ -26478,7 +26500,10 @@ static MIR_reg_t emit_dynamic_keyed_literal_items(MirTranspiler* mt,
             MIR_reg_t result = emit_call_2(mt, "map_literal_spread", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_item),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, source));
-            emit_return_if_item_error(mt, result);
+            {
+                MirAdmissionCheckScope checking(mt);
+                emit_return_if_item_error(mt, result);
+            }
             continue;
         }
 
@@ -26510,7 +26535,10 @@ static MIR_reg_t emit_dynamic_keyed_literal_items(MirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_item),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-        emit_return_if_item_error(mt, result);
+        {
+            MirAdmissionCheckScope checking(mt);
+            emit_return_if_item_error(mt, result);
+        }
     }
     return load_gc_root_slot(mt, owner_root, "literal_owner");
 }
@@ -26872,6 +26900,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
                 ? load_gc_root_slot(mt, val_root_slots[i], "field_source") : val_ops[i].u.reg;
                 if (field_contract &&
                         !mir_map_literal_field_proven(mt, key_expr->as, field_contract)) {
+                    MirAdmissionCheckScope checking(mt);
                     char site[192];
                     snprintf(site, sizeof(site), "field '%.*s'",
                         (int)key_expr->name->len, key_expr->name->chars);
@@ -35097,7 +35126,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         !accumulated && argument_contract &&
                         !mir_boundary_is_redundant(mt, arg, argument_contract));
                     if (admitted_argument) {
-                        MirParameterCheckScope checking(mt);
+                        MirAdmissionCheckScope checking(mt);
                         MIR_reg_t admitted = emit_checked_value_boundary(mt, argument_value,
                             argument_contract, "tail-call argument");
                         emit_return_if_item_error(mt, admitted);
@@ -35105,7 +35134,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         short_circuit_error = false;
                     }
                     if (accumulated) {
-                        MirParameterCheckScope checking(mt);
+                        MirAdmissionCheckScope checking(mt);
                         // The initial value remains frozen until the first append
                         // copies it; later backedges can reuse the private buffer.
                         emit_return_if_item_error(mt, accumulated);
@@ -35124,7 +35153,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         // A tail-call rewrite overwrites parameter registers in
                         // phase 2. Preserve an error before that mutation so
                         // the next loop iteration cannot observe it as input.
-                        MirParameterCheckScope checking(mt);
+                        MirAdmissionCheckScope checking(mt);
                         emit_return_if_item_error(mt, val);
                     }
 
@@ -35718,7 +35747,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     }
                     MIR_reg_t array_item = val;
                     if (!proven_array_witness) {
-                        MirParameterCheckScope checking(mt);
+                        MirAdmissionCheckScope checking(mt);
                         MIR_reg_t admitted_array = emit_checked_boundary(mt, val,
                             LMD_TYPE_ANY, parameter_contract,
                             "typed array call argument", VALUE_REP_NONE);
@@ -35930,7 +35959,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
-                            MirParameterCheckScope checking(mt);
+                            MirAdmissionCheckScope checking(mt);
                             if (!mir_emit_int_lane_null_admission(mt, val, val_tid,
                                     val_rep, parameter_contract, boundary)) {
                                 val = emit_parameter_boundary(mt, val, val_tid,
@@ -36663,24 +36692,14 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 
 static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call_node,
         AstNode* injected) {
-    MirParameterGuard guard = {mt->parameter_guard, mt->em.func_item, NULL, 0};
-    mt->parameter_guard = &guard;
+    MirAdmissionGuard guard = {mt->admission_guard, mt->em.func_item, NULL, 0};
+    mt->admission_guard = &guard;
     MirValue value = {};
     // emit_call_value consumes the tail flag, so read it first (LR12-11 below)
     const bool call_in_tail_position = mt->in_tail_position;
     value = emit_call_value(mt, call_node, injected);
-    mt->parameter_guard = guard.parent;
-    if (guard.error) {
-        MIR_reg_t normal = em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
-        MIR_label_t done = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, guard.result), MIR_new_reg_op(mt->ctx, normal)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
-        emit_label(mt, guard.error);
-        emit_label(mt, done);
-        value = mir_value_from_reg(mt, (AstNode*)call_node, guard.result,
-            VALUE_REP_ITEM, &TYPE_ANY, LMD_TYPE_ANY);
-    }
+    value = mir_finish_admission_guard(mt, &guard, (AstNode*)call_node,
+        value);
 
     if (call_node->propagate) {
         TypeId carrier_type = mir_expr_carrier_type(mt, (AstNode*)call_node);
@@ -41951,9 +41970,9 @@ static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
 // and completion policy (D2.4.1–D2.4.3, D5.3.4, D8.2.6).
 static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand, ValueRep required) {
-    // Child expressions own their own boundaries; only the surrounding call
-    // emitter's admission checks branch to its parameter-error join.
-    MirParameterCheckScope expression(mt, false);
+    // child evaluation is not admission; scoped destination checks alone
+    // branch to the surrounding call or constructor's admission join.
+    MirAdmissionCheckScope expression(mt, false);
     MirSourceScope source_scope(mt, node);
     AstCompoundAssignNode* store = mt->stored_value_capture;
     if (node && store && node == store->value) {
