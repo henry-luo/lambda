@@ -15457,6 +15457,106 @@ TEST_F(RadiantTextQuery, RubyHiddenAnnotationsRetainPairingWithoutContributingSi
     dom_range_release(range);
 }
 
+TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutChangingSource) {
+    ASSERT_NE(load("test/html/layout_ruby_break_normalization.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float width; } cases[] = {
+        {"direct", 60.0f}, {"nested", 60.0f}, {"collapsed-spaces", 60.0f},
+        {"repeated", 60.0f}, {"leading", 40.0f}, {"trailing", 40.0f},
+        {"newline", 60.0f}, {"preserved-spaces", 140.0f},
+        {"repeated-newline", 60.0f}, {"leading-newline", 40.0f},
+        {"trailing-newline", 40.0f}, {"preserved-br", 60.0f},
+        {"split-newline", 60.0f}, {"split-repeated-newline", 60.0f},
+        {"split-trailing-newline", 40.0f},
+        {"rtl-newline", 60.0f}, {"rtl-repeated-newline", 60.0f}, {"rtl-br", 60.0f},
+        {"computed-role", 60.0f}, {"annotation-atomic", 60.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+        }
+        DomElement* ordinary = dom_find_element_by_id(document->root, "ordinary");
+        DomElement* base_atomic = dom_find_element_by_id(document->root, "base-atomic-box");
+        DomElement* annotation_atomic = dom_find_element_by_id(document->root, "annotation-atomic-box");
+        ASSERT_NE(ordinary, nullptr);
+        ASSERT_NE(base_atomic, nullptr);
+        ASSERT_NE(annotation_atomic, nullptr);
+        EXPECT_FLOAT_EQ(ordinary->parent->height, 200.0f);
+        EXPECT_FLOAT_EQ(base_atomic->height, 200.0f);
+        EXPECT_FLOAT_EQ(annotation_atomic->height, 100.0f);
+        DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
+        ASSERT_NE(reading, nullptr);
+        EXPECT_STREQ((const char*)reading->first_child->text_data(), "A\nB");
+        EXPECT_EQ(css_prop_compute_cascaded_keyword(reading, CSS_PROPERTY_WHITE_SPACE, CSS_VALUE_NORMAL),
+            CSS_VALUE_PRE);
+        for (const char* id : {"newline-reading", "repeated-newline-reading",
+                              "rtl-newline-reading", "rtl-repeated-newline-reading"}) {
+            DomElement* annotation = dom_find_element_by_id(document->root, id);
+            DomText* source = annotation->first_child->as_text();
+            struct Glyphs { unsigned count; float x[2]; } glyphs = {};
+            auto visit = [](void* pointer, uint32_t cp, FontHandle*, float x, float, float) {
+                Glyphs* glyphs = (Glyphs*)pointer;
+                if (cp == 'A' || cp == 'B') {
+                    if (glyphs->count < 2) glyphs->x[glyphs->count] = x;
+                    glyphs->count++;
+                }
+                return true;
+            };
+            ASSERT_TRUE(visit_text_paint_glyphs(annotation->parent->parent->as_element(), source, visit, &glyphs));
+            EXPECT_EQ(glyphs.count, 2u) << id;
+            EXPECT_FLOAT_EQ(glyphs.x[1] - glyphs.x[0], 40.0f) << id;
+        }
+        struct MixedGlyphs { unsigned count; uint32_t codepoints[4]; float x[4]; } mixed[2] = {};
+        const char* mixed_ids[] = {"rtl-mixed-space", "rtl-mixed-newline"};
+        for (unsigned index = 0; index < 2; index++) {
+            DomElement* annotation = dom_find_element_by_id(document->root, mixed_ids[index]);
+            auto visit = [](void* pointer, uint32_t cp, FontHandle*, float x, float, float) {
+                MixedGlyphs* glyphs = (MixedGlyphs*)pointer;
+                if (cp == ' ') return true;
+                if (glyphs->count < 4) {
+                    glyphs->codepoints[glyphs->count] = cp;
+                    glyphs->x[glyphs->count] = x;
+                }
+                glyphs->count++;
+                return true;
+            };
+            ASSERT_TRUE(visit_text_paint_glyphs(annotation->parent->parent->as_element(),
+                annotation->first_child->as_text(), visit, &mixed[index]));
+            ASSERT_EQ(mixed[index].count, 4u);
+        }
+        for (unsigned index = 0; index < 4; index++) {
+            EXPECT_EQ(mixed[0].codepoints[index], mixed[1].codepoints[index]);
+            EXPECT_NEAR(mixed[0].x[index] - mixed[0].x[0], mixed[1].x[index] - mixed[1].x[0], 0.01f);
+        }
+    }
+    DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
+    DomText* source = reading->first_child->as_text();
+    DocState* state = radiant_document_ensure_state(document, "ruby-break-normalization");
+    ASSERT_NE(state, nullptr);
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    float x = 0.0f, y = 0.0f;
+    view_get_visual_bounds(source, &x, &y, nullptr, nullptr);
+    expect_character_rect(range, source, 1, Rect{x + 20.0f, y, 20.0f, 20.0f});
+    expect_character_rect(range, source, 2, Rect{x + 40.0f, y, 20.0f, 20.0f});
+    dom_range_release(range);
+    reading = dom_find_element_by_id(document->root, "role-reading");
+    DomElement* marker = dom_find_element_by_id(document->root, "role-br");
+    DomNode* first = reading->first_child;
+    for (const char* display : {"inline-block", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(marker->width, strcmp(display, "ruby-text") == 0 ? 20.0f : 0.0f);
+        EXPECT_FLOAT_EQ(reading->height, strcmp(display, "ruby-text") == 0 ? 20.0f : 200.0f);
+        EXPECT_EQ(reading->first_child.get(), first);
+        EXPECT_EQ(first->parent.get(), reading);
+    }
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

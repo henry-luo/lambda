@@ -494,7 +494,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     void* line_width_context = nullptr,
                                     bool allow_soft_wrap = true);
 StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descendants);
-StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space);
+StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
+                                    bool collapse_segment_breaks = false,
+                                    bool preserve_initial_space = false,
+                                    bool preserve_terminal_space = false);
 void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
@@ -689,6 +692,9 @@ struct LayoutTextIntrinsicLineOptions {
     float vertical_line_advance = 0.0f;
     float vertical_inline_basis = 0.0f;
     bool processed_forced_breaks = false; // layout_collect_inline_text's paragraph markers
+    bool collapse_segment_breaks = false; // used-text override; authored spaces keep their CSS policy
+    bool preserve_initial_space = false; // neighboring inline content owns these edge decisions
+    bool preserve_terminal_space = false;
     bool text_combine = false; // one effective em square, independent of internal text width/breaks
     lam::Up<ViewBlock> line_box = nullptr; // optional line-metric owner
     float line_height = 0.0f;
@@ -1866,6 +1872,8 @@ enum LayoutInlineTextEdgeMode {
     LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE,
 };
 bool layout_ruby_annotation_node(DomNode* node);
+bool layout_ruby_annotation_content(DomNode* node);
+bool layout_text_collapses_segment_breaks(DomNode* node);
 bool layout_ruby_annotation_outside_scope(DomNode* node, DomElement* scope);
 void layout_text_reset_kerning_context(LayoutContext* context);
 bool view_is_collapsed_whitespace_text(View* view);
@@ -2685,6 +2693,7 @@ typedef struct Linebox {
     lam::Up<TextRect> last_text_rect;       // last text rect output on this line (for trailing space trimming)
     lam::Up<struct ViewText> last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
+    lam::Up<View> trailing_space_box; // a converted break owns its separator without synthetic DOM text
     lam::Up<TextRect> committed_trailing_rect;  // text rect that had trailing space when output_text was called
     lam::Up<struct ViewText> committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
@@ -2720,6 +2729,11 @@ typedef struct Linebox {
     float trailing_letter_spacing;   // CSS Text 3 §8: letter-spacing after the last character on a line;
                                      // trimmed at line breaks since letter-spacing is not applied at line ends
 
+    inline void clear_trailing_space() {
+        trailing_space_width = 0.0f;
+        trailing_space_box = nullptr;
+    }
+
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
         last_space_kind = BRK_TEXT;  last_space_hanging = {};
@@ -2727,7 +2741,7 @@ typedef struct Linebox {
         last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging = {};
         last_space_metrics.valid = false;
         last_non_shy_space_metrics.valid = false;
-        trailing_space_width = 0;
+        clear_trailing_space();
         committed_trailing_rect = NULL;
         committed_trailing_view = NULL;
         committed_trailing_space = 0;

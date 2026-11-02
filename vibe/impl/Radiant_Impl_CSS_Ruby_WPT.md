@@ -3,9 +3,10 @@
 Status: active. Started 2026-11-02 on `codex/css-ruby-wpt`, source base
 `c5e40c521`. The imported suite contains 212 documents. The initial worktree
 run reports 19 full matches, 193 geometry mismatches, and no execution errors.
-Computed-role/metric and HTML-construction milestones are qualified with the
-existing aggregate failures documented below. Segment/column implementation
-is the next active milestone; the objective is not complete.
+Computed roles, HTML construction, shared columns and annotation hiding are
+qualified with existing aggregate failures documented below. Annotation-break
+normalization is also qualified. Flow integration and the remaining raw
+suite failures are still open; the objective is not complete.
 
 ## Objective and contracts
 
@@ -453,3 +454,104 @@ The native host is restored after Lambda's debug-host gate; the final raw Ruby
 run remains 30/212. Dimension lint and diff checks pass. This closes default
 annotation hiding; merge behavior, whitespace boundaries between hidden and
 visible annotation sequences, and general wrapping remain later flow work.
+
+## M5: annotation forced-break normalization
+
+Priority: P1. Annotation `<br>` and preserved source newlines currently create
+extra lines. CSS Ruby 1 §2.2 step 7 instead converts forced annotation breaks
+using collapsible segment-break rules, irrespective of authored `white-space`.
+Their source DOM and computed style remain intact. HTML's rendering model
+describes `<br>` as a newline control; its used break behavior must therefore
+follow this normalization as well as ordinary text processing.
+
+Use one computed-role policy for layout, intrinsic measurement, bidi and text
+projection. Extend the existing collapsible-space ownership/trim path to a
+break-marker box rather than creating fake DOM text or a separate glyph path.
+Retain the source marker's used geometry in its existing view ownership domain
+and journal it with the corresponding view state (**D4.1.4v5 / D4.5.1v4**).
+
+Acceptance: direct/nested annotation BRs and preserved newlines; leading,
+repeated and trailing converted breaks; surrounding collapsed spaces;
+preserved ordinary spaces; arbitrary elements with annotation display roles;
+text/range and glyph positions; intrinsic/used size agreement; retained role
+changes. Ordinary text and base independent formatting contexts must retain
+their forced breaks. Annotation breaks inside nested formatting contexts
+follow §2.2's annotation rule. Full synchronized wrapping remains subsequent
+work against the shared column model.
+
+Chromium 152's Ahem probe confirms a converted BR has a space allocation and
+that an independent inline-block in the base still breaks
+(`temp/ruby-br-inlinification-browser-probe.json`). Some pinned WPT references
+expect all Ruby-related BRs to disappear without a separator; use the current
+specification and independent normalization controls, preserving the raw
+references. Base-only BR/newline handling requires its own audit rather than
+blanket suppression based on a tag name.
+
+Verification budget: focused native normalization and existing Ruby/whitespace
+checks in the edit loop; raw Ruby suite and dimension lint; required Radiant
+and input gates at the stable milestone boundary. Add other required gates if
+the owning stage expands beyond layout/CSS projection.
+
+### M5 implementation and evidence
+
+`layout_ruby_annotation_content` derives annotation membership from computed
+roles, including descendants inside independent formatting contexts. Used LF
+processing overrides the break policy without changing authored spaces or
+computed `white-space`. Converted BRs retain their own source element/view and
+space advance. The existing trailing-space trim accepts that box as an owner;
+`Linebox::clear_trailing_space` clears both the advance and owner together.
+The existing view snapshot already journals the marker's geometry, while its
+line-context borrow remains pass-local (**D4.1.4v5 / D4.5.1v4**).
+
+Intrinsic collectors and the generic inline-run aggregation recognize converted
+BRs as separators. The shared normalizer takes explicit inline-edge context so
+it does not discard a separator merely because it crosses a source-node
+boundary. Annotation formatting contexts bound that lookup. Bidi receives
+U+0020 instead of a paragraph boundary; repeated source LFs retain their source
+ownership with zero advance. Paint export, raster/shadows and reversed-cluster
+measurement use the same space-survival decision. This fixes a mixed Hebrew/
+Latin control where treating each raw LF independently displaced glyphs by
+20px even though the annotation's total width was correct.
+
+`layout_ruby_break_normalization.html` covers direct/nested BRs, repeated and
+line-edge breaks, preserved spaces/newlines, split inline owners, arbitrary
+annotation roles, independent annotation/base contexts, RTL and mixed bidi.
+The native test checks used/intrinsic agreement, glyph placement against a
+single-space control, LF Range geometry, unchanged source/computed style and
+retained role changes. The focused Ruby/whitespace selection passes 11/11.
+The complete native text-query component in the Radiant aggregate passes
+448/448. Logs: `temp/ruby-m5-reproducer-before.log`,
+`temp/ruby-m5-bidi-control-before.log`,
+`temp/ruby-m5-focused-final.log`, `temp/ruby-m5-radiant-output/`.
+
+The raw suite remains **30 full matches / 182 mismatches**, with no lost full
+match or execution error. Annotation normalization improves the element match
+rates of `ruby-line-break-suppression-001` (6.3% to 18.8%) and `-003` (0% to
+17.6%); their remaining failures include base-level behavior. Raw references
+and comparison tolerances are unchanged. Logs:
+`temp/ruby-m5-wpt-first.log`, `temp/ruby-m5-wpt-delta.json`.
+
+Qualification finishes with **4973 full layout matches, 301 accepted partials
+and zero layout regressions**, including **448/448** native text-query checks.
+The aggregate reports nine slide teardown exits, all among the cases already
+reproduced on unchanged `c5e40c521`; no new failing case appears. This run's
+browser-global profile and the other previously failing slide cases pass.
+The gate remains red; no exemption is added. Logs and summary:
+`temp/ruby-m5-radiant-baseline.log`,
+`temp/ruby-m5-radiant-output/test_summary.json`.
+
+The rebuilt full input gate completes **4594/4621**, with exactly the same 27
+wiki/prose/PDF failures as M4, no new or resolved failing case and no skipped
+case. CSS runners pass. Logs: `temp/build-ruby-m5-input-runners.log`,
+`temp/ruby-m5-input-qualified.log`,
+`temp/ruby-m5-input-output/test_summary.json`.
+Dimension lint and diff checks pass. The generated CSS support inventory is
+refreshed because source/test line references moved; its registrations and
+qualification fields are unchanged, and the generator's check passes.
+
+The next diagnostic target is textless inline annotation geometry. In the
+saved `ruby-align-001` output, all text and base-column geometry match, while
+each visible annotation containing a 160px-wide zero-height atomic child has
+zero height. Chromium exposes its 8px font box. Inspect the shared inline
+font-box/strut path and preserve descendant overflow independently before
+changing placement; do not add a per-fixture annotation height.

@@ -766,6 +766,19 @@ bool layout_ruby_annotation_outside_scope(DomNode* node, DomElement* scope) {
     return layout_ruby_annotation_node(node) && !layout_ruby_annotation_node(scope);
 }
 
+bool layout_ruby_annotation_content(DomNode* node) {
+    // CSS Ruby §2.2 step 7 also reaches descendants with independent formatting contexts.
+    for (; node; node = node->parent) {
+        if (layout_ruby_annotation_node(node)) return true;
+    }
+    return false;
+}
+
+bool layout_text_collapses_segment_breaks(DomNode* node) {
+    return layout_white_space_collapses_newlines(get_white_space_value(node)) ||
+        layout_ruby_annotation_content(node);
+}
+
 static bool ruby_annotation_display_is_misparented(DomNode* node,
                                                    DisplayValue display) {
     if (!node || !node->is_element() ||
@@ -2121,7 +2134,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.last_space = lam::up((unsigned char*)elmt);
         lycon->line.last_space_pos = lycon->line.advance_x;
         lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
-        lycon->line.trailing_space_width = 0;
+        lycon->line.clear_trailing_space();
         lycon->line.wrap_opportunity_before_nowrap = true;
         return;
     }
@@ -2147,6 +2160,30 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §10.8.1: <br> participates in the current line before forcing
         float br_line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : br_font_height;
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
+        if (layout_ruby_annotation_content(elmt)) {
+            // CSS Ruby §2.2: a forced annotation break becomes a collapsible separator.
+            layout_commit_inline_boxes(lycon);
+            br_view->x = lycon->line.advance_x;
+            if (!lycon->line.is_line_start && !lycon->line.has_space) {
+                br_view->width = layout_measure_space_advance(
+                    lycon, br_fh, lycon->font.style) +
+                    text_character_spacing(lycon->font.style, ' ', true);
+                lycon->line.advance_x += br_view->width;
+                lycon->line.trailing_space_width = br_view->width;
+                lycon->line.trailing_space_box = lam::up(br_view);
+                lycon->line.has_space = true;
+            }
+            if (get_text_wrap_mode_value(elmt, lycon) != CSS_VALUE_NOWRAP) {
+                lycon->line.last_space = lam::up((unsigned char*)elmt);
+                lycon->line.last_space_pos = lycon->line.advance_x;
+                lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
+                lycon->line.wrap_opportunity_before_nowrap = true;
+            }
+            layout_text_reset_kerning_context(lycon);
+            lycon->line.prev_text_spacing_codepoint = ' ';
+            lycon->line.prev_text_autospace_codepoint = ' ';
+            return;
+        }
         bool was_line_clamped = lycon->block.line_clamped;
         bool line_had_replaced_content = lycon->line.has_replaced_content;
         bool collapse_br_rect = quirks_br_after_nested_inline_text(lycon, elmt);

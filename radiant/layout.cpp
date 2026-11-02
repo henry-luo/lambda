@@ -4650,7 +4650,7 @@ static bool layout_empty_mathml_element(LayoutContext* lycon, DomNode* node,
     if (display.outer == CSS_VALUE_INLINE && lycon->line.trailing_space_width > 0.0f) {
         // CSS Text 3 §4.1.1: a following inline box keeps the preceding
         // collapsed separator from being treated as line-end whitespace.
-        lycon->line.trailing_space_width = 0.0f;
+        lycon->line.clear_trailing_space();
         lycon->line.committed_trailing_rect = nullptr;
         lycon->line.committed_trailing_view = nullptr;
         lycon->line.committed_trailing_space = 0.0f;

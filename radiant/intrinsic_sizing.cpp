@@ -2063,6 +2063,19 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         if (metrics) { metrics->line_count = 1; metrics->block_extent = em; }
         return result;
     }
+    if (options.collapse_segment_breaks) {
+        StrBuf* normalized = layout_normalize_inline_text(text, length, options.white_space, true,
+            options.preserve_initial_space, options.preserve_terminal_space);
+        if (!normalized) return result;
+        LayoutTextIntrinsicLineOptions normalized_options = options;
+        normalized_options.collapse_segment_breaks = false;
+        // normalized text contains spaces, while genuine forced-break markers retain their meaning.
+        normalized_options.processed_forced_breaks = true;
+        result = layout_measure_text_intrinsic_lines(lycon, normalized->str, normalized->length,
+            normalized_options, vertical_text_extent, metrics);
+        strbuf_free(normalized);
+        return result;
+    }
     bool preserve_spaces = white_space_preserves_space_advance(options.white_space);
     bool preserve_newlines = preserve_spaces || options.white_space == CSS_VALUE_PRE_LINE;
     const char* line_start = text;
@@ -2511,6 +2524,7 @@ bool layout_intrinsic_node_is_collapsible_space_only(DomNode* node) {
     DomElement* element = node->as_element();
     if (!is_inline_level_element(element)) return false;
     bool saw_child = false;
+    if (element->tag() == MARKUP_NAME_BR && layout_ruby_annotation_content(element)) return true;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (child->is_comment()) continue;
         if (!layout_intrinsic_node_is_collapsible_space_only(child)) return false;
@@ -2597,6 +2611,7 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
 
         DomNode* parent = current->parent;
         if (!parent || !parent->is_element()) break;
+        if (layout_ruby_annotation_node(parent)) break;
         if (!is_inline_level_element(parent->as_element())) break;
         if (layout_intrinsic_element_is_atomic_inline(parent->as_element())) {
             // css display 3: an atomic inline owns its formatting context, so
@@ -2620,13 +2635,13 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
             white_space == CSS_VALUE_BREAK_SPACES ||
             white_space == CSS_VALUE_PRE_LINE;
         char edge = text[end ? length - 1 : 0];
-        return preserves_newlines && layout_text_is_segment_break(edge);
+        return preserves_newlines && !layout_ruby_annotation_content(node) && layout_text_is_segment_break(edge);
     }
     if (!node->is_element()) return false;
 
     DomElement* element = node->as_element();
     if (!is_inline_level_element(element)) return false;
-    if (element->tag() == MARKUP_NAME_BR) return true;
+    if (element->tag() == MARKUP_NAME_BR) return !layout_ruby_annotation_content(element);
     if (layout_intrinsic_element_is_atomic_inline(element)) return false;
     for (DomNode* child = end ? element->last_child : element->first_child;
          child; child = end ? child->prev_sibling : child->next_sibling) {
@@ -2640,8 +2655,12 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
 static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
-        return layout_text_edge_has_whitespace((const char*)node->text_data(), end) &&
-            !white_space_preserves_space_advance(get_white_space_value(node));
+        const char* text = (const char*)node->text_data();
+        if (!text || !*text) return false;
+        char edge = text[end ? strlen(text) - 1 : 0];
+        return layout_text_edge_has_whitespace(text, end) &&
+            (!white_space_preserves_space_advance(get_white_space_value(node)) ||
+             (layout_text_is_segment_break(edge) && layout_ruby_annotation_content(node)));
     }
     if (!node->is_element()) return false;
 
@@ -5609,6 +5628,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 line_options.text_transform = text_transform;
                 line_options.font_variant = font_variant;
                 line_options.white_space = ws;
+                line_options.collapse_segment_breaks = preserve_newlines && layout_ruby_annotation_content(child);
+                if (line_options.collapse_segment_breaks) {
+                    line_options.preserve_initial_space = intrinsic_has_inline_boundary_content_in_direction(child, false);
+                    line_options.preserve_terminal_space = intrinsic_has_inline_boundary_content_in_direction(child, true);
+                }
                 line_options.overflow_wrap = ow;
                 line_options.word_break = wb;
                 line_options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
@@ -6585,17 +6609,19 @@ static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextStat
 
 static void intrinsic_append_normalized_text(StrBuf* output,
                                                     const char* data, size_t length, CssEnum white_space,
-                                                    IntrinsicInlineTextState* state) {
+                                                    IntrinsicInlineTextState* state,
+                                                    bool collapse_segment_breaks = false) {
     if (!data) return;
     bool collapse = layout_white_space_collapses(white_space);
-    bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
+    bool collapse_newlines = collapse_segment_breaks || layout_white_space_collapses_newlines(white_space);
     for (size_t i = 0; i < length; i++) {
         char ch = data[i];
         if (layout_text_is_segment_break(ch) && !collapse_newlines) {
             strbuf_append_char(output, '\v');
             state->pending_space = false;
             state->has_line_content = false;
-        } else if (collapse && is_space((unsigned char)ch)) {
+        } else if ((collapse && is_space((unsigned char)ch)) ||
+                   (collapse_segment_breaks && layout_text_is_segment_break(ch))) {
             state->pending_space = true;
         } else {
             intrinsic_flush_inline_space(output, state);
@@ -6609,14 +6635,18 @@ static void intrinsic_append_normalized_inline_text(StrBuf* output, DomNode* nod
                                                     IntrinsicInlineTextState* state) {
     const char* data = reinterpret_cast<const char*>(node->text_data());
     intrinsic_append_normalized_text(output,data,data ? strlen(data) : 0,
-        get_white_space_value(node),state);
+        get_white_space_value(node),state,layout_ruby_annotation_content(node));
 }
 
-StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space) {
+StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
+                                    bool collapse_segment_breaks,
+                                    bool preserve_initial_space, bool preserve_terminal_space) {
     StrBuf* normalized = strbuf_new();
     if (!normalized) return nullptr;
     IntrinsicInlineTextState state;
-    intrinsic_append_normalized_text(normalized,text,length,white_space,&state);
+    state.has_line_content = preserve_initial_space;
+    intrinsic_append_normalized_text(normalized,text,length,white_space,&state,collapse_segment_breaks);
+    if (preserve_terminal_space) intrinsic_flush_inline_space(normalized, &state);
     return normalized;
 }
 
@@ -6637,6 +6667,10 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     ViewElement* element_view = lam::view_require_element(static_cast<View*>(element));
     if (layout_display_is_none(element_view->display)) return true;
     if (element->tag_id == MARKUP_NAME_BR) {
+        if (layout_ruby_annotation_content(element)) {
+            intrinsic_append_normalized_text(output, "\n", 1, CSS_VALUE_NORMAL, state);
+            return true;
+        }
         // preserve a forced break without making it ordinary collapsible whitespace.
         strbuf_append_char(output, '\v');
         state->pending_space = false;
@@ -6882,7 +6916,8 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
         DomElement* element = child->as_element();
         ViewBlock* atom = lam::unsafe_view_block_element_storage(element);
         IntrinsicSizes contribution = {};
-        bool forced_break = element->tag() == MARKUP_NAME_BR;
+        bool converted_break = element->tag() == MARKUP_NAME_BR && layout_ruby_annotation_content(element);
+        bool forced_break = element->tag() == MARKUP_NAME_BR && !converted_break;
         bool soft_break = element->tag() == MARKUP_NAME_WBR;
         {
             BlockContextScope block_scope(lycon);
@@ -6921,7 +6956,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
             }
             bool parallel_block = block_sequence && !atom->display.list_item &&
                 layout_block_inline_axis_is_vertical(atom) == layout_block_inline_axis_is_vertical(block);
-            if (layout_element_is_floated(element) || (!composed && !forced_break && !soft_break &&
+            if (layout_element_is_floated(element) || (!composed && !forced_break && !soft_break && !converted_break &&
                 ((!parallel_block && !layout_intrinsic_element_is_atomic_inline(element)) ||
                  !intrinsic_measure_box_inline_contribution(lycon, atom,
                     !layout_block_inline_axis_is_vertical(block), &contribution)))) {
@@ -6938,6 +6973,11 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
         if (forced_break) {
             strbuf_append_char(text, '\v');
             text_state = {};
+            text_source = child;
+            continue;
+        }
+        if (converted_break) {
+            intrinsic_append_normalized_text(text, "\n", 1, CSS_VALUE_NORMAL, &text_state);
             text_source = child;
             continue;
         }

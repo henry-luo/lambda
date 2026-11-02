@@ -38,6 +38,7 @@ typedef struct BidiRectInfo {
     int visible_count;
     float raw_width;
     bool collapses_spaces;
+    bool collapses_segment_breaks;
     bool line_has_bidi_inline_content;
     ViewSpan* directional_span;
 } BidiRectInfo;
@@ -323,6 +324,13 @@ static void bidi_count_views(View* view, int line_number, int depth,
             }
             return false;
         }
+        if (current->view_type == RDT_VIEW_BR && layout_ruby_annotation_content(current)) {
+            if (current->inline_line_number == line_number && current->width > 0.0f) {
+                counts->chars++;
+                if (!counts->source_anchor) counts->source_anchor = current;
+            }
+            return false;
+        }
         if (bidi_atomic_inline(current)) {
             if (!layout_inline_span_has_content_on_line(current, line_number)) return false;
             counts->has_atomic_inline = true;
@@ -497,6 +505,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                 rect_info->raw_width = 0.0f;
                 rect_info->collapses_spaces = layout_white_space_collapses(
                     get_white_space_value(static_cast<DomNode*>(text)));
+                rect_info->collapses_segment_breaks = layout_ruby_annotation_content(text);
                 rect_info->line_has_bidi_inline_content = false;
                 rect_info->directional_span = bidi_text_directional_span(text, direction);
                 bool rect_use_fallback_metrics = use_fallback_metrics &&
@@ -513,6 +522,9 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                         codepoint = *cursor;
                         consumed = 1;
                     }
+                    bool segment_break = layout_text_is_segment_break(codepoint);
+                    bool repeated_segment_break = segment_break && rect_info->collapses_segment_breaks &&
+                        cursor > text->text_data() && layout_text_is_segment_break(cursor[-1]);
                     codepoint = bidi_source_codepoint(text,codepoint);
                     if (layout_text_is_segment_break(codepoint)) {
                         cursor += consumed;
@@ -529,8 +541,9 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                     fragment->codepoint = codepoint;
                     // the isolated composition is strong LTR outward; its real source remains available to inner shaping.
                     fragment->upright = upright || combined;
-                    fragment->width = combined ? text->font->font_size : bidi_char_raw_width(
-                        lycon, text, codepoint, rect_use_fallback_metrics);
+                    // collapsed source breaks retain bidi/source ownership but cannot stretch the visual run.
+                    fragment->width = repeated_segment_break ? 0.0f : combined ? text->font->font_size
+                        : bidi_char_raw_width(lycon, text, codepoint, rect_use_fallback_metrics);
                     fragment->advance_width = fragment->width;
                     fragment->visual_x = 0.0f;
                     rect_info->char_count++;
@@ -596,6 +609,11 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                     chars, char_cursor, current,
                     bidi_marker_representative_codepoint(direction), marker->width);
             }
+            continue;
+        }
+        if (current->view_type == RDT_VIEW_BR && layout_ruby_annotation_content(current)) {
+            if (current->inline_line_number == line_number && current->width > 0.0f)
+                bidi_append_atomic_fragment(chars, char_cursor, current, ' ', current->width);
             continue;
         }
         if (bidi_atomic_inline(current)) {
@@ -673,9 +691,12 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
         // would incorrectly widen the DOM range across reordered fragments.
         for (int j = rect_info->char_count - 1; j >= 0; j--) {
             BidiCharFragment* fragment = &chars[rect_info->first_char + j];
+            bool collapsed_segment_break = rect_info->collapses_segment_breaks &&
+                layout_text_is_segment_break(rect_info->text->text_data()[fragment->source_index]);
+            if (collapsed_segment_break && fragment->width == 0.0f) continue;
             // base RTL also reorders a collapsed suffix when all visible characters are Latin.
             // the width check below retains a space that still contributes to the measured rectangle.
-            if (!rect_info->collapses_spaces ||
+            if ((!rect_info->collapses_spaces && !collapsed_segment_break) ||
                 !bidi_is_collapsible_space(fragment->codepoint) ||
                 fragment->width <= 0.0f ||
                 rect_info->raw_width <= 0.0f ||
@@ -1212,7 +1233,7 @@ static void bidi_position_forced_breaks(View* view, int line_number,
     if (!view) return;
     for (View* current = view; current; current = current->next()) {
         if (current->view_type == RDT_VIEW_BR) {
-            if (current->inline_line_number == line_number) {
+            if (current->inline_line_number == line_number && !layout_ruby_annotation_content(current)) {
                 // CSS Writing Modes places a forced break at the visual end
                 // of its bidi paragraph, not at the logical child-list end.
                 current->x = direction == CSS_VALUE_RTL ? left : right;
