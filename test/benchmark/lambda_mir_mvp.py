@@ -117,6 +117,8 @@ def main():
     parser.add_argument("--previous-mvp", type=Path, help="optional prior MVP release for an interleaved before/after comparison")
     parser.add_argument("--legacy-timer", action="store_true", help="use the historical C adapter that also times output")
     parser.add_argument("--runs", type=int, default=15)
+    parser.add_argument("--c2mir-allowance-percent", type=float, default=20.0,
+                        help="maximum slowdown against C2MIR, using the one-sided 95%% upper ratio bound")
     subsets = {"scalar": SCALAR_CASES, "array": ARRAY_CASES, "float-array": FLOAT_ARRAY_CASES,
                "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES, "all": CASES}
     parser.add_argument("--subset", choices=tuple(subsets), default="all")
@@ -130,6 +132,8 @@ def main():
     args = parser.parse_args()
     if args.runs < 3 or args.warmups < 1:
         parser.error("use at least three measured runs and one warmup")
+    if not math.isfinite(args.c2mir_allowance_percent) or args.c2mir_allowance_percent < 0:
+        parser.error("C2MIR allowance must be a finite nonnegative percentage")
     if args.sumfp_batch < 1 or args.sumfp_batch > 100000:
         parser.error("use a Sumfp batch count from 1 to 100000")
     if args.sumfp_batch > 1 and (args.case != "r7rs/sumfp" or args.legacy_timer):
@@ -154,6 +158,7 @@ def main():
         "revision": command_output(["git", "rev-parse", "HEAD"]),
         "working_tree": command_output(["git", "status", "--short"]),
         "release_confirmed": args.release,
+        "c2mir_allowance_percent": args.c2mir_allowance_percent,
         "compiler_identity": compiler_identity(),
         "executables": {name: {"path": str(path), "sha256": sha256_file(path)}
                         for name, path in binaries.items()},
@@ -239,6 +244,7 @@ def main():
         reference = row["uncertainty"]["mvp_over_c2mir"]
         row["performance_gates"] = {
             "faster_than_full_mir": full["upper_bound"] < 1.0 if full else None,
+            "within_c2mir_allowance": reference["upper_bound"] <= 1.0 + args.c2mir_allowance_percent / 100.0 if reference else None,
             "within_10_percent_of_c2mir": reference["upper_bound"] <= 1.10 if reference else None}
         report["cases"].append(row)
         args.output.parent.mkdir(parents=True, exist_ok=True)

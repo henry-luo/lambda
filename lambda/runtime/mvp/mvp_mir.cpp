@@ -191,6 +191,8 @@ static MirValue statements(MvpCompiler* c, AstNode* node, bool discard = false);
 static void array_iteration(MvpCompiler* c, AstNode* body);
 static MIR_label_t dense_call_loop(MvpCompiler* c, AstLoopControlNode* loop);
 static MIR_label_t dense_array_loop(MvpCompiler* c, AstNode* loop);
+static MIR_label_t strided_array_loop(MvpCompiler* c, AstLoopControlNode* loop);
+static bool string_comparison_inputs(MvpCompiler* c, AstBinaryNode* node, MirValue* left, MirValue* right);
 static void narrow_dense_locals(LambdaMvpModule* m, AstNodeId root);
 static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args,
     bool discard = false, MvpBinding* destination = NULL);
@@ -1078,10 +1080,25 @@ static MIR_reg_t zero_residue(MvpCompiler* c, AstBinaryNode* n) {
     return operation(c, MIR_AND, reg(c, a.reg), imm(c, divisor - 1));
 }
 
+static unsigned integer_comparison_guard(Operator op, bool left_finite, bool right_finite) {
+    // NaN is the least signed lane. The other operand's ordered predicate
+    // already rejects it; equality needs only one witness (S4.2.1).
+    if (op == OPERATOR_EQ || op == OPERATOR_NE) return left_finite || right_finite ? 0 : 1;
+    if (op == OPERATOR_LT || op == OPERATOR_LE) return left_finite ? 0 : 1;
+    if (op == OPERATOR_GT || op == OPERATOR_GE) return right_finite ? 0 : 2;
+    return 3;
+}
+
 static void boolean_branch(MvpCompiler* c, AstNode* source, MIR_label_t target, bool when_true) {
     AstNode* node = ast_unwrap_primary_to_leaf(source);
     if (node && node->node_type == AST_NODE_BINARY && mvp_value_contract(c->module, node)->type_id == LMD_TYPE_BOOL) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
+        MirValue character_left, character_right;
+        if (string_comparison_inputs(c, binary, &character_left, &character_right)) {
+            branch(c, (binary->op == OPERATOR_EQ) == when_true ? MIR_BEQ : MIR_BNE,
+                target, reg(c, character_left.reg), reg(c, character_right.reg));
+            return;
+        }
         if (MIR_reg_t masked = zero_residue(c, binary)) {
             branch(c, (binary->op == OPERATOR_EQ) == when_true ? MIR_BEQ : MIR_BNE,
                 target, reg(c, masked), imm(c, 0));
@@ -1109,8 +1126,7 @@ static void boolean_branch(MvpCompiler* c, AstNode* source, MIR_label_t target, 
         bool booleans = left == LMD_TYPE_BOOL && right == LMD_TYPE_BOOL;
         bool finite_left = ints && mvp_int_range(c->module, binary->left).finite;
         bool finite_right = ints && mvp_int_range(c->module, binary->right).finite;
-        if (booleans || (ints && (equality ? finite_left || finite_right : finite_left && finite_right)) ||
-                (floats && (when_true || equality))) {
+        if (booleans || ints || (floats && (when_true || equality))) {
             MIR_insn_code_t op = MIR_MOV;
             switch (binary->op) {
             case OPERATOR_EQ: op = floats ? MIR_DBEQ : MIR_BEQ; break;
@@ -1125,9 +1141,19 @@ static void boolean_branch(MvpCompiler* c, AstNode* source, MIR_label_t target, 
                 MirValue a = expression(c, binary->left), b = expression(c, binary->right);
                 ValueRep rep = floats ? VALUE_REP_F64 : ints ? VALUE_REP_INT_LANE : VALUE_REP_I64;
                 a = convert(c, a, rep); b = convert(c, b, rep);
+                unsigned guard = ints ? integer_comparison_guard(binary->op, finite_left, finite_right) : 0;
+                MIR_label_t unordered = NULL;
+                if (guard) {
+                    // branch demand consumes unorderedness directly; no boolean
+                    // mask needs to survive into the ordered comparison (S6.1.2v2).
+                    bool nan_result = binary->op == OPERATOR_NE;
+                    MIR_label_t nan_target = when_true == nan_result ? target : (unordered = label(c));
+                    branch(c, MIR_BEQ, nan_target, reg(c, guard == 1 ? a.reg : b.reg), imm(c, INT_LANE_NAN));
+                }
                 // ordered float predicates cannot be complemented when NaN is possible (S4.2.1).
                 if (!when_true) op = floats ? (op == MIR_DBEQ ? MIR_DBNE : MIR_DBEQ) : MIR_reverse_branch_code(op);
                 branch(c, op, target, reg(c, a.reg), reg(c, b.reg));
+                if (unordered) mark(c, unordered);
                 return;
             }
         }
@@ -1301,16 +1327,10 @@ static MirValue numeric_binary(MvpCompiler* c, AstBinaryNode* n, MirValue a, Mir
     if (ints && plan.is_comparison) {
         bool left_finite = finite_inputs || mvp_int_range(c->module, n->left).finite;
         bool right_finite = finite_inputs || mvp_int_range(c->module, n->right).finite;
-        bool equality = n->op == OPERATOR_EQ || n->op == OPERATOR_NE;
-        // a finite operand already distinguishes every poison encoding for equality (S4.2.1).
-        if ((!left_finite || !right_finite) && !(equality && (left_finite || right_finite))) {
+        unsigned guard = integer_comparison_guard(n->op, left_finite, right_finite);
+        if (guard) {
             // predicate masks avoid control-flow joins in every native integer comparison.
-            MIR_reg_t ordered = 0;
-            if (!left_finite) ordered = operation(c, MIR_NE, reg(c, a.reg), imm(c, INT_LANE_NAN));
-            if (!right_finite) {
-                MIR_reg_t right = operation(c, MIR_NE, reg(c, b.reg), imm(c, INT_LANE_NAN));
-                ordered = ordered ? operation(c, MIR_AND, reg(c, ordered), reg(c, right)) : right;
-            }
+            MIR_reg_t ordered = operation(c, MIR_NE, reg(c, guard == 1 ? a.reg : b.reg), imm(c, INT_LANE_NAN));
             if (n->op == OPERATOR_NE) {
                 MIR_reg_t unordered = operation(c, MIR_EQ, reg(c, ordered), imm(c, 0));
                 r = operation(c, MIR_OR, reg(c, r), reg(c, unordered));
@@ -1371,6 +1391,15 @@ static MIR_reg_t scaled_integer(MvpCompiler* c, AstNode* node) {
 
 static MirValue string_character(MvpCompiler* c, AstFieldNode* n, bool ordinal) {
     MvpBinding* binding = mvp_local_binding(c->module, n->object);
+    if (binding && binding->dense_items) {
+        // the closed loop guards ASCII, both index endpoints and owner stability.
+        MIR_reg_t byte = 0;
+        for (MvpStringByte* p = c->string_bytes; p; p = p->next)
+            if (p->owner == binding && mvp_same_integer_expression(c->module, p->key, n->field)) { byte = p->byte; break; }
+        if (!byte) byte = em_ascii_string_byte_at_pointer(&c->em, binding->dense_items, expression(c, n->field).reg);
+        MIR_reg_t word = ordinal ? byte : operation(c, MIR_OR, reg(c, byte), imm(c, UINT64_C(1) << 32));
+        return value(c, word, LMD_TYPE_INT, ordinal ? VALUE_REP_INT_LANE : VALUE_REP_I64, &TYPE_INT, n);
+    }
     MirValue owner = binding && mvp_pure_key(n->field) ? read_binding(c, binding, n->object, false) : expression(c, n->object);
     MirValue key = expression(c, n->field);
     owner = convert(c, owner, VALUE_REP_RAW_GC_POINTER);
@@ -1390,16 +1419,25 @@ static MirValue string_character(MvpCompiler* c, AstFieldNode* n, bool ordinal) 
         ordinal ? c->module->nullable_int : &TYPE_INT, n);
 }
 
+static bool string_comparison_inputs(MvpCompiler* c, AstBinaryNode* n, MirValue* left, MirValue* right) {
+    if (n->op != OPERATOR_EQ && n->op != OPERATOR_NE) return false;
+    AstFieldNode* a = mvp_string_index(c->module, n->left);
+    AstFieldNode* b = mvp_string_index(c->module, n->right);
+    if (!a || !b) return false;
+    MvpBinding* x = mvp_local_binding(c->module, a->object);
+    MvpBinding* y = mvp_local_binding(c->module, b->object);
+    // present ASCII bytes need no presence word; checked siblings keep NUL
+    // distinct from absence and compare complete Unicode code points (S7.1.1v3).
+    bool bytes = x && y && x->dense_items && y->dense_items;
+    *left = string_character(c, a, bytes); *right = string_character(c, b, bytes);
+    return true;
+}
+
 static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
-    if (n->op == OPERATOR_EQ || n->op == OPERATOR_NE) {
-        AstFieldNode* left = mvp_string_index(c->module, n->left);
-        AstFieldNode* right = mvp_string_index(c->module, n->right);
-        if (left && right) {
-            MirValue a = string_character(c, left, false), b = string_character(c, right, false);
-            return value(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE, reg(c, a.reg), reg(c, b.reg)),
-                LMD_TYPE_BOOL, VALUE_REP_I64, &TYPE_BOOL, n);
-        }
-    }
+    MirValue character_left, character_right;
+    if (string_comparison_inputs(c, n, &character_left, &character_right))
+        return value(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE,
+            reg(c, character_left.reg), reg(c, character_right.reg)), LMD_TYPE_BOOL, VALUE_REP_I64, &TYPE_BOOL, n);
     if (n->op == OPERATOR_JOIN) {
         MirValue joined = string_concat(c, n);
         if (joined.reg) return joined;
@@ -2071,6 +2109,7 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard) {
         if (!fast_done) fast_done = indexed_loop(c, n);
         if (!fast_done) fast_done = numeric_loop(c, n);
         if (!fast_done) fast_done = dense_call_loop(c, n);
+        if (!fast_done) fast_done = strided_array_loop(c, n);
         if (!fast_done) fast_done = dense_array_loop(c, n);
         MvpBinding* saved_array = c->loop_array; MIR_reg_t saved_items = c->loop_array_items;
         c->loop_array = loop_store_array(c, n);
@@ -2749,7 +2788,7 @@ static void narrow_dense_locals(LambdaMvpModule* m, AstNodeId root) {
     }
 }
 
-static bool array_iteration_plan(MvpCompiler* c, AstNode* body, MvpIterationPlan* plan) {
+static bool array_iteration_plan(MvpCompiler* c, AstNode* body, MvpIterationPlan* plan, bool strings = false) {
     // a single-store loop already hoists its payload and checks each store; a second version adds no shared checks.
     if (c->dense_arrays || c->loop_array || !body || body->node_type != AST_NODE_CONTENT) return false;
     LambdaMvpModule* m = c->module;
@@ -2764,7 +2803,7 @@ static bool array_iteration_plan(MvpCompiler* c, AstNode* body, MvpIterationPlan
                 n->node_type == AST_NODE_CONTINUE_STAM) return false;
         AstNode* object = NULL; AstNode* key = NULL;
         if (n->node_type == AST_NODE_INDEX_EXPR) {
-            if (fused_character_index(c, n)) continue;
+            if (!strings && fused_character_index(c, n)) continue;
             object = ((AstFieldNode*)n)->object; key = ((AstFieldNode*)n)->field;
         } else if (n->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
             object = ((AstAssignStamNode*)n)->object; key = ((AstAssignStamNode*)n)->key;
@@ -2772,7 +2811,16 @@ static bool array_iteration_plan(MvpCompiler* c, AstNode* body, MvpIterationPlan
         if (!object) continue;
         plan->access_count++;
         MvpBinding* b = mvp_local_binding(m, object);
-        if (!b || !mvp_array_element(b->contract) || !b->array_native) return false;
+        bool character = strings && b && b->contract->type_id == LMD_TYPE_STRING && fused_character_index(c, n);
+        if (!character && (!b || !mvp_array_element(b->contract) || !b->array_native)) return false;
+        if (character) {
+            if (ast_index_node_descends(index, ast_index_find(index, b->entry->node), plan->root)) return false;
+            uint32_t count = 0;
+            const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, b->entry), &count);
+            for (uint32_t u = 0; u < count; u++)
+                if (index->nodes[uses[u]]->node_type == AST_NODE_ASSIGN_STAM &&
+                        ast_index_node_descends(index, uses[u], plan->root)) return false;
+        }
         unsigned a = 0;
         while (a < plan->array_count && plan->arrays[a] != b) a++;
         if (a == plan->array_count) {
@@ -2795,6 +2843,139 @@ static bool array_iteration_plan(MvpCompiler* c, AstNode* body, MvpIterationPlan
     narrow_dense_locals(m, plan->root);
     MvpIndexLoopPlan unused = {};
     return dense_region_eligible(c, plan->root, &unused, true);
+}
+
+static bool loop_key_slope(MvpCompiler* c, AstNode* source, MvpIterationPlan* plan,
+        MvpBinding* counter, int* slope, int depth = 0) {
+    AstNode* n = ast_unwrap_primary_to_leaf(source);
+    if (!n || depth > 16 || mvp_value_contract(c->module, n)->type_id != LMD_TYPE_INT) return false;
+    if (n->node_type == AST_NODE_IDENT) {
+        MvpBinding* b = mvp_local_binding(c->module, n);
+        if (!b) return false;
+        if (b == counter) { *slope = 1; return true; }
+        AstIndex* index = &c->module->tp->ast_index;
+        uint32_t count = 0;
+        const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, b->entry), &count);
+        for (uint32_t i = 0; i < count; i++)
+            if (index->nodes[uses[i]]->node_type == AST_NODE_ASSIGN_STAM &&
+                    ast_index_node_descends(index, uses[i], plan->root)) return false;
+        if (!ast_index_node_descends(index, ast_index_find(index, b->entry->node), plan->root)) {
+            *slope = 0; return true;
+        }
+        // iteration_key already proved these declarations unconditional and pure.
+        for (unsigned i = 0; i < plan->hoisted_count; i++) if (plan->hoisted[i] == b)
+            return loop_key_slope(c, ((AstDeclaratorNode*)b->entry->node)->init, plan, counter, slope, depth + 1);
+        return false;
+    }
+    if (n->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* b = (AstBinaryNode*)n;
+        int left, right;
+        if ((b->op != OPERATOR_ADD && b->op != OPERATOR_SUB) ||
+                !loop_key_slope(c, b->left, plan, counter, &left, depth + 1) ||
+                !loop_key_slope(c, b->right, plan, counter, &right, depth + 1)) return false;
+        *slope = b->op == OPERATOR_ADD ? left + right : left - right;
+        return true;
+    }
+    int64_t literal;
+    if (!mir_decimal_int_literal(c->module->tp->source, n, &literal)) return false;
+    *slope = 0; return true;
+}
+
+static MIR_label_t strided_array_loop(MvpCompiler* c, AstLoopControlNode* loop) {
+    if (c->dense_arrays || c->dense_callee || c->loop_array || loop->form != LOOP_FORM_WHILE) return NULL;
+    LambdaMvpModule* m = c->module;
+    AstNode* condition = ast_unwrap_primary_to_leaf(loop->cond);
+    if (!condition || condition->node_type != AST_NODE_BINARY) return NULL;
+    AstBinaryNode* test = (AstBinaryNode*)condition;
+    if (test->op != OPERATOR_LT && test->op != OPERATOR_LE) return NULL;
+    MvpBinding* counter = mvp_local_binding(m, test->left);
+    if (!counter || !counter->range.finite || !mvp_int_range(m, test->right).finite ||
+            !loop->body || loop->body->node_type != AST_NODE_CONTENT) return NULL;
+    AstNode* last = ((AstListNode*)loop->body)->item;
+    while (last && last->next) last = last->next;
+    if (!last || last->node_type != AST_NODE_ASSIGN_STAM) return NULL;
+    AstAssignStamNode* update = (AstAssignStamNode*)last;
+    if (update->target_entry != counter->entry || !mvp_int_range(m, update->value).finite) return NULL;
+    AstIndex* index = &m->tp->ast_index;
+    AstNodeId root = ast_index_find(index, loop->body);
+    for (AstNodeId i = root; i < ast_index_subtree_end(index, root); i++) {
+        AstNode* n = index->nodes[i];
+        if (n->node_type == AST_NODE_ASSIGN_STAM && n != last &&
+                ((AstAssignStamNode*)n)->target_entry == counter->entry) return NULL;
+        if (n->node_type == AST_NODE_CALL_EXPR) {
+            AstFuncNode* fn = ast_direct_call_function((AstCallNode*)n);
+            for (AstNamedNode* p = fn ? fn->param : NULL; p; p = (AstNamedNode*)p->next)
+                if (lambda_type_param(p->type)->is_var_param) return NULL;
+        }
+    }
+    MvpBinding* saved = (MvpBinding*)mem_alloc(m->binding_count * sizeof(MvpBinding), MEM_CAT_TEMP);
+    if (!saved) { mvp_reject(m, loop, "strided loop binding allocation failed"); return NULL; }
+    memcpy(saved, m->bindings, m->binding_count * sizeof(MvpBinding));
+    MvpIterationPlan plan = {};
+    int slope = 0;
+    bool eligible = array_iteration_plan(c, loop->body, &plan, true) && plan.access_count >= 2 &&
+        iteration_key(c, test->right, &plan) && loop_key_slope(c, test->right, &plan, counter, &slope) && slope == 0 &&
+        iteration_key(c, update->value, &plan) && loop_key_slope(c, update->value, &plan, counter, &slope) && slope == 1;
+    for (unsigned k = 0; eligible && k < plan.key_count; k++)
+        eligible = loop_key_slope(c, plan.keys[k], &plan, counter, &slope);
+    MIR_label_t checked = NULL, done = NULL;
+    if (eligible) {
+        checked = label(c); done = label(c);
+        MIR_reg_t first = counter->reg, limit = expression(c, test->right).reg;
+        branch(c, test->op == OPERATOR_LT ? MIR_BGE : MIR_BGT, done, reg(c, first), reg(c, limit));
+        MvpIntRange range = counter->range;
+        counter->reg = constant(c, 0); counter->range = {true, 0, 0};
+        MIR_reg_t step = expression(c, update->value).reg;
+        counter->reg = first; counter->range = range;
+        em_branch_int53_outside(&c->em, step, checked);
+        branch(c, MIR_BLE, checked, reg(c, step), imm(c, 0));
+        MIR_reg_t end = test->op == OPERATOR_LT ? operation(c, MIR_SUB, reg(c, limit), imm(c, 1)) : limit;
+        MIR_reg_t distance = operation(c, MIR_SUB, reg(c, end), reg(c, first));
+        MIR_reg_t remainder = operation(c, MIR_MOD, reg(c, distance), reg(c, step));
+        MIR_reg_t final = operation(c, MIR_SUB, reg(c, end), reg(c, remainder));
+        for (unsigned a = 0; a < plan.array_count; a++) {
+            MvpBinding* b = plan.arrays[a];
+            if (b->contract->type_id == LMD_TYPE_STRING) b->array_length = em_guard_ascii_string(&c->em, b->reg, checked);
+            else branch(c, MIR_BEQ, checked, reg(c, b->array_written ? b->array_writable : b->array_native), imm(c, 0));
+        }
+        // affine keys stay between their first and final visited values, even
+        // when the stride does not divide the limit (S7.1.1v3). Check both before effects.
+        MIR_reg_t endpoints[] = {first, final};
+        for (unsigned e = 0; e < 2; e++) {
+            counter->reg = endpoints[e];
+            for (unsigned h = 0; h < plan.hoisted_count; h++) {
+                MvpBinding* b = plan.hoisted[h];
+                move(c, b->reg, reg(c, expression(c, ((AstDeclaratorNode*)b->entry->node)->init).reg));
+            }
+            for (unsigned k = 0; k < plan.key_count; k++) {
+                MIR_reg_t key = expression(c, plan.keys[k]).reg;
+                branch(c, MIR_UBGE, checked, reg(c, key), reg(c, plan.key_arrays[k]->array_length));
+            }
+        }
+        counter->reg = first;
+        for (unsigned a = 0; a < plan.array_count; a++) {
+            MvpBinding* b = plan.arrays[a];
+            b->dense_items = b->contract->type_id == LMD_TYPE_STRING ? b->reg :
+                em_load_at(&c->em, b->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "stride_items");
+        }
+        MvpStringByte bytes[64]; unsigned byte_count = 0;
+        MvpStringByte* saved_bytes = c->string_bytes;
+        for (unsigned k = 0; k < plan.key_count; k++) {
+            MvpBinding* b = plan.key_arrays[k];
+            if (b->contract->type_id != LMD_TYPE_STRING ||
+                    !loop_key_slope(c, plan.keys[k], &plan, counter, &slope) || slope) continue;
+            // immutable owners and invariant keys permit one byte load for all iterations.
+            MIR_reg_t byte = em_ascii_string_byte_at_pointer(&c->em, b->reg, expression(c, plan.keys[k]).reg);
+            bytes[byte_count] = {c->string_bytes, b, plan.keys[k], byte};
+            c->string_bytes = &bytes[byte_count++];
+        }
+        emit_closed_region(c, loop, true);
+        c->string_bytes = saved_bytes;
+        jump(c, done);
+    }
+    memcpy(m->bindings, saved, m->binding_count * sizeof(MvpBinding)); mem_free(saved);
+    if (checked) mark(c, checked);
+    return done;
 }
 
 static void array_iteration(MvpCompiler* c, AstNode* body) {

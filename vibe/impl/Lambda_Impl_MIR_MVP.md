@@ -2106,3 +2106,188 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
   --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
   --output temp/lambda_mir_mvp/recheck_sumfp.json
 ```
+
+## Guarded strides, character reads and integer ranges — 2026-11-03
+
+### Implementation
+
+A closed ascending loop can now guard the first and final **visited** index of
+an affine access once, including a stride that does not divide the loop limit.
+The planner requires a finite counter and update, one unconditional terminal
+increment, stable key inputs, and a closed body. The generated entry checks a
+positive finite step, native writable/readable owners and both index endpoints.
+Guard misses enter the original checked loop before any source effects. This
+preserves short arrays, negative indices, snapshots and mutation errors
+(**S7.1.1v3**, **S9.1.2**, **D4.4.4v4**). The existing iteration planner and closed
+region emitter provide the shared eligibility and lowering; no workload names
+or benchmark constants participate in the optimization.
+
+Fused character comparisons can join this loop proof. ASCII and bounds checks
+run at entry, immutable invariant character reads load once, and comparisons of
+two proven present characters use their bytes directly. The checked sibling
+retains Unicode code-point and absence behavior, including NUL versus absence
+(**S7.1.1v3**, **S6.1.2v2**). The ASCII owner guard was extracted from the existing
+shared emitter, preserving Full MIR's instruction sequence.
+
+Integer comparisons now use the signed ordering of the existing NaN sentinel
+to retain only the necessary unordered check. A finite operand can eliminate
+that check for the appropriate comparison direction; equality needs one witness
+when both inputs are unknown. Branch demand emits that check and the ordered
+branch directly; value demand retains its boolean result. NaN, infinity and
+nullable behavior remain under **S4.2.1–S4.2.3**, **S6.1.2v2**.
+
+Range analysis can multiply finite enclosing loop trip bounds for an additive
+recurrence. It rejects counter rewrites, skipped increments, mutable borrows and
+other noncontracting writes to the accumulator. A subtraction at the start of a
+while body can contract a nonnegative interval when the unchanged loop predicate
+proves the difference nonnegative. These proofs remove checks only when the
+entire interval remains inside int53; saturation and poison retain the original
+checked arithmetic (**S4.1.1–S4.1.2**).
+
+Runtime types, container layouts, GC ownership and the default MIR optimization
+level remain unchanged. A separate 15-sample O2/O3 screen did not establish a
+broad advantage from changing optimizer settings.
+
+### Measurement contract
+
+The user's 2026-11-03 target is a **1.20×** upper ratio bound for **each of the
+28 rows**. The runner defaults to `--c2mir-allowance-percent 20`, records the
+allowance and its per-row gate, and retains the 10% and Full MIR diagnostics.
+Previously committed reports are unchanged. Timers remain self-reported
+execution windows with matched C-port boundaries, excluding compilation and
+process startup. This uses independent C ports through the standalone C2MIR
+reference tool; the removed Lambda C-text backend is not restored or used.
+
+The candidate is `temp/lambda_mir_mvp/tune28h/step10-release.exe`, SHA-256
+`c8ac3031b927e0f01973779f89acc1aa3d213549e1c6ef41ccf10300be0ff026`.
+The interleaved prior MVP is the previous pass's pinned release, SHA-256
+`51457671ba22db43cf304f91ac5aeaa15115feed616fd86a39e71ed4b1042dd9`.
+The 25-sample screens are diagnostic; qualification uses the complete campaign
+below, with 100 samples, two warmups and the existing one-sided 95% paired
+bootstrap (10,000 resamples, seed 1101).
+
+### Complete 28-row campaign
+
+[Retained 100-sample report](../../test/benchmark/lambda_mvp/tune28_guarded_ranges_2026-11-03.json).
+Medians are milliseconds; U95 is the one-sided 95% upper ratio bound.
+Each row keeps its original workload and timer boundary.
+
+| Benchmark | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR | ≤20% |
+|---|---:|---:|---:|---:|---:|:---:|
+| r7rs/fib | 0.5850 | 1.1620 | 1.0305 | 0.516 | 0.582 | yes |
+| r7rs/sum | 0.0980 | 0.2660 | 0.2659 | 0.375 | 0.378 | yes |
+| r7rs/sumfp | 0.0000 | 0.0725 | 0.0710 | unresolved | unresolved | unresolved |
+| awfy/mandelbrot | 22.2155 | 27.6485 | 21.9861 | 0.817 | 1.029 | yes |
+| larceny/array1 | 0.1050 | 1.3485 | 0.2820 | 0.079 | 0.376 | yes |
+| awfy/sieve | 0.0160 | 0.0240 | 0.0120 | 0.708 | 1.421 | no |
+| beng/spectralnorm | 0.3155 | 1.1725 | 0.3450 | 0.276 | 0.922 | yes |
+| awfy/nbody | 1.4285 | 2.5990 | 1.4525 | 0.572 | 1.026 | yes |
+| r7rs/tak | 0.0720 | 0.1300 | 0.1169 | 0.566 | 0.638 | yes |
+| r7rs/ack | 5.7015 | 10.6300 | 12.4686 | 0.543 | 0.463 | yes |
+| larceny/quicksort | 0.2705 | 0.5900 | 0.2190 | 0.481 | 1.303 | no |
+| kostya/matmul | 4.6230 | 19.7910 | 6.0305 | 0.238 | 0.778 | yes |
+| kostya/collatz | 173.2065 | 300.7425 | 223.6250 | 0.587 | 0.790 | yes |
+| r7rs/fibfp | 0.5515 | 0.6475 | 1.0876 | 0.874 | 0.522 | yes |
+| r7rs/fft | 0.0350 | 0.0720 | 0.0190 | 0.500 | 1.915 | no |
+| r7rs/nqueens | 0.5260 | 0.5665 | 0.3401 | 0.940 | 1.561 | no |
+| awfy/bounce | 0.0470 | 0.0540 | 0.0200 | 0.889 | 2.398 | no |
+| awfy/queens | 0.0220 | 0.0590 | 0.0159 | 0.386 | 1.453 | no |
+| beng/fannkuch | 0.2135 | 0.2620 | 0.1460 | 0.826 | 1.479 | no |
+| kostya/primes | 0.9740 | 2.2455 | 1.5972 | 0.448 | 0.629 | yes |
+| kostya/levenshtein | 0.8795 | 1.8650 | 0.8075 | 0.479 | 1.107 | yes |
+| kostya/brainfuck | 54.2765 | 78.8005 | 27.1310 | 0.697 | 2.018 | no |
+| larceny/paraffins | 0.0880 | 0.1290 | 0.0391 | 0.701 | 2.298 | no |
+| larceny/pnpoly | 1.7975 | 2.3865 | 1.8466 | 0.775 | 0.999 | yes |
+| larceny/ray | 0.1240 | 0.2080 | 0.1450 | 0.611 | 0.881 | yes |
+| beng/mandelbrot | 11.8830 | 13.2180 | 11.8511 | 0.905 | 1.008 | yes |
+| kostya/json_gen | 1.4215 | 4.7640 | 1.3816 | 0.304 | 1.051 | yes |
+| larceny/divrec | 0.9385 | 1.2235 | 5.1229 | 0.777 | 0.186 | yes |
+
+The original windows qualify **27/28 against Full MIR and 18/28 within 20%
+of C2MIR and both gates**. The retained 10% diagnostic qualifies **17/28**.
+Sumfp remains unresolved here because the original samples include zero.
+
+The interleaved before/after comparison establishes these improvements:
+
+| Benchmark | Faster than prior MVP | Before/after 95% interval |
+|---|---:|---:|
+| r7rs/tak | 13.3% | [0.857, 0.890] |
+| r7rs/fft | 18.6% | [0.795, 0.837] |
+| awfy/bounce | 10.5% | [0.855, 0.923] |
+| kostya/levenshtein | 40.9% | [0.583, 0.601] |
+
+Levenshtein newly qualifies at **1.089× C2MIR**, with **U95 1.107×**.
+It meets the requested 20% allowance, while narrowly missing the retained 10%
+diagnostic. Quicksort's before/after interval **[0.931, 1.036]** includes parity;
+its 2.2% lower median is not an established gain. Brainfuck's interval
+**[0.989, 1.009]** likewise includes parity. No resolved row's before/after
+95% interval lies wholly above 1.0 in this campaign.
+
+### Sumfp batch and remaining work
+
+[Separate matched Sumfp batch](../../test/benchmark/lambda_mvp/tune28_guarded_ranges_sumfp_2026-11-03.json)
+repeats each unchanged kernel 10,000 times, consuming every result inside the
+matched timer boundaries. It retains 100 samples and two warmups. This resolves
+the original row's clock limit and confirms its existing finite-reduction
+optimization; both MVP versions have the same median.
+
+| Batch | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR |
+|---|---:|---:|---:|---:|---:|---:|
+| Sumfp ×10,000 | 0.0110 | 0.0110 | 739.2070 | 739.9825 | 0.00001513 | 0.00001507 |
+
+Combining the 27 resolved original windows with this explicitly separate batch
+qualifies **28/28 against Full MIR and 19/28 within 20% of C2MIR and both gates**.
+Re-evaluating the prior committed campaign at the same 20% allowance gives
+**18/28**. The retained 10% diagnostic remains **18/28** in both campaigns.
+The original zero-duration samples remain unqualified.
+
+The all-28 C2MIR target is **not met**. Nine misses remain: Sieve, Quicksort,
+FFT, NQueens, Bounce, Queens, Fannkuch, Brainfuck and Paraffins. FFT still has
+non-affine bit-reversal accesses outside the strided proof. Unknown array
+element ranges still require checked arithmetic in several integer kernels;
+scalar loop bounds do not prove those stored values finite (**S4.1.1–S4.1.2**).
+Allocation-heavy search also retains the normal runtime ownership costs
+(**S9.1.2**, **D4.3.1**, **D4.4.4v4**). Broader value-range and ownership proofs
+remain necessary before removing those checks or allocations.
+
+### Validation
+
+All **40 focused MVP groups** pass on the measured release, including the 28
+benchmark goldens, forced and seeded GC with freed-memory poisoning, and
+emission checks. Expanded cases cover nondividing strides, empty loops,
+changing limits, short arrays, negative indices, snapshots, invariant and
+varying character indices, Unicode, NUL versus absence, NaN on either side of
+every comparison, nested counts, contracting subtraction and overflow after
+counter resets.
+
+The final `make test-lambda-baseline` records **8,518/8,520**, including
+**279/279 MIR emission**, **350/350 forced-GC**, **849/849 JS MVP** and
+**47/47 item representation** tests. The two failures are:
+
+- `docx_docx_business_plans`: the existing 60-second timeout. All three
+  separate-process isolated reruns pass in **24.119, 24.216 and 24.114 seconds**.
+- `proc_mir_mvp_roots`: the known AUTO-tier cold-float snapshot mismatch,
+  final `false` instead of `true`. The prior and final release both reproduce
+  identical output. Its MVP-mode focused test passes.
+
+These reruns do not turn the aggregate result into a clean pass. No expected
+output, test selection or timeout was relaxed. Logs are under
+`temp/lambda_mir_mvp/tune28h/`: `focused10.log`, `baseline10.log`,
+`baseline10-details.log`, `docx-isolated10.log`, `start-release.exe.roots.txt`
+and `step10-release.exe.roots.txt`. The root `lambda.exe` remains the baseline's
+debug build; all timing explicitly selects the pinned release.
+
+```sh
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28h/start-release.exe \
+  --runs 100 --warmups 2 --c2mir-allowance-percent 20 \
+  --output temp/lambda_mir_mvp/recheck28.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28h/start-release.exe \
+  --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
+  --c2mir-allowance-percent 20 --output temp/lambda_mir_mvp/recheck_sumfp.json
+```

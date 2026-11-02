@@ -91,6 +91,13 @@ struct MvpFloatConstant {
     MIR_reg_t reg;
 };
 
+struct MvpStringByte {
+    MvpStringByte* next;
+    MvpBinding* owner;
+    AstNode* key;
+    MIR_reg_t byte;
+};
+
 struct MvpCompiler {
     LambdaMvpModule* module;
     MvpFunction* function;
@@ -100,6 +107,7 @@ struct MvpCompiler {
     MvpInline* inlining;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
+    MvpStringByte* string_bytes;
     MIR_insn_t constant_cursor;
     MIR_label_t tail_entry;
     MIR_reg_t argument_span;
