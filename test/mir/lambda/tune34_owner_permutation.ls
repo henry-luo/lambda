@@ -29,7 +29,7 @@ pn typed_cycle() {
     var b: int[] = fill(2, 2)^
     var saved = a
     a = b
-    b = saved^
+    b = saved
     a[0] = 3
     return [a[0], b[0]]
 }

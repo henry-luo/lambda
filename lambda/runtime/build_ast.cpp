@@ -2150,6 +2150,27 @@ static bool empty_array_contract_admits(Type* target) {
         info.array_contract == target && !info.counted_axes;
 }
 
+static bool propagated_fill_contract_admits(AstNode* value, Type* target) {
+    if (!value || value->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)value;
+    if (!call->propagate || call->pipe_inject) return false;
+    AstNode* callee = boundary_unwrap_primary(call->function);
+    SysFuncInfo* builtin = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    AstNode* filler = call->argument ? call->argument->next : NULL;
+    if (!builtin || builtin->fn != SYSFUNC_FILL || !filler || filler->next ||
+            !ast_is_numeric_literal_syntax(filler)) return false;
+    target = unwrap_simple_type_type(target);
+    LambdaArrayContractInfo info;
+    // S7.6.3v3 removes fill's count failure; a numeric literal fixes every
+    // successful element. Counted shapes and nullable reads still validate.
+    // This proves membership only: runtime admission still reifies storage.
+    return lambda_array_contract_info(target, &info) &&
+        info.array_contract == target && info.rank == 1 && !info.counted_axes &&
+        static_boundary_relation(filler->type, info.immediate_element) ==
+            STATIC_BOUNDARY_PROVEN;
+}
+
 StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
         Type* proof_type) {
     AstNode* value = boundary_unwrap_primary(source);
@@ -2157,6 +2178,7 @@ StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
             !((AstListNode*)value)->item && empty_array_contract_admits(target)) {
         return STATIC_BOUNDARY_PROVEN;
     }
+    if (propagated_fill_contract_admits(value, target)) return STATIC_BOUNDARY_PROVEN;
     return static_boundary_relation(proof_type ? proof_type : source ? source->type : NULL,
         target);
 }

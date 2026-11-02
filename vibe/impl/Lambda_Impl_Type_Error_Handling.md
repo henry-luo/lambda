@@ -1324,3 +1324,29 @@ assertions are unchanged.
 Qualification: **274/280** MIR emission checks, **160/160** focused tier/GC
 executions, **351/351** full MIR GC cases, and **247/247** diagnostic/binder
 checks. Evidence: `temp/error-handling/m3-broad-container-outcome-proof-{mir.json,focused.log,gc.json,diagnostics.json}`.
+
+### Propagated fill membership and boundary ordering (2026-11-03)
+
+S7.6.3v3/S11.4.6v3: the shared AST admission classifier now proves an
+uncounted rank-one array's element membership after a direct propagated
+`fill(count, numeric_literal)`. It reuses the existing literal-syntax and
+element-admission classifiers. This is a membership proof, not a storage
+certificate; runtime admission still reifies the carrier. Counted contracts,
+arbitrary typed reads and other dynamic fillers keep their deferred checks.
+The typed owner-cycle fixture can consequently retain `b = saved` without an
+unnecessary propagation, and its existing no-share-mark assertion passes.
+
+The new `admission_fill_outcomes` regression exposed a separate JIT ordering
+bug: fused counted-fill construction applied destination admission inside
+the propagated producer. A length mismatch therefore exited the activation
+instead of being retained at the binding. The fusion gate now preserves the
+producer/admission sequence when the counted destination can fail after fill
+success (S7.7.2v2/S7.7.4v2). Both declaration and reassignment continue after
+the length mismatch; invalid counts still propagate. Nullable indexed fillers
+also retain their destination validation outcome and reach the following code.
+
+Qualification: **168/168** focused tier/GC executions, **275/280** unchanged
+MIR emission checks, **351/351** full MIR GC cases and **247/247** diagnostics.
+Native optimization checks remain **49/55**, with the same six open failures;
+no profile expectation, golden or ratchet budget was relaxed. Evidence:
+`temp/error-handling/m3-propagated-fill-order-{focused.log,mir.json,gc.json,diagnostics.json,native.json}`.

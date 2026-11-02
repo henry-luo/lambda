@@ -1060,12 +1060,17 @@ perform their required conversion. Whether an error union should apply T's
 normal admission is pending the ruling listed above (S7.4.2v3/S11.4.5). Native return selection
 therefore requires the actual normal carrier across all returns and branches;
 a success-type name alone is insufficient. The qualified MIR emission count
-is 274/280; remaining checks are recorded without relaxing expectations.
+is 275/280; remaining checks are recorded without relaxing expectations.
 S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
 float literal members and dynamic record fields: optimized admission retains
 the error at the receiving binding and continues. The constructor shares the
 call-admission join without changing field evaluation or procedural store
 containment. The expanded tier/GC matrix and full MIR GC corpus pass.
+S7.6.3v3/S7.7.2v2 counted fill qualification keeps producer propagation before
+destination validation: `let a: int[2] = fill(n, 1)^` retains a length mismatch
+at `a` and continues, while an invalid fill count propagates. Uncounted numeric
+literal fill success has a static membership proof; runtime storage admission
+is still required. The focused tier/GC matrix passes 168/168.
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

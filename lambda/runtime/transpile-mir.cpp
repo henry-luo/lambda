@@ -10548,7 +10548,10 @@ static bool mir_fill_proves_nonempty_numeric_array_contract(MirTranspiler* mt,
             mir_expr_may_be_null(mt, value)) {
         return false;
     }
-    return true;
+    // S7.6.3v3/S7.7.2v2: ^ belongs to fill, before the receiving boundary.
+    // A counted destination can fail after fill succeeds; fusing that check
+    // into the producer would propagate a local validation outcome instead.
+    return !call->propagate || !lambda_type_counts_array_length(contract);
 }
 
 static MIR_reg_t emit_fill_numeric_array_declaration_boundary(MirTranspiler* mt,
