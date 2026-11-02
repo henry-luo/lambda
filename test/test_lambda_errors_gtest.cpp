@@ -2637,7 +2637,7 @@ TEST_F(NegativeScriptTest, ErrorOperatorsRetainReturnAndAcknowledgmentObligation
             "error[E208]: function 'rejected' may return error from call to 'int'");
     }
     ExpectRejectedOnEveryTier("test/lambda/negative/semantic/error_or_unhandled_channel.ls",
-        false, "error[E228]: possible error outcome must be retained");
+        false, "error[E228]: error from 'risky' must be handled");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
@@ -2666,6 +2666,22 @@ TEST_F(NegativeScriptTest, ErrorAdmittingReturnStillChecksNormalAlternatives) {
 TEST_F(NegativeScriptTest, InferredReturnIncludesEarlyPropagatedErrors) {
     ExpectErrorMessage("test/lambda/negative/semantic/implicit_propagation_overwritten.ls",
         "error[E228]: error from 'escaping' must be handled");
+}
+
+TEST_F(NegativeScriptTest, AnyJoinsRetainKnownErrorOutcomes) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_any_join_unhandled.ls",
+        "function 'hidden' may return error from call to 'error'");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_any_join_unhandled.ls",
+        "function 'forward_any' body returns type error");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_any_join_unhandled.ls",
+        "function 'underlying' body returns type error");
+}
+
+TEST_F(NegativeScriptTest, UnknownCallAdmissionMustHaveAReceiver) {
+    ExpectErrorMessage("test/lambda/negative/semantic/unknown_call_outcome_overwritten.ls",
+        "error[E228]: error from 'f' must be handled");
+    ExpectErrorMessage("test/lambda/negative/semantic/unknown_call_outcome_overwritten.ls",
+        "error[E228]: error from 'failed' must be handled");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ReturnErrorExplainsArgumentContract) {

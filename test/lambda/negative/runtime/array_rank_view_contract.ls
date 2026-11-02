@@ -4,4 +4,4 @@
 // leaves -- so `number[]` still rejects a matrix, on every tier.
 fn dyn(v) => v
 let e: number[] = dyn(reshape([1, 2, 3, 4], [2, 2]))
-"bound: " ++ string(e)
+"bound: " ++ string(e^)

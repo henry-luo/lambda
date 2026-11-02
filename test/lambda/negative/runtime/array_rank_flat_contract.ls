@@ -4,4 +4,4 @@
 // decides it, on every tier.
 fn dyn(v) => v
 let e: int[] = dyn(reshape([1, 2, 3, 4], [2, 2]))
-"bound: " ++ string(e)
+"bound: " ++ string(e^)

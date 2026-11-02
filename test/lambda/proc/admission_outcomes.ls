@@ -4,6 +4,7 @@ fn opaque_any(value) any => value
 fn failed() int^ => error("propagated")
 pn inferred_propagation() { failed()^; 7 }
 pn inferred_unary_propagation() { let outcome = failed(); outcome^; 8 }
+pn message_recovery() { failed() ^ { ^.message }; 42 }
 pn inferred_return(value) {
     if (true) { let checked: int = value; return checked }
     return 7
@@ -28,5 +29,5 @@ pn main() {
     [bad is error, good, changed is error, comma_bad is error, comma_good,
      nested, arr is error, small is error, inferred.message, broad.message,
      checked_after_handler is error, after_binding, broad_source is error, returned is error,
-     propagated.message, propagated_value.message]
+     propagated.message, propagated_value.message, message_recovery()]
 }

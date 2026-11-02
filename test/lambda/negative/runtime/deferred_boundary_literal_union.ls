@@ -2,4 +2,4 @@
 // checker only deferred must reach the runtime check. The JIT read every
 // literal as `null` here and bound `5` unchecked.
 let w: int[] | null = 5
-"bound: " ++ string(w)
+"bound: " ++ string(w^)

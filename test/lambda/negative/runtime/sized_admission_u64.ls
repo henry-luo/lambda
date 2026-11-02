@@ -2,4 +2,4 @@
 // wrapped -1 to 2^64 - 1.
 fn dyn(v) => v
 let a: u64 = dyn(-1)
-"bound: " ++ string(a)
+"bound: " ++ string(a^)

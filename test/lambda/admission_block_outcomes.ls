@@ -1,6 +1,11 @@
-// S7.7.2v2/S2.5.3v2: local validation does not manufacture a block result.
+// S7.7.2v2/S2.5.3v3: local validation does not manufacture a block result.
 type Record = { count: int }
 fn opaque(value) => value
+fn admitted_array() int { let values: int[] = [1, 2]; len(values) }
+fn defaulted(value: int?) int {
+    let resolved: int = value or^ { 9 }
+    resolved
+}
 fn capture() => {
     let value: int = opaque("bad")
     let read = () => value is error;
@@ -13,5 +18,8 @@ let declaration_only = { let local: int = opaque("bad") };
 // S7.8.2: collected body outcomes are retained without an outer error union.
 let rows = [for (i in 1 to 2) error("row")];
 let node = <result error("child")>;
+// S10.6.1: concatenation does not retain the left literal's singleton type.
+let text: "ab" = "a" ++ "b"
+let joined_symbol: 'ab' = 'a' ++ 'b';
 [record is error, capture(), recovered, declaration_only, rows[0] is error, rows[1].message,
- node[0] is error, node[0].message]
+ node[0] is error, node[0].message, text, joined_symbol, admitted_array(), defaulted(null), defaulted(3)]

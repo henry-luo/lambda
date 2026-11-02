@@ -382,7 +382,8 @@ struct NameEntry {
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
     InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
-    // S7.7.2v2/S7.7.4v2: failed local admission is a stored outcome.
+    // S7.5.1v6/S7.7.2v2/S7.7.4v2: a stored error remains an outcome fact,
+    // including when deferred admission or an any join hides it in the type.
     bool admission_may_fail;
     bool type_widened;
     bool is_lexical;
@@ -837,17 +838,16 @@ typedef struct AstCallNode : AstNode {
     // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
     // yields that error as its value; set when an argument may be one (its
     // type admits error, or it may carry a defect), so the call is lowered as
-    // a join. It occupies the padding before the guard bits, so the node
-    // keeps its size.
+    // a join. These flags share the padding before the colour guard bits.
     bool rejected_error_flows;
     // S7.7.3: deferred parameter admission adds an error to this call's
     // outcome, independently of the callee's declared return contract.
     bool parameter_admission_may_fail;
-    // S7.6.3: propagation's early outcome survives success-type narrowing.
-    Type* propagated_error_type;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
+    // S7.6.3: propagation's early outcome survives success-type narrowing.
+    Type* propagated_error_type;
 } AstCallNode;
 
 // D8.2.4: call argument shape belongs to the immutable AST definition. Both
