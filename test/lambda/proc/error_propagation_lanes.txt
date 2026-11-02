@@ -1,1 +1,1 @@
-[true, "condition", true, "condition", true, "returned", true, 7, 1, 2]
+[true, "condition", true, "condition", true, "returned", true, 7, 1, 2, 1, true, 2, true, true, 4]

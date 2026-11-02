@@ -3,12 +3,15 @@ type Counter {
     count: int = 0,
     pn increment() {
         count = count + 1
+        return count
     }
     pn add(n: int) {
         count = count + n
+        return count
     }
     pn reset() {
         count = 0
+        return count
     }
 }
 

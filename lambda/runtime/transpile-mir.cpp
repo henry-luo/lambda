@@ -2713,7 +2713,9 @@ static void emit_var_param_home_publication(MirTranspiler* mt,
     }
 }
 
-static void finish_function_epilogue(MirTranspiler* mt) {
+static void emit_method_field_publication(MirTranspiler* mt, AstFuncNode* fn_node);
+
+static void finish_function_epilogue(MirTranspiler* mt, AstFuncNode* method = NULL) {
     // A shape-2 companion cannot survive the function's publication/extent
     // boundary. Tail forwarding is a separate explicit path; until then every
     // producer must have consumed or patched its pending Item (D5.2.1v3,
@@ -2730,6 +2732,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
     // cannot split a hot numeric loop (S4.1, D2.4.1, D5.2-D5.3).
     emit_deferred_null_boundaries(mt);
     emit_label(mt, mt->em.frame.return_label);
+    if (method) emit_method_field_publication(mt, method);
     // Publish each transported `var` param's FINAL value through the
     // caller's home address consumed in the prologue. A zero home (the caller
     // could not transport this argument) skips -- graceful degradation to the
@@ -45599,6 +45602,52 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     strbuf_free(wrapper_name);
 }
 
+// S7.4.6v3/S12.1.2v3: early completion publishes the receiver's final fields.
+static void emit_method_field_publication(MirTranspiler* mt, AstFuncNode* fn_node) {
+    MIR_label_t saved_return = mt->em.frame.return_label;
+    MIR_label_t done = new_label(mt);
+    // A rejected field publication completes this epilogue, never re-enters it.
+    mt->em.frame.return_label = done;
+    if (mt->self_reg) {
+        TypeObject* owner = mt->method_owner;
+        ShapeEntry* field = owner ? owner->shape : NULL;
+        while (field) {
+            if (field->name) {
+                MirVarEntry* var = mir_var_for_binding(mt, field->binding);
+                if (var && ast_body_may_write_entry(fn_node->body, field->binding, true)) {
+                    MIR_label_t absent = var->method_field_present ? new_label(mt) : 0;
+                    MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
+                    if (absent) {
+                        MIR_label_t stored = new_label(mt);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, stored), MIR_new_reg_op(mt->ctx, var->method_field_present)));
+                        // a borrowed update can supply a formerly absent value too.
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                            MIR_new_label_op(mt->ctx, absent), MIR_new_reg_op(mt->ctx, boxed_val),
+                            MIR_new_int_op(mt->ctx, ITEM_NULL)));
+                        emit_label(mt, stored);
+                    }
+                    MIR_reg_t name_ptr = emit_load_string_literal(mt, field->name->str);
+                    MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field->name->length));
+                    MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
+                    // method field locals are snapshots; write them back before returning to preserve mutations.
+                    MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->self_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                    emit_return_if_item_error(mt, write_result);
+                    if (absent) emit_label(mt, absent);
+                }
+            }
+            field = typemap_next_field(owner, field);
+        }
+    }
+    emit_label(mt, done);
+    mt->em.frame.return_label = saved_return;
+}
+
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MirSourceScope source_scope(mt, fn_node);
     const MirRawVariantKey* raw_variant_key =
@@ -46804,44 +46853,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", func);
         emit_call_void_1(mt, "restore_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, saved_vargs));
     }
-    if (is_method && !is_closure && mt->self_reg) {
-        TypeObject* owner = mt->method_owner;
-        ShapeEntry* field = owner ? owner->shape : NULL;
-        while (field) {
-            if (field->name) {
-                MirVarEntry* var = mir_var_for_binding(mt, field->binding);
-                if (var && is_proc_fn && ast_body_may_write_entry(fn_node->body, field->binding, true)) {
-                    MIR_label_t absent = var->method_field_present ? new_label(mt) : 0;
-                    MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
-                    if (absent) {
-                        MIR_label_t stored = new_label(mt);
-                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                            MIR_new_label_op(mt->ctx, stored), MIR_new_reg_op(mt->ctx, var->method_field_present)));
-                        // a borrowed update can supply a formerly absent value too.
-                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-                            MIR_new_label_op(mt->ctx, absent), MIR_new_reg_op(mt->ctx, boxed_val),
-                            MIR_new_int_op(mt->ctx, ITEM_NULL)));
-                        emit_label(mt, stored);
-                    }
-                    MIR_reg_t name_ptr = emit_load_string_literal(mt, field->name->str);
-                    MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field->name->length));
-                    MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
-                    // method field locals are snapshots; write them back before returning to preserve mutations.
-                    MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->self_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                    emit_return_if_item_error(mt, write_result);
-                    if (absent) emit_label(mt, absent);
-                }
-            }
-            field = typemap_next_field(owner, field);
-        }
-    }
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
-    finish_function_epilogue(mt);
+    finish_function_epilogue(mt, is_method && !is_closure && is_proc_fn ? fn_node : NULL);
     finalize_gc_root_publication(mt, name_buf->str);
     finalize_side_root_frame(mt);
     mir_narrow_body_gc_effect(mt, fn_node);

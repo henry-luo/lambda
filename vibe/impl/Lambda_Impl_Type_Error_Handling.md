@@ -1086,3 +1086,33 @@ name failures, a retired Python import, an invalid input arity, the established
 RSA branch-shape failure, and WIP modules requiring further review. This count
 is not a claim that all remaining failures are pre-existing. Aggregate runtime
 and optimization qualification is still in progress.
+
+### Method receiver publication on completion (2026-11-03)
+
+S7.4.6v3/S12.1.2v3 completion preserves mutations already performed by a
+method. MIR previously published mutable field locals only on fallthrough;
+an explicit return or propagated/raised error skipped the receiver write-back.
+Publication now runs at the common return epilogue before root cleanup. A
+rejected publication exits that epilogue rather than re-entering its return
+label. The existing field publication loop is shared by all completion paths.
+
+The propagation fixture now checks normal return, propagation, returned error
+and raise after a field update on interp/jit/auto and immediate promotion,
+including forced/poisoned GC. The matrix passes **144/144**. The Counter API
+fixture spells its numeric method results with explicit `return count`, and
+its interpreter/JIT goldens match. The aggregate full MIR GC check passes
+**350/350**; loopback-enabled HTTP checks pass **152/152**. The rebuilt aggregate
+reports **8,524/8,554** Lambda checks and **2,112/2,112** input checks. Its 30
+failures comprise 13 MIR proof checks, six native optimization checks, four MIR
+size ratchets, four sandbox-blocked HTTP checks (passing separately), and three
+main-runtime cases. The main runtime now passes **1,995/1,998**; its remaining
+cases are the isolated MIR accumulator defect and the graphviz/MVP differences
+still being compared against the base. Artifacts are frozen under
+`temp/error-handling/m3-method-qualified-baseline/`; the aggregate log is
+`m3-method-qualified-baseline.log`.
+
+A separate accumulator regression has been reproduced in standalone valid MIR
+with no Lambda runtime: levels 0/1 compute the expected result, while level 2
+does not. The isolated source and runner are under
+`temp/error-handling/loop-standalone.{mir,c,exe}`. No vendored code has changed;
+AGENTS.md rule 16 approval is pending before a MIR fix and auditable patch.
