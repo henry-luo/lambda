@@ -89,6 +89,7 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
 static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call);
 static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth = 0);
+static Type* error_field_result_type(Transpiler* tp, AstNode* field, AstNodeType node_type);
 static bool complete_outcome_facts(Transpiler* tp, AstScript* script);
 
 // Forward declaration for imported module resolution
@@ -3021,6 +3022,12 @@ static bool resolve_qualified_member_key(Transpiler* tp, AstNode** object,
 
 // Forward declaration: check if AST node contains ~ (current_item) reference
 bool has_current_item_ref(AstNode* node);
+
+static bool pipe_source_is_sequence(TypeId source_id) {
+    return is_sequence_text_type_id(source_id) || source_id == LMD_TYPE_ARRAY ||
+        source_id == LMD_TYPE_ARRAY_NUM || source_id == LMD_TYPE_RANGE ||
+        source_id == LMD_TYPE_VARRAY || is_map_family_type_id(source_id);
+}
 
 
 static bool strview_matches_string(StrView* view, String* str) {
@@ -6684,10 +6691,15 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         AstBinaryNode* binary = (AstBinaryNode*)node;
         bool classification = binary->op == OPERATOR_IS &&
             lambda_type_has_proven_error(binary->right ? binary->right->type : NULL);
+        // S10.1.2v4/S7.8.2: sequence mapping retains each body outcome in
+        // its result slot. Scalar/open application still needs a receiver.
+        bool collects_body = binary->op == OPERATOR_PIPE &&
+            has_current_item_ref(binary->right) && binary->left &&
+            pipe_source_is_sequence(binary->left->type ? binary->left->type->type_id : LMD_TYPE_ANY);
         // S7.5.4: error-preserving operators carry the obligation to their receiver.
         validate_enforcing_calls_in_expression(tp, binary->left,
             immediate_acknowledgment || classification, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, binary->right, immediate_acknowledgment,
+        validate_enforcing_calls_in_expression(tp, binary->right, immediate_acknowledgment || collects_body,
             return_acknowledgment);
         return;
     }
@@ -7452,6 +7464,14 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
             (ordinary_outcome_has_error(tp, binary->left, depth + 1) ||
              ordinary_outcome_has_error(tp, binary->right, depth + 1));
     }
+    case AST_NODE_PIPE: {
+        AstBinaryNode* pipe = (AstBinaryNode*)node;
+        if (pipe->op != OPERATOR_PIPE) return false;
+        bool collects_body = has_current_item_ref(pipe->right) && pipe->left &&
+            pipe_source_is_sequence(pipe->left->type ? pipe->left->type->type_id : LMD_TYPE_ANY);
+        return ordinary_outcome_has_error(tp, pipe->left, depth + 1) ||
+            (!collects_body && ordinary_outcome_has_error(tp, pipe->right, depth + 1));
+    }
     case AST_NODE_UNARY:
         return ordinary_outcome_has_error(tp, ((AstUnaryNode*)node)->operand, depth + 1);
     case AST_NODE_MATCH_EXPR:
@@ -7461,7 +7481,10 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
         Type* contract = declared_compound_destination_type(tp, node, NULL);
-        return contract && lambda_type_accepts_error(contract);
+        AstFieldNode* access = (AstFieldNode*)node;
+        return (contract && lambda_type_accepts_error(contract)) ||
+            (ordinary_outcome_has_error(tp, access->object, depth + 1) &&
+             lambda_type_accepts_error(error_field_result_type(tp, access->field, node->node_type)));
     }
     default: return false;
     }
@@ -9536,9 +9559,7 @@ static Type* pipe_collection_result_type(Transpiler* tp, Operator op,
             ? lambda_type_nullable_normalized(tp->pool, source) : body;
     }
     bool text = is_sequence_text_type_id(source_id);
-    bool sequence = source_id == LMD_TYPE_ARRAY || source_id == LMD_TYPE_ARRAY_NUM ||
-        source_id == LMD_TYPE_RANGE || source_id == LMD_TYPE_VARRAY ||
-        is_map_family_type_id(source_id);
+    bool sequence = pipe_source_is_sequence(source_id);
     if (op == OPERATOR_FILTER) {
         // S2.5.8: a filter over text keeps that kind -- its items are the
         // source's own characters, so they always rebuild it. The canonical
@@ -9919,28 +9940,33 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
     return;
 }
 
+static Type* error_field_result_type(Transpiler* tp, AstNode* field, AstNodeType node_type) {
+    // S7.1.1v3: computed indexing of an error is an absent read.
+    if (node_type == AST_NODE_INDEX_EXPR) return &TYPE_NULL;
+    // S7.4.4: metadata reads recover ordinary values; .source retains the
+    // wrapped error, while an unknown member preserves the error itself.
+    AstNode* key = ast_unwrap_primary(field);
+    if (node_type == AST_NODE_MEMBER_EXPR && key && key->node_type == AST_NODE_IDENT) {
+        String* name = ((AstIdentNode*)key)->name;
+        StrView member = strview_init(name->chars, name->len);
+        if (strview_equal(&member, "message")) return &TYPE_STRING;
+        if (strview_equal(&member, "code")) return &TYPE_INT;
+        if (strview_equal(&member, "source"))
+            return lambda_type_nullable_normalized(tp->pool, &TYPE_ERROR);
+        if (strview_equal(&member, "file"))
+            return lambda_type_nullable_normalized(tp->pool, &TYPE_STRING);
+        if (strview_equal(&member, "line") || strview_equal(&member, "column"))
+            return lambda_type_nullable_normalized(tp->pool, &TYPE_INT);
+    }
+    return &TYPE_ERROR;
+}
+
 static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
         AstNode* field, AstNodeType node_type) {
     if (!object || !object->type) return set_type_any(tp, ANY_MEMBER_SHAPE);
     Type* object_type = object->type;
-    if (object_type->type_id == LMD_TYPE_ERROR) {
-        // S7.4.4: metadata reads recover ordinary values; .source retains the
-        // wrapped error, while an unknown member preserves the error itself.
-        AstNode* key = ast_unwrap_primary(field);
-        if (node_type == AST_NODE_MEMBER_EXPR && key && key->node_type == AST_NODE_IDENT) {
-            String* name = ((AstIdentNode*)key)->name;
-            StrView member = strview_init(name->chars, name->len);
-            if (strview_equal(&member, "message")) return &TYPE_STRING;
-            if (strview_equal(&member, "code")) return &TYPE_INT;
-            if (strview_equal(&member, "source"))
-                return lambda_type_nullable_normalized(tp->pool, &TYPE_ERROR);
-            if (strview_equal(&member, "file"))
-                return lambda_type_nullable_normalized(tp->pool, &TYPE_STRING);
-            if (strview_equal(&member, "line") || strview_equal(&member, "column"))
-                return lambda_type_nullable_normalized(tp->pool, &TYPE_INT);
-        }
-        return &TYPE_ERROR;
-    }
+    if (object_type->type_id == LMD_TYPE_ERROR)
+        return error_field_result_type(tp, field, node_type);
     if (node_type == AST_NODE_INDEX_EXPR) {
         if (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
                 object_type->type_id == LMD_TYPE_ARRAY) {
@@ -10183,6 +10209,8 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
     bool declared_path = node_type == AST_NODE_MEMBER_EXPR ||
         (node_type == AST_NODE_INDEX_EXPR && (!object || !object->type ||
             object->type->type_id == LMD_TYPE_MAP || ast_index_key_is_position(field)));
+    Type* error_result = ordinary_outcome_has_error(tp, object)
+        ? error_field_result_type(tp, field, node_type) : NULL;
     if (declared_path) {
         bool optional_field = false;
         Type* declared = declared_compound_destination_type(tp,
@@ -10194,10 +10222,12 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 (object && object->type && lambda_type_accepts_null(object->type));
             node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
                 : declared;
+            node->type = lambda_type_union_normalized(tp->pool, node->type, error_result);
             return;
         }
     }
-    node->type = direct_field_result_type(tp, object, field, node_type);
+    node->type = lambda_type_union_normalized(tp->pool,
+        direct_field_result_type(tp, object, field, node_type), error_result);
 }
 
 static AstNode* build_query_syntax(Transpiler* tp, SourceSpan span,
@@ -14825,9 +14855,13 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
     case AST_NODE_RETURN_STAM:
         node->type = ((AstReturnNode*)node)->value->type;
         break;
-    case AST_NODE_IF_EXPR:
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR:
+        // receiver errors change metadata reads differently from ordinary
+        // fields; reuse the read oracle instead of adding a blanket error.
+        resolve_field(tp, (AstFieldNode*)node);
+        break;
+    case AST_NODE_IF_EXPR:
         node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
         break;
     default: break;
@@ -15027,6 +15061,15 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
     }
     bool may_error = operand && operand->type &&
         lambda_type_accepts_error(operand->type);
+    may_error |= ordinary_outcome_has_error(tp, operand);
+    Type* explicit_contract = NULL;
+    if (effective && effective->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)effective)->entry;
+        if (entry) explicit_contract = entry->declared_type;
+    } else if (effective && (effective->node_type == AST_NODE_MEMBER_EXPR ||
+            effective->node_type == AST_NODE_INDEX_EXPR)) {
+        explicit_contract = declared_compound_destination_type(tp, effective, NULL);
+    }
     if (effective && effective->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)effective;
         call->propagate = true;
@@ -15034,14 +15077,22 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
         may_error = may_error || call->can_raise;
         TypeFunc* signature = call->function
             ? lambda_type_func_signature(call->function->type) : NULL;
+        if (signature && signature->has_explicit_return_contract)
+            explicit_contract = signature->return_contract;
         if (call->can_raise && signature) {
             Type* success = function_success_result_type(signature);
             if (success) call->type = success;
         }
     }
     if (!may_error) {
-        record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
-            "postfix `^` used on an expression that does not return errors");
+        if (explicit_contract && !lambda_type_accepts_error(explicit_contract)) {
+            record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
+                "postfix `^` used on an expression whose explicit contract excludes error");
+        } else {
+            // S7.6.3v3: defensive propagation may outlive an inference proof.
+            record_semantic_warning_span(tp, span, ERR_SEMANTIC_ERROR,
+                "defensive postfix `^` on an expression inferred not to return errors");
+        }
     }
     Type* success = operand && operand->type
         ? lambda_type_remove_error(tp->pool, operand->type) : NULL;

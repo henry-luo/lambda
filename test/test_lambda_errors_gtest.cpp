@@ -2677,11 +2677,27 @@ TEST_F(NegativeScriptTest, AnyJoinsRetainKnownErrorOutcomes) {
         "function 'underlying' body returns type error");
 }
 
+TEST_F(NegativeScriptTest, FailedReceiverRetainsItsFieldOutcome) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_declared_field_outcome.ls",
+        "cannot initialize 'value' of type int with int | error");
+}
+
+TEST_F(NegativeScriptTest, PropagationDistinguishesWrittenAndInferredContracts) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_explicit_clean_propagation.ls",
+        "explicit contract excludes error");
+    ScriptResult result = run_lambda_script("test/lambda/proc/error_defensive_propagation.ls", true);
+    EXPECT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), "defensive postfix `^`"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), "[7, 7, true]"), nullptr) << result.output;
+}
+
 TEST_F(NegativeScriptTest, UnknownCallAdmissionMustHaveAReceiver) {
     ExpectErrorMessage("test/lambda/negative/semantic/unknown_call_outcome_overwritten.ls",
         "error[E228]: error from 'f' must be handled");
     ExpectErrorMessage("test/lambda/negative/semantic/unknown_call_outcome_overwritten.ls",
         "error[E228]: error from 'failed' must be handled");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_scalar_pipe_return.ls",
+        "function 'scalar_mapping' may return error from call to 'failed'");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ReturnErrorExplainsArgumentContract) {

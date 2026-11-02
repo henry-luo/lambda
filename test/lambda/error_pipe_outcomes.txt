@@ -1,1 +1,1 @@
-[8, true, true, 99, "pipe failure"]
+[8, true, true, 99, "pipe failure", [true, true]]
