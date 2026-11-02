@@ -863,12 +863,23 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     ruby_measure_used_level(level);
 }
 
-void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_start_edge) {
+static void ruby_align_annotation_model(ViewSpan* ruby,
+        LayoutRubyModel* model, Rect empty_base) {
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+        Rect base = ruby_level_bounds(&segment->base);
+        if (base.height <= 0.0f) base = empty_base;
+        auto no_contribution = [](LayoutRubyLevel*, Rect, bool) {};
+        ruby_position_annotation_levels(ruby, segment, base, true, no_contribution);
+    }
+}
+
+void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     ScratchScope scope(&context->scratch);
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
     if (model.failed) { log_error("ruby model: used normalization allocation failed"); return; }
     DomElementExt* ext = ruby->ensure_ext();
     ruby_clear_element_geometry(ruby);
+    bool inline_root = ruby->view_type == RDT_VIEW_INLINE;
     float start = context->line.advance_x;
     float preceding_space = context->line.has_space
         ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;
@@ -890,9 +901,10 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
         layout_flow_node(context, node);
     }
     float natural_advance = context->line.advance_x - start;
-    compute_span_bounding_box(ruby, false, font_box_handle(&context->font));
-    float base_top = ruby->y, base_height = ruby->height;
+    if (inline_root) compute_span_bounding_box(ruby, false, font_box_handle(&context->font));
     float font_height = font_get_cell_height(font_box_handle(&context->font));
+    float base_top = inline_root ? ruby->y : context->block.advance_y + context->block.lead_y;
+    float base_height = inline_root ? ruby->height : font_height;
     Linebox base_line = context->line;
     bool base_has_content = false, annotations_have_content = false;
     for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
@@ -907,8 +919,9 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
     }
     if (!base_has_content && annotations_have_content) {
         // CSS Ruby §2.3.1/§3.1.2 supplies an empty base, with the inherited font strut.
-        contribute_inline_strut(context, ruby, ruby);
-        if (!context->line.start_view) context->line.start_view = lam::up(static_cast<View*>(ruby));
+        contribute_inline_strut(context, ruby, inline_root ? ruby : nullptr);
+        if (!context->line.start_view) context->line.start_view = lam::up(inline_root
+            ? static_cast<View*>(ruby) : ruby->first_placed_child());
         context->line.is_line_start = false;
     }
     base_line = context->line;
@@ -919,8 +932,10 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
         font_get_content_area_split(font_box_handle(&context->font), &ascender, &descender);
         base_top = layout_inline_font_box_y(context, ruby, context->block.line_height,
             ascender, descender, base_baseline, 0.0f, 0.0f);
-        LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(ruby);
-        ruby->y = base_top - edges.top;
+        if (inline_root) {
+            LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(ruby);
+            ruby->y = base_top - edges.top;
+        }
         base_height = font_height;
     }
     layout_ruby_resolve_columns(&model, &scope);
@@ -964,17 +979,69 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
         ext->has_empty_ruby_base = !has_base;
         ext->ruby_empty_base_block_size = font_height;
     }
-    ruby_publish_geometry(ruby, start - inline_start_edge, advance + inline_start_edge);
+    if (inline_root) {
+        // column geometry owns both decorations; margins remain external to the inline's border box.
+        bool rtl = context->block.direction == CSS_VALUE_RTL;
+        float before = layout_inline_span_edge_extent(ruby, rtl, true, false);
+        float after = layout_inline_span_edge_extent(ruby, rtl, false, false);
+        ruby_publish_geometry(ruby, start - before, advance + before + after);
+    }
+    else if (!context->line.is_line_start) {
+        // finish the anonymous inline while its normalized model remains in scratch.
+        float ascender = 0.0f, descender = 0.0f;
+        font_get_content_area_split(font_box_handle(&context->font), &ascender, &descender);
+        float baseline = line_baseline_position(context, nullptr);
+        Rect empty_base = {start, context->block.advance_y + baseline - ascender, advance, font_height};
+        context->line.is_last_line = true;
+        line_break(context);
+        ruby_align_annotation_model(ruby, &model, empty_base);
+    }
 }
 
 void layout_ruby_align_annotations_after_line(LayoutContext* context, ViewSpan* ruby) {
     ScratchScope scope(&context->scratch);
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope, false);
     if (model.failed) { log_error("ruby model: final alignment scratch allocation failed"); return; }
-    for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
-        Rect base = ruby_level_bounds(&segment->base);
-        if (base.height <= 0.0f) base = {ruby->x, ruby->y, ruby->width, ruby->height};
-        auto no_contribution = [](LayoutRubyLevel*, Rect, bool) {};
-        ruby_position_annotation_levels(ruby, segment, base, true, no_contribution);
+    ruby_align_annotation_model(ruby, &model,
+        {ruby->x, ruby->y, ruby->width, ruby->height});
+}
+
+float layout_ruby_intrinsic_height(LayoutContext* context, DomElement* ruby, float available_width) {
+    // D4.5.1v4: speculative flow must restore selected fragments as well as scalar boxes.
+    ScratchScope counter_scratch(&context->scratch);
+    CounterCheckpoint counters;
+    if (!counters.enter(context->counter_context, &context->scratch, &counter_scratch.mark)) {
+        log_error("ruby height: cannot isolate generated effects");
+        return 0.0f;
     }
+    radiant::LayoutFlowResult* selected = radiant::layout_flow_result_capture(context, ruby);
+    if (!selected) { log_error("ruby height: cannot preserve selected flow"); return 0.0f; }
+    radiant::LayoutMeasureScope measure(context, ruby);
+    LayoutViewScope view(context);
+    ViewBlock* block = lam::unsafe_view_block_element_storage(ruby);
+    float content_width = available_width;
+    if (layout_axis_has_given_size(block, true) &&
+        !layout_axis_uses_intrinsic_size(block->blk, LAYOUT_AXIS_X)) {
+        content_width = layout_content_size_if_border_box(block,
+            layout_axis_given_size(block->block(), LAYOUT_AXIS_X), true);
+    }
+    content_width = max(content_width, 0.0f);
+    block->view_type = RDT_VIEW_BLOCK;
+    block->width = layout_border_size_from_content_box(block, content_width, true);
+    block->height = layout_border_size_from_content_box(block, 0.0f, false);
+    BlockContext parent = context->block;
+    layout_setup_assigned_block_context(context, block, &parent, content_width, -1.0f);
+    context->view = lam::up(static_cast<View*>(block));
+    context->elmt = lam::up(static_cast<DomNode*>(ruby));
+    setup_line_height(context, block);
+    layout_setup_block_font_metrics(context);
+    context->block.block_container_font = lam::up(context->font.style);
+    setup_inline(context, block);
+    float content_start = context->block.advance_y;
+    layout_ruby_children(context, block);
+    float height = max(0.0f, context->block.advance_y - content_start);
+    if (!radiant::layout_flow_result_apply(context, selected))
+        log_error("ruby height: selected flow restoration failed");
+    radiant::layout_flow_result_release(context->pool, selected);
+    return height;
 }

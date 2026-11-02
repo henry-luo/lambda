@@ -1175,7 +1175,7 @@ bool inline_span_float_continuation_x(
 }
 
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
-    if (!lycon || !span || !font_box_handle(&lycon->font)) return;
+    if (!lycon || !font_box_handle(&lycon->font)) return;
     layout_commit_inline_boxes(lycon);
     float ascender = 0.0f, descender = 0.0f;
     layout_inline_font_metrics(lycon, font_box_handle(&lycon->font), lycon->block.line_height,
@@ -1188,7 +1188,8 @@ void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* sp
             lycon->block.line_height, normal_lh,
             lycon->line.vertical_align, lycon->line.vertical_align_offset);
     }
-    span->content_height = lycon->block.line_height;
+    // anonymous inline bases contribute metrics without replacing a block's used size.
+    if (span) span->content_height = lycon->block.line_height;
 }
 
 static bool inline_span_has_nonempty_split_block(ViewSpan* span) {
@@ -2640,7 +2641,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         ruby_annotation_display_is_misparented(elmt, display);
     Linebox base_line_before_ruby_annotation = lycon->line;
     if (is_ruby_container) {
-        layout_ruby_children(lycon, span, inline_left_edge);
+        layout_ruby_children(lycon, span);
     } else if (layout_ruby_active_level_children(lycon, span)) {
         // the owning ruby model supplies this level's normalized box sequence.
     } else if (child) {

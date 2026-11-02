@@ -5,7 +5,8 @@ Status: active. Started 2026-11-02 on `codex/css-ruby-wpt`, source base
 run reports 19 full matches, 193 geometry mismatches, and no execution errors.
 Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
-normalization, inline font boxes, Ruby spacing and nested envelopes are also qualified. Flow
+normalization, inline font boxes, Ruby spacing, nested envelopes and non-inline
+Ruby formatting are also qualified. General flow
 integration and the remaining raw suite failures are still open; the objective
 is not complete.
 
@@ -750,3 +751,90 @@ sections, while the native `#log` is empty. Its six layout rows therefore have
 a common vertical origin difference even where their geometry agrees.
 `temp/ruby-m7-line-break-around-ruby-001-differences.json` records this capture
 limitation; no reporting shim, fixture, reference or tolerance is changed.
+
+### M8 implementation and focused evidence
+
+`layout_block_inner_content` dispatches non-inline Ruby to the existing Ruby
+formatter. The source block keeps its principal geometry; scratch normalization
+represents its anonymous inline Ruby. Both paths share column resolution,
+annotation positioning and final block-axis alignment. The anonymous inline is
+finalized while that model is alive, then the ordinary block finalizer owns
+used dimensions, overflow and baselines. Annotation-only Ruby contributes an
+anonymous base strut without writing the source block's content height.
+
+The grid control exposed a second owning-stage defect: the generic intrinsic
+height estimator stacked a base and its annotation as two block siblings,
+producing a 136px minimum instead of the 76px natural border-box height.
+`layout_ruby_intrinsic_height` now measures with the same formatter. Existing
+`LayoutMeasureScope`, full flow capture/replay and a counter checkpoint preserve
+selected scalar geometry, text fragments, generated effects and caller state
+(**D4.1.4v5 / D4.5.1v4 / D4.5.2**). This is an exact flow measurement, without a
+second font/column-height estimator. The ordinary intrinsic-height cache owns
+the scalar result.
+
+Retained block-to-inline changes also exposed the Ruby publication path
+omitting the ending decoration. Its border-box publication now obtains both
+decoration edges from the shared inline-edge helper and leaves margins outside
+that box. The formatter no longer receives a margin-inclusive starting edge
+from its caller.
+
+`NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent` fails before dispatch
+is added and passes afterward. It covers authored and arbitrary-element block
+Ruby, float/position/grid blockification, generated base content, annotation-only
+content, paired columns, grid stretch, centered/right alignment, border/padding,
+painted glyph positions, initial/retained layout, font/display changes and
+external margins. Repeated intrinsic queries with different available widths
+preserve the selected readings' rectangles and paint positions and the caller's
+active line, view and sizing state. The existing nested-Ruby paint checks share
+the same single-glyph assertion helper. All twelve focused controls pass:
+`temp/ruby-m8-focused-final.log`.
+
+The browser agrees on the non-inline boxes, grid stretch, generated base and
+center/right controls: `temp/ruby-non-inline-browser-probe.json`. Its known
+annotation-only empty-base and unsupported explicit-base-role behavior remains
+different from the CSS model; those results do not replace native spec checks.
+
+The raw suite remains **33/212 full matches, 179 mismatches**, with no new/lost
+full match or execution error. Block-Ruby 002 and 005 improve substantially;
+005 reaches 95.8%/96.6% element matches in the test/reference documents.
+Block-Ruby 003/004 partials and the decorated intrinsic-width case also expose
+remaining failures. Scores and all changed partials are retained in
+`temp/ruby-m8-wpt-final.log` and `temp/ruby-m8-wpt-final-delta.json`.
+
+### M8 qualification
+
+The required Radiant gate finishes with **451/451 native text-query tests**,
+**4974 layout full matches, 300 accepted partials and zero regressions**. The
+aggregate remains red on ten of the previously reproduced slide teardown
+failures. There are no new failing cases compared with M6; direct-text and
+home-ribbon teardown cases pass this run, as does the transient spelling case
+observed in M7. Logs: `temp/ruby-m8-radiant-baseline.log`,
+`temp/ruby-m8-radiant-output/test_summary.json`,
+`temp/ruby-m8-radiant-output/test_radiant_layout_baseline_results.json`.
+
+The freshly rebuilt input gate completes **4594/4621**, with the exact same
+27 failures as M6 and no new/resolved failure, skip or timeout. Logs:
+`temp/build-ruby-m8-input-runners.log`, `temp/ruby-m8-input-qualified.log`,
+`temp/ruby-m8-input-output/test_summary.json`. Dimension lint, inventory
+generation/check and diff checks pass; the inventory changes only source/test
+references. This closes M8's non-inline formatting scope. The isolated-inline
+margin defect below and broader Ruby flow integration remain open.
+
+## M9: isolated inline margins during bidi placement
+
+Priority: P1. The decoration publication correction exposes an existing shared
+bidi defect when text precedes a decorated Ruby. `bidi_append_atomic_fragment`
+adds external margins for atomic inline boxes, but not isolated inline boxes.
+The latter already supply complete border-box widths, and therefore must also
+supply their separate margin advances. Without them, placement moves a Ruby
+backward across its starting margin and loses its ending margin before the
+following text. The same path serves ordinary isolated inlines.
+
+Keep this repair in the shared bidi fragment construction. Acceptance: ordinary
+isolated inline and Ruby controls after a text prefix, matching border boxes,
+base/glyph positions and following-text advances; decorated/margin first-item
+controls and retained changes. Use CSS Writing Modes §2 bidi isolation and
+CSS 2.1 §8.3 inline margin-box rules. Preserve source geometry ownership
+(**D4.1.4v5 / D4.5.1v4**), without Ruby-specific offsets or width inflation.
+Verify focused bidi/Ruby controls, the raw Ruby suite and required Radiant
+baseline at the stable boundary. Full parallel Ruby wrapping remains open.

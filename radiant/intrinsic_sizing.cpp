@@ -7608,6 +7608,9 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
         // Empty auto-height containers have zero content height. Padding and border
         // are still added below, but line-height must not synthesize a line.
         height = 0.0f;
+    } else if (display_inner == CSS_VALUE_RUBY) {
+        // the same normalized formatter supplies paired line metrics; annotations are not block siblings.
+        height = layout_ruby_intrinsic_height(lycon, element, width);
     } else if (is_table_structure_box) {
         // CSS tables size rows from the max cell height; block stacking would sum
         // sibling cells and overstate intrinsic table height.
