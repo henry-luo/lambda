@@ -8217,20 +8217,33 @@ static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
 }
 
 static AstNode* mir_single_value_branch_node(AstNode* node);
+static bool mir_join_int_success(MirTranspiler* mt, AstNode* node);
 
-// broad containers need membership only; refined shapes and T[] still own
-// their reification boundary. The error arm is handled by the consumer.
-static bool mir_container_success_proves_contract(MirTranspiler* mt,
+// Plain int outcomes and broad containers need no normal-arm conversion.
+// Refined shapes and T[] still own their reification boundary. The consumer
+// handles the error arm without changing the receiving contract.
+static bool mir_plain_outcome_proves_contract(MirTranspiler* mt,
         AstNode* source, Type* target, int depth = 0) {
     Type* expected = mir_error_preserving_normal_type(target);
-    if ((expected != &TYPE_ARRAY && expected != &TYPE_MAP) || depth > 12) return false;
-    AstNode* node = ast_unwrap_primary(source);
+    bool int_outcome = expected == &TYPE_INT &&
+        lambda_type_contract_is_subtype(&TYPE_ERROR, target);
+    if ((!int_outcome && expected != &TYPE_ARRAY && expected != &TYPE_MAP) ||
+            depth > 12) return false;
+    AstNode* node = ast_unwrap_primary_to_leaf(source);
     if (!node) return false;
-    if (mir_flow_find(mt, node, expected, MIR_FLOW_SEMANTIC)) return true;
+    if (!int_outcome && mir_flow_find(mt, node, expected, MIR_FLOW_SEMANTIC)) return true;
+    // S7.4.2v3/S7.9.3: the existing integer-join lowering publishes only an
+    // int or the original error. Re-admitting that exact int^ changes neither.
+    if (int_outcome && (mir_join_int_success(mt, node) ||
+            (!mir_expr_may_be_null(mt, node) &&
+             !mir_argument_may_return_item_error(mt, node) &&
+             mir_expr_proves_native_return_lane(mt, node, LMD_TYPE_INT)))) return true;
     // Broad containers need membership, so independently allocated equivalent
     // error unions need no packed-layout identity (S11.4.10, S7.4.2v3).
     Type* produced = mir_call_result_contract(node);
-    if (produced && lambda_type_contract_is_subtype(produced, target)) return true;
+    if (produced && (!int_outcome ||
+            mir_error_preserving_normal_type(produced) == &TYPE_INT) &&
+            lambda_type_contract_is_subtype(produced, target)) return true;
     if (node->node_type == AST_NODE_ARRAY) return expected == &TYPE_ARRAY;
     if (node->node_type == AST_NODE_MAP) return expected == &TYPE_MAP;
     if (node->node_type == AST_NODE_UNARY &&
@@ -8247,20 +8260,21 @@ static bool mir_container_success_proves_contract(MirTranspiler* mt,
     }
     if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_LIST) {
         AstNode* value = mir_single_value_branch_node(node);
-        return value && mir_container_success_proves_contract(mt, value, target, depth + 1);
+        return value && mir_plain_outcome_proves_contract(mt, value, target, depth + 1);
     }
     if (node->node_type == AST_NODE_IF_EXPR) {
         AstIfNode* branch = (AstIfNode*)node;
         return branch->otherwise &&
-            mir_container_success_proves_contract(mt, branch->then, target, depth + 1) &&
-            mir_container_success_proves_contract(mt, branch->otherwise, target, depth + 1);
+            mir_plain_outcome_proves_contract(mt, branch->then, target, depth + 1) &&
+            mir_plain_outcome_proves_contract(mt, branch->otherwise, target, depth + 1);
     }
     if (node->node_type == AST_NODE_BINARY && expected == &TYPE_ARRAY) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         return binary->op == OPERATOR_JOIN &&
-            mir_container_success_proves_contract(mt, binary->left, expected, depth + 1) &&
-            mir_container_success_proves_contract(mt, binary->right, expected, depth + 1);
+            mir_plain_outcome_proves_contract(mt, binary->left, expected, depth + 1) &&
+            mir_plain_outcome_proves_contract(mt, binary->right, expected, depth + 1);
     }
+    if (int_outcome) return false;
     if (node->node_type != AST_NODE_IDENT) return false;
     MirVarEntry* binding = mir_var_for_ident(mt, (AstIdentNode*)node);
     // boxed parameters retain their admitted full contract even when their
@@ -8290,7 +8304,7 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
 // receiving contract; local bindings retain that outcome and continue.
 static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* source_node,
         Type* target) {
-    if (mir_container_success_proves_contract(mt, source_node, target)) return true;
+    if (mir_plain_outcome_proves_contract(mt, source_node, target)) return true;
     AstCallNode* call = mir_value_call(source_node);
     // int() itself is non-defecting, but its compact bitwise operand can
     // publish ItemError. Its successful result already satisfies plain int.
@@ -8303,6 +8317,7 @@ static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* sour
 // the redundancy proofs proper, for a source whose value is its declared type
 static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source_node,
         Type* target) {
+    if (mir_plain_outcome_proves_contract(mt, source_node, target)) return true;
     // Indexed absence inhabits the native sentinel even when the compact AST
     // type names its element. The target must admit that null or check it.
     if (!lambda_type_accepts_null(target) && mir_expr_may_be_null(mt, source_node))
@@ -8353,8 +8368,6 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
         return true;
     }
     AstNode* primary = ast_unwrap_primary(source_node);
-    if (primary && primary->node_type == AST_NODE_IDENT &&
-            mir_container_success_proves_contract(mt, primary, target)) return true;
     if (mir_call_result_proves_contract(primary, target)) return true;
     if (primary && primary->node_type == AST_NODE_IDENT &&
             mir_binding_definitions_prove_contract(mt,
@@ -16333,8 +16346,6 @@ static bool mir_emit_local_versioned_tree(MirTranspiler* mt, AstBinaryNode* bi,
     return true;
 }
 
-static bool mir_join_int_success(MirTranspiler* mt, AstNode* node);
-
 static AstNode* mir_immutable_local_source(MirTranspiler* mt, AstNode* node) {
     AstNode* source = ast_unwrap_primary(node);
     if (!source || source->node_type != AST_NODE_IDENT) return source;
@@ -23016,14 +23027,15 @@ static MirValue transpile_control_value(MirTranspiler* mt, AstNode* node) {
 
 
 static AstNode* mir_single_value_branch_node(AstNode* node) {
-    AstNode* base = ast_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary_to_leaf(node);
     if (!base || (base->node_type != AST_NODE_CONTENT &&
             base->node_type != AST_NODE_LIST)) return base;
     AstListNode* list = (AstListNode*)base;
     if (!list->item || list->item->next ||
             is_declaration_node(list->item) ||
             is_side_effect_stam(list->item->node_type)) return NULL;
-    return ast_unwrap_primary(list->item);
+    // a bare literal is the produced value, not an empty wrapper.
+    return ast_unwrap_primary_to_leaf(list->item);
 }
 
 static bool mir_native_int_value_for_u32(MirTranspiler* mt, AstNode* node) {

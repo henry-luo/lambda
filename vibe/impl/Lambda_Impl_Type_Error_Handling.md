@@ -1367,3 +1367,35 @@ native tests pass. The rebuilt aggregate's native optimization gate now passes
 **51/55**, with four separate admission/COW/string-proof failures still open.
 Evidence: `m3-profile-caller-{tiers.json,emission.log,native.json}` and
 `m3-qualified-fill-lambda/test_lambda_opt_gtest_results.json`.
+
+### Integer outcome proofs and aggregate checkpoint (2026-11-03)
+
+S7.4.2v3/S7.9.3: an expression the existing integer-join lowering proves to
+produce only int or error needs no repeated admission into exactly `int^`.
+The shared plain-outcome proof now handles this alongside broad array/map
+membership, reusing its conditional/sequence traversal. Other normal numeric
+domains and particular-error destinations retain their checks; this does not
+choose the pending numeric-union conversion policy. The branch walk now keeps
+bare literal primaries, which previously disappeared when unwrapped as if they
+were empty expression wrappers. Recursive union traversal consequently no
+longer re-admits each integer result: its existing `<40` admission bound passes.
+
+The allocating-forward-call fixture loses three root slots used only by the
+removed admission. Its check now pins the resulting two-slot frame and adds
+the actual string save/call/reload/length sequence, while forbidding redundant
+return admission. The allocating call and error join remain. This updates a
+changed frame shape while directly strengthening the live-string invariant
+(D5.3.1–D5.3.2), rather than retaining unused roots to match an old slot count.
+
+The immediately preceding rebuilt aggregate (commit `82a5ae590`) completed
+**6,431/6,446**, including main **1,998/2,000**, errors **321/321**, REPL
+**50/50**, full MIR GC **351/351** and HTTP **152/152**. The 15 failures were
+five MIR checks, four native checks, four ratchets, the pending vendor MIR
+optimizer defect and the existing MVP alias difference. Required input suites
+pass **2,112/2,112**. Evidence: `m3-qualified-fill-lambda.log`, its per-suite
+results directory and `m3-qualified-fill-input-{wpt,markdown,yaml,ascii,math}.log`.
+
+After the integer proof: **276/280** MIR emission checks, **52/55** native
+optimization checks, **168/168** focused tier/GC executions, **351/351** MIR GC
+and **247/247** diagnostics. Evidence:
+`temp/error-handling/m3-int-outcome-final-{mir.json,native.json,focused.log,gc.json,diagnostics.json}`.
