@@ -74,6 +74,20 @@ DomNode* dom_source_sibling(DomNode* node, bool forward) {
     }
 }
 
+void dom_collect_text_content(DomNode* node, StrBuf* output) {
+    if (!node || !output || dom_is_generated_pseudo_node(node)) return;
+    if (DomText* text = node->as_text()) {
+        if (text->text && text->length > 0) strbuf_append_str_n(output, text->text, text->length);
+        return;
+    }
+    if (DomElement* element = node->as_element()) {
+        for (DomNode* child = dom_source_child(element, true); child;
+             child = dom_source_sibling(child, true)) {
+            dom_collect_text_content(child, output);
+        }
+    }
+}
+
 DomElement* dom_parent_element(DomElement* element) {
     DomNode* parent_node = dom_source_parent(element);
     DomElement* parent = parent_node ? parent_node->as_element() : nullptr;

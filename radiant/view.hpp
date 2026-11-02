@@ -411,6 +411,12 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
 bool view_visibility_is_hidden(const View* view);
+inline bool view_ruby_annotation_is_hidden(const View* view) {
+    for (const DomNode* node = view; node; node = node->parent) {
+        if (node->ruby_annotation_hidden) return true;
+    }
+    return false;
+}
 bool view_focus_is_hidden(View* view);
 bool view_size_containment_applies(DisplayValue display);
 bool view_contents_are_skipped(const View* view);

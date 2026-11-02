@@ -13,6 +13,7 @@ struct LayoutRubyBox {
     int span;
     bool whitespace;
     bool spanning;
+    bool hidden;
     IntrinsicSizes sizes;
     float natural_start;
     float natural_width;
@@ -185,6 +186,40 @@ static void ruby_build_explicit_level(RubyBuildContext* context,
     }
 }
 
+static void ruby_append_box_text(StrBuf* text, LayoutRubyBox* box) {
+    for (int index = 0; index < box->node_count; index++) dom_collect_text_content(box->nodes[index], text);
+}
+
+static void ruby_resolve_annotation_hiding(LayoutRubyModel* model, DomElement* ruby) {
+    StrBuf* base_text = strbuf_new();
+    StrBuf* annotation_text = strbuf_new();
+    if (!base_text || !annotation_text) {
+        strbuf_free(base_text); strbuf_free(annotation_text);
+        model->failed = true;
+        return;
+    }
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+        for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+            for (LayoutRubyBox* annotation = level->first; annotation; annotation = annotation->next) {
+                DomElement* owner = annotation->element ? annotation->element : level->element ? level->element : ruby;
+                annotation->hidden = css_prop_compute_cascaded_keyword(owner, CSS_PROPERTY_VISIBILITY,
+                    CSS_VALUE_VISIBLE) == CSS_VALUE_COLLAPSE;
+                if (annotation->hidden) continue;
+                strbuf_reset(base_text); strbuf_reset(annotation_text);
+                for (LayoutRubyBox* base = segment->base.first; base; base = base->next) {
+                    if (annotation->spanning || base->column == annotation->column) ruby_append_box_text(base_text, base);
+                }
+                ruby_append_box_text(annotation_text, annotation);
+                // CSS Ruby §2.4 compares source text before collapse/transform,
+                // after pairing so hidden readings never shift later associations.
+                annotation->hidden = base_text->length == annotation_text->length &&
+                    (base_text->length == 0 || memcmp(base_text->str, annotation_text->str, base_text->length) == 0);
+            }
+        }
+    }
+    strbuf_free(base_text); strbuf_free(annotation_text);
+}
+
 static LayoutRubyModel layout_ruby_build_model(LayoutContext* layout, DomElement* ruby,
                                       ScratchScope* scope, bool initialize_contents = true) {
     LayoutRubyModel model = {};
@@ -242,6 +277,7 @@ static LayoutRubyModel layout_ruby_build_model(LayoutContext* layout, DomElement
         }
         previous = role == CSS_VALUE_FLOW ? CSS_VALUE_RUBY_BASE : role;
     }
+    if (!model.failed) ruby_resolve_annotation_hiding(&model, ruby);
     return model;
 }
 
@@ -306,6 +342,7 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level) {
         if (level->element->font) setup_font(context->ui_context, &context->font, level->element->font);
     }
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
+        if (box->hidden) continue;
         if (box->whitespace) {
             box->sizes.max_content = white_space_preserves_space_advance(get_white_space_value(box->nodes[0]))
                 ? calculate_max_content_width(context, box->nodes[0])
@@ -370,7 +407,7 @@ static void ruby_segment_minimum(LayoutContext* context, LayoutRubySegment* segm
     bool unbroken_span = false;
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
         LayoutRubyBox* box = level->first;
-        unbroken_span |= box && box->spanning && box->sizes.max_content > 0.0f &&
+        unbroken_span |= box && !box->hidden && box->spanning && box->sizes.max_content > 0.0f &&
             !box->sizes.has_min_content_break;
     }
     if (unbroken_span) {
@@ -492,6 +529,7 @@ static void ruby_include_bounds(Rect* result, bool* found, Rect bounds) {
 
 static Rect ruby_box_bounds(LayoutRubyBox* box) {
     Rect result = {};
+    if (box->hidden) return result;
     bool found = false;
     for (int index = 0; index < box->node_count; index++) {
         View* view = static_cast<View*>(box->nodes[index]);
@@ -631,6 +669,7 @@ static float ruby_column_range_width(LayoutRubySegment* segment, int first, int 
 static void ruby_place_level(LayoutRubySegment* segment, LayoutRubyLevel* level,
                               DomElement* ruby, float start) {
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
+        if (box->hidden) continue;
         float box_start = start + ruby_column_range_width(segment, 0, box->column);
         float width = ruby_column_range_width(segment, box->column, box->span);
         ruby_align_box(box, level->element ? level->element : ruby, box_start, width);
@@ -713,19 +752,43 @@ bool layout_ruby_active_level_children(LayoutContext* context, ViewSpan* span) {
     if (!level || level->element != span) return false;
     for (int index = 0; index < level->node_count; index++) {
         if (level->discarded[index]) layout_suppress_ignorable_container_text(level->nodes[index]);
-        else layout_flow_node(context, level->nodes[index]);
+        else if (!level->nodes[index]->ruby_annotation_hidden) layout_flow_node(context, level->nodes[index]);
     }
     return true;
 }
 
+static void ruby_clear_element_geometry(DomElement* element) {
+    if (!element || !element->ext) return;
+    element->ext->has_ruby_column_geometry = false;
+    element->ext->has_empty_ruby_base = false;
+}
+
 static void ruby_clear_level_geometry(LayoutRubyLevel* level) {
-    auto clear = [](DomElement* element) {
-        if (!element || !element->ext) return;
-        element->ext->has_ruby_column_geometry = false;
-        element->ext->has_empty_ruby_base = false;
+    ruby_clear_element_geometry(level->element);
+    for (LayoutRubyBox* box = level->first; box; box = box->next) {
+        ruby_clear_element_geometry(box->element);
+        for (int index = 0; index < box->node_count; index++) box->nodes[index]->ruby_annotation_hidden = false;
+    }
+}
+
+static void ruby_suppress_annotation_box(LayoutContext* context, LayoutRubyBox* box) {
+    auto descend = [](View* view, int) { return view->is_element(); };
+    auto suppress = [&](View* view, int) {
+        if (DomText* text = view->as_text()) {
+            context->doc->view_tree->recycle_text_rects(text->rect);
+            text->rect = nullptr;
+        } else if (DomElement* element = view->as_element()) {
+            element->content_width = element->content_height = 0.0f;
+            ruby_clear_element_geometry(element);
+        }
+        view->view_type = RDT_VIEW_NONE;
+        layout_set_view_geometry(view, 0.0f, 0.0f, 0.0f, 0.0f);
     };
-    clear(level->element);
-    for (LayoutRubyBox* box = level->first; box; box = box->next) clear(box->element);
+    for (int index = 0; index < box->node_count; index++) {
+        View* root = box->nodes[index];
+        layout_walk_view_tree(root, descend, suppress, false, 0, true, root->next());
+        root->ruby_annotation_hidden = true;
+    }
 }
 
 static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel* level,
@@ -735,9 +798,13 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     RubyLevelScope level_scope(context, level);
     context->block.inline_box_metrics = nullptr;
     line_init(context, base_line->left, FLT_MAX);
+    for (LayoutRubyBox* box = level->first; box; box = box->next) {
+        if (box->hidden) ruby_suppress_annotation_box(context, box);
+    }
     if (level->element) layout_flow_node(context, level->element);
     else {
         for (LayoutRubyBox* box = level->first; box; box = box->next) {
+            if (box->hidden) continue;
             for (int index = 0; index < box->node_count; index++) layout_flow_node(context, box->nodes[index]);
         }
     }
@@ -750,7 +817,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby, float inline_s
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
     if (model.failed) { log_error("ruby model: used normalization allocation failed"); return; }
     DomElementExt* ext = ruby->ensure_ext();
-    if (ext) { ext->has_ruby_column_geometry = false; ext->has_empty_ruby_base = false; }
+    ruby_clear_element_geometry(ruby);
     float start = context->line.advance_x;
     float preceding_space = context->line.has_space
         ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;

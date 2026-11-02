@@ -15009,7 +15009,7 @@ TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     }
     DomElement* annotation = dom_find_element_by_id(document->root->as_element(), "ruby-annotation");
     ASSERT_NE(annotation, nullptr);
-    EXPECT_FLOAT_EQ(annotation->width, 10.0f);
+    EXPECT_FLOAT_EQ(annotation->width, 15.0f);
     EXPECT_FLOAT_EQ(annotation->height, 5.0f);
 }
 
@@ -15351,6 +15351,110 @@ TEST_F(RadiantTextQuery, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps
                 has_previous_word && strcmp(width, "30px") == 0 ? 40.0f : 20.0f);
         }
     }
+}
+
+TEST_F(RadiantTextQuery, RubyHiddenAnnotationsRetainPairingWithoutContributingSize) {
+    ASSERT_NE(load("test/html/layout_ruby_hiding.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float width; } cases[] = {
+        {"identical", 70.0f}, {"nested-hidden", 40.0f}, {"collapsed", 70.0f},
+        {"invisible", 190.0f}, {"different-space", 120.0f}, {"equal-space", 60.0f},
+        {"transformed", 80.0f}, {"spanning-hidden", 40.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->parent->height, 100.0f) << entry.id;
+        }
+        for (const char* id : {"next-reading", "collapsed-next"}) {
+            DomElement* reading = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(reading, nullptr);
+            float x = 0.0f;
+            view_get_visual_bounds(reading, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, 40.0f) << id;
+            EXPECT_FLOAT_EQ(reading->width, 30.0f) << id;
+        }
+        DomElement* empty = dom_find_element_by_id(document->root, "empty-hidden");
+        ASSERT_NE(empty, nullptr);
+        EXPECT_FLOAT_EQ(empty->width, 10.0f);
+        EXPECT_FLOAT_EQ(empty->parent->height, 50.0f);
+    }
+    DomElement* ruby = dom_find_element_by_id(document->root, "identical");
+    DomElement* annotation = dom_find_element_by_id(document->root, "identical-annotation");
+    ASSERT_NE(ruby, nullptr);
+    ASSERT_NE(annotation, nullptr);
+    DomText* text = annotation->first_child->as_text();
+    ASSERT_NE(text, nullptr);
+    DocState* state = radiant_document_ensure_state(document, "ruby-hiding-query-test");
+    ASSERT_NE(state, nullptr);
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_range_set_start(range, text, 0, &exception));
+    ASSERT_TRUE(dom_range_set_end(range, text, 2, &exception));
+    unsigned rects = 0;
+    auto count_rect = [](float, float, float, float, void* pointer) {
+        (*(unsigned*)pointer)++;
+    };
+    dom_range_for_each_rect(range, &ui, count_rect, &rects);
+    EXPECT_EQ(rects, 0u);
+    lam::Temp<char> raw(dom_range_to_string_ex(range, DOM_STRINGIFY_RAW));
+    lam::Temp<char> rendered(dom_range_to_string_ex(range, DOM_STRINGIFY_RENDERED));
+    EXPECT_STREQ(raw.get(), "XX");
+    EXPECT_STREQ(rendered.get(), "");
+    EXPECT_TRUE(view_visibility_is_hidden(text));
+    EXPECT_EQ(css_prop_compute_cascaded_keyword(annotation, CSS_PROPERTY_VISIBILITY, CSS_VALUE_VISIBLE),
+        CSS_VALUE_VISIBLE);
+    struct TextPaintVisits { RenderContext context; DomText* hidden; unsigned visible; bool painted_hidden; } paint = {};
+    paint.context.ui_context = lam::up(&ui);
+    paint.hidden = text;
+    RenderBackend backend = {};
+    backend.ctx = lam::up(&paint.context);
+    backend.render_text = [](RenderContext* context, ViewText* text, float, float, FontBox*, Color) {
+        TextPaintVisits* visits = (TextPaintVisits*)context;
+        visits->visible++;
+        visits->painted_hidden |= text == visits->hidden;
+    };
+    RenderWalkState walk = {};
+    walk.ui_context = lam::up(&ui);
+    setup_font(&ui, &walk.font, ruby->font);
+    render_walk_view_one(&backend, &walk, ruby);
+    EXPECT_EQ(paint.visible, 3u);
+    EXPECT_FALSE(paint.painted_hidden);
+    for (const char* content : {"ab", "XX"}) {
+        ASSERT_TRUE(dom_text_set_content(text, content));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float width = strcmp(content, "XX") == 0 ? 70.0f : 110.0f;
+        EXPECT_FLOAT_EQ(ruby->width, width);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, width);
+        EXPECT_EQ(text->parent.get(), annotation);
+        rects = 0;
+        dom_range_for_each_rect(range, &ui, count_rect, &rects);
+        EXPECT_EQ(rects, strcmp(content, "XX") == 0 ? 0u : 1u);
+    }
+    for (const char* display : {"inline", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(ruby->width, strcmp(display, "inline") == 0 ? 140.0f : 70.0f);
+        EXPECT_EQ(annotation->ruby_annotation_hidden, strcmp(display, "ruby-text") == 0);
+    }
+    DomElement* collapsed = dom_find_element_by_id(document->root, "collapsed");
+    DomElement* collapsed_annotation = dom_find_element_by_id(document->root, "collapsed-annotation");
+    ASSERT_NE(collapsed, nullptr);
+    ASSERT_NE(collapsed_annotation, nullptr);
+    EXPECT_TRUE(view_visibility_is_hidden(collapsed_annotation->first_child));
+    for (const char* visibility : {"visible", "hidden", "collapse"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(collapsed_annotation, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(collapsed->width, strcmp(visibility, "collapse") == 0 ? 70.0f : 190.0f);
+        EXPECT_EQ(view_visibility_is_hidden(collapsed_annotation->first_child),
+            strcmp(visibility, "collapse") == 0);
+    }
+    dom_range_release(range);
 }
 
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {

@@ -17,6 +17,7 @@ struct LayoutViewSnapshot {
     float width;
     float height;
     bool layout_dirty;
+    bool ruby_annotation_hidden;
     float layout_height_contribution;
     bool is_element;
     float content_width;
@@ -47,6 +48,7 @@ static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snap
     snapshot->width = node->width;
     snapshot->height = node->height;
     snapshot->layout_dirty = node->layout_dirty;
+    snapshot->ruby_annotation_hidden = node->ruby_annotation_hidden;
     snapshot->layout_height_contribution = node->layout_height_contribution;
     snapshot->is_element = node->is_element();
 
@@ -95,6 +97,7 @@ static void layout_view_snapshot_restore(const LayoutViewSnapshot* snapshot) {
     node->width = snapshot->width;
     node->height = snapshot->height;
     node->layout_dirty = snapshot->layout_dirty;
+    node->ruby_annotation_hidden = snapshot->ruby_annotation_hidden;
     node->layout_height_contribution = snapshot->layout_height_contribution;
 
     if (snapshot->is_element && node->is_element()) {

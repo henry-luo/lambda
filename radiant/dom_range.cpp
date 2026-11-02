@@ -2195,6 +2195,7 @@ static CssEnum effective_user_select(const DomNode* n) {
 // True iff `t` should be excluded from a Selection.toString() result by CSS.
 static bool text_excluded_for_rendered_stringify(const DomText* t, DomStringifyMode mode) {
     if (!t || !t->parent || !t->parent->is_element()) return false;
+    if (view_ruby_annotation_is_hidden(t)) return true;
     const DomElement* parent = t->parent->as_element();
 
     // user-select: none on any ancestor (without a closer `text`/`all` override)

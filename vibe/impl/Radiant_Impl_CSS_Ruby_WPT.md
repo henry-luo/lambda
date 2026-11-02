@@ -345,8 +345,8 @@ Compute hiding on normalized paired boxes before measuring columns. Compare
 untransformed source text content, ignoring element boundaries; retain the
 normalization model's source links and pairing. Layout, intrinsic measurement,
 paint and text queries must agree on the annotation's absent participation.
-Do not overwrite authored style or source text. Keep any transient comparison
-data within the existing scratch scope (**D4.5.1v4**).
+Do not overwrite authored style or source text. Keep paired flags in the
+existing scratch scope and comparison buffers call-scoped (**D4.5.1v4**).
 
 Acceptance: an identical reading with a larger annotation font contributes no
 size; changing the reading to different text and back reverses that effect;
@@ -364,3 +364,92 @@ The bundled Chromium 152 probe does not hide identical annotations and does
 not remove a collapsed annotation's column contribution
 (`temp/ruby-hiding-browser-probe.json`). Preserve those browser references;
 native assertions follow the specification for this unsupported behavior.
+The separate plain-text probe also checks small/large annotation fonts and a
+Japanese kana reading (`temp/ruby-autohiding-plain-browser-probe.json`); none
+auto-hide in Chromium 152.
+
+The normalized model now computes hiding after pairing and before intrinsic
+measurement. It compares source text with the shared `dom_collect_text_content`
+helper, promoted from the DOM adapter into the source-DOM layer and reused by
+textarea initialization as well. Two reusable native buffers are released
+before normalization returns; no text or source node is copied into retained
+view state. Hidden boxes keep their unit indices but contribute zero width.
+
+Used layout suppresses the hidden source range's geometry and text rectangles.
+A selected-view `ruby_annotation_hidden` output distinguishes that result from
+authored visibility. The ordinary flow clears it when a node participates
+again; lifecycle reset, temporary measurements and retained flow replay all
+save/reset it with the corresponding view geometry. The common visibility
+classifier applies it to paint, focus and hit queries without allowing a
+descendant's authored `visibility: visible` to restore a hidden reading.
+Rendered Range text excludes it while raw Range text retains the source.
+These remain selected-view outputs under **D4.1.4v5 / D4.5.1v4**.
+
+`RubyHiddenAnnotationsRetainPairingWithoutContributingSize` fails before the
+implementation: the identical-reading case measures/uses 110px rather than
+70px, and a nested identical reading uses 80px rather than 40px. It now passes
+the nine geometry cases, source whitespace/transform comparisons, spanning and
+empty text, preserved later pairing, initial/retained layout, and text,
+display-role and visibility mutations. Range rectangles disappear/reappear,
+raw text remains `XX`, and the shared paint walk visits the three visible text
+nodes without visiting the hidden reading. All nine focused Ruby/whitespace
+checks pass (`temp/ruby-m4-native-4.log`); the dimension lint passes.
+
+The earlier atomic annotation line-metric fixture gave both its base and its
+reading empty text. That must auto-hide under §2.4, so its reading now contains
+distinct text to keep the independent metric control visible. A separate
+empty-content case explicitly requires auto-hiding and a 50px base-only line;
+the visible atomic controls still require a 100px line.
+The terminal-space fixture had the same issue with identical whitespace-only
+source text. Its distinct 5px reading plus 10px atomic box now requires a 15px
+annotation, excluding the trailing collapsible space. This preserves that
+independent whitespace assertion while the new empty-content test covers
+mandatory auto-hiding.
+
+The raw Chromium comparison currently has **30 full matches and 182
+mismatches**. Its only lost match is `ruby-text-collapse`: Chromium retains
+collapsed annotation sizing, contrary to §2.4. The native collapse/hidden/
+visible mutation control checks the required 70px/190px distinction. References
+and tolerances remain unchanged. Logs: `temp/ruby-m4-reproducer-before.log`,
+`temp/ruby-m4-final-wpt.log`, `temp/ruby-m4-wpt-delta-1.json`. The shared text
+content helper also serves the DOM adapter, requiring both Radiant and Lambda
+baseline qualification.
+
+The Radiant aggregate completes with **4973 full layout matches, 301 accepted
+partials and zero layout regressions**. It reports the known browser-global
+profile and the twelve slide teardown exits already reproduced on the base,
+plus the terminal-space control's old visible-annotation expectation. After
+correcting that fixture, the entire native text-query component passes
+**447/447** checks. The engine implementation is unchanged between that
+aggregate and the component replay. The updated focused run also verifies
+that a descendant's explicit `visibility: visible` cannot restore a collapsed
+annotation, while it still overrides ordinary inherited `visibility: hidden`.
+Logs: `temp/ruby-m4-radiant-baseline.log`,
+`temp/ruby-m4-radiant-output/`,
+`temp/ruby-m4-focused-final.log`,
+`temp/ruby-m4-text-query-qualified.log`. This does not claim the raw aggregate
+gate exited successfully. The pure hidden-ancestor query is inline in the view
+header so Range-only/native state-store consumers do not acquire a graphics
+pool linkage dependency.
+
+The required Lambda baseline completes **8501/8502** checks: all **2112/2112**
+input baseline checks and **6389/6390** runtime checks. Its sole failure is
+`proc_mir_mvp_roots`, whose final subnormal boxed-value comparison prints
+`false` instead of the golden `true`. Both the current host and saved unchanged
+`c5e40c521` host reproduce exactly that output, so the unrelated failure is
+retained rather than changing its golden or runtime during Ruby work.
+Logs: `temp/ruby-m4-lambda-baseline.log`,
+`temp/ruby-m4-lambda-output/`,
+`temp/ruby-m4-core-roots-head.txt`,
+`temp/ruby-m4-core-roots-current.txt`.
+
+The full input gate is rebuilt and completes **4594/4621** checks, with the
+exact same 27 wiki/prose/PDF failures as M3 and no new failure. All CSS runners
+pass, and no PDF/WebGL case is skipped. Logs and summary:
+`temp/build-ruby-m4-input-runners.log`,
+`temp/ruby-m4-input-qualified.log`,
+`temp/ruby-m4-input-output/test_summary.json`.
+The native host is restored after Lambda's debug-host gate; the final raw Ruby
+run remains 30/212. Dimension lint and diff checks pass. This closes default
+annotation hiding; merge behavior, whitespace boundaries between hidden and
+visible annotation sequences, and general wrapping remain later flow work.

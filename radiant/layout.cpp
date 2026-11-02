@@ -4794,6 +4794,7 @@ bool layout_details_needs_default_summary(ViewBlock* block) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
+    node->ruby_annotation_hidden = false;
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
         log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
                   MAX_LAYOUT_DEPTH, node->source_loc());
