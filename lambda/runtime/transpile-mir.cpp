@@ -3353,6 +3353,25 @@ static void mir_prune_jumps_to_next_label(MirTranspiler* mt) {
     }
 }
 
+// S12.1.2v3: return bridges may satisfy structural demands during lowering,
+// but no instruction between an unconditional exit and the next label executes.
+static void mir_prune_unreachable_bridges(MirTranspiler* mt) {
+    if (!mt || !mt->em.func || !mt->em.func_item) return;
+    bool unreachable = false;
+    MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, mt->em.func->insns);
+    while (insn) {
+        MIR_insn_t next = DLIST_NEXT(MIR_insn_t, insn);
+        if (insn->code == MIR_LABEL) {
+            unreachable = false;
+        } else if (unreachable && insn != mt->em.insert_after) {
+            MIR_remove_insn(mt->ctx, mt->em.func_item, insn);
+        } else if (insn->code == MIR_JMP || insn->code == MIR_RET) {
+            unreachable = true;
+        }
+        insn = next;
+    }
+}
+
 static void finalize_gc_root_publication(MirTranspiler* mt,
         const char* function_name) {
     mir_prune_jumps_to_next_label(mt);
@@ -3368,6 +3387,10 @@ static void finalize_gc_root_publication(MirTranspiler* mt,
     // Runs even when the frame took no roots at all: a function with zero root
     // slots is precisely where an unrooted temporary would go unnoticed.
     emit_root_witness_across_calls(mt, function_name);
+    // root and reload analyses consume their recorded instruction references
+    // before dead bridges are removed from the final executable body.
+    mir_prune_unreachable_bridges(mt);
+    mir_prune_jumps_to_next_label(mt);
 }
 
 static void note_gc_root_candidate(MirTranspiler* mt, MIR_reg_t value,
@@ -44378,7 +44401,7 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (lambda_type_is_union(mir_unwrap_decl_type(return_contract)) &&
                     (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
                      ret_tid == LMD_TYPE_INT64 || ret_tid == LMD_TYPE_UINT64)) {
-                // S7.4.2v3: an ordinary union preserves a conforming member.
+                // S7.4.2v3: current ordinary union admission preserves a conforming member.
                 // A native return must prove its actual kind, not merely that
                 // numeric admission could convert it to the declared arm.
                 int returns = 0;

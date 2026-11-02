@@ -876,7 +876,7 @@ still outstanding.
 S7.4.2v3 ordinary error unions reuse scalar identity-admission proofs on each
 outcome. This removes redundant checks without skipping numeric conversions,
 literal checks or container reification. S11.4.5 plain `float` return admission
-widens an integer through the numeric conversion helper. Ordinary union
+widens an integer through the numeric conversion helper. Current interpreter union
 admission preserves an already-conforming member; `float^` therefore cannot
 promise a physical float result from an integer or mixed-kind body. The native
 return proof now checks the actual normal kind across branches and explicit
@@ -916,3 +916,30 @@ validation outcomes before typed mutation. Assertions remain unchanged.
 Evidence: `temp/error-handling/m3-construction-joins-{diag,mir-final,gc-final}.json`
 and `m3-construction-owned-checks-{focused,tail}.log`. Caller migration and
 aggregate qualification remain open.
+
+
+### Completed-block bridges and migration cleanup (2026-11-03)
+
+S12.1.2v3 explicit completion produces no subsequent normal value. MIR lowering
+may leave bridge instructions to satisfy structural value demands, including
+an unreachable null after `return`. A final linear cleanup removes instructions
+between an unconditional jump/return and the next label. Root/reload analysis
+and witness emission consume their instruction records first; the cleanup does
+not invalidate those records while they are in use. The required-field guard
+again observes the actual field loads without the unrelated dead null.
+
+Diagnostic checks pass **247/247**, the focused matrix **128/128**, and full
+MIR GC **350/350**. Existing MIR emission checks pass **264/279**, unchanged.
+Evidence: `temp/error-handling/m3-unreachable-bridges-{diag,gc,mir-full}.json`.
+A full caller audit compiles **3,649/3,772** sources. Cleanup removes **67**
+redundant propagation operators and **40** proven-unnecessary staging bindings.
+The legacy rejected-error-flow fixture now retains errors in admitted `T^`
+bindings and reassignments, with matching interpreter/JIT output. Remaining
+caller fixes and aggregate qualification are still open.
+
+The error-union normal-admission interaction is an outstanding design question,
+not a settled exception to S7.4.2v3 or S11.4.5. Current probes expose integer
+kind changes through `float^` propagation and an incorrect reordered-record
+field read after propagation. The user has been asked whether error unions
+apply T's normal conversion/reification or preserve matching members. No
+runtime admission rule changes while that decision is pending.

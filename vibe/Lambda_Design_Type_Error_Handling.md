@@ -960,6 +960,7 @@ These topics await further decisions; they do not alter current rulings.
 | Topic | Question to settle |
 |---|---|
 | Other receiving positions | Whole-variable reassignment now shares initializer admission (TE-18.2). Should the inferred admission and warning policy extend to parameters, returns, and container stores under S7.7.3/S7.7.6 and S7.8.1? |
+| Error-union normal admission | S7.4.2v3 and S11.4.5 do not explicitly settle whether `T | error` applies T's normal conversion/reification or preserves a value already matching the union. Pending user ruling: `float^ = 7` and reordered `Record^` members expose tier differences. Apply the decision consistently to `T^` and its ordinary-union spelling. |
 | Validation expression | Choose the surface for value-or-error admission, including runtime-dependent target types; define how it composes with handlers and propagation without a new block-exit mechanism. |
 | Container mutation and loop bindings | Settle field/element-store failures and dedicated typed loop-variable admission; avoid silently treating a retained old element/field as a successful write. |
 | Validation diagnostics | Specify how rejection of an existing error retains or wraps its payload, and how the effective outcome type is displayed when the target is runtime-dependent. |
@@ -1053,12 +1054,13 @@ join applies the callable's return admission before opening a success lane;
 an ordinary error is never decoded as an integer or pointer. The full MIR GC
 corpus passes 350/350; aggregate and remaining caller/native-proof qualification
 remain open in the implementation record. Scalar error-union admission reuses
-identity proofs without dropping the native error channel. Ordinary unions
-retain an already-conforming numeric member, while plain numeric contracts
-perform their required conversion (S7.4.2v3/S11.4.5). Native return selection
+identity proofs without dropping the native error channel. Current interpreter union admission
+retains an already-conforming numeric member, while plain numeric contracts
+perform their required conversion. Whether an error union should apply T's
+normal admission is pending the ruling listed above (S7.4.2v3/S11.4.5). Native return selection
 therefore requires the actual normal carrier across all returns and branches;
 a success-type name alone is insufficient. The qualified MIR emission count
-is 263/279; remaining checks are recorded without relaxing expectations.
+is 264/279; remaining checks are recorded without relaxing expectations.
 S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
 float literal members and dynamic record fields: optimized admission retains
 the error at the receiving binding and continues. The constructor shares the
