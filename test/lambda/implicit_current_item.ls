@@ -37,11 +37,11 @@ match {size: 3} { case int: 0 default: size * 2 }
 // ============================================================
 
 '=2a=';
-lookup({total: 5, tax: 1}, false) ^ { 0 } ~ { total + tax }
+{ let __error_outcome_1 = lookup({total: 5, tax: 1}, false) ^ { ^ }; if (__error_outcome_1 is error) { 0 } else match __error_outcome_1 { case any { total + tax } } }
 
 '=2b=';
 // the error arm binds ^ and keeps the outer ~: fallback is the subject's
-{fallback: 7} that ((lookup({}, true) ^ { fallback } ~ { 0 }) == 7)
+{fallback: 7} that (({ let __error_outcome_2 = lookup({}, true) ^ { ^ }; if (__error_outcome_2 is error) { fallback } else match __error_outcome_2 { case any { 0 } } }) == 7)
 
 // ============================================================
 // Section 3: A constrained arm reads the candidate's fields
@@ -69,7 +69,7 @@ type Adult = {age: int} that (age >= 18);
 
 '=4b=';
 // the same for a handler's value arm
-{rec: {total: 7}, total: 1} that ((lookup(rec, false) ^ { 0 } ~ { total }) + total == 8)
+{rec: {total: 7}, total: 1} that (({ let __error_outcome_3 = lookup(rec, false) ^ { ^ }; if (__error_outcome_3 is error) { 0 } else match __error_outcome_3 { case any { total } } }) + total == 8)
 
 '=4c=';
 // and for a constrained arm: lim is the candidate's, then the arm's

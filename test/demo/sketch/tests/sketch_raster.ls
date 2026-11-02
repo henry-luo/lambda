@@ -48,18 +48,18 @@ m.encode(imported.doc).version==2 and m.encode(st.doc).version==1
 m.decode(parse(format(m.encode(imported.doc),'json'),'json')^)^==imported.doc
 m.decode(m.encode(st.doc))^==st.doc
 let wrong = {*:imported.doc,layers:[imported.doc.layers[0],{*:imported.doc.layers[1],objects:[{*:o,image_width:161}]}]}
-m.decode(m.encode(wrong)) ^ { true } ~ { false }
+match (m.decode(m.encode(wrong)) ^ { ^ }) { case error: true default: false }
 let inconsistent = {*:pasted.doc,layers:[*imported.doc.layers,{*:pasted.doc.layers[last],objects:[{*:m.chosen(pasted),image_height:101}]}]}
-m.decode(m.encode(inconsistent)) ^ { true } ~ { false }
+match (m.decode(m.encode(inconsistent)) ^ { ^ }) { case error: true default: false }
 let corrupt = {*:imported.doc,layers:[imported.doc.layers[0],{*:imported.doc.layers[1],objects:[{*:o,src:"data:image/png;base64,AAAA"}]}]}
-m.decode(m.encode(corrupt)) ^ { true } ~ { false }
-m.decode({format:"lambda-sketch",version:1,document:imported.doc}) ^ { true } ~ { false }
-raster.from_bytes(b'\x00010203') ^ { true } ~ { false }
+match (m.decode(m.encode(corrupt)) ^ { ^ }) { case error: true default: false }
+match (m.decode({format:"lambda-sketch",version:1,document:imported.doc}) ^ { ^ }) { case error: true default: false }
+match (raster.from_bytes(b'\x00010203') ^ { ^ }) { case error: true default: false }
 let animation = <image width:1,height:1,
     <frame duration:{ticks:1,rate:10},<stack <layer kind:'raster',image.blank({width:1,height:1,color:[1.0,0.0,0.0,1.0]})^>>>
     <frame duration:{ticks:1,rate:10},<stack <layer kind:'raster',image.blank({width:1,height:1,color:[0.0,0.0,1.0,1.0]})^>>>>
-raster.from_bytes(image.encode(animation,{format:'gif'})^) ^ { true } ~ { false }
-raster.from_uri("https://example.com/image.png") ^ { true } ~ { false }
+match (raster.from_bytes(image.encode(animation,{format:'gif'})^) ^ { ^ }) { case error: true default: false }
+match (raster.from_uri("https://example.com/image.png") ^ { ^ }) { case error: true default: false }
 let snapshot = {html:"<p>Image<img src=\"" ++ source.src ++ "\"></p>",text:"caption"}
 raster.clipboard_source(snapshot)==source.src
 raster.clipboard_source({html:"<img src='https://example.com/image.png'>",text:"caption",image:source.src})==source.src

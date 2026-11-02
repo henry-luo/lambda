@@ -23,12 +23,11 @@ pn update_property(owner,st,control,final=false) {
     let editing = if (base.editing != null) base.editing else {key:key,before:base.doc}
     var result = {*:base,editing:editing}
     let input_value = dom.get_state(control,"value")
-    let requested = (if (model.numeric_fields[key] != null) float(input_value) else if (key == "routing") symbol(input_value) else input_value) ^ {
+    let requested = { let __error_outcome_1 = (if (model.numeric_fields[key] != null) float(input_value) else if (key == "routing") symbol(input_value) else input_value) ^ { ^ }; if (__error_outcome_1 is error) {
         result = {*:result,error:"Draw: enter a valid number",status:"Enter a valid number."}
-    } ~ {
-        model.preview_properties(result,{[key]:~}) ^ { result = {*:result,error:^.message,status:^.message} }
-            ~ { result = {*:~,status:"Properties updated."} }
-    }
+    } else match __error_outcome_1 { case any {
+        { let __error_outcome_2 = model.preview_properties(result,{[key]:~}) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:result,error:__error_outcome_2.message,status:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = {*:~,status:"Properties updated."} } } }
+    } } }
     if (final or dom.matches(control,"select")) { result = finish_edit(result) }
     return result
 }
@@ -95,7 +94,7 @@ pn command(owner,st,action) any^ {
 pn dispatch(owner,st,action) {
     let base = finish_edit(st)
     var result = base
-    command(owner,base,action) ^ { result = {*:base,error:^.message,status:^.message} } ~ { result = ~ }
+    { let __error_outcome_3 = command(owner,base,action) ^ { ^ }; if (__error_outcome_3 is error) { result = {*:base,error:__error_outcome_3.message,status:__error_outcome_3.message} } else match __error_outcome_3 { case any { result = ~ } } }
     return if (starts_with(action,"arrow-open-")) result else {*:result,arrow_menu:""}
 }
 

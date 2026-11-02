@@ -4,7 +4,7 @@
 // Creates array of 10000 elements, fills with indices, sums all
 // Expected: sum(0..9999) = 49995000
 
-pn benchmark() {
+fn benchmark() {
     let size = 10000
     var arr = fill(size, 0)
 

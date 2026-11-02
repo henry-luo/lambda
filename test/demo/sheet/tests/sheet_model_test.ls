@@ -3,7 +3,7 @@ import f: ~~.mod_formula
 
 f.address(0,0)=="A1" and f.address(19,27)=="AB20"
 f.position("$AB$20")^=={row:19,col:27}
-f.position("A0") ^ {true} ~ {false}
+match (f.position("A0") ^ { ^ }) { case error: true default: false }
 let sample=m.initial()
 f.display(m.current(sample),4,5)==133000
 f.display(m.current(sample),10,5)==395900

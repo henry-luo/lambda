@@ -185,15 +185,15 @@ on input(evt) {
     let target = dom.get_attribute(evt.target,"id")
     let old_edit = session.editing
     var next = session
-    app.change(owner_of(evt),session,key,dom.get_state(evt.target,"value")) ^ {
+    { let __error_outcome_1 = app.change(owner_of(evt),session,key,dom.get_state(evt.target,"value")) ^ { ^ }; if (__error_outcome_1 is error) {
         // incomplete numeric/Mark drafts belong to the native field, while the deck stays valid.
-        next = {*:session,error:^.message,editing:if (old_edit.target == target) old_edit else {target:target,undo:null}}
-    } ~ {
+        next = {*:session,error:__error_outcome_1.message,editing:if (old_edit.target == target) old_edit else {target:target,undo:null}}
+    } else match __error_outcome_1 { case any {
         // a continuous field edit is one undo step, while the native control keeps its draft.
         let grouped = old_edit.target == target and old_edit.undo != null;
         next = {*:~,error:"",undo:if (grouped) old_edit.undo else ~.undo,
             editing:{target:target,undo:if (grouped) old_edit.undo else ~.undo}}
-    }
+    } } }
     session = app.publish(owner_of(evt),next)
     return 'handled'
 }
@@ -223,7 +223,7 @@ on change(evt) {
         let sample = dom.get_state(evt.target,"value")
         if (sample == "") { return 'pass' }
         var next = session
-        m.open_deck(session,input(url_resolve(BASE,sample),'slides')^,BASE) ^ { next = {*:session,error:^.message} } ~ { next = ~ }
+        { let __error_outcome_2 = m.open_deck(session,input(url_resolve(BASE,sample),'slides')^,BASE) ^ { ^ }; if (__error_outcome_2 is error) { next = {*:session,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { next = ~ } } }
         session = app.publish(owner,next,true,next.doc!=session.doc)
         app.value(owner,"samples","")
         return 'handled'
@@ -236,7 +236,7 @@ on change(evt) {
     let key = dom.get_attribute(evt.target,"data-property")
     if (key == null or not dom.matches(evt.target,"select,input[type=checkbox]")) { return 'pass' }
     var next = session
-    app.change(owner,session,key,dom.get_state(evt.target,if (dom.matches(evt.target,"input[type=checkbox]")) "checked" else "value")) ^ { next = {*:session,error:^.message} } ~ { next = ~ }
+    { let __error_outcome_3 = app.change(owner,session,key,dom.get_state(evt.target,if (dom.matches(evt.target,"input[type=checkbox]")) "checked" else "value")) ^ { ^ }; if (__error_outcome_3 is error) { next = {*:session,error:__error_outcome_3.message} } else match __error_outcome_3 { case any { next = ~ } } }
     session = app.publish(owner,{*:next,editing:null})
     return 'handled'
 }
@@ -345,7 +345,7 @@ on pointerup(evt) {
     dom.release_pointer_capture(app.node(owner,"stage"),evt.pointerId)
     var next = session
     let moved = drag.values!=null and any([for (key,value in drag.values) value!=drag.object[key]])
-    if (moved) m.properties(session,drag.values) ^ { next = {*:session,error:^.message} } ~ { next = ~ }
+    if (moved) { let __error_outcome_4 = m.properties(session,drag.values) ^ { ^ }; if (__error_outcome_4 is error) { next = {*:session,error:__error_outcome_4.message} } else match __error_outcome_4 { case any { next = ~ } } }
     session = if (not moved and drag.text_edit==true and inline_text.can_edit(m.chosen(next)))
         app.begin_inline(owner,next,{x:evt.clientX,y:evt.clientY}) else app.publish(owner,next,moved)
     return 'prevent-default'
@@ -542,8 +542,8 @@ on keydown(evt) {
     if (contains(["arrowleft","arrowright","arrowup","arrowdown"],key) and obj != null) {
         let step = if (evt.shiftKey) 10.0 else 1.0
         var next = session
-        m.properties(session,{x:obj.x+(if (key == "arrowleft") -step else if (key == "arrowright") step else 0.0),
-            y:obj.y+(if (key == "arrowup") -step else if (key == "arrowdown") step else 0.0)}) ^ { next = {*:session,error:^.message} } ~ { next = ~ }
+        { let __error_outcome_5 = m.properties(session,{x:obj.x+(if (key == "arrowleft") -step else if (key == "arrowright") step else 0.0),
+            y:obj.y+(if (key == "arrowup") -step else if (key == "arrowdown") step else 0.0)}) ^ { ^ }; if (__error_outcome_5 is error) { next = {*:session,error:__error_outcome_5.message} } else match __error_outcome_5 { case any { next = ~ } } }
         session = app.publish(owner,next)
         return 'prevent-default'
     }

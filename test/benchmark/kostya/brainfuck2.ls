@@ -7,7 +7,7 @@
 // The local buffers use packed ArrayNum storage; main records the jump table's
 // int[] contract before it crosses run_bf's checked parameter boundary.
 // Precompute matching brackets
-pn build_jump_table(prog: string, prog_len: int) int[] {
+fn build_jump_table(prog: string, prog_len: int) int[] {
     var jumps: int[] = fill(prog_len, 0)
     var stack = fill(256, 0)
     var sp: int = 0
@@ -31,7 +31,7 @@ pn build_jump_table(prog: string, prog_len: int) int[] {
     return jumps
 }
 
-pn run_bf(prog: string, prog_len: int, jumps: int[]) string {
+fn run_bf(prog: string, prog_len: int, jumps: int[]) string {
     var tape = fill(30000, 0)
     var dp: int = 0
     var ip: int = 0

@@ -33,7 +33,7 @@ check(configured.doc == st.doc and configured.hist == st.hist and not editor.dir
 check(configured.rulers_visible and configured.grid_visible and configured.snap_grid)
 check(editor.exec(configured,{id:"view.configure"})^ == configured)
 check(all([for (command in [{rulers:1},{grid:"yes"},{snap:0},{spacing:0},{spacing:65537},{spacing:1.5},{subdivisions:0},{subdivisions:17},{subdivisions:2.5},{unknown:true}])
-    editor.exec(st,{id:"view.configure",*:command}) ^ { true } ~ { false }]))
+    match (editor.exec(st,{id:"view.configure",*:command}) ^ { ^ }) { case error: true default: false }]))
 let lines = navigation.grid_lines(configured,bounds)
 check(len(lines) == 39 and all([for (line in lines) line.value%8 == 0]))
 check(all([for (line in lines where line.major) line.value%32 == 0]))

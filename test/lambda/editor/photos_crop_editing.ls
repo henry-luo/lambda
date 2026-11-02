@@ -37,10 +37,10 @@ check(crop.rectangle(st.doc,{x:100,y:100},start,"custom",[2,5])^ == {x:60,y:0,wi
 check(crop.rectangle(st.doc,start,{x:100,y:100},"custom",[0.5,0.2])^ == {x:0,y:0,width:100,height:40})
 check(crop.edit_rectangle(st.doc,{x:40,y:30,width:80,height:32},start,{x:20,y:20},"se","custom",[5,2])^ == {x:40,y:30,width:100,height:40})
 check(all([for (bad in [[],[1],[1,0],[-1,1],[true,1],[nan,1],[inf,1],[1e308,1e-308],"5:2"])
-    editor.exec(st,{id:"tool.configure",crop_ratio:bad}) ^ { true } ~ { false }]))
-check(crop.edit_rectangle(st.doc,before,start,end,"unknown") ^ { true } ~ { false })
-check(crop.edit_rectangle(st.doc,{*:before,x:-1},start,end,"se") ^ { true } ~ { false })
-check(crop.edit_rectangle(st.doc,before,start,{x:inf,y:1},"move") ^ { true } ~ { false })
+    match (editor.exec(st,{id:"tool.configure",crop_ratio:bad}) ^ { ^ }) { case error: true default: false }]))
+check(match (crop.edit_rectangle(st.doc,before,start,end,"unknown") ^ { ^ }) { case error: true default: false })
+check(match (crop.edit_rectangle(st.doc,{*:before,x:-1},start,end,"se") ^ { ^ }) { case error: true default: false })
+check(match (crop.edit_rectangle(st.doc,before,start,{x:inf,y:1},"move") ^ { ^ }) { case error: true default: false })
 let configured = editor.exec(st,{id:"tool.configure",tool:"crop",crop_aspect:"custom",crop_ratio:[5,2]})^
 check(configured.crop_ratio == [5,2] and configured.hist == st.hist and not editor.dirty(configured))
 fn pointer(x,y,handle=null,shift=false) => {point:{x:x,y:y},screen:{x:x,y:y},pointer:1,crop_handle:handle,shift:shift}

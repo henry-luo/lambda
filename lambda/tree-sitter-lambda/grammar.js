@@ -343,6 +343,9 @@ module.exports = grammar({
     // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
     $._member_dot,
     $._postfix_caret,
+    $._handler_caret,
+    $._handler_lbrace,
+    $._handler_rbrace,
     // A new statement starts here: emitted only before a start-only token,
     // which is disjoint from every guarded operator above.
     $._stmt_boundary,
@@ -561,6 +564,7 @@ module.exports = grammar({
       $.unary_expr,
       $.not_expr,
       $.binary_expr,
+      $.fallback_expr,
       $.raise_expr,
     ),
 
@@ -753,6 +757,7 @@ module.exports = grammar({
       $.unary_expr,
       $.not_expr,
       alias($.element_binary_expr, $.binary_expr),
+      alias($.element_fallback_expr, $.fallback_expr),
       alias($.element_if_expr, $.if_expr),
       alias($.element_for_expr, $.for_expr),
       $.while_expr,
@@ -782,6 +787,7 @@ module.exports = grammar({
       $.address_of_expr,
       $.not_expr,
       $.binary_expr,
+      $.fallback_expr,
       $.if_expr,
       $.while_expr,
       $.match_expr,
@@ -855,12 +861,26 @@ module.exports = grammar({
       field('propagate', alias($._postfix_caret, '^')),
     )),
 
+    // S7.6.2v5/S7.6.9: one recovery body, with an optional named selector.
+    // The scanner distinguishes a handler caret before a brace/name from
+    // propagation, so GLR cannot split the handler into unrelated statements.
     handler_expr: $ => prec.left(100, seq(
-      field('operand', $.primary_expr),
-      // The handler brace must open on the same line as its `^` (§3.6); a
-      // line-start `{` is always a new map or block expression.
-      alias($._postfix_caret, '^'), '{', field('body', $.content), '}',
-      optional(seq('~', '{', field('value', $.content), '}')),
+      field('operand', $.primary_expr), alias($._handler_caret, '^'),
+      optional(field('filter', $._handler_selector)),
+      alias($._handler_lbrace, '{'), field('body', $.content),
+      alias($._handler_rbrace, '}'),
+    )),
+    _handler_selector: $ => choice(
+      $.identifier, alias($._base_type_kw, $.base_type),
+      seq($.identifier, repeat1(seq('.', $.identifier))),
+    ),
+    fallback_expr: $ => prec.left('logical_or', seq(
+      field('operand', $._expr), 'or^', alias($._handler_lbrace, '{'),
+      field('body', $.content), alias($._handler_rbrace, '}'),
+    )),
+    element_fallback_expr: $ => prec.left('logical_or', seq(
+      field('operand', $._element_expr), 'or^', alias($._handler_lbrace, '{'),
+      field('body', $.content), alias($._handler_rbrace, '}'),
     )),
 
     index_expr: $ => prec.right(100, seq(

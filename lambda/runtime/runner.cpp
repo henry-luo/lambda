@@ -2661,7 +2661,7 @@ static bool repl_item_produces_no_item(AstNode* item) {
             ast_branch_kind(item) == AST_BRANCH_CONTROL) return true;
     return is_declaration_node(item) ||
         is_side_effect_stam(item->node_type) ||
-        is_procedural_only_stam(item->node_type) || ast_for_discards_result(item);
+        is_imperative_statement(item->node_type) || ast_for_discards_result(item);
 }
 
 static bool repl_fragment_declarations_only(AstNode* fragment) {

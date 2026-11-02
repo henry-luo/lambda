@@ -151,7 +151,7 @@ on photo_frame(evt) {
             session={*:session,export_job:0,export_request:null}
         }
     }
-    present.paint(evt.target,session) ^ { problem=^.message } ~ { session=~ }
+    { let __error_outcome_1 = present.paint(evt.target,session) ^ { ^ }; if (__error_outcome_1 is error) { problem=__error_outcome_1.message } else match __error_outcome_1 { case any { session=~ } } }
     if (not (problem is null)) {
         present.message(evt.target,problem,true)
         radiant.image_job(evt.target,{action:"cancel",channel:"preview"})
@@ -186,7 +186,7 @@ on click(evt) {
         session = replace_recipe(session,model.change(model.current(session.hist),key,model.recipe()[key]))
     } else if (action != null) {
         var problem = null
-        command(owner,session,dom.get_attribute(action,"data-action")) ^ { problem = ^.message } ~ { session = ~ }
+        { let __error_outcome_2 = command(owner,session,dom.get_attribute(action,"data-action")) ^ { ^ }; if (__error_outcome_2 is error) { problem = __error_outcome_2.message } else match __error_outcome_2 { case any { session = ~ } } }
         if (not (problem is null)) present.message(owner,problem,true)
     } else { return 'pass' }
     session = present.schedule(owner,session)

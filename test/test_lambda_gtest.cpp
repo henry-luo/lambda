@@ -506,6 +506,28 @@ struct TierParityFixture {
     const char* interp_unsupported = nullptr;
 };
 static const TierParityFixture kTune27TierParity[] = {
+    // S12.1.2v3/S9.1.4v2: pure local control and escaping snapshots agree.
+    {"test/lambda/fn_local_control.ls", "test/lambda/fn_local_control.txt"},
+    {"test/lambda/fn_local_return_paths.ls", "test/lambda/fn_local_return_paths.txt"},
+    {"test/lambda/fn_local_scalar_snapshot.ls", "test/lambda/fn_local_scalar_snapshot.txt"},
+    {"test/lambda/fn_local_values.ls", "test/lambda/fn_local_values.txt"},
+    {"test/lambda/fn_local_snapshots.ls", "test/lambda/fn_local_snapshots.txt"},
+    {"test/lambda/fn_local_named_snapshots.ls", "test/lambda/fn_local_named_snapshots.txt"},
+    {"test/lambda/fn_local_confined_capture.ls", "test/lambda/fn_local_confined_capture.txt"},
+    {"test/lambda/fn_local_capture_modes.ls", "test/lambda/fn_local_capture_modes.txt"},
+    {"test/lambda/fn_local_capture_flow.ls", "test/lambda/fn_local_capture_flow.txt"},
+    {"test/lambda/fn_local_decomposition.ls", "test/lambda/fn_local_decomposition.txt"},
+    {"test/lambda/fn_local_loop_handoff.ls", "test/lambda/fn_local_loop_handoff.txt"},
+    {"test/lambda/fn_local_literal_ownership.ls", "test/lambda/fn_local_literal_ownership.txt"},
+    {"test/mir/lambda/fn_local_return_lanes.ls", "test/mir/lambda/fn_local_return_lanes.txt"},
+    {"test/mir/lambda/fn_local_optimizations.ls", "test/mir/lambda/fn_local_optimizations.txt"},
+    {"test/lambda/fn_local_decomposition_capture.ls", "test/lambda/fn_local_decomposition_capture.txt"},
+    {"test/lambda/proc/fn_local_decomposition_snapshot.ls", "test/lambda/proc/fn_local_decomposition_snapshot.txt"},
+    {"test/lambda/fn_local_capture_roots.ls", "test/lambda/fn_local_capture_roots.txt"},
+    {"test/lambda/fn_local_capture_iterations.ls", "test/lambda/fn_local_capture_iterations.txt"},
+    {"test/lambda/fn_local_colour_poly.ls", "test/lambda/fn_local_colour_poly.txt"},
+    {"test/lambda/fn_local_roots.ls", "test/lambda/fn_local_roots.txt"},
+    {"test/lambda/proc/fn_local_proc_snapshot.ls", "test/lambda/proc/fn_local_proc_snapshot.txt"},
     // S12.1.1v3: procedural preparation and pure construction on every tier.
     {"test/lambda/proc/element_prepared_parts.ls",
      "test/lambda/proc/element_prepared_parts.txt"},
@@ -832,6 +854,43 @@ public:
     ScopedTestEnv(const ScopedTestEnv&) = delete;
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
+
+TEST(LambdaTierParityTests, FunctionLocalStateSurvivesCollectionAndPromotion) {
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    ScopedTestEnv function_threshold("LAMBDA_FUNC_JIT_THRESHOLD", "1");
+    ScopedTestEnv loop_threshold("LAMBDA_LOOP_JIT_THRESHOLD", "2");
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/fn_local_roots.ls",
+            "test/lambda/fn_local_roots.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_capture_modes.ls",
+            "test/lambda/fn_local_capture_modes.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_capture_flow.ls",
+            "test/lambda/fn_local_capture_flow.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_decomposition.ls",
+            "test/lambda/fn_local_decomposition.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_decomposition_capture.ls",
+            "test/lambda/fn_local_decomposition_capture.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/proc/fn_local_decomposition_snapshot.ls",
+            "test/lambda/proc/fn_local_decomposition_snapshot.txt", true, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_capture_roots.ls",
+            "test/lambda/fn_local_capture_roots.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/fn_local_capture_iterations.ls",
+            "test/lambda/fn_local_capture_iterations.txt", false, tier);
+    }
+}
+
+TEST(LambdaTierParityTests, FunctionLoopsHandOffWithoutLosingCollectedValues) {
+    ScopedTestEnv loop_threshold("LAMBDA_LOOP_JIT_THRESHOLD", "2");
+    ScopedTestEnv function_threshold("LAMBDA_FUNC_JIT_THRESHOLD", "1000000");
+    ScopedTestEnv synchronous("LAMBDA_SATELLITE_SYNC", "1");
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    test_lambda_script_against_file("test/lambda/fn_local_loop_handoff.ls",
+        "test/lambda/fn_local_loop_handoff.txt", false, "auto");
+}
 
 TEST(LambdaTierParityTests, DynamicCallScalarsSurviveMovingArgumentStorage) {
     ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "37");

@@ -1049,7 +1049,7 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstFuncNode*)node)->param); AST_VISIT(((AstFuncNode*)node)->body); break;
         case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
             AST_VISIT(((AstHandlerNode*)node)->operand); AST_VISIT(((AstHandlerNode*)node)->body);
-            AST_VISIT(((AstHandlerNode*)node)->value_body); break;
+            AST_VISIT(((AstHandlerNode*)node)->filter); break;
         case AST_NODE_START: AST_VISIT(((AstStartNode*)node)->call); break;
         case AST_NODE_METHOD:
             AST_VISIT(((AstMethodNode*)node)->key); AST_VISIT(((AstMethodNode*)node)->param);

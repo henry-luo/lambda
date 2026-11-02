@@ -5,7 +5,7 @@
 // Flat 4x4 matrix stored as 16-element array [row-major]
 // M[i][j] -> m[i*4+j]
 
-pn mat4_identity() {
+fn mat4_identity() {
     return [1.0,0.0,0.0,0.0,
             0.0,1.0,0.0,0.0,
             0.0,0.0,1.0,0.0,
@@ -103,13 +103,13 @@ pn rotate_z(m: float[], phi: float) {
     return mat4_mul(r, m)
 }
 
-pn calc_cross(v0: float[], v1: float[]) {
+fn calc_cross(v0: float[], v1: float[]) {
     return [v0[1] * v1[2] - v0[2] * v1[1],
             v0[2] * v1[0] - v0[0] * v1[2],
             v0[0] * v1[1] - v0[1] * v1[0]]
 }
 
-pn calc_normal(v0: float[], v1: float[], v2: float[]) {
+fn calc_normal(v0: float[], v1: float[], v2: float[]) {
     var a = [v0[0] - v1[0], v0[1] - v1[1], v0[2] - v1[2]]
     var b = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]]
     var cross = calc_cross(a, b)

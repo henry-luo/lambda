@@ -86,13 +86,13 @@ pn command(owner,st,action,shift=false) any^ {
 pn dispatch(owner,st,action,shift=false) {
     let base = m.finish_edit(st)
     var result = base
-    command(owner,base,action,shift) ^ { result = {*:base,error:^.message,status:^.message} } ~ { result = ~ }
+    { let __error_outcome_1 = command(owner,base,action,shift) ^ { ^ }; if (__error_outcome_1 is error) { result = {*:base,error:__error_outcome_1.message,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { result = ~ } } }
     return {*:result,context:null}
 }
 pn update_property(st,control,final=false) {
     let key = dom.get_attribute(control,"data-property")
     var result = st
-    m.property(st,key,dom.get_state(control,"value")) ^ { result = {*:st,error:^.message} } ~ { result = ~ }
+    { let __error_outcome_2 = m.property(st,key,dom.get_state(control,"value")) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:st,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     return if (final) m.finish_edit(result) else result
 }
 

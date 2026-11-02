@@ -1,0 +1,11 @@
+{
+  collected: [1, 4],
+  controlled: [1, 1],
+  replacement: 2,
+  no_result: null,
+  arrow: 5,
+  empty: {},
+  mapped: {
+    key: 7
+  }
+}

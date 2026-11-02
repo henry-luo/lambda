@@ -2,16 +2,18 @@
 // Sum of floats from 0.0 to 100000.0, repeated 1 time
 // Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)
 
-pn run(n) {
+fn run(n) {
+    var work_n = n
+
     var s = 0.0
-    while (n >= 0.0) {
-        s = s + n
-        n = n - 1.0
+    while (work_n >= 0.0) {
+        s = s + work_n
+        work_n = work_n - 1.0
     }
     return s
 }
 
-pn benchmark() {
+fn benchmark() {
     var result = run(100000.0)
     return result
 }

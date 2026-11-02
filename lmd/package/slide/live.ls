@@ -223,12 +223,10 @@ pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
 
 pn commit_event(owner, plan, before, event, options, token, painted, tools, voice = null) {
     if (token > 0) { dom.cancel_frame(owner, token) }
-    let result = player.reduce(plan, before, event) ^ { {ps: {*: before, paused: true}, problem: ^.message} } ~
-        { {ps: ~, problem: null} }
+    let result = { let __error_outcome_1 = player.reduce(plan, before, event) ^ { ^ }; if (__error_outcome_1 is error) { {ps: {*: before, paused: true}, problem: __error_outcome_1.message} } else match __error_outcome_1 { case any { {ps: ~, problem: null} } } }
     // procedure handlers publish through locals; their statement result is null (S7.6.7v4).
     var displayed = {problem: null, painted: null}
-    present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { displayed = {problem: ^.message, painted: null} } ~
-        { displayed = {problem: null, painted: ~} }
+    { let __error_outcome_2 = present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { ^ }; if (__error_outcome_2 is error) { displayed = {problem: __error_outcome_2.message, painted: null} } else match __error_outcome_2 { case any { displayed = {problem: null, painted: ~} } } }
     let audio = sound.sync(owner,voice,plan,result.ps,c.as_text(event.command) == "stop")
     let sound_state = if (audio.error != null) "error" else if (audio.token == null) "silent" else dom.audio_state(owner,audio.token)
     if (dom.get_attribute(owner,"data-slide-sound") != sound_state) dom.set_attribute(owner,"data-slide-sound",sound_state)
@@ -345,7 +343,7 @@ pn action(owner, plan, session, command, value, now_ms, options) {
     var clock_token = session.clock_token
     var event = {command: command, time_ms: now_ms}
     if (command == "go") {
-        let picked = presenter.destination(plan, value) ^ { {problem: ^.message, index: null} } ~ { {problem: null, index: ~} }
+        let picked = { let __error_outcome_3 = presenter.destination(plan, value) ^ { ^ }; if (__error_outcome_3 is error) { {problem: __error_outcome_3.message, index: null} } else match __error_outcome_3 { case any { {problem: null, index: ~} } } }
         if (not (picked.problem is null)) {
             set_text(dom.query_selector(owner, ".slide-status"), picked.problem)
             return session

@@ -483,7 +483,7 @@ pub pn open_finished(owner,st,detail) {
     // A cancelled or replaced request cannot overwrite the current deck.
     if (st.dialog!="open" or st.open_task==null or detail.seq!=st.open_seq) { return st }
     var next = {*:st,open_task:null}
-    imported(next,detail.reply) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_1 = imported(next,detail.reply) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,error:__error_outcome_1.message,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     let published = publish(owner,next,true,next.dialog=="")
     dom.focus_set(node(owner,if (next.dialog=="") "stage" else "file-path"),false)
     return published
@@ -513,7 +513,7 @@ pub pn open_slide_context(owner,st,index,point=null) {
 }
 pub pn dispatch(owner,st,action,base) {
     var result = {*:st,editing:null}
-    command(owner,result,action,base) ^ { result = {*:result,error:^.message,status:^.message} } ~ { result = ~ }
+    { let __error_outcome_2 = command(owner,result,action,base) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:result,error:__error_outcome_2.message,status:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     let published = publish(owner,if (starts_with(action,"menu-")) result else {*:result,menu:""},true,
         (action=="new" or (action=="file-confirm" and st.dialog=="open")) and result.doc!=st.doc);
     if (st.menu=="slide-context" and published.menu=="") restore_menu_focus(owner,published,st.menu)
@@ -593,14 +593,14 @@ pub pn finish_inline(owner,st,accept=true) {
             let failure = c.value(dom.get_attribute(host,"data-inline-error"),"");
             if (failure!="") { return {*:st,error:failure,status:failure} }
             if (dom.get_attribute(host,"data-inline-changed")=="true")
-                m.set_text(next,dom.get_attribute(host,"data-inline-mark"),true,insert_model.inline_source) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
+                { let __error_outcome_3 = m.set_text(next,dom.get_attribute(host,"data-inline-mark"),true,insert_model.inline_source) ^ { ^ }; if (__error_outcome_3 is error) { next = {*:next,error:__error_outcome_3.message} } else match __error_outcome_3 { case any { next = ~ } } }
         }
         // keep the retained editor owner alive when the procedural slide canvas is replaced.
         dom.dispatch(host,{type:"slide_inline_end",bubbles:false})
         dom.append_child(node(owner,"inline-parking"),host)
     }
     if (st.inline.kind!="rich") {
-        if (accept) m.set_text(next,field(owner,"canvas-text")) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
+        if (accept) { let __error_outcome_4 = m.set_text(next,field(owner,"canvas-text")) ^ { ^ }; if (__error_outcome_4 is error) { next = {*:next,error:__error_outcome_4.message} } else match __error_outcome_4 { case any { next = ~ } } }
         if (control!=null) dom.remove(control)
     }
     // unchanged markup is cached, so closing a draft must undo its temporary visibility change.

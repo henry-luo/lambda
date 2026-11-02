@@ -9,10 +9,17 @@ Coverage now extends to **28 rows**, including floating recursion, FFT,
 allocation-heavy search, dynamic arrays, character processing, numerical kernels
 and JSON generation. All 28 original goldens pass; allocation workloads also
 pass forced GC with freed-memory poisoning. The latest 30-run paired tuning
-campaign qualifies **15/28** against Full MIR, **11/28** against the C2MIR
-allowance, and **10/28** against both. Primes now passes both gates; several
-larger gaps have narrowed substantially. Sumfp is below the original clock's
-resolution and remains unqualified pending a longer timing experiment.
+campaign qualifies **25/28** against Full MIR, **16/28** against the C2MIR
+allowance, and **15/28** against both. The latest pass reuses typed-constructor
+admission, establishes fresh array storage witnesses, extends native copy loops
+to constant index offsets, and lowers guarded modular updates and power-of-two
+integer division/remainder (**S4.1.2**, **S9.1.2–S9.1.3**). Against the
+interleaved previous MVP, NQueens improves 33%, Brainfuck 20%, Queens 16% and
+Fannkuch 9%. NQueens still misses Full MIR; Beng Mandelbrot's confidence bound
+reaches parity, so its faster median does not qualify in this campaign. Sumfp
+remains below the original clock's resolution and unqualified pending longer
+matched timing. All 34 focused test groups pass; the required baseline is
+8,501/8,502 with the previously recorded AUTO-tier cold-float snapshot failure.
 The full 28-row performance milestone remains open.
 See the
 [implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
@@ -447,9 +454,11 @@ Detailed implementation progress and measurements belong in a later
 
 ## Appendix A. Proposed implementation seams
 
-The four scalar compiler files and selector below are implemented. Array lowering
-and new runtime helpers remain proposed; current behavior and limits are recorded
-in the [implementation note](impl/Lambda_Impl_MIR_MVP.md).
+The compiler interface, plans, scalar/array lowering and selector are implemented
+in the existing four MVP files. Separate array/runtime-helper files remain optional
+seams; justified helper changes currently reuse the shared runtime. Current
+behavior and limits are recorded in the
+[implementation note](impl/Lambda_Impl_MIR_MVP.md).
 
 ```text
 lambda/runtime/mvp/

@@ -1160,11 +1160,11 @@ on document_select(entry) {
   // Procedure handlers assign the captured publication in their success arm.
   var publication = null
   if (is_epub_document(entry["extension"])) {
-    selected_epub(entry) ^ {
-      publication = {error:^.message}
-    } ~ {
+    { let __error_outcome_1 = selected_epub(entry) ^ { ^ }; if (__error_outcome_1 is error) {
+      publication = {error:__error_outcome_1.message}
+    } else match __error_outcome_1 { case any {
       publication = ~
-    }
+    } } }
   }
   let file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"],

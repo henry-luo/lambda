@@ -25,7 +25,7 @@ m.points[last] == draw.resolve_endpoint(moved.doc,draw.lookup(moved.doc,"c").sha
 m.handles.to == m.points[last]
 draw.decode(parse(format(draw.encode(moved.doc)^,'json'),'json')^)^ == moved.doc
 let loop = draw.edge("loop",source,{kind:'boundary',vertex:"a",side:'north'})^;
-draw.exec(st,{kind:'insert',objects:[loop]}) ^ { true } ~ { false }
+match (draw.exec(st,{kind:'insert',objects:[loop]}) ^ { ^ }) { case error: true default: false }
 let loops = draw.exec(draw.open_session(draw.new_document({'allow-loops':true}))^,{kind:'insert',objects:[a,loop]})^
 let lr = draw.route(loops.doc,loop);
 len(lr.points)>=5 and lr.bounds.width>40 and lr.bounds.height>40
@@ -37,7 +37,7 @@ let copied = draw.exec(curved,{kind:'duplicate',ids:["a","b"]})^;
 len(draw.vertices(copied.doc))==4 and len(draw.edges(copied.doc))==6
 len(draw.validate(copied.doc)) == 0
 let malformed = draw.edge("bad",source,target,{segments:[[0,0,1]]})^;
-draw.exec(st,{kind:'insert',objects:[malformed]}) ^ { true } ~ { false }
+match (draw.exec(st,{kind:'insert',objects:[malformed]}) ^ { ^ }) { case error: true default: false }
 
 let reversed = draw.exec(curved,{kind:'reverse',id:"c"})^;
 draw.route(reversed.doc,draw.lookup(reversed.doc,"c").shape).points[0] == r.points[last]

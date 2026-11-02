@@ -6,6 +6,6 @@ pn overflow(n) int^ {
 
 pn main() {
     var value = null
-    overflow(0) ^ { value = ^ } ~ { value = ~ }
+    { let __error_outcome_1 = overflow(0) ^ { ^ }; if (__error_outcome_1 is error) { value = __error_outcome_1 } else match __error_outcome_1 { case any { value = ~ } } }
     print([value, value is error, value.code, value.message])
 }

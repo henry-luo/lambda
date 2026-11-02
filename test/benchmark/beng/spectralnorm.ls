@@ -6,14 +6,16 @@
 let N = 100
 
 // format a float to exactly 9 decimal places
-pn format9(x) {
+fn format9(x) {
+    var work_x = x
+
     var neg = ""
-    if (x < 0.0) {
+    if (work_x < 0.0) {
         neg = "-"
-        x = -x
+        work_x = -work_x
     }
-    var int_part = int(floor(x))
-    var frac = x - float(int_part)
+    var int_part = int(floor(work_x))
+    var frac = work_x - float(int_part)
     var scaled = frac * 1000000000.0 + 0.5
     var fl = floor(scaled)
     var frac_int = int(fl)
@@ -33,7 +35,7 @@ pn format9(x) {
     return result
 }
 
-pn eval_A(i, j) {
+fn eval_A(i, j) {
     return 1.0 / float((i + j) * (i + j + 1) / 2 + i + 1)
 }
 

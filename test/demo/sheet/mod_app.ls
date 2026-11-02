@@ -85,6 +85,6 @@ pub pn command(st,id,owner) map^ {
 // S7.6.7v4: a procedure handler discards its value; capture success in its value arm.
 pub pn dispatch(st,id,owner) {
     var result={*:st,error:null}
-    command(result,id,owner) ^ { result={*:result,status:string(^.message),error:string(^.message)} } ~ { result=~ }
+    { let __error_outcome_1 = command(result,id,owner) ^ { ^ }; if (__error_outcome_1 is error) { result={*:result,status:string(__error_outcome_1.message),error:string(__error_outcome_1.message)} } else match __error_outcome_1 { case any { result=~ } } }
     return result
 }

@@ -24,10 +24,10 @@ let checks={
     copied:len(stair.contacts)>0 and stair.platform=="stair-shape" and stair.platform_pose.quaternion==[0.0,0.0,0.0,1.0],
     mixed:len(mixed)==3 and mixed[0].grounded and mixed[1].body=="hero" and len(mixed[2])>=1,
     pure:untouched.ticks==0 and untouched.frames[0].bodies[1].position==[0.0,1.001,0.0],
-    bad_body:physics.move(scene,"absent",[1.0,0.0,0.0]) ^ { true } ~ { false },
-    bad_motion:physics.move(scene,"floor",[1.0,0.0,0.0]) ^ { true } ~ { false },
-    bad_up:physics.move(scene,"hero",[1.0,0.0,0.0],{up:[0.0,0.0,0.0]}) ^ { true } ~ { false },
-    budget:physics.move(scene,"hero",[1.0,0.0,0.0],{geometry_budget:1}) ^ { true } ~ { false },
-    bad_platform:physics.move(scene,"hero",[0.0,0.0,0.0],{platform:"floor-shape"}) ^ { true } ~ { false }
+    bad_body:match (physics.move(scene,"absent",[1.0,0.0,0.0]) ^ { ^ }) { case error: true default: false },
+    bad_motion:match (physics.move(scene,"floor",[1.0,0.0,0.0]) ^ { ^ }) { case error: true default: false },
+    bad_up:match (physics.move(scene,"hero",[1.0,0.0,0.0],{up:[0.0,0.0,0.0]}) ^ { ^ }) { case error: true default: false },
+    budget:match (physics.move(scene,"hero",[1.0,0.0,0.0],{geometry_budget:1}) ^ { ^ }) { case error: true default: false },
+    bad_platform:match (physics.move(scene,"hero",[0.0,0.0,0.0],{platform:"floor-shape"}) ^ { ^ }) { case error: true default: false }
 };
 [for (key,passed in checks where passed!=true) string(key)]

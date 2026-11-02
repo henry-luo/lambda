@@ -4,7 +4,7 @@
 // Classifies 100000 test points against a 20-vertex polygon
 // Expected: 50000 (test points are generated on a grid, half inside)
 
-pn pnpoly(xs, ys, n, testx, testy) {
+fn pnpoly(xs, ys, n, testx, testy) {
     var inside = false
     var j = n - 1
     var i = 0

@@ -43,7 +43,7 @@ pub pn ensure(viewport,base,id) {
     dom.set_attribute(slot,"data-model",id)
     var loaded = null
     var problem = ""
-    load(base,id) ^ { problem = "Could not load " ++ data.cell(id).name ++ ". " ++ ^.message } ~ { loaded = ~ }
+    { let __error_outcome_1 = load(base,id) ^ { ^ }; if (__error_outcome_1 is error) { problem = "Could not load " ++ data.cell(id).name ++ ". " ++ __error_outcome_1.message } else match __error_outcome_1 { case any { loaded = ~ } } }
     if (loaded != null) {
         scene_dom.mount(slot,loaded,if (id == "whiteBlood") 1024 else 2048)
     }

@@ -35,20 +35,20 @@ let checks={
     edge_quota:nav.path(graph,"start","goal",{max_edge_tests:0})^.edge_tests==0,
     no_mutation:route==nav.path(graph,"start","goal")^,
     errors:[
-      nav.validate(nav.graph([nav.node("a",[0,0]),nav.node("a",[1,0])],[])) ^ { true } ~ { false },
-      nav.validate(nav.graph([nav.node("a",[0,0])],[nav.edge("a","missing")])) ^ { true } ~ { false },
-      nav.validate(nav.graph(nodes,[nav.edge("start","goal",-1.0)])) ^ { true } ~ { false },
-      nav.validate(nav.graph(nodes,edges,{version:2})) ^ { true } ~ { false },
-      nav.validate(nav.grid([0,2])) ^ { true } ~ { false },
-      nav.validate(nav.grid([65536,2])) ^ { true } ~ { false },
-      nav.validate(nav.grid([2,2],{blocked:[[2,0]]})) ^ { true } ~ { false },
-      nav.validate(nav.grid([2,2],{costs:[1.0]})) ^ { true } ~ { false },
-      nav.validate(nav.grid([2,2],{cell_size:[0.0,1.0]})) ^ { true } ~ { false },
-      nav.path(graph,"start","missing") ^ { true } ~ { false },
-      nav.path(grid,[0,0],[5,0]) ^ { true } ~ { false },
-      nav.path(graph,"start","goal",{heuristic:7}) ^ { true } ~ { false },
-      nav.path(graph,"start","goal",{partial:1}) ^ { true } ~ { false },
-      nav.path(graph,"start","goal",{max_expansions:-1}) ^ { true } ~ { false }
+      match (nav.validate(nav.graph([nav.node("a",[0,0]),nav.node("a",[1,0])],[])) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.graph([nav.node("a",[0,0])],[nav.edge("a","missing")])) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.graph(nodes,[nav.edge("start","goal",-1.0)])) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.graph(nodes,edges,{version:2})) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.grid([0,2])) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.grid([65536,2])) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.grid([2,2],{blocked:[[2,0]]})) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.grid([2,2],{costs:[1.0]})) ^ { ^ }) { case error: true default: false },
+      match (nav.validate(nav.grid([2,2],{cell_size:[0.0,1.0]})) ^ { ^ }) { case error: true default: false },
+      match (nav.path(graph,"start","missing") ^ { ^ }) { case error: true default: false },
+      match (nav.path(grid,[0,0],[5,0]) ^ { ^ }) { case error: true default: false },
+      match (nav.path(graph,"start","goal",{heuristic:7}) ^ { ^ }) { case error: true default: false },
+      match (nav.path(graph,"start","goal",{partial:1}) ^ { ^ }) { case error: true default: false },
+      match (nav.path(graph,"start","goal",{max_expansions:-1}) ^ { ^ }) { case error: true default: false }
     ] == fill(14,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]

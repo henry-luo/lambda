@@ -43,7 +43,7 @@ pn unpack_view(record) {
         if (exists(snapshot ++ "/media")) store.copy_tree(snapshot ++ "/media", dir ++ "/media") ^ { null }
     }
     var markdown = null
-    if (exists(dir ++ "/article.md")) { input(dir ++ "/article.md", 'text') ^ { null } ~ { markdown = ~ } }
+    if (exists(dir ++ "/article.md")) { markdown = input(dir ++ "/article.md", 'text') ^ { null } }
     return {id: record.id, url: "file://" ++ dir, readable: exists(dir ++ "/readable.html"), markdown: markdown}
 }
 
@@ -58,7 +58,7 @@ pn submit(st, service) {
 // the search hits for a query, over the library's text.txt files (AR8)
 pn searched(st, library, query) {
     var hits = []
-    if (trim(query) != "" and library != null) { archive.search(library, query) ^ { hits = [] } ~ { hits = ~ } }
+    if (trim(query) != "" and library != null) { { let __error_outcome_2 = archive.search(library, query) ^ { ^ }; if (__error_outcome_2 is error) { hits = [] } else match __error_outcome_2 { case any { hits = ~ } } } }
     model.with_hits(st, query, hits)
 }
 
@@ -71,7 +71,7 @@ on load(evt) {
     if (library != null or st.loaded) { return 'pass' }
     var lib = null
     var failure = null
-    archive.library(ROOT, {config: CONFIG}) ^ { failure = ^ } ~ { lib = ~ }
+    { let __error_outcome_3 = archive.library(ROOT, {config: CONFIG}) ^ { ^ }; if (__error_outcome_3 is error) { failure = __error_outcome_3 } else match __error_outcome_3 { case any { lib = ~ } } }
     if (failure is error) {
         st = {*: model.loaded(st, []), note: "Cannot open the library: " ++ failure.message}
         return 'handled'

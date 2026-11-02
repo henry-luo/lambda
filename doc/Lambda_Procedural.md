@@ -1,6 +1,6 @@
 # Lambda Procedural Programming
 
-This document covers Lambda's procedural programming features — mutable state, imperative control flow, and side effects — all available exclusively inside `pn` (procedural) functions.
+This document covers local state and imperative control in `fn` and `pn`, plus effects available through `pn` (S12.1.2v3). An `fn` writes only its own local variables and cannot call a procedure.
 
 > **Related Documentation**:
 > - [Lambda Expressions and Statements](Lambda_Expr_Stam.md) — Expressions, control flow, operators
@@ -28,7 +28,7 @@ This document covers Lambda's procedural programming features — mutable state,
 
 ## Overview
 
-Lambda is a pure functional language by default. The `pn` keyword introduces **procedural functions** that allow mutable state and imperative control flow:
+Lambda functions may use local mutable working state and sequential control flow while retaining a pure call contract. The `pn` keyword additionally permits effects and calls to other procedures (S12.1.1v3–S12.1.2v3):
 
 ```lambda
 pn counter() {
@@ -40,16 +40,16 @@ pn counter() {
 }
 ```
 
-Procedural-only features:
+Local control and effect features:
 
-| Feature | Syntax | Description |
+| Feature | Syntax | Available in |
 |---------|--------|-------------|
-| Mutable variables | `var x = 0` | Declare mutable bindings |
-| Assignment | `x = value` | Reassign variables, array/map elements |
-| While loop | `while (cond) { ... }` | Conditional looping |
-| Break/Continue | `break`, `continue` | Loop control |
-| Early return | `return expr` | Exit function early |
-| File output | `output()` | Write data to files |
+| Mutable variables | `var x = 0` | `fn` and `pn` locals |
+| Assignment | `x = value` | `fn` and `pn` locals |
+| While loop | `while (cond) { ... }` | `fn` and `pn` |
+| Break/Continue | `break`, `continue` | `while` in either colour; existing procedural `for` |
+| Early return | `return expr` | `fn` and `pn` |
+| File output | `output()` | `pn` |
 
 ### Running Procedural Scripts
 
@@ -63,7 +63,7 @@ The `main()` procedure serves as the entry point for procedural scripts.
 
 ## Variable Declaration (`var`)
 
-`var` declares a mutable variable. Unlike `let` (which is immutable), `var` bindings can be reassigned.
+`var` declares a mutable local in an `fn` or `pn` activation. Unlike `let`, it can be reassigned. An `fn` cannot reassign an enclosing binding or accept an inout `var` parameter; module-level `var` remains forbidden (S9.1.3v2, S9.1.7v2).
 
 ```lambda error=E211
 pn example() {
@@ -73,6 +73,19 @@ pn example() {
     let y = 10
     y = 20          // ERROR E211: cannot reassign immutable binding
 }
+```
+
+Comma decomposition evaluates its source once and gives each `var` target its
+own mutable value binding (S12.2.1v3, S16.8.7). The corresponding `let` targets
+remain immutable. For example:
+
+```lambda
+fn combined() {
+    var left, right = [2, 3]
+    left = left + right
+    return left
+}
+combined()  // 5
 ```
 
 ### Type Widening
@@ -94,10 +107,10 @@ Variables with explicit type annotations (`var x: int`) enforce the declared typ
 
 ### No Global Variables
 
-`var` is only valid inside a `pn` body (or a `view` event handler). **Lambda has no global mutable state** — a `var` at script/module scope is a compile error, and this is true for `lambda script.ls`, `lambda run script.ls`, and the REPL alike. `pn main()` does not change it: `main` is an ordinary `pn` inside an otherwise functional module.
+`var` is valid inside `fn` and `pn` activations (or a `view` event handler). **Lambda has no global mutable state** — a `var` at script/module scope is a compile error, and this is true for `lambda script.ls`, `lambda run script.ls`, and the REPL alike. `pn main()` does not change it: `main` is an ordinary `pn` inside an otherwise functional module.
 
 ```lambda error=E224
-var count = 0        // ERROR: 'var' statement is only allowed in procedural functions (pn)
+var count = 0        // ERROR: module-level var is forbidden
 
 let base = 10        // OK — module bindings are immutable
 
@@ -124,7 +137,7 @@ This means every mutable root in a Lambda program is owned by a single activatio
 - **Worker state** lives in the `var`s of the `pn` that starts the worker. A spawned task cannot capture a mutable `var` (see [The Capture Rule](Lambda_Concurrency.md#the-capture-rule)) — copy it to a `let` or use message passing.
 - **Template state** lives in a `view`'s `state` entries, isolated per template instance.
 - **Object state** lives in instance fields, reachable only through a `var` receiver.
-- **`fn` functions** hold no mutable state at all.
+- **Function working state** lives in local `var`s for one `fn` call. Returned closures retain immutable snapshots; a confined nested `pn` may refer to the same local bindings (S9.1.4v2, S9.1.7v2).
 
 The practical consequence is that a module exposes no mutable cell, so importing it can never couple two parts of a program through hidden shared state.
 
@@ -176,7 +189,7 @@ Prefer to keep module-level bindings pure and take the effectful read inside `ma
 
 ## Assignment Statement
 
-Assignment (`=`) is only available inside `pn` functions. The left-hand side can be a variable, array element, map field, or element attribute/child.
+Assignment (`=`) is available for local variables inside `fn` and `pn` functions (S12.1.2v3). An `fn` cannot write an enclosing or caller-owned variable. The left-hand side can be a variable, array element, map field, or element attribute/child.
 
 ### Immutability Rules
 
@@ -413,7 +426,7 @@ While loops can be combined with `break` and `continue` for more complex control
 
 ## Break and Continue
 
-`break` exits the innermost loop immediately. `continue` skips to the next iteration.
+`break` exits the innermost eligible loop in the same callable; `continue` skips to its next iteration. A `while` is eligible in either colour, as are existing procedural `for` loops. Functional comprehension extensions remain SO51.
 
 ```lambda
 pn find_first_negative(nums: int[]) {
@@ -573,7 +586,7 @@ The `pn` keyword declares a **procedural function** — a function that can use 
 
 ### Declaration Syntax
 
-`pn` declares like `fn`, but takes only the braced block body, and enables procedural features inside it. A procedure without a name is the procedure arrow `pn (x) => { ... }` (see [Anonymous Procedures](Lambda_Func.md#anonymous-procedures)).
+`pn` declares like `fn`, but takes only the braced block body, and permits effectful calls inside it. A procedure without a name is the procedure arrow `pn (x) => { ... }` (see [Anonymous Procedures](Lambda_Func.md#anonymous-procedures)).
 
 ```lambda
 // Block body
@@ -664,7 +677,7 @@ pn main() {
 }
 ```
 
-> **Note**: `fn` functions cannot use procedural features (`var`, assignment, `while`, `return`, file output). Attempting to do so produces a compile error.
+> **Local control:** `fn` admits local `var`, assignment, `while`, `break`, `continue` and `return`. It still cannot call `pn`, including file output or a procedure nested in that `fn` (S12.1.1v3–S12.1.2v3).
 
 ### Procedural Methods in Object Types
 
@@ -744,30 +757,29 @@ The full model — messages, `select`, timeouts, cancellation, the capture rule 
 
 | Feature | `fn` (Functional) | `pn` (Procedural) |
 |---------|-------------------|--------------------|
-| Mutable variables | No | Yes (`var`) |
-| Assignment | No | Yes (`x = value`) |
-| While loops | No | Yes |
-| Break/Continue | No | Yes |
-| Early return | No | Yes (`return`) |
+| Mutable variables | Local `var` | Yes (`var`) |
+| Assignment | Own locals only | Yes (`x = value`) |
+| While loops | Yes | Yes |
+| Break/Continue | Within `while` | Within eligible loops |
+| Early return | Yes (`return`) | Yes (`return`) |
 | File output | No | Yes (`output()`) |
 | Side effects | No | Allowed |
-| Expression body | Yes | Yes |
+| Expression body | Yes | Named procedures use block bodies |
 | Block body | Yes | Yes |
 | Closures | Yes | Yes |
 | Cooperative suspension | No | Yes |
 | `start` / task messaging | No | Yes |
 
 **When to use `pn`:**
-- Algorithms that need mutable state (counters, accumulators)
 - I/O operations (file writing, console output)
-- Imperative algorithms with early exit
 - Script entry points (`main()`)
 
 **When to use `fn`:**
 - Pure transformations and computations
 - Data processing pipelines
 - Functions that should be composable and testable
-- The default choice — use `fn` unless you need mutability
+- Algorithms with local counters, accumulators or early exits
+- The default choice — use `pn` when effects are needed
 
 ---
 

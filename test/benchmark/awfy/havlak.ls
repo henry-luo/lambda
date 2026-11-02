@@ -24,7 +24,7 @@ pn null32() {
     return a
 }
 
-pn int32() {
+fn int32() {
     var a = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
     return a
 }
@@ -38,7 +38,7 @@ pn arr_new() {
     return a
 }
 
-pn arr_get(a, idx) {
+fn arr_get(a, idx) {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -82,7 +82,7 @@ pn iarr_new() {
     return a
 }
 
-pn iarr_get(a, idx) {
+fn iarr_get(a, idx) {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -124,7 +124,7 @@ pn iarr_set(var a, idx, val) {
 // Big vector (bvec): sequential append/remove, 8192 cap
 // Uses 3-level arr internally plus first/sz tracking
 // =====================================================
-pn bvec_new() {
+fn bvec_new() {
     var v = { data: [], first: 0 }
     return v
 }
@@ -134,16 +134,16 @@ pn bvec_add(var v, item) {
     return 0
 }
 
-pn bvec_raw_get(v, idx) {
+fn bvec_raw_get(v, idx) {
     return (v.data)[idx]
 }
 
-pn bvec_at(v, idx) {
+fn bvec_at(v, idx) {
     var f = (v.first)
     return (v.data)[f + idx]
 }
 
-pn bvec_size(v) {
+fn bvec_size(v) {
     return len(v.data) - (v.first)
 }
 
@@ -155,7 +155,7 @@ pn bvec_remove_first(var v) {
     return r
 }
 
-pn bvec_is_empty(v) {
+fn bvec_is_empty(v) {
     if ((v.first) >= len(v.data)) { return 1 }
     return 0
 }
@@ -177,7 +177,7 @@ pn bvec_has_dfn(v, id) {
 // =====================================================
 // Small vector (vec): 16x16=256, for per-node small lists
 // =====================================================
-pn vec_new() {
+fn vec_new() {
     return []
 }
 
@@ -186,18 +186,18 @@ pn vec_add(var v, item) {
     return 0
 }
 
-pn vec_at(v, idx) {
+fn vec_at(v, idx) {
     return v[idx]
 }
 
-pn vec_size(v) {
+fn vec_size(v) {
     return len(v)
 }
 
 // =====================================================
 // Integer Set (iset): for nonBackPreds - set of ints
 // =====================================================
-pn iset_new() {
+fn iset_new() {
     var s = { items: vec_new() }
     return s
 }
@@ -225,7 +225,7 @@ pn iset_size(s) {
 // =====================================================
 // BasicBlock
 // =====================================================
-pn bb_new(name) {
+fn bb_new(name) {
     var ie = vec_new()
     var oe = vec_new()
     var b = { bid: 0, inEdges: null, outEdges: null }
@@ -290,7 +290,7 @@ pn cfg_add_edge(var cfg, fromName, toName) {
     return 0
 }
 
-pn cfg_get_num_nodes(cfg) {
+fn cfg_get_num_nodes(cfg) {
     var r = (cfg.numNodes)
     return r
 }
@@ -358,7 +358,7 @@ pn lsg_create_new_loop(var lsg, bb, isReducible) {
     return loop
 }
 
-pn lsg_get_num_loops(lsg) {
+fn lsg_get_num_loops(lsg) {
     var r = (lsg.loopCounter)
     return r
 }
@@ -415,7 +415,7 @@ pn lsg_calc_nesting(var lsg) {
 // =====================================================
 // UnionFindNode
 // =====================================================
-pn uf_new() {
+fn uf_new() {
     var n = { dfn: 0, parentDfn: 0, bb: null, loop: null }
     return n
 }
@@ -428,26 +428,28 @@ pn uf_init(var node, bb, dfsNum) {
     return 0
 }
 
-pn uf_find_set(nodes, nodeId) {
-    var node = arr_get(nodes, nodeId)
+fn uf_find_set(nodes, nodeId) {
+    var work_nodeId = nodeId
+
+    var node = arr_get(nodes, work_nodeId)
     var pdfn = (node.parentDfn)
-    if (pdfn == nodeId) { return nodeId }
+    if (pdfn == work_nodeId) { return work_nodeId }
     var curp = pdfn
-    while (nodeId != curp) {
+    while (work_nodeId != curp) {
         var pp = curp
         var gpNode = arr_get(nodes, pp)
         var gpp = (gpNode.parentDfn)
-        nodeId = pp
+        work_nodeId = pp
         curp = gpp
     }
-    return nodeId
+    return work_nodeId
 }
 
 // =====================================================
 // Havlak Loop Finder
 // =====================================================
 
-pn hlf_is_ancestor(hlf_last, w, v) {
+fn hlf_is_ancestor(hlf_last, w, v) {
     if (w > v) { return 0 }
     var lw = iarr_get(hlf_last, w)
     if (v > lw) { return 0 }

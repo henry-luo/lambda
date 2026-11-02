@@ -11,9 +11,9 @@ pn main() {
         index = index + 1
     }
     var sent = null
-    send(handle, 1024) ^ { sent = ^ } ~ { sent = ~ }
+    { let __error_outcome_1 = send(handle, 1024) ^ { ^ }; if (__error_outcome_1 is error) { sent = __error_outcome_1 } else match __error_outcome_1 { case any { sent = ~ } } }
     print(sent is error)
     cancel(handle)
     var done = null
-    wait(handle) ^ { done = ^ } ~ { done = ~ }
+    { let __error_outcome_2 = wait(handle) ^ { ^ }; if (__error_outcome_2 is error) { done = __error_outcome_2 } else match __error_outcome_2 { case any { done = ~ } } }
 }

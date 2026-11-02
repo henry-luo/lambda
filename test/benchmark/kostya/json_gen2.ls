@@ -4,33 +4,33 @@
 // Builds a JSON-like structure with 1000 objects, converts to string
 // Measures map creation and string concatenation speed
 
-pn json_escape(s: string) string {
+fn json_escape(s: string) string {
     // Simple escape for JSON strings (just handle double quotes)
     return s
 }
 
-pn json_str(s: string) string {
+fn json_str(s: string) string {
     return "\"" ++ json_escape(s) ++ "\""
 }
 
-pn json_num(n: int) string {
+fn json_num(n: int) string {
     return string(n)
 }
 
-pn json_obj_2(k1: string, v1: string, k2: string, v2: string) string {
+fn json_obj_2(k1: string, v1: string, k2: string, v2: string) string {
     return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "}"
 }
 
-pn json_obj_4(k1: string, v1: string, k2: string, v2: string,
+fn json_obj_4(k1: string, v1: string, k2: string, v2: string,
               k3: string, v3: string, k4: string, v4: string) string {
     return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "," ++ json_str(k3) ++ ":" ++ v3 ++ "," ++ json_str(k4) ++ ":" ++ v4 ++ "}"
 }
 
-pn next_rand(seed: int) int {
+fn next_rand(seed: int) int {
     return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
-pn benchmark() int {
+fn benchmark() int {
     let num_objects: int = 1000
     var seed: int = 42
     var json: string = "["

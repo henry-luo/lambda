@@ -479,6 +479,9 @@ run A "keyword method names"               'type T { a: int, fn if() => 1, fn st
 run A "keyword module segment"             'import .lib.string\n1\n'
 run A "base-type loop index type"          'let a = [1]\nlet z = for (i: int, x in a) x\nz\n'
 
+# S12.1.2v3: callable block bodies admit local imperative syntax.
+run A "fn local while and return" 'fn f(n) { var x = 0; while (x < n) { x = x + 1 }; return x }\nf(3)\n'
+run A "pure arrow local control" 'let f = (n) => { var x = n; while (x < 3) { x = x + 1 }; return x }; f(0)\n'
 echo "--- S16.6.7v2 the arrow is the one anonymous function ---"
 run A "procedure arrow"                     'pn main() {\nlet p = pn (x) => { print(x) }\np(1)\n}\n'
 run A "procedure arrow at top level"        'let p = pn (x) => { x }\np\n'
@@ -541,4 +544,19 @@ run A 'decimal literal type' 'type T = 1.5m\n'
 run A 'datetime literal type' "type T = t'2025-01-01'\n"
 run A 'binding error union suffix' 'let v: int^ = 1\n'
 run A 'parameter error union suffix' 'fn f(x: int^) int | error => x\n'
+
+# S7.6.2v5/S7.6.8/S7.6.9: single-body handlers and combined fallback.
+run A "combined fallback" 'null or^ { 1 }\n' 'fallback_expr'
+run A "fallback line continuation" 'null\nor^ { 1 }\n' 'fallback_expr'
+run R "fallback brace next line" 'null or^\n{ 1 }\n'
+run A "filtered handler chain" '1 ^error { 2 } ^error { 3 }\n' 'handler_expr'
+run R "filter brace next line" '1 ^error\n{ 2 }\n'
+run R "filter selector next line" '1 ^\nerror { 2 }\n'
+run R "retired success arm" '1 ^ { 2 } ~ { 3 }\n'
+run R "retired multiline success arm" '1 ^ { 2 }\n~ { 3 }\n'
+run A "initializer keeps handler tree" 'let x = 1 ^ { 2 }; x\n' 'handler_expr'
+
+run A "qualified error filter" 'import types: .mod_handler_error_types\n1 ^types.Failure { 2 }\n'
+run R "qualified filter crosses line" '1 ^types.\nFailure { 2 }\n'
+run A "propagation divided by block" 'fn f() int^ => 4\nf()^ / { 2 }\n'
 echo "pass=$pass fail=$fail"

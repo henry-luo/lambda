@@ -62,8 +62,8 @@ authoring.parameters({*:equation.defaults,size:"28"}).size==28
 authoring.active({editor:inserted,equation_edit:{path:image.selected(inserted).path,revision:inserted.model_revision}})
 not authoring.active({editor:inserted,equation_edit:{path:[99],revision:inserted.model_revision}})
 
-model.execute(base,"equation.format",{source:"x"}) ^ {true} ~ {false}
+match (model.execute(base,"equation.format",{source:"x"}) ^ { ^ }) { case error: true default: false }
 all([for (bad in [{source:""},{source:"\\notSupported{x}"},{size:0},{size:73},{color:"red"},{justify:"justify"},{linear:"true"},{display:"true"},{number:"a\nb"}])
-    model.execute(inserted,"equation.format",bad) ^ {true} ~ {false}])
+    match (model.execute(inserted,"equation.format",bad) ^ { ^ }) { case error: true default: false }])
 equation.settings(node_attrs('img',[{name:'data-word-equation',value:"[]"}],[]))==null
 model.execute(model.execute(labeled,"equation.format",{})^,"edit.undo")^.doc==inserted.doc

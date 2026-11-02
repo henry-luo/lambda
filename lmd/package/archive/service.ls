@@ -19,7 +19,7 @@ pn worker(service, notify) {
         let h = if (m.op == 'refresh') start(jobs.refresh, [m.lib, m.id, m.formats])
             else start(jobs.run, [m.lib, m.url, {*: (m.options or {}), tag: m.tag, progress: notify}])
         send(service, {op: 'running', tag: m.tag, handle: h})^
-        let outcome: map | error = wait(h)
+        let outcome: map^ = wait(h)
         let failed = outcome is error
         send(service, {op: 'finished', worker: self(), tag: m.tag, url: m.url, snapshot: if (failed) null else outcome,
             message: if (failed) (if (outcome.code == 319) "cancelled" else outcome.message) else null})^

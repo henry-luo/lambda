@@ -86,7 +86,7 @@ pub pn run(root,req) {
     var i = 0
     while (i<len(req.urls) and (i==0 or failure is error or not settled(req,reply))) {
         failure = null
-        io.fetch(req.urls[i],{timeout:15,headers:{Accept:"application/json"}}) ^ { failure = ^ } ~ { reply = ~ }
+        { let __error_outcome_1 = io.fetch(req.urls[i],{timeout:15,headers:{Accept:"application/json"}}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { reply = ~ } } }
         i = i+1
     }
     let detail = {*:if (failure is error) {error:"Could not reach the service: " ++ failure.message} else outcome(req,reply),seq:req.seq}

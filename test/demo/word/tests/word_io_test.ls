@@ -16,9 +16,9 @@ files.restore(parse(format(files.archive(colored.doc,"Colors"),'json'),'json')^)
 contains(files.html_document(colored.doc,"<Title>")^,"&lt;Title&gt;")
 contains(files.html_document(colored.doc,"Title")^,"&amp; &lt;world&gt;")
 contains(files.html_document(colored.doc,"Title")^,"color: #b43d47")
-files.restore({format:"lambda-word",version:2,title:"Bad",document:{}}) ^ { true } ~ { false }
-files.restore({format:"lambda-word",version:1,title:"Bad",document:{kind:"node",tag:"script",attrs:[],content:[]}}) ^ { true } ~ { false }
-files.restore({format:"lambda-word",version:1,title:"Empty",document:{kind:"node",tag:"doc",attrs:[],content:[]}}) ^ { true } ~ { false }
+match (files.restore({format:"lambda-word",version:2,title:"Bad",document:{}}) ^ { ^ }) { case error: true default: false }
+match (files.restore({format:"lambda-word",version:1,title:"Bad",document:{kind:"node",tag:"script",attrs:[],content:[]}}) ^ { ^ }) { case error: true default: false }
+match (files.restore({format:"lambda-word",version:1,title:"Empty",document:{kind:"node",tag:"doc",attrs:[],content:[]}}) ^ { ^ }) { case error: true default: false }
 let imported = [for (ext in ["html","md","txt"]) files.read_document("test/demo/word/tests/import." ++ ext)^]
 all([for (opened in imported) contains(model.plain_text(opened.editor.doc),"Imported heading\nA ")])
 all([for (opened in imported) opened.session.path == ""])
