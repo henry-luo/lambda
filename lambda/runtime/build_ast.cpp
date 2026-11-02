@@ -1897,6 +1897,13 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     }
     if (source->type_id == LMD_TYPE_MAP && target->type_id == LMD_TYPE_MAP &&
             source != target && target != &TYPE_MAP) {
+        // S7.7.2v2: a complete field-domain inclusion proves admission, while
+        // numeric narrowing and open/spread shapes still need the runtime check.
+        if (lambda_type_is_concrete_attr_shape(source) &&
+                !((TypeMap*)source)->has_spread && !((TypeMap*)source)->js_meta &&
+                lambda_type_contract_is_subtype(source, target)) {
+            return STATIC_BOUNDARY_PROVEN;
+        }
         return STATIC_BOUNDARY_DEFERRED;
     }
     // S11.1.5 / S12.1.4v2(3): `function` admits both colours; a known colour

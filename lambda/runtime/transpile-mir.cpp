@@ -25910,7 +25910,9 @@ static Type* mir_proven_map_field_contract(MirTranspiler* mt, AstNode* value) {
 static Type* mir_nonnull_contract_base(Type* type);
 
 static bool mir_map_field_contract_compatible(Type* proven, Type* expected) {
-    if (lambda_type_contract_semantically_compatible(proven, expected)) return true;
+    // S7.7.2v2: numeric compatibility alone does not prove narrowing admission.
+    if (lambda_static_boundary_relation(proven, expected, false) == STATIC_BOUNDARY_PROVEN)
+        return true;
     Type* base = mir_nonnull_contract_base(expected);
     if (!base) {
         return false;
@@ -26169,8 +26171,8 @@ static bool mir_map_literal_matches_contract(AstMapNode* map_node,
     if (!map_node || map_node->has_computed_key || !map_node->type || !expected) return false;
     if (!ast_map_literal_keys_follow_contract(map_node, expected)) return false;
     TypeMap* candidate = (TypeMap*)map_node->type;
-    MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
-    if (!mt && !require_identity && relation != MAP_CONTRACT_INCOMPATIBLE) {
+    if (!mt && !require_identity && lambda_static_boundary_relation(
+            (Type*)candidate, (Type*)expected, false) == STATIC_BOUNDARY_PROVEN) {
         return true;
     }
     if (candidate->length != expected->length) return false;
