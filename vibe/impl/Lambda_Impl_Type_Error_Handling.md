@@ -938,9 +938,10 @@ bindings and reassignments, with matching interpreter/JIT output. Remaining
 caller fixes and aggregate qualification are still open.
 
 The error-union normal-admission interaction is an outstanding design question,
-not a settled exception to S7.4.2v3 or S11.4.5. Current probes expose integer
+not a settled exception to S7.4.2v3 or S11.4.5. Probes exposed integer
 kind changes through `float^` propagation and an incorrect reordered-record
-field read after propagation. The user has been asked whether error unions
+field read after propagation; the native representation fixes below now preserve
+both successful values. The user has been asked whether error unions
 apply T's normal conversion/reification or preserve matching members. No
 runtime admission rule changes while that decision is pending.
 
@@ -964,3 +965,26 @@ propagation. Diagnostic checks pass **247/247**, the focused tier/GC matrix
 `temp/error-handling/m3-empty-array-proof-{diag,gc,mir}.json` and
 `m3-empty-array-proof-focused.log`. Caller migration remains in progress;
 the incremental inventory compiles **3,741/3,772** and needs a final full audit.
+
+
+### Propagation representation and absent return checks (2026-11-03)
+
+S7.6.3v3 propagation removes an error outcome without admitting the successful
+value again. MIR keeps a propagated Item's actual numeric kind and derives
+record-layout/array-lane proofs from the complete enforced producer contract,
+not its error-stripped semantic type. An immutable array without a live physical
+element witness uses the checked reader. Predicate-only values retain their
+boolean proof through propagation, without general truthiness calls. These
+changes preserve current union admission; they do not decide the pending
+normal-conversion/reification policy.
+
+D2.8.3/S11.4.1v5 strict return admission also rejects absent array reads. The
+origination solver previously mistook a nullable native lane for proof that
+this admission could not fail. It now distinguishes the physical carrier from
+non-null membership, reserving the return error channel instead of publishing
+an error Item through a numeric lane. The return-outcome fixture covers missing
+integer, float and boolean elements as well as preserved scalar, record and
+array members through propagation. The focused tier/GC matrix passes
+**128/128**. Aggregate qualification is in progress; its native diagnostic
+runner passes **321/321**, full MIR GC **350/350**, and MIR emission remains
+**264/279**, with all assertions unchanged.

@@ -34,7 +34,18 @@ pn empty_vector() int[] { return [] }
 fn empty_flags() bool[] => []
 pn fill_vector(var values: int[]) any { push(values, 3) }
 pn fill_flags(var values: bool[]) any { push(values, true) }
+type Ordered = {a: int, b: int}
+fn preserved_fill(n: int) float[]^ => fill(n, 1)
+pn checked_int_read(values: int[], index: int) int { return values[index] }
+pn checked_float_read(values: float[], index: int) float { return values[index] }
+pn checked_bool_read(values: bool[], index: int) bool { return values[index] }
 pn main() {
+    let absent_int = checked_int_read([7], 5)
+    let absent_float = checked_float_read([7.5], 5)
+    let absent_bool = checked_bool_read([true], 5)
+    let scalar_member: float^ = 7
+    let record_member: Ordered^ = {b: 20, a: 10}
+    let filled_members = preserved_fill(2)^
     var vector = empty_vector()
     var flags = empty_flags()
     fill_vector(vector)^
@@ -55,5 +66,6 @@ pn main() {
      dependent(1.5) == 1.5, present([error("nested")]),
      type(widened_plain(7)) == float, type(widened_union(7)) == int, type(propagated_union()) == int,
      type(mixed_union(true)) == int, type(mixed_union(false)) == float,
-     type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7), vector, flags]
+     type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7), vector, flags, type(scalar_member^) == int,
+     record_member^.a, type(filled_members[0]) == int, absent_int is error, absent_float is error, absent_bool is error]
 }

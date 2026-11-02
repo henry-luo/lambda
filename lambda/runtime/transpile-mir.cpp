@@ -5419,14 +5419,18 @@ static bool mir_boxed_predicate_result(AstNode* source, int depth = 0) {
     if (!source || depth > 16) return false;
     AstNode* node = ast_unwrap_primary_to_leaf(source);
     if (!node) return false;
+    if (node->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) {
+        return mir_boxed_predicate_result(((AstUnaryNode*)node)->operand, depth + 1);
+    }
     if (node->node_type == AST_NODE_PRIMARY || node->node_type == AST_NODE_LITERAL) {
         return node->type && node->type->type_id == LMD_TYPE_BOOL;
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        // a checked bool return can join an error Item; only ItemTrue admits
-        // the success, so the existing error edge needs no truthiness call.
+        // A bool/error outcome and its propagated success have the same
+        // boolean representation proof; neither needs general truthiness.
         Type* result = mir_call_result_contract(node);
-        return result && mir_unwrap_decl_type(result) == &TYPE_BOOL;
+        return result && mir_unwrap_decl_type(lambda_type_remove_error(NULL, result)) == &TYPE_BOOL;
     }
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* binary = (AstBinaryNode*)node;
@@ -7899,9 +7903,9 @@ static Type* mir_call_result_contract(AstNode* primary) {
             !callee_type->return_contract ||
             ((callee_type->can_raise || callee_type->may_return_error) &&
              !((AstCallNode*)primary)->propagate)) return NULL;
-    // S7.6.3v3: propagation has checked the outcome before a consumer uses it.
-    return ((AstCallNode*)primary)->propagate
-        ? callee_type->returned : callee_type->return_contract;
+    // S7.6.3v3 checks the error arm; it does not re-admit the successful
+    // member. Only the complete enforced contract proves its representation.
+    return callee_type->return_contract;
 }
 
 static bool mir_call_result_proves_contract(AstNode* primary, Type* target) {
@@ -8270,6 +8274,10 @@ static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* sour
 // the redundancy proofs proper, for a source whose value is its declared type
 static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source_node,
         Type* target) {
+    // Indexed absence inhabits the native sentinel even when the compact AST
+    // type names its element. The target must admit that null or check it.
+    if (!lambda_type_accepts_null(target) && mir_expr_may_be_null(mt, source_node))
+        return false;
     if (lambda_boundary_is_redundant(source_node->type, target)) return true;
     ShapeEntry* scalar_field = mir_record_member_field(mt, source_node);
     // Forward-call projections can keep public Any types. Their scalar cells
@@ -11965,21 +11973,10 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
                 return LMD_TYPE_ANY;
             }
             if (is_array) {
-                // An immutable binding can retain its AST witness only while
-                // no representation-changing store or whole-variable rebind
-                // invalidates the runtime lane.
-                Type* object_type = object ? object->type : NULL;
-                if (object_type && (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
-                        object_type->type_id == LMD_TYPE_ARRAY)) {
-                    TypeArray* array_type = (TypeArray*)object_type;
-                    TypeId nested = array_type->nested ? array_type->nested->type_id
-                        : LMD_TYPE_ANY;
-                    if (nested != LMD_TYPE_ANY && mt->func_body &&
-                            has_elem_type_invalidation(mt, ident->entry,
-                                mt->func_body, nested)) {
-                        return LMD_TYPE_ANY;
-                    }
-                }
+                // An immutable semantic T[] can still hold a different numeric
+                // member through a union admission. No live element witness
+                // means that its physical lane must be checked by the reader.
+                return LMD_TYPE_ANY;
             }
         }
         // During the native-return prepass, parameter bindings have not been
@@ -12311,6 +12308,10 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
     // native scalar merely because static inference found one.
     if (node->node_type == AST_NODE_HANDLER_EXPR ||
             node->node_type == AST_NODE_HANDLER_STAM) return LMD_TYPE_ANY;
+    // Propagation preserves a successful Item, including its numeric kind.
+    // Its narrowed semantic type does not prove a fresh native conversion.
+    if (node->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) return LMD_TYPE_ANY;
     // Unwrap PRIMARY nodes (parenthesized expressions)
     if (node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
@@ -25848,6 +25849,11 @@ static Type* mir_map_field_contract_candidate(AstNode* value) {
     }
     if (!primary) return NULL;
 
+    if (primary->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)primary)->op == OPERATOR_PROPAGATE) {
+        // Removing an error arm changes no packed field offsets.
+        return mir_map_field_contract_candidate(((AstUnaryNode*)primary)->operand);
+    }
     Type* value_type = mir_unwrap_decl_type(primary->type);
     if (primary->node_type == AST_NODE_MEMBER_EXPR) {
         Type* member_contract = mir_trusted_map_member_contract(primary);
@@ -43241,10 +43247,14 @@ static bool mir_solve_value_proves_lane(MirDefectOriginScan* scan, AstNode* node
     if (value->node_type == AST_NODE_MEMBER_EXPR) {
         Type* field = mir_narrowed_member_type(scan, value);
         TypeId field_lane = LMD_TYPE_ANY;
-        if (field && mir_contract_native_scalar_type(field, &field_lane)) {
+        if (field && !lambda_type_accepts_null(field) &&
+                mir_contract_native_scalar_type(field, &field_lane)) {
             return field_lane == lane || (lane == LMD_TYPE_FLOAT && field_lane == LMD_TYPE_INT);
         }
     }
+    // This solver proves admission, not just a physical lane. A nullable
+    // indexed lane still needs the return check's error channel (D2.8.3).
+    if (mir_expr_may_be_null(scan->mt, value)) return false;
     if (value->node_type == AST_NODE_CALL_EXPR) {
         // a self-call returns the lane under proof unless an argument can be
         // an error its parameter guard would return instead
