@@ -1807,7 +1807,7 @@ static Item interp_read_store_owner(InterpFrame* f, NameEntry* root,
 
 // LR12-10: remember that this activation shared one of its `var` parameters
 static void interp_note_var_param_marked(InterpFrame* f, AstNode* source) {
-    AstNode* node = ast_unwrap_primary(source);
+    AstNode* node = ast_cow_value_source(source);
     if (!f || !node || node->node_type != AST_NODE_IDENT) return;
     NameEntry* entry = ((AstIdentNode*)node)->entry;
     if (!entry || !entry->is_var_param || !entry->storage_assigned ||
@@ -4757,7 +4757,7 @@ static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
 static Item interp_snapshot_binding_alias(InterpFrame* f, AstNode* expr,
         NameEntry* alias, Type* declared, Item value) {
     if (alias && alias->cow_borrow_lowered) return value;
-    AstNode* source = ast_unwrap_primary(expr);
+    AstNode* source = ast_cow_value_source(expr);
     if (!source) return value;
     bool captures = ast_expr_insertion_needs_capture(source);
     if (source->node_type == AST_NODE_IDENT) {

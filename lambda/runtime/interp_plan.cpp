@@ -899,7 +899,7 @@ typedef struct PlanCtx {
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)decl)->init);
+    AstNode* init = ast_cow_value_source(((AstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
         NameEntry* src = ((AstIdentNode*)init)->entry;

@@ -1014,3 +1014,26 @@ The fresh aggregate preceding this cohort passed **5,466/5,518** Lambda and
 **2,112/2,112** input checks; **52** failures include caller updates, compiler
 proofs and unrelated/environmental cases still under review. Its preserved
 artifacts are under `temp/error-handling/m3-baseline-qualified-current/`.
+
+
+### Snapshot observers through outcomes (2026-11-03)
+
+S7.6.3v3/S9.1.2 propagation preserves the container's existing observers.
+Shared AST ownership analysis now follows successful `^` values for ownership,
+alias capture and insertion, and recognizes mutable members behind outcome
+and occurrence types. Interpreter planning and MIR binding analysis use the
+same value-source helper. MIR also records the runtime capture on the original
+source binding; otherwise a later native writer could bypass the share bit.
+The interpreter's borrowed-parameter capture mask follows the same source.
+
+The snapshot-outcome fixture covers admitted roots, error-union snapshots,
+propagated aliases, nested child snapshots, a replaced borrowed binding, and
+ordinary error/type values passing these paths. The expanded tier/GC matrix
+passes **136/136**, diagnostics **247/247**, full MIR GC **350/350**, and MIR
+emission **265/279** without relaxed assertions. The formerly failing typed
+path and scalar-child snapshot goldens now match on both tiers; the read-handle
+snapshot also matches after MIR's source-capture bookkeeping follows `^`.
+Evidence: `temp/error-handling/m3-outcome-snapshot-{qualified-diag,final-gc,qualified-mir}.json`,
+`m3-outcome-snapshot-qualified-focused.log`, and `outcome-handle-qualified.out`.
+A full runtime-golden audit found additional legacy differences and regressions
+that remain under review; GC consistency alone does not qualify their values.

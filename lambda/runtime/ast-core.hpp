@@ -28,6 +28,10 @@ bool ast_join_produces_fresh_array(AstNode* node);
 extern "C"
 #endif
 bool ast_type_is_array_contract(Type* type);
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_type_may_be_container(Type* type);
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -1315,12 +1319,23 @@ static inline bool ast_collect_cow_path(AstCowPath* path, AstNode* node) {
     return true;
 }
 
+// S7.6.3v3: successful propagation preserves the observed container owner.
+static inline AstNode* ast_cow_value_source(AstNode* expr) {
+    AstNode* source = ast_unwrap_primary(expr);
+    while (source && source->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)source)->op == OPERATOR_PROPAGATE) {
+        source = ast_unwrap_primary(((AstUnaryNode*)source)->operand);
+    }
+    return source;
+}
+
 // The shape half of "does this initializer hand back a freshly-owned
 // container": literals, calls and `new` produce a new owner, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
 // resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
 static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
+    root_expr = ast_cow_value_source(root_expr);
     if (!root_expr) return false;
     switch (root_expr->node_type) {
     case AST_NODE_ARRAY:
@@ -1352,7 +1367,7 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
 // detached copy while element reads still borrow (the open C4.1 half) -- turning
 // a conservative mark into lost updates.
 static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return false;
     if (root_expr->node_type == AST_NODE_IDENT) {
         NameEntry* source = ((AstIdentNode*)root_expr)->entry;
@@ -1381,10 +1396,11 @@ static inline bool ast_parameter_needs_snapshot(const NameEntry* parameter) {
 static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
         TypeId target_tid) {
     if (ast_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
-    if (expr && ast_type_is_array_contract(expr->type)) return true;
+    if (expr && (ast_type_is_array_contract(expr->type) ||
+            (expr_tid == LMD_TYPE_TYPE && ast_type_may_be_container(expr->type)))) return true;
     if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
 
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return target_tid == LMD_TYPE_ANY;
     switch (root_expr->node_type) {
     case AST_NODE_ARRAY:

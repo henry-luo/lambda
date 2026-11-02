@@ -2145,7 +2145,7 @@ static MirVarEntry* mir_direct_root_binding(MirTranspiler* mt, AstNode* node) {
 }
 
 static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return false;
     if (root_expr->node_type == AST_NODE_IDENT) {
         MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
@@ -2160,7 +2160,7 @@ static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
 static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr,
         NameEntry* alias) {
     if (alias && alias->cow_borrow_lowered) return false;
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return false;
     if (root_expr->node_type != AST_NODE_IDENT) {
         // member reads and operand-returning expressions borrow a live value.
@@ -3641,12 +3641,12 @@ static bool mir_cow_path_needs_rebuild(MirVarEntry* root,
 // Emission order is program order, so setting it here reaches exactly the
 // writes that follow the capture -- the same mechanism binding aliases use.
 static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
-    MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
+    AstNode* node = ast_cow_value_source(value_expr);
+    MirVarEntry* source = mir_direct_root_binding(mt, node);
     if (source && mir_root_may_need_cow(source)) {
         source->cow_marked = true;
         return;
     }
-    AstNode* node = ast_unwrap_primary(value_expr);
     if (!node) return;
     // the selected value's runtime mark must also reach every possible
     // source binding's store planner (LR12-35), without evaluating it again.
