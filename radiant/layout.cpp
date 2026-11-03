@@ -3748,14 +3748,21 @@ static void recompute_inline_view_bounds_after_line_layout(View* view) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
-void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y) {
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y,
+                                  float break_offset_x) {
     auto visit = [&](View* view, int) {
-        shift_inline_current_line_view(offset_x, offset_y, line_number, view);
+        // break cursors can retain the paragraph's inline frame while ink moves to a fragment.
+        float inline_offset = view->view_type == RDT_VIEW_BR ? break_offset_x : offset_x;
+        shift_inline_current_line_view(inline_offset, offset_y, line_number, view);
         return view->view_type == RDT_VIEW_INLINE;
     };
     layout_walk_view_tree(root, visit, [](View* view, int) {
         recompute_inline_view_bounds_after_line_layout(view);
     }, true, 0, false, root->next());
+}
+
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y) {
+    layout_shift_inline_fragment(root, line_number, offset_x, offset_y, offset_x);
 }
 
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span) {

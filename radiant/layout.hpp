@@ -4065,6 +4065,7 @@ typedef struct LayoutContext {
     ScratchArena scratch;
     lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
     lam::Up<struct LayoutRubyFlowScope> active_ruby_flow; // borrowed chosen segments during line finalization
+    lam::Up<struct LayoutLineBoxScope> line_boxes; // borrowed completed-line sink for an outer IFC consumer
     lam::Up<struct LayoutInlineKeepScope> inline_keep; // borrowed constraint for a parallel inline unit
     lam::Up<struct LayoutTextSliceScope> text_slice; // borrowed original-source range during coordinated flow
     // A style-pass-local ordering of winning declarations, sorted by the
@@ -4899,6 +4900,8 @@ bool layout_inline_span_owns_source_edge(ViewSpan* span, int line_number, bool e
 bool layout_inline_line_bounds(LayoutContext* context, ViewSpan* span, int line_number, Rect* bounds);
 void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float start, float end);
 void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y);
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y,
+    float break_offset_x);
 bool layout_inline_boundary_allows_soft_wrap(LayoutContext* context, DomNode* source);
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
@@ -5970,6 +5973,31 @@ struct LayoutContextScope {
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
 };
 
+struct LayoutLineBox {
+    int number;
+    float block_start, block_extent;
+};
+
+// tier-3: completed outer lines are consumed before this borrowed stack scope leaves layout.
+struct LayoutLineBoxScope {
+    lam::Up<LayoutContext> context;
+    lam::Up<LayoutLineBoxScope> previous;
+    lam::Up<ViewBlock> owner;
+    lam::ArrayList<LayoutLineBox> lines{MEM_CAT_LAYOUT, 0};
+    bool failed = false;
+    bool active = true;
+    LayoutLineBoxScope(LayoutContext* layout, ViewBlock* block)
+        : context(layout), previous(layout->line_boxes), owner(block) {
+        layout->line_boxes = lam::up(this);
+    }
+    void finish() {
+        if (active) { context->line_boxes = previous; active = false; }
+    }
+    ~LayoutLineBoxScope() { finish(); }
+    LayoutLineBoxScope(const LayoutLineBoxScope&) = delete;
+    LayoutLineBoxScope& operator=(const LayoutLineBoxScope&) = delete;
+};
+
 // tier-3: a parallel unit constrains only the IFC that formats its bases.
 struct LayoutInlineKeepScope {
     lam::Up<LayoutContext> context;
@@ -6184,6 +6212,7 @@ LAM_NODE_OF(BlockContextScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
 LAM_NODE_OF(LayoutContextScope, NodeStack);
 LAM_NODE_OF(LayoutInlineKeepScope, NodeStack);
+LAM_NODE_OF(LayoutLineBoxScope, NodeStack);
 LAM_NODE_OF(LayoutTextSliceScope, NodeStack);
 LAM_NODE_OF(IntrinsicMeasureScope, NodeStack);
 LAM_NODE_OF(LayoutViewScope, NodeStack);

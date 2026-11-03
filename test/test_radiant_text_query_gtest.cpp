@@ -508,10 +508,21 @@ protected:
                                   DomText* const* references, size_t reference_count,
                                   size_t expected_count = SIZE_MAX) {
         TestRadiantPaintGlyphs<Capacity> actual, expected;
-        ASSERT_TRUE(visit_text_paint_glyphs(owner, text, TestRadiantPaintGlyphs<Capacity>::collect, &actual));
-        for (size_t index = 0; index < reference_count; index++)
-            ASSERT_TRUE(visit_text_paint_glyphs(control_owner, references[index],
-                TestRadiantPaintGlyphs<Capacity>::collect, &expected));
+        auto collect = [&](DomElement* block, DomText* source, TestRadiantPaintGlyphs<Capacity>* glyphs) {
+            size_t first = glyphs->count;
+            ASSERT_TRUE(visit_text_paint_glyphs(block, source, TestRadiantPaintGlyphs<Capacity>::collect, glyphs));
+            ASSERT_NE(source->rect, nullptr);
+            float x, y, owner_x, owner_y;
+            view_get_layout_position(source, source->rect, &x, &y);
+            view_get_layout_position(block, nullptr, &owner_x, &owner_y);
+            // glyph runs use their containing block's coordinates; compare both sources in the requested owner frame.
+            for (size_t index = first; index < glyphs->count; index++) {
+                glyphs->glyphs[index].x += x - source->rect->x - owner_x;
+                glyphs->glyphs[index].y += y - source->rect->y - owner_y;
+            }
+        };
+        collect(owner, text, &actual);
+        for (size_t index = 0; index < reference_count; index++) collect(control_owner, references[index], &expected);
         ASSERT_EQ(actual.count, expected.count);
         if (expected_count != SIZE_MAX) ASSERT_EQ(actual.count, expected_count);
         for (size_t index = 0; index < actual.count; index++) {
@@ -15684,6 +15695,93 @@ TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments)
             ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
             check(narrow);
         }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
+    ASSERT_NE(load("test/html/layout_ruby_multicol_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* rows[] = {"split", "continuous", "custom", "mixed"};
+    struct Source { const char* row; const char* source; const char* first; const char* last;
+        unsigned glyphs; DomText* text = nullptr; DomNode* parent = nullptr;
+        const unsigned char* data = nullptr; } sources[] = {
+        {"split","split-prefix","split-cprefix",nullptr,3},
+        {"split","split-ba","split-ca",nullptr,3},
+        {"split","split-bb","split-cb",nullptr,2},
+        {"split","split-ra","split-cra",nullptr,6},
+        {"split","split-rb","split-crb",nullptr,4},
+        {"split","split-suffix","split-csuffix",nullptr,3},
+        {"continuous","continuous-base","continuous-ca","continuous-cb",5},
+        {"continuous","continuous-reading","continuous-cra","continuous-crb",10},
+        {"custom","custom-ba","custom-ca",nullptr,3},
+        {"custom","custom-bb","custom-cb",nullptr,2},
+        {"custom","custom-ra","custom-cra",nullptr,6},
+        {"custom","custom-rb","custom-crb",nullptr,4},
+        {"mixed","mixed-ba","mixed-ca",nullptr,3},
+        {"mixed","mixed-bb","mixed-cb",nullptr,2},
+        {"mixed","mixed-ra","mixed-cra",nullptr,6},
+        {"mixed","mixed-rb","mixed-crb",nullptr,4},
+        {"mixed","mixed-neighbor","mixed-control-neighbor",nullptr,1},
+        {"mixed","mixed-neighbor-reading","mixed-control-neighbor-reading",nullptr,2},
+        {"mixed","mixed-suffix","mixed-csuffix",nullptr,3}
+    };
+    for (Source& entry : sources) {
+        entry.text = first_text_leaf(find(entry.source));
+        ASSERT_NE(entry.text, nullptr);
+        entry.parent = entry.text->parent;
+        entry.data = entry.text->text_data();
+    }
+    auto check = [&]() {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-column-projection"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Source& entry : sources) {
+            SCOPED_TRACE(entry.source);
+            EXPECT_EQ(entry.text, first_text_leaf(find(entry.source)));
+            EXPECT_EQ(entry.text->parent.get(), entry.parent);
+            EXPECT_EQ(entry.text->text_data(), entry.data);
+            char control_id[64]; str_fmt(control_id, sizeof(control_id), "%s-control", entry.row);
+            DomElement* row = find(entry.row); DomElement* control = find(control_id);
+            DomText* refs[] = {first_text_leaf(find(entry.first)), entry.last ? first_text_leaf(find(entry.last)) : nullptr};
+            size_t count = refs[1] ? 2 : 1;
+            expect_text_paint_sources<16>(row, entry.text, control, refs, count, entry.glyphs);
+            unsigned offset = 0;
+            for (size_t part = 0; part < count; part++) {
+                ASSERT_NE(refs[part]->rect, nullptr);
+                TextRect* rect = refs[part]->rect;
+                unsigned length = dom_text_utf16_length(refs[part]);
+                for (unsigned index = 0; index < length; index++) {
+                    float step = rect->width / length;
+                    float row_x = 0.0f, row_y = 0.0f, control_x = 0.0f, control_y = 0.0f;
+                    float reference_x = 0.0f, reference_y = 0.0f;
+                    view_get_visual_bounds(row, &row_x, &row_y, nullptr, nullptr);
+                    view_get_visual_bounds(control, &control_x, &control_y, nullptr, nullptr);
+                    view_get_visual_bounds(refs[part], &reference_x, &reference_y, nullptr, nullptr);
+                    expect_character_rect(range, entry.text, offset + index,
+                        {reference_x + row_x - control_x + index * step,
+                         reference_y + row_y - control_y, step, rect->height});
+                }
+                offset += length;
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(); }
+    for (bool columns : {false, true}) {
+        for (const char* row_id : rows) {
+            DomElement* row = find(row_id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "column-count", columns ? "2" : "1"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", columns ? "260px" : "300px"));
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", row_id);
+            DomElement* control = find(id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, "display", columns ? "flex" : "block"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, "width", columns ? "260px" : "300px"));
+            for (DomNode* child = control->first_child; child; child = child->next_sibling)
+                if (child->is_element()) ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(),
+                    "display", columns ? "block" : "contents"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check();
     }
 }
 

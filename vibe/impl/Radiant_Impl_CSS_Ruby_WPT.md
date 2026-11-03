@@ -1655,3 +1655,81 @@ The goal remains active with **161 Ruby mismatches**. Next priority is paired
 Ruby projection through CSS columns, starting with the remaining middle
 paragraph of the original `basic` WPT. The source-line/annotation ownership
 findings and finite acceptance plan are in `temp/ruby-m17/next-milestone.json`.
+
+## M18: completed outer lines own column projection
+
+P1: the remaining middle paragraph of `break-within-bases/basic` counts every
+base text rectangle as a separate line during column distribution, and leaves
+readings at their original positions. CSS Ruby §3.4 keeps annotations paired
+with their bases; CSS Break §4.1 breaks outer inline flow between line boxes.
+Column projection must consume completed line geometry rather than infer it
+from the top edges of glyph runs or annotation-level content.
+
+Capture completed outer line boxes in a borrowed stack scope while the multicol
+formats its narrow first pass. Nested formatting contexts cannot append to the
+outer scope. Reuse source line membership and the generic selected-line shift
+to project all base/readings rectangles once. Keep this transient data out of
+retained views (**D4.5.1v4 / D4.1.4v5**). Share existing fragmentation/bounds
+helpers and computed Ruby role checks; do not introduce tag-specific traversal.
+
+Acceptance: original basic/basic-ref, multiple text runs on one line, a source
+split across columns, CSS display Ruby roles, an unsplit neighboring Ruby, and
+initial/retained plus column-count/width mutations with unchanged source parents,
+byte intervals, glyph and range geometry. Begin horizontal inline-only column
+flow; mixed block-flow, vertical/RTL and independent fragmentation protocols
+remain separately tracked. Budget: focused native/browser controls, Ruby and
+multicol neighbors, unchanged-reference Ruby delta, then one stable required
+Radiant gate, lint/inventory and boundary validation for the new borrowed scope.
+
+
+The original `basic` and `basic-ref` documents now fully match. Capture is
+scoped to the outer IFC during the narrow formatting pass; nested contexts
+cannot become outer lines, and records do not escape into retained views.
+Column planning uses those records' actual start/extent instead of counting
+source rectangles or estimating Ruby leading from glyph tops. The existing
+selected-line shift projects all parallel text and atomic content together.
+The recorded line list removes the old 512-rectangle truncation for this path.
+When a fragment cannot hold the requested orphan lines, the break policy uses
+CSS Break §4.4's relaxation rather than forcing a whole paragraph to overflow.
+
+Six focused source/spacing/column checks and 66 Ruby/multicol neighbors pass.
+The raw Ruby suite improves **51 → 53/212**, gaining `basic` and `basic-ref`,
+with no lost full match or partial-score change. Independent minimal-fixture
+captures match 424 coordinates. Evidence: `temp/ruby-m18/focused-2.log`,
+`neighbors-1.log`, `wpt-1.log`, `delta-1.json`, and `browser-comparison.json`.
+
+The neighboring column baseline exposed a separate cursor-frame requirement:
+`multicol-nested-006` keeps BR cursors in local inline coordinates while text
+moves to later columns. Current Chromium confirms the saved reference.
+The generic fragment shift now lets its column caller retain that paragraph
+frame: its first-column inline origin is zero for LTR, and the rightmost column
+for RTL. A live `getclientrects-001` capture confirms that RTL leading BR remains
+at the paragraph's right edge. Normal inline shifts apply one translation to
+all content. No baseline/reference change is included. The neighbor gate is
+rerun after this shared correction.
+
+M18 is qualified on main-workspace base `2c42c6514`. The final raw comparison
+retains **53/212 full matches**, **159 mismatches**, and no partial-score
+regression. The required Radiant gate passes **9,078 passed / 305 partial /
+0 failed / 2 skipped** of 9,385 checks, including **482/482** native text/query
+and **752/752** UI checks. Layout baselines retain **4,973 full / 301 partial /
+0 regressions**; the multicol category retains **334 full / 28 partial**.
+The source hashes and candidate CLI remain unchanged through qualification.
+Dimension lint, whitespace checks and the generated CSS inventory check pass;
+the inventory retains 421 names/IDs with changes only in reference columns
+14/15. Evidence: `temp/ruby-m18/radiant.log`,
+`radiant-output/test_summary.json`, `source-inputs.json`, `neighbors-3.log`,
+`wpt-2.log`, `delta-2.json`, `browser-comparison.json`, and
+`qualification-result.json` in the same task directory.
+
+Fresh module-boundary validation links the strict DSOs, then rejects the same
+six pre-existing deferred imports recorded by M15–M17 (140 current imports,
+165-entry baseline). The allowlist remains unchanged. The unrelated input/PDF
+duplicate-symbol build limit from M15 is unchanged and was not rerun.
+See `temp/ruby-m18/boundary.log`; neither ancillary gate is claimed as passing.
+
+The goal remains active. Coordinated fragments across multiple Ruby segments,
+mixed/atomic and preserved-space source protocols, and vertical/RTL Ruby flow
+remain open. The next finite investigation is retained in
+`temp/ruby-m18/next-milestone.json`. Browser references, upstream WPT documents,
+comparison thresholds and baseline floors remain unchanged.

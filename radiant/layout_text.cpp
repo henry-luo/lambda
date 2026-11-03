@@ -2886,6 +2886,15 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     record_inline_line_box_union(lycon, lycon->block.advance_y,
                                  lycon->block.advance_y + used_line_height);
+    LayoutLineBoxScope* line_boxes = lycon->line_boxes.get();
+    if (line_boxes && line_boxes->owner == lycon->block.flow_box && !line_boxes->failed &&
+            lycon->run_mode != radiant::RunMode::ComputeSize && used_line_height > 0.0f) {
+        // fragmentainers consume the completed outer line, independent of its source/annotation runs.
+        if (!line_boxes->lines.append({lycon->block.line_number, lycon->block.advance_y, used_line_height})) {
+            line_boxes->failed = true;
+            log_error("line box capture: cannot retain completed outer line metrics");
+        }
+    }
 
     lycon->block.advance_y += used_line_height;
 
