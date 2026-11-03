@@ -196,11 +196,11 @@ function getTestIdleTimeoutMs(baseName) {
     return IDLE_TIMEOUT_MS;
 }
 
-// Radiant subprocesses mix compilation, rendering and event waits; allow modest overlap.
+// nested UI/layout/scene pools already reserve CPU workers; an inflated outer
+// budget oversubscribes their compilation and layout work on the same cores.
 function getMaxConcurrent(allowParallel = parallelExecution) {
     if (!allowParallel) return 1;
-    const cpuScaled = Math.max(1, targetSuite === 'radiant'
-        ? Math.floor(os.cpus().length * 1.25) : os.cpus().length - 1);
+    const cpuScaled = Math.max(1, os.cpus().length - 1);
     const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
     if (Number.isFinite(requested) && requested > 0) {
         return Math.min(cpuScaled, requested);

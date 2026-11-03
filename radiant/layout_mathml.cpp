@@ -40,7 +40,7 @@ static bool mathml_package_layout(const CustomLayoutContext* context, CustomLayo
 bool layout_measure_mathml(LayoutContext* lycon, DomElement* element,
                            float* width, float* height, float* baseline) {
     if (!lycon || !layout_is_mathml_root(element) ||
-            resolve_display_value(element).inner != CSS_VALUE_MATH) return false;
+            layout_resolved_display(element).inner != CSS_VALUE_MATH) return false;
     CustomLayoutContext context = {};
     context.lycon = lam::up(lycon);
     context.parent = lam::up(lam::unsafe_view_block_element_storage(element));

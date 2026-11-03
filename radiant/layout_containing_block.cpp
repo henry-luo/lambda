@@ -23,7 +23,7 @@ bool layout_element_has_in_flow_content(DomElement* element,
         if (element_predicate && !element_predicate(child->as_element())) continue;
         ViewBlock* child_block = lam::view_as_block(child->as_element());
         if (!child_block) {
-            if (!layout_display_is_none(resolve_display_value(child))) return true;
+            if (!layout_display_is_none(layout_resolved_display(child))) return true;
             continue;
         }
         if (!layout_block_is_display_none(child_block) &&
@@ -66,7 +66,7 @@ static int layout_collect_flattened_item_children(
             element->set_styles_resolved(false);
         }
 
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         if (layout_display_is_none(display)) {
             element->view_type = RDT_VIEW_NONE;
             continue;
@@ -102,7 +102,7 @@ static int layout_count_flattened_item_children(DomNode* first_child,
     int count = 0;
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (child->is_element()) {
-            DisplayValue display = resolve_display_value(child);
+            DisplayValue display = layout_resolved_display(child);
             if (display.outer == CSS_VALUE_CONTENTS) {
                 count += layout_count_flattened_item_children(
                     child->as_element()->first_child, include_text);
@@ -525,7 +525,7 @@ static bool layout_find_contents_text_edge(DomElement* contents, bool from_start
                 return true;
             }
         } else if (child->is_element()) {
-            DisplayValue display = resolve_display_value(child);
+            DisplayValue display = layout_resolved_display(child);
             if (display.outer != CSS_VALUE_CONTENTS) return false;
             DomNode* edge_text = nullptr;
             if (!layout_find_contents_text_edge(
@@ -555,7 +555,7 @@ DomNode* layout_adjacent_flattened_text(DomNode* node,
             if (sibling->is_text()) {
                 if (layout_text_node_has_content(sibling)) return sibling;
             } else if (sibling->is_element()) {
-                DisplayValue display = resolve_display_value(sibling);
+                DisplayValue display = layout_resolved_display(sibling);
                 if (display.outer != CSS_VALUE_CONTENTS) return nullptr;
                 DomNode* edge_text = nullptr;
                 if (!layout_find_contents_text_edge(
@@ -569,7 +569,7 @@ DomNode* layout_adjacent_flattened_text(DomNode* node,
 
         DomNode* parent = current->parent;
         if (!parent || parent == container_node || !parent->is_element()) return nullptr;
-        DisplayValue parent_display = resolve_display_value(parent);
+        DisplayValue parent_display = layout_resolved_display(parent);
         if (parent_display.outer != CSS_VALUE_CONTENTS) return nullptr;
         current = parent;
     }

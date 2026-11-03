@@ -12,7 +12,7 @@ CssEnum layout_inline_boundary_keyword(DomElement* element,
     };
     for (DomElement* current = element; current; current = dom_parent_element(current)) {
         if (property == CSS_PROPERTY_UNICODE_BIDI &&
-            css_display_is_ruby_role(resolve_display_value(current).inner)) ruby_bidi = true;
+            css_display_is_ruby_role(layout_resolved_display(current).inner)) ruby_bidi = true;
         CssDeclaration* declaration = current->specified_style
             ? style_tree_get_declaration(current->specified_style, property) : nullptr;
         if (declaration && declaration->value) {
@@ -45,7 +45,7 @@ CssEnum layout_inline_boundary_keyword(DomElement* element,
 
 static bool text_shaping_crosses_inline_edge(LayoutContext* lycon, DomElement* element,
                                                bool cursive, bool inline_start) {
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     if (display.outer == CSS_VALUE_CONTENTS) return true;
     if (display.outer != CSS_VALUE_INLINE ||
         layout_intrinsic_element_is_atomic_inline(element)) return false;
@@ -92,7 +92,7 @@ static DomText* text_shaping_neighbor(LayoutContext* lycon, DomNode* node,
             }
             if (node->is_element()) {
                 DomElement* element = node->as_element();
-                if (layout_display_is_none(resolve_display_value(element)) ||
+                if (layout_display_is_none(layout_resolved_display(element)) ||
                     layout_element_is_abs_or_fixed(element) || layout_element_is_floated(element)) break;
                 if (!text_shaping_crosses_inline_edge(lycon, element, cursive, forward)) return nullptr;
                 DomNode* child = forward ? element->first_child : element->last_child;

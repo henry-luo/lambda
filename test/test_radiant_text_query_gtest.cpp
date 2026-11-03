@@ -3629,6 +3629,52 @@ TEST_F(RadiantTextQuery, SizeContainedContributionsKeepOwnConstraints) {
     }
 }
 
+TEST_F(RadiantTextQuery, ResolvedLayoutDisplayPreservesTheLiveComputedDisplayQuery) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>#result{display:block}</style><button id=result>label</button>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    ASSERT_TRUE(result->display_resolved());
+    EXPECT_EQ(layout_resolved_display(result).inner, CSS_VALUE_FLOW_ROOT);
+    EXPECT_EQ(resolve_display_value(result).inner, CSS_VALUE_FLOW);
+    ASSERT_TRUE(dom_cssom_set_inline_property(result, "display", "none"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_resolved_display(result).outer, CSS_VALUE_NONE);
+    EXPECT_EQ(resolve_display_value(result).outer, CSS_VALUE_NONE);
+}
+
+TEST_F(RadiantTextQuery, GlyphOrientationQueriesFollowInheritedEditsAndReparenting) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>#vertical{writing-mode:vertical-rl;text-orientation:upright}"
+        "#horizontal{writing-mode:horizontal-tb}</style>"
+        "<div id=vertical><span id=result>AB</span></div><div id=horizontal></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    DomElement* vertical = dom_find_element_by_id(document->root, "vertical");
+    DomElement* horizontal = dom_find_element_by_id(document->root, "horizontal");
+    ASSERT_NE(vertical, nullptr);
+    ASSERT_NE(horizontal, nullptr);
+    LayoutContext query = {};
+    query.doc = lam::up(document);
+    query.elmt = lam::up(result->first_child.get());
+    for (unsigned repeat = 0; repeat < 2; repeat++)
+        EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_UPRIGHT);
+    ASSERT_TRUE(dom_cssom_set_inline_property(vertical, "text-orientation", "mixed"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_SIDEWAYS_CW);
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 0x4e00), TEXT_GLYPH_UPRIGHT);
+    // reuse the same query after moving its owner to a different inherited flow.
+    ASSERT_TRUE(vertical->remove_child(result));
+    ASSERT_TRUE(horizontal->append_child(result));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_HORIZONTAL);
+    ASSERT_TRUE(dom_cssom_set_inline_property(horizontal, "writing-mode", "sideways-lr"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_SIDEWAYS_CCW);
+}
+
 TEST_F(RadiantTextQuery, FontUnitsUseInheritedOrientationAndHorizontalSidewaysMetrics) {
     const struct { const char* css; const char* orientation; bool inherits; } cases[] = {
         {"", "upright", true}, {"text-orientation:inherit", "upright", true},

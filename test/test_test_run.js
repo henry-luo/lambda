@@ -574,7 +574,7 @@ try {
             LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
             LAMBDA_LOG_LEVEL: 'DEBUG',
             LAMBDA_UI_TEST_JOBS: String(Math.max(1, Math.min(budget,
-                Math.max(1, Math.floor(os.cpus().length * 1.25))) - 1)),
+                Math.max(1, os.cpus().length - 1)) - 1)),
         }, true);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, names.length);
@@ -590,7 +590,7 @@ try {
             if (event.name !== 'test_map_gtest') parallelPeak = Math.max(parallelPeak, active);
         }
         assert.equal(active, 0);
-        const ceiling = Math.min(budget, Math.max(1, Math.floor(os.cpus().length * 1.25)));
+        const ceiling = Math.min(budget, Math.max(1, os.cpus().length - 1));
         assert.ok(peak <= ceiling, `peak reserved workers: ${peak}`);
         assert.ok(parallelPeak <= ceiling);
         if (ceiling > summary.level2_c_tests.find(row => row.test === 'test_ui_automation_gtest').worker_slots) {
@@ -703,6 +703,8 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
             'pass', [], { PATH: fixture + path.delimiter + process.env.PATH, FAKE_LAYOUT: 'pass',
                 FAKE_LAYOUT_WORKSPACE: workspaceTrace, FAKE_SUITE_TRACE_DIR: trace,
                 FAKE_WAIT_TEST: 'test_ui_automation_gtest', FAKE_WAIT_FILE: workspaceTrace,
+                // leave the script pool its three slots within the actual CPU budget.
+                LAMBDA_UI_TEST_JOBS: String(Math.max(1, os.cpus().length - 1 - 3)),
                 LAMBDA_TEST_MAX_CONCURRENT: '12' }, true);
         assert.equal(child.status, 0, child.stderr);
         const layout = summary.level2_c_tests.find(t => t.test === 'test_radiant_layout_baseline');

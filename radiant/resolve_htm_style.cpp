@@ -1329,7 +1329,17 @@ static void apply_html_centered_popup_style(LayoutContext* lycon, ViewBlock* blo
     apply_html_overflow(lycon, block, CSS_VALUE_AUTO);
 }
 
+static void apply_element_default_style_impl(LayoutContext* lycon, DomNode* elmt);
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
+    DomElement* element = elmt->as_element();
+    DisplayValue display = element->display;
+    apply_element_default_style_impl(lycon, elmt);
+    // UA box defaults cannot overwrite the CSS role already selected by flow routing.
+    element->display = display;
+}
+
+static void apply_element_default_style_impl(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
     // Default-style resolution runs for both block and inline elements,
     // including generated pseudo-elements like ::after with display:inline.

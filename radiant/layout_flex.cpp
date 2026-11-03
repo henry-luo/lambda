@@ -1688,7 +1688,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                 invalidate_measurement_cache_for_node(child);
             }
         }
-        DisplayValue child_display = resolve_display_value(child);
+        DisplayValue child_display = layout_resolved_display(child);
         if (layout_display_is_none(child_display)) {
             child->view_type = RDT_VIEW_NONE;
             continue;

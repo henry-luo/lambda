@@ -31,7 +31,7 @@ static bool table_view_can_contain_flattened_items(View* view, int item_type) {
              view->as_element()->display.outer == CSS_VALUE_CONTENTS);
     }
     return view->is_element() &&
-        resolve_display_value((void*)view).outer == CSS_VALUE_CONTENTS;
+        layout_resolved_display((void*)view).outer == CSS_VALUE_CONTENTS;
 }
 
 static View* table_find_flattened_item(View* first, int item_type) {
@@ -107,7 +107,7 @@ static bool table_accept_body_group(LayoutTableSectionOrder* order, DomElement* 
 }
 
 bool LayoutTableSectionOrder::accept_body_group(DomElement* group) {
-    return table_accept_body_group(this, group, table_section_type(group, resolve_display_value(group)));
+    return table_accept_body_group(this, group, table_section_type(group, layout_resolved_display(group)));
 }
 
 bool LayoutTableSectionOrder::accept_body_group(ViewTableRowGroup* group) {
@@ -119,7 +119,7 @@ static void table_source_children(DomElement* parent, Visitor visit) {
     for (DomNode* node = layout_render_child_list(parent); node; node = node->next_sibling) {
         if (!node->is_element()) continue;
         DomElement* element = node->as_element();
-        DisplayValue display = resolve_display_value(element);
+        DisplayValue display = layout_resolved_display(element);
         InlineOutOfFlowKind outside = inline_out_of_flow_kind(element);
         if (display.outer == CSS_VALUE_NONE || outside.positioned || outside.floated) continue;
         if (display.outer == CSS_VALUE_CONTENTS) table_source_children(element, visit);
@@ -3115,7 +3115,7 @@ LayoutTableBorderGrid layout_table_border_grid_create(ScratchScope* scope,
     layout_table_visit_source_columns(table, &grid,
         [](void* context, DomElement* source, size_t first, size_t span, bool) {
             auto* grid = static_cast<LayoutTableBorderGrid*>(context);
-            bool group = resolve_display_value(source).inner == CSS_VALUE_TABLE_COLUMN_GROUP;
+            bool group = layout_resolved_display(source).inner == CSS_VALUE_TABLE_COLUMN_GROUP;
             DomElement** targets = group ? grid->column_groups : grid->columns;
             for (size_t column = first; column < (size_t)grid->column_count && column - first < span; column++)
                 if (!targets[column]) targets[column] = source;
@@ -3165,14 +3165,14 @@ void layout_table_visit_source_columns(DomElement* table, void* context,
     for (DomNode* child = table->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* source = child->as_element();
-        CssEnum display = resolve_display_value(source).inner;
+        CssEnum display = layout_resolved_display(source).inner;
         if (display == CSS_VALUE_TABLE_COLUMN) { leaf(source); continue; }
         if (display != CSS_VALUE_TABLE_COLUMN_GROUP) continue;
         size_t first = SIZE_MAX, last = 0; bool has_children = false;
         for (DomNode* node = source->first_child; node; node = node->next_sibling) {
             if (!node->is_element()) continue;
             DomElement* column = node->as_element();
-            if (resolve_display_value(column).inner != CSS_VALUE_TABLE_COLUMN) continue;
+            if (layout_resolved_display(column).inner != CSS_VALUE_TABLE_COLUMN) continue;
             has_children = true;
             size_t start = leaf(column);
             if (start == SIZE_MAX) continue;
@@ -3310,7 +3310,7 @@ static void for_each_table_row_cell_slot_in_tree(View* first, Fn fn) {
         if (child->view_type == RDT_VIEW_TABLE_CELL || is_out_of_flow_table_cell_slot(child)) {
             fn(child);
         } else if (child->is_element() &&
-                   resolve_display_value((void*)child).outer == CSS_VALUE_CONTENTS) {
+                   layout_resolved_display((void*)child).outer == CSS_VALUE_CONTENTS) {
             for_each_table_row_cell_slot_in_tree(
                 static_cast<View*>(child->as_element()->first_child), fn);
         }
@@ -3774,7 +3774,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
 
 bool table_view_is_caption(ViewBlock* child) {
     if (!child) return false;
-    DisplayValue child_display = resolve_display_value((void*)child);
+    DisplayValue child_display = layout_resolved_display((void*)child);
     return child->tag() == MARKUP_NAME_CAPTION ||
         child_display.inner == CSS_VALUE_TABLE_CAPTION;
 }
@@ -4000,7 +4000,7 @@ static bool table_anonymous_run_allows_preserved_whitespace(ArrayList* run) {
                    table_text_node_has_preserved_whitespace_content(node);
         }
         if (node->is_element()) {
-            DisplayValue display = resolve_display_value(node);
+            DisplayValue display = layout_resolved_display(node);
             if (layout_display_is_none(display)) {
                 continue;
             }
@@ -4041,7 +4041,7 @@ static bool table_scan_display_contents(DomElement* element,
             continue;
         }
         if (!child->is_element()) continue;
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         if (layout_display_is_none(display)) continue;
         if (scan == TABLE_DISPLAY_SCAN_FIRST_INTERNAL) {
             if (display.outer == CSS_VALUE_CONTENTS) {
@@ -4105,7 +4105,7 @@ static CssEnum table_display_contents_first_internal_display(DomElement* element
 
 static CssEnum table_effective_internal_display(DomNode* node) {
     if (!node || !node->is_element()) return CSS_VALUE__UNDEF;
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     return display.outer == CSS_VALUE_CONTENTS
         ? table_display_contents_first_internal_display(node->as_element())
         : display.inner;
@@ -4118,7 +4118,7 @@ static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* 
         bool is_cell = false;
         bool is_transparent_cell_run = false;
         if (node->is_element()) {
-            DisplayValue disp = resolve_display_value(node);
+            DisplayValue disp = layout_resolved_display(node);
             is_cell = disp.inner == CSS_VALUE_TABLE_CELL;
             is_transparent_cell_run = disp.outer == CSS_VALUE_CONTENTS &&
             table_display_contents_is_run_of_display(
@@ -4174,7 +4174,7 @@ static void table_wrap_display_contents_children(LayoutContext* lycon,
     if (!lycon || !contents) return;
     for (DomNode* child = contents->first_child; child; child = child->next_sibling) {
         if (child->is_element() && child->as_element()->is_table_fixup() &&
-            resolve_display_value(child).inner == display_type) {
+            layout_resolved_display(child).inner == display_type) {
             return;
         }
     }
@@ -4255,7 +4255,7 @@ static void remerge_stale_anonymous_table_runs(DomElement* parent, bool table_ch
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* element = child->as_element();
-        CssEnum role = resolve_display_value(child).inner;
+        CssEnum role = layout_resolved_display(child).inner;
         bool needs_run = table_children ? role == CSS_VALUE_TABLE_ROW || role == CSS_VALUE_TABLE_CELL
             : is_table_internal_display(role);
         if (!element->is_table_fixup() && needs_run) {
@@ -4268,7 +4268,7 @@ static void remerge_stale_anonymous_table_runs(DomElement* parent, bool table_ch
     for (DomNode* child = parent->first_child; child; ) {
         DomNode* next = child->next_sibling;
         if (child->is_element() && (table_children
-                ? child->as_element()->is_table_fixup() && layout_display_is_table_row_group(resolve_display_value(child).inner)
+                ? child->as_element()->is_table_fixup() && layout_display_is_table_row_group(layout_resolved_display(child).inner)
                 : table_fixup_is_outer_anonymous_table(child->as_element()))) {
             // new source rows/cells must join the retained anonymous run before row spans are clamped.
             unwrap_anonymous_table_fixup(child->as_element(), parent, next);
@@ -4348,7 +4348,7 @@ static void repair_anonymous_table_children(LayoutContext* lycon,
             }
             continue;
         }
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         // CSS Tables 3 §2.2 removes display:none boxes before anonymous-table
         // runs are formed, so they cannot acquire generated table parents.
         if (layout_display_is_none(display)) continue;
@@ -4394,7 +4394,7 @@ static void repair_anonymous_table_children(LayoutContext* lycon,
 static void repair_anonymous_table_descendants(LayoutContext* lycon,
                                                DomElement* parent) {
     if (!lycon || !parent) return;
-    DisplayValue display = resolve_display_value((void*)parent);
+    DisplayValue display = layout_resolved_display((void*)parent);
     if (layout_display_is_table_row_group(display.inner)) {
         repair_anonymous_table_children(
             lycon, parent, CSS_VALUE_TABLE_ROW, true);
@@ -4431,7 +4431,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             i++;
             continue;
         }
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         // CSS Tables 3 §2.2 removes display:none boxes before anonymous-table
         // runs are formed, preserving adjacency of the remaining table boxes.
         if (layout_display_is_none(display)) {
@@ -4584,7 +4584,7 @@ static void mark_table_children(LayoutContext* lycon, DomNode* node,
     for (DomNode* child = layout_render_child_list(node->as_element()); child;
          child = child->next_sibling) {
         if (!child->is_element()) continue;
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         if (display.outer == CSS_VALUE_CONTENTS) {
             // CSS Display 3: a boxless table descendant contributes its
             // rendered table-internal children to the surrounding row.
@@ -4598,7 +4598,7 @@ static void mark_table_children(LayoutContext* lycon, DomNode* node,
 
 static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* parent) {
     if (!node || !node->is_element()) return;
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     if (display.outer == CSS_VALUE_NONE) {
         // hidden table parts have no role or geometry, including retained captions.
         LayoutViewScope view_scope(lycon);
@@ -4705,7 +4705,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                     DomElement* row_elem = node->as_element();
                     auto insert_pseudo_for_row = [&](DomElement* pseudo, bool is_before) {
                         if (!pseudo) return;
-                        DisplayValue pseudo_display = resolve_display_value(pseudo);
+                        DisplayValue pseudo_display = layout_resolved_display(pseudo);
                         bool is_cell = pseudo_display.inner == CSS_VALUE_TABLE_CELL;
                         if (is_cell) {
                             insert_pseudo_into_dom(row_elem, pseudo, is_before);
@@ -6551,7 +6551,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
             // table cell's intrinsic column width, including after DOM mutation.
             if (layout_element_is_abs_or_fixed(child_elem)) continue;
             // This properly handles explicit CSS widths (with border/padding),
-            DisplayValue child_display = resolve_display_value(child);
+            DisplayValue child_display = layout_resolved_display(child);
             // CSS Tables 3 §2.2 removes display:none boxes before measuring a
             // cell's inline run; script nodes cannot create a line break here.
             if (layout_display_is_none(child_display)) continue;
@@ -7813,7 +7813,7 @@ bool layout_element_contains_table_internal(DomElement* element) {
     for (DomNode* child = layout_render_child_list(element); child;
          child = child->next_sibling) {
         if (!child->is_element()) continue;
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         if (layout_display_is_none(display)) continue;
         if (is_table_internal_display(display.inner)) return true;
         if (layout_element_contains_table_internal(child->as_element())) return true;
@@ -7837,7 +7837,7 @@ static bool table_child_requires_anonymous_fixup(DomNode* node) {
 
 static bool table_nonrendering_separator_has_whitespace(DomNode* node) {
     if (!node || !node->is_element() ||
-        !layout_display_is_none(resolve_display_value(node))) return false;
+        !layout_display_is_none(layout_resolved_display(node))) return false;
     NameId tag = node->as_element()->tag();
     if (tag != MARKUP_NAME_SCRIPT && tag != MARKUP_NAME_STYLE) return false;
     DomNode* before = node->prev_sibling;
@@ -7852,7 +7852,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     if (!lycon || !parent || !parent->first_child) return false;
     // display:contents has no independent formatting context; its flattened
     // children must be repaired by the nearest real table parent.
-    if (resolve_display_value((void*)parent).outer == CSS_VALUE_CONTENTS) return false;
+    if (layout_resolved_display((void*)parent).outer == CSS_VALUE_CONTENTS) return false;
     remerge_stale_anonymous_table_runs(parent);
     bool has_table_internal = false;
     bool has_retained_fixup = false;
@@ -7937,7 +7937,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         DomElement* table_wrapper = nullptr;
         if (needs_table) {
             // and table-child repair share inheritance and pool ownership.
-            DisplayValue parent_display = resolve_display_value((void*)parent);
+            DisplayValue parent_display = layout_resolved_display((void*)parent);
             bool parent_is_inline = parent_display.outer == CSS_VALUE_INLINE &&
                 parent_display.inner != CSS_VALUE_FLOW_ROOT;
             // CSS Display 3: an inline flow-root is an atomic block container;

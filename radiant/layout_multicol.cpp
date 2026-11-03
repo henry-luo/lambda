@@ -1011,7 +1011,7 @@ static bool multicol_uses_static_axis(ViewBlock* block, bool horizontal) {
 
 static bool multicol_is_spanner_element(DomElement* element) {
     if (!element || layout_element_is_out_of_flow(element)) return false;
-    CssEnum outer = resolve_display_value(static_cast<DomNode*>(element)).outer;
+    CssEnum outer = layout_resolved_display(static_cast<DomNode*>(element)).outer;
     // CSS Multicol §6.1 limits spanning to in-flow block-level elements.
     if (outer != CSS_VALUE_BLOCK && outer != CSS_VALUE_LIST_ITEM &&
         outer != CSS_VALUE_TABLE) return false;

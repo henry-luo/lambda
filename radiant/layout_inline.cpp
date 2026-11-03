@@ -479,7 +479,7 @@ static bool has_following_content(DomNode* node, bool inline_only) {
                 }
             } else if (sib->is_element()) {
                 DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(sib);
-                DisplayValue display = resolve_display_value(elem);
+                DisplayValue display = layout_resolved_display(elem);
                 if (inline_only) return display.outer == CSS_VALUE_INLINE;
                 InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
                 if (display.outer != CSS_VALUE_NONE && !kind.floated && !kind.positioned) {
@@ -563,7 +563,7 @@ bool layout_text_is_collapsible_whitespace(DomNode* node, size_t start_index,
 bool layout_inline_child_is_block_split(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(node);
-    DisplayValue display = resolve_display_value(elem);
+    DisplayValue display = layout_resolved_display(elem);
     InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
     if (kind.floated || kind.positioned) return false;
     return display.outer == CSS_VALUE_BLOCK ||
@@ -579,7 +579,7 @@ static DomNode* inline_next_participating_child(DomNode* node) {
         if (sibling->is_comment()) continue;
         if (layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
-            layout_display_is_none(resolve_display_value(sibling))) {
+            layout_display_is_none(layout_resolved_display(sibling))) {
             continue;
         }
         return sibling;
@@ -594,7 +594,7 @@ static bool inline_empty_box_between_block_siblings(DomNode* node) {
          sibling = sibling->prev_sibling) {
         if (sibling->is_comment() || layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
-            layout_display_is_none(resolve_display_value(sibling))) {
+            layout_display_is_none(layout_resolved_display(sibling))) {
             continue;
         }
         previous = sibling;
@@ -625,7 +625,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
         DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(child);
         InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
         if (kind.floated || kind.positioned ||
-            layout_display_is_none(resolve_display_value(element))) {
+            layout_display_is_none(layout_resolved_display(element))) {
             continue;
         }
         if (layout_inline_child_is_block_split(child)) {
@@ -633,7 +633,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
             *last_block = element;
             continue;
         }
-        DisplayValue display = resolve_display_value(element);
+        DisplayValue display = layout_resolved_display(element);
         if (display.outer == CSS_VALUE_INLINE) {
             DomElement* nested_last = nullptr;
             bool nested_content = inline_wrapper_last_block(element, &nested_last);
@@ -657,10 +657,10 @@ static DomElement* inline_previous_wrapper_block(DomElement* inline_elem) {
         DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(sibling);
         InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
         if (kind.floated || kind.positioned ||
-            layout_display_is_none(resolve_display_value(element))) {
+            layout_display_is_none(layout_resolved_display(element))) {
             continue;
         }
-        DisplayValue display = resolve_display_value(element);
+        DisplayValue display = layout_resolved_display(element);
         if (display.outer != CSS_VALUE_INLINE) return nullptr;
         DomElement* last_block = nullptr;
         if (!inline_wrapper_last_block(element, &last_block)) continue;
@@ -687,7 +687,7 @@ static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) 
 bool layout_ruby_annotation_node(DomNode* node) {
     if (!node || !node->is_element()) return false;
     // CSS Ruby 1 §2.1 assigns roles through computed display, including author overrides of rt.
-    CssEnum role = resolve_display_value(node).inner;
+    CssEnum role = layout_resolved_display(node).inner;
     return role == CSS_VALUE_RUBY_TEXT || role == CSS_VALUE_RUBY_TEXT_CONTAINER;
 }
 
@@ -717,7 +717,7 @@ static bool ruby_annotation_display_is_misparented(DomNode* node,
         return false;
     }
     if (!node->parent || !node->parent->is_element()) return true;
-    DisplayValue parent_display = resolve_display_value(node->parent);
+    DisplayValue parent_display = layout_resolved_display(node->parent);
     return parent_display.inner != CSS_VALUE_RUBY &&
         parent_display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER;
 }
@@ -844,14 +844,14 @@ static bool inline_paint_line_collect(DomNode* node, void* context) {
         if (selected && layout_ruby_annotation_outside_scope(parent, collected->span)) {
             // a misparented annotation flows as an anonymous Ruby unit at its source position.
             if (parent != node || !ruby_annotation_display_is_misparented(parent,
-                    resolve_display_value(parent))) return true;
+                    layout_resolved_display(parent))) return true;
         }
         if (parent == node) continue;
         if (parent->view_type != RDT_VIEW_INLINE) return true;
     }
     if (node->view_type != RDT_VIEW_TEXT) {
         bool anonymous_ruby = selected && layout_ruby_annotation_outside_scope(node, collected->span) &&
-            ruby_annotation_display_is_misparented(node, resolve_display_value(node));
+            ruby_annotation_display_is_misparented(node, layout_resolved_display(node));
         if (selected && node->is_element() &&
                 (anonymous_ruby || layout_intrinsic_element_is_atomic_inline(node->as_element())) &&
                 node->inline_line_number == collected->selected_line)
@@ -1918,7 +1918,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             }
         }
         DisplayValue child_display = child->is_element() ?
-            resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+            layout_resolved_display(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
         // block children below take layout_block directly, so the page flow's
         // out-of-flow material (footnote bodies, running elements, page controls)
         // leaves here as it does in layout_flow_node
@@ -2496,7 +2496,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     DomNode* scan = child;
     while (scan) {
         if (scan->is_element()) {
-            DisplayValue child_display = resolve_display_value(scan);
+            DisplayValue child_display = layout_resolved_display(scan);
             bool child_is_table_internal =
                 is_table_internal_display(child_display.inner) ||
                 is_table_internal_display(child_display.outer);
@@ -2679,7 +2679,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             bool child_has_replaced_fragment = false;
             if (child->is_element()) {
                 DomElement* child_element = child->as_element();
-                DisplayValue child_display = resolve_display_value(child_element);
+                DisplayValue child_display = layout_resolved_display(child_element);
                 child_can_close_inline_line =
                     !layout_element_is_abs_or_fixed(child_element) &&
                     layout_display_is_inline_level(child_display.outer);

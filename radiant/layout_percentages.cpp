@@ -451,7 +451,7 @@ static DomElement* layout_block_used_flow_source(ViewBlock* block) {
         // principal flow changes used writing mode and direction, preserving
         // computed CSS for inheritance and logical-property mapping.
         if (body && dom_element_is_html_tag(body, MARKUP_NAME_BODY) &&
-            !layout_display_is_none(resolve_display_value(body)) &&
+            !layout_display_is_none(layout_resolved_display(body)) &&
             !layout_element_has_containment(block->as_element()) &&
             !layout_element_has_containment(body))
             return body;
@@ -469,8 +469,7 @@ static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
         // resolved ancestors already own their used display; repeated axis
         // queries need only its table-track kind, not a fresh display cascade.
-        DisplayValue display = ancestor->styles_resolved() && !ancestor->needs_style_recompute()
-            ? ancestor->display : resolve_display_value(ancestor);
+        DisplayValue display = layout_resolved_display(ancestor);
         if (layout_display_is_table_track(display.inner)) {
             // ignored table-track modes still compute font-relative lengths, but do not govern descendant flow.
             source = dom_parent_element(ancestor);
@@ -500,9 +499,9 @@ TextOrientationPolicy layout_text_orientation_policy(DomNode* node) {
     DomElement* element = view_geometry_nearest_dom_element(node, 0);
     if (!element) return policy;
     // text-orientation computes on table tracks for inheritance but does not apply to them.
-    if (layout_display_is_table_track(resolve_display_value(element).inner)) return policy;
+    DisplayValue display = layout_resolved_display(element);
+    if (layout_display_is_table_track(display.inner)) return policy;
     ViewBlock* flow = lam::view_as_block(static_cast<View*>(element));
-    DisplayValue display = resolve_display_value(element);
     bool own_flow = flow || display.outer == CSS_VALUE_BLOCK ||
         display.outer == CSS_VALUE_INLINE_BLOCK || display.inner == CSS_VALUE_FLEX ||
         display.inner == CSS_VALUE_GRID || display.inner == CSS_VALUE_TABLE;
@@ -526,7 +525,29 @@ bool layout_text_uses_upright_orientation(DomNode* node) {
 TextGlyphOrientation layout_text_glyph_orientation(LayoutContext* lycon, uint32_t codepoint) {
     DomNode* owner = lycon ? lycon->elmt.get() : nullptr;
     if (!owner && lycon) owner = lycon->view.get();
-    return text_glyph_orientation(layout_text_orientation_policy(owner), codepoint);
+    DomDocument* doc = lycon ? lycon->doc.get() : nullptr;
+    ViewTree* tree = doc ? doc->view_tree.get() : nullptr;
+    DomElement* element = view_geometry_nearest_dom_element(owner, 0);
+    bool cacheable = element && element->doc == doc && tree &&
+        !element->scratch_lived() && !lycon->css_query_probe &&
+        (!lycon->selected_view_tree || lycon->selected_view_tree == tree);
+    if (!cacheable)
+        return text_glyph_orientation(layout_text_orientation_policy(owner), codepoint);
+    if (lycon->text_orientation_owner != owner ||
+        lycon->text_orientation_style_epoch != doc->style_query_epoch ||
+        lycon->text_orientation_mutation_epoch != doc->mutation_epoch ||
+        lycon->text_orientation_generation != tree->layout_generation ||
+        lycon->text_orientation_measurement_generation != tree->measurement_cache_generation ||
+        lycon->text_orientation_view_type != owner->view_type) {
+        lycon->text_orientation_policy = layout_text_orientation_policy(owner);
+        lycon->text_orientation_owner = lam::up(owner);
+        lycon->text_orientation_style_epoch = doc->style_query_epoch;
+        lycon->text_orientation_mutation_epoch = doc->mutation_epoch;
+        lycon->text_orientation_generation = tree->layout_generation;
+        lycon->text_orientation_measurement_generation = tree->measurement_cache_generation;
+        lycon->text_orientation_view_type = owner->view_type;
+    }
+    return text_glyph_orientation(lycon->text_orientation_policy, codepoint);
 }
 
 CssEnum layout_text_used_direction(DomNode* node) {

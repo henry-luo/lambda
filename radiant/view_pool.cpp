@@ -861,6 +861,7 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
     elem->set_has_cached_intrinsic_widths(false);
     if (!layout_element_is_anonymous_table_fixup(elem)) {
         elem->set_styles_resolved(false);
+        elem->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
     }
     elem->set_float_prelaid(false);
     elem->reset_view_ext();
