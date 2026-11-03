@@ -120,7 +120,6 @@ static constexpr int MIR_CONTAINER_MAP_KIND_OFFSET = (int)offsetof(Container, ma
 static constexpr int MIR_CONTAINER_RESERVED_STATE_OFFSET = (int)offsetof(Container, reserved_state);
 static constexpr int MIR_CONTAINER_TYPE_ID_OFFSET = (int)offsetof(Container, type_id);
 static constexpr int MIR_MAP_TYPE_OFFSET = (int)offsetof(Map, type);
-static constexpr int MIR_MAP_VERIFIED_CONTRACT_OFFSET = (int)offsetof(TypeMap, verified_contract);
 static constexpr int MIR_CONTAINER_DATA_OFFSET = (int)offsetof(Map, data);
 [[maybe_unused]] static constexpr int MIR_CONTAINER_DATA_CAP_OFFSET = (int)offsetof(Map, data_cap);
 static constexpr int MIR_CONTAINER_ITEMS_OFFSET = (int)offsetof(List, items);
@@ -6983,20 +6982,8 @@ static bool mir_contract_uses_binder(Type* type) {
 // (D3.2.4v4); inferred layouts still require exact descriptor identity.
 static void mir_guard_map_layout(MirTranspiler* mt, MIR_reg_t map,
         TypeMap* expected, MIR_label_t miss) {
-    MIR_reg_t shape = em_load_at(&mt->em, map, MIR_MAP_TYPE_OFFSET,
-        MIR_T_I64, "record_shape");
-    MIR_label_t hit = expected->is_trusted_contract ? new_label(mt) : 0;
-    if (hit) {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, hit),
-            MIR_new_reg_op(mt->ctx, shape),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-        shape = em_load_at(&mt->em, shape, MIR_MAP_VERIFIED_CONTRACT_OFFSET,
-            MIR_T_I64, "record_prefix");
-    }
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
-        MIR_new_reg_op(mt->ctx, shape),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-    if (hit) emit_label(mt, hit);
+    em_guard_map_layout(&mt->em, map, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected),
+        miss, expected->is_trusted_contract);
 }
 
 static void mir_guard_map_shape(MirTranspiler* mt, MIR_reg_t item,

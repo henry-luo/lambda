@@ -183,6 +183,7 @@ extern void edit_session_subscribe(void* session, int kind, void* callback, void
 extern Item fn_undo(void);
 extern Item fn_redo(void);
 extern Item fn_edit_commit0(void);
+extern Item lambda_decimal_binary(Item left, Item right, int64_t operation);
 extern Item fn_edit_commit1(Item description);
 
 extern Item pn_select(Item handles, Item timeout_ms);
@@ -2278,6 +2279,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_add", FPTR(fn_add)},
     {"fn_sub", FPTR(fn_sub)},
     {"fn_mul", FPTR(fn_mul)},
+    {"lambda_decimal_binary", FPTR(lambda_decimal_binary), JIT_IMPORT_STABLE_ITEM},
     {"fn_div", FPTR(fn_div)},
     {"fn_idiv", FPTR(fn_idiv)},
     {"fn_mod", FPTR(fn_mod)},

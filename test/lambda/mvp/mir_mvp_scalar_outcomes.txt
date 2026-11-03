@@ -1,0 +1,6 @@
+[3, -1]
+[2.5, null]
+[true, true]
+[true, null]
+[true, true, null]
+[inf, inf, 4]

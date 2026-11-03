@@ -21,11 +21,12 @@ pn four1(data: float[], n: int) any {
         // C14c: `div` keeps truncation semantics but takes its result domain
         // from `/`, so int div int is a float. An int binding needs int().
         let _admitted_m_23: int = int(n div 2)
-        var m: int = _admitted_m_23^
+        // the admitted native-int binding has no error alternative (S7.7.2v2).
+        var m: int = _admitted_m_23
         while ((m >= 2 and j >= m)^) {
             j = j - m
             let _admitted_m_26: int = int(m div 2)^
-            m = _admitted_m_26^
+            m = _admitted_m_26
         }
         j = j + m
         i = i + 2

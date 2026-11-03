@@ -1,6 +1,6 @@
 # Lambda MIR MVP — typed execution on the existing runtime
 
-**Date:** 2026-11-03
+**Date:** 2026-11-04
 
 **Status:** experimental typed compiler behind an explicit selector, with
 native scalar/array kernels, typed records, checked mutation and precise `var`
@@ -8,31 +8,32 @@ write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest frozen pass reuses the shared confinement proof and scalar-array
-snapshot helper for recursive plain parameters (**S9.1.2–S9.1.3v2, D5.3,
-D8.2.6v2**). Puzzle improves **18.759→4.1115 ms**, faster than Full MIR at
-**4.903 ms**, while still **3.28× C2MIR's 1.25293 ms**. Runtime data models
-and ownership remain shared.
+The latest batch adds rooted decimal dispatch, bounded recursive inlining,
+admitted record layouts, successful producer domains and guarded float/error
+comparisons (**D3.2.4v4, D5.2–D5.3, D8.2.6v2, S7.7.3**). Runtime types,
+data layouts and the precise ownership model remain shared.
 
-The 30-sample primary, including matched batched Sumfp, qualifies **42/48
-against Full MIR and 22/48 against both targets**, versus 41 and 22 for the
-fresh pre-snapshot MVP control. The original 28 have
-**27 Full wins, 15 combined wins and no regression flags**. Additional Towers
-retains a 3.2% primary slowdown flag. An independent qualified 61-pair audit
-measures 0.3% and does not confirm it; normalized MIR matches. Archived Full
-MIR's FFT/Fasta crashes and incorrect Navier–Stokes checksum keep three
-comparisons unqualified.
+The complete 30-pair, 48-row primary, including matched batched Sumfp, qualifies
+**46/48 against Full MIR and 22/48 against both targets**, versus 44 and 22 for
+its interleaved fresh control. Its original 28 have **28 Full wins, 15 combined
+wins and no regression flags**. List misses Full and List/Storage have prior-MVP
+regression flags. Full Navier–Stokes remains incorrect and unqualified.
 
-All 48 frozen MVP benchmark goldens and nine targeted GC/emission/provenance
-groups pass. The broader experimental gate retains **58 failing subtests
-across 17 of 57 groups**, with no new failure headers. The pinned later-runtime
-integration baseline passes **8,733/8,733**. Its MVP benchmark recheck still
-rejects the unchanged FFT fixture before lowering under newer frontend contracts.
+The final six-case follow-up fixes List's Full loss and clears Storage's
+regression flag. Five cases pass the strict Full gate; Permute's faster median
+has an upper confidence bound at parity. List still regresses 18% against the
+previous MVP. **A complete latest-compiler timing requalification remains
+pending**, so these focused results do not replace the older primary's counts.
+The 20% C2MIR target remains open.
+
+All48 latest benchmark goldens, 18 forced-GC benchmarks and nine targeted groups
+pass. The broader 59-group experimental gate retains 57 failing subtests across 16
+groups, with no new failure headers. The private production/shared-runtime
+baseline passes 8,736/8,736, including 2,112 reused unchanged input-parser cases.
 Timings use matched execution windows, excluding startup and compilation,
-with one-sided 95% confidence gates. Sources, benchmark inputs and executables
-are archived; subsequent shared frontend/Full MIR edits are outside that
-performance identity. **The performance milestone remains open.** See the
-[latest measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-confined-recursive-array-snapshots).
+with one-sided 95% confidence gates. Primary and follow-up sources, inputs and
+executables are archived separately. See
+[batch measurements and remaining gaps](impl/Lambda_Impl_MIR_MVP.md#2026-11-04-batch-tuning-of-every-full-mir-miss).
 
 **Destination:** `lambda/runtime/mvp/`
 

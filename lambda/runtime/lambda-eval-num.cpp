@@ -551,6 +551,17 @@ static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
     }
 }
 
+// proven decimal carriers skip vector/promotion classification, retaining the
+// same rooted arithmetic, BigInt subtype and error/absence rules (S4.4, D5.3).
+extern "C" Item lambda_decimal_binary(Item left, Item right, int64_t operation) {
+    GUARD_ERROR2(left, right);
+    TypeId left_type = get_type_id(left), right_type = get_type_id(right);
+    if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) return ItemNull;
+    if (left_type != LMD_TYPE_DECIMAL || right_type != LMD_TYPE_DECIMAL) return ItemError;
+    return apply_decimal_numeric(left, LAMBDA_NUM_DECIMAL, right, LAMBDA_NUM_DECIMAL,
+        LAMBDA_NUM_DECIMAL, (LambdaNumericOpFamily)operation);
+}
+
 static double runtime_number_division_result(double left, double right,
         LambdaNumericOpFamily op) {
     if (op == LAMBDA_NUM_OP_TRUE_DIV) return left / right;

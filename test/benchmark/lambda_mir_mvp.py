@@ -350,11 +350,11 @@ def main():
                 "statistically_slower": previous["two_sided_lower_bound"] > 1.0 if previous else None,
             }
         full = row["uncertainty"]["mvp_over_production"]
-        reference = row["uncertainty"]["mvp_over_c2mir"]
+        reference_bounds = row["uncertainty"]["mvp_over_c2mir"]
         row["performance_gates"] = {
             "faster_than_full_mir": full["upper_bound"] < 1.0 if full else None,
-            "within_c2mir_allowance": reference["upper_bound"] <= 1.0 + args.c2mir_allowance_percent / 100.0 if reference else None,
-            "within_10_percent_of_c2mir": reference["upper_bound"] <= 1.10 if reference else None}
+            "within_c2mir_allowance": reference_bounds["upper_bound"] <= 1.0 + args.c2mir_allowance_percent / 100.0 if reference_bounds else None,
+            "within_10_percent_of_c2mir": reference_bounds["upper_bound"] <= 1.10 if reference_bounds else None}
         report["cases"].append(row)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")

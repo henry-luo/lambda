@@ -10842,8 +10842,9 @@ bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
         break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:  {
-        Container* c = value.container;
-        *(Container**)field_ptr = c;
+        // this stores an admitted physical pointer, including virtual carriers
+        // (D7.4.5v2). Only absence changes encoding in the slot (D2.6.4v3).
+        *(Container**)field_ptr = value.item == ITEM_NULL ? NULL : value.container;
         break;
     }
     case LMD_TYPE_ANY: {

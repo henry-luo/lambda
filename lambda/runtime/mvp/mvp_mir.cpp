@@ -1,4 +1,5 @@
 #include "mvp_internal.hpp"
+#include "../lambda-number.hpp"
 #include "../type_contract.hpp"
 #include "../mir_loop_analysis.hpp"
 #include "../mir_bitwise.hpp"
@@ -67,7 +68,7 @@ static MirValue value(MvpCompiler* c, MIR_reg_t r, TypeId type, ValueRep rep,
         Type* success = lambda_type_remove_error(c->module->tp->pool, contract);
         // a validated outcome keeps its successful domain independently of
         // the error Item; consumers still test that alternative before unboxing.
-        if (success && success != contract && mvp_rep(success) != VALUE_REP_ITEM)
+        if (success && success != contract && success != &TYPE_ANY_NO_ERROR)
             v.admitted_success_contract = success;
     }
     if (v.value_class == JIT_VALUE_BOXED_ITEM || v.value_class == JIT_VALUE_RAW_GC_POINTER)
@@ -467,6 +468,21 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         else branch(c, MIR_BNE, native_admitted, reg(c, v.reg),
             imm(c, v.rep == VALUE_REP_RAW_GC_POINTER ? 0 : INT_LANE_NULL));
     }
+    Type* outcome_success = v.admitted_success_contract ? v.admitted_success_contract : v.semantic_contract;
+    bool optional_success = false;
+    Type* success_base = lambda_type_nullable_lane_base(outcome_success, &optional_success);
+    if (!proven && v.rep == VALUE_REP_ITEM && optional_success && success_base &&
+            (mvp_array_contract(success_base) || lambda_type_nonnull_map_contract(success_base)) &&
+            mvp_boundary_proven(success_base, contract)) {
+        native_admitted = label(c); native_result = v.reg;
+        MIR_label_t checked = label(c);
+        // a nullable producer proves only the non-null success arm. Errors and
+        // absence retain the ordinary boundary diagnostic (S7.7.3).
+        branch(c, MIR_BEQ, checked,
+            reg(c, operation(c, MIR_URSH, reg(c, v.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+        branch(c, MIR_BNE, native_admitted, reg(c, v.reg), imm(c, ITEM_NULL));
+        mark(c, checked);
+    }
     if (!proven) {
         // typed constructors already admitted their success value; primitive
         // array invariance must use the same proof as ordinary boundaries.
@@ -508,19 +524,24 @@ static void array_writable_guard(MvpCompiler* c, MvpBinding* binding, MIR_label_
 }
 
 static void refresh_record(MvpCompiler* c, MvpBinding* binding) {
-    TypeMap* shape = mvp_scalar_record_contract(binding->contract);
+    TypeMap* shape = mvp_record_contract(binding->contract, binding->record_written);
     // forwarding-only activations need the owner home, not another witness.
-    if (!shape || !binding->record_written || !binding->entry || !binding->entry->node ||
-            binding->entry->node->node_type != AST_NODE_PARAM ||
-            !mvp_parameter_storage_stable(c->module, (AstNamedNode*)binding->entry->node)) return;
-    if (!binding->record_writable) {
-        binding->record_writable = em_new_reg(&c->em, "record_writable", MIR_T_I64);
-    }
-    move(c, binding->record_writable, imm(c, 0));
+    if (!shape || !binding->entry || !binding->entry->node ||
+            binding->entry->node->node_type != AST_NODE_PARAM) return;
+    AstNamedNode* parameter = (AstNamedNode*)binding->entry->node;
+    if (binding->record_written ? !mvp_parameter_storage_stable(c->module, parameter) :
+            !mvp_parameter_borrowable(c->module, parameter)) return;
+    MIR_reg_t* witness = binding->record_written ? &binding->record_writable : &binding->record_readable;
+    if (!*witness) *witness = em_new_reg(&c->em, "record_witness", MIR_T_I64);
+    move(c, *witness, imm(c, 0));
     MIR_label_t done = label(c);
-    em_guard_map_shape(&c->em, binding->reg, constant(c, (intptr_t)shape), done, true);
-    array_writable_guard(c, binding, done);
-    move(c, binding->record_writable, imm(c, 1)); mark(c, done);
+    em_guard_map_shape(&c->em, binding->reg, constant(c, (intptr_t)shape), done, true,
+        !binding->record_written);
+    // shape remains valid when a value snapshot removes exclusive write
+    // permission; closed readers may cache that weaker fact (D3.2.4v4).
+    if (binding->record_written) array_writable_guard(c, binding, done);
+    move(c, *witness, imm(c, 1));
+    mark(c, done);
 }
 
 static void refresh_array(MvpCompiler* c, MvpBinding* binding, bool fresh = false) {
@@ -586,8 +607,28 @@ static bool binding_needs_number_home(MvpCompiler* c, MvpBinding* binding) {
         lambda_type_id_may_be_wide_scalar(scalar->type_id);
 }
 
+static MirValue capture_projection(MvpCompiler* c, MirValue v, AstNode* source, bool projection_only = false) {
+    if (!source) source = (AstNode*)v.provenance_node;
+    AstNode* projected = ast_cow_value_source(source);
+    if (projection_only && (!projected || (projected->node_type != AST_NODE_MEMBER_EXPR &&
+            projected->node_type != AST_NODE_INDEX_EXPR))) return v;
+    Type* domain = v.admitted_success_contract ? v.admitted_success_contract : v.semantic_contract;
+    if (!source || mvp_local_binding(c->module, source) ||
+            !ast_expr_insertion_needs_capture(source) ||
+            (v.rep != VALUE_REP_ITEM && v.rep != VALUE_REP_RAW_GC_POINTER) ||
+            (!ast_type_may_be_container(domain) && !mvp_array_contract(domain))) return v;
+    // retaining a projected child creates a second observer. Capture at the
+    // ownership boundary, leaving transient reads as borrows (S9.1.2, S9.3.1).
+    v = convert(c, v, VALUE_REP_ITEM);
+    v.reg = em_call_1(&c->em, "cow_capture_value", MIR_T_I64, MIR_T_I64, reg(c, v.reg), true);
+    MirValue result = value(c, v.reg, v.semantic_type, v.rep, v.semantic_contract, source);
+    result.admitted_success_contract = v.admitted_success_contract;
+    return result;
+}
+
 static void store_binding(MvpCompiler* c, MvpBinding* binding, MirValue v) {
     AstNode* node = binding->entry->node;
+    if (!binding->entry->cow_borrow_lowered) v = capture_projection(c, v, NULL, true);
     bool fresh = fresh_array_value(c, v, binding->contract);
     bool inferred = node->node_type == AST_NODE_VARIABLE_DECLARATOR && !((AstDeclaratorNode*)node)->declared_type;
     // the declaration's pooled name outlives the JIT artifact and identifies failed assignments (S7.7.4).
@@ -796,12 +837,18 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
     bool optional_string = false;
     Type* string_base = lambda_type_nullable_lane_base(
         lambda_type_remove_error(c->module->tp->pool, b->contract), &optional_string);
+    bool optional_success = false;
+    Type* success_base = b->producer_success_contract
+        ? lambda_type_nullable_lane_base(b->producer_success_contract, &optional_success) : NULL;
+    bool stable_scalar = success_base && (success_base->type_id == LMD_TYPE_FLOAT ||
+        success_base->type_id == LMD_TYPE_INT || success_base->type_id == LMD_TYPE_BOOL ||
+        success_base->type_id == LMD_TYPE_DECIMAL);
     if (capture && string_base && string_base->type_id == LMD_TYPE_STRING && b->rep == VALUE_REP_RAW_GC_POINTER)
         r = em_call_1(&c->em, "fn_string_freeze", MIR_T_P, MIR_T_P, reg(c, r), true);
     Type* map_contract = lambda_type_nonnull_map_contract(b->contract);
-    // compact scalar/error outcomes own no mutable buffer or number-home
-    // bytes. Their Item roots suffice; unknown and string domains still capture.
-    if (capture && ((b->rep == VALUE_REP_ITEM && (ast_type_may_be_container(b->contract) ||
+    // unchanged scalar/error bindings already own their number-home bytes;
+    // reads reuse that owner and have no mutable buffer to snapshot (D5.2.3).
+    if (capture && !stable_scalar && ((b->rep == VALUE_REP_ITEM && (ast_type_may_be_container(b->contract) ||
             (string_base && string_base->type_id == LMD_TYPE_STRING))) || mvp_array_element(b->contract) || map_contract ||
             (string_base && string_base->type_id == LMD_TYPE_MAP) ||
             mvp_array_contract(b->contract))) {
@@ -809,12 +856,17 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
         if (b->array_writable) move(c, b->array_writable, imm(c, 0));
         if (b->record_writable) move(c, b->record_writable, imm(c, 0));
     }
-    if (b->rep == VALUE_REP_ITEM && !mvp_array_element(b->contract) && binding_needs_number_home(c, b)) {
+    if (b->rep == VALUE_REP_ITEM && !stable_scalar && !mvp_array_element(b->contract) && binding_needs_number_home(c, b)) {
         int home = em_scalar_home_new(&c->em);
         r = em_adopt_scalar_item_value(&c->em, SCALAR_RETURN_DYNAMIC, r,
             em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, home)));
     }
-    return value(c, r, b->contract->type_id, b->rep, b->contract, node);
+    MirValue result = value(c, r, b->contract->type_id, b->rep, b->contract, node);
+    // native carriers already encode their domain; this fact describes only
+    // the success alternative of a boxed outcome (D2.4.3).
+    if (b->rep == VALUE_REP_ITEM && b->producer_success_contract)
+        result.admitted_success_contract = b->producer_success_contract;
+    return result;
 }
 
 static AstNode* function_result_expression(MvpFunction* f) {
@@ -1834,8 +1886,10 @@ static bool float_array_comparison(MvpCompiler* c, AstBinaryNode* n, MirValue* o
     AstNode* other = n->right;
     bool reversed = !array_side || array_side->node_type != AST_NODE_INDEX_EXPR;
     if (reversed) { array_side = ast_unwrap_primary_to_leaf(n->right); other = n->left; }
+    MvpBinding* threshold_binding = mvp_local_binding(c->module, other);
+    bool float_outcome = threshold_binding && threshold_binding->producer_success_contract == &TYPE_FLOAT;
     if (!array_side || array_side->node_type != AST_NODE_INDEX_EXPR || !mvp_pure_key(other) ||
-            mvp_value_contract(c->module, other)->type_id != LMD_TYPE_FLOAT) return false;
+            (mvp_value_contract(c->module, other)->type_id != LMD_TYPE_FLOAT && !float_outcome)) return false;
     AstFieldNode* access = (AstFieldNode*)array_side;
     MvpBinding* binding = mvp_local_binding(c->module, access->object);
     if (!binding || binding->rep != VALUE_REP_ITEM || mvp_array_element(binding->contract) ||
@@ -1857,7 +1911,16 @@ static bool float_array_comparison(MvpCompiler* c, AstBinaryNode* n, MirValue* o
     MIR_reg_t member = em_load_at(&c->em, address, 0, MIR_T_D, "compared_float");
     // ArrayNum float slots are non-nullable; nullable native lanes use Array,
     // which the carrier guard excludes (D2.4.3, D3.3.3v3).
-    MirValue threshold = convert(c, expression(c, other), VALUE_REP_F64);
+    MirValue threshold = expression(c, other);
+    if (float_outcome && threshold.rep == VALUE_REP_ITEM) {
+        // an unchanged float/error threshold needs one outcome guard, not a
+        // generic comparison. Replay still owns errors and absence (S6.1.2v2).
+        branch(c, MIR_BEQ, checked, reg(c, operation(c, MIR_URSH,
+            reg(c, threshold.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+        threshold.semantic_type = LMD_TYPE_FLOAT;
+        threshold.semantic_contract = &TYPE_FLOAT;
+    }
+    threshold = convert(c, threshold, VALUE_REP_F64);
     MIR_reg_t predicate = operation(c, plan.f64_opcode, reg(c, reversed ? threshold.reg : member),
         reg(c, reversed ? member : threshold.reg));
     MIR_reg_t result = 0;
@@ -1875,6 +1938,25 @@ static bool float_array_comparison(MvpCompiler* c, AstBinaryNode* n, MirValue* o
     mark(c, done);
     if (output) *output = value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, n);
     return true;
+}
+
+static int decimal_operation(Operator op) {
+    static const struct { Operator op; LambdaNumericOpFamily family; } operations[] = {
+        {OPERATOR_ADD, LAMBDA_NUM_OP_ADD}, {OPERATOR_SUB, LAMBDA_NUM_OP_SUB},
+        {OPERATOR_MUL, LAMBDA_NUM_OP_MUL}, {OPERATOR_DIV, LAMBDA_NUM_OP_TRUE_DIV},
+        {OPERATOR_IDIV, LAMBDA_NUM_OP_IDIV}, {OPERATOR_MOD, LAMBDA_NUM_OP_MOD},
+    };
+    for (const auto& operation : operations) if (operation.op == op) return operation.family;
+    return -1;
+}
+
+static MirValue binary_operand(MvpCompiler* c, AstNode* source, AstNode* other, Operator op) {
+    MvpBinding* binding = mvp_local_binding(c->module, source);
+    // a pure null predicate never retains its operand. Borrow the owner while
+    // leaving real binding/return snapshots intact (S9.1.2).
+    bool observes = (op == OPERATOR_EQ || op == OPERATOR_NE) && mvp_pure_key(other) &&
+        mvp_value_contract(c->module, other)->type_id == LMD_TYPE_NULL;
+    return binding && observes ? read_binding(c, binding, source, false) : expression(c, source);
 }
 
 static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
@@ -1908,7 +1990,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
     if (MIR_reg_t masked = zero_residue(c, n))
         return value(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE, reg(c, masked), imm(c, 0)),
             LMD_TYPE_BOOL, VALUE_REP_I64, &TYPE_BOOL, n);
-    MirValue a = expression(c, n->left);
+    MirValue a = binary_operand(c, n->left, n->right, n->op);
     if (n->op == OPERATOR_AND || n->op == OPERATOR_OR) {
         bool right_null = false;
         Type* right_base = lambda_type_nullable_lane_base(mvp_value_contract(c->module, n->right, 0, c->dense_arrays), &right_null);
@@ -1929,7 +2011,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         return value(c, r, booleans ? LMD_TYPE_BOOL : LMD_TYPE_ANY,
             booleans ? VALUE_REP_I64 : VALUE_REP_ITEM, booleans ? logical_contract : &TYPE_ANY, n);
     }
-    MirValue b = expression(c, n->right);
+    MirValue b = binary_operand(c, n->right, n->left, n->op);
     // map absence is the zero pointer in both Item and nullable pointer lanes.
     if ((n->op == OPERATOR_EQ || n->op == OPERATOR_NE) &&
             ((a.semantic_type == LMD_TYPE_NULL && lambda_type_nonnull_map_contract(b.semantic_contract)) ||
@@ -1983,8 +2065,13 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
             move(c, result, reg(c, convert(c, numeric_binary(c, n, ai, bi, true), VALUE_REP_ITEM).reg));
             jump(c, done); mark(c, slow);
         }
-        MIR_reg_t checked = em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
-            MIR_T_I64, reg(c, b.reg), true);
+        int decimal_op = left == LMD_TYPE_DECIMAL && right == LMD_TYPE_DECIMAL
+            ? decimal_operation(n->op) : -1;
+        MIR_reg_t checked = decimal_op >= 0
+            ? em_call_3(&c->em, "lambda_decimal_binary", MIR_T_I64,
+                MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), MIR_T_I64, imm(c, decimal_op), true)
+            : em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
+                MIR_T_I64, reg(c, b.reg), true);
         if (result) move(c, result, reg(c, checked));
         else result = checked;
         if (done) mark(c, done);
@@ -2031,6 +2118,7 @@ struct MvpDenseCalls {
 };
 static bool dense_body_eligible(MvpCompiler*, MvpIndexLoopPlan*, MvpDenseCalls* calls = NULL, bool allocating = false);
 static bool dense_call_eligible(MvpCompiler*, AstCallNode*);
+static bool dense_call_arguments(MvpCompiler*, MvpFunction*, AstNode*);
 
 static bool function_has_arrays(MvpFunction* f) {
     for (AstNamedNode* p = f ? f->ast->param : NULL; p; p = (AstNamedNode*)p->next)
@@ -2044,10 +2132,11 @@ static bool function_has_snapshots(LambdaMvpModule* m, MvpFunction* f) {
     return false;
 }
 
-static bool inline_eligible(MvpCompiler* c, MvpFunction* f, bool discard = false) {
+static bool inline_eligible(MvpCompiler* c, MvpFunction* f, bool discard = false,
+        bool closed_body = false) {
     unsigned budget = !f->abi.effects.may_gc && !f->abi.effects.may_return_error ? 192 : 96;
     if (!f->inline_cost || f->inline_cost > budget || c->inline_cost + f->inline_cost > 256 ||
-            f->abi.effects.may_reenter ||
+            (f->abi.effects.may_reenter && !closed_body) ||
             (f->abi.result.normal.abi_rep == VALUE_REP_ITEM && !discard) ||
             // immutable decimal payloads use the same precisely rooted raw
             // result path as strings; neither needs container write-back.
@@ -2058,11 +2147,13 @@ static bool inline_eligible(MvpCompiler* c, MvpFunction* f, bool discard = false
         if (mvp_rep(mvp_contract(p)) == VALUE_REP_ITEM && !mvp_array_element(mvp_contract(p))) return false;
     }
     if (function_has_arrays(f)) {
-        // keep loop kernels at their own entry, where dense-body versioning can guard them once.
+        // keep loop kernels at their own entry; a single recursive expansion
+        // can still reuse caller witnesses without bypassing the next real edge.
         AstIndex* index = &c->module->tp->ast_index;
         AstNodeId root = ast_index_find(index, f->ast->body);
         for (AstNodeId i = root; i < ast_index_subtree_end(index, root); i++)
-            if (index->nodes[i]->node_type == AST_NODE_LOOP || index->nodes[i]->node_type == AST_NODE_FOR_EXPR) return false;
+            if ((index->nodes[i]->node_type == AST_NODE_LOOP || index->nodes[i]->node_type == AST_NODE_FOR_EXPR) &&
+                    (f != c->function || c->inlining || f->inline_cost > 96)) return false;
     }
     unsigned depth = 0;
     for (MvpInline* p = c->inlining; p; p = p->parent)
@@ -2137,7 +2228,7 @@ static MirCallResult inline_call(MvpCompiler* c, MvpFunction* f, MIR_op_t* args,
         value(c, b->reg, b->contract->type_id, b->rep, b->contract);
         b->scalar_home = 0; b->scope = NULL;
         b->var_home = b->array_native = b->array_float_native = b->array_writable = b->array_length = b->dense_items = 0;
-        b->record_writable = 0;
+        b->record_writable = b->record_readable = 0;
     }
     int i = 0;
     bool snapshots = function_has_snapshots(m, f);
@@ -2256,9 +2347,10 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool 
     }
     // the closed body already guards unchanged owners and every access extent.
     // Self recursion reuses that proof; bounded leaf accessors expand natively.
+    bool allocating_leaf = c->guarded_allocating && dense_call_arguments(c, f, args);
     bool closed_call = c->dense_calls && c->dense_arrays && function_has_arrays(f);
     bool recursive = closed_call && f == c->function;
-    bool dense_call = c->dense_callee == f || closed_call;
+    bool dense_call = c->dense_callee == f || closed_call || allocating_leaf;
     // one bounded recursive expansion amortizes entry guards and the checked
     // sibling's frame; its next self edge remains a stack-guarded real call.
     bool inlined = recursive ? !c->inlining && f->inline_cost <= 256 :
@@ -2293,7 +2385,7 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool 
     if (inlined) {
         // admission failures skip the inlined body and join through the same call boundary below.
         MvpFunction* saved_callee = c->dense_callee;
-        if (closed_call) c->dense_callee = f;
+        if (closed_call || allocating_leaf) c->dense_callee = f;
         result = inline_call(c, f, ops, witnesses);
         c->dense_callee = saved_callee;
     } else {
@@ -2386,9 +2478,9 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool 
             move(c, joined, reg(c, failure.error)); mark(c, completed);
         }
         MirValue joined_value = value(c, joined, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
-        // call-site failures join only errors; a native callee's success lane
-        // already passed its declared return contract (D8.4.2v2, S7.7.3).
-        if (f->abi.result.normal.abi_rep != VALUE_REP_ITEM)
+        // call-site failures join only errors; the callee's success value
+        // passed its return contract even with Item transport (D8.4.2v2, S7.7.3).
+        if (!lambda_type_accepts_error(f->result_contract))
             joined_value.admitted_success_contract = f->result_contract;
         return joined_value;
     }
@@ -2614,17 +2706,7 @@ static MirValue map_literal(MvpCompiler* c, AstMapNode* node, TypeMap* destinati
     for (AstNode* item = node->item; item; item = item->next) {
         AstNode* source = item->node_type == AST_NODE_KEY_EXPR ? ((AstNamedNode*)item)->as : item;
         MirValue member = expression(c, source);
-        // fresh results have no second observer, and named reads already
-        // capture. Borrowed member/index results still need insertion capture
-        // (S9.3.1).
-        if (!mvp_local_binding(c->module, source) && ast_expr_insertion_needs_capture(source) &&
-                ast_type_needs_mutable_clone(member.semantic_type)) {
-            member = convert(c, member, VALUE_REP_ITEM);
-            member.reg = em_call_1(&c->em, "cow_capture_value", MIR_T_I64,
-                MIR_T_I64, reg(c, member.reg), true);
-            member = value(c, member.reg, member.semantic_type, member.rep, member.semantic_contract);
-        }
-        staged[i++] = member;
+        staged[i++] = capture_projection(c, member, source);
     }
     TypeMap* shape = (TypeMap*)node->type;
     MvpErrorTarget failure = {};
@@ -2690,21 +2772,30 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
     ValueRep rep = mvp_rep(contract);
     MIR_reg_t joined = em_new_reg(&c->em, "member", em_mir_type_for_rep(rep));
     MIR_label_t slow = label(c), done = label(c);
+    const LaneStorageDesc* storage = field ? shape_entry_storage(field) : NULL;
+    bool container_slot = storage && storage->kind == LANE_STORAGE_POINTER &&
+        (storage->value_domain == LMD_TYPE_MAP || storage->value_domain == LMD_TYPE_ARRAY ||
+         storage->value_domain == LMD_TYPE_ARRAY_NUM || storage->value_domain == LMD_TYPE_ELEMENT ||
+         storage->value_domain == LMD_TYPE_RANGE);
     if (field && shape && shape->is_trusted_contract &&
-            shape_entry_storage(field)->native && shape_entry_storage_fits_data(field, shape->byte_size)) {
+            (storage->native || container_slot) && shape_entry_storage_fits_data(field, shape->byte_size)) {
         owner = convert(c, owner, VALUE_REP_ITEM);
         // the enforced receiver contract already proves map-or-null; retain
         // null/layout guards without repeating tagged-kind classification.
         MIR_reg_t pointer = owner.reg;
-        if (binding && binding->record_writable)
-            branch(c, MIR_BEQ, slow, reg(c, binding->record_writable), imm(c, 0));
+        if (binding && (binding->record_readable || binding->record_writable))
+            branch(c, MIR_BEQ, slow,
+                reg(c, binding->record_readable ? binding->record_readable : binding->record_writable), imm(c, 0));
         else pointer = em_guard_map_shape(&c->em, owner.reg, constant(c, (intptr_t)shape), slow,
-            lambda_type_nonnull_map_contract(owner.semantic_contract) != NULL);
-        const LaneStorageDesc* storage = shape_entry_storage(field);
+            lambda_type_nonnull_map_contract(owner.semantic_contract) != NULL, true);
         MIR_type_t lane = native_field_storage_type(storage);
         MIR_reg_t data = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_DATA, MIR_T_P, "member_data");
+        Type* field_contract = type_field_unwrap_simple_decl(field->type);
+        // packed container slots use raw pointers even when the array contract
+        // itself has Item transport. Decode the descriptor, not the type AST.
         MirValue member = value(c, em_load_at(&c->em, data, field->byte_offset, lane, "member_lane"),
-            field->type->type_id, mvp_rep(field->type), field->type, node);
+            container_slot ? (TypeId)storage->value_domain : field_contract->type_id,
+            container_slot ? VALUE_REP_RAW_GC_POINTER : mvp_rep(field_contract), field_contract, node);
         member = convert(c, member, rep);
         move(c, joined, reg(c, member.reg), member.mir_type); jump(c, done);
     }
@@ -2741,7 +2832,7 @@ static void member_write(MvpCompiler* c, AstAssignStamNode* node) {
             MIR_reg_t pointer = binding->reg;
             if (binding->record_writable) branch(c, MIR_BEQ, slow, reg(c, binding->record_writable), imm(c, 0));
             else {
-                pointer = em_guard_map_shape(&c->em, binding->reg, constant(c, (intptr_t)shape), slow, true);
+                pointer = em_guard_map_shape(&c->em, binding->reg, constant(c, (intptr_t)shape), slow, true, true);
                 array_writable_guard(c, binding, slow);
             }
             MirValue member = convert(c, input, mvp_rep(field->type));
@@ -2768,6 +2859,7 @@ static void member_write(MvpCompiler* c, AstAssignStamNode* node) {
 }
 static void return_value(MvpCompiler* c, MirValue v, AstNode* node) {
     Type* contract = c->function->result_contract;
+    v = capture_projection(c, v, node, true);
     // native lanes cannot hold ItemError. Admit their nullable success domain
     // directly so only absence reaches the validator (D2.4.3).
     if (c->function->declared_result && c->function->declared_result != contract &&
@@ -2835,6 +2927,35 @@ static bool tail_call(MvpCompiler* c, AstNode* node) {
     jump(c, c->tail_entry);
     return true;
 }
+static bool match_subject_arm(MvpCompiler* c, AstMatchNode* match, AstMatchArm* arm) {
+    MvpBinding* subject = mvp_local_binding(c->module, match->scrutinee);
+    return subject && mvp_local_binding(c->module, arm->body) == subject;
+}
+
+static Type* native_match_contract(MvpCompiler* c, AstMatchNode* match, MirValue subject) {
+    Type* contract = mvp_contextual_contract(c->module, match);
+    // an explicit scalar boundary owns any promotion between arm carriers;
+    // an ordinary match must preserve the selected value's original tag.
+    if (!contract) return NULL;
+    ValueRep rep = mvp_rep(contract);
+    if (rep != VALUE_REP_F64 && rep != VALUE_REP_INT_LANE &&
+            !(rep == VALUE_REP_I64 && contract == &TYPE_BOOL)) return NULL;
+    Type* success = subject.admitted_success_contract ? subject.admitted_success_contract : subject.semantic_contract;
+    bool error_covered = !lambda_type_accepts_error(subject.semantic_contract), success_covered = false;
+    for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+        Type* pattern = arm->pattern ? mvp_match_type(arm->pattern) : NULL;
+        Type* body = pattern && match_subject_arm(c, match, arm)
+            ? pattern : mvp_value_contract(c->module, arm->body);
+        if (!mvp_boundary_proven(body, contract)) return NULL;
+        if (!pattern) return contract;
+        error_covered |= pattern == &TYPE_ERROR;
+        success_covered |= type_field_unwrap_simple_decl(success) == pattern;
+    }
+    // an unhandled scrutinee keeps the generic nullable completion. Only a
+    // complete numeric outcome may select native result lanes (S11.2.1).
+    return error_covered && success_covered ? contract : NULL;
+}
+
 static MirValue expression(MvpCompiler* c, AstNode* node, bool discard) {
     if (!node || c->module->failed) return null_value(c);
     switch (node->node_type) {
@@ -2955,22 +3076,43 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard) {
         // ordered base-type cases consume one rooted scrutinee, including an
         // error value handled by an explicit error arm (S11.2.1).
         MirValue subject = convert(c, expression(c, match->scrutinee), VALUE_REP_ITEM);
-        MIR_reg_t result = constant(c, ITEM_NULL);
-        value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+        Type* contract = native_match_contract(c, match, subject);
+        ValueRep rep = contract ? mvp_rep(contract) : VALUE_REP_ITEM;
+        MIR_type_t lane = em_mir_type_for_rep(rep);
+        MIR_reg_t result = em_new_reg(&c->em, "match_result", lane);
+        move(c, result, lane == MIR_T_D ? MIR_new_double_op(c->em.ctx, 0.0) : imm(c, ITEM_NULL), lane);
+        value(c, result, contract ? contract->type_id : LMD_TYPE_ANY, rep, contract ? contract : &TYPE_ANY);
         MIR_label_t done = label(c);
         for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
             MIR_label_t next = label(c);
+            Type* pattern = arm->pattern ? mvp_match_type(arm->pattern) : NULL;
             if (arm->pattern) {
-                MIR_reg_t matched = em_call_2(&c->em, "lambda_value_type_is_exact", MIR_T_I64,
-                    MIR_T_I64, reg(c, subject.reg), MIR_T_P, imm(c, (intptr_t)mvp_match_type(arm->pattern)), true);
-                branch(c, MIR_BEQ, next, reg(c, matched), imm(c, 0));
+                if (pattern == &TYPE_ERROR) {
+                    branch(c, MIR_BNE, next, reg(c, operation(c, MIR_URSH,
+                        reg(c, subject.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+                } else if (subject.admitted_success_contract &&
+                        type_field_unwrap_simple_decl(subject.admitted_success_contract) == pattern) {
+                    if (pattern != &TYPE_ERROR)
+                        branch(c, MIR_BEQ, next, reg(c, operation(c, MIR_URSH,
+                            reg(c, subject.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+                } else {
+                    MIR_reg_t matched = em_call_2(&c->em, "lambda_value_type_is_exact", MIR_T_I64,
+                        MIR_T_I64, reg(c, subject.reg), MIR_T_P, imm(c, (intptr_t)pattern), true);
+                    branch(c, MIR_BEQ, next, reg(c, matched), imm(c, 0));
+                }
             }
-            MirValue selected = convert(c, expression(c, arm->body, discard), VALUE_REP_ITEM);
-            if (!discard) move(c, result, reg(c, selected.reg));
+            MirValue selected = contract && pattern && match_subject_arm(c, match, arm)
+                ? value(c, subject.reg, pattern->type_id, VALUE_REP_ITEM, pattern, arm->body)
+                : expression(c, arm->body, discard);
+            if (!discard) {
+                selected = convert(c, selected, rep);
+                move(c, result, reg(c, selected.reg), selected.mir_type);
+            }
             jump(c, done); mark(c, next);
         }
         mark(c, done);
-        return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+        return discard ? null_value(c) : value(c, result,
+            contract ? contract->type_id : LMD_TYPE_ANY, rep, contract ? contract : &TYPE_ANY, node);
     }
     case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
@@ -3476,7 +3618,7 @@ static bool dense_body_eligible(MvpCompiler* c, MvpIndexLoopPlan* indices, MvpDe
         } else if (b->rep != VALUE_REP_F64 && b->rep != VALUE_REP_INT_LANE && b->rep != VALUE_REP_I64) return false;
     }
     if (!has_array) return false;
-    bool saved = c->dense_calls; c->dense_calls = calls != NULL;
+    bool saved = c->dense_calls; c->dense_calls = calls != NULL || allocating;
     AstNodeId root = ast_index_find(index, c->function->ast->body);
     bool eligible = true;
     if (calls) {
@@ -3501,12 +3643,18 @@ static bool dense_body_eligible(MvpCompiler* c, MvpIndexLoopPlan* indices, MvpDe
 }
 
 static bool dense_call_eligible(MvpCompiler* c, AstCallNode* call) {
+    return dense_call_arguments(c, mvp_function(c->module, ast_direct_call_function(call)), call->argument);
+}
+
+static bool dense_call_arguments(MvpCompiler* c, MvpFunction* f, AstNode* arguments) {
     LambdaMvpModule* m = c->module;
-    MvpFunction* f = mvp_function(m, ast_direct_call_function(call));
-    if (!f || f->abi.effects.may_reenter) return false;
+    if (!f) return false;
     bool recursive = f == c->function;
+    if (recursive && f->abi.effects.may_reenter) return false;
     if (!recursive) {
-        if (!inline_eligible(c, f, true)) return false;
+        // the checked ABI may conservatively classify boxed math as reentrant;
+        // only the complete closed-body proof below can replace that effect.
+        if (!inline_eligible(c, f, true, true)) return false;
         MvpFunction* caller = c->function; c->function = f;
         MvpIndexLoopPlan indices = {};
         bool eligible = dense_body_eligible(c, &indices) && !indices.array;
@@ -3514,7 +3662,7 @@ static bool dense_call_eligible(MvpCompiler* c, AstCallNode* call) {
         if (!eligible) return false;
     }
     AstNamedNode* param = f->ast->param;
-    for (AstNode* a = call->argument; a; a = a->next, param = (AstNamedNode*)param->next) {
+    for (AstNode* a = arguments; a; a = a->next, param = (AstNamedNode*)param->next) {
         if (!mvp_pure_key(a) || !mvp_boundary_proven(mvp_value_contract(m, a, 0, true), mvp_contract(param))) return false;
         MvpBinding* formal = mvp_binding(m, param->entry);
         if (!mvp_array_element(formal->contract)) continue;
@@ -3528,7 +3676,7 @@ static bool dense_call_eligible(MvpCompiler* c, AstCallNode* call) {
         } else {
             if (!mvp_parameter_borrowable(m, param)) return false;
             AstNamedNode* other = f->ast->param;
-            for (AstNode* arg = call->argument; arg; arg = arg->next, other = (AstNamedNode*)other->next)
+            for (AstNode* arg = arguments; arg; arg = arg->next, other = (AstNamedNode*)other->next)
                 if (lambda_type_param(other->type)->is_var_param && mvp_local_binding(m, arg) == owner) return false;
         }
     }
@@ -4204,7 +4352,9 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
             }
             if (allocating) {
                 uint32_t cost = c.inline_cost;
+                c.guarded_allocating = true;
                 function_body(&c);
+                c.guarded_allocating = false;
                 c.inline_cost = cost;
             } else {
                 dense_call_effects(&calls, true);

@@ -1376,14 +1376,36 @@ static inline MIR_reg_t em_guard_container(MirEmitter* em, MIR_reg_t item,
     return pointer;
 }
 
-static inline MIR_reg_t em_guard_map_shape(MirEmitter* em, MIR_reg_t item,
-        MIR_reg_t expected, MIR_label_t miss, bool proven_map = false) {
-    MIR_reg_t map = em_guard_container(em, item, LMD_TYPE_MAP, miss, proven_map);
+// an admitted immutable prefix preserves the declared offsets (D3.2.4v4).
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+static inline void em_guard_map_layout(MirEmitter* em, MIR_reg_t map,
+        MIR_op_t expected, MIR_label_t miss, bool trusted = false) {
     MIR_reg_t shape = em_load_at(em, map, LAMBDA_GC_OFF_MAP_TYPE,
         MIR_T_I64, "grd_shape");
+    MIR_label_t hit = trusted ? em_new_label(em) : NULL;
+    if (hit) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+            MIR_new_label_op(em->ctx, hit), MIR_new_reg_op(em->ctx, shape),
+            expected));
+        shape = em_load_at(em, shape, offsetof(TypeMap, verified_contract),
+            MIR_T_I64, "grd_prefix");
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
         MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, shape),
-        MIR_new_reg_op(em->ctx, expected)));
+        expected));
+    if (hit) em_emit_label(em, hit);
+}
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+static inline MIR_reg_t em_guard_map_shape(MirEmitter* em, MIR_reg_t item,
+        MIR_reg_t expected, MIR_label_t miss, bool proven_map = false, bool trusted = false) {
+    MIR_reg_t map = em_guard_container(em, item, LMD_TYPE_MAP, miss, proven_map);
+    em_guard_map_layout(em, map, MIR_new_reg_op(em->ctx, expected), miss, trusted);
     return map;
 }
 

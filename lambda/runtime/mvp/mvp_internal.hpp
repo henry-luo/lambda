@@ -31,6 +31,7 @@ struct MvpIntRange {
 struct MvpBinding {
     NameEntry* entry;
     Type* admission_contract;
+    Type* producer_success_contract;
     Type* contract;
     ValueRep rep;
     MIR_reg_t reg;
@@ -42,6 +43,7 @@ struct MvpBinding {
     MIR_reg_t array_native;
     MIR_reg_t array_float_native;
     MIR_reg_t record_writable;
+    MIR_reg_t record_readable;
     MIR_reg_t array_writable;
     MIR_reg_t array_length;
     int64_t array_extent;
@@ -129,6 +131,7 @@ struct MvpCompiler {
     MvpBinding* loop_array;
     MIR_reg_t loop_array_items;
     bool dense_arrays;
+    bool guarded_allocating;
     MvpFunction* dense_callee;
     bool dense_calls;
     bool checked_bitwise;
@@ -202,7 +205,8 @@ bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, 
 bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
 bool mvp_index_key(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
-TypeMap* mvp_scalar_record_contract(Type* contract);
+TypeMap* mvp_record_contract(Type* contract, bool scalar_only);
+Type* mvp_contextual_contract(LambdaMvpModule* module, AstNode* node);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);

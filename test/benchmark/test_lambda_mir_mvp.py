@@ -300,6 +300,48 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("source manifest does not identify", result.stderr)
 
+    def test_batched_reference_executable(self):
+        reference = Path(self.scratch.name) / "batch-reference.exe"
+        reference.write_text("mock reference executable\n")
+        report = Path(self.scratch.name) / "batch-reference.json"
+
+        def invoke(command, env):
+            if command[1] == "run":
+                source = Path(command[2])
+                expected = source.with_suffix(".txt")
+            else:
+                self.assertEqual(command[0], str(reference))
+                source = Path(command[-2])
+                expected = source.parent.parent / (source.stem + "2.txt")
+            return expected.read_text().strip() + "\n__TIMING__:1.0\n"
+
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+            "--subset", "float-array", "--runs", "3", "--warmups", "1",
+            "--c2mir-exe", str(reference), "--output", str(report)]
+        with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
+                mock.patch("builtins.print"):
+            lambda_mir_mvp.main()
+        rows = json.loads(report.read_text())["cases"]
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["commands"]["c2mir"][0], str(reference))
+            self.assertEqual(len(row["samples_ms"]["c2mir"]), 3)
+
+    def test_batch_record_and_decimal_paths(self):
+        modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+            {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
+        for name in ("batch_records", "decimal_dispatch", "scalar_outcomes"):
+            source = ROOT / "test/lambda/mvp" / f"mir_mvp_{name}.ls"
+            for mode in modes:
+                with self.subTest(fixture=name, mode=mode):
+                    self.check_golden(source, mode)
+        decimal = ROOT / "test/lambda/mvp/mir_mvp_decimal_dispatch.ls"
+        self.assertEqual(self.function_mir(decimal, "decimal_ops").count("\tcall\tlambda_decimal_binary"), 6)
+        self.assertIn("\tcall\tfn_add", self.function_mir(decimal, "decimal_generic"))
+        compared = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_scalar_outcomes.ls", "scalar_compare")
+        self.assertIn("\tdlt\t", compared)
+        self.assertIn("\tcall\tfn_lt", compared)
+
     def test_recursive_constructor_gc(self):
         original = (ROOT / "test/benchmark/larceny/gcbench2.ls").read_text()
         source = Path(self.scratch.name) / "recursive_constructor.ls"
@@ -351,14 +393,14 @@ class LambdaMirMvpTests(unittest.TestCase):
         for name in ("decimal_sum", "decimal_remainder", "decimal_quotient", "decimal_compare", "string_compare"):
             body = self.function_mir(source, name)
             self.assertNotIn("lambda_int_lane_", body)
-            before_helper = body[:re.search(r"\tcall\tfn_", body).start()]
+            before_helper = body[:re.search(r"\tcall\t(?:fn_|lambda_decimal_binary)", body).start()]
             self.assertNotIn("\tubgt\t", before_helper)
         dynamic = self.function_mir(source, "dynamic_sum")
         self.assertIn("\tubgt\t", dynamic)
         self.assertIn("\tcall\tfn_add", dynamic)
         chain = self.function_mir(source, "decimal_chain")
         self.assertNotRegex(chain, r"\tcall\tmvp_\d+_decimal_quotient_dp")
-        self.assertIn("\tcall\tfn_mod", chain)
+        self.assertIn("\tcall\tlambda_decimal_binary", chain)
         epilogue = re.search(r"(?m)^(L\d+):\n(?:\t[^\n]*\n)*?\tret\t", chain).group(1)
         # the failed-local completion keeps its cold check; successful arithmetic does not.
         self.assertNotIn("lambda_type_check", chain[:chain.index("\tjmp\t" + epilogue)])
