@@ -1386,3 +1386,96 @@ The goal remains active with **176 Ruby mismatches**. Next priority is
 coordinated within-base/reading fragments; source-range design findings are
 retained in `temp/ruby-m14/next-fragment-plan.json`. Browser references,
 upstream fixtures, thresholds and baselines remain unchanged.
+
+
+## M15: coordinated text fragments within a base/reading pair
+
+P1 common Japanese paragraph flow. `break-within-bases/no-break-opportunity-at-end`
+currently wraps the base before its reading is available, then moves already
+finalized lines during global column placement. CSS Ruby §3.4/§3.4.2 requires
+opportunities inside all parallel boxes and independent alignment of each
+chosen fragment; use live line availability and shared tail lookahead so a
+following nonbreaking punctuation run stays with the final fragment.
+
+Introduce bounded original-source text flow with append-only selected
+TextRects, and collect measured opportunities through the existing intrinsic
+scanner and normalizer. Reuse the column solver, placement, line metrics and
+selected-model callbacks. Shared helpers retain source indices, whitespace,
+clusters and text transformation; no copied/NUL-modified DOM source is used.
+Preserve selected snapshots and borrowed scope lifetimes (**D4.5.1v4 /
+D4.1.4v5**). The first formatter capability is one inline horizontal LTR segment
+with a direct text run in each single-column parallel box, collapsing whitespace
+and ordinary interior opportunities. Preserved whitespace, mixed/atomic or forced
+content, nested ruby/independent formatting contexts, source floats/positioned
+children, generated children, decorated units, block ruby, multiple columns/segments,
+vertical/RTL or first-line-styled flow, conditional
+hyphens and `overflow-wrap: break-word` contexts retain their existing paths.
+This is one flow milestone, not a claim that the remaining Ruby family is done.
+
+Acceptance: the Japanese punctuation case against independently split controls,
+wide/narrow and retained flow, different base/reading lengths, nowrap controls,
+unchanged source identities and byte ranges, and glyph/range geometry. Budget:
+focused source-range and Ruby/bidi/whitespace/intrinsic checks during the edit
+loop, raw Ruby score comparison, lint/inventory and required Radiant
+qualification on stable production inputs; broaden only for affected consumers.
+
+`LayoutTextSliceScope` now supplies original-source byte intervals to the shared
+text scanner. Continuations append rectangles and retain the source node and
+indices. The existing intrinsic scanner collects measured ordinary opportunities;
+its normalizer optionally maps processed byte boundaries back to source bytes.
+Paint and layout share source-aware word-start handling. No source strings are
+copied or temporarily terminated.
+
+The Ruby formatter selects approximately proportional cuts using the live line
+availability, lays out both sides, and applies the existing column solver before
+closing the base line. Shared boundary/tail lookahead reserves a forbidden
+following run. Collapsed separators are trimmed in every selected parallel
+fragment before alignment, retaining their source ownership. Selected-line
+bounds and shifts exclude rectangles on completed lines; allocated advances live
+on each rectangle rather than in a single whole-box column offset.
+
+A scalar selected-view flag on the Ruby root lets the final line callback rebuild
+and select the relevant line. Flow snapshots capture that flag, while prefix
+plans and borrowed source scopes remain in scratch/stack storage
+(**D4.5.1v4 / D4.1.4v5**).
+
+M15's inline plain-text milestone is implemented. The original
+`no-break-opportunity-at-end` case now matches the browser. Native controls cover
+source identity/byte intervals, range and painted glyph geometry, retained
+wide/narrow reflow, three successive lines and repeated leading/interior/trailing
+collapsed separators. Independent browser captures agree on 88 element geometry
+coordinates/dimensions. Unsupported formatting protocols retain their prior flow;
+Ruby support remains partial.
+
+Qualified on unchanged production inputs:
+
+- Raw Ruby: **37/212 full matches**, up from 36; **175 mismatches** remain.
+  No lost full matches or partial-score changes.
+- Required Radiant gate: **9,380 total**, **9,074 passed**, **304 partial**,
+  **0 failed**, **2 skipped**. Native text/query **477/477**, UI **752/752**;
+  layout **4,974 full + 300 partial**, **0 regressions**.
+- Dimension lint, diff checks and CSS inventory checks pass. Inventory remains
+  421 registered names/IDs; only source/reference columns changed.
+- Ancillary module-boundary validation still rejects six deferred imports
+  (`view_get_client_matrix`, `doc_state_request_repaint`,
+  `view_geometry_block_viewport_origin`,
+  `editing_geometry_text_control_for_each_selection_rect`,
+  `dom_boundary_from_source_pos`, `radiant_dom_m4b_src_get`). Strict validation
+  DSOs link. The associated source files are unchanged by M15; the allowlist is
+  unchanged.
+- A fresh full input build stops at `test_input_pdf_gtest`: its local static
+  `read_binary_file` redeclares the external `lib/file.h` function under
+  `-fms-extensions`, producing a duplicate symbol with `lib/file.c`. Those files
+  are unchanged by M15. No fresh full input pass is claimed.
+
+Evidence: `temp/ruby-m15/qualification-result.json`, `source-inputs.json`,
+`radiant-stable.log`, `radiant-stable-output/test_summary.json`, `wpt-stable.log`,
+`browser-comparison.json`, `boundary-final.log` and `build-input.log` under the
+same task directory. `lambda-qualified.exe` retains the tested CLI. Earlier
+interrupted qualification logs are not the aggregate evidence above.
+
+The goal remains active. Next core priority is coordinated text fragments across
+multiple simple segments, reusing between-base group/boundary policy and the
+selected-line protocol. The finite next plan is retained in
+`temp/ruby-m15/next-fragment-plan.json`. Browser references, upstream WPT fixtures,
+thresholds and baseline floors remain unchanged.

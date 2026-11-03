@@ -571,7 +571,7 @@ void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
     }
 }
 
-static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
+bool layout_inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
     DomNode* source = nullptr;
     uint32_t edge = layout_inline_text_edge_codepoint(inline_node, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
@@ -3106,7 +3106,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // nearest common ancestor's wrapping mode, not the inline's own mode.
     if ((span_is_unbreakable || layout_inline_span_isolate(span)) && !lycon->line.is_line_start &&
         has_following_content(elmt, true) &&
-        inline_boundary_allows_soft_wrap(lycon, elmt)) {
+        layout_inline_boundary_allows_soft_wrap(lycon, elmt)) {
         // following normal text needs the candidate too; a nowrap-only flag loses the closing seam.
         layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
             lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);

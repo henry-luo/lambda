@@ -949,6 +949,7 @@ struct DomElementExt {
     float ruby_empty_base_block_size;
     bool has_ruby_column_geometry;
     bool has_empty_ruby_base;
+    bool has_ruby_parallel_fragments; // selected text rectangles own each line's allocation
     bool popover_open;
     bool dialog_modal;
     lam::Own<const char> dialog_return_value; // document-pooled WebIDL state, independent of JS expandos
@@ -1454,6 +1455,7 @@ struct DomElement : DomNode {
         ext->ruby_empty_base_block_size = 0.0f;
         ext->has_ruby_column_geometry = false;
         ext->has_empty_ruby_base = false;
+        ext->has_ruby_parallel_fragments = false;
     }
 
 };

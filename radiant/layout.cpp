@@ -3719,12 +3719,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
-static bool shift_text_current_line_rects(float offset, int line_number, ViewText* text) {
+static bool shift_text_current_line_rects(float offset, float offset_y, int line_number, ViewText* text) {
     bool shifted = false;
     TextRect* rect = text->rect;
     while (rect) {
         if (rect->line_number == line_number) {
             rect->x += offset;
+            rect->y += offset_y;
             shifted = true;
         }
         rect = rect->next;
@@ -3733,10 +3734,10 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
     return shifted;
 }
 
-static bool shift_inline_current_line_view(float offset, int line_number, View* view) {
+static bool shift_inline_current_line_view(float offset, float offset_y, int line_number, View* view) {
     if (layout_view_is_out_of_flow(view)) return false;
     if (view->view_type == RDT_VIEW_TEXT)
-        return shift_text_current_line_rects(offset,line_number,lam::view_require_text(view));
+        return shift_text_current_line_rects(offset,offset_y,line_number,lam::view_require_text(view));
     bool atomic = view->is_element() && layout_intrinsic_element_is_atomic_inline(view->as_element());
     bool empty_inline = view->view_type == RDT_VIEW_INLINE && !view->as_element()->first_child;
     if ((atomic || empty_inline || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
@@ -3744,6 +3745,7 @@ static bool shift_inline_current_line_view(float offset, int line_number, View* 
         // an atomic box moves in its parent's line; its internal coordinates
         // already belong to its independent formatting context.
         view->x += offset;
+        view->y += offset_y;
         return true;
     }
     return false;
@@ -3757,11 +3759,21 @@ static void recompute_inline_view_bounds_after_line_layout(View* view) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y) {
+    auto visit = [&](View* view, int) {
+        shift_inline_current_line_view(offset_x, offset_y, line_number, view);
+        return view->view_type == RDT_VIEW_INLINE;
+    };
+    layout_walk_view_tree(root, visit, [](View* view, int) {
+        recompute_inline_view_bounds_after_line_layout(view);
+    }, true, 0, false, root->next());
+}
+
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span) {
     int line_number = context->block.line_number;
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     auto shift_view = [&](View* view) -> bool {
-        return shift_inline_current_line_view(offset,line_number,view);
+        return shift_inline_current_line_view(offset,0.0f,line_number,view);
     };
     bool shifted = layout_walk_inline_views(
         static_cast<View*>(span->first_child), shift_view,
@@ -3788,7 +3800,7 @@ void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
         if (prev->view_type == RDT_VIEW_INLINE) {
             layout_shift_span_current_line(
                 lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
-        } else shift_inline_current_line_view(offset,line_number,prev);
+        } else shift_inline_current_line_view(offset,0.0f,line_number,prev);
         prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
     }
 }
@@ -3801,7 +3813,7 @@ static void align_inline_line_from_fragment(LayoutContext* lycon, float offset, 
         layout_shift_span_current_line(
             lycon, offset,
             lam::view_require<RDT_VIEW_INLINE>(fragment));
-    } else shift_inline_current_line_view(offset,lycon->block.line_number,fragment);
+    } else shift_inline_current_line_view(offset,0.0f,lycon->block.line_number,fragment);
 
     while (cursor) {
         if (View* next = cursor->next()) {

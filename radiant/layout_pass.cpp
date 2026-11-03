@@ -216,7 +216,7 @@ struct LayoutFlowNode {
     uint8_t text_trim_applied;
     float text_trim_start, text_trim_end, initial_letter_trimmed_start;
     float ruby_start_offset, ruby_end_offset, ruby_empty_block_size;
-    bool ruby_geometry, ruby_empty;
+    bool ruby_geometry, ruby_empty, ruby_fragments;
     bool inline_strut;
     lam::Own<LayoutFlowNode> next;
 };
@@ -382,6 +382,7 @@ static bool layout_flow_capture_nodes(LayoutContext* context, DomNode* node,
             output->ruby_empty_block_size = element->ext->ruby_empty_base_block_size;
             output->ruby_geometry = element->ext->has_ruby_column_geometry;
             output->ruby_empty = element->ext->has_empty_ruby_base;
+            output->ruby_fragments = element->ext->has_ruby_parallel_fragments;
         }
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (!layout_flow_capture_nodes(context, child, tail, depth + 1, remaining)) return false;
@@ -515,6 +516,7 @@ bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* re
                 element->ext->ruby_empty_base_block_size = output->ruby_empty_block_size;
                 element->ext->has_ruby_column_geometry = output->ruby_geometry;
                 element->ext->has_empty_ruby_base = output->ruby_empty;
+                element->ext->has_ruby_parallel_fragments = output->ruby_fragments;
             }
         } else if (node->is_text()) {
             DomText* text = node->as_text();

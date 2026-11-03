@@ -15269,6 +15269,154 @@ TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningConten
     EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
 }
 
+TEST_F(RadiantTextQuery, RubyParallelTextFragmentsPreserveSourceAndMatchExplicitSplits) {
+    ASSERT_NE(load("test/html/layout_ruby_parallel_fragments.html"), nullptr);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* group = find("group");
+    DomElement* reading = find("reading");
+    ASSERT_NE(group, nullptr);
+    ASSERT_NE(reading, nullptr);
+    DomText* base_source = group->first_child->as_text();
+    DomText* reading_source = reading->first_child->as_text();
+    ASSERT_NE(base_source, nullptr);
+    ASSERT_NE(reading_source, nullptr);
+    const unsigned char* base_data = base_source->text_data();
+    const unsigned char* reading_data = reading_source->text_data();
+    auto check = [&](bool narrow) {
+        DomElement* row = find("group-row");
+        DomElement* control = find("control-row");
+        EXPECT_FLOAT_EQ(row->height, narrow ? 120.0f : 60.0f);
+        EXPECT_FLOAT_EQ(row->height, control->height);
+        EXPECT_EQ(base_source->parent.get(), group);
+        EXPECT_EQ(reading_source->parent.get(), reading);
+        EXPECT_EQ(base_source->text_data(), base_data);
+        EXPECT_EQ(reading_source->text_data(), reading_data);
+        EXPECT_EQ(group->first_child.get(), base_source);
+        EXPECT_EQ(reading->first_child.get(), reading_source);
+        struct Pair { DomText* source; const char* first; const char* last; unsigned cut, count; } pairs[] = {
+            {base_source, "control-first", "control-last", 4, 5},
+            {reading_source, "control-reading-first", "control-reading-last", 8, 10}
+        };
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-parallel-fragments"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Pair& pair : pairs) {
+            DomText* first = first_text_leaf(find(pair.first));
+            DomText* last = first_text_leaf(find(pair.last));
+            ASSERT_NE(first, nullptr);
+            ASSERT_NE(last, nullptr);
+            TextRect* rect = pair.source->rect;
+            ASSERT_NE(rect, nullptr);
+            EXPECT_EQ(rect->start_index, 0);
+            EXPECT_EQ(rect->length, (narrow ? pair.cut : pair.count) * 3u);
+            EXPECT_FLOAT_EQ(rect->x, 60.0f);
+            if (narrow) {
+                ASSERT_NE(rect->next, nullptr);
+                EXPECT_EQ(rect->next->start_index, pair.cut * 3u);
+                EXPECT_EQ(rect->next->length, (pair.count - pair.cut) * 3u);
+                EXPECT_FLOAT_EQ(rect->next->x, 0.0f);
+                EXPECT_EQ(rect->next->line_number, rect->line_number + 1);
+                EXPECT_EQ(rect->next->next, nullptr);
+            } else EXPECT_EQ(rect->next, nullptr);
+            TestRadiantPaintGlyphs<16> actual, expected;
+            ASSERT_TRUE(visit_text_paint_glyphs(row, pair.source, TestRadiantPaintGlyphs<16>::collect, &actual));
+            ASSERT_TRUE(visit_text_paint_glyphs(control, first, TestRadiantPaintGlyphs<16>::collect, &expected));
+            ASSERT_TRUE(visit_text_paint_glyphs(control, last, TestRadiantPaintGlyphs<16>::collect, &expected));
+            ASSERT_EQ(actual.count, pair.count);
+            ASSERT_EQ(expected.count, pair.count);
+            for (unsigned index = 0; index < pair.count; index++) {
+                EXPECT_EQ(actual.glyphs[index].codepoint, expected.glyphs[index].codepoint);
+                EXPECT_FLOAT_EQ(actual.glyphs[index].x, expected.glyphs[index].x);
+                EXPECT_FLOAT_EQ(actual.glyphs[index].y, expected.glyphs[index].y);
+                DomText* reference = index < pair.cut ? first : last;
+                TextRect* expected_rect = reference->rect;
+                ASSERT_NE(expected_rect, nullptr);
+                float advance = pair.count == 5 ? 20.0f : 10.0f;
+                unsigned local = index < pair.cut ? index : index - pair.cut;
+                expect_character_rect(range, pair.source, index, {expected_rect->x + local * advance,
+                    expected_rect->y, advance, expected_rect->height});
+            }
+        }
+        dom_range_release(range);
+        EXPECT_FLOAT_EQ(group->next_sibling->x, find("control-last")->next_sibling->x);
+        EXPECT_FLOAT_EQ(group->next_sibling->y, find("control-last")->next_sibling->y);
+        IntrinsicSizes sizes = measure_physical_widths(group);
+        EXPECT_FLOAT_EQ(sizes.max_content, 100.0f);
+        EXPECT_TRUE(sizes.has_min_content_break);
+        EXPECT_EQ(group->ext->has_ruby_parallel_fragments, true);
+        DomText* kept_base = first_text_leaf(find("nowrap"));
+        ASSERT_NE(kept_base->rect, nullptr);
+        EXPECT_EQ(kept_base->rect->next, nullptr);
+        EXPECT_FALSE(find("nowrap")->ext->has_ruby_parallel_fragments);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check(true);
+    }
+    for (const char* width : {"200px", "160px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("group-row"), "width", width));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("control-row"), "width", width));
+        bool narrow = strcmp(width, "160px") == 0;
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("control-break"), "display", narrow ? "inline" : "none"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check(narrow);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSeparators) {
+    ASSERT_NE(load("test/html/layout_ruby_parallel_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* group; const char* row; const char* control; const char* reading;
+        const char* pieces[3]; size_t starts[2][3]; size_t lengths[2][3]; } cases[] = {
+        {"triple", "triple-row", "triple-control", "triple-reading", {"triple-a", "triple-b", "triple-c"}, {{0,9,18},{0,18,36}}, {{9,9,9},{18,18,18}}},
+        {"spaces", "spaces-row", "spaces-control", "spaces-reading", {"spaces-a", "spaces-b", "spaces-c"}, {{2,6,10},{1,4,7}}, {{4,4,4},{3,3,2}}}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.group);
+            DomElement* row = find(entry.row);
+            DomElement* control = find(entry.control);
+            EXPECT_FLOAT_EQ(row->height, 180.0f);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            for (bool annotation : {false, true}) {
+                DomText* source = first_text_leaf(find(annotation ? entry.reading : entry.group));
+                ASSERT_NE(source, nullptr);
+                TextRect* rect = source->rect;
+                TestRadiantPaintGlyphs<32> actual, expected;
+                ASSERT_TRUE(visit_text_paint_glyphs(row, source, TestRadiantPaintGlyphs<32>::collect, &actual));
+                for (size_t index = 0; index < 3; index++) {
+                    DomElement* piece = find(entry.pieces[index]);
+                    DomText* reference = first_text_leaf(annotation ? piece->last_child.get() : piece);
+                    ASSERT_NE(reference, nullptr);
+                    ASSERT_NE(rect, nullptr);
+                    EXPECT_EQ(rect->line_number, index);
+                    EXPECT_EQ(rect->start_index, entry.starts[annotation][index]);
+                    EXPECT_EQ(rect->length, entry.lengths[annotation][index]);
+                    int painted_start = 0, painted_length = 0;
+                    text_rect_painted_source_range(rect, &painted_start, &painted_length);
+                    EXPECT_EQ(painted_start, rect->start_index);
+                    // soft-break separators are explicitly suppressed; terminal source spaces are normalized by paint.
+                    if (index + 1 < 3) EXPECT_EQ(painted_length, reference->rect->length);
+                    EXPECT_FLOAT_EQ(rect->x, reference->rect->x);
+                    EXPECT_FLOAT_EQ(rect->y, reference->rect->y);
+                    EXPECT_FLOAT_EQ(rect->width, reference->rect->width);
+                    ASSERT_TRUE(visit_text_paint_glyphs(control, reference, TestRadiantPaintGlyphs<32>::collect, &expected));
+                    rect = rect->next;
+                }
+                EXPECT_EQ(rect, nullptr);
+                ASSERT_EQ(actual.count, expected.count);
+                for (size_t index = 0; index < actual.count; index++) {
+                    EXPECT_EQ(actual.glyphs[index].codepoint, expected.glyphs[index].codepoint);
+                    EXPECT_FLOAT_EQ(actual.glyphs[index].x, expected.glyphs[index].x);
+                    EXPECT_FLOAT_EQ(actual.glyphs[index].y, expected.glyphs[index].y);
+                }
+            }
+        }
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
     ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
     process_document_font_faces(&ui, document);

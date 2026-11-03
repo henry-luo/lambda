@@ -1669,6 +1669,24 @@ static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum wh
     widths->interior_min_content = 0.0f;
 }
 
+struct IntrinsicTextBreakObserver {
+    LayoutTextBreakPlan* plan;
+    const size_t* source_offsets;
+    size_t source_length;
+    bool allows_wrap;
+
+    void record(size_t start, size_t end, float advance, float next_advance,
+                float first_adjustment, bool at_break) {
+        if (at_break && !allows_wrap) return;
+        LayoutTextBreakPoint* previous = &plan->points[plan->count - 1];
+        // a new line has no kerning/autospace pair with the preceding fragment.
+        if (previous->source_end == source_offsets[start]) previous->next_advance += first_adjustment;
+        size_t source_end = at_break ? source_offsets[end] : source_length;
+        if (source_end <= previous->source_end) return;
+        plan->points[plan->count++] = {source_end, advance, next_advance};
+    }
+};
+
 static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            const char* text,
                                                            size_t length,
@@ -1678,7 +1696,8 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            CssEnum overflow_wrap,
                                                            CssEnum word_break,
                                                            CssEnum line_break,
-                                                           IntrinsicTextLinePacking* packing = nullptr) {
+                                                           IntrinsicTextLinePacking* packing = nullptr,
+                                                           IntrinsicTextBreakObserver* observer = nullptr) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
@@ -1707,7 +1726,21 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     float current_word = 0.0f;
     float packed_end = 0.0f;
     bool packed_content = false;
-    auto record_segment = [&](bool at_break = true, float end_adjustment = 0.0f) {
+    bool segment_started = false;
+    float first_adjustment = 0.0f;
+    size_t segment_start = 0;
+    auto append_advance = [&](float advance, float boundary_adjustment = 0.0f) {
+        if (!segment_started) { first_adjustment = boundary_adjustment; segment_started = true; }
+        current_word += advance;
+        total_width += advance;
+    };
+    auto record_segment = [&](size_t source_end, bool at_break = true,
+                              float end_adjustment = 0.0f, float next_adjustment = 0.0f) {
+        if (observer) observer->record(segment_start, source_end, total_width + end_adjustment,
+            total_width + next_adjustment, first_adjustment, at_break);
+        segment_start = source_end;
+        segment_started = false;
+        first_adjustment = 0.0f;
         if (packing && current_word != 0.0f) {
             float end = total_width + end_adjustment;
             // separators participate between words, but collapse at a new line's start.
@@ -1728,23 +1761,22 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     // CSS Text 3 §4.2.2: break-spaces — spaces are not hangable,
                     // contribute to min-content. Break opportunity is AFTER the space.
                     current_word += 4.0f;
-                    if (i + 1 < length) record_segment(true, 4.0f);
+                    if (i + 1 < length) record_segment(i + 1, true, 4.0f, 4.0f);
                 } else {
-                    if (i < trailing_space_start) record_segment();
+                    if (i < trailing_space_start) record_segment(i + 1, true, 0.0f, 4.0f);
                 }
                 total_width += 4.0f;  // Space width estimate
             } else {
-                current_word += 11.0f;  // Use 11.0 to match font fallback width
-                total_width += 11.0f;
+                append_advance(11.0f);  // use the same font fallback width.
                 if (layout_text_break_opportunity(ch, ch,
                         (const unsigned char*)text + i + 1,
                         (const unsigned char*)text + length, native_breaks, i + 1,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
-                    record_segment();
+                    record_segment(i + 1);
                 }
             }
         }
-        record_segment(false);
+        record_segment(length, false);
 
         result.max_content = total_width;
         return result;
@@ -1769,7 +1801,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         IntrinsicZeroWidthChar zero_width = intrinsic_zero_width_char(str, i, length);
 
         if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
-            if (i + 3 < length) record_segment();
+            if (i + 3 < length) record_segment(i + 3);
             is_word_start = true;
             i += 3;
             continue;
@@ -1800,10 +1832,10 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 // and DO contribute to min-content width. Break opportunity is AFTER
                 // each preserved space, so include space in the preceding segment.
                 current_word += kerning_adj + space_width;
-                if (i + 1 < length) record_segment(true, kerning_adj + space_width);
+                if (i + 1 < length) record_segment(i + 1, true, kerning_adj + space_width, kerning_adj + space_width);
             } else {
                 // terminal collapsible/hanging spaces do not invent an empty final fragment.
-                if (i < trailing_space_start) record_segment();
+                if (i < trailing_space_start) record_segment(i + 1, true, 0.0f, kerning_adj + space_width);
             }
 
             total_width += kerning_adj + space_width;
@@ -1835,8 +1867,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                             shaped_script_first);
                     }
                     float advance = shaped_script_width + kerning;
-                    current_word += advance;
-                    total_width += advance;
+                    append_advance(advance, kerning);
                     prev_codepoint = shaped_script_last;
                     prev_text_autospace_codepoint = shaped_script_last;
                     prev_is_zwj_base = false;
@@ -1845,7 +1876,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     if (layout_text_break_opportunity(shaped_script_first, shaped_script_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
-                        record_segment();
+                        record_segment(i);
                     }
                     continue;
                 }
@@ -1871,8 +1902,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                             cluster_first)) {
                         advance += layout_text_autospace_advance(lycon);
                     }
-                    current_word += advance;
-                    total_width += advance;
+                    append_advance(advance, advance - cluster_width);
                     prev_codepoint = cluster_last;
                     prev_text_autospace_codepoint = cluster_last;
                     prev_is_zwj_base = false;
@@ -1883,7 +1913,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     if (layout_text_break_opportunity(cluster_first, cluster_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
-                        record_segment();
+                        record_segment(i);
                     }
                     continue;
                 }
@@ -1909,8 +1939,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                         shaped_first_cp)) {
                     advance += layout_text_autospace_advance(lycon);
                 }
-                current_word += advance;
-                total_width += advance;
+                append_advance(advance, advance - shaped_width);
                 prev_codepoint = shaped_last_cp;
                 prev_text_autospace_codepoint = shaped_last_cp;
                 prev_is_zwj_base = false;
@@ -1921,7 +1950,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
                     // a shaped Latin run can end at a native CJK boundary;
                     // its advance must not carry into the following word.
-                    record_segment();
+                    record_segment(i);
                 }
                 continue;
             }
@@ -1930,12 +1959,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         uint32_t codepoint;
         int bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
         if (bytes <= 0) {
-            current_word += 11.0f;
-            total_width += 11.0f;
+            append_advance(11.0f);
             i++;
             is_word_start = false;
             if (break_anywhere) {
-                record_segment();
+                record_segment(i);
             }
             continue;
         }
@@ -2000,6 +2028,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
             lycon, codepoint, is_small_caps_lower, kerning,
             emoji_presentation, &glyph_loaded);
         if (!glyph_loaded) advance = 11.0f;
+        float boundary_adjustment = kerning;
         if (text_transform == CSS_VALUE_NONE && font_variant != CSS_VALUE_SMALL_CAPS &&
             utf_requires_contextual_shaping(codepoint)) {
             float contextual_width = 0.0f;
@@ -2009,18 +2038,20 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 advance = contextual_width + (contextual_width > 0.0f
                     ? text_character_spacing(lycon->font.style, codepoint) : 0.0f);
                 glyph_loaded = true;
+                boundary_adjustment = 0.0f;
             }
         }
         if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                 text_autospace, prev_text_autospace_codepoint, codepoint)) {
-            advance += layout_text_autospace_advance(lycon);
+            float autospace = layout_text_autospace_advance(lycon);
+            advance += autospace;
+            boundary_adjustment += autospace;
         }
         if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
             advance += lycon->font.style->word_spacing;
             is_word_start = true;
         }
-        current_word += advance;
-        total_width += advance;
+        append_advance(advance, boundary_adjustment);
 
         if (glyph_index) prev_codepoint = codepoint;
         prev_text_autospace_codepoint = codepoint;
@@ -2029,11 +2060,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         if (layout_text_break_opportunity(codepoint, codepoint,
                 &str[i], str + length, native_breaks, i,
                 break_anywhere, break_all, cjk_breaks, line_break)) {
-            record_segment();
+            record_segment(i);
         }
     }
 
-    record_segment(false);
+    record_segment(length, false);
 
     // max-content disables wrapping, including line-break:anywhere, to retain whole-run shaping.
     result.max_content = break_all || break_anywhere || break_word
@@ -6614,17 +6645,23 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
 struct IntrinsicInlineTextState {
     bool pending_space = false;
     bool has_line_content = false;
+    size_t pending_source_end = 0;
 };
 
-static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextState* state) {
-    if (state->pending_space && state->has_line_content) strbuf_append_char(output, ' ');
+static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextState* state,
+                                         size_t* source_offsets = nullptr) {
+    if (state->pending_space && state->has_line_content) {
+        strbuf_append_char(output, ' ');
+        if (source_offsets) source_offsets[output->length] = state->pending_source_end;
+    }
     state->pending_space = false;
 }
 
 static void intrinsic_append_normalized_text(StrBuf* output,
                                                     const char* data, size_t length, CssEnum white_space,
                                                     IntrinsicInlineTextState* state,
-                                                    bool collapse_segment_breaks = false) {
+                                                    bool collapse_segment_breaks = false,
+                                                    size_t* source_offsets = nullptr) {
     if (!data) return;
     bool collapse = layout_white_space_collapses(white_space);
     bool collapse_newlines = collapse_segment_breaks || layout_white_space_collapses_newlines(white_space);
@@ -6632,14 +6669,18 @@ static void intrinsic_append_normalized_text(StrBuf* output,
         char ch = data[i];
         if (layout_text_is_segment_break(ch) && !collapse_newlines) {
             strbuf_append_char(output, '\v');
+            if (source_offsets) source_offsets[output->length] = i + 1;
             state->pending_space = false;
             state->has_line_content = false;
         } else if ((collapse && is_space((unsigned char)ch)) ||
                    (collapse_segment_breaks && layout_text_is_segment_break(ch))) {
             state->pending_space = true;
+            state->pending_source_end = i + 1;
         } else {
-            intrinsic_flush_inline_space(output, state);
+            intrinsic_flush_inline_space(output, state, source_offsets);
+            if (source_offsets && output->length == 0) source_offsets[0] = i;
             strbuf_append_char(output, (char)layout_text_resolve_css_whitespace(ch));
+            if (source_offsets) source_offsets[output->length] = i + 1;
             state->has_line_content = true;
         }
     }
@@ -6654,14 +6695,57 @@ static void intrinsic_append_normalized_inline_text(StrBuf* output, DomNode* nod
 
 StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
                                     bool collapse_segment_breaks,
-                                    bool preserve_initial_space, bool preserve_terminal_space) {
+                                    bool preserve_initial_space, bool preserve_terminal_space,
+                                    size_t* source_offsets) {
     StrBuf* normalized = strbuf_new();
     if (!normalized) return nullptr;
     IntrinsicInlineTextState state;
     state.has_line_content = preserve_initial_space;
-    intrinsic_append_normalized_text(normalized,text,length,white_space,&state,collapse_segment_breaks);
-    if (preserve_terminal_space) intrinsic_flush_inline_space(normalized, &state);
+    if (source_offsets) source_offsets[0] = 0;
+    intrinsic_append_normalized_text(normalized,text,length,white_space,&state,collapse_segment_breaks,source_offsets);
+    if (preserve_terminal_space) intrinsic_flush_inline_space(normalized, &state, source_offsets);
     return normalized;
+}
+
+bool layout_measure_text_break_plan(LayoutContext* context, DomNode* source,
+        ScratchScope* scope, LayoutTextBreakPlan* plan) {
+    *plan = {};
+    if (!context || !source || !source->is_text() || !source->text_data()) return false;
+    LayoutFontScope font(context);
+    LayoutViewScope selected(context);
+    context->elmt = lam::up(source);
+    DomElement* owner = source->parent ? source->parent->as_element() : nullptr;
+    if (owner && owner->font) setup_font(context->ui_context, &context->font, owner->font);
+    LayoutTextIntrinsicLineOptions options = intrinsic_text_line_options(context, owner, source);
+    const char* text = (const char*)source->text_data();
+    size_t length = strlen(text);
+    // conditional breaks need generated-mark/emergency metadata beyond a prefix-width plan.
+    if (options.overflow_wrap == CSS_VALUE_BREAK_WORD || strstr(text, "\xC2\xAD") ||
+            get_inherited_text_enum(context, CSS_PROPERTY_HYPHENS, &BlockProp::hyphens,
+                CSS_VALUE_MANUAL, source) == CSS_VALUE_AUTO) return false;
+    // preserved spaces can hang and tabs depend on the line origin; prefix widths do not describe those edges.
+    if (!layout_white_space_collapses(options.white_space)) return false;
+    size_t* offsets = scope->array_zero<size_t>(length + 1);
+    plan->points = scope->array_zero<LayoutTextBreakPoint>(length + 2);
+    if (!offsets || !plan->points) return false;
+    uint32_t following = layout_adjacent_inline_codepoint(source, false, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT);
+    StrBuf* normalized = layout_normalize_inline_text(text, length, options.white_space,
+        options.collapse_segment_breaks, true, following && following != '\n', offsets);
+    if (!normalized) return false;
+    bool supported = memchr(normalized->str, '\v', normalized->length) == nullptr;
+    if (supported) {
+        plan->points[plan->count++] = {offsets[0], 0.0f, 0.0f};
+        IntrinsicTextBreakObserver observer = {plan, offsets, length,
+            intrinsic_text_wraps(options.white_space, options.text_wrap_mode)};
+        measure_text_intrinsic_segments(context, normalized->str, normalized->length,
+            options.text_transform, options.font_variant, options.white_space,
+            options.overflow_wrap, options.word_break, options.line_break, nullptr, &observer);
+        if (plan->points[plan->count - 1].source_end < length)
+            plan->points[plan->count++] = {length, 0.0f, 0.0f};
+        plan->width = plan->points[plan->count - 1].advance;
+    }
+    strbuf_free(normalized);
+    return supported;
 }
 
 static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,

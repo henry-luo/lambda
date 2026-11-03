@@ -460,6 +460,7 @@ bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
                                       CssEnum line_break, bool zwj_preceded,
                                       bool cj_non_starter);
 bool layout_text_allows_ascii_opening_break(uint32_t current, uint32_t next);
+bool layout_text_source_word_start(const unsigned char* text, size_t byte_offset);
 bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
     uint32_t current, const unsigned char* next, const unsigned char* end,
     bool keep_all);
@@ -503,7 +504,7 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
 StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
                                     bool collapse_segment_breaks = false,
                                     bool preserve_initial_space = false,
-                                    bool preserve_terminal_space = false);
+                                    bool preserve_terminal_space = false, size_t* source_offsets = nullptr);
 void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
@@ -707,6 +708,18 @@ struct LayoutTextIntrinsicLineOptions {
     float line_height = 0.0f;
     bool line_height_is_normal = true;
 };
+struct LayoutTextBreakPoint {
+    size_t source_end;
+    float advance;       // prefix excluding a collapsible line-end separator
+    float next_advance;  // origin after that separator and the next unit's boundary adjustment
+};
+struct LayoutTextBreakPlan {
+    LayoutTextBreakPoint* points = nullptr;
+    size_t count = 0;
+    float width = 0.0f;
+};
+bool layout_measure_text_break_plan(LayoutContext* context, DomNode* source,
+    ScratchScope* scope, LayoutTextBreakPlan* plan);
 struct LayoutTextIntrinsicLineMetrics {
     size_t line_count = 0;
     float block_extent = 0.0f;
@@ -4051,6 +4064,7 @@ typedef struct LayoutContext {
     lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
     lam::Up<struct LayoutRubyFlowScope> active_ruby_flow; // borrowed chosen segments during line finalization
     lam::Up<struct LayoutInlineKeepScope> inline_keep; // borrowed constraint for a parallel inline unit
+    lam::Up<struct LayoutTextSliceScope> text_slice; // borrowed original-source range during coordinated flow
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
     lam::Up<CssDeclaration*> cascade_priority_decls;
@@ -4882,6 +4896,8 @@ bool layout_inline_span_has_content_on_line(View* view, int line_number);
 bool layout_inline_span_owns_source_edge(ViewSpan* span, int line_number, bool end);
 bool layout_inline_line_bounds(LayoutContext* context, ViewSpan* span, int line_number, Rect* bounds);
 void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float start, float end);
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y);
+bool layout_inline_boundary_allows_soft_wrap(LayoutContext* context, DomNode* source);
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
@@ -4913,6 +4929,7 @@ void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
                                  float* fieldset_body_origin = nullptr);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
+bool layout_following_inline_content_fits(LayoutContext* context, View* source, float advance);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem);
 bool layout_optgroup_is_native_child(DomElement* elem);
@@ -5964,6 +5981,21 @@ struct LayoutInlineKeepScope {
     LayoutInlineKeepScope(const LayoutInlineKeepScope&) = delete;
     LayoutInlineKeepScope& operator=(const LayoutInlineKeepScope&) = delete;
 };
+// tier-3: fragments retain offsets into their DOM source; the scanner never receives a copied string.
+struct LayoutTextSliceScope {
+    lam::Up<LayoutContext> context;
+    lam::Up<LayoutTextSliceScope> previous;
+    lam::Up<DomNode> source;
+    size_t first, last;
+    bool append;
+    LayoutTextSliceScope(LayoutContext* layout, DomNode* text, size_t start, size_t end, bool continuation)
+        : context(layout), previous(layout->text_slice), source(text), first(start), last(end), append(continuation) {
+        layout->text_slice = lam::up(this);
+    }
+    ~LayoutTextSliceScope() { context->text_slice = previous; }
+    LayoutTextSliceScope(const LayoutTextSliceScope&) = delete;
+    LayoutTextSliceScope& operator=(const LayoutTextSliceScope&) = delete;
+};
 // Intrinsic width recursion changes both the element cycle bit and active view;
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
@@ -6150,6 +6182,7 @@ LAM_NODE_OF(BlockContextScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
 LAM_NODE_OF(LayoutContextScope, NodeStack);
 LAM_NODE_OF(LayoutInlineKeepScope, NodeStack);
+LAM_NODE_OF(LayoutTextSliceScope, NodeStack);
 LAM_NODE_OF(IntrinsicMeasureScope, NodeStack);
 LAM_NODE_OF(LayoutViewScope, NodeStack);
 LAM_NODE_OF(LayoutFontScope, NodeStack);
