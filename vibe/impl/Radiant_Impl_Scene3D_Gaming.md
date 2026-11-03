@@ -58,14 +58,14 @@ does not revise those contracts.
 
 | Stage | Outcome | Status |
 |---|---|---|
-| M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
-| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Coordinator and copied generation/target-tick animation batches implemented; other command consumers and whole-tick transactions pending; aggregate qualification limited |
-| M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
-| M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
+| M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; current aggregate qualification recorded below |
+| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Coordinator and copied generation/target-tick animation batches implemented; other command consumers and whole-tick transactions pending; current aggregate qualification recorded below |
+| M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; current aggregate qualification recorded below; broader CCD remains open |
+| M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, current aggregate qualification recorded below; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused/current aggregate gates pass with recorded profile limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, rotation/velocity curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; analytic GPU plane/sphere collision, bounded seeded CPU/GPU noise, color/opacity with per-emitter depth ordering, texture sheets, billboard presentation and bounded CPU/GPU ribbon trails and copied spawn commands implemented and qualified with the recorded limits; depth collision awaits M9; presets/effect/sub-emitter rules moved to M13 |
-| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded output, scene clips/sources/listeners, spatialization/Doppler, bounded named bus/send/solo graphs, ordered filter/EQ/delay/reverb/compressor/limiter inserts, tail-aware lifetime, sample-time cues and explicit offline PCM/WAV jobs implemented and qualified with recorded limits; MIDI/speech routes implemented with focused evidence; post-merge aggregates pending; provider export, video-track routing and ratified microphone acquisition pending; music/voice/occlusion policy and factories moved to M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits. USER ratified capture as D7.5.9; its macOS core acquisition, bounded reads, lifecycle and dry/named bus monitor routing are qualified below. Other OS capture backends and physical/release/integration qualification remain open; music/voice/occlusion policy and factories remain M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
@@ -5837,3 +5837,408 @@ do not silently retain full-file audio or fall back to a second audible player.
 Use focused provider/media/UI cases, then the aggregate gates at the stable
 profile boundary. Capture remains contingent on the policy ratification in
 proposal §9.3; other native work can continue independently.
+
+
+## Current worktree checkpoint — 2026-11-03
+
+Resumed in `temp/scene3d-native-goal`, branch
+`codex/scene3d-native-goal-20261103`, from `29ecf0695`. Main-checkout Ruby edits
+are outside this branch. Build outputs are private; dependency/corpus links
+follow Developer Guide §7. No release target that cleans shared artifacts is
+permitted in this worktree.
+
+**Qualified component:** macOS video-track audio now joins the document submix
+through bounded streaming PCM. The separate AVPlayer output was the integration
+gap. The implementation reuses the existing miniaudio ring and preserves
+**D7.5.4** admission and **D4.5.2 / D5.3.3 / D7.5.3v2** ownership. Preparation
+stays outside the callback; consumed samples drive A/V time, starvation holds
+position and transport/teardown retire readers before releasing storage.
+
+**Acceptance/budget:** focused native controls cover exact stereo PCM, source
+PTS gaps/overlaps, bounded partial writes, pause/gain/EOF, wraparound and stalled
+producers. Then connect the platform reader and verify A/V transport, source
+fallback, activation and actual shared-submix output with the existing native
+media/UI fixtures. Use targeted ASan for lifetime/thread boundaries and run the
+required aggregates at the stable end-to-end boundary, including the earlier
+pending Lambda/Radiant reruns. Record physical-device, release-memory and
+cross-platform limits separately. Named video routing and capture permission
+ratification follow the shared-output core; do not start capture implicitly.
+
+
+**Current implementation:** AVAssetReader prepares interleaved 48-kHz stereo
+PCM on the control thread. The existing miniaudio SPSC ring retains at most two
+seconds; one source packet is bounded to 65536 frames. Finite media up to 24
+hours is admitted. Consumed frames drive video image selection and media time;
+starvation holds the cursor. AVPlayer remains silent. Pause/seek/loop, live gain,
+EOF and decoder/output errors use the shared voice lifecycle. Explicit native
+binding reservations share the decoded service's 128-reader/512-MiB accounting;
+nonreused reservation identities make stale release harmless. Bindings retire
+before their document submix owner. Delayed AVFoundation callbacks retain a
+retired observer rather than a freed native video pointer.
+
+**Focused evidence:** all 23 native video controls pass with explicit offline
+sample-clock advancement, as do 43 stream/audio controls, 21 document audio
+controls and 54 Scene3D audio controls. The text-query runner deliberately uses
+the video stub; actual platform decode is covered by the native video target
+and CLI. Twelve forced/poisoned-GC CLI replays (two video fixtures across JS
+AST/MIR × Lambda interpreter/JIT/AUTO) pass. A local HTTP-origin control passes
+14 assertions on each JS backend: unactivated play/unmute/positive gain fail
+visibly, muted/zero-gain transport works, and trusted activation enables sound
+(**D7.5.4**). The same shared gain setter handles procedural controls and
+authored muted changes. Native frame fixtures now consume the offline kernel
+instead of waiting for wall time, preserving their existing pixel/PTS checks.
+Initial seeks requested while loading or before first play now transfer into
+the PCM reader; the regression originally played from zero instead of 0.5 s.
+Silent videos preserve the platform clock without reserving PCM. Reservation
+refusal and explicit output retirement cannot leave an audible peer or reader.
+The 30-second hidden-video replay crosses two complete loops.
+
+AddressSanitizer passes 140 focused native controls (22 video, 43 stream/audio,
+21 document and 54 Scene3D). Sixteen ASan UI replays cover shared video,
+30-second loops, source replacement/removal, iframe ownership and timeline
+completion/lifetime on AST/MIR. Ten focused replays use forced/poisoned GC;
+the six larger timeline replays use ordinary GC. Forced-every-allocation GC
+made those application fixtures exceed 60 s; the captured stack is in script
+allocation/GC, and each passes without that stress knob. Leak detection is
+disabled; no LSan, TSAN, release deadline or physical-device claim is made.
+Dimension lint, fixture JSON and `git diff --check` pass.
+Evidence is under `temp/scene3d-video/`; no release performance is claimed.
+
+**Aggregate evidence before boundary closure:** full Lambda/Input passes
+8646/8646 (6534 runtime, 2112 input), including 353 forced-GC stress controls.
+Full Radiant exits 0: 9093 passed, 304 configured partial and 2 skipped out of
+9399, with zero failing cases. Scene3D is 639/639, text queries 478/478 and UI
+754/754. The normal profile is restored. The module gate reproduces exactly the
+six previously recorded raw DOM→Radiant imports (140 total versus baseline
+165); the stream adds none. Its allowlist remains unchanged.
+
+**Qualification closure:** those six callers bypassed the immutable native
+host table (**D7.1.3 / D7.5.3v2 / D5.3.3**). Reuse the existing repaint entry;
+publish borrowed frame/origin, source-boundary, text-control-rectangle and
+parameterized URL-attribute queries through that same table. Promote the
+existing static URL helper rather than copying it. Acceptance is unchanged
+geometry/selection/source/URL behavior, engine-absent defaults and a clean
+module gate without baseline edits. Use focused native checks before repeating
+both required aggregate gates for this native-provider ABI change.
+
+**Boundary result:** the original module gate now passes at 133 imports versus
+baseline 165, with no baseline edit. Focused checks pass: 79 provider/range
+controls (including absent-engine defaults, complete-table validation and
+concurrent borrowed-query dispatch), 37 integrated geometry/source/scroll
+controls and 165 DOM UI controls. The optional standalone source-position
+executable cannot link its unchanged data-only dependency: security cache code
+requires `heap_register_gc_root_for`, `heap_unregister_gc_root_for` and
+`set_runtime_error`. No stub or linker relaxation was added; integrated
+source-range cases provide the selected behavior check.
+
+**ASan prerequisite fixed:** the broader instrumented DOM suite exposed
+listener-list reallocation in Bootstrap modal dispatch. `fire_listeners` kept
+an `EventListener*` across a callback and then read its IDL-handler flag after
+`addEventListener` freed the array. The existing mutation repro also reproduces
+the UAF. Snapshot scalar flags and root callback/signal values before script;
+re-find by registration order after signal lookup, and retire once entries
+before user-object lookup can reenter. This follows **D4.5.2 / D5.3.3** precise
+ownership and the [DOM inner-invoke order](https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke).
+The existing repro is now registered as `dom/event_listener_growth.json`, with
+functional, once-getter-reentry and IDL-cancellation controls. Both it and the
+original Bootstrap modal pass ASan with forced/poisoned GC on AST/MIR. The full
+DOM UI selection then passes 166/166 on each instrumented backend (ordinary GC,
+poisoning enabled, leak detection disabled).
+
+**Final qualification:** every stage in `aggregate-final-status.json` exits 0
+on the frozen source recorded in `qualified-source-hashes.json`:
+
+- Full Lambda/Input: **8646/8646**, with the documented worker cap of one.
+  The default parallel attempt had one Hotwire MIR timeout (8645/8646); that
+  exact case passes six isolated runs, including five with heavy-load mode.
+- Full Radiant at ordinary settings: **9094 passed, 304 configured partial,
+  2 skipped, zero failures** out of 9400. Scene3D is 639/639, text queries
+  478/478, DOM UI 166/166 and baseline UI 754/754.
+- Original module gate: **133 imports** versus baseline 165; no new imports or
+  baseline edit. Dimension lint and `git diff --check` pass.
+
+Normal binaries and archives are restored. No timeout, assertion, golden or
+allowlist was weakened. Evidence remains in `temp/scene3d-video/`. The optional
+standalone source-position link issue above remains separate and unresolved.
+
+**Next selected native component:** expose exact document-owned video provider
+tickets to the existing named-route table, reusing route references and atomic
+publication from MIDI/speech. Cover loading/paused/live controls, stale and
+foreign tickets, source replacement, route loss and teardown before provider
+export. First check early unactivated network play with `preload=none`: inspect
+the current error mapping and redundant property synchronization, then change
+it only if a focused replay proves a fault. Capture still requires the policy
+ratification in proposal §9.3; other native work proceeds independently.
+
+Named video scene routes, provider export, ratified capture,
+physical-device/hotplug qualification, deadline/peak-memory profiling and other
+platform backends remain subsequent work. Broader M1–M5, M6 depth collision
+after M9, M8–M12 and deferred M13 retain the outstanding scope recorded above;
+this component does not close the full goal.
+
+
+### M7 named video routes — qualified 2026-11-03
+
+**Done behavior:** exact document-owned `video` tickets from
+`dom.media_info(...).audio_token` reuse the MIDI/speech provider table and
+atomic route-reference helper (**S4.9.1 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+Ready, paused and playing sources retain their named bus; rewiring preserves
+the PCM cursor. Stale/foreign tickets and exhausted route reservations reject
+without changing playback. Graph-owner removal faults the retained source with
+`route_lost`, with no audible default fallback.
+
+DOM removal follows the existing retained-media lifetime: it pauses the reader
+but keeps its decoder/cursor/ticket while a wrapper retains the element.
+Reattachment preserves them. Source reload/replacement, native disposal and
+document teardown retire the ticket and route reference (**D4.5.2 / D5.3.3**).
+The imported fixture checks hidden video, rendered child-document isolation,
+source replacement, meters and these distinct retirement events. Hidden iframe
+loading remains outside the tested host profile.
+
+**Prerequisite fixes:** unchanged-property readiness polling no longer clears an
+early network play refusal with `preload=none`; HTTP AST/MIR controls preserve
+`NotAllowedError` (**D7.5.4**). Primitive constructors now reuse the existing
+BigInt canonicalizer for native i64/u64 arguments and guest ToPrimitive results
+(**S4.9.1 / D6.2.2v2**); signed/unsigned endpoint controls reproduce the original
+TypeError and verify exact formatting/conversion.
+
+The final review reproduced an omitted video graph-edit guard: after the host
+withdrew autoplay permission, an active positive-gain video behind a muted dry
+bus could publish an unmuting edit. Shared input eligibility now covers decoded,
+MIDI, speech and video providers even when DSP history is silent (**D7.5.4**).
+The macOS document test runner now links the actual AVFoundation backend; its
+regression covers rejection, muted/paused eligibility and document activation.
+
+**Verification:** focused native controls, video/MIDI-speech flows across all six
+JS/Lambda backend combinations with forced/poisoned GC, and supported ASan native
+ownership/UI controls pass. The final Radiant gate passes with 9,103 passed,
+304 configured partial cases, two skips and zero failures. The Lambda/Input gate
+passes all 8,647 cases; subsequent edits leave its engine source unchanged.
+Boundary validation retains 133 deferred imports against baseline 165, without
+an allowlist/baseline edit. Dimension lint and whitespace checks pass. Frozen
+source hashes match the tested state; only checkpoint documentation follows.
+
+**Open behavior / next action:** provider export is the next native M7 component;
+§9.3 microphone policy still needs ratification. Physical-device/deadline,
+release peak-memory and other video-backend qualification remain open. Earlier
+M1–M6 extensions, M8–M12 and deferred M13 remain in the active full-scope goal.
+
+Evidence: `temp/scene3d-video/{video-graph-gate-native-before.log,
+gate-*-after.log,gate-ui-normal-status.json,gate-ui-asan-status.json,
+routes-final-lambda.log,routes-closure-status.json,routes-closure-*.log,
+routes-closed-source-hashes.json,routes-core-carry-forward.json,
+provider-export-next.json,checkpoint.json}`.
+
+### M7 provider export — qualified 2026-11-03
+
+**Done behavior:** existing `audio_render` jobs admit document-scoped prepared
+MIDI, speech and video tickets with a fresh position and copied bus selection.
+A valid-session replay against the committed parser reproduces rejection at
+its required clip-event array; the extended input now accepts providers, clip
+events or both. One shared provider table serves read, routing and snapshot
+admission (**S4.9.1 / D7.5.3v2 / D7.5.4**).
+
+Each provider prepares one owned finite PCM interval before job publication.
+MIDI reuses the synthesizer's immutable-font copy and fresh seek/controller
+state; speech copies completed, normalized engine PCM; video reuses the existing
+PTS gap/overlap, loop and gain kernel with an independent retained asset/reader.
+The existing immutable PCM constructor/admission, sample-zero cue path, virtual
+submix, graph and file IO perform the remaining work. Snapshots join the existing scheduler/mixer through owned PCM and release
+provider transport pointers before publication. Live edits, close/reload,
+removal and device retirement leave admitted output intact.
+
+**Ownership/bounds:** quota ownership is registered before the job pool so
+unfinished speech-only jobs retire before their newly created document audio
+service (**D4.5.2 / D5.3.3**). Each input reserves a job-length stereo interval;
+combined source/event, reader/PCM and output limits reject atomically. Partial
+provider preparation closes its temporary assets. Completion/cancellation/scene
+and document teardown reuse the existing reader retirement. Render steps remain
+bounded; synchronous preparation and release peak-memory/deadline qualification
+are recorded separately. The [public contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
+defines fields, frozen state, preparation limits and private cue receipts.
+
+**Verification:** independent synth/video ownership controls, copied bus gain,
+mixed-input PCM, step partitions, source disposal, network isolation, stale/
+foreign/unprepared/quota rejection and teardown pass. Four imported flows pass
+all six JS/Lambda backend combinations with forced/poisoned GC; provider WAV
+bytes match exactly across modes. Supported ASan passes 176 focused native
+controls (one opt-in device skip) and both UI backends; the WAV also matches the
+normal profile. The required Radiant gate passes with 9,119 passed, 304 configured
+partial cases, two skips and zero failures. Boundary validation stays at 133
+imports against baseline 165; dimension lint and whitespace pass. Lambda engine
+and `.ls` package source are unchanged from the earlier 8,647-case core gate.
+
+**Open behavior / next action:** USER ratified the capture policy on 2026-11-03
+as **D7.5.9**; the approved draft and review record are in the evidence folder.
+Starting synthesis within a job, live-history continuation, additional video backends,
+physical input/output and release/combined-scene qualification are not claimed
+by this prepared-provider profile. Remaining M1–M6 extensions, M8–M12 and
+M13 retain the full goal scope. Capture implementation follows in the next
+component below; M8 remains the next independent native milestone.
+
+Evidence: `temp/scene3d-provider-export/{base-parser-status.json,
+provider-admission-base-parser.log,native-final-*.log,stable-*.log,
+ui-normal-status.json,ui-asan-status.json,provider-output-normal.wav,
+provider-output-asan.wav,qualification-status.json,qualification-*.log,
+frozen-source-hashes.json,lambda-engine-carry-forward.json,
+capture-policy-proposal.patch,checkpoint.json}`.
+
+### M7 explicit microphone capture — qualified 2026-11-03
+
+**Authority/outcome:** USER ratified **D7.5.9** on 2026-11-03. Capture needs
+explicit procedural acquisition plus OS and per-document host grants; monitoring
+starts off and separately obeys **D7.5.4**. The policy approval does not authorize
+access to the user's microphone. Preserve **D4.5.2 / D5.3.3 / D7.5.3v2** and the
+existing IO/host waist; pure scene evaluation never opens an input device.
+
+**Finite implementation:** timestamped bounded native PCM with separate SPSC
+record/monitor readers, bounded producer work and explicit overrun diagnostics;
+OS authorization and device callbacks; document-scoped host grant, explicit
+open/status/read/monitor/stop operations; cleanup on stop, revocation, device
+loss and document teardown. Host grants do not propagate to child documents or
+navigation. Reuse the existing audio device library and output submix.
+
+**Verification budget:** independent PCM/time/gap/wrap/overflow and concurrent
+producer controls; deterministic host backend tests for denial/pending/revoked/
+unavailable/loss and callback retirement; procedural UI across both JS and all
+Lambda tiers with forced GC; supported ASan then required engine/boundary gates
+at the stable profile boundary. Physical microphone tests remain opt-in and
+separate from policy and simulated ownership qualification.
+
+**Delivered behavior:** `audio_capture_pcm` carries exact sample stamps through
+independent fixed record/monitor rings. The producer validates at most 4096
+frames, never allocates/waits and drops excess/new overflow input with copied
+counters. Host reads return one contiguous interval without synthesizing gaps.
+The device adapter asks AVFoundation for consent only after its document grant,
+then miniaudio supplies converted stereo 48-kHz f32 input. The OS completion
+retains no document, queue or GC pointer (**D4.5.2**). Pending/active input keeps
+host polling alive. Permission denial, cancellation and teardown cannot start a
+device later; revocation and device loss retire input before freeing queues.
+
+`dom.audio_capture(owner,request)` appends to the neutral catalog without moving
+published slots. Exact ticket/count decoding and precisely rooted copied
+records/binaries preserve **S4.9.1 / D5.3.3**. `view --microphone` grants only its
+initial document, including transformed/paged views; it neither acquires input
+nor grants output. The CLI embeds a purpose string through build configuration;
+Foundation metadata lookup was verified without a permission request. Monitoring
+starts off and uses the existing document submix, with separate recording reads.
+Output loss disables the monitor while recording continues. The native quota
+owner is registered before its capture borrower, so LIFO teardown remains safe.
+
+**Qualified evidence:** six kernel and nine host/bridge cases pass, including
+concurrent overflow/sample identity, malformed/oversized packets, exact counters
+above 2^53, pending denial/stop/teardown, independent OS/document grants, input/
+output loss, quota exhaustion and copied PCM after close. The normal imported
+capture/shared-audio matrix passes 12 replays / 210 assertions across JS AST/MIR
+and Lambda interpreter/JIT/AUTO with forced/poisoned GC. Supported ASan passes
+146 native capture/audio/scene controls and four imported replays / 70 assertions;
+leak detection is disabled. The fresh required gates pass: Lambda/Input
+8,647/8,647; Radiant 9,135 passed, 304 configured partial cases, two skips and
+zero failures (9,441 total). Module imports remain 133 against baseline 165;
+dimension lint, whitespace and added document file links pass. All 28 frozen
+source/config/fixture hashes are unchanged after qualification.
+
+**Open behavior / next action:** this closes the selected macOS capture core,
+not the full M7 or Scene3D goal. No physical microphone or OS consent dialog was
+accessed. Named capture-bus routing follows in the qualified component below. Other OS
+backends, physical permission/hotplug and release/combined-scene qualification
+remain open, alongside the retained M1–M6 extensions, M8–M12 and deferred M13.
+
+Evidence: `temp/scene3d-capture/{kernel-tests.log,capture-host-final.log,
+focused-audio.log,ui-normal-status.json,ui-asan-status.json,
+qualification-status.json,qualification-*.log,qualified-source-hashes.json,
+document-checks.json,info-probe.mm,checkpoint.json}`.
+
+### M7 named capture monitor routes — qualified 2026-11-03
+
+**Finite outcome:** add capture to the shared provider route/read table under
+**D7.5.9 / D7.5.4 / D4.5.2 / S4.9.1**. A pending/active explicitly acquired
+capture can pin a generation-checked named bus; live rewiring preserves both
+PCM readers. Input recording survives output/graph loss, while monitoring stops
+and exposes copied loss/route validity. Stop/revocation/denial/teardown release
+route references before the quota owner retires. Prepared export must reject
+live capture explicitly; it must never consume recording data or open input.
+
+**Acceptance/budget:** deterministic injected PCM through bus gain/mute/inserts,
+live and unmonitored rewiring, stale/foreign/terminal tickets and route-reference
+capacity, owner loss/recovery, network graph-edit/output activation fencing,
+copied snapshots and atomic export rejection. Reuse one capture backend fixture
+across native host/scene tests. Focused normal and ASan capture/provider cases,
+both imported JS backends with forced GC, then the required Radiant and module
+boundary gates at the stable boundary. Keep the qualified 8,647-case Lambda
+gate when core/package source is unchanged. Physical acquisition remains opt-in.
+
+**Delivered behavior:** capture now uses the shared provider route/read table;
+it pins a bus while acquisition is pending/active and monitoring is off or on.
+Live rewiring changes the existing voice destination at a buffer boundary,
+without restarting input or advancing/resetting either PCM reader. Named gain,
+mute and ordered delay produce independent numeric PCM controls while recording
+returns the original samples. Stale/foreign/session/expected/terminal/reference-
+quota rejection preserves the existing binding. Stop, pending denial, revocation
+and input loss release the route; callback targets remain alive through the
+producer close hook (**D4.5.2 / D5.3.3**).
+
+Graph-owner loss disables the monitor and copies `route_lost`/invalid route
+state while recording continues. Explicit rebind/default detach plus monitor
+enable recovers. Output loss also keeps recording and its valid named binding;
+monitor re-enable clears the copied loss. Dry capture inputs participate in the
+existing graph-edit activation fence, so a muted graph cannot bypass **D7.5.4**
+after host output activation is withdrawn. Route preparation never grants input
+or output. The shared export adapter explicitly rejects live-only capture
+snapshots before consuming input or retaining extra readers/output.
+
+**Qualification:** nine native capture-route cases include an imported procedural
+replay. The full focused capture/provider/audio set passes 155 cases normally
+and under supported ASan with forced/poisoned GC; leak detection is disabled.
+The injected imported replay passes JS AST/MIR × Lambda interpreter/JIT/AUTO
+(six normal runs), plus both JS backends under ASan. The required Radiant gate
+passes 9,144 cases, with 304 configured partial cases, two skips and zero
+failures (9,450 total). Strict module-boundary validation remains 133 imports
+against baseline 165; dimension lint and whitespace pass. All seven frozen
+source/fixture hashes match after qualification. Lambda engine/package/build
+source is unchanged from the qualified 8,647-case gate at `d4587e69d`.
+
+**Remaining scope:** named capture bus routing is complete for this profile.
+No physical microphone or permission dialog was accessed. Other OS backends,
+physical permission/hotplug, hardware timing, release/combined-scene work and
+the previously recorded broader Scene3D milestones remain outstanding.
+
+Evidence: `temp/scene3d-capture-routes/{normal-status.json,normal-*.log,
+ui-normal-status.json,ui-asan-status.json,qualification-status.json,
+qualification-*.log,qualified-source-hashes.json,lambda-carry-forward.json,
+document-checks.json,checkpoint.json}`. The earlier `unfinished.patch` is an
+archived starting point, superseded by this qualified implementation.
+
+### Remote master integration — qualified 2026-11-03
+
+**Integrated contract:** combine component tip `7168800e8` with published master
+`460cf22ea`, including its error-contract and Ruby layout changes. Retain the
+explicit bridge, output gate and approved microphone policy under
+**D7.5.3v2 / D7.5.4 / D7.5.9**. Formal Design is version 60.1.0 with a regenerated
+index. The capture/routing scope and remaining milestones above are unchanged.
+
+**Qualification:** the merged runtime passes 200 focused native audio/provider
+cases, with one opt-in device skip, and 30 imported replays across JS AST/MIR
+and Lambda interpreter/JIT/AUTO with forced/poisoned GC. After incorporating the
+four published Ruby commits, the fresh Radiant gate passes 9,163 cases, with
+305 configured partial cases, two skips and zero failures (9,470 total). All
+six imported capture-routing combinations pass again on that final build.
+Lambda/Input passes 8,707/8,707; the subsequent Ruby-only changes leave its
+runtime/package/parser sources unchanged. Strict module-boundary validation
+passes with 133 imports against baseline 165; dimension lint, formal-index and
+whitespace checks pass. All 75 integration file hashes remain stable through
+qualification before this documentation receipt.
+
+**Build limit:** the all-target baseline build exposed a duplicate PDF fixture
+reader; reusing `file_read_all` removes the conflicting symbol and all 33 PDF
+tests pass. The broader all-target build still stops at the existing standalone
+source-position fixture's missing GC-root/error-runtime linkage. Its fixture,
+project entry and affected runtime files match published master; no no-op
+rooting stubs or test suppressions were added. Required Lambda/Input and Radiant
+gates run independently and pass as recorded above.
+
+**Retention:** qualification logs, runners, source hashes, JSON reports and the
+earlier component evidence are archived outside the retiring worktree under
+`temp/scene3d-merge-20261103-7168800e8/{checks,reports,runners,evidence}`.
+No physical microphone or permission dialog was accessed. The broader Scene3D
+goal remains unfinished at the component boundaries recorded above.

@@ -13,12 +13,15 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <unistd.h>
+#include <math.h>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
 #include "../radiant/rdt_video.h"
+#include "../radiant/audio_bus.hpp"
+#include "test_audio_fixture.hpp"
 
 // ============================================================================
 // Test media path — resolved relative to the executable's working directory
@@ -57,24 +60,29 @@ TEST(RdtVideoMimeTest, ReportsActualDecoderCapabilities) {
 // Helper: poll state until target or timeout
 // ============================================================================
 
-static bool wait_for_state(RdtVideo* video, RdtVideoState target, int timeout_ms) {
-    int elapsed = 0;
-    const int step_ms = 10;
-    while (elapsed < timeout_ms) {
-        // pump the run loop so AVFoundation can process async operations
-#ifdef __APPLE__
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, step_ms / 1000.0, false);
-#else
-        usleep(step_ms * 1000);
-#endif
-        if (rdt_video_get_state(video) == target) return true;
-        elapsed += step_ms;
-    }
-    return rdt_video_get_state(video) == target;
+
+static RdtVideo* create_bound_video(AudioSubmixId submix) {
+    auto* video = rdt_video_create(nullptr, nullptr); if (!video) return nullptr;
+    RdtVideoAudioBinding binding = {}; binding.submix = submix;
+    if (rdt_video_bind_audio(video, &binding)) return video;
+    rdt_video_destroy(video); return nullptr;
+}
+static bool open_ready(RdtVideo* video) {
+    return rdt_video_open_file(video, TEST_VIDEO_PATH) == 0 && audio_fixture_video_wait(video, RDT_VIDEO_STATE_READY, 3000);
 }
 
 // pump the run loop for a given duration (ms)
-static void pump_runloop_ms(int ms) {
+static void pump_runloop_ms(int ms, AudioSubmixId submix = 0, RdtVideo* video = nullptr) {
+    if (submix && video && audio_bus_offline()) {
+        // offline media time follows consumed PCM, so wall-clock waiting cannot advance frames.
+        unsigned frames = (unsigned)ms * AUDIO_BUS_RATE / 1000;
+        while (frames) {
+            rdt_video_get_state(video);
+            unsigned chunk = frames < 4096 ? frames : 4096;
+            audio_submix_render(submix, nullptr, chunk); frames -= chunk;
+        }
+        return;
+    }
 #ifdef __APPLE__
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, ms / 1000.0, false);
 #else
@@ -82,14 +90,14 @@ static void pump_runloop_ms(int ms) {
 #endif
 }
 
-static bool wait_for_frame(RdtVideo* video, RdtVideoFrame* frame, int timeout_ms) {
+static bool wait_for_frame(RdtVideo* video, RdtVideoFrame* frame, int timeout_ms, AudioSubmixId submix) {
     int elapsed = 0;
     const int step_ms = 10;
     while (elapsed < timeout_ms) {
         if (rdt_video_get_frame(video, frame) == 0 && frame->pixels != nullptr) {
             return true;
         }
-        pump_runloop_ms(step_ms);
+        pump_runloop_ms(step_ms, submix, video);
         elapsed += step_ms;
     }
     return rdt_video_get_frame(video, frame) == 0 && frame->pixels != nullptr;
@@ -99,34 +107,110 @@ static bool wait_for_frame(RdtVideo* video, RdtVideoFrame* frame, int timeout_ms
 // Test Fixture
 // ============================================================================
 
+struct VideoStorageControl { unsigned acquired, released, retired; size_t bytes; bool allow = true; };
 class RdtVideoTest : public ::testing::Test {
 protected:
     RdtVideo* video = nullptr;
+    AudioSubmixId submix = 0;
+    bool previous_offline = false;
+    VideoStorageControl owner = {};
+    RdtVideo* control = nullptr;
+    RdtAudio* snapshot = nullptr;
+    AudioSubmixId control_submix = 0;
+    AudioGraphId graph = 0;
+    AudioGraphConfig graph_config = {};
 
     void SetUp() override {
+        previous_offline = audio_bus_offline();
+        audio_bus_set_offline(true);
 #ifdef __linux__
         // rdt_video_stub is the deliberate Linux build backend until an
         // FFmpeg implementation exists; these tests require native decoding.
         GTEST_SKIP() << "Linux video backend is not implemented";
 #endif
-        video = rdt_video_create(nullptr, nullptr);
-        ASSERT_NE(video, nullptr);
+        submix = audio_submix_create(); ASSERT_NE(submix, 0u);
+        video = create_bound_video(submix); ASSERT_NE(video, nullptr);
     }
 
     void TearDown() override {
+        rdt_audio_destroy(snapshot);
         if (video) {
             rdt_video_destroy(video);
             video = nullptr;
         }
+        if (control) rdt_video_destroy(control);
+        audio_submix_destroy(control_submix);
+        audio_submix_destroy(submix); audio_bus_set_offline(previous_offline);
     }
 
     // open test file and wait until READY
     bool open_and_wait_ready() {
-        int rc = rdt_video_open_file(video, TEST_VIDEO_PATH);
-        if (rc != 0) return false;
-        return wait_for_state(video, RDT_VIDEO_STATE_READY, 3000);
+        return open_ready(video);
+    }
+    bool prepare_graph(float gain) {
+        graph = audio_submix_graph_open(submix); if (!graph) return false;
+        graph_config.count = 2;
+        graph_config.buses[0] = audio_graph_bus_default("master");
+        graph_config.buses[1] = audio_graph_bus_default("video");
+        graph_config.buses[0].smoothing = graph_config.buses[1].smoothing = 0;
+        graph_config.buses[1].gain = gain;
+        return audio_fixture_graph_publish(submix, graph, graph_config);
+    }
+    AudioRouteId video_route() { return audio_submix_graph_route(submix, graph, nullptr, "video"); }
+    void expect_route_loss(unsigned phase) {
+        ASSERT_TRUE(prepare_graph(.5f)); ASSERT_TRUE(open_and_wait_ready()); const char* error = nullptr;
+        auto route = video_route(); ASSERT_TRUE(rdt_video_audio_route(video, 0, route, &error));
+        if (phase) { rdt_video_play(video); ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING); }
+        if (phase == 1) rdt_video_pause(video);
+        audio_submix_graph_close(submix, graph);
+        EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
+        AudioProviderInfo info; ASSERT_TRUE(rdt_video_audio_routing(video, &info));
+        EXPECT_EQ(info.route, route); EXPECT_EQ(info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_FALSE(info.route_valid);
+        EXPECT_FALSE(audio_submix_has_work(submix));
+        ASSERT_TRUE(rdt_video_audio_route(video, route, 0, &error));
+        rdt_video_play(video); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
     }
 };
+
+TEST_F(RdtVideoTest, AudioSnapshotsKeepIndependentCursorGainAndDecoderOwnership) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_seek(video, .15); rdt_video_set_volume(video, .5f);
+    snapshot = rdt_video_audio_snapshot(video, 0, 4096); ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY); EXPECT_NEAR(rdt_video_get_current_time(video), .15, 1e-9);
+    control_submix = audio_submix_create(true); control = create_bound_video(control_submix); ASSERT_NE(control, nullptr); ASSERT_TRUE(open_ready(control));
+    rdt_video_set_volume(control, .5f); rdt_video_play(control); float reference[4096 * 2], copied[4096 * 2] = {};
+    ASSERT_TRUE(audio_submix_render(control_submix, reference, 4096));
+    rdt_video_destroy(video); video = nullptr;
+    ASSERT_TRUE(rdt_audio_play(snapshot, 1)); rdt_audio_mix(snapshot, copied, 4096, 0);
+    double energy = 0; for (unsigned i = 0; i < 4096 * 2; i++) { EXPECT_NEAR(copied[i], reference[i], 1e-6); energy += copied[i] * copied[i]; }
+    EXPECT_GT(energy, 0);
+}
+
+TEST_F(RdtVideoTest, AudioSnapshotsReuseLoopTimestampsAndStayIndependentOfRenderPartitions) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_set_loop(video, true); rdt_video_set_volume(video, .25f);
+    double position = rdt_video_get_duration(video) - .02; snapshot = rdt_video_audio_snapshot(video, position, 8192); ASSERT_NE(snapshot, nullptr);
+    control_submix = audio_submix_create(true); control = create_bound_video(control_submix); ASSERT_NE(control, nullptr); ASSERT_TRUE(open_ready(control));
+    rdt_video_set_loop(control, true); rdt_video_set_volume(control, .25f); rdt_video_seek(control, position); rdt_video_play(control);
+    ASSERT_TRUE(rdt_audio_play(snapshot, 1));
+    float reference[128 * 2], copied[128 * 2];
+    for (unsigned done = 0; done < 8192;) {
+        unsigned count = 8192 - done < 73 ? 8192 - done : 73;
+        memset(copied, 0, sizeof(copied)); ASSERT_TRUE(audio_submix_render(control_submix, reference, count));
+        rdt_audio_mix(snapshot, copied, count, done);
+        for (unsigned i = 0; i < count * 2; i++) EXPECT_NEAR(copied[i], reference[i], 1e-6);
+        done += count;
+    }
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY); EXPECT_EQ(rdt_video_get_current_time(video), 0);
+}
+
+TEST_F(RdtVideoTest, AudioSnapshotsNeedNoOutputBindingAndRejectInvalidIntervals) {
+    ASSERT_TRUE(open_and_wait_ready()); ASSERT_TRUE(rdt_video_bind_audio(video, nullptr));
+    for (double position : {-1., (double)NAN, rdt_video_get_duration(video) + 1}) EXPECT_EQ(rdt_video_audio_snapshot(video, position, 16), nullptr);
+    EXPECT_EQ(rdt_video_audio_snapshot(video, 0, 0), nullptr);
+    EXPECT_EQ(rdt_video_audio_snapshot(video, 0, UINT32_MAX), nullptr);
+    snapshot = rdt_video_audio_snapshot(video, 0, 16); ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY);
+    rdt_video_play(video); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
+}
 
 // ============================================================================
 // Lifecycle Tests
@@ -142,7 +226,7 @@ TEST_F(RdtVideoTest, OpenInvalidFile) {
     // open_file may return 0 (async) and transition to ERROR, or return -1 immediately
     if (rc == 0) {
         // wait a bit for ERROR state
-        pump_runloop_ms(500);
+        pump_runloop_ms(500, submix, video);
         RdtVideoState state = rdt_video_get_state(video);
         EXPECT_TRUE(state == RDT_VIDEO_STATE_ERROR || state == RDT_VIDEO_STATE_LOADING);
     } else {
@@ -198,12 +282,174 @@ TEST_F(RdtVideoTest, PlayPauseTransitions) {
     ASSERT_TRUE(open_and_wait_ready()) << "File did not reach READY state";
 
     rdt_video_play(video);
-    EXPECT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000))
+    EXPECT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000))
         << "Did not transition to PLAYING";
 
     rdt_video_pause(video);
-    EXPECT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PAUSED, 1000))
+    EXPECT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PAUSED, 1000))
         << "Did not transition to PAUSED";
+}
+
+TEST_F(RdtVideoTest, AudioTrackReachesTheSharedOutputKernel) {
+    audio_bus_set_offline(true); ASSERT_TRUE(open_and_wait_ready()); ASSERT_TRUE(rdt_video_has_audio(video));
+    rdt_video_play(video); ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    float samples[4096 * 2]; audio_bus_mix(samples, 4096); double energy = 0;
+    for (float sample : samples) energy += sample * sample;
+    EXPECT_GT(energy, 1e-6); EXPECT_EQ(audio_submix_clock(submix), 4096u);
+    EXPECT_NEAR(rdt_video_get_current_time(video), 4096.0 / AUDIO_BUS_RATE, .001);
+}
+
+TEST_F(RdtVideoTest, NamedRoutesMatchIndependentPcmAndRewireWithoutRestarting) {
+    ASSERT_TRUE(prepare_graph(.25f)); ASSERT_TRUE(open_and_wait_ready());
+    control_submix = audio_submix_create(); ASSERT_NE(control_submix, 0u);
+    control = create_bound_video(control_submix); ASSERT_NE(control, nullptr); ASSERT_TRUE(open_ready(control));
+    auto foreign = audio_submix_graph_open(control_submix); ASSERT_NE(foreign, 0u);
+    ASSERT_TRUE(audio_fixture_graph_publish(control_submix, foreign, graph_config));
+    auto foreign_route = audio_submix_graph_route(control_submix, foreign, nullptr, "video");
+    auto route = video_route(); ASSERT_NE(route, 0u); const char* error = nullptr;
+    ASSERT_TRUE(rdt_video_audio_route(video, 0, route, &error));
+    rdt_video_play(video); rdt_video_play(control);
+    float actual[4096 * 2], reference[4096 * 2]; double energy = 0;
+    ASSERT_TRUE(audio_submix_render(submix, actual, 4096));
+    ASSERT_TRUE(audio_submix_render(control_submix, reference, 4096));
+    for (unsigned i = 0; i < 4096 * 2; i++) {
+        energy += reference[i] * reference[i]; EXPECT_NEAR(actual[i], reference[i] * .25f, 1e-6);
+    }
+    EXPECT_GT(energy, 1e-6);
+    AudioGraphSnapshot meters; ASSERT_TRUE(audio_submix_graph_snapshot(submix, graph, &meters));
+    EXPECT_EQ(meters.meters[1].frames, 4096u); EXPECT_GT(meters.meters[1].peak, 0);
+    EXPECT_FALSE(rdt_video_audio_route(video, 0, 0, &error));
+    EXPECT_FALSE(rdt_video_audio_route(video, route, foreign_route, &error));
+    AudioProviderInfo info; ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_EQ(info.route, route);
+    ASSERT_TRUE(rdt_video_audio_route(video, route, 0, &error));
+    ASSERT_TRUE(audio_submix_render(submix, actual, 256));
+    ASSERT_TRUE(audio_submix_render(control_submix, reference, 256));
+    for (unsigned i = 0; i < 512; i++) EXPECT_NEAR(actual[i], reference[i], 1e-6);
+    double held = rdt_video_get_current_time(video); rdt_video_pause(video);
+    ASSERT_TRUE(rdt_video_audio_route(video, 0, route, &error));
+    ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_STREQ(info.state, "paused"); EXPECT_DOUBLE_EQ(info.position, held);
+    rdt_video_play(video); ASSERT_TRUE(audio_submix_render(submix, actual, 256));
+    ASSERT_TRUE(audio_submix_render(control_submix, reference, 256));
+    for (unsigned i = 0; i < 512; i++) EXPECT_NEAR(actual[i], reference[i] * .25f, 1e-6);
+}
+
+TEST_F(RdtVideoTest, PausedNamedRoutePinsItsBusUntilExplicitUnbind) {
+    ASSERT_TRUE(prepare_graph(.5f)); ASSERT_TRUE(open_and_wait_ready()); auto route = video_route(); const char* error = nullptr;
+    rdt_video_play(video); rdt_video_pause(video); ASSERT_TRUE(rdt_video_audio_route(video, 0, route, &error));
+    graph_config.count = 1; EXPECT_FALSE(audio_fixture_graph_publish(submix, graph, graph_config));
+    AudioProviderInfo info; ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_TRUE(info.route_valid);
+    ASSERT_TRUE(rdt_video_audio_route(video, route, 0, &error));
+    ASSERT_TRUE(audio_fixture_graph_publish(submix, graph, graph_config));
+    EXPECT_FALSE(rdt_video_audio_route(video, 0, route, &error));
+    ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_EQ(info.route, 0u); EXPECT_STREQ(info.state, "paused");
+}
+
+TEST_F(RdtVideoTest, NamedRouteReferenceExhaustionPreservesDefaultAndRecovers) {
+    ASSERT_TRUE(prepare_graph(.5f)); ASSERT_TRUE(open_and_wait_ready()); auto route = video_route(); AudioRouteRef refs[128] = {};
+    for (auto& ref : refs) ASSERT_TRUE(audio_submix_bind_route(submix, &ref, 0, route));
+    const char* error = nullptr; EXPECT_FALSE(rdt_video_audio_route(video, 0, route, &error));
+    AudioProviderInfo info; ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_EQ(info.route, 0u);
+    audio_submix_release_route(submix, refs[0]); ASSERT_TRUE(rdt_video_audio_route(video, 0, route, &error));
+    for (auto ref : refs) audio_submix_release_route(submix, ref);
+    ASSERT_TRUE(rdt_video_audio_routing(video, &info)); EXPECT_EQ(info.route, route); EXPECT_TRUE(info.route_valid);
+}
+
+TEST_F(RdtVideoTest, NamedRouteLossFencesReadyReaders) { expect_route_loss(0); }
+TEST_F(RdtVideoTest, NamedRouteLossFencesPausedReaders) { expect_route_loss(1); }
+TEST_F(RdtVideoTest, NamedRouteLossFencesPlayingReaders) { expect_route_loss(2); }
+
+TEST_F(RdtVideoTest, SharedAudioFirstPlayHonorsAnAlreadyRequestedSeek) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_seek(video, .5); rdt_video_play(video);
+    ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+    ASSERT_TRUE(audio_submix_render(submix, nullptr, 256));
+    EXPECT_NEAR(rdt_video_get_current_time(video), .5 + 256.0 / AUDIO_BUS_RATE, 1.0 / AUDIO_BUS_RATE);
+}
+
+TEST_F(RdtVideoTest, SharedAudioLoadingRetainsTheRequestedSeek) {
+    ASSERT_EQ(rdt_video_open_file(video, TEST_VIDEO_PATH), 0); rdt_video_seek(video, .5);
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_READY, 3000));
+    EXPECT_DOUBLE_EQ(rdt_video_get_current_time(video), .5); rdt_video_play(video);
+    ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+    ASSERT_TRUE(audio_submix_render(submix, nullptr, 256));
+    EXPECT_NEAR(rdt_video_get_current_time(video), .5 + 256.0 / AUDIO_BUS_RATE, 1.0 / AUDIO_BUS_RATE);
+}
+
+TEST_F(RdtVideoTest, SharedAudioPauseSeekAndMuteKeepTheMediaSampleClock) {
+    audio_bus_set_offline(true); ASSERT_TRUE(open_and_wait_ready()); rdt_video_play(video);
+    ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+    float output[4096 * 2]; audio_bus_mix(output, 4096); rdt_video_pause(video);
+    double held = rdt_video_get_current_time(video); uint64_t clock = audio_submix_clock(submix);
+    audio_bus_mix(output, 4096); EXPECT_DOUBLE_EQ(rdt_video_get_current_time(video), held);
+    EXPECT_EQ(audio_submix_clock(submix), clock); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    rdt_video_seek(video, .5); EXPECT_DOUBLE_EQ(rdt_video_get_current_time(video), .5);
+    rdt_video_set_muted(video, true); rdt_video_play(video); ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+    audio_bus_mix(output, 4096); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    EXPECT_NEAR(rdt_video_get_current_time(video), .5 + 4096.0 / AUDIO_BUS_RATE, 1e-9);
+    rdt_video_set_muted(video, false); rdt_video_get_state(video); audio_bus_mix(output, 4096);
+    double energy = 0; for (float v : output) energy += v * v; EXPECT_GT(energy, 1e-6);
+}
+TEST_F(RdtVideoTest, SharedAudioLoopsAndEndsAcrossBoundedRefills) {
+    audio_bus_set_offline(true); ASSERT_TRUE(open_and_wait_ready()); rdt_video_set_loop(video, true); rdt_video_play(video);
+    uint64_t cycle = (uint64_t)llround(rdt_video_get_duration(video) * AUDIO_BUS_RATE), target = cycle + 4096;
+    float output[4096 * 2];
+    for (uint64_t done = 0; done < target;) {
+        ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+        unsigned count = target - done < 4096 ? (unsigned)(target - done) : 4096;
+        audio_bus_mix(output, count); done += count;
+    }
+    EXPECT_NEAR(rdt_video_get_current_time(video), 4096.0 / AUDIO_BUS_RATE, 1e-9);
+    rdt_video_set_loop(video, false);
+    for (uint64_t done = 4096; done < cycle;) {
+        ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+        unsigned count = cycle - done < 4096 ? (unsigned)(cycle - done) : 4096;
+        audio_bus_mix(output, count); done += count;
+    }
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ENDED);
+    EXPECT_NEAR(rdt_video_get_current_time(video), rdt_video_get_duration(video), 1.0 / AUDIO_BUS_RATE);
+    EXPECT_FALSE(audio_submix_has_work(submix));
+}
+
+static bool video_test_reserve(void* data, size_t bytes) {
+    auto* owner = (VideoStorageControl*)data; owner->acquired++; owner->bytes = bytes; return owner->allow;
+}
+static void video_test_release(void* data) { ((VideoStorageControl*)data)->released++; }
+static void video_test_retire(void* data) { ((VideoStorageControl*)data)->retired++; }
+TEST_F(RdtVideoTest, SharedAudioBindingRetiresPcmBeforeReleasingItsOwner) {
+    audio_bus_set_offline(true);
+    RdtVideoAudioBinding binding = {submix, &owner, video_test_reserve, video_test_release, video_test_retire};
+    ASSERT_TRUE(rdt_video_bind_audio(video, &binding)); ASSERT_TRUE(open_and_wait_ready());
+    EXPECT_EQ(owner.acquired, 0u); rdt_video_play(video); EXPECT_EQ(owner.acquired, 1u); EXPECT_GT(owner.bytes, 0u);
+    rdt_video_pause(video); EXPECT_EQ(owner.released, 0u); ASSERT_TRUE(rdt_video_bind_audio(video, nullptr));
+    EXPECT_EQ(owner.released, 1u); EXPECT_EQ(owner.retired, 1u); EXPECT_FALSE(audio_submix_has_work(submix));
+    rdt_video_destroy(video); video = nullptr; EXPECT_EQ(owner.released, 1u); EXPECT_EQ(owner.retired, 1u);
+}
+
+TEST_F(RdtVideoTest, SharedAudioQuotaRefusalDoesNotStartAnotherAudiblePlayer) {
+    owner.allow = false;
+    RdtVideoAudioBinding binding = {submix, &owner, video_test_reserve, video_test_release, video_test_retire};
+    ASSERT_TRUE(rdt_video_bind_audio(video, &binding)); ASSERT_TRUE(open_and_wait_ready());
+    rdt_video_play(video); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
+    EXPECT_EQ(owner.acquired, 1u); EXPECT_EQ(owner.released, 0u); EXPECT_FALSE(audio_submix_has_work(submix));
+    rdt_video_destroy(video); video = nullptr; EXPECT_EQ(owner.retired, 1u); EXPECT_EQ(owner.released, 0u);
+}
+
+TEST_F(RdtVideoTest, SharedAudioOutputRetirementFailsAndRemovesItsReader) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_play(video);
+    ASSERT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_PLAYING);
+    audio_bus_retire_output(); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
+    EXPECT_FALSE(audio_submix_has_work(submix));
+}
+
+TEST_F(RdtVideoTest, SilentVideoKeepsThePlatformClockWithoutReservingPcm) {
+    RdtVideoAudioBinding binding = {submix, &owner, video_test_reserve, video_test_release, video_test_retire};
+    ASSERT_TRUE(rdt_video_bind_audio(video, &binding));
+    ASSERT_EQ(rdt_video_open_file(video, "test/media/test_video.mp4"), 0);
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_READY, 3000)); ASSERT_FALSE(rdt_video_has_audio(video));
+    rdt_video_play(video); ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    for (unsigned tries = 0; tries < 200 && rdt_video_get_current_time(video) <= .05; tries++) pump_runloop_ms(10);
+    EXPECT_GT(rdt_video_get_current_time(video), .05); EXPECT_EQ(owner.acquired, 0u);
+    EXPECT_EQ(audio_submix_clock(submix), 0u); EXPECT_FALSE(audio_submix_has_work(submix));
+    rdt_video_pause(video); EXPECT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PAUSED, 1000));
 }
 
 // ============================================================================
@@ -217,13 +463,13 @@ TEST_F(RdtVideoTest, GetFrameDimensions) {
     rdt_video_set_layout_rect(video, 564, 240);
 
     rdt_video_play(video);
-    ASSERT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
 
     // wait for first frame to be decoded
     RdtVideoFrame frame;
     memset(&frame, 0, sizeof(frame));
 
-    bool got_frame = wait_for_frame(video, &frame, 2000);
+    bool got_frame = wait_for_frame(video, &frame, 2000, submix);
 
     if (!got_frame) {
         native_frame_decode_unavailable = true;
@@ -245,7 +491,7 @@ TEST_F(RdtVideoTest, FramePixelsNotAllZero) {
 
     rdt_video_set_layout_rect(video, 564, 240);
     rdt_video_play(video);
-    ASSERT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
 
     // wait for a non-black frame (skip first few which might be black leader)
     RdtVideoFrame frame;
@@ -269,7 +515,7 @@ TEST_F(RdtVideoTest, FramePixelsNotAllZero) {
                 break;
             }
         }
-        pump_runloop_ms(10);
+        pump_runloop_ms(10, submix, video);
     }
 
     if (!got_non_black_frame) {
@@ -290,7 +536,7 @@ TEST_F(RdtVideoTest, FramePTSAdvances) {
 
     rdt_video_set_layout_rect(video, 282, 120);  // half resolution
     rdt_video_play(video);
-    ASSERT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
 
     double first_pts = -1.0;
     double later_pts = -1.0;
@@ -303,7 +549,7 @@ TEST_F(RdtVideoTest, FramePTSAdvances) {
             first_pts = frame.pts;
             break;
         }
-        pump_runloop_ms(10);
+        pump_runloop_ms(10, submix, video);
     }
     if (first_pts < 0.0) {
         native_frame_decode_unavailable = true;
@@ -311,14 +557,14 @@ TEST_F(RdtVideoTest, FramePTSAdvances) {
     }
 
     // wait 500ms then get another frame
-    pump_runloop_ms(500);
+    pump_runloop_ms(500, submix, video);
 
     for (int i = 0; i < 50; i++) {
         if (rdt_video_get_frame(video, &frame) == 0 && frame.pixels != nullptr) {
             later_pts = frame.pts;
             break;
         }
-        pump_runloop_ms(10);
+        pump_runloop_ms(10, submix, video);
     }
     ASSERT_GE(later_pts, 0.0) << "Could not get later frame";
 
@@ -341,7 +587,7 @@ TEST_F(RdtVideoTest, LayoutRectDoesNotAffectFrameSize) {
     // intrinsic resolution; scaling happens in render_video.cpp blit path
     rdt_video_set_layout_rect(video, 200, 100);
     rdt_video_play(video);
-    ASSERT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    ASSERT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
 
     RdtVideoFrame frame;
     memset(&frame, 0, sizeof(frame));
@@ -352,7 +598,7 @@ TEST_F(RdtVideoTest, LayoutRectDoesNotAffectFrameSize) {
             got_frame = true;
             break;
         }
-        pump_runloop_ms(10);
+        pump_runloop_ms(10, submix, video);
     }
     if (!got_frame) {
         native_frame_decode_unavailable = true;
@@ -381,9 +627,9 @@ TEST_F(RdtVideoTest, VolumeAndMute) {
     // play muted to verify no crash during audio playback
     rdt_video_set_muted(video, true);
     rdt_video_play(video);
-    EXPECT_TRUE(wait_for_state(video, RDT_VIDEO_STATE_PLAYING, 1000));
+    EXPECT_TRUE(audio_fixture_video_wait(video, RDT_VIDEO_STATE_PLAYING, 1000));
 
-    pump_runloop_ms(200);  // let it play briefly
+    pump_runloop_ms(200, submix, video);  // let it play briefly
     rdt_video_pause(video);
 }
 
@@ -438,7 +684,7 @@ TEST(RdtVideoCallbackTest, CallbacksFireOnOpen) {
     ASSERT_EQ(rc, 0);
 
     // poll state to drive the KVO-fallback path (callbacks fire from get_state)
-    bool ready = wait_for_state(video, RDT_VIDEO_STATE_READY, 3000);
+    bool ready = audio_fixture_video_wait(video, RDT_VIDEO_STATE_READY, 3000);
     EXPECT_TRUE(ready);
 
     if (ready) {

@@ -6512,6 +6512,12 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         bool environment_changed = engine->context.viewport_width != viewport_width ||
             engine->context.viewport_height != viewport_height;
         environment_changed = css_engine_set_input_capabilities(engine, &uicon->input_capabilities) || environment_changed;
+        // resolution media queries follow the window's backing scale; the engine is created at 1x.
+        double density = uicon->device_scale > 0 ? uicon->device_scale : 1.0;
+        if (engine->context.device_pixel_ratio != density) {
+            engine->context.device_pixel_ratio = density;
+            environment_changed = true;
+        }
         css_engine_set_viewport(engine, viewport_width, viewport_height);
         if (environment_changed) {
             radiant_recascade_document_styles(doc, doc->root);

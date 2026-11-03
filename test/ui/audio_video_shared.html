@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><style>body{margin:0}video{display:block;width:160px;height:120px}</style></head>
+<body><div id="result"><video id="movie" src="../media/test_video_audio.mp4" preload="auto"></video></div>
+<script type="module">
+import {request} from './fixtures/_audio_shared_bridge.ls';
+globalThis.movie=document.getElementById('movie');
+globalThis.videoPlaying=false;
+globalThis.clockBusy=false;
+globalThis.clockSample=null;
+globalThis.startVideo=async()=>{videoPlaying=false;await movie.play();videoPlaying=true;};
+globalThis.readVideoClock=async()=>{
+  clockBusy=true;
+  const before=movie.currentTime;
+  const packet=await request(document.getElementById('result'),'clock',0,null);
+  clockSample={before,after:movie.currentTime,clock:packet.clock};
+  clockBusy=false;
+};
+</script></body></html>

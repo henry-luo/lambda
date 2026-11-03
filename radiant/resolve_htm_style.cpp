@@ -830,6 +830,87 @@ struct MediaSourcePath {
     char* release() { temporary = false; return path.release(); }
 };
 
+struct MediaAudioOwner : DomDocumentResourceData { DomDocument* document; RdtVideo* video; uint64_t storage, token; };
+static bool media_audio_reserve(void* data, size_t bytes) {
+    auto* owner = (MediaAudioOwner*)data;
+    if (owner->storage) return false;
+    owner->storage = radiant_audio_storage_acquire(owner->document, bytes); return owner->storage != 0;
+}
+static void media_audio_release(void* data) {
+    auto* owner = (MediaAudioOwner*)data;
+    radiant_audio_storage_release(owner->document, owner->storage); owner->storage = 0;
+}
+static void media_audio_retire(void* data) {
+    auto* owner = (MediaAudioOwner*)data; owner->video = nullptr;
+    dom_document_release_resource(owner->document, owner);
+}
+static void media_audio_owner_destroy(DomDocumentResourceData* data) {
+    auto* owner = (MediaAudioOwner*)data;
+    if (owner->video) rdt_video_bind_audio(owner->video, nullptr);
+    media_audio_release(owner); mem_free(owner);
+}
+static MediaAudioOwner* media_audio_owner(DomDocument* document, uint64_t token) {
+    if (document && token) for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
+        if (resource->destroy != media_audio_owner_destroy) continue;
+        auto* owner = (MediaAudioOwner*)resource->data;
+        if (owner->token == token) return owner;
+    }
+    return nullptr;
+}
+bool radiant_media_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info) {
+    auto* owner = media_audio_owner(document, token);
+    return owner && rdt_video_audio_routing(owner->video, info);
+}
+RdtAudio* radiant_media_snapshot(DomDocument* document, uint64_t token, double position, uint32_t frames) {
+    auto* owner = media_audio_owner(document, token);
+    return owner ? rdt_video_audio_snapshot(owner->video, position, frames) : nullptr;
+}
+bool radiant_media_graph_audible(DomDocument* document, AudioGraphId graph) {
+    if (document) for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
+        if (resource->destroy != media_audio_owner_destroy) continue;
+        auto* owner = (MediaAudioOwner*)resource->data; AudioProviderInfo info;
+        if (rdt_video_audio_routing(owner->video, &info) && radiant_audio_graph_input_audible(
+            radiant_document_submix(document), graph, info.route, !strcmp(info.state, "playing"), info.gain)) return true;
+    }
+    return false;
+}
+bool radiant_media_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error) {
+    auto* owner = media_audio_owner(document, token); AudioProviderInfo info;
+    if (!owner || !rdt_video_audio_routing(owner->video, &info)) {
+        if (error) *error = "video route: missing provider in this document"; return false;
+    }
+    if (route != info.route && !strcmp(info.state, "playing") && info.gain > 0 && !radiant_document_may_start_audio(document)) {
+        if (error) *error = "video route: audible rewire requires document activation"; return false;
+    }
+    return rdt_video_audio_route(owner->video, expected, route, error);
+}
+static uint64_t media_bind_audio(DomDocument* document, RdtVideo* video) {
+    auto mix = radiant_document_submix(document); if (!mix) return 0;
+    auto* owner = (MediaAudioOwner*)mem_calloc(1, sizeof(MediaAudioOwner), MEM_CAT_RENDER);
+    if (!owner) return 0;
+    owner->document = document; owner->video = video;
+    // tickets identify this selected native source and never survive its replacement (D5.3.3).
+    owner->token = audio_bus_identity(); if (!owner->token) { mem_free(owner); return 0; }
+    // register after DocumentAudio so decoder bindings retire before their quota/submix owner (D4.5.2).
+    if (!dom_document_add_resource(document, owner, media_audio_owner_destroy)) { mem_free(owner); return 0; }
+    RdtVideoAudioBinding binding = {mix, owner, media_audio_reserve, media_audio_release, media_audio_retire};
+    if (rdt_video_bind_audio(video, &binding)) return owner->token;
+    owner->video = nullptr; dom_document_release_resource(document, owner); return 0;
+}
+
+bool radiant_media_set_gain(DomDocument* document, MediaViewState* media, float volume, bool muted) {
+    if (!document || !media || !isfinite(volume) || volume < 0 || volume > 1) return false;
+    // changing a muted/zero-gain transport to audible output is a new start under D7.5.4.
+    if (media->play_requested && !muted && volume > 0 && !radiant_document_may_start_audio(document)) {
+        media->play_error = 1; return false;
+    }
+    media->volume = volume; media->muted = muted; media->play_error = 0;
+    if (media->player) {
+        rdt_video_set_volume(media->player, volume); rdt_video_set_muted(media->player, muted);
+    }
+    return true;
+}
+
 MediaViewState* radiant_media_prepare(DomElement* element) {
     DomDocument* doc = element ? element->doc : nullptr;
     if (!doc || !doc->url || doc->services.svg_image_document ||
@@ -858,7 +939,14 @@ MediaViewState* radiant_media_prepare(DomElement* element) {
     bool created = !retained->player;
     bool loop = element->has_attribute("loop"), muted = element->has_attribute("muted");
     bool autoplay = element->has_attribute("autoplay");
-    if (!retained->muted_override && (created || muted != retained->default_muted)) retained->muted = muted;
+    // source polling must preserve refused-start diagnostics when the property did not change.
+    if (!retained->muted_override && retained->muted != muted && (created || muted != retained->default_muted) &&
+            !radiant_media_set_gain(doc, retained, retained->volume, muted)) {
+        // authored unmuting can update the property, but cannot leave unauthorized audio playing.
+        retained->play_requested = retained->native_play_requested = false;
+        if (retained->player) rdt_video_pause(retained->player);
+        retained->muted = muted;
+    }
     if (autoplay && !retained->default_autoplay &&
             (retained->muted || retained->volume == 0.0f || radiant_document_may_start_audio(doc)))
         retained->play_requested = true;
@@ -887,12 +975,15 @@ MediaViewState* radiant_media_prepare(DomElement* element) {
             if (!source_path.path) continue;
             RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
             if (!candidate) continue;
+            uint64_t audio_token = media_bind_audio(doc, candidate);
+            if (!audio_token) { rdt_video_destroy(candidate); continue; }
             bool open = !preload_none || retained->play_requested;
             if (open && rdt_video_open_file(candidate, source_path.path.get()) != 0) {
                 rdt_video_destroy(candidate);
                 continue;
             }
             retained->player = candidate;
+            retained->audio_token = audio_token;
             retained->destroy = rdt_video_destroy;
             retained->pause = rdt_video_pause;
             retained->source_owned = source_path.temporary;

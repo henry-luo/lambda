@@ -134,6 +134,13 @@ const char* midi_player_state_name(MidiState state) {
     static const char* names[] = {"ready", "playing", "paused", "ended", "error"};
     return names[state];
 }
+static bool midi_prepare(MidiPlayer* p) {
+    if (!p->synth || !tsf_set_max_voices(p->synth, 256)) return false;
+    tsf_set_output(p->synth, TSF_STEREO_INTERLEAVED, p->sample_rate, -6);
+    // prepare every channel before rendering; font copies have independent controller storage.
+    for (int ch = 0; ch < 16; ch++) if (!tsf_channel_set_presetnumber(p->synth, ch, 0, ch == 9)) return false;
+    return true;
+}
 MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double duration,
     const void* font, size_t font_size, uint32_t sample_rate) {
     if (!font || font_size < 12 || font_size > 128 * 1024 * 1024 || !events || !count || count > 200000 ||
@@ -147,15 +154,25 @@ MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double durat
     if (!p) return nullptr;
     p->events = (MidiEvent*)mem_alloc(count * sizeof(MidiEvent), MEM_CAT_RENDER);
     p->synth = tsf_load_memory(font, (int)font_size); // INT_CAST_OK: bounded soundfont byte length.
-    if (!p->events || !p->synth || !tsf_set_max_voices(p->synth, 256)) { midi_player_close(p); return nullptr; }
+    if (!p->events || !p->synth) { midi_player_close(p); return nullptr; }
     memcpy(p->events, events, count * sizeof(MidiEvent));
     p->count = count; p->duration = duration; p->speed = 1; p->volume = 0.8; p->sample_rate = sample_rate;
-    tsf_set_output(p->synth, TSF_STEREO_INTERLEAVED, sample_rate, -6);
-    // allocate every MIDI channel before the first callback, and verify the GM baseline bank.
-    for (int ch = 0; ch < 16; ch++) if (!tsf_channel_set_presetnumber(p->synth, ch, 0, ch == 9)) {
-        midi_player_close(p); return nullptr;
-    }
+    if (!midi_prepare(p)) { midi_player_close(p); return nullptr; }
     midi_restore(p, 0, false);
+    return p;
+}
+MidiPlayer* midi_player_clone(MidiPlayer* source, double position) {
+    if (!source || midi_state(source) == MIDI_ERROR || !isfinite(position) || position < 0 || position > source->duration) return nullptr;
+    auto* p = (MidiPlayer*)mem_calloc(1, sizeof(MidiPlayer), MEM_CAT_RENDER); if (!p) return nullptr;
+    p->events = (MidiEvent*)mem_alloc(source->count * sizeof(MidiEvent), MEM_CAT_RENDER);
+    // tsf_copy retains immutable samples/presets; the original may close before this reader.
+    p->synth = tsf_copy(source->synth);
+    if (!p->events || !p->synth) { midi_player_close(p); return nullptr; }
+    memcpy(p->events, source->events, source->count * sizeof(MidiEvent));
+    p->count = source->count; p->duration = source->duration; p->sample_rate = source->sample_rate;
+    p->volume = source->volume; p->speed = source->speed; p->mute = source->mute; p->solo = source->solo;
+    if (!midi_prepare(p)) { midi_player_close(p); return nullptr; }
+    midi_restore(p, position, false); midi_set_state(p, position == p->duration ? MIDI_ENDED : MIDI_READY);
     return p;
 }
 void midi_player_close(MidiPlayer* p) {

@@ -276,8 +276,7 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
 void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
     ImageSurface* img = render_media_image_surface(view);
-    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
-    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
+    Rect rect =render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
     float s = rdcon->raster_scale;
 
     if (!img) {
@@ -345,11 +344,14 @@ void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
             rc_pop_clip(rdcon);
         }
     }
+    render_media_selection_overlay(rdcon, view);
+}
 
-    // Render blue selection overlay if image is within a cross-view selection
+void render_media_selection_overlay(RasterRenderContext* rdcon, ViewBlock* view) {
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? rdcon->ui_context->document->state : NULL;
     if (render_selection_contains_view(state, static_cast<View*>(view))) {
+        Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);

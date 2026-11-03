@@ -1,0 +1,28 @@
+{
+  "name": "D7.5.9 capture is procedural, denied without a host grant, and never self-grants",
+  "html": "test/ui/audio_capture.html",
+  "viewport": {"width": 200, "height": 160},
+  "env": [{"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "script", "js": "captureCall({op:'open',granted:true,permission:'allowed'})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult.state==='denied'&&!captureResult.granted&&captureResult.rate===48000&&captureResult.channels===2&&captureResult.format==='f32le'&&captureResult.monitor_gain===0&&captureResult.captured===0n&&captureResult.next_frame===0n"},
+    {"type": "script", "js": "globalThis.captureToken=captureResult.token;captureCall({op:'read',token:captureToken,frames:17})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult.state==='denied'&&captureResult.frames===0&&captureResult.first_frame===0n&&new Uint8Array(captureResult.data).length===0"},
+    {"type": "script", "js": "captureCall({op:'monitor',token:captureToken,gain:1})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult===null"},
+    {"type": "script", "js": "captureCall({op:'stop',token:captureToken})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult.state==='stopped'&&captureResult.queued===0"},
+    {"type": "script", "js": "captureCall({op:'open'})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult.state==='denied'&&captureResult.token!==captureToken"},
+    {"type": "script", "js": "captureCall({op:'status',token:captureToken})"},
+    {"type": "assert_script", "js": "captureBusy===false", "assert_interval": 1},
+    {"type": "assert_script", "js": "captureResult===null"}
+  ]
+}

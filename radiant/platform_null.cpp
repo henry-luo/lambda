@@ -67,7 +67,7 @@ void radiant_platform_set_clipboard(RadiantWindow*, const char*) {}
 
 bool radiant_platform_present_init(RadiantWindow*) { return false; }
 void radiant_platform_present(RadiantWindow*, const ImageSurface*, const Bound*, bool,
-                              uint32_t, float, float) {}
+                              uint32_t, float, float, const RadiantPresentLayers*) {}
 
 // --- native toolkit companions (ime_mac.mm, app_icon_mac.mm are not built) ---
 extern "C" void radiant_ime_mac_attach(void*) {}

@@ -59,6 +59,7 @@ struct Scene3dPhysics {
     PhysicsState published = {};
     Scene3dRuntime* runtime = nullptr;
     uint64_t epoch = 0, generation = 1;
+    uint32_t source_generation = 0;
     uint64_t world_identity = 0;
     uint64_t* next_identity = nullptr;
     bool automatic = false, playing = false;
@@ -745,6 +746,7 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root, char* diagnostic, size_
     state->document = root->doc;
     state->root = dom_node_ref(root);
     state->epoch = root->doc->mutation_epoch;
+    state->source_generation = root->layer_generation;
     state->automatic = automatic;
     state->runtime = runtime;
     state->next_identity = scene3d_physics_sequence(root->doc);
@@ -911,7 +913,8 @@ Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state, DomElement*
                                               size_t capacity) {
     if (!state || state->document != root->doc)
         return SCENE3D_PHYSICS_REBUILD;
-    if (state->epoch == root->doc->mutation_epoch)
+    // edits outside the scene, such as a HUD's per-frame presentation writes, keep the compiled world
+    if (scene3d_source_unchanged(root, &state->epoch, state->source_generation))
         return SCENE3D_PHYSICS_KEEP;
     PhysicsScene current;
     auto reject = [&](const char* message) {
@@ -943,6 +946,7 @@ Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state, DomElement*
     state->pending_roots = static_cast<lam::ArrayList<PhysicsRootMotion>&&>(roots);
     state->root_definitions_pending = true;
     state->epoch = root->doc->mutation_epoch;
+    state->source_generation = root->layer_generation;
     if (capacity)
         diagnostic[0] = 0;
     return SCENE3D_PHYSICS_KEEP;

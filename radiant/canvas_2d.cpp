@@ -64,6 +64,7 @@ struct CanvasEntry {
     unsigned mode; // 0 unselected, 1 canvas2d, 2 webgl2
     CanvasEntry* graphics_next;
     ImageSurface* surface;
+    bool surface_pending; // a WebGL snapshot that stands for the presented copy, read back on first CPU use
     CanvasState state;
     CanvasSavedState* saved_states;
     CanvasClip* clips;
@@ -257,12 +258,19 @@ static bool canvas_dimensions_supported(int width, int height) {
     return pixels <= RADIANT_CANVAS_MAX_PIXELS;
 }
 
+// Retires a WebGL canvas's published snapshot; leases keep its pixels for retained consumers (D4.5.1v4).
+static void canvas_retire_snapshot(CanvasEntry* entry) {
+    image_surface_bump_generation(entry->surface);
+    image_surface_snapshot_release(entry->surface);
+    entry->surface = nullptr;
+    entry->surface_pending = false;
+}
+
 static bool canvas_replace_surface(CanvasEntry* entry, int width, int height) {
     if (!entry || !canvas_dimensions_supported(width, height)) return false;
     if (entry->graphics) {
         if (!native_gl_webgl_resize(entry->graphics, width, height)) return false;
-        image_surface_bump_generation(entry->surface);
-        image_surface_snapshot_release(entry->surface);entry->surface=nullptr;
+        canvas_retire_snapshot(entry);
         return true;
     }
     ImageSurface* replacement = nullptr;
@@ -948,40 +956,203 @@ extern "C" bool radiant_canvas_fill_text(void* canvas_element, void* font_handle
     return true;
 }
 
-static void canvas_prepare_surface(CanvasEntry* entry) {
+// fills a deferred snapshot from the presented copy it stands for; one that cannot be read is retired
+static bool canvas_materialize_entry(CanvasEntry* entry) {
+    if (!entry->surface_pending) return true;
+    entry->surface_pending = false;
+    if (native_gl_webgl_snapshot_into(entry->graphics, entry->surface)) return true;
+    canvas_retire_snapshot(entry);
+    return false;
+}
+
+// Brings a WebGL canvas's published snapshot up to its drawing buffer's latest frame. A live window that
+// composites publishes the frame's presented copy instead (`defer`), and its snapshot is filled when a CPU
+// consumer reads it (Radiant_Design_GPU_Compositor C4).
+static void canvas_prepare_surface(CanvasEntry* entry, bool defer) {
     if (!entry || !entry->graphics) return;
-    ImageSurface* snapshot = native_gl_webgl_snapshot(entry->graphics);
-    if (!snapshot) return;
+    ImageSurface* pending = defer ? native_gl_webgl_publish(entry->graphics) : nullptr;
+    ImageSurface* snapshot = pending ? pending : native_gl_webgl_snapshot(entry->graphics);
+    if (!snapshot) {
+        if (!defer) canvas_materialize_entry(entry);
+        return;
+    }
     // Dirty GPU pixels must be current before any exporter takes an owned paint snapshot.
-    image_surface_bump_generation(entry->surface);
-    image_surface_snapshot_release(entry->surface);
+    canvas_retire_snapshot(entry);
     image_surface_snapshot_publish(snapshot);
     entry->surface = snapshot;
+    entry->surface_pending = pending != nullptr;
 }
 
 ImageSurface* render_canvas_surface(ViewBlock* view) {
     if (!view || !view->is_element()) return nullptr;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     CanvasEntry* entry = canvas_entry_for_element(element, false);
-    canvas_prepare_surface(entry);
+    canvas_prepare_surface(entry, false);
     return entry ? entry->surface : nullptr;
 }
 
+static bool canvas_materialize(DomElement* element) {
+    CanvasEntry* entry = canvas_entry_for_element(element, false);
+    return entry && entry->surface && canvas_materialize_entry(entry);
+}
+
+// A WebGL canvas composites from its presented copy (Radiant_Design_GPU_Compositor C4) where its image fills
+// its content box or less, sampled bilinearly (image-rendering: auto); its bitmap needs no density cap.
+static bool canvas_composite_content(RasterRenderContext* rdcon, ViewBlock* view) {
+    if (!rdcon->compositor.get()) return false;
+    DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
+    CanvasEntry* entry = canvas_entry_for_element(element, false);
+    if (!entry || !entry->graphics || !entry->surface) return false;
+    if (render_image_scale_mode(element, false) != SCALE_MODE_LINEAR)
+        return render_compositor_reject(view, "image-rendering samples by nearest pixel");
+    Rect content = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
+    Rect rect = render_media_image_rect(view, entry->surface, content, rdcon->raster_scale);
+    if (!view_geometry_rect_contains_rect(content, rect, 0.01f))
+        return render_compositor_reject(view, "object-fit overflows the content box");
+    CompositorSource source = {};
+    source.element = element;
+    source.materialize = canvas_materialize;
+    source.snapshot = entry->surface;
+    source.producer = entry->graphics;
+    source.image = native_gl_webgl_presented(entry->graphics);
+    source.opaque = !entry->webgl_options.alpha;
+    return render_compositor_cut(rdcon, view, rect, &source);
+}
+
 void render_canvas_content(RasterRenderContext* rdcon, ViewBlock* view) {
+    if (canvas_composite_content(rdcon, view)) {
+        render_media_selection_overlay(rdcon, view);
+        return;
+    }
     // Reuse image fitting, clipping and pixel-center sampling across outputs.
     render_media_image_content(rdcon, view);
 }
 
-void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface) {
-    if (!rdcon || !view || !surface) return;
-    Rect rect = render_geometry_block_content_rect(&rdcon->block, view,
-                                                   rdcon->raster_scale);
+static void render_surface_rect(RasterRenderContext* rdcon, Rect rect, ImageSurface* surface, ScaleMode scale_mode) {
     if (rect.width <= 0.0f || rect.height <= 0.0f) return;
-    Bound clip = rdcon->has_transform
+    // an edge-covered quad (SCALE_MODE_LINEAR_EDGE) bounds itself; a clip at its edges would cover them twice
+    Bound clip = rdcon->has_transform || scale_mode == SCALE_MODE_LINEAR_EDGE
         ? rdcon->block.clip
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
     render_painter_draw_pixels_rect(rdcon,(const uint32_t*)surface->pixels,surface->width,surface->height,
-        surface->pitch/4,&rect,&clip,255,surface);
+        surface->pitch/4,&rect,&clip,255,surface,scale_mode);
+}
+
+void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface, ScaleMode scale_mode) {
+    if (!rdcon || !view || !surface) return;
+    render_surface_rect(rdcon, render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale),
+                        surface, scale_mode);
+}
+
+bool render_compositor_reject(ViewBlock* view, const char* why) {
+    DomElement* element = view->as_element();
+    const char* id = element->get_attribute("id");
+    log_debug("[COMPOSITOR] <%s> %s stays on the CPU: %s", element->tag_name ? element->tag_name.get() : "?",
+              id ? id : "(no id)", why);
+    return false;
+}
+
+// The presenter draws a viewport when it has a 2D affine placement, a whole-pixel rectangular clip and at
+// most four clip shapes it can mask by (Q10), and a frame cuts up to four (Q12).
+bool render_compositor_cut(RasterRenderContext* context, ViewBlock* view, Rect rect, const CompositorSource* source) {
+    RenderCompositorFrame* frame = context->compositor.get();
+    auto reject = [&](const char* why) { return render_compositor_reject(view, why); };
+    if (!frame) return false;
+    if (frame->count >= NATIVE_GL_PRESENT_LAYERS) return reject("four viewports already cut (Q12)");
+    if (context->dl.get() != frame->list) return reject("recorded into a nested capture");
+    if (context->css3d_context) return reject("inside a preserve-3d context");
+    // normal-flow replaced content paints once, in the foreground phase
+    if (!render_paint_phase_has_content(context->paint_phase)) return reject("a paint phase without content");
+    if (context->vector_clip_depth != context->clip_shape_depth) return reject("a vector clip");
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    // has_transform is the flattened paint transform; an ancestor's identity CSS transform leaves it clear
+    RdtMatrix matrix = context->has_transform ? context->transform : rdt_matrix_identity();
+    RdtMatrix inverse;
+    float edges[4][3];
+    float left, top, right, bottom;
+    if (matrix.e31 != 0.0f || matrix.e32 != 0.0f || matrix.e33 != 1.0f || !rdt_matrix_inverse(&matrix, &inverse) ||
+        !render_image_quad_edges(&matrix, rect, edges) ||
+        !rdt_matrix_project_rect_bounds(&matrix, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height,
+                                        &left, &top, &right, &bottom))
+        return reject("not a 2D affine placement");
+    // an edge-covered image is clipped only by its ancestors; the CPU keeps a rectangular raster clip, the
+    // presenter's, only while it falls on whole pixels (vector_raster_clip_rect)
+    Rect snapped = {floorf(left), floorf(top), ceilf(right) - floorf(left), ceilf(bottom) - floorf(top)};
+    Bound clip = view_geometry_intersect_bound_rect(context->block.clip, snapped);
+    if (clip.right <= clip.left || clip.bottom <= clip.top || clip.left != floorf(clip.left) ||
+        clip.top != floorf(clip.top) || clip.right != floorf(clip.right) || clip.bottom != floorf(clip.bottom))
+        return reject("clip is not a whole-pixel rectangle");
+    // Clip shapes that cut into the image (rounded corners, Q10) mask it in the presenter by their coverage,
+    // which the CPU's clip paths rasterize; a polygon or a transformed shape keeps the CPU's clip.
+    CompositorClip clips[COMPOSITOR_VIEWPORT_CLIPS];
+    unsigned clip_count = 0;
+    for (int i = 0; i < context->clip_shape_depth; i++) {
+        ClipShape* shape = context->clip_shapes[i];
+        if (clip_shapes_rect_inside(&shape, 1, clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top))
+            continue;
+        if (clip_count == COMPOSITOR_VIEWPORT_CLIPS || !compositor_clip_from_shape(shape, &clips[clip_count]))
+            return reject("a polygon, transformed or fifth clip shape cuts into it");
+        clip_count++;
+    }
+    ImageSurface* image = source->snapshot;
+    NativeGlStats stats = {};
+    if (!image || !source->image.id || !native_gl_stats(source->producer, &stats))
+        return reject("no published image");
+    // the CPU draws a capped-density scene from its upsampled snapshot, so a placement that resamples that
+    // snapshot again has no single-pass equivalent
+    float copy_x, copy_y;
+    if (source->upsampled && !rdt_image_is_pixel_copy(context->has_transform ? &matrix : nullptr, image->width,
+                                                      image->height, rect.x, rect.y, rect.width, rect.height,
+                                                      &copy_x, &copy_y))
+        return reject("a capped-density scene at a resampled placement");
+    // the CPU area-samples an axis-aligned minification, which equals the presenter's bilinear filter only
+    // while the image overshoots its device size by under a sixty-fourth (a content box's rounded-up pixel)
+    bool axis_aligned = matrix.e12 == 0.0f && matrix.e21 == 0.0f;
+    float footprint_x = (float)image->width / (rect.width * fabsf(matrix.e11));
+    float footprint_y = (float)image->height / (rect.height * fabsf(matrix.e22));
+    if (axis_aligned && (footprint_x > 1.0f || footprint_y > 1.0f) &&
+        (fabsf(footprint_x - 1.0f) > 1.0f / 64.0f || fabsf(footprint_y - 1.0f) > 1.0f / 64.0f))
+        return reject("minified");
+    int first = context->dl->item_count();
+    render_surface_rect(context, rect, image, SCALE_MODE_LINEAR_EDGE);
+    int cut = -1;
+    for (int i = first; i < context->dl->item_count(); i++) {
+        const DisplayItem& item = (*context->dl)[i];
+        if (item.op == DL_DRAW_IMAGE && item.draw_image.resource == image->self) {
+            cut = i;
+            break;
+        }
+    }
+    // an image the cut cannot name paints the snapshot after all
+    if (cut < 0) {
+        source->materialize(source->element);
+        return true;
+    }
+    RenderCompositorViewport& viewport = frame->viewports[frame->count++];
+    viewport.cut = cut;
+    viewport.element = source->element;
+    viewport.materialize = source->materialize;
+    // the page below shows nowhere an opaque image covers whole pixels, unless a clip shape reveals it
+    viewport.opaque = source->opaque && axis_aligned && !clip_count && left == snapped.x && top == snapped.y &&
+        right == snapped.x + snapped.width && bottom == snapped.y + snapped.height;
+    NativeGlPresentLayer& layer = viewport.layer;
+    layer = {};
+    layer.producer = source->producer;
+    layer.producer_generation = stats.generation;
+    layer.image = source->image;
+    layer.publication = native_gl_publication(source->producer, source->image);
+    layer.dst_x = rect.x; layer.dst_y = rect.y;
+    layer.dst_width = rect.width; layer.dst_height = rect.height;
+    const float rows[6] = {inverse.e11, inverse.e12, inverse.e13, inverse.e21, inverse.e22, inverse.e23};
+    memcpy(layer.inverse, rows, sizeof(rows));
+    memcpy(layer.edges, edges, sizeof(edges));
+    layer.opacity = 1.0f;
+    layer.upsampled = source->upsampled;
+    layer.clip_left = clip.left; layer.clip_top = clip.top;
+    layer.clip_right = clip.right; layer.clip_bottom = clip.bottom;
+    memcpy(viewport.clips, clips, sizeof(CompositorClip) * clip_count);
+    viewport.clip_count = clip_count;
+    return true;
 }
 
 extern "C" bool radiant_webgl_has_context(void* canvas) {
@@ -995,7 +1166,8 @@ extern "C" uint64_t radiant_webgl_create(void* canvas, const WebGlOptions* optio
     if (entry->graphics) return entry->webgl_id;
     UiContext* ui=element->doc?(UiContext*)element->doc->js.host_ui_context:nullptr;
     char diagnostic[2048];
-    NativeGlContext* graphics=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic));
+    // one share group per window (Radiant_Design_GPU_Compositor Q7)
+    NativeGlContext* graphics=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic),ui?ui->window:nullptr);
     if (!graphics) return 0;
     unsigned width=canvas_attribute_dimension(element,"width",300),height=canvas_attribute_dimension(element,"height",150);
     if (!native_gl_webgl_init(graphics,width,height,options)) { native_gl_destroy(graphics);return 0; }
@@ -1166,9 +1338,9 @@ extern "C" bool radiant_webgl_image(uint64_t canvas,const WebGlCommand* command,
     bool handled=native_gl_webgl_call(destination->graphics,&upload,reply);
     mem_free(pixels);if(owned) image_surface_destroy(image);return handled;
 }
-void radiant_canvas_prepare_document(DomDocument* document) {
+void radiant_canvas_prepare_document(DomDocument* document, bool defer) {
     for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next)
-        if (entry->element->doc==document) canvas_prepare_surface(entry);
+        if (entry->element->doc==document) canvas_prepare_surface(entry, defer);
 }
 
 extern "C" bool radiant_webgl_lose(uint64_t canvas) {
@@ -1176,7 +1348,7 @@ extern "C" bool radiant_webgl_lose(uint64_t canvas) {
     WebGlCommand command={};command.op=WEBGL_isContextLost;WebGlReply reply={};
     native_gl_webgl_call(entry->graphics,&command,&reply);if (reply.n[0]) return false;
     native_gl_lose(entry->graphics);
-    image_surface_bump_generation(entry->surface);image_surface_snapshot_release(entry->surface);entry->surface=nullptr;
+    canvas_retire_snapshot(entry);
     canvas_request_repaint(entry);
     return true;
 }
@@ -1185,7 +1357,7 @@ extern "C" bool radiant_webgl_restore(uint64_t canvas) {
     WebGlCommand command={};command.op=WEBGL_isContextLost;WebGlReply reply={};
     native_gl_webgl_call(entry->graphics,&command,&reply);if (!reply.n[0]) return false;
     DomElement* element=entry->element;UiContext* ui=(UiContext*)element->doc->js.host_ui_context;
-    char diagnostic[2048];NativeGlContext* replacement=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic));
+    char diagnostic[2048];NativeGlContext* replacement=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic),ui?ui->window:nullptr);
     if (!replacement) return false;
     if (!native_gl_webgl_init(replacement,canvas_attribute_dimension(element,"width",300),
             canvas_attribute_dimension(element,"height",150),&entry->webgl_options)) {

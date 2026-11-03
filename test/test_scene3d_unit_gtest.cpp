@@ -35,10 +35,12 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_events.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/core/lambda-error-data.h"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -1807,10 +1809,13 @@ protected:
         Item source=builder.element("keyframe-track").attr("path",builder.createStringItem(path))
             .attr("type",builder.createSymbolItem("vector")).attr("times",times).attr("values",values).final();
         DomElement* track=build_dom_tree_from_element(source.element,&doc,clip);
-        if(track) doc.mutation_epoch++;return track;
+        if(track) mutated(clip);return track;
     }
+    // publish a test edit as the DOM does: the document epoch and the layer generation of the node and
+    // every ancestor advance, and scene caches compare both
+    void mutated(DomNode* node=nullptr) { dom_notify_mutation(DOM_JS_MUTATION_UNKNOWN,node?node:root,nullptr); }
     void attr(DomElement* node,const char* name,const char* value) {
-        ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
+        ASSERT_TRUE(node->set_attribute(name,value));mutated(node);
     }
     DomElement* layer_track(const char* id, const char* path, const char* values, bool additive = false,
                             const char* weight = "1", const char* reference = nullptr) {
@@ -3575,7 +3580,7 @@ protected:
         }
         scene3d_follow_rebuild(&doc, previous, root);
         doc.root = lam::up(root);
-        doc.mutation_epoch++;
+        mutated();
         ASSERT_NE(snapshot(), nullptr);
         EXPECT_EQ(scene3d_particles(root), owner);
         ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
@@ -5083,7 +5088,7 @@ TEST_F(Scene3dTest, ParticlesRetainCompatibleEditsRejectBadDescriptionsAndRetire
     EXPECT_EQ(after.live, 0u);
     EXPECT_EQ(after.sequence, 0u);
     ASSERT_TRUE(root->remove_child(emitter));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     EXPECT_FALSE(scene3d_particles_view(owner, emitter, &after));
 }
@@ -5174,7 +5179,7 @@ TEST_F(Scene3dTest, ParticlesFiniteAndLoopingEmissionUseBoundedTickBirthsAndSour
     attr(curve, "values", "1 1 1 1");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(once->remove_child(curve));
-    doc.mutation_epoch++;
+    mutated();
     attr(loop, "id", "once");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     attr(loop, "id", "loop");
@@ -5281,7 +5286,7 @@ TEST_F(Scene3dTest, ParticlesRotationCurveAdmissionKeepsLiveBuffersOnMalformedOr
     auto *duplicate = particle_rotation_curve(emitter);
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(emitter->remove_child(duplicate));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
 }
 
@@ -5431,7 +5436,7 @@ TEST_F(Scene3dTest, ParticlesCpuSceneCollisionRespectsGroupsAndSensorAdmission) 
                      .final();
     stage.collider = build_dom_tree_from_element(shape.element, &doc, stage.body);
     ASSERT_NE(stage.collider, nullptr);
-    doc.mutation_epoch++;
+    mutated();
     attr(stage.collision, "filter", "1");
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
@@ -5631,7 +5636,7 @@ TEST_F(Scene3dTest, ParticlesCpuSceneCollisionUsesInlineSphereCastsOnMeshAndHeig
     EXPECT_GT(view.collision_triangles, 0u);
     ASSERT_TRUE(stage.collider->remove_attribute("vertices"));
     ASSERT_TRUE(stage.collider->remove_attribute("indices"));
-    doc.mutation_epoch++;
+    mutated();
     attr(stage.body, "position", "-10 0 -10");
     attr(stage.collider, "shape", "heightfield");
     attr(stage.collider, "rows", "2");
@@ -6020,7 +6025,7 @@ TEST_F(Scene3dTest, ParticlesSurfaceSceneBudgetRejectsAdditionalTablesWithoutRep
     EXPECT_EQ(scene3d_particles(root), owner);
     EXPECT_EQ(scene3d_particles_generation(owner), generation);
     ASSERT_TRUE(root->remove_child(extra));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
 }
@@ -6105,7 +6110,7 @@ TEST_F(Scene3dTest, ParticlesGpuSurfaceToPointEditsRetainOldRecipesUntilExpiry) 
     ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &first));
     attr(emitter, "shape", "point");
     ASSERT_TRUE(emitter->remove_attribute("surface"));
-    doc.mutation_epoch++;
+    mutated();
     attr(emitter, "lifetime", "2");
     attr(emitter, "rate", "10");
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
@@ -6456,7 +6461,7 @@ TEST_F(Scene3dTest, AnimationNumericStreamsShareAcrossClipsAndInvalidateEdits) {
     for(int64_t i=0;i<keys;i++) values[i*3]=2*i;
     Item changed=builder.createNumericArray(ELEM_FLOAT64,1,&components,values);mem_free(times);mem_free(values);
     auto* parent=first->parent->as_element();ASSERT_TRUE(parent->remove_child(first));
-    ASSERT_NE(typed_track(builder,parent,"animated-0.position",timeline,changed),nullptr);doc.mutation_epoch++;
+    ASSERT_NE(typed_track(builder,parent,"animated-0.position",timeline,changed),nullptr);mutated();
     ASSERT_NE(snapshot(),nullptr);state=scene3d_animations(root);ASSERT_NE(state,nullptr);
     ASSERT_TRUE(scene3d_animation_seek(state,.5));ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_animation_value(state,targets[0],"position",&sampled));EXPECT_DOUBLE_EQ(sampled.numbers[0],1);
@@ -6480,7 +6485,7 @@ TEST_F(Scene3dTest, AnimationNumericStreamBudgetRejectsUniqueOverflowAndRecovers
     }
     mem_free(values);EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
     EXPECT_NE(strstr(scene3d_diagnostic(root),"animation key data quota exceeded"),nullptr);
-    ASSERT_TRUE(clip->remove_child(last));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(clip->remove_child(last));mutated();ASSERT_NE(snapshot(),nullptr);
 }
 
 TEST_F(Scene3dTest, AnimationCommandsPrepareCurrentSourceBeforePainting) {
@@ -6721,12 +6726,12 @@ TEST_F(Scene3dTest, AnimationReconciliationResetsOnlyNewOrIncompatibleClips) {
     auto* clip = first->parent->as_element();
     ASSERT_TRUE(root->remove_child(clip));
     ASSERT_TRUE(root->append_child(clip));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
     EXPECT_EQ(scene3d_animation_action(state, "first")->identity, identity);
     ASSERT_TRUE(root->remove_child(added->parent));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_EQ(scene3d_animation_action(state, "added"), nullptr);
     EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
@@ -6827,7 +6832,7 @@ TEST_F(Scene3dTest, RootRotationTransformsSourceAxesAndUniformScaleIntoWorldTurn
     attr(frame, "scale", "2 2 2");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
     Scene3dMatrix pose = {};
@@ -6920,7 +6925,7 @@ TEST_F(Scene3dTest, RootRotationRejectsNonuniformSourceFramesBeforeAdmission) {
     attr(frame, "scale", "1 2 1");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     EXPECT_NE(strstr(scene3d_diagnostic(root), "uniform proper parent frame"), nullptr);
 }
@@ -6967,7 +6972,7 @@ TEST_F(Scene3dTest, RootMotionTransformsParentAxesAndKeepsVisibleMotionSingleApp
     attr(frame, "scale", "2 2 2");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     auto* state = scene3d_prepare_animations(root);
     ASSERT_NE(state, nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 10));
@@ -7152,7 +7157,7 @@ TEST_F(Scene3dTest, RootMotionRemovingTheLastControllerRetiresItsTickScratchAndC
     auto* physics = scene3d_physics(root);
     ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
     ASSERT_TRUE(stage.body->remove_attribute("root-motion-source"));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_FALSE(scene3d_physics_has_root_motion(physics));
     ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
@@ -7897,9 +7902,9 @@ TEST_F(Scene3dTest, CameraOnlyEditsRetainDrawsButMixedAndStructuralEditsReprojec
     // camera IDs and children are structural: they must still pass the full validator.
     attr(camera,"id","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
     attr(camera,"id","main");pixel(snapshot(),64,64,0,255,0);
-    DomElement* child=element("group",camera);doc.mutation_epoch++;
+    DomElement* child=element("group",camera);mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
-    camera->remove_child(child);doc.mutation_epoch++;pixel(snapshot(),64,64,0,255,0);
+    camera->remove_child(child);mutated();pixel(snapshot(),64,64,0,255,0);
     ASSERT_TRUE(scene3d_stats(root,&before));
     // parent transforms move scene objects too, even when a camera changes in the same turn.
     attr(root,"position","0.5 0 0");attr(camera,"fov","75");ASSERT_NE(snapshot(),nullptr);
@@ -7912,11 +7917,11 @@ TEST_F(Scene3dTest, TypedScalarEditsInvalidateWithoutReplacingTheBackingElement)
     ASSERT_TRUE(scene->set_attribute("tone-mapping","neutral"));
     MarkEditor editor(page,EDIT_MODE_INLINE);Item backing={.element=dom_element_backing(scene)};
     ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.25)).element,backing.element);
-    page->mutation_epoch++;
+    mutated(scene);
     pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,137,0,0);
     Scene3dStats before={},after={};ASSERT_TRUE(scene3d_stats(scene,&before));
     ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.5)).element,backing.element);
-    page->mutation_epoch++;
+    mutated(scene);
     pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,188,0,0);
     ASSERT_TRUE(scene3d_stats(scene,&after));EXPECT_EQ(after.projection_generation,before.projection_generation+1);
 }
@@ -7928,7 +7933,7 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     pixel(snapshot(),64,64,188,0,0);
     DomElement* second=element("light",root);attr(second,"type","hemisphere");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"hemisphere light quota"),nullptr);
-    root->remove_child(second);root->remove_child(hemisphere);doc.mutation_epoch++;
+    root->remove_child(second);root->remove_child(hemisphere);mutated();
     pixel(snapshot(),64,64,0,0,0);
     // a uniformly glowing box around the capture point: every prefiltered level holds its radiance,
     // which lights the Lambert plane as an ambient light of that color would; the box itself is never drawn
@@ -7953,7 +7958,7 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     EXPECT_NE(strstr(scene3d_diagnostic(root),"names no environment"),nullptr);
     attr(root,"environment","glow");DomElement* inner=element("camera",environment);attr(inner,"type","perspective");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cameras"),nullptr);
-    environment->remove_child(inner);element("environment",environment);doc.mutation_epoch++;
+    environment->remove_child(inner);element("environment",environment);mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot nest"),nullptr);
 }
 
@@ -8037,7 +8042,7 @@ TEST_F(Scene3dTest, ShadowMapsDarkenReceiversAndRenderOnlyWhenTheirCastersOrFram
     // ambient and hemisphere lights cast nothing; at most four lights cast
     DomElement* ambient=element("light",root);attr(ambient,"type","ambient");attr(ambient,"cast-shadow","true");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directional, point or spot"),nullptr);
-    root->remove_child(ambient);doc.mutation_epoch++;
+    root->remove_child(ambient);mutated();
     for (unsigned i=0;i<4;i++) {
         DomElement* extra=element("light",root);attr(extra,"type","directional");attr(extra,"position","0 1 1");attr(extra,"cast-shadow","true");
     }
@@ -8518,7 +8523,7 @@ TEST_F(Scene3dTest, SvgExportEmbedsScenePixelsAndRejectsInvalidScene) {
     ASSERT_FALSE(ui.render_failed);
     DomElement* scene=dom_find_element_by_id(page->root->as_element(),"viewport");
     ASSERT_NE(scene,nullptr);
-    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));page->mutation_epoch++;
+    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));mutated(scene);
     lam::Temp<char> invalid(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
     EXPECT_EQ(invalid.get(),nullptr);EXPECT_TRUE(ui.render_failed);
 }
@@ -9006,7 +9011,7 @@ TEST_F(Scene3dTest, CustomColorPassesRespectDomainsCacheProgramsAndReleaseTheirR
     pixel(snapshot(),64,64,0,255,0);
     attr(linear,"domain","display");attr(display,"domain","linear");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"linear effects before"),nullptr);
-    root->remove_child(chain);doc.mutation_epoch++;pixel(snapshot(),64,64,255,0,0);
+    root->remove_child(chain);mutated();pixel(snapshot(),64,64,255,0,0);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.shader_programs,0u);EXPECT_LT(after.graphics.resources,before.graphics.resources);
 }
 
@@ -9199,7 +9204,7 @@ TEST_F(Scene3dGcTest, TypedNumericGeometrySurvivesMovingGcAndProjectionRebuild) 
     DomElement* material=element("material",object);attr(material,"type","basic");attr(material,"color","#ff0000");
     pixel(snapshot(),64,64,255,0,0);double* previous=positions->float_items;
     gc_collect(heap.gc,nullptr,0);EXPECT_NE(positions->float_items,previous);
-    doc.mutation_epoch++;pixel(snapshot(),64,64,255,0,0);
+    mutated();pixel(snapshot(),64,64,255,0,0);
     for (unsigned pass=0;pass<3;pass++) { gc_collect(heap.gc,nullptr,0);pixel(snapshot(128,128,pass%2+1),64*(pass%2+1),64*(pass%2+1),255,0,0); }
 }
 
@@ -9238,6 +9243,45 @@ TEST_F(Scene3dTest, Es100ShaderAndDefaultFramebufferResolvePreserveApplicationSt
     EXPECT_EQ(call(WEBGL_getParameter,0x0B98).n[0],0x12);EXPECT_EQ(call(WEBGL_getParameter,0x8CA5).n[0],0x34);
     pixel(image,16,16,0,255,0);EXPECT_EQ(call(WEBGL_getError).n[0],0);
     image_surface_destroy(image);native_gl_destroy(graphics);
+}
+
+// The GPU compositor samples a WebGL canvas's presented copy (Radiant_Design_GPU_Compositor §7): publishing
+// consumes a frame by the drawing-buffer rules a snapshot follows, the copy keeps that frame after the buffer
+// is discarded, and its deferred snapshot is normalized as a readback is.
+TEST_F(Scene3dTest, WebGlPresentedCopyKeepsFrameUnderDrawingBufferRules) {
+    for (bool premultiplied : {true, false}) {
+        SCOPED_TRACE(premultiplied ? "premultiplied" : "straight alpha");
+        char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));
+        ASSERT_NE(graphics,nullptr)<<diagnostic;
+        // alpha, no depth or stencil, no antialiasing, preserveDrawingBuffer false
+        WebGlOptions options={true,false,false,false,premultiplied,false};
+        ASSERT_TRUE(native_gl_webgl_init(graphics,8,4,&options));
+        auto call=[&](WebGlOp op,double a=0,double b=0,double c=0,double d=0) {
+            WebGlCommand command={};command.op=op;command.n[0]=a;command.n[1]=b;command.n[2]=c;command.n[3]=d;
+            WebGlReply reply={};EXPECT_TRUE(native_gl_webgl_call(graphics,&command,&reply));return reply;
+        };
+        call(WEBGL_clearColor,1,.5,0,.5);call(WEBGL_clear,0x4000);
+        ImageSurface* pending=native_gl_webgl_publish(graphics);ASSERT_NE(pending,nullptr);
+        NativeGlResource copy=native_gl_webgl_presented(graphics);
+        EXPECT_NE(copy.id,0u);EXPECT_NE(native_gl_publication(graphics,copy),0u);
+        // the frame is consumed and the copy current: nothing to publish or read back
+        EXPECT_EQ(native_gl_webgl_publish(graphics),nullptr);EXPECT_EQ(native_gl_webgl_snapshot(graphics),nullptr);
+        // the next draw starts from a discarded buffer; the copy still holds the published frame
+        call(WEBGL_scissor,0,0,1,1);call(WEBGL_enable,0x0C11);call(WEBGL_clearColor,0,0,1,1);call(WEBGL_clear,0x4000);
+        ASSERT_TRUE(native_gl_webgl_snapshot_into(graphics,pending));
+        if (premultiplied) pixel(pending,4,2,255,128,0,128);else pixel(pending,4,2,128,64,0,128);
+        ImageSurface* next=native_gl_webgl_snapshot(graphics);ASSERT_NE(next,nullptr);
+        pixel(next,4,2,0,0,0,0);pixel(next,0,3,0,0,255,255);
+        // a readback leaves the copy behind the buffer until the next publication refreshes it
+        EXPECT_EQ(native_gl_webgl_presented(graphics).id,0u);
+        ImageSurface* refreshed=native_gl_webgl_publish(graphics);ASSERT_NE(refreshed,nullptr);
+        EXPECT_EQ(native_gl_webgl_presented(graphics).id,copy.id);
+        ASSERT_TRUE(native_gl_webgl_snapshot_into(graphics,refreshed));
+        pixel(refreshed,4,2,0,0,0,0);pixel(refreshed,0,3,0,0,255,255);
+        EXPECT_EQ(call(WEBGL_getError).n[0],0);
+        image_surface_destroy(pending);image_surface_destroy(next);image_surface_destroy(refreshed);
+        native_gl_destroy(graphics);
+    }
 }
 
 
@@ -9312,13 +9356,13 @@ TEST_F(Scene3dTest, ImportedCamerasFrameTheSceneAndExplicitSelectionWins) {
     DomElement* scene=dom_find_element_by_id(page->root->as_element(),"fidelity-scene");ASSERT_NE(scene,nullptr);
     ImageSurface* image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
     uint8_t finite[128*128*4];memcpy(finite,image->pixels,sizeof(finite));pixel(image,40,64,0,0,0);
-    ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-2"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-2"));mutated(scene);image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
     EXPECT_NE(memcmp(finite,image->pixels,sizeof(finite)),0);unsigned at40=64*image->pitch+40*4;
     EXPECT_GT(((const uint8_t*)image->pixels)[at40]+((const uint8_t*)image->pixels)[at40+1]+((const uint8_t*)image->pixels)[at40+2],100u);
-    ASSERT_TRUE(scene->set_attribute("camera","override"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","override"));mutated(scene);image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
     unsigned at10=64*image->pitch+10*4;EXPECT_GT(((const uint8_t*)image->pixels)[at10]+((const uint8_t*)image->pixels)[at10+1]+((const uint8_t*)image->pixels)[at10+2],100u);
     DomElement* model=dom_find_element_by_id(page->root->as_element(),"fidelity-asset-node-0-primitive-0");ASSERT_NE(model,nullptr);
-    ASSERT_TRUE(model->set_attribute("scale","10000 10000 1"));ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-3"));page->mutation_epoch++;
+    ASSERT_TRUE(model->set_attribute("scale","10000 10000 1"));ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-3"));mutated(scene);
     image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
     unsigned center=64*image->pitch+64*4;EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
     Scene3dMatrix lens=scene3d_perspective(90,1,.1f,INFINITY);
@@ -9332,7 +9376,7 @@ TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
     SCOPED_TRACE(path);if(model) root->remove_child(model);
     Input* source=input_from_url(builder.createString(path),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
-    model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
     unsigned center=64*image->pitch+64*4;
     EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
@@ -9341,7 +9385,7 @@ TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
         Url* uri=url_parse_with_base(binary?"roundtrip.glb":"roundtrip.gltf",doc.url);
         Input* again=input_from_source_n(bytes->str,bytes->length,uri,builder.createString("scene3d-asset"),nullptr);strbuf_free(bytes);
         ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;
-        root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+        root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
         image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
     }
     }
@@ -9401,7 +9445,7 @@ TEST_F(Scene3dTest, PhysicalMapsFourShadowsAndSkinPaletteFitTheCheckedBindingPla
     EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.environment_builds,after.environment_builds);
     EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
     // only map presence changes the shader variant; returning to a prior mask reuses it.
-    ASSERT_TRUE(m->remove_attribute("sheen-roughness-texture"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(m->remove_attribute("sheen-roughness-texture"));mutated();ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.material_links,before.material_links+1);
     attr(m,"sheen-roughness-texture","layer-9");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.material_links,before.material_links+1);
@@ -9461,7 +9505,7 @@ TEST_F(Scene3dTest, TransmissionMapsOverlapEmptyEdgesResizeAndRecoveryRetainTheS
     ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);EXPECT_EQ(after.graphics.frames,before.graphics.frames+1);
     EXPECT_EQ(after.postprocess_passes,before.postprocess_passes+5);
-    root->remove_child(post);doc.mutation_epoch++;image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
+    root->remove_child(post);mutated();image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
     attr(background,"visible","false");attr(glass,"position","1.4 0 .5");ASSERT_NE(snapshot(),nullptr);
     attr(m,"alpha-mode","blend");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"coverage"),nullptr);
     attr(m,"alpha-mode","opaque");attr(m,"attenuation-distance","0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"attenuation-distance"),nullptr);
@@ -9507,7 +9551,7 @@ TEST_F(Scene3dTest, SourceUvsDoNotChangePointCoverageAndLineCoordinatesInterpola
     DomElement* texture=map_texture("map","test/scene3d/assets/fidelity/colors.png");attr(texture,"uv-set","0");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),24u);pixel(image,64,64,255,0,0);
     pixel(image,54,54,0,0,0,0);pixel(image,64,55,255,0,0);
-    root->remove_child(cloud);doc.mutation_epoch++;
+    root->remove_child(cloud);mutated();
     DomElement* path=drawable("line-segments","-1 0 0 1 0 0","#ffffff");g=path->first_child->as_element();m=path->last_child->as_element();
     attr(path,"width","12");attr(g,"drawable-uvs","source");attr(g,"uvs",".25 .75 .75 .75");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
     image=snapshot();ASSERT_NE(image,nullptr);pixel(image,40,64,255,0,0);pixel(image,88,64,0,255,0);
@@ -9556,7 +9600,7 @@ TEST_F(Scene3dTest, MirroredPointInstancesStayInOneBatchAndSharedSourcesKeepThei
     Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.meshes,1u);EXPECT_EQ(before.graphics.draws,2u);
     for(unsigned i=0;i<100;i++) ASSERT_NE(snapshot(i%2?128:96,i%2?128:96),nullptr);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    ASSERT_TRUE(cloud->remove_attribute("instances"));attr(g,"id","shared");attr(g,"positions","-.6 -.5 0 .6 -.5 0 0 .5 0");doc.mutation_epoch++;
+    ASSERT_TRUE(cloud->remove_attribute("instances"));attr(g,"id","shared");attr(g,"positions","-.6 -.5 0 .6 -.5 0 0 .5 0");mutated();
     DomElement* triangle=element("mesh",root);attr(triangle,"geometry","shared");DomElement* material=element("material",triangle);attr(material,"type","basic");attr(material,"color","#0000ff");
     DomElement* unused=element("geometry",root);attr(unused,"type","buffer");attr(unused,"positions","0 0 0");
     ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.geometries,2u);
@@ -9567,12 +9611,12 @@ TEST_F(Scene3dTest, ImportedFaceFreePointAndLinePrimitivesRenderAndRetireTheirUp
     Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
     Input* source=input_from_url(builder.createString("test/scene3d/assets/fidelity/drawables.gltf"),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
-    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);unsigned covered=0;
     for(unsigned y=0;y<image->height;y++) for(unsigned x=0;x<image->width;x++) covered+=((uint8_t*)image->pixels)[y*image->pitch+x*4+3]>0;
     EXPECT_GT(covered,80u);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.geometries,3u);
     scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    root->remove_child(model);doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    root->remove_child(model);mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.geometries,0u);EXPECT_LT(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
 }
 
@@ -9638,7 +9682,7 @@ TEST_F(Scene3dTest, DeformedAndShaderGeometryUsesAuthoredEnvelopesOrStaysUnculle
     attr(object,"position","10 0 0");attr(object,"morph-weights","1");attr(g,"morph-positions","-10 0 0 -10 0 0 -10 0 0");
     pixel(snapshot(),64,64,255,0,0);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.visibility_tests,0u);
     attr(object,"bounds","-11 -1 0 1 1 0");pixel(snapshot(),64,64,255,0,0);
-    ASSERT_TRUE(g->remove_attribute("morph-positions"));ASSERT_TRUE(object->remove_attribute("morph-weights"));ASSERT_TRUE(object->remove_attribute("bounds"));doc.mutation_epoch++;
+    ASSERT_TRUE(g->remove_attribute("morph-positions"));ASSERT_TRUE(object->remove_attribute("morph-weights"));ASSERT_TRUE(object->remove_attribute("bounds"));mutated();
     attr(m,"type","shader");attr(m,"vertex","void main(){gl_Position=projection_matrix*view_matrix*model_matrix*vec4(position+vec3(-10,0,0),1);}");
     attr(m,"fragment","void main(){fragment_color=vec4(1,0,0,1);}");pixel(snapshot(),64,64,255,0,0);
     ASSERT_TRUE(scene3d_stats(root,&before));attr(camera,"position","30 0 4");attr(camera,"target","30 0 0");ASSERT_NE(snapshot(),nullptr);
@@ -9663,9 +9707,9 @@ TEST_F(Scene3dTest, OffCameraCastersKeepTheirShadowWhenPresentationIsCulled) {
     // a distant presentation may choose an empty level; its highest-detail caster still shadows.
     attr(camera,"position","0 0 4");attr(caster,"cast-shadow","true");
     DomElement* lod=element("lod",root);attr(lod,"distances","0 1");DomElement* high=element("group",lod);element("group",lod);
-    ASSERT_TRUE(root->remove_child(caster));ASSERT_TRUE(high->append_child(caster));doc.mutation_epoch++;
+    ASSERT_TRUE(root->remove_child(caster));ASSERT_TRUE(high->append_child(caster));mutated();
     image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(shadowed,image->pixels,sizeof(shadowed)),0);
-    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.lod_state_bytes,0u);
+    ASSERT_TRUE(root->remove_child(lod));mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.lod_state_bytes,0u);
 }
 
 TEST_F(Scene3dTest, LodSwitchesBothWaysWithHysteresisAndRetainsEveryLevel) {
@@ -9704,9 +9748,9 @@ TEST_F(Scene3dTest, NestedLodKeepsInactiveAnimationAndRetiresItsSelectionState) 
     Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.lods,2u);
     attr(camera,"position","0 0 12");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,96,64,0,255,0);pixel(image,64,64,0,0,0,0);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;
+    ASSERT_TRUE(root->remove_child(lod));mutated();
     // retire the disconnected binding before validating the reduced scene.
-    ASSERT_TRUE(root->remove_child(clip));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    ASSERT_TRUE(root->remove_child(clip));mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.lods,0u);EXPECT_EQ(after.lod_state_bytes,0u);
 }
 
@@ -10206,8 +10250,8 @@ TEST_F(Scene3dTest, NavigationAssetEditsPublishTogetherAndRetireStaleGenerations
     attr(first,"data","{\"size\":[4,3],\"type\":\"grid\"}");ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_EQ(current,a); // equivalent source order preserves paths
     attr(first,"revision","1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);a=current;
-    ASSERT_TRUE(resources->remove_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);EXPECT_FALSE(scene3d_navigation_generation(cache,"a",&current));
-    ASSERT_TRUE(resources->append_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(resources->remove_child(first));mutated();ASSERT_NE(snapshot(),nullptr);EXPECT_FALSE(scene3d_navigation_generation(cache,"a",&current));
+    ASSERT_TRUE(resources->append_child(first));mutated();ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);
 }
 
@@ -10215,11 +10259,11 @@ TEST_F(Scene3dTest, NavigationAssetsFollowEquivalentTemplateRebuildsAndRejectInv
     navigation_asset();ASSERT_NE(snapshot(),nullptr);auto* cache=scene3d_navigation(root);uint64_t generation=0,current=0;
     ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&generation));auto* previous=root;
     root=element("scene3d");camera=element("camera",root);attr(camera,"type","perspective");attr(camera,"id","main");attr(camera,"position","0 0 4");attr(camera,"target","0 0 0");attr(camera,"fov","90");attr(root,"camera","main");
-    auto* asset=navigation_asset();scene3d_follow_rebuild(&doc,previous,root);doc.root=lam::up(root);doc.mutation_epoch++;
+    auto* asset=navigation_asset();scene3d_follow_rebuild(&doc,previous,root);doc.root=lam::up(root);mutated();
     ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_navigation(root),cache);ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
     attr(asset,"position","1 0 0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"world coordinates"),nullptr);
-    ASSERT_TRUE(asset->remove_attribute("position"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
-    auto* parent=asset->parent->as_element();ASSERT_TRUE(parent->remove_child(asset));ASSERT_TRUE(root->append_child(asset));doc.mutation_epoch++;
+    ASSERT_TRUE(asset->remove_attribute("position"));mutated();ASSERT_NE(snapshot(),nullptr);
+    auto* parent=asset->parent->as_element();ASSERT_TRUE(parent->remove_child(asset));ASSERT_TRUE(root->append_child(asset));mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directly to scene resources"),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
 }
@@ -10766,6 +10810,13 @@ class Scene3dAudioTest : public Scene3dAgentTest {
     bool previous_offline;
     AudioFixtureSpeechEngine speech_engine;
 protected:
+    struct NetworkOrigin {
+        DomDocument* document; Url* local; Url* network;
+        explicit NetworkOrigin(DomDocument* doc) : document(doc), local(doc->url), network(url_parse("https://example.test/scene")) {
+            if (network) doc->url = lam::own(network);
+        }
+        ~NetworkOrigin() { radiant_audio_grant_activation(false); document->url = lam::own(local); url_destroy(network); }
+    };
     void SetUp() override {
         Scene3dAgentTest::SetUp(); previous_offline = audio_bus_offline(); audio_bus_set_offline(true);
         attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1");
@@ -10868,6 +10919,15 @@ protected:
         ticket(&request); request.put("frames", box_uint64_value(frames)); request.put("events", events.value.get());
         return call_audio("audio_render_open", request.value.get());
     }
+    Item render_provider_open(const char* kind, uint64_t token, uint64_t frames = 480,
+        const char* bus = "master", double position = 0, Item events = ItemNull) {
+        RootedValueBuilder provider(RootedValueBuilder::DATA_MAP), providers(true), request(RootedValueBuilder::DATA_MAP);
+        provider.put("provider", Item{.item=s2it(heap_create_name(kind))}); provider.put("token", box_uint64_value(token));
+        provider.put("bus", Item{.item=s2it(heap_create_name(bus))}); provider.put("position", push_d(position)); providers.append(provider.value.get());
+        ticket(&request); request.put("frames", box_uint64_value(frames)); request.put("providers", providers.value.get());
+        if (events.item != ItemNull.item) request.put("events", events);
+        return call_audio("audio_render_open", request.value.get());
+    }
     Item render_command(const char* operation, uint64_t id, uint64_t frames = 64, uint64_t offset = 0, const char* format = nullptr) {
         RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request); request.put("job", box_uint64_value(id));
         request.put("frames", box_uint64_value(frames)); request.put("offset", box_uint64_value(offset));
@@ -10876,10 +10936,167 @@ protected:
     }
     uint64_t render_id(Item packet) { return ItemReader(item_attr(packet, "job").to_const()).asUInt64(); }
     float render_sample(Item packet, unsigned frame, unsigned channel = 1) {
-        Item bytes = item_attr(packet, "data"); uint32_t bits = read_le32((const uint8_t*)binary_data(bytes.get_binary()) + (frame * 2 + channel) * 4);
-        float value; memcpy(&value, &bits, sizeof(value)); return value;
+        return audio_fixture_sample(binary_data(item_attr(packet, "data").get_binary()), frame, channel);
     }
 };
+
+class Scene3dCaptureTest : public Scene3dAudioTest {
+protected:
+    AudioFixtureCaptureBackend host;
+    uint64_t token = 0;
+    void acquire(bool pending = false) {
+        auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(&doc, &backend));
+        ASSERT_TRUE(radiant_capture_grant(&doc, true)); if (pending) host.permission = AUDIO_CAPTURE_PENDING;
+        token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    }
+    void input(uint64_t frame, unsigned count = 4) {
+        ASSERT_NE(host.sink, nullptr); ASSERT_LE(count, 64u); float samples[128];
+        for (unsigned i = 0; i < count; i++) { samples[i * 2] = .5f; samples[i * 2 + 1] = -.25f; }
+        ASSERT_EQ(audio_capture_pcm_write(host.sink, frame, samples, count), count);
+    }
+};
+TEST_F(Scene3dCaptureTest, NamedGainAndLiveRewirePreserveBothPcmReaders) {
+    auto* first = element("audio-bus", root); attr(first, "id", "mic"); attr(first, "gain", ".25"); attr(first, "smoothing", "0");
+    auto* second = element("audio-bus", root); attr(second, "id", "other"); attr(second, "gain", ".5"); attr(second, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    auto a = bus_identity(packet.get(), "mic"), b = bus_identity(packet.get(), "other"); ASSERT_NE(a, 0u); ASSERT_NE(b, 0u);
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", a))); input(0);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(4); pcm(.0625f, -.03125f, 4);
+    input(8); ASSERT_FALSE(item_is_error(provider_route("capture", token, "other", b, a))); pcm(.125f, -.0625f, 4);
+    float recorded[24]; uint64_t first_frame = UINT64_MAX;
+    ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 12, &first_frame), 12u); EXPECT_EQ(first_frame, 0u);
+    for (unsigned i = 0; i < 12; i++) { EXPECT_FLOAT_EQ(recorded[i * 2], .5f); EXPECT_FLOAT_EQ(recorded[i * 2 + 1], -.25f); }
+    attr(second, "mute", "true"); ASSERT_FALSE(item_is_error(read_audio())); input(12); pcm(0, 0, 4);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 0)); input(16);
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", a, b))); input(20);
+    ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 12, &first_frame), 12u); EXPECT_EQ(first_frame, 12u);
+    result.set(provider_read("capture", token)); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), a);
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(result.get(), "position").to_const()).asFloat(), 24.0 / AUDIO_BUS_RATE);
+    EXPECT_FLOAT_EQ(ItemReader(item_attr(result.get(), "gain").to_const()).asFloat(), 0);
+}
+TEST_F(Scene3dCaptureTest, NamedDelayProcessesOnlyMonitoringAndLeavesRecordedPcmUnchanged) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "gain", ".5"); attr(bus, "smoothing", "0");
+    auto* effect = element("audio-effect", bus); attr(effect, "type", "delay"); attr(effect, "seconds", ".001"); attr(effect, "wet", "1"); attr(effect, "feedback", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1));
+    const float impulse[] = {.5f,-.25f,0,0,0,0,0,0}; ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, impulse, 4), 4u);
+    float output[128]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 64));
+    for (unsigned i = 0; i < 64; i++) { EXPECT_FLOAT_EQ(output[i * 2], i == 48 ? .25f : 0); EXPECT_FLOAT_EQ(output[i * 2 + 1], i == 48 ? -.125f : 0); }
+    float recorded[8]; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 4, &first), 4u);
+    EXPECT_EQ(memcmp(recorded, impulse, sizeof(impulse)), 0);
+}
+TEST_F(Scene3dCaptureTest, RetainedCaptureRoutesFenceBusRemovalAndStopReleasesTheReference) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route)));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route, 1)));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route + 1, route)));
+    auto session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, nullptr, 0, route, session + 1)));
+    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(radiant_capture_stop(&doc, token)); EXPECT_FALSE(item_is_error(read_audio()));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "master", bus_identity(packet.get(), "master"))));
+    EXPECT_EQ(host.closes, 1u);
+}
+TEST_F(Scene3dCaptureTest, PendingDenialAndRevocationReleaseNamedReferencesWithoutImplicitAcquisition) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(true); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_DENIED; AudioProviderInfo info;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(info.route, 0u);
+    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_FALSE(item_is_error(read_audio()));
+    EXPECT_EQ(host.opens, 0u); host.permission = AUDIO_CAPTURE_ALLOWED; token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    packet.set(read_audio()); route = bus_identity(packet.get(), "master"); ASSERT_FALSE(item_is_error(provider_route("capture", token, "master", route)));
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0); ASSERT_TRUE(radiant_capture_grant(&doc, false));
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(info.route, 0u);
+    EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.closed_frame, 4u); EXPECT_EQ(host.sink, nullptr);
+    ASSERT_TRUE(radiant_capture_grant(&doc, true)); token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "master", route))); host.loss = true;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(info.route, 0u); EXPECT_EQ(host.closes, 2u);
+}
+TEST_F(Scene3dCaptureTest, GraphLossStopsMonitoringWhileRecordingContinuesAndExplicitDetachmentRecovers) {
+    auto* shell = element("div"); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.mutation_epoch++;
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0);
+    ASSERT_TRUE(shell->remove_child(root)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    AudioProviderInfo info; ASSERT_TRUE(radiant_capture_routing(&doc, token, &info));
+    EXPECT_STREQ(info.state, "capturing"); EXPECT_EQ(info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_FALSE(info.route_valid); EXPECT_EQ(info.gain, 0);
+    EXPECT_FALSE(radiant_capture_monitor(&doc, token, 1)); EXPECT_EQ(host.closes, 0u); input(4);
+    float recorded[16]; uint64_t first = UINT64_MAX; ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 8, &first), 8u); EXPECT_EQ(first, 0u);
+    const char* error = nullptr; ASSERT_TRUE(radiant_capture_route(&doc, token, route, 0, &error)) << error;
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(8); pcm(.25f, -.125f, 4);
+}
+TEST_F(Scene3dCaptureTest, UnactivatedNetworkInputCanRouteButCannotMonitorRewireOrUnmuteAudibleInput) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "mute", "true"); attr(bus, "smoothing", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr); acquire();
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); EXPECT_FALSE(radiant_capture_monitor(&doc, token, 1));
+    radiant_audio_grant_activation(true); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0); pcm(0, 0, 4);
+    radiant_audio_grant_activation(false); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, nullptr, 0, route)));
+    attr(bus, "mute", "false"); EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 0)); EXPECT_FALSE(item_is_error(read_audio()));
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, nullptr, 0, route))); EXPECT_FALSE(radiant_capture_monitor(&doc, token, .5f));
+    radiant_audio_note_activation(&doc); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(4); pcm(.25f, -.125f, 4);
+}
+TEST_F(Scene3dCaptureTest, OutputLossRetainsTheNamedBindingAndInputWhileReenableRestoresTheBus) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic"); acquire();
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(0);
+    audio_bus_retire_output(); AudioProviderInfo info; ASSERT_TRUE(radiant_capture_routing(&doc, token, &info));
+    EXPECT_STREQ(info.state, "capturing"); EXPECT_EQ(info.route, route); EXPECT_TRUE(info.route_valid); EXPECT_EQ(info.loss, AUDIO_VOICE_DEVICE_LOST);
+    EXPECT_EQ(host.closes, 0u); input(4); float recorded[16]; uint64_t first = 0; EXPECT_EQ(radiant_capture_read(&doc, token, recorded, 8, &first), 8u);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(8); pcm(.0625f, -.03125f, 4);
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.loss, AUDIO_VOICE_OK);
+}
+TEST_F(Scene3dCaptureTest, ForeignAndFullRouteTablesRejectAtomicallyAndLiveExportNeverConsumesInput) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    auto route = bus_identity(packet.get(), "mic"); acquire(); auto mix = radiant_document_submix(&doc); AudioRouteRef references[AUDIO_ROUTE_REFERENCES] = {};
+    for (auto& ref : references) ASSERT_TRUE(audio_submix_bind_route(mix, &ref, 0, route));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route))); AudioProviderInfo info;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.route, 0u);
+    audio_submix_release_route(mix, references[0]); references[0] = 0; ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route)));
+    AudioSubmixId foreign = audio_submix_create(); ASSERT_NE(foreign, 0u); auto graph = audio_submix_graph_open(foreign);
+    AudioGraphConfig config = {}; config.count = 1; config.buses[0] = audio_graph_bus_default("master"); ASSERT_TRUE(audio_fixture_graph_publish(foreign, graph, config));
+    auto other = audio_submix_graph_route(foreign, graph, nullptr, "master"); const char* error = nullptr;
+    EXPECT_FALSE(radiant_capture_route(&doc, token, route, other, &error)); audio_submix_destroy(foreign);
+    size_t players = 0, bytes = 0, after = 0; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); input(0);
+    EXPECT_TRUE(item_is_error(render_provider_open("capture", token, 64)));
+    ASSERT_TRUE(radiant_audio_usage(&doc, &players, &after)); EXPECT_EQ(after, bytes); EXPECT_EQ(players, 1u);
+    float recorded[8]; uint64_t first = 0; EXPECT_EQ(radiant_capture_read(&doc, token, recorded, 4, &first), 4u);
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.route, route); EXPECT_EQ(host.closes, 0u);
+    for (auto ref : references) audio_submix_release_route(mix, ref);
+    struct Peer { DomDocument* doc; ~Peer() { dom_document_destroy(doc); } } peer{dom_document_create(doc.input)};
+    ASSERT_NE(peer.doc, nullptr); dom_document_borrow_input_resources(peer.doc);
+    const auto* provider = radiant_audio_provider("capture"); ASSERT_NE(provider, nullptr);
+    EXPECT_FALSE(provider->read(peer.doc, token, &info)); EXPECT_FALSE(provider->route(peer.doc, token, 0, route, &error));
+    auto old = token; ASSERT_TRUE(radiant_capture_stop(&doc, token)); token = radiant_capture_open(&doc); ASSERT_NE(token, 0u); EXPECT_NE(token, old);
+    EXPECT_TRUE(item_is_error(provider_read("capture", old))); EXPECT_TRUE(item_is_error(provider_route("capture", old, "mic", route)));
+}
+TEST_F(Scene3dCaptureTest, ImportedProceduralRoutesPreserveExactTicketsAndCopiedPcm) {
+    ASSERT_NE(load_page("test/scene3d/capture-routes.html"), nullptr); pump_js(); ASSERT_NE(page, nullptr);
+    auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(page, &backend)); ASSERT_TRUE(radiant_capture_grant(page, true));
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('open')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.state==='capturing'&&typeof captureToken==='bigint'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('route')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&captureProvider.provider==='capture'&&captureProvider.token===captureToken&&captureProvider.route>0n&&captureProvider.route_valid&&captureProvider.gain===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('monitor')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.monitor_gain===0.5").to_const()).asBool());
+    input(0); // the injected backend belongs to the loaded document, not the fixture's synthetic scene.
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('route','other')"))); pump_js();
+    float output[8]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(page), output, 4));
+    for (unsigned i = 0; i < 4; i++) { EXPECT_FLOAT_EQ(output[i * 2], .125f); EXPECT_FLOAT_EQ(output[i * 2 + 1], -.0625f); }
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('read')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.frames===4&&capturePacket.first_frame===0n&&capturePacket.next_frame===4n&&new Uint8Array(capturePacket.data).length===32").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(run_js("new DataView(new Uint8Array(capturePacket.data).buffer).getFloat32(0,true)===0.5").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('export')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&captureExportRejected").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('stop')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.state==='stopped'").to_const()).asBool());
+    EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.closed_frame, 4u);
+}
 
 TEST_F(Scene3dAudioTest, SpatialAndStereoSourcesProduceKnownIndependentPcm) {
     auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
@@ -10990,7 +11207,7 @@ TEST_F(Scene3dAudioTest, GraphOwnerRemovalFailsActiveSpeechAndUnvoicedMidiWithou
     EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0)); EXPECT_FALSE(radiant_speech_command(&doc, speech, "resume"));
 }
 TEST_F(Scene3dAudioTest, UnactivatedNetworkProvidersCanPrepareRoutesAndPlayMutedButCannotBecomeAudible) {
-    fake_speech(); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    fake_speech(); NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr);
     auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
     auto route = bus_identity(packet.get(), "providers"), midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
     ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0));
@@ -11000,7 +11217,6 @@ TEST_F(Scene3dAudioTest, UnactivatedNetworkProvidersCanPrepareRoutesAndPlayMuted
     float output[512 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 512)); for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
     EXPECT_FALSE(radiant_midi_command(&doc, midi, "volume", 1)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
     radiant_audio_note_activation(&doc); EXPECT_TRUE(radiant_midi_command(&doc, midi, "volume", 1));
-    url_destroy(doc.url); doc.url = lam::own(local);
 }
 TEST_F(Scene3dAudioTest, AudibleDefaultDetachmentAndSpeechResumeRequireActivationAfterOriginChanges) {
     fake_speech(); auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); attr(bus, "mute", "true");
@@ -11050,8 +11266,111 @@ TEST_F(Scene3dAudioTest, OutputFreeRenderJobsProduceExactCuePcmWithoutAdvancingL
     for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(render_sample(output.get(), i), i < 17 ? 0 : .5, 1e-6);
     EXPECT_EQ(radiant_audio_frame(&doc), 0u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
 }
+TEST_F(Scene3dAudioTest, RenderJobsAdmitIndependentMidiProvidersWithoutAdvancingLiveTransport) {
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, render_provider_open("midi", midi)), output(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(packet.get()));
+    ASSERT_FALSE(item_is_error(job.get())) << (it2err(job.get()) ? it2err(job.get())->message : "unallocated error"); auto id = render_id(job.get());
+    job.set(render_command("audio_render_step", id, 480)); ASSERT_FALSE(item_is_error(job.get()));
+    output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+    double energy = 0; for (unsigned i = 0; i < 480; i++) { double sample = render_sample(output.get(), i); energy += sample * sample; }
+    EXPECT_GT(energy, 0); MidiSnapshot live; ASSERT_TRUE(radiant_midi_info(&doc, midi, &live));
+    EXPECT_EQ(live.state, MIDI_READY); EXPECT_EQ(live.position, 0); EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+}
+TEST_F(Scene3dAudioTest, ProviderJobsRetainMidiControlsAndPcmAfterCloseAcrossStepPartitions) {
+    auto* quiet = element("audio-bus", root); attr(quiet, "id", "quiet"); attr(quiet, "gain", ".5"); attr(quiet, "smoothing", "0");
+    RootFrame roots(7); Rooted<Item> packet(roots, read_audio()), one(roots, ItemNull), many(roots, ItemNull), half(roots, ItemNull),
+        first(roots, ItemNull), second(roots, ItemNull), third(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "volume", .4)); ASSERT_TRUE(radiant_midi_command(&doc, midi, "speed", .5));
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "play", 0)); float live[64 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), live, 64));
+    MidiSnapshot before, after; ASSERT_TRUE(radiant_midi_info(&doc, midi, &before));
+    one.set(render_provider_open("midi", midi, 1024, "master", .01)); many.set(render_provider_open("midi", midi, 1024, "master", .01));
+    half.set(render_provider_open("midi", midi, 1024, "quiet", .01));
+    ASSERT_FALSE(item_is_error(one.get())); ASSERT_FALSE(item_is_error(many.get())); ASSERT_FALSE(item_is_error(half.get()));
+    ASSERT_TRUE(radiant_midi_info(&doc, midi, &after)); EXPECT_EQ(after.state, before.state); EXPECT_EQ(after.position, before.position);
+    ASSERT_TRUE(radiant_audio_close(&doc, midi)); auto a = render_id(one.get()), b = render_id(many.get());
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", a, 1024)));
+    for (unsigned done = 0; done < 1024;) { unsigned count = 1024 - done < 37 ? 1024 - done : 37; ASSERT_FALSE(item_is_error(render_command("audio_render_step", b, count))); done += count; }
+    first.set(render_command("audio_render_read", a, 1024)); second.set(render_command("audio_render_read", b, 1024));
+    ASSERT_FALSE(item_is_error(first.get())); ASSERT_FALSE(item_is_error(second.get()));
+    EXPECT_EQ(memcmp(binary_data(item_attr(first.get(), "data").get_binary()), binary_data(item_attr(second.get(), "data").get_binary()), 1024 * 8), 0);
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(half.get()), 1024)));
+    third.set(render_command("audio_render_read", render_id(half.get()), 1024)); ASSERT_FALSE(item_is_error(third.get()));
+    for (unsigned i = 0; i < 1024; i++) for (unsigned channel = 0; channel < 2; channel++) EXPECT_NEAR(render_sample(third.get(), i, channel), render_sample(first.get(), i, channel) * .5f, 1e-6);
+    double energy = 0; for (unsigned i = 0; i < 1024; i++) energy += render_sample(first.get(), i) * render_sample(first.get(), i);
+    EXPECT_GT(energy, 0); EXPECT_EQ(radiant_audio_frame(&doc), 64u);
+}
+TEST_F(Scene3dAudioTest, MixedSpeechAndClipJobsMatchIndependentInputsAfterUtteranceCancellation) {
+    fake_speech(); speaker(); ASSERT_FALSE(item_is_error(upload())); auto speech = audio_fixture_speech(root, "go go", .5f); ASSERT_NE(speech, 0u);
+    RootFrame roots(6); Rooted<Item> packet(roots, read_audio()), voice(roots, render_provider_open("speech", speech, 480, "master", .05)),
+        clip(roots, render_open(packet.get(), 480, 0)), mixed(roots, ItemNull), output(roots, ItemNull), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(voice.get())); ASSERT_FALSE(item_is_error(clip.get()));
+    RootedValueBuilder events(true); events.append(cue(packet.get(), "play", 0));
+    mixed.set(render_provider_open("speech", speech, 480, "master", .05, events.value.get())); ASSERT_FALSE(item_is_error(mixed.get()));
+    ASSERT_TRUE(radiant_speech_command(&doc, speech, "cancel")); float expected[480 * 2] = {};
+    for (auto id : {render_id(voice.get()), render_id(clip.get())}) {
+        ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 480))); output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+        for (unsigned frame = 0; frame < 480; frame++) for (unsigned channel = 0; channel < 2; channel++) expected[frame * 2 + channel] += render_sample(output.get(), frame, channel);
+    }
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(mixed.get()), 480)));
+    result.set(render_command("audio_render_read", render_id(mixed.get()), 480)); ASSERT_FALSE(item_is_error(result.get()));
+    for (unsigned frame = 0; frame < 480; frame++) for (unsigned channel = 0; channel < 2; channel++) EXPECT_NEAR(render_sample(result.get(), frame, channel), expected[frame * 2 + channel], 1e-6);
+    EXPECT_EQ(radiant_audio_frame(&doc), 0u); SpeechInfo info; ASSERT_TRUE(radiant_speech_info(&doc, speech, &info)); EXPECT_EQ(info.state, SPEECH_CANCELLED);
+}
+TEST_F(Scene3dAudioTest, UnactivatedNetworkProviderJobsUsePrivateOutputWithoutStartingLiveTransports) {
+    fake_speech(); RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr); audio_bus_set_offline(false);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0));
+    radiant_audio_grant_activation(true); auto speech = audio_fixture_speech(root, "go", .5f); ASSERT_NE(speech, 0u);
+    ASSERT_TRUE(radiant_speech_command(&doc, speech, "pause")); radiant_audio_grant_activation(false);
+    SpeechInfo before; ASSERT_TRUE(radiant_speech_info(&doc, speech, &before));
+    const struct { const char* name; uint64_t token; } providers[] = {{"midi", midi}, {"speech", speech}};
+    for (const auto& provider : providers) {
+        job.set(render_provider_open(provider.name, provider.token, 480)); ASSERT_FALSE(item_is_error(job.get()));
+        auto id = render_id(job.get()); ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 480)));
+        output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+        double energy = 0; for (unsigned i = 0; i < 480; i++) energy += render_sample(output.get(), i) * render_sample(output.get(), i); EXPECT_GT(energy, 0);
+    }
+    EXPECT_FALSE(radiant_document_may_start_audio(&doc)); EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+    MidiSnapshot midi_info; SpeechInfo speech_info; ASSERT_TRUE(radiant_midi_info(&doc, midi, &midi_info)); ASSERT_TRUE(radiant_speech_info(&doc, speech, &speech_info));
+    EXPECT_EQ(midi_info.state, MIDI_READY); EXPECT_EQ(midi_info.position, 0); EXPECT_EQ(speech_info.state, before.state); EXPECT_EQ(speech_info.position, before.position);
+}
+TEST_F(Scene3dAudioTest, ProviderJobsRetireWithTheirSceneWhileCopiedReadResultsSurvive) {
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); job.set(render_provider_open("midi", midi)); ASSERT_FALSE(item_is_error(job.get()));
+    auto id = render_id(job.get()), session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 64))); output.set(render_command("audio_render_read", id, 64)); ASSERT_FALSE(item_is_error(output.get()));
+    float first = render_sample(output.get(), 17);
+    doc.root = nullptr; doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    AudioRenderSnapshot snapshot; EXPECT_FALSE(audio_render_snapshot(&doc, session, id, &snapshot));
+    EXPECT_FLOAT_EQ(render_sample(output.get(), 17), first);
+}
+TEST_F(Scene3dAudioTest, ProviderQuotaAndInvalidPeerRejectionPreserveEarlierJobsAndReleaseSnapshots) {
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), peer(roots, ItemNull), rejected(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); peer.set(render_provider_open("midi", midi)); ASSERT_FALSE(item_is_error(peer.get()));
+    DomDocument foreign; const char* foreign_error = nullptr;
+    EXPECT_EQ(radiant_audio_provider_snapshot(&foreign, radiant_audio_provider("midi"), midi, 0, 480, &foreign_error), 0u);
+    EXPECT_NE(foreign_error, nullptr); EXPECT_EQ(foreign.resources.get(), nullptr);
+    uint64_t reservations[128] = {}; unsigned count = 0;
+    while (count < 128 && (reservations[count] = radiant_audio_storage_acquire(&doc, 1))) count++;
+    rejected.set(render_provider_open("midi", midi)); EXPECT_TRUE(item_is_error(rejected.get()));
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(peer.get()), 480)));
+    for (unsigned i = 0; i < count; i++) radiant_audio_storage_release(&doc, reservations[i]);
+    size_t before_players, before_bytes, players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &before_players, &before_bytes));
+    RootedValueBuilder providers(true), request(RootedValueBuilder::DATA_MAP);
+    for (auto token : {midi, UINT64_MAX}) {
+        RootedValueBuilder provider(RootedValueBuilder::DATA_MAP); provider.put("provider", Item{.item=s2it(heap_create_name("midi"))}); provider.put("token", box_uint64_value(token)); providers.append(provider.value.get());
+    }
+    ticket(&request); request.put("frames", box_uint64_value(480)); request.put("providers", providers.value.get());
+    rejected.set(call_audio("audio_render_open", request.value.get())); EXPECT_TRUE(item_is_error(rejected.get()));
+    ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, before_players); EXPECT_EQ(bytes, before_bytes);
+    for (double position : {-1., .3}) EXPECT_TRUE(item_is_error(render_provider_open("midi", midi, 480, "master", position)));
+    EXPECT_TRUE(item_is_error(render_provider_open("unsupported", midi))); EXPECT_TRUE(item_is_error(render_provider_open("midi", midi, 480, "missing")));
+    rejected.set(render_provider_open("midi", midi)); EXPECT_FALSE(item_is_error(rejected.get()));
+}
 TEST_F(Scene3dAudioTest, NetworkRenderJobsRunWithOnlineOutputButNeverJoinOrActivateTheDevice) {
-    audio_bus_set_offline(false); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    audio_bus_set_offline(false); NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr);
     speaker(); ASSERT_FALSE(item_is_error(upload())); EXPECT_TRUE(item_is_error(transport("play")));
     RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull);
     ASSERT_FALSE(item_is_error(job.get())); uint64_t id = render_id(job.get()); float silence[64 * 2]; audio_bus_mix(silence, 64);
@@ -11061,7 +11380,7 @@ TEST_F(Scene3dAudioTest, NetworkRenderJobsRunWithOnlineOutputButNeverJoinOrActiv
     EXPECT_STREQ(ItemReader(item_attr(job.get(), "state").to_const()).asString()->chars, "complete");
     output.set(render_command("audio_render_read", id)); ASSERT_FALSE(item_is_error(output.get()));
     EXPECT_FLOAT_EQ(render_sample(output.get(), 17), .5f); EXPECT_FALSE(radiant_audio_frames_pending(&doc)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
-    EXPECT_TRUE(item_is_error(transport("play"))); url_destroy(doc.url); doc.url = lam::own(local);
+    EXPECT_TRUE(item_is_error(transport("play")));
 }
 TEST_F(Scene3dAudioTest, RenderPlanRetainsCopiedAssetsSpatialParametersGraphAndResultsAcrossLiveReset) {
     auto* source = speaker(); attr(source, "bus", "effects"); auto* bus = element("audio-bus", root); attr(bus, "id", "effects");
@@ -11744,7 +12063,7 @@ TEST_F(Scene3dAgentTest, ParticlesContactsRetainCopiedHistoryAcrossTemplateConte
     stage = particle_collision_stage("kill");
     scene3d_follow_rebuild(&doc, previous, root);
     doc.root = lam::up(root);
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
     EXPECT_EQ(scene3d_particles(root), owner);
     attr(stage.emitter, "rate", "10");
@@ -11798,7 +12117,7 @@ TEST_F(Scene3dAgentTest, TrackMappingRetainsMixedRootPlaybackAndNativeMasksWhenD
     auto* clip = stage.track->parent->as_element();
     ASSERT_TRUE(clip->remove_child(stage.track));
     ASSERT_TRUE(clip->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state) << scene3d_diagnostic(root);
     auto* action = scene3d_animation_action(state, "walk");
     EXPECT_EQ(action->identity, identity);
@@ -11846,7 +12165,7 @@ TEST_F(Scene3dAgentTest, TrackMappingPreservesRepeatedTargetOccurrencesAndDiscre
     ASSERT_TRUE(clip->remove_child(repeated));
     ASSERT_TRUE(clip->append_child(first));
     ASSERT_TRUE(clip->append_child(repeated));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     action = scene3d_animation_action(state, "pose");
     EXPECT_EQ(action->identity, identity);
@@ -11891,7 +12210,7 @@ TEST_F(Scene3dAgentTest, TrackMappingKeepsCompletedControllerHandoffsAndPhysical
     ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &before));
     ASSERT_TRUE(walk->remove_child(stage.track));
     ASSERT_TRUE(walk->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     action = scene3d_animation_action(state, "idle");
     EXPECT_EQ(action->identity, identity);
@@ -11942,7 +12261,7 @@ TEST_F(Scene3dAgentTest, TrackMappingInvalidatesOldChannelBatchesAndResetsOnlyIn
     auto* clip = stage.track->parent->as_element();
     ASSERT_TRUE(clip->remove_child(stage.track));
     ASSERT_TRUE(clip->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_EQ(scene3d_animation_action(state, "walk")->identity, identity);
     Scene3dRuntimeStats stats = {};
@@ -12329,7 +12648,7 @@ TEST_F(Scene3dAgentTest, AnimationBatchesRejectCompatibilityControllerWritersAnd
     ASSERT_NE(state, nullptr);
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 1)));
     ASSERT_TRUE(root->remove_child(controller));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"phase","value":2)", 1, 1)));
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"mask","channel":0,"value":-1)", 1, 1)));
@@ -12567,7 +12886,7 @@ TEST_F(Scene3dAgentTest, RootMotionSourceAdmissionKeepsAnExistingNavigationOwner
     EXPECT_TRUE(scene3d_navigation_body_owned(scene3d_navigation(root), walker));
     EXPECT_FALSE(scene3d_physics_root_owns_body(physics, walker));
     ASSERT_TRUE(walker->remove_attribute("root-motion-source"));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_FALSE(
         item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
@@ -13059,7 +13378,7 @@ TEST_F(Scene3dAgentTest, NavigationAgentsDoNotHijackReusedBodyIdsAndFollowExplic
     for(DomNode* node=root->first_child;node;node=node->next_sibling)if(node->is_element()) {
         const char* id=scene3d_text(node->as_element(),"id");if(id&&!strcmp(id,"walker0"))original=node->as_element();
     }
-    ASSERT_NE(original,nullptr);ASSERT_TRUE(root->remove_child(original));doc.mutation_epoch++;
+    ASSERT_NE(original,nullptr);ASSERT_TRUE(root->remove_child(original));mutated();
     ASSERT_TRUE(scene3d_runtime_step(runtime,1));Item missing=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");EXPECT_STREQ(ItemReader(missing.to_const()).asMap().get("status").cstring(),"invalid");
     auto* replacement=element("rigid-body",root);attr(replacement,"id","walker0");attr(replacement,"type","kinematic-position");attr(replacement,"position","1.5 .51 1.5");
     auto* shape=element("collider",replacement);attr(shape,"id","capsule0");attr(shape,"shape","capsule");attr(shape,"radius",".2");attr(shape,"height",".6");

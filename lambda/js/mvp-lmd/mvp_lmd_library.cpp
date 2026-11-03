@@ -118,6 +118,9 @@ static Item primitive_construct(Context*, MvpLmdProgram* program, Item* args, ui
     uint64_t home = 0;
     Rooted<Item> value(roots, count ? lambda_item_adopt_scalar_home(args[0], &home) : Item{.item = ITEM_JS_UNDEFINED}),
         prototype(roots, ItemNull);
+    // S4.9.1: native i64/u64 enter primitive constructors through their BigInt face.
+    value.set(js_native_bigint_to_bigint(value.get()));
+    if (item_is_error(value.get())) return value.get();
     if (kind == LMD_PRIMITIVE_STRING) {
         value.set(count ? mvp_lmd_primitive_to_string(value.get(), construct ? 1 : 3) :
             Item{.item = s2it(heap_create_name("", 0))});
@@ -125,6 +128,9 @@ static Item primitive_construct(Context*, MvpLmdProgram* program, Item* args, ui
         value.set(Item{.item = b2it(mvp_lmd_truthy(value.get()))});
     } else {
         value.set(lambda_item_adopt_scalar_home(mvp_lmd_to_primitive(value.get(), 1), &home));
+        if (item_is_error(value.get())) return value.get();
+        // a guest conversion hook can return another native integer carrier.
+        value.set(js_native_bigint_to_bigint(value.get()));
         if (item_is_error(value.get())) return value.get();
         TypeId type = get_type_id(value.get());
         if (kind == LMD_PRIMITIVE_NUMBER) {

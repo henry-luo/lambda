@@ -19,6 +19,7 @@
 union RdtEvent;
 struct ImageSurface;
 struct Bound;
+struct NativeGlPresentLayer;
 
 typedef struct RadiantWindow RadiantWindow;   // a native top-level window
 typedef struct RadiantCursor RadiantCursor;   // a native pointer cursor
@@ -98,13 +99,22 @@ void radiant_platform_set_clipboard(RadiantWindow* window, const char* text);
 
 // --- presentation of Radiant's CPU-rendered surface ---
 bool radiant_platform_present_init(RadiantWindow* window);
+// Native viewports the GPU composites over the surface, each with the transparent page segment
+// above it (vibe/radiant/Radiant_Design_GPU_Compositor.md); null or empty presents the surface alone.
+struct RadiantPresentLayers {
+    const NativeGlPresentLayer* layers;
+    unsigned count;
+    bool surface_hidden;           // an opaque layer covers the surface
+    const ImageSurface* reference; // RADIANT_PRESENT_CHECK: the CPU composition of the frame
+};
 // Shows `surface` in `window`. With `partial`, only `damage` changed since the
 // previous present of the same-sized surface; otherwise everything did.
 // pixel scales reflect display-density changes, never a viewport resize. The
 // image stays at the top left; exposed areas use background_rgba (surface format).
 void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface,
                               const Bound* damage, bool partial, uint32_t background_rgba,
-                              float pixel_scale_x, float pixel_scale_y);
+                              float pixel_scale_x, float pixel_scale_y,
+                              const RadiantPresentLayers* composite = nullptr);
 
 // --- host entry points the backend calls (defined by window.cpp) ---
 void radiant_host_input(RadiantWindow* window, union RdtEvent* event);

@@ -349,7 +349,8 @@ int view_lambda_document_transform_with_events(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* event_file, bool headless, const char** font_dirs,
-    int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen = false);
+    int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen = false,
+    bool microphone_granted = false);
 // Open a local document in the lambda.edit authoring application. The window
 // runs in edit app mode: Escape reaches the document, and a close request
 // consults the session's close guard (Radiant_Design_Edit_Mode §7-§8).

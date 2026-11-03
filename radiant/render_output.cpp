@@ -15,6 +15,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/hash.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/file.h"
@@ -871,7 +872,7 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     // retire changed generations before retained ancestors can bypass media traversal.
     if (uicon->document) {
         scene3d_prepare_document(uicon->document,uicon,rdcon->raster_scale);
-        radiant_canvas_prepare_document(uicon->document);
+        radiant_canvas_prepare_document(uicon->document, ui_context_gpu_compositor(uicon));
     }
 
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
@@ -1356,6 +1357,399 @@ bool render_secondary_view_to_svg(ViewTree* tree, const char* filename, float ou
     return ok;
 }
 
+// window frames log when their compositing outcome changes, not every frame (C6)
+static void render_output_note_compositor(const char* outcome) {
+    static char last[160];
+    if (!strcmp(outcome, last)) return;
+    snprintf(last, sizeof(last), "%s", outcome);
+    log_info("[COMPOSITOR] window frames: %s", outcome);
+}
+
+// Keeps the cuts that hold, in order, and returns how many (C1); a dropped cut's viewport is materialized
+// and painted into its segment by the CPU. A cut fails when a shadow scope or a group is open across it,
+// except opacity groups that hold nothing but that viewport, whose opacity the presenter applies, or
+// when an item after it reads the pixels below. An upper segment rasterizes into a transparent
+// premultiplied surface in one pass when every item supports that; outer shadows do, because their
+// composite keeps a premultiplied destination's representation. Otherwise `matte` asks for a replay
+// over black and over white (Q9). `reason` explains the last cut dropped.
+static unsigned render_output_cuts_validate(const ValidatedDisplayList& recording, RenderCompositorFrame* frame,
+                                            bool matte[NATIVE_GL_PRESENT_LAYERS], const char** reason) {
+    const unsigned count = frame->count;
+    bool failed[NATIVE_GL_PRESENT_LAYERS] = {}, wrapped[NATIVE_GL_PRESENT_LAYERS] = {};
+    bool gap_matte[NATIVE_GL_PRESENT_LAYERS + 1] = {};  // gap k lies between cuts k - 1 and k
+    struct Group { unsigned cuts; int drawn; };          // cuts passed and drawing items seen at its start
+    Group groups[DL_REPLAY_MAX_BACKDROP_DEPTH];
+    int depth = 0, shadows = 0, drawn = 0;
+    unsigned passed = 0;
+    static char text[96];
+    auto fail = [&](unsigned from, unsigned to, const char* why) {
+        for (unsigned k = from; k < to; k++) failed[k] = true;
+        if (to > from) *reason = why;
+    };
+    DisplayListCursor cursor(recording.get());
+    while (const DisplayItem* item = cursor.next()) {
+        int at = cursor.root_index;
+        if (passed < count && at == frame->viewports[passed].cut) {
+            if (shadows) fail(passed, passed + 1, "CPU (a shadow scope spans the viewport)");
+            passed++;
+            continue;
+        }
+        bool reads_below = item->op == DL_APPLY_BLEND_MODE || item->op == DL_APPLY_FILTER ||
+            item->op == DL_BOX_BLUR_REGION || item->op == DL_BOX_BLUR_INSET ||
+            item->op == DL_VIDEO_PLACEHOLDER || item->op == DL_WEBVIEW_LAYER_PLACEHOLDER;
+        if (reads_below && passed) {
+            snprintf(text, sizeof(text), "CPU (display op %d above the viewport reads below it)", (int)item->op);
+            fail(0, passed, text);
+        }
+        if (item->op == DL_SHADOW_CLIP_SAVE) shadows++;
+        else if (item->op == DL_SHADOW_CLIP_RESTORE) shadows--;
+        if (item->op == DL_SAVE_BACKDROP) {
+            if (depth == DL_REPLAY_MAX_BACKDROP_DEPTH) { fail(0, count, "CPU (groups nest too deep)"); break; }
+            groups[depth++] = {passed, drawn};
+            continue;  // classified when it closes
+        }
+        if ((item->op == DL_COMPOSITE_OPACITY || item->op == DL_APPLY_BLEND_MODE) && depth) {
+            Group group = groups[--depth];
+            NativeGlPresentLayer* layer = passed == group.cuts + 1 ? &frame->viewports[group.cuts].layer : nullptr;
+            const DlCompositeOpacity& composite = item->composite_opacity;
+            // the group's region must hold the whole viewport, or the CPU would draw part of it ungrouped
+            if (layer && drawn == group.drawn && item->op == DL_COMPOSITE_OPACITY && !composite.mask.gradient &&
+                (float)composite.x0 <= layer->clip_left && (float)composite.y0 <= layer->clip_top &&
+                (float)(composite.x0 + composite.w) >= layer->clip_right &&
+                (float)(composite.y0 + composite.h) >= layer->clip_bottom) {
+                // the CPU composites with a byte opacity
+                layer->opacity *= (float)clamp_byte_round(clamp_unit(composite.opacity) * 255.0f) / 255.0f;
+                wrapped[group.cuts] = true;
+                continue;
+            }
+            fail(group.cuts, passed, "CPU (a group spans the viewport)");
+            // a group's backdrop save and composite are not single-pass items
+            if (group.cuts) gap_matte[group.cuts] = true;
+        }
+        if (!dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE)) drawn++;
+        if (passed && !dl_op_has_flags(item->op, DL_OP_FLAG_PREMULTIPLIED_CAPTURE) && item->op != DL_OUTER_SHADOW &&
+            item->op != DL_SHADOW_CLIP_SAVE && item->op != DL_SHADOW_CLIP_RESTORE)
+            gap_matte[passed] = true;
+    }
+    if (cursor.failed) fail(0, count, "CPU (unreadable recording)");
+    unsigned original[NATIVE_GL_PRESENT_LAYERS], kept = 0;
+    for (unsigned k = 0; k < count; k++) {
+        if (!failed[k]) { original[kept] = k; frame->viewports[kept++] = frame->viewports[k]; continue; }
+        frame->viewports[k].materialize(frame->viewports[k].element);
+        // its opacity groups now hold the CPU's image, on either side of where the cut was
+        if (wrapped[k]) { if (k) gap_matte[k] = true; gap_matte[k + 1] = true; }
+    }
+    // an upper segment spans the gaps from its own cut to the next kept one
+    for (unsigned m = 0; m < kept; m++) {
+        unsigned last = m + 1 < kept ? original[m + 1] : count;
+        matte[m] = false;
+        for (unsigned gap = original[m] + 1; gap <= last; gap++) matte[m] = matte[m] || gap_matte[gap];
+    }
+    frame->count = kept;
+    return kept;
+}
+
+void compositor_damage_add(CompositorDamage* damage, Bound rect) {
+    if (!damage || damage->full || !(rect.right > rect.left && rect.bottom > rect.top)) return;
+    for (unsigned i = 0; i < damage->count; i++) {
+        Bound& r = damage->rects[i];
+        if (rect.left <= r.right && r.left <= rect.right && rect.top <= r.bottom && r.top <= rect.bottom) {
+            r = {fminf(r.left, rect.left), fminf(r.top, rect.top), fmaxf(r.right, rect.right), fmaxf(r.bottom, rect.bottom)};
+            return;
+        }
+    }
+    if (damage->count < COMPOSITOR_DAMAGE_RECTS) { damage->rects[damage->count++] = rect; return; }
+    Bound all = rect;
+    for (unsigned i = 0; i < damage->count; i++) {
+        const Bound& r = damage->rects[i];
+        all = {fminf(all.left, r.left), fminf(all.top, r.top), fmaxf(all.right, r.right), fmaxf(all.bottom, r.bottom)};
+    }
+    damage->rects[0] = all;
+    damage->count = 1;
+}
+
+static void render_output_damage_merge(CompositorDamage* into, const CompositorDamage& from) {
+    if (from.full) into->full = true;
+    for (unsigned i = 0; i < from.count; i++) compositor_damage_add(into, from.rects[i]);
+}
+
+// What changed in one segment since the last composited frame (C2): the old and new bounds of every
+// item whose fingerprint differs, widened for antialiased fringes. A different item sequence, a first
+// frame, or a changed painting item without bounds damages the whole segment.
+static void render_output_segment_damage(CompositorSegmentSummary* summary, const ValidatedDisplayList& recording,
+                                         DisplayReplaySegment window, CompositorDamage* damage) {
+    *damage = {};
+    ImageSurfaceReadScope read_scope;  // fingerprints fold the pixels images draw
+    CompositorSegmentItem* items = nullptr;
+    int count = 0, capacity = 0;
+    bool ok = true;
+    DisplayListCursor cursor(recording.get());
+    while (const DisplayItem* item = cursor.next()) {
+        int at = cursor.root_index;
+        if (at <= window.begin || at >= window.end) continue;
+        if (count == capacity) {
+            int grown = capacity ? capacity * 2 : 256;
+            CompositorSegmentItem* larger = (CompositorSegmentItem*)mem_realloc(items,
+                (size_t)grown * sizeof(CompositorSegmentItem), MEM_CAT_RENDER);
+            if (!larger) { ok = false; break; }
+            items = larger; capacity = grown;
+        }
+        CompositorSegmentItem& entry = items[count++];
+        entry.bounds = dl_item_bounds(item);
+        entry.op = item->op;
+        entry.known = dl_item_fingerprint(item, &entry.fingerprint);
+    }
+    if (!ok || cursor.failed || !summary->valid || count != summary->count) damage->full = true;
+    for (int i = 0; !damage->full && i < count; i++) {
+        const CompositorSegmentItem& before = summary->items[i];
+        const CompositorSegmentItem& now = items[i];
+        if (before.op != now.op) { damage->full = true; break; }
+        if (before.known && now.known && before.fingerprint == now.fingerprint) continue;
+        auto painted = [](const Bound& b) { return b.right > b.left && b.bottom > b.top; };
+        if (!painted(before.bounds) && !painted(now.bounds)) {
+            // element markers only bound their children, whose own items carry any change
+            if (now.op == DL_BEGIN_ELEMENT || now.op == DL_END_ELEMENT) continue;
+            damage->full = true;
+            break;
+        }
+        const Bound pair[2] = {before.bounds, now.bounds};
+        for (const Bound& b : pair)
+            if (painted(b)) compositor_damage_add(damage, {floorf(b.left) - 2, floorf(b.top) - 2, ceilf(b.right) + 2, ceilf(b.bottom) + 2});
+    }
+    mem_free(summary->items);
+    summary->items = ok ? items : nullptr;
+    summary->count = ok ? count : 0;
+    summary->capacity = ok ? capacity : 0;
+    summary->valid = ok;
+    if (!ok) mem_free(items);
+}
+
+// The tile that replays the pixel box [x0, x1) x [y0, y1) on its own, with a margin so a culled
+// neighbour's antialiased fringe still lands. Its origin is even: ThorVG places a merely shifted image
+// at nearbyint() of its offset, which rounds halves to even, so only an even shift of the origin places
+// a half-pixel image where a whole replay does.
+static IRect render_output_region_tile(int x0, int y0, int x1, int y1) {
+    const int margin = 4;
+    int left = x0 - margin, top = y0 - margin;
+    left -= left & 1;
+    top -= top & 1;
+    return {left, top, x1 + margin - left, y1 + margin - top};
+}
+
+// Repaints damaged rectangles of an upper segment, each as one tile at its own origin, so its pixels
+// match a whole replay (see render_output_replay_region). A matte replays each over opaque black and
+// over opaque white and solves for coverage (Q9); otherwise one transparent premultiplied tile does.
+// False when no tile worker is available or an allocation fails.
+static bool render_output_replay_segment_regions(RasterRenderContext* rdcon, DisplayList* list,
+                                                 DisplayReplaySegment segment, ImageSurface* above,
+                                                 const CompositorDamage& damage, bool matte) {
+    const unsigned passes = matte ? 2 : 1;
+    Tile tiles[2 * COMPOSITOR_DAMAGE_RECTS] = {};
+    TileJob jobs[2 * COMPOSITOR_DAMAGE_RECTS] = {};
+    int boxes[COMPOSITOR_DAMAGE_RECTS][4];
+    unsigned box_count = 0, job_count = 0;
+    bool ok = true;
+    for (unsigned r = 0; ok && r < damage.count; r++) {
+        const Bound& rect = damage.rects[r];
+        int x0 = (int)fmaxf(0.0f, floorf(rect.left)); // INT_CAST_OK: pixel index
+        int y0 = (int)fmaxf(0.0f, floorf(rect.top)); // INT_CAST_OK: pixel index
+        int x1 = (int)fminf((float)above->width, ceilf(rect.right)); // INT_CAST_OK: pixel index
+        int y1 = (int)fminf((float)above->height, ceilf(rect.bottom)); // INT_CAST_OK: pixel index
+        if (x1 <= x0 || y1 <= y0) continue;
+        IRect area = render_output_region_tile(x0, y0, x1, y1);
+        int w = area.w, h = area.h;
+        for (unsigned pass = 0; pass < passes; pass++) {
+            uint32_t background = !matte ? 0u : pass == 0 ? 0xFF000000u : 0xFFFFFFFFu;
+            uint32_t* pixels = (uint32_t*)mem_alloc((size_t)w * (size_t)h * sizeof(uint32_t), MEM_CAT_RENDER);
+            if (!pixels) { ok = false; break; }
+            for (size_t i = 0; i < (size_t)w * (size_t)h; i++) pixels[i] = background;
+            Tile& tile = tiles[job_count];
+            tile.x = (float)area.x; tile.y = (float)area.y; tile.w = (float)w; tile.h = (float)h;
+            tile.pixels = lam::up(pixels);
+            tile.pixel_w = w; tile.pixel_h = h; tile.stride = w;
+            TileJob& job = jobs[job_count++];
+            job.tile = lam::up(&tile);
+            job.display_list = lam::up(list);
+            job.raster_scale = rdcon->raster_scale;
+            job.bg_color = background;
+            job.segment = lam::up((const DisplayReplaySegment*)&segment);
+            // a matte pass paints over an opaque backdrop, as an opaque page would
+            job.alpha_mode = matte ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
+        }
+        boxes[box_count][0] = x0; boxes[box_count][1] = y0; boxes[box_count][2] = x1; boxes[box_count][3] = y1;
+        box_count++;
+    }
+    if (ok && job_count) ok = render_output_dispatch_jobs(jobs, (int)job_count) > 0; // INT_CAST_OK: job count
+    for (unsigned b = 0; ok && b < box_count; b++) {
+        int x0 = boxes[b][0], y0 = boxes[b][1], x1 = boxes[b][2], y1 = boxes[b][3];
+        const Tile& tile = tiles[b * passes];
+        int tx = (int)tile.x, ty = (int)tile.y; // INT_CAST_OK: whole-pixel tile origin
+        const uint32_t* first = tile.pixels.get();
+        const uint32_t* second = matte ? tiles[b * passes + 1].pixels.get() : nullptr;
+        for (int y = y0; y < y1; y++) {
+            uint32_t* row = (uint32_t*)((uint8_t*)above->pixels + (size_t)y * above->pitch) + x0;
+            size_t offset = (size_t)(y - ty) * tile.stride + (x0 - tx);
+            if (matte) render_pixel_resolve_matte(first + offset, second + offset, row, (size_t)(x1 - x0), true);
+            else memcpy(row, first + offset, (size_t)(x1 - x0) * 4);
+        }
+    }
+    for (unsigned j = 0; j < job_count; j++) mem_free(tiles[j].pixels.get());
+    return ok;
+}
+
+static UiCompositorState* render_output_compositor_state(UiContext* uicon) {
+    if (!uicon->compositor) uicon->compositor = (UiCompositorState*)mem_calloc(1, sizeof(UiCompositorState), MEM_CAT_RENDER);
+    return uicon->compositor;
+}
+
+// a window-sized surface reused across frames, cleared to `fill`
+static ImageSurface* render_output_segment_surface(ImageSurface** slot, const ImageSurface* page, uint32_t fill) {
+    if (!*slot || (*slot)->width != page->width || (*slot)->height != page->height) {
+        image_surface_destroy(*slot);
+        *slot = image_surface_create(page->width, page->height);
+        if (!*slot) return nullptr;
+    }
+    ImageSurface* surface = *slot;
+    for (int y = 0; y < surface->height; y++) {
+        uint32_t* row = (uint32_t*)((uint8_t*)surface->pixels + (size_t)y * surface->pitch);
+        if (!fill) memset(row, 0, (size_t)surface->width * 4);
+        else for (int x = 0; x < surface->width; x++) row[x] = fill;
+    }
+    return surface;
+}
+
+// replays the whole recording, or one segment of it, into `surface` with its own vector canvas
+static void render_output_replay_into(RasterRenderContext* rdcon, const ValidatedDisplayList& recording,
+                                      ImageSurface* surface, const DisplayReplaySegment* segment) {
+    RdtVector vec = {};
+    rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->pitch / 4);
+    if (!vec.impl) return;
+    Bound clip = {0.0f, 0.0f, (float)surface->width, (float)surface->height};
+    dl_replay_validated(recording, &vec, surface, &clip, &rdcon->scratch, rdcon->raster_scale, nullptr, segment);
+    rdt_vector_destroy(&vec);
+}
+
+// Repaints one upper segment where it changed since its last composited frame, and adds that to the
+// damage the presenter uploads. False leaves the frame to the CPU replay.
+static bool render_output_replay_upper(RasterRenderContext* rdcon, const ValidatedDisplayList& recording,
+                                       UiCompositorState* state, unsigned index, DisplayReplaySegment window,
+                                       bool matte) {
+    const ImageSurface* page = rdcon->ui_context->surface;
+    ImageSurface*& above = state->above[index];
+    CompositorSegmentSummary& summary = state->summaries[1 + index];
+    if (!above || above->width != page->width || above->height != page->height) {
+        if (!render_output_segment_surface(&above, page, 0)) return false;
+        summary.valid = false;
+    }
+    above->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    CompositorDamage damage = {};
+    render_output_segment_damage(&summary, recording, window, &damage);
+    // a whole matte (a first frame, or a new structure above) costs about what the CPU frame would,
+    // and leaves the following frames to their damage
+    if (damage.full && matte) {
+        damage = {};
+        damage.count = 1;
+        damage.rects[0] = {0.0f, 0.0f, (float)page->width, (float)page->height};
+        if (!render_output_replay_segment_regions(rdcon, recording.get(), window, above, damage, true)) {
+            summary.valid = false;
+            return false;
+        }
+        damage.full = true;
+    } else if (damage.full || !render_output_replay_segment_regions(rdcon, recording.get(), window, above, damage, matte)) {
+        if (matte) {
+            summary.valid = false;
+            return false;
+        }
+        render_output_segment_surface(&above, page, 0);
+        above->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        render_output_replay_into(rdcon, recording, above, &window);
+        damage.full = true;
+    }
+    // damage accumulates until the presenter uploads it
+    render_output_damage_merge(&state->above_damage[index], damage);
+    return true;
+}
+
+// A layer's clip mask (Q10), rasterized again only when its shapes or its clip rectangle changed. False
+// leaves the frame to the CPU replay.
+static bool render_output_layer_mask(UiCompositorState* state, unsigned index, const RenderCompositorViewport& viewport,
+                                     NativeGlPresentLayer* layer) {
+    layer->clip_mask = nullptr;
+    if (!viewport.clip_count) return true;
+    Bound region = {layer->clip_left, layer->clip_top, layer->clip_right, layer->clip_bottom};
+    uint64_t key = hash_fnv1a_64(&region, sizeof(region));
+    key = hash_fnv1a_64_extend(key, viewport.clips, sizeof(CompositorClip) * viewport.clip_count) | 1;  // never 0, the empty key
+    if (!state->masks[index] || state->mask_keys[index] != key) {
+        image_surface_destroy(state->masks[index]);
+        state->masks[index] = compositor_clip_coverage(viewport.clips, viewport.clip_count, region);
+        state->mask_keys[index] = key;
+        if (!state->masks[index]) return false;
+    }
+    layer->clip_mask = state->masks[index];
+    layer->clip_mask_key = key;
+    return true;
+}
+
+// The page below the first viewport stays in `surface`, the page between and above viewports goes to
+// transparent segments, and the presenter draws each viewport between its two segments (steps 2 and 3).
+// Each segment repaints and uploads only what changed since the last composited frame. `page_partial` is
+// set when the page upload can keep to the damage this added to `present_rect`. False leaves the frame
+// to the CPU replay; the upper segments go first, so a failure leaves the page untouched.
+static bool render_output_replay_composited(RasterRenderContext* rdcon, const ValidatedDisplayList& recording,
+                                            uint32_t canvas_bg, RenderCompositorFrame* frame,
+                                            const bool matte[NATIVE_GL_PRESENT_LAYERS], bool* page_partial) {
+    UiContext* uicon = rdcon->ui_context;
+    ImageSurface* page = uicon->surface;
+    UiCompositorState* state = render_output_compositor_state(uicon);
+    if (!state) return false;
+    const unsigned count = frame->count;
+    NativeGlPresentLayer layers[NATIVE_GL_PRESENT_LAYERS];
+    for (unsigned k = 0; k < count; k++) {
+        DisplayReplaySegment window = {frame->viewports[k].cut, k + 1 < count ? frame->viewports[k + 1].cut : INT_MAX};
+        layers[k] = frame->viewports[k].layer;
+        if (!render_output_layer_mask(state, k, frame->viewports[k], &layers[k]) ||
+            !render_output_replay_upper(rdcon, recording, state, k, window, matte[k])) return false;
+    }
+    const RenderCompositorViewport& first = frame->viewports[0];
+    const NativeGlPresentLayer& bottom = first.layer;
+    // an opaque viewport over the whole page hides segment 0: it is neither replayed nor uploaded
+    bool hidden = first.opaque && bottom.opacity == 1.0f && bottom.clip_left <= 0 && bottom.clip_top <= 0 &&
+        bottom.clip_right >= (float)page->width && bottom.clip_bottom >= (float)page->height;
+    rdcon->dl = nullptr;
+    *page_partial = false;
+    if (!hidden) {
+        DisplayReplaySegment below = {-1, first.cut};
+        dl_replay_validated(recording, &rdcon->vec, page, &rdcon->block.clip, &rdcon->scratch,
+                            rdcon->raster_scale, nullptr, &below);
+        // the whole page was replayed, identical outside what changed
+        CompositorDamage page_damage = {};
+        render_output_segment_damage(&state->summaries[0], recording, below, &page_damage);
+        *page_partial = !page_damage.full;
+        for (unsigned i = 0; *page_partial && i < page_damage.count; i++)
+            ui_context_add_present_damage(uicon, page_damage.rects[i]);
+    } else {
+        state->summaries[0].valid = false;
+    }
+    for (unsigned k = 0; k < count; k++) {
+        NativeGlPresentLayer layer = layers[k];
+        layer.above = state->above[k];
+        layer.above_changed = state->above_damage[k].full || state->above_damage[k].count > 0;
+        state->layers[k] = layer;
+    }
+    state->count = count;
+    state->surface_hidden = hidden;
+    // RADIANT_PRESENT_CHECK compares the composite with the CPU replay of the same recording
+    image_surface_destroy(state->reference);
+    state->reference = nullptr;
+    bool materialized = native_gl_present_check_enabled();
+    for (unsigned k = 0; materialized && k < count; k++) materialized = frame->viewports[k].materialize(frame->viewports[k].element);
+    if (materialized) {
+        state->reference = render_output_segment_surface(&state->reference, page, canvas_bg);
+        if (state->reference) render_output_replay_into(rdcon, recording, state->reference, nullptr);
+    }
+    return true;
+}
+
 static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
                                                                   const ValidatedDisplayList& recording,
                                                                   uint32_t canvas_bg,
@@ -1428,12 +1822,9 @@ static bool render_output_replay_region(RasterRenderContext* rdcon, DisplayList*
     int x1 = (int)fminf((float)surface->width, ceilf(region.right)); // INT_CAST_OK: pixel index
     int y1 = (int)fminf((float)surface->height, ceilf(region.bottom)); // INT_CAST_OK: pixel index
     if (x1 <= x0 || y1 <= y0) return true;
-    // The tile culls items by their recorded bounds, which can stop short of an antialiased
-    // fringe; replay a margin around the region so a culled neighbour's fringe still lands,
-    // then copy back only the region itself.
-    const int margin = 4;
-    int tx0 = x0 - margin, ty0 = y0 - margin;
-    int w = x1 - x0 + 2 * margin, h = y1 - y0 + 2 * margin;
+    // the tile culls items by their recorded bounds, so it replays a margin and copies back only the region
+    IRect area = render_output_region_tile(x0, y0, x1, y1);
+    int tx0 = area.x, ty0 = area.y, w = area.w, h = area.h;
     uint32_t* pixels = (uint32_t*)mem_alloc((size_t)w * (size_t)h * sizeof(uint32_t), MEM_CAT_RENDER);
     if (!pixels) return false;
     for (size_t i = 0; i < (size_t)w * (size_t)h; i++) pixels[i] = canvas_bg;
@@ -1502,8 +1893,18 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     RenderOutputClearResult clear_result = {};
     if (!presentation) clear_result = render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
     bool selective = clear_result.selective;
+    // A full live-window frame may cut up to four native viewports out of the page for the GPU presenter
+    // (vibe/radiant/Radiant_Design_GPU_Compositor.md); every other window frame presents the page alone.
+    bool window_frame = target->kind == RENDER_OUTPUT_SCREEN && !target->output_file;
+    if (window_frame && uicon->compositor) uicon->compositor->count = 0;
+    RenderCompositorFrame compositor_frame = {};
+    compositor_frame.list = &display_list;
+    bool compositing = window_frame && !presentation && !selective && ui_context_gpu_compositor(uicon);
+    if (compositing) rdcon.compositor = lam::up(&compositor_frame);
 
     RenderFrameCache* cache = frame.storage_owner ? view_tree->render_frame_cache.get() : nullptr;
+    // Documents with native producers never retain (render_frame_can_retain); a frame that cuts a viewport
+    // anyway keeps its recording to itself below, since the recording omits that viewport's pixels.
     bool can_retain = cache && !selective && !presentation && render_frame_can_retain(uicon);
     RenderFrameKey key = render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background);
     bool reused = can_retain && cache->valid && cache->recording.get() == &display_list &&
@@ -1595,7 +1996,9 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         ~CapturedResources() { dl_destroy(&commands); dl_resource_summary_destroy(value); }
     } captured_resources;
     bool resources_captured = false;
-    if (!reused) {
+    // a live window composites by default, but only a frame that cut a viewport has an incomplete recording
+    bool complete_recording = !compositor_frame.count;
+    if (!reused && complete_recording) {
         if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document))
             resources_captured = retained_dl_cache_capture_resources(rdcon.retained_dl_cache,
             &display_list, document_commands, &captured_resources.value, &captured_resources.commands);
@@ -1619,7 +2022,30 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     bool region_replayed = presentation && selective && render_output_replay_region(&rdcon, replay_recording.get(),
         canvas_bg, {rdcon.dirty_union.left * region_scale, rdcon.dirty_union.top * region_scale,
                     rdcon.dirty_union.right * region_scale, rdcon.dirty_union.bottom * region_scale});
-    if (!region_replayed)
+    unsigned cuts = compositing ? compositor_frame.count : 0;
+    bool matte[NATIVE_GL_PRESENT_LAYERS] = {}, page_partial = false;
+    const char* dropped = nullptr;
+    bool video = cuts && replay_recording.content().has_video;
+    unsigned kept = cuts && !video ? render_output_cuts_validate(replay_recording, &compositor_frame, matte, &dropped) : 0;
+    bool composited = kept && render_output_replay_composited(&rdcon, replay_recording, canvas_bg, &compositor_frame,
+                                                              matte, &page_partial);
+    // an abandoned cut paints the viewport's snapshot like any other image; validation materialized those it dropped
+    for (unsigned k = 0; !composited && k < (video ? cuts : kept); k++)
+        compositor_frame.viewports[k].materialize(compositor_frame.viewports[k].element);
+    char outcome[160];
+    if (composited) {
+        bool any_matte = false;
+        for (unsigned k = 0; k < kept; k++) any_matte = any_matte || matte[k];
+        snprintf(outcome, sizeof(outcome), "GPU (%u of %u viewports composited%s%s%s%s)", kept, cuts,
+                 uicon->compositor->surface_hidden ? "; the first hides the page below" : "",
+                 any_matte ? "; matte above" : "", dropped ? "; " : "", dropped ? dropped : "");
+        render_output_note_compositor(outcome);
+    }
+    else if (compositing && !cuts) render_output_note_compositor("CPU (no eligible native viewport)");
+    else if (video) render_output_note_compositor("CPU (video blits after replay)");
+    else if (cuts && !kept && dropped) render_output_note_compositor(dropped);
+    rdcon.compositor = nullptr;
+    if (!region_replayed && !composited)
         replay_result = render_output_replay_display_list(&rdcon, replay_recording, canvas_bg, clear_result.replay_dirty);
 
     uint64_t t_replay_end = time_now_ns();
@@ -1639,16 +2065,14 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     render_video_frames(replay_recording.content().has_video ? &display_list : nullptr,
         rdcon.ui_context->surface, rstate, rdcon.ui_context);
-    // a selective presentation frame wrote only its damage; anything else wrote everywhere
-    if (presentation && selective && !target->output_file) {
+    // a selective frame, paint-only or dirty-region, cleared and replayed only its damage; video
+    // blits after replay and a full repaint write anywhere (Radiant_Design_GPU_Compositor C5)
+    if (selective && !target->output_file && !replay_recording.content().has_video) {
         float s = rdcon.raster_scale > 0.0f ? rdcon.raster_scale : 1.0f;
-        Bound damage = {rdcon.dirty_union.left * s, rdcon.dirty_union.top * s,
-                        rdcon.dirty_union.right * s, rdcon.dirty_union.bottom * s};
-        Bound& r = uicon->present_rect;
-        if (!(r.right > r.left && r.bottom > r.top)) r = damage;
-        else r = {fminf(r.left, damage.left), fminf(r.top, damage.top),
-                  fmaxf(r.right, damage.right), fmaxf(r.bottom, damage.bottom)};
-    } else {
+        ui_context_add_present_damage(uicon, {rdcon.dirty_union.left * s, rdcon.dirty_union.top * s,
+                                              rdcon.dirty_union.right * s, rdcon.dirty_union.bottom * s});
+    } else if (!page_partial) {
+        // a composited page keeps its upload to the damage the segment diff added
         uicon->present_partial = false;
     }
 
@@ -1698,7 +2122,8 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
             can_retain, rdcon.has_foreign_paint_dependencies, render_svg_layers_pending(uicon->document),
             !render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background)));
     }
-    if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document) &&
+    if (can_retain && complete_recording && !rdcon.has_foreign_paint_dependencies &&
+        !render_svg_layers_pending(uicon->document) &&
         render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background))) {
         dl_trim_empty_arena(&display_list);
         size_t proposed_bytes = 0;

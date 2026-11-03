@@ -1,12 +1,60 @@
 #pragma once
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_capture.hpp"
 #include "../radiant/speech.hpp"
+#include "../radiant/rdt_video.h"
 #include "../lib/file.h"
 #include "../lib/mem.h"
+#include "../lib/endian.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <uv.h>
+
+// a trusted injected backend keeps capture acceptance independent of OS consent and devices.
+struct AudioFixtureCaptureBackend {
+    AudioCapturePermission permission = AUDIO_CAPTURE_ALLOWED;
+    AudioCapturePcm* sink = nullptr;
+    unsigned requests = 0, opens = 0, closes = 0;
+    uint64_t closed_frame = 0;
+    bool loss = false, fail_open = false;
+    static AudioCapturePermission permission_read(void* context, bool request) {
+        auto* host = (AudioFixtureCaptureBackend*)context; if (request) host->requests++; return host->permission;
+    }
+    static void* open(void* context, AudioCapturePcm* sink) {
+        auto* host = (AudioFixtureCaptureBackend*)context; host->opens++;
+        if (host->fail_open) return nullptr; host->sink = sink; return host;
+    }
+    static bool lost(void* context, void*) { return ((AudioFixtureCaptureBackend*)context)->loss; }
+    static void close(void* context, void*) {
+        auto* host = (AudioFixtureCaptureBackend*)context;
+        // the callback target must remain alive until the producer's close hook has returned.
+        host->closed_frame = audio_capture_pcm_info(host->sink).next_frame; host->closes++; host->sink = nullptr;
+    }
+    AudioCaptureBackend backend() { return {this, permission_read, open, lost, close}; }
+};
+
+static inline bool audio_fixture_video_wait(RdtVideo* video, RdtVideoState target, unsigned timeout_ms) {
+    uint64_t start = uv_hrtime();
+    do {
+        rdt_video_pump_events();
+        if (rdt_video_get_state(video) == target) return true;
+        uv_sleep(10);
+    } while ((uv_hrtime() - start) / 1000000 < timeout_ms);
+    return rdt_video_get_state(video) == target;
+}
+
+static inline bool audio_fixture_graph_publish(AudioSubmixId submix, AudioGraphId graph, const AudioGraphConfig& config) {
+    AudioGraph* prepared = nullptr; const char* error = nullptr;
+    if (!audio_submix_graph_prepare(submix, graph, config, &prepared, &error)) return false;
+    if (audio_submix_graph_commit(submix, graph, prepared, nullptr, 0)) return true;
+    audio_graph_destroy(prepared); return false;
+}
+static inline float audio_fixture_sample(const void* bytes, unsigned frame, unsigned channel = 1) {
+    uint32_t bits = read_le32((const uint8_t*)bytes + (frame * 2 + channel) * 4);
+    float value; memcpy(&value, &bits, sizeof(value)); return value;
+}
 
 static inline void audio_fixture_le(unsigned char* out, uint32_t value, unsigned bytes) {
     for (unsigned i = 0; i < bytes; i++) out[i] = (unsigned char)(value >> (i * 8));

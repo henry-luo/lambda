@@ -123,6 +123,9 @@ of recursing until stack overflow.
 `event-listener-mutation-realloc.html` captures listener arrays that grow while
 an event dispatch is iterating a snapshot. Dispatch must not keep pointers into
 storage that `addEventListener()` can reallocate.
+The registered `test/ui/dom/event_listener_growth.json` checks first-dispatch
+order, once-handler lookup reentry and IDL cancellation after list growth
+(**D4.5.2 / D5.3.3**).
 
 `event-listener-entry-table-realloc.html` captures listener-entry table growth
 while an event dispatch is iterating an existing target. Dispatch must re-find

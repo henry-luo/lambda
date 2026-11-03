@@ -13,6 +13,8 @@ struct UiContext;
 struct DomText;
 struct DocState;
 struct DomSelection;
+struct SourcePosC;
+struct DomBoundary;
 
 // native host calls borrow Items/documents/text synchronously; publication has process lifetime
 // (D4.5.1v4 / D4.1.4v5, D7.1.3 / D7.5.3).
@@ -75,7 +77,11 @@ struct DomSelection;
     OP(void, range_adopt_subtree, (DocState* source, DocState* destination, DomNode* subtree), (source, destination, subtree), (void)0) \
     OP(void, range_refresh_lifecycle_pins, (DomDocument* document), (document), (void)0) \
     OP(bool, selection_collapse, (DomSelection* selection, DomNode* node, uint32_t offset, const char** exception), (selection, node, offset, exception), false) \
-    OP(DomText*, text_split_at, (DocState* state, DomText* text, uint32_t offset), (state, text, offset), nullptr)
+    OP(DomText*, text_split_at, (DocState* state, DomText* text, uint32_t offset), (state, text, offset), nullptr) \
+    OP(bool, element_client_frame, (DomNode* node, RdtMatrix* matrix, float* origin_x, float* origin_y), (node, matrix, origin_x, origin_y), false) \
+    OP(bool, source_boundary, (DomNode* root, const SourcePosC* position, DomBoundary* boundary), (root, position, boundary), false) \
+    OP(bool, text_control_selection_rects, (UiContext* ui, DomElement* element, uint32_t start, uint32_t end, void (*callback)(float, float, float, float, void*), void* owner), (ui, element, start, end, callback, owner), false) \
+    OP(int, url_attribute_get, (Item receiver, Item* out, const char* attribute), (receiver, out, attribute), 0)
 
 struct DomHostEngineOps {
 #define DOM_HOST_FIELD(result, name, parameters, arguments, absence) result (*name) parameters;

@@ -24,6 +24,24 @@ static bool dl_replay_skip_clean_item(const DisplayReplayDirtyClip* dirty_clip,
         !dl_replay_item_intersects_dirty(dirty_clip, item);
 }
 
+DlSegmentAction dl_segment_action(const DisplayReplaySegment* segment, const DisplayItem* item,
+                                  const DisplayListCursor* cursor) {
+    if (!segment || !item || !cursor) return DL_SEGMENT_DRAW;
+    int at = cursor->root_index;
+    // a cut's own image item lies outside every window; it is not a state item, so it is skipped
+    if (at > segment->begin && at < segment->end) return DL_SEGMENT_DRAW;
+    if (item->op == DL_BEGIN_ELEMENT && cursor->depth == 0 &&
+        (at > segment->end || item->element_marker.matching_index < segment->begin)) return DL_SEGMENT_SKIP_ELEMENT;
+    return dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE) ? DL_SEGMENT_STATE_ONLY : DL_SEGMENT_SKIP;
+}
+
+static bool dl_replay_skip_segment_item(const DisplayReplaySegment* segment, const DisplayItem* item,
+                                        DisplayListCursor* cursor) {
+    DlSegmentAction action = dl_segment_action(segment, item, cursor);
+    if (action == DL_SEGMENT_SKIP_ELEMENT) cursor->skip_element();
+    return action == DL_SEGMENT_SKIP_ELEMENT || action == DL_SEGMENT_SKIP;
+}
+
 static bool dl_replay_vector_or_descriptor_skip(RdtVector* vec, const DisplayItem* item) {
     if (!item) return true;
     if (dl_replay_vector_item(vec, item) != DL_REPLAY_VECTOR_NOT_HANDLED) {
@@ -62,7 +80,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 void dl_replay_validated(const ValidatedDisplayList& recording, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
                ScratchArena* scratch, float scale,
-               DirtyTracker* dirty_tracker) {
+               DirtyTracker* dirty_tracker, const DisplayReplaySegment* segment) {
     DisplayList* dl = recording.get();
     if (!dl) {
         log_error("[DL_REPLAY] invalid or stale validated recording");
@@ -87,7 +105,8 @@ void dl_replay_validated(const ValidatedDisplayList& recording, RdtVector* vec,
     DisplayListCursor cursor(dl);
     while (const DisplayItem* item = cursor.next()) {
 
-        if (dl_replay_skip_clean_item(&dirty_clip, item, &cursor)) {
+        if (dl_replay_skip_segment_item(segment, item, &cursor) ||
+            dl_replay_skip_clean_item(&dirty_clip, item, &cursor)) {
             continue;
         }
 

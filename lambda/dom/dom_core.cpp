@@ -148,6 +148,7 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
 
 DOM_ENGINE_SEAM_2(get_state)
 DOM_ENGINE_SEAM_2(audio_open)
+DOM_ENGINE_SEAM_2(audio_capture)
 DOM_ENGINE_SEAM_3(audio_play)
 DOM_ENGINE_SEAM_3(midi_open)
 DOM_ENGINE_SEAM_4(midi_command)

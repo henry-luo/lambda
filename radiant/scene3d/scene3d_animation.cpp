@@ -73,6 +73,7 @@ struct Scene3dAnimationState {
     unsigned pending_count;
     Scene3dRuntime* runtime;
     uint64_t epoch, generation, revision, command_revision, event_replays, source_hash, number_count, text_bytes;
+    uint32_t source_generation;
     unsigned binding_count, clip_count;
     bool automatic, quiet, coupled;
     const char* diagnostic;
@@ -988,6 +989,7 @@ Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnost
     state->document = root->doc;
     state->root = dom_node_ref(root);
     state->epoch = root->doc->mutation_epoch;
+    state->source_generation = root->layer_generation;
     state->runtime = runtime;
     state->quiet = replay;
     state->coupled = scene3d_physics_has_root_motion(physics);
@@ -1293,7 +1295,7 @@ bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, c
 bool scene3d_animation_matches(Scene3dAnimationState* state, DomElement* root) {
     if (!state || state->document != root->doc)
         return false;
-    if (state->epoch == root->doc->mutation_epoch)
+    if (scene3d_source_unchanged(root, &state->epoch, state->source_generation))
         return true;
     // sibling UI mutations may reproject the scene, but cannot restart an unchanged clip timeline.
     for (auto* binding = state->bindings; binding; binding = binding->next)
@@ -1308,6 +1310,7 @@ bool scene3d_animation_matches(Scene3dAnimationState* state, DomElement* root) {
         return false;
     }
     state->epoch = root->doc->mutation_epoch;
+    state->source_generation = root->layer_generation;
     return true;
 }
 uint64_t scene3d_animation_generation(Scene3dAnimationState* state) {

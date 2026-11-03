@@ -92,10 +92,11 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
         render_raster_retained_media(rdcon, block, render_geomap_content);
     }
     else if (block->tag_id == MARKUP_NAME_SCENE3D) {
-        // project mutations before checking retained fragments, including changes to non-layout scene children.
+        // project mutations before checking retained fragments, including changes to non-layout scene children;
+        // a frame that may composite the scene leaves its readback to the content callback
         Rect rect=render_geometry_block_content_rect(&rdcon->block,block,rdcon->raster_scale);
-        scene3d_snapshot(block->as_element(),rdcon->ui_context,rect.width/rdcon->raster_scale,
-            rect.height/rdcon->raster_scale,rdcon->raster_scale);
+        scene3d_frame(block->as_element(),rdcon->ui_context,rect.width/rdcon->raster_scale,
+            rect.height/rdcon->raster_scale,rdcon->raster_scale,!rdcon->compositor.get());
         render_raster_retained_media(rdcon, block, render_scene3d_content);
     }
     else if (block->tag_id == MARKUP_NAME_CANVAS) {
