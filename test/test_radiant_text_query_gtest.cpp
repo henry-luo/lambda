@@ -15123,6 +15123,84 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyInlineMarginsContributeToColumnsWithoutEnteringBorderBoxes) {
+    ASSERT_NE(load("test/html/layout_ruby_inline_margins.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; float left, right; bool decorated; CssEnum width; bool base;
+        DomText* source[2]; DomNode* parent[2]; const unsigned char* data[2];
+    } cases[] = {{"left", 10, 0}, {"right", 0, 10}, {"both", 5, 15},
+        {"decorated", 5, 15, true}, {"minimum", 5, 15, false, CSS_VALUE_MIN_CONTENT},
+        {"maximum", 5, 15, false, CSS_VALUE_MAX_CONTENT}, {"custom", 5, 15},
+        {"base-inline", 5, 15, false, CSS_VALUE__UNDEF, true}};
+    auto part = [&](const Case& entry, bool control, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s%s", entry.id, control ? "-control" : "", suffix);
+        return find(id);
+    };
+    for (Case& entry : cases) for (size_t role = 0; role < 2; role++) {
+        DomText* text = first_text_leaf(part(entry, false, role ? "-reading" : "-ruby"));
+        ASSERT_NE(text, nullptr);
+        entry.source[role] = text; entry.parent[role] = text->parent; entry.data[role] = text->text_data();
+    }
+    auto check = [&](bool zero, bool swapped) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-inline-margins"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            float left = zero ? 0.0f : swapped ? entry.right : entry.left;
+            float right = zero ? 0.0f : swapped ? entry.left : entry.right;
+            float border_width = entry.decorated ? 90.0f : 80.0f;
+            float column = border_width + left + right;
+            DomElement* row = part(entry, false, ""), *control = part(entry, true, "");
+            const char* unit = entry.base ? "-base" : "-reading";
+            DomElement* ruby = part(entry, false, "-ruby"), *reading = part(entry, false, unit);
+            EXPECT_FLOAT_EQ(ruby->width, column);
+            EXPECT_FLOAT_EQ(part(entry, true, "-ruby")->width, column);
+            float reading_x = 0.0f; view_get_visual_bounds(reading, &reading_x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(reading_x, left); EXPECT_FLOAT_EQ(reading->width, border_width);
+            EXPECT_FLOAT_EQ(part(entry, true, unit)->width, column);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, column); EXPECT_FLOAT_EQ(sizes.max_content, column);
+            IntrinsicSizes row_sizes = measure_physical_widths(row);
+            // preferred intrinsic keywords constrain the parent's contribution as well as its used width.
+            EXPECT_FLOAT_EQ(row_sizes.min_content, entry.width == CSS_VALUE_MAX_CONTENT ? column + 10.0f : column);
+            EXPECT_FLOAT_EQ(row_sizes.max_content, entry.width == CSS_VALUE_MIN_CONTENT ? column : column + 10.0f);
+            if (entry.width == CSS_VALUE_MIN_CONTENT) EXPECT_FLOAT_EQ(row->width, column);
+            if (entry.width == CSS_VALUE_MAX_CONTENT) EXPECT_FLOAT_EQ(row->width, column + 10.0f);
+            float tail_x = 0.0f, tail_y = 0.0f, control_x = 0.0f, control_y = 0.0f;
+            view_get_visual_bounds(part(entry, false, "-tail"), &tail_x, &tail_y, nullptr, nullptr);
+            view_get_visual_bounds(part(entry, true, "-tail"), &control_x, &control_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(tail_x, control_x); EXPECT_FLOAT_EQ(tail_y - row->y, control_y - control->y);
+            for (size_t role = 0; role < 2; role++) {
+                const char* suffix = role ? "-reading" : "-ruby";
+                EXPECT_EQ(first_text_leaf(part(entry, false, suffix)), entry.source[role]);
+                EXPECT_EQ(entry.source[role]->parent.get(), entry.parent[role]);
+                EXPECT_EQ(entry.source[role]->text_data(), entry.data[role]);
+                expect_text_source_pair<16>(range, row, entry.source[role], control,
+                    first_text_leaf(part(entry, true, suffix)));
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(false, false); }
+    for (bool zero : {true, false}) {
+        for (const Case& entry : cases) {
+            float left = zero ? 0.0f : entry.right, right = zero ? 0.0f : entry.left;
+            const char* unit = entry.base ? "-base" : "-reading";
+            char value[32];
+            str_fmt(value, sizeof(value), "%.0fpx", left);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, false, unit), "margin-left", value));
+            str_fmt(value, sizeof(value), "%.0fpx", right);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, false, unit), "margin-right", value));
+            str_fmt(value, sizeof(value), "%.0fpx", left + (entry.decorated ? 3.0f : 0.0f));
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, true, unit), "padding-left", value));
+            str_fmt(value, sizeof(value), "%.0fpx", right);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, true, unit), "padding-right", value));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(zero, true);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyAnnotationMarginsSeparateLevelsAndReserveRepeatedLineSpace) {
     ASSERT_NE(load("test/html/layout_ruby_annotation_margins.html"), nullptr);
     process_document_font_faces(&ui, document);

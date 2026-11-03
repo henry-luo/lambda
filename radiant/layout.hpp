@@ -536,6 +536,8 @@ typedef struct LayoutIntrinsicMarginPair {
 LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
         LayoutContext* lycon, DomElement* element,
         LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
+void layout_intrinsic_add_inline_margins(LayoutContext* context, DomElement* element,
+    IntrinsicSizes* sizes, bool include_unsegmented_min = true);
 float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
     bool physical_left, bool include_margin = true);
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,

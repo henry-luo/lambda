@@ -458,6 +458,7 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level, S
                 continue;
             }
             IntrinsicSizes sizes = calculate_node_intrinsic_widths(context, node);
+            if (node->is_element()) layout_intrinsic_add_inline_margins(context, node->as_element(), &sizes);
             bool atomic = node->is_element() && layout_intrinsic_element_is_atomic_inline(node->as_element());
             box->has_forced_break |= !atomic && (sizes.has_forced_break ||
                 layout_intrinsic_node_has_forced_break_at_edge(node, false) ||
@@ -639,29 +640,40 @@ static RdtLogicalPoint ruby_relative_offset(View* view) {
     return layout_applied_inline_relative_offset(view, scope);
 }
 
+static BoxEdges ruby_unit_margin_edges(View* view) {
+    DomElement* element = view ? view->as_element() : nullptr;
+    if (!element) return {};
+    BoxEdges margin = layout_line_relative_box_edges(
+        layout_boundary_margin_edges(element->bound), layout_nearest_block_ancestor(view->parent_view()));
+    CssEnum role = ruby_node_role(view);
+    // ordinary inline content contributes inline margins inside its anonymous ruby unit.
+    if (role != CSS_VALUE_RUBY_BASE && role != CSS_VALUE_RUBY_TEXT) margin.top = margin.bottom = 0.0f;
+    return margin;
+}
+
 static Rect ruby_flow_bounds(View* view, Rect bounds) {
     RdtLogicalPoint relative = ruby_relative_offset(view);
-    bounds.x -= relative.x;
-    bounds.y -= relative.y;
-    CssEnum role = ruby_node_role(view);
-    if (role == CSS_VALUE_RUBY_BASE || role == CSS_VALUE_RUBY_TEXT) {
-        // CSS Ruby §3.1.2 stacks level margin boxes; published inline geometry remains a border box.
-        BoxEdges margin = layout_line_relative_box_edges(
-            layout_boundary_margin_edges(view->as_element()->bound),
-            layout_nearest_block_ancestor(view->parent_view()));
-        bounds.y -= margin.top;
-        bounds.height += margin.top + margin.bottom;
-    }
+    BoxEdges margin = ruby_unit_margin_edges(view);
+    // column constraints and level stacking use outer normal-flow bounds, not visual border boxes.
+    bounds.x -= relative.x + margin.left;
+    bounds.y -= relative.y + margin.top;
+    bounds.width += margin.left + margin.right;
+    bounds.height += margin.top + margin.bottom;
     return bounds;
 }
 
 static void ruby_publish_geometry(DomElement* element, float start, float width,
-        bool normal_flow_start = false) {
+        bool column_allocation = false) {
     ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(element);
     if (!span) return;
     DomElementExt* ext = element->ensure_ext();
     if (!ext) return;
-    if (normal_flow_start) start += ruby_relative_offset(span).x;
+    if (column_allocation) {
+        // an allocated column includes external margins; source CSSOM geometry excludes them.
+        BoxEdges margin = ruby_unit_margin_edges(span);
+        start += ruby_relative_offset(span).x + margin.left;
+        width = max(0.0f, width - margin.left - margin.right);
+    }
     ext->has_ruby_column_geometry = false;
     ruby_refresh_inline_bounds(span, 0);
     ext->ruby_column_start_offset = start - span->x;
