@@ -3382,6 +3382,16 @@ effect colour; pure call guards must remain active inside these bodies.
 Functional `for` extensions remain SO51. Existing separation, line-start,
 map/block and branch-homogeneity rules otherwise retain their meanings.
 
+### 7.32 Unresolved value names (decided 2026-11-03)
+
+**S16.10.4:** a value identifier that has no compile-time binding is rejected
+with E202, or E203 when it is the target of a bare call. This also rejects
+under `--static-warning`: there is no binding to evaluate. Lexical scope,
+imports, builtins, forward declarations and S10.1.7v4 implicit field reads
+are resolved first. Member names and computed keys keep their ordinary data
+read behavior. This resolves the policy question in LR02-35.
+Implementation and qualification: [unresolved names](<impl/Lambda_Impl_Unresolved_Names (done).md>).
+
 ## Appendix S — Superseded Rulings
 
 Text that once stated a ruling and no longer does. It is kept for the

@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **270 anchored records**, preserving fixed, resolved,
+This archive contains **272 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -26,7 +26,10 @@ by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
-resolved/obsolete appendix.
+resolved/obsolete appendix. LR08-14 moved here from the active ledger on
+2026-11-03 after its 2026-10-29 fix and qualification; its original resolution
+summary and implementation record are retained below. LR02-35 moved here on
+2026-11-03 after S16.10.4 was ruled and implemented.
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
 
@@ -155,6 +158,22 @@ failed in the earlier colour-work run and had been filed as pre-existing.
 
 
 ## 2. Parsing & AST construction (LR_02)
+
+<a id="lr02-35"></a>**LR02-35 · An unknown name compiled and evaluated to a bare `error` (S16.10.4) · FIXED 2026-11-03 (found 2026-10-07, std test triage)**
+
+**Original report:** `nosuchname` and calls to retired names compiled, then
+evaluated to `error` (code 318, message "Error", no detail) with status 0 under
+`test-batch`; the JIT reported E212 instead. `build_identifier_syntax` typed
+unresolved identifiers `any`, and no later step rejected them. Undefined-name
+tests were parked while their policy was unruled.
+
+**Resolution:** S16.10.4 requires compile-time rejection. After resolution
+and deferred binding, unknown value reads report E202 and bare calls E203,
+including under `--static-warning`. The parked tests now run as negative
+fixtures; batch status, REPL rollback, builtin pipes, imports, path schemes,
+implicit fields and join bindings are covered. The Lambda/input baseline
+passed 8,704/8,712 in the sandbox; all eight denied listener cases passed with
+loopback access. [Implementation and qualification](<impl/Lambda_Impl_Unresolved_Names (done).md>).
 
 <a id="lr02-32"></a>**LR02-32 · An inline element pattern in a subscript is built as an element value, so `e[<p>]` is `null` (S8.2.4v3) · FIXED 2026-10-29 (found 2026-09-30, site snippet pass)**
 
@@ -1386,6 +1405,19 @@ Covered by fixture `test/mir/lambda/root_publication_map_keys.ls`, checked on al
 **Root cause:** the wide integer was never the problem — the pending-pair return resolved correctly. `string()` returns a raw `String*` (`C_RET_STRING`). The call's carrier was the boxed `any` lane because `mir_call_may_defect` saw a defect-capable operand (f's typed `var` store), so `mir_call_value_from_result` published the register as an Item; but no rejected join was built (`rejected_error_flows` was false), so nothing boxed the raw pointer, and `print` received it untagged. **Fix:** `POST_PROCESS_CARRIER` at the three generic system-call return points boxes a raw C return (`String*`, `Symbol*`, int64, double) with `emit_box` whenever the call's carrier is `any`; `bool` and DateTime returns were already boxed by their post-processing. The two predicates still answer differently (MIR defect facts vs the AST's rejected-flow flag); only the representation mismatch is fixed. **Tests:** `test/mir/lambda/wide_int_native_lane.txt` plus `LambdaTypedPathTests.WideIntNativeLaneValues` / `…Jit` now pin the fixture's values.
 
 ## 8. Memory management & GC (LR_08)
+
+<a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D4.5.1v4–D4.5.2) · FIXED 2026-10-29 (Lambda baseline 8,410/8,410 and native replay qualified)**
+
+An element's int→text retype migrated attribute data to the runtime pool and
+set its migration flag. A following shape extension installed arena data but
+kept the flag; the next retype attempted a pool free of that arena pointer.
+UI extension and retyping now share document-arena ownership, and only actual
+pool migrations set the flag. The native allocator-owner regression passes;
+the four-spread page and Eden landscape replay no longer emit the warning.
+The related numeric DOM/SVG repair also handles typeless layout nodes and
+standalone document storage. Required Radiant qualification retains 413 exact
+old-host CSS failures; isolated follow-ups pass the affected native/DOM/UI
+paths. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#ui-attribute-buffer-ownership--lr08-14).
 
 <a id="lr08-13"></a>**LR08-13 · An abandoned interpreted generator or async body leaves `JsInterpEnvRoot` roots registered · FIXED 2026-10-29 (found 2026-10-04, worktree `runtime-async`, uncommitted; Runtime_Async RA-O2)**
 

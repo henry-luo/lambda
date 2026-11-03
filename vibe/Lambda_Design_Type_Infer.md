@@ -241,8 +241,9 @@ Ruling (user decision 2026-08-18):
     (E201/E204/E208/…) reject compilation; the user gets no result.
     Data-processing and scripting users want wrong programs stopped early.
   - **`lambda --static-warning` (relaxed mode, IMPLEMENTED 2026-08-18):**
-    the same semantic (E2xx) diagnostics report as `warning[E…]` and the
-    script runs. Parse/syntax errors are never downgraded. A diagnosed
+    static type diagnostics report as `warning[E…]` and the script runs.
+    Parse/syntax errors and unresolved value names (S16.10.4) are never
+    downgraded. A diagnosed
     annotation is no contract: unresolved annotations and statically
     rejected declarations fall back to the initializer's inferred type, so
     representation never follows a failed contract (SI14 — the emitter

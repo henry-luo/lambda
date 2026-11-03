@@ -32,7 +32,7 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 | | `--tier=auto\|jit\|interp` | Execution tier: `auto` interprets and compiles hot functions, `jit` compiles everything, `interp` never compiles. `LAMBDA_EXEC_BACKEND` is the environment equivalent | `auto` |
 | | `--mir-interp` | Run the JIT's output on the MIR interpreter instead of native code | |
 | | `--dry-run` | Skip real I/O; return fabricated results for network/filesystem operations | `false` |
-| | `--static-warning` | Relaxed mode: report static type errors as warnings and keep running (syntax errors still fail; the result may contain error values) | |
+| | `--static-warning` | Relaxed mode: report static type errors as warnings and keep running (syntax errors and unresolved value names still fail; the result may contain error values) | |
 | | `--no-drain` | Return without draining spawned tasks | |
 
 `--help` (`-h`) is recognized only as the first argument: `lambda --help`.

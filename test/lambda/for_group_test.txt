@@ -61,5 +61,4 @@
 [[3, 3], [1]]
 [array, array]
 [5, 4]
-[error, error]
 "All for group clause tests completed!"

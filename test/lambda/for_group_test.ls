@@ -43,7 +43,4 @@ for (w in words group by len(w) as wlen into g order by wlen)
 // After group by, order by / limit apply to groups.
 [for (x in [5, 4, 5, 3, 4, 5] group by x as v into g order by len(g) desc limit 2) v];
 
-// Row variables are out of scope after group by.
-[for (x in [1, 2] group by x as value into g) x]
-
 "All for group clause tests completed!"

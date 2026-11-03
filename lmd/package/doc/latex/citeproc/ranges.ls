@@ -1,5 +1,6 @@
 // Expand abbreviated page endpoints before applying the style's range policy.
 import c: .common
+import math
 
 fn expanded(start, end) any^ {
     if (len(end) >= len(start)) end

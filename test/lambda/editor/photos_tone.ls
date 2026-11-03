@@ -5,8 +5,8 @@ import effects: lambda.editor.raster.effects
 import tone: lambda.editor.raster.tone
 import project: lambda.image.project
 fn check(value) => value
-fn rejected(options) => match (img.adjust(source,options) ^ { ^ }) { case error: true default: false }
 let source = img.from_bytes(b'004080ff80804080ffffff40',{width:3,height:1})^
+fn rejected(options) => match (img.adjust(source,options) ^ { ^ }) { case error: true default: false }
 let invert = {rgb:[[0,1],[1,0]]}
 let inverse = img.adjust(source,{curves:invert})^
 check(img.sample(inverse,0,0)^ == [255,191,127,255])

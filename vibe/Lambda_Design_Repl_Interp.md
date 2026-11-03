@@ -46,6 +46,10 @@ Session driven over stdin; `>` is the non-tty prompt.
 
 Mechanics confirmed: a rejected entry restores scope tail, const/type list lengths, source length, AST index and slab snapshot (`runner.cpp:2404`–`2515`); `clear` releases the module root and Script (`runner.cpp:2322`); the slab grows geometrically with one registered root range (D5.3.3).
 
+**2026-11-03 update:** S16.10.4 now rejects an undefined value name or bare
+call while compiling the entry (E202/E203). The REPL reports the diagnostic
+and rolls back the entry; G2's other runtime-diagnostic questions remain.
+
 ### 1.1 Gap list
 
 | ID | Gap | Site |
@@ -95,7 +99,7 @@ ReplEntryStatus interp_repl_session_eval(InterpReplSession*, const char* source,
 Contract: **every non-OK status prints its reason on stderr exactly once**, from the session, not from the driver. Specifically:
 
 - T0-unsupported node (`interp_scan_supported` reject): `error: <construct> is not supported in the REPL yet` naming the node kind, instead of the `log.txt`-only line. Unsupported entries are *not* compiled by any other means (§5 RI5).
-- Runtime error Item: `err_print` of the error's payload (today's bare `error` comes from `print_root_item` on an error Item whose message was never surfaced). The same error the `jit` path prints as "undefined variable 'g'" must reach the user.
+- Runtime error Item: `err_print` of the error's payload (the original bare `error` came from `print_root_item` on an error Item whose message was never surfaced). Undefined names now fail earlier under S16.10.4.
 - The duplicate E209 print (second row of G3) is a double report from build + finalize; collapse to one.
 
 ### 3.3 Redefinition (G3) — ruled: stays an error (RI2, S16.7.5)

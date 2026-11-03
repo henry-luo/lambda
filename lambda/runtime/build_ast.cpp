@@ -1553,13 +1553,13 @@ TypeId census_any_type_id(Transpiler* tp, AnyReason reason) {
     return LMD_TYPE_ANY;
 }
 
-// relaxed mode (--static-warning): a semantic (E2xx) diagnostic is stored as
-// a warning and does not fail compilation — the script still runs and may
-// produce a result containing error values (SI3v2/TI6 per-surface policy).
+// relaxed mode downgrades type findings, but an unbound name has no runtime
+// binding to evaluate and must still reject the module (S16.10.4).
 // Parse/syntax failures never reach here, so they are never downgraded.
 static bool record_as_static_warning(Transpiler* tp, LambdaErrorCode code,
         LambdaError* error) {
-    if (!tp->static_warning || !ERR_IS_SEMANTIC(code)) return false;
+    if (!tp->static_warning || !ERR_IS_SEMANTIC(code) ||
+            code == ERR_UNDEFINED_VARIABLE || code == ERR_UNDEFINED_FUNCTION) return false;
     tp->warning_count++;
     if (!tp->warnings) tp->warnings = arraylist_new(8);
     arraylist_append(tp->warnings, error);
@@ -9868,9 +9868,55 @@ struct LambdaResolver {
     ArrayList* prebound_types;
     // each wrapper's first payload, the placeholder record
     ArrayList* prebound_placeholders;
+    ArrayList* unresolved_names;
+    ArrayList* failed_import_names;
+    uint32_t suppress_unresolved;
     // the module scope, where a top-level alias resolved early resolves
     NameScope* module_scope;
 };
+
+struct UnresolvedName {
+    AstIdentNode* ident;
+    bool called;
+};
+
+// Join predicates bind their new loop variable after resolving the predicate;
+// defer diagnostics until those identities and call dispatch are complete.
+static void resolver_note_unresolved(LambdaResolver* r, AstIdentNode* ident, bool called) {
+    if (!ident || ident->node_type != AST_NODE_IDENT || ident->entry) return;
+    UnresolvedName* name = (UnresolvedName*)pool_calloc(r->tp->pool, sizeof(UnresolvedName));
+    if (!name || !arraylist_append(r->unresolved_names, name)) {
+        r->tp->build_allocation_failed = true;
+        return;
+    }
+    name->ident = ident;
+    name->called = called;
+}
+
+static void resolver_reject_unresolved(LambdaResolver* r) {
+    // Cross-language imports are intentionally deferred by AST prebuild; that
+    // tainted template is never reused, and the execution compile resolves it.
+    if (r->tp->runtime && r->tp->runtime->ast_prebuild_only &&
+            r->tp->cache_cross_lang_tainted) return;
+    for (int i = 0; r->unresolved_names && i < r->unresolved_names->length; i++) {
+        UnresolvedName* pending = (UnresolvedName*)r->unresolved_names->data[i];
+        AstIdentNode* ident = pending->ident;
+        if (ident->node_type != AST_NODE_IDENT || ident->entry) continue;
+        bool failed_import = false;
+        for (int j = 0; r->failed_import_names && j < r->failed_import_names->length; j++) {
+            if (same_name_string(ident->name, (String*)r->failed_import_names->data[j])) {
+                failed_import = true;
+                break;
+            }
+        }
+        // The import diagnostic already explains why this alias is unavailable.
+        if (failed_import) continue;
+        record_semantic_error_span(r->tp, ident->source_span,
+            pending->called ? ERR_UNDEFINED_FUNCTION : ERR_UNDEFINED_VARIABLE,
+            "undefined %s '%.*s'", pending->called ? "function" : "name",
+            (int)ident->name->len, ident->name->chars);
+    }
+}
 
 // The resolver of the unit being resolved, for resolving a top-level alias at
 // its first earlier reference (S11.4.12). An import compiles its module inside
@@ -16242,13 +16288,9 @@ static AstNode* syntax_path_member_step(LambdaSyntaxSink* sink,
             valid ? &step : NULL);
     }
     if (!valid) path->type = &TYPE_ERROR;
-    // The extended literal replaces its base, which leaves the tree with
-    // anything still to resolve on it; a scheme word is read as a name first.
-    if (direct_is_path_literal(object)) {
-        syntax_move_attachments(sink, object, path);
-    } else {
-        syntax_attach_node(sink, path, LSA_BEFORE, object);
-    }
+    // The scheme token is part of the path literal, not a value-name read;
+    // retain any diagnostics attached to the superseded syntax node.
+    syntax_move_attachments(sink, object, path);
     if (step_error) {
         syntax_attach_diagnostic(sink, path, ERR_INVALID_LITERAL,
             step_token.span, step_error);
@@ -18913,6 +18955,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_IDENT:
         resolve_diagnostics(r, node);
         resolve_identifier(tp, (AstIdentNode*)node);
+        if (!r->suppress_unresolved) resolver_note_unresolved(r, (AstIdentNode*)node, false);
         break;
     case LSF_MEMBER_NAME:
         resolve_diagnostics(r, node);
@@ -19162,12 +19205,28 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         bool that = (node->syntax_flags & LSF_BINARY_THAT) != 0;
         bool scoped = that || (node->syntax_flags & LSF_BINARY_PIPE_BODY) != 0;
+        AstNode* pipe_target = ast_unwrap_primary(binary->right);
+        bool bare_pipe_target = strview_equal(&binary->op_str, "|>") &&
+            pipe_target && pipe_target->node_type == AST_NODE_IDENT;
         resolve_walk(r, binary->left);
         if (scoped) resolver_that_begin(r, that);
+        if (bare_pipe_target) r->suppress_unresolved++;
         resolve_walk(r, binary->right);
+        if (bare_pipe_target) r->suppress_unresolved--;
         if (scoped) resolver_that_end(r);
         resolve_diagnostics(r, node);
         resolve_binary(tp, binary);
+        if (bare_pipe_target && pipe_target->node_type == AST_NODE_IDENT) {
+            AstNode* resolved = ast_unwrap_primary(binary->right);
+            AstNode* callee = resolved && resolved->node_type == AST_NODE_CALL_EXPR
+                ? ast_unwrap_primary(((AstCallNode*)resolved)->function) : resolved;
+            AstIdentNode* ident = (AstIdentNode*)pipe_target;
+            // Pipe application selects an overloaded builtin only after its
+            // receiver is known; diagnose the name only if it remains unbound.
+            if (callee == pipe_target &&
+                    !is_sys_func_name(ident->name->chars, (int)ident->name->len))
+                resolver_note_unresolved(r, ident, false);
+        }
         break;
     }
     case LSF_MEMBER:
@@ -19175,9 +19234,15 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         AstFieldNode* member = (AstFieldNode*)node;
         bool module_prefix = form == LSF_MEMBER &&
             member_object_names_module(tp, member->object, member->field);
-        if (module_prefix) resolver_that_begin(r, false);
+        if (module_prefix) {
+            resolver_that_begin(r, false);
+            r->suppress_unresolved++;
+        }
         resolve_walk(r, member->object);
-        if (module_prefix) resolver_that_end(r);
+        if (module_prefix) {
+            r->suppress_unresolved--;
+            resolver_that_end(r);
+        }
         resolve_walk_chain(r, member->field);
         resolve_diagnostics(r, node);
         resolve_field(tp, member);
@@ -19216,12 +19281,24 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         // call the absent field `~.len` (S10.1.5v3's `xs that len(~) > 2`).
         AstNode* callee = ast_unwrap_primary(call->function);
         bool in_that = tp->in_that_clause;
-        if (callee && callee->node_type == AST_NODE_IDENT) tp->in_that_clause = false;
+        bool bare_callee = callee && callee->node_type == AST_NODE_IDENT;
+        if (bare_callee) {
+            tp->in_that_clause = false;
+            r->suppress_unresolved++;
+        }
         resolve_walk(r, call->function);
+        if (bare_callee) r->suppress_unresolved--;
         tp->in_that_clause = in_that;
         resolve_walk_chain(r, call->argument);
         resolve_diagnostics(r, node);
         resolve_call(tp, call);
+        if (bare_callee && ast_unwrap_primary(call->function) == callee &&
+                callee->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)callee;
+            // A known builtin with the wrong arity already has its own error.
+            if (!is_sys_func_name(ident->name->chars, (int)ident->name->len))
+                resolver_note_unresolved(r, ident, true);
+        }
         break;
     }
     case LSF_CONSTRAINED: {
@@ -19238,10 +19315,17 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_constrained(tp, constrained, predicate);
         break;
     }
-    case LSF_IMPORT:
+    case LSF_IMPORT: {
+        AstImportNode* import = (AstImportNode*)node;
+        String* alias = import->alias;
+        int previous_errors = tp->error_count;
         resolve_diagnostics(r, node);
-        resolve_import(tp, (AstImportNode*)node);
+        resolve_import(tp, import);
+        if (alias && tp->error_count > previous_errors &&
+                !arraylist_append(r->failed_import_names, alias))
+            tp->build_allocation_failed = true;
         break;
+    }
     case LSF_TYPE_STAM:
         resolve_walk(r, ((AstLetNode*)node)->declare);
         resolve_diagnostics(r, node);
@@ -19787,16 +19871,23 @@ LambdaParseStatus lambda_rd_resolve_syntax(Transpiler* tp,
     resolver.prebound_aliases = arraylist_new(8);
     resolver.prebound_types = arraylist_new(8);
     resolver.prebound_placeholders = arraylist_new(8);
+    resolver.unresolved_names = arraylist_new(8);
+    resolver.failed_import_names = arraylist_new(4);
+    if (!resolver.unresolved_names || !resolver.failed_import_names)
+        tp->build_allocation_failed = true;
     resolver.module_scope = tp->current_scope;
     LambdaResolver* outer_resolver = active_resolver;
     active_resolver = &resolver;
     resolver_predeclare(&resolver);
     resolve_walk(&resolver, (AstNode*)unit->root);
     if (!resolver.failed) resolver_complete_types(&resolver);
+    if (!resolver.failed) resolver_reject_unresolved(&resolver);
     active_resolver = outer_resolver;
     if (resolver.prebound_aliases) arraylist_free(resolver.prebound_aliases);
     if (resolver.prebound_types) arraylist_free(resolver.prebound_types);
     if (resolver.prebound_placeholders) arraylist_free(resolver.prebound_placeholders);
+    if (resolver.unresolved_names) arraylist_free(resolver.unresolved_names);
+    if (resolver.failed_import_names) arraylist_free(resolver.failed_import_names);
     if (tp->build_allocation_failed) resolver.failed = true;
     if (resolver.failed || !resolver.root) {
         log_error("direct AST resolve failure at=%u message=%s",

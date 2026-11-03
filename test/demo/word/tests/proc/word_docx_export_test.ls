@@ -5,6 +5,7 @@ import docx: lambda.doc.docx
 import lambda.editor.mod_doc
 import lambda.editor.mod_transaction
 import lambda.editor.mod_source_pos
+import lambda.editor.mod_step
 pn main() {
     let doc = document.sample()
     let result = files.export_document(doc,"Exported studio","temp/docx-export/word.docx")^

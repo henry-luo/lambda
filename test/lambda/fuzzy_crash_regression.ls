@@ -10,9 +10,10 @@
 'Crash 1: argmin/argmax empty array';
 [argmin([]) is null, argmax([]) is null]
 
-// === Crash 2: for-in on error/undefined value ===
+// === Crash 2: for-in on an error value ===
 'Crash 2: for-in on error value';
-[for (c in undefined_var) c]
+let iteration_error = error("iteration error");
+[for (c in iteration_error) c]
 
 // === Crash 3: ~ self-reference in type method body ===
 'Crash 3: ~ in type method'

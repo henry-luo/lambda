@@ -124,6 +124,18 @@ static int count_substr(const char* text, const char* needle) {
     return count;
 }
 
+TEST(LambdaReplTests, unresolved_name_rolls_back_before_later_definition) {
+    test_result result = run_lambda_repl(
+        "missing_repl(1)\nfn missing_repl(x) => x + 1\nmissing_repl(1)\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_EQ(result.exit_code, 0);
+    EXPECT_EQ(count_substr(result.output, "error[E203]: undefined function 'missing_repl'"), 1)
+        << result.output;
+    EXPECT_NE(strstr(result.output, "Entry rolled back."), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> 2\n"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
 TEST(LambdaReplTests, test_views_apply_across_submissions_and_rollback) {
     test_result result = run_lambda_repl(
         "view int { ~ * 2 }\napply(42)\napply(7, {})\n"

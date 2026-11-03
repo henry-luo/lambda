@@ -314,6 +314,12 @@ Errors are categorized by numeric code ranges:
 
 User-created errors (via `error("message")`) default to code 318 (`user_error`). The full enumeration is `lambda/runtime/lambda-error.h`.
 
+An unresolved value name is a compile error: E202 for a read and E203 for a
+bare call. These errors also reject the script with `--static-warning`.
+Member reads retain their ordinary behavior: a missing member of a non-error
+value yields `null`; in a body that permits implicit current-item fields, a
+bare field name is a member read (S16.10.4, S10.1.7v4).
+
 ---
 
 ## Checking for Errors

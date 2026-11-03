@@ -1882,6 +1882,83 @@ TEST_F(NegativeScriptTest, UndefinedFunction) {
     ExpectErrorWithoutCrash("test/lambda/negative/undefined_function.ls");
 }
 
+TEST_F(NegativeScriptTest, UnresolvedValueNamesRejectOnEveryTierAndInRelaxedMode) {
+    struct Case {
+        const char* path;
+        const char* diagnostics[3];
+    };
+    const Case cases[] = {
+        {"test/lambda/negative/semantic/ledger_undefined_variable.ls", {
+            "error[E202]: undefined name 'undefined_var'",
+            "error[E202]: undefined name 'unknown_name'",
+            "error[E202]: undefined name 'nonexistent_var'"}},
+        {"test/lambda/negative/semantic/ledger_undefined_function.ls", {
+            "error[E203]: undefined function 'nonexistent_function'",
+            "error[E203]: undefined function 'pritn'",
+            "error[E203]: undefined function 'greeet'"}},
+    };
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const Case& test : cases) {
+        for (const char* tier : tiers) {
+            ScriptResult result = run_lambda_script(test.path, false, tier);
+            EXPECT_NE(result.exit_code, 0) << test.path << " tier=" << tier;
+            for (const char* diagnostic : test.diagnostics) {
+                EXPECT_NE(strstr(result.output.c_str(), diagnostic), nullptr)
+                    << test.path << " tier=" << tier << "\n" << result.output;
+            }
+        }
+        const char* args[] = {LAMBDA_EXE, "--no-log", "--static-warning", test.path, NULL};
+        ShellOptions options = {0};
+        options.merge_stderr = true;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_NE(result.exit_code, 0) << test.path;
+        for (const char* diagnostic : test.diagnostics) {
+            EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, diagnostic) : nullptr, nullptr)
+                << test.path << " with --static-warning";
+        }
+        shell_result_free(&result);
+    }
+}
+
+TEST_F(NegativeScriptTest, FailedImportDoesNotHideOtherUnresolvedNames) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        ScriptResult result = run_lambda_script(
+            "test/lambda/negative/semantic/ledger_failed_import.ls", false, tier);
+        EXPECT_NE(result.exit_code, 0) << tier;
+        EXPECT_NE(strstr(result.output.c_str(), "error[E217]: failed to import"), nullptr)
+            << tier << "\n" << result.output;
+        EXPECT_NE(strstr(result.output.c_str(), "error[E202]: undefined name 'unrelated_unknown'"), nullptr)
+            << tier << "\n" << result.output;
+        EXPECT_EQ(strstr(result.output.c_str(), "error[E202]: undefined name 'missing'"), nullptr)
+            << tier << "\n" << result.output;
+    }
+}
+
+TEST_F(NegativeScriptTest, UndefinedPipeAndExpiredGroupBindingAreRejected) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/ledger_undefined_pipe.ls", false,
+        "error[E202]: undefined name 'absent_pipe_target'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/ledger_group_scope.ls", false,
+        "error[E202]: undefined name 'x'");
+}
+
+TEST_F(NegativeScriptTest, BatchReportsUnresolvedNameAsFailedScript) {
+    const char* manifest = "temp/lr02_35_batch_manifest.txt";
+    const char* script = "test/lambda/negative/semantic/ledger_undefined_variable.ls\n";
+    ASSERT_EQ(write_binary_file(manifest, script, strlen(script)), 0);
+    const char* args[] = {LAMBDA_EXE, "test-batch", "--no-log", "--timeout=10", NULL};
+    ShellOptions options = {0};
+    options.stdin_path = manifest;
+    options.merge_stderr = true;
+    options.timeout_ms = 15000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    EXPECT_EQ(result.exit_code, 0);
+    EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, "BATCH_END 1") : nullptr, nullptr);
+    EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, "error[E202]: undefined name 'undefined_var'") : nullptr, nullptr);
+    shell_result_free(&result);
+    remove(manifest);
+}
+
 TEST_F(NegativeScriptTest, CallNonFunction) {
     ExpectErrorWithoutCrash("test/lambda/negative/call_non_function.ls");
 }
