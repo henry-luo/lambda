@@ -1107,6 +1107,26 @@ also captures wide scalar payloads before frame teardown, preserving snapshots
 when a later outcome replaces the variable. Qualification and the remaining
 vendor divergence are tracked in the
 [tail-call and ownership record](impl/Lambda_Impl_Type_Error_Handling.md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03).
+S7.6.3v3/S11.4.6v3 validated plain scalar locals also retain their proven
+normal kind after propagation. D5.2.1v5 procedure planning keeps the ordinary
+error companion independently of that success lane. An immediate, sole `^`
+may fuse a local's check without skipping intervening user code or changing its
+error location (S7.7.2v2/S7.4.4); other observations retain the boxed outcome.
+The [scalar qualification record](impl/Lambda_Impl_Type_Error_Handling.md#admitted-scalar-success-lanes-and-immediate-propagation-2026-11-03)
+records the restored libm budget and remaining aggregate work.
+D8.6.1 also requires making intended emission growth explicit. The remaining
+cube/delta/printer comparisons retain validation outcomes and checked argument
+entry rather than relying on the retired declaration exit. Their reviewed
+zero-slack budgets pass 20/20; benchmark output matches the original compiler,
+and invalid-input tier/GC probes pass. The
+[emission review](impl/Lambda_Impl_Type_Error_Handling.md#reviewed-emission-cost-of-retained-outcomes-2026-11-03)
+records the measured cost, conservative proof limits and qualification scope.
+The final complete tier sweep has 1,431 matches, eight exclusions and one
+vendor-loop mismatch among 1,440 scripts, without timeouts (S1.6). That mismatch
+prevents manifest publication. The two ordinary-union admission proof checks
+remain pending the normal-admission ruling; the
+[final qualification boundary](impl/Lambda_Impl_Type_Error_Handling.md#final-independent-qualification-boundary-2026-11-03)
+names the exact checks and required inputs. No assertion is waived.
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

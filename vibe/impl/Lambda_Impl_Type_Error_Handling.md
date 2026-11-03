@@ -1,8 +1,10 @@
 # Lambda — Type and Error Handling Implementation Plan
 
-**Status:** M1 handlers and M2/M3 core admission/outcome changes are implemented
-in `codex/error-handling-20261102`. Package/demo migration and aggregate
-qualification are in progress; the full P0–P5 plan is not complete.
+**Status:** M1 handlers, M2/M3 admission/outcome changes, and authored caller
+migration are implemented in `codex/error-handling-20261102`. Final qualification
+has three open checks: two union-policy-dependent emission cases and the
+isolated vendor MIR loop defect. That defect also blocks interpreter manifest
+publication. The full P0–P5 plan is not complete; see the final boundary below.
 **Date:** 2026-11-02.
 **Design:** [Type and Error Handling](../Lambda_Design_Type_Error_Handling.md),
 TE-13.1–TE-13.3, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
@@ -512,8 +514,8 @@ result. Keep all artifacts under `temp/`.
 | P1 | Core qualified; aggregate proof checks open | Normalized ordinary outcomes, admission, composition and overwritten-result diagnostics pass focused gates. |
 | P2 | Core qualified; aggregate proof checks open | Retained validation outcomes and physical carriers pass the tier/GC matrix and full MIR GC corpus. |
 | P3 | Qualified in M1 | Handler/fallback parsing, residual errors, chaining, results and suspension are implemented. |
-| P4 | Expanded migration qualification in progress | The initial 3,778-source inventory and the remaining 295 tracked non-negative scripts have been audited; UI, scene and utility migrations and their runtime checks are recorded below. |
-| P5 | In progress | Fresh aggregate gates, documentation and remaining native proof/caller differences are recorded below; no assertions or budgets are relaxed. |
+| P4 | Source migration reviewed; runtime limits recorded | The final inventory covers all 4,080 tracked non-negative scripts with no new compile failures. Package/demo, UI, scene and utility checks and unrelated host limitations are recorded below. |
+| P5 | In progress | Fresh aggregate gates, documentation and remaining native proof/caller differences are recorded below. Assertions remain intact; intended emission growth receives the explicit D8.6.1 review below. |
 
 
 <a id="m1-handler-outcomes"></a>
@@ -1771,3 +1773,158 @@ relaxed. Evidence: `m5-destination-{focused.log,renderer.json}` and
 `m5-destination-final-lambda.log` with its per-suite results directory. A complete
 sweep has not yet been rerun after these fixes; the nine-case differential is
 not manifest qualification. All three interpreter manifests remain unchanged.
+
+### Admitted scalar success lanes and immediate propagation (2026-11-03)
+
+**S7.6.3v3/S11.4.6v3/D2.4.1–D2.4.3:** after `^`, a deferred immutable
+local with a strict plain `int`/`float` contract has an already admitted normal
+kind. The carrier oracle and native-return proof share that fact; the emitter
+still checks an Item error before unboxing. Error unions, nullable/literal
+contracts, mutable locals, captures, module reads and unresolved targets do not
+gain that proof. In particular, `float^` retains its current union-member
+behavior; the pending normal-admission ruling is not decided here.
+
+**D5.2.1v5/D8.3.3:** procedure planning proves normal returns independently
+of ordinary-error admission, using the existing native error companion. The
+legacy blanket `can_raise` rejection blocked this proof. Exact ordinary-union
+selection still verifies the actual normal kind. A shared analysis scope
+replaces the repeated save/restore sequences and supplies the function context
+to that exact-kind proof.
+
+**S7.7.2v2/S7.6.3v3/D8.2.6v2:** a single immutable scalar binding whose
+sole use is the next statement's direct `^` may fuse admission and propagation.
+Only a producer-owned matching native kind qualifies. Failure explicitly exits
+the function; it cannot take a containing block/store's implicit containment
+edge. Intervening effects or another observation retain the ordinary boxed
+outcome. Task cleanup keeps the regular unwind path. Deferred cold diagnostics
+also retain their original declaration source, fixing a location probe that
+reported the function header after moving the check (S7.4.4).
+
+The paired `admitted_scalar_propagation` fixture covers normal/error returns,
+direct/boxed calls, numeric conversions, union member identity, captures,
+nullable/literal admission, reassignment, int/float array bounds, delayed
+effects, error inspection, nested function-level propagation and exact diagnostic
+locations. Its MIR sidecar checks native float plus error-companion returns and
+preserved Item carriers where required. The expanded matrix passes **280/280**;
+the new emission fixture passes and the original libm budget is restored.
+Size ratchets are now **17/20**, with cube3d, deltablue and prettier remaining.
+Evidence: `m6-final-{focused.log,new-proof.json,ratchet.json,location.out}`.
+Final rebuilt aggregate qualification follows below. No budget is changed.
+The existing terminal-OOB sidecar now pins both native null predicates to the
+values consumed by arithmetic, replacing its boxed-tag/`it2d` sequence. It keeps
+the four exact diagnostic calls and runtime negative/left/right-OOB cases, and
+additionally forbids boxing and generic unboxing in the native body.
+
+The rebuilt 31-suite aggregate records **6,447/6,454**, including MIR GC
+**352/352**, diagnostics **321/321**, native optimization **55/55**, and
+runtime fixtures **2,005/2,006**. Its seven failures include the terminal-OOB
+sidecar's superseded boxed representation expectation. With that assertion
+updated to the native dataflow, the complete MIR emission gate is **279/281**;
+the final portable terminal-guard replay also passes. Product source is unchanged
+between these runs. The six remaining checks are cube3d/deltablue/prettier size
+ratchets, the two pending union-policy emission cases, and vendor-loop parity.
+Evidence: `m6-final-lambda.log` and its per-suite results directory,
+`m6-final-mir.{json,log}`, and `m6-portable-null-guards.{json,log}`.
+The focused **280/280** result includes all 30 assertions in the new fixture,
+including the diagnostic-location correction. Complete interpreter-sweep and
+manifest qualification remain pending; no vendor code or size budget changed.
+
+### Reviewed emission cost of retained outcomes (2026-11-03)
+
+**S7.7.2v2/S7.7.4v2/S7.7.3/D2.8.3v3/D8.3.3:** removing the
+implicit declaration exit changes the proof available after a checked binding.
+A nullable array read admitted against a strict record, for example, now leaves
+either the record or an error in its local. The declaration's normal contract
+alone no longer permits an unchecked record load or native argument. Caller
+migration also exposes ordinary error outcomes previously hidden by the legacy
+returned/raised distinction. The remaining three size ratchets were compared
+with the preserved original compiler and original sources (`0452aaabc`), then
+with the final M6 emitter/source (MIR source blob
+`164a6e70f7778ab1b4669e5177696a859b19d59d`, before this budget-only review).
+
+| Probe | Module instructions | Ratcheted body instructions |
+|---|---:|---:|
+| cube3d | 17,056 → 19,194 | `run_cube`: 9,651 → 11,720 |
+| deltablue | 10,882 → 14,374 | `constraint_choose_method`: 1,875 → 3,561 |
+| prettier | 21,495 → 21,770 | `print_node`: 4,972 → 5,053 |
+
+- Cube retains the three indexed edge outcomes used to construct coordinate
+  vectors, and the successive fallible `mtrans` outcomes. `run_cube` adds nine
+  generic index/multiply pairs, error-capable construction for three vectors,
+  23 cold validators, and their guards/root joins. Three packed-literal and
+  three uninitialized numeric-array constructor calls disappear. Across the
+  module, several matrix helpers shrink; `draw_line` grows by 256 instructions
+  because its array-fed scalar locals retain failures before explicit `^`.
+- Delta's five nullable-slot record bindings retain failures. Its six `stronger`
+  calls and one `weaker` call now require 14 checked integer arguments. The
+  chosen body adds 26 generic member reads and four generic index calls, keeping
+  errors outside raw record storage. Its 18 checked path stores and 18 failure
+  reports remain under S7.7.6v2. The extra local error tests and admission joins explain the
+  larger body; the old unchecked field operations are not valid substitutes.
+- Prettier adds three cold admission calls: the `if_break_doc` default, the
+  integer precedence argument, and the module-held hardline separator passed
+  to `join_docs`. The rest of the body growth is guards, roots and outcome
+  joins. Its forward `print_statement` target uses the stable boxed entry
+  rather than an unproved native plan; the number of calls at that site is
+  unchanged. No allocation-helper call is added to `print_node`.
+
+**D8.6.1:** these are reviewed costs of the new semantics with the current
+conservative proofs, not a claim that every extra instruction is irreducible.
+The six exact default-profile ceilings are recorded in `mir_budgets.json`;
+zero slack, all other probes, and every frame/root ceiling remain intact.
+Unmeasured Windows profiles are unchanged and need native qualification.
+Further reductions require valid flow-sensitive receiver/argument proofs;
+they cannot restore the old implicit exit or assume an error-capable local
+contains its declared normal type.
+
+All three complete benchmarks pass their built-in oracles on both compiler
+snapshots. Their output is byte-identical after removing timing lines, including
+the complete printer output and checksum. Temporary probes made from the
+current benchmark definitions also pass **18/18** executions across interp,
+JIT and immediate promotion, each with ordinary and forced/poison GC. They
+exercise short vectors, null/missing planner slots without unintended stores,
+failed text conversion, rejected precedence and the valid default document.
+These are correctness checks using debug hosts; no timing claim is made.
+Evidence: `temp/error-handling/m7-emission-review.json`,
+`m7-{cube,deltablue,prettier}-review.diff`,
+`m7-benchmark-oracles.{json,log}`, and `m7-error-oracles.{json,log}`.
+The complete ratchet replay passes **20/20** (`m7-final-ratchet.{json,log}`).
+The final authored-source inventory also compiles **4,034/4,080** tracked
+non-negative scripts: the same **46** previously audited base failures, with
+**no new failures and no timeouts**. This includes all seven added runtime/MIR
+fixtures since the preceding complete inventory. Evidence:
+`m7-source-compile.{json,log}`. Both checks use the unchanged M6 executable
+(SHA-256 `e5cc8e95a03e71676ee15484e6f3e017e7cb4abdbbcf3183d3e50bf4a561cff8`).
+
+### Final independent qualification boundary (2026-11-03)
+
+**S1.6/D8.1.1:** the new complete interpreter/JIT sweep covers **1,440**
+scripts: **1,431 matches**, **8 exclusions**, **1 mismatch**, **0 timeouts**.
+The sole mismatch is `proc/tune27_loop_accumulator.ls`, whose wrong level-2
+code generation was independently reproduced without the Lambda runtime.
+All other previously observed tier divergences are resolved. The failing
+official `make interp-sweep` does not reach manifest refresh; all three
+committed interpreter lists remain unchanged. The frozen evidence is
+`temp/error-handling/m7-final-interp-sweep.log` and `m7-final-sweep.tsv`.
+
+Together with the unchanged M6 product's complete gates above, the independent
+review now leaves these three checks open:
+
+| Check | Required next step |
+|---|---|
+| `typed_fill_count_boundary` emission | Resolve normal array admission/certification through an error union before selecting destination-aware construction for `native_fill`. |
+| `tune24_record_context` emission | Resolve ordinary-union normal reification before extending record-return/context proofs to its fallible `chain`. |
+| Runtime tier parity / full-sweep loop case | Obtain AGENTS.md rule 16 approval before fixing the vendor MIR optimizer and recording its auditable patch. |
+
+The first two remain failed assertions, not newly waived expectations. The
+pending S11.4.6v3 question is whether `T | error` performs T's normal admission
+(including numeric conversion and container reification), or preserves an
+already matching normal member. For example, should `float^ = 7` produce a
+float or preserve its integer kind? The implementation keeps current runtime
+admission while awaiting that ruling. Public validation-expression spelling
+also remains an unratified follow-up; no new spelling or builtin was invented.
+
+The vendor approval and union ruling have remained pending across the previous
+qualification checkpoints. All currently independent implementation and
+qualification work is recorded; completing this plan needs those inputs,
+the affected fixes/gates, and a successful full sweep before manifest publication.

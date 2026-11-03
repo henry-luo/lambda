@@ -199,6 +199,7 @@ struct MirDeferredNullBoundary {
     MIR_label_t label;
     Type* expected;
     const char* site;
+    const AstNode* source;
 };
 
 typedef struct MirPropertyKeyEntry {
@@ -755,6 +756,24 @@ struct MirAdmissionCheckScope {
         mt->checking_admission = checking;
     }
     ~MirAdmissionCheckScope() { mt->checking_admission = saved; }
+};
+
+struct MirNativeReturnAnalysisScope {
+    MirTranspiler* mt;
+    AstFuncNode* saved_fn;
+    TypeId saved_tid;
+    MirNativeReturnAnalysisScope(MirTranspiler* owner, AstFuncNode* fn, TypeId tid)
+        : mt(owner), saved_fn(owner->native_return_analysis_fn),
+          saved_tid(owner->native_return_analysis_tid) {
+        if (fn) {
+            mt->native_return_analysis_fn = fn;
+            mt->native_return_analysis_tid = tid;
+        }
+    }
+    ~MirNativeReturnAnalysisScope() {
+        mt->native_return_analysis_fn = saved_fn;
+        mt->native_return_analysis_tid = saved_tid;
+    }
 };
 
 struct MirSkipRegion {
@@ -7194,6 +7213,7 @@ static bool defer_terminal_checked_null_rejection(MirTranspiler* mt,
     deferred->expected = expected;
     deferred->site = mir_stable_string_literal(mt,
         site ? site : "typed boundary");
+    deferred->source = mt->boundary_source;
     return true;
 }
 
@@ -7202,6 +7222,8 @@ static void emit_deferred_null_boundaries(MirTranspiler* mt) {
     for (int i = 0; i < mt->deferred_null_boundary_count; i++) {
         MirDeferredNullBoundary* deferred =
             &mt->deferred_null_boundaries[i];
+        // S7.4.4: moving a cold check must preserve its declaration location.
+        MirSourceScope source(mt, deferred->source);
         emit_label(mt, deferred->label);
         if (!emit_direct_terminal_checked_null_rejection(mt,
                 deferred->expected, deferred->site)) {
@@ -8211,6 +8233,41 @@ static Type* mir_plain_scalar_contract(Type* target, bool* nullable) {
         ? type_info[payload->type_id].type : NULL;
 }
 
+// S7.6.3v3/S11.4.6v3: ^ removes the error arm of an already admitted local.
+// Its plain contract fixes the normal kind; an error union does not convert it.
+static TypeId mir_admitted_scalar_propagation_type(MirTranspiler* mt,
+        AstUnaryNode* unary) {
+    if (!mt || !unary || unary->op != OPERATOR_PROPAGATE ||
+            mir_in_inline_context(mt)) return LMD_TYPE_ANY;
+    AstNode* operand = ast_unwrap_primary(unary->operand);
+    if (!operand || operand->node_type != AST_NODE_IDENT) return LMD_TYPE_ANY;
+    AstIdentNode* ident = (AstIdentNode*)operand;
+    NameEntry* entry = ident->entry;
+    if (!entry || entry->is_mutable || entry->is_var_param ||
+            !entry->admission_may_fail || !entry->node ||
+            entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !entry->declared_type ||
+            lambda_type_accepts_error(entry->declared_type) ||
+            lambda_type_accepts_null(entry->declared_type) ||
+            mir_argument_is_module_binding(mt, operand)) return LMD_TYPE_ANY;
+    bool nullable = false;
+    Type* scalar = mir_plain_scalar_contract(entry->declared_type, &nullable);
+    if (!scalar || nullable) return LMD_TYPE_ANY;
+    MirVarEntry* variable = mir_var_for_ident(mt, ident);
+    if (variable && (variable->from_env || variable->in_scope_env ||
+            variable->env_offset >= 0 || variable->is_var_param ||
+            variable->is_state_var)) return LMD_TYPE_ANY;
+    if (mt->native_return_analysis_fn) {
+        // A prepass has no MIR locals yet. Lexical ownership excludes captures.
+        NameScope* scope = entry->scope;
+        for (int depth = 0; scope && depth < 64; depth++, scope = scope->parent) {
+            if (scope == mt->native_return_analysis_fn->vars) return scalar->type_id;
+        }
+        return LMD_TYPE_ANY;
+    }
+    return variable ? scalar->type_id : LMD_TYPE_ANY;
+}
+
 static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
         AstCallNode* call, Type* target) {
     // particular-error contracts still need their error-admission firewall.
@@ -8538,7 +8595,12 @@ static MirVarEntry* mir_reusable_array_argument_root(MirTranspiler* mt,
 // rejection semantics, but make the common non-null arm a raw move instead of
 // boxing the value just to call lambda_type_check (S4.1, D2.4, D3.2.1).
 static MIR_reg_t emit_native_scalar_declaration_boundary(MirTranspiler* mt,
-        MIR_reg_t value, Type* expected, const char* site) {
+        MIR_reg_t value, Type* expected, const char* site,
+        bool propagate_failure = false) {
+    // An explicit immediate ^ exits the activation, including inside a block
+    // or a containing call/store. It never uses implicit binding containment.
+    MirBindingBoundary propagation(mt, NULL, 0, propagate_failure);
+    MirAdmissionCheckScope checking(mt, propagate_failure ? false : mt->checking_admission);
     MIR_reg_t is_null = new_reg(mt, "native_decl_null", MIR_T_I64);
     if (expected->type_id == LMD_TYPE_FLOAT) {
         MIR_reg_t bits = emit_double_bits(mt, value);
@@ -8558,8 +8620,8 @@ static MIR_reg_t emit_native_scalar_declaration_boundary(MirTranspiler* mt,
     MIR_label_t rejected = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, rejected), MIR_new_reg_op(mt->ctx, is_null)));
-    if (defer_terminal_checked_null_rejection(mt,
-            rejected, expected, site)) {
+    if ((!propagate_failure || !mt->task_scopes) &&
+            defer_terminal_checked_null_rejection(mt, rejected, expected, site)) {
         // The native success lane falls through without an inline may-GC
         // island. Keeping the known-null diagnostic at the terminal edge
         // prevents an almost-never-taken typed assignment check from making
@@ -12394,10 +12456,11 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
     // native scalar merely because static inference found one.
     if (node->node_type == AST_NODE_HANDLER_EXPR ||
             node->node_type == AST_NODE_HANDLER_STAM) return LMD_TYPE_ANY;
-    // Propagation preserves a successful Item, including its numeric kind.
-    // Its narrowed semantic type does not prove a fresh native conversion.
+    // A plain admitted local fixes its success kind; other outcomes preserve
+    // their Item, including the member kind of an ordinary error union.
     if (node->node_type == AST_NODE_UNARY &&
-            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) return LMD_TYPE_ANY;
+            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE)
+        return mir_admitted_scalar_propagation_type(mt, (AstUnaryNode*)node);
     // Unwrap PRIMARY nodes (parenthesized expressions)
     if (node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
@@ -18168,11 +18231,17 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
                 MIR_new_reg_op(mt->ctx, boxed)), VALUE_REP_ITEM);
     }
     case OPERATOR_PROPAGATE: {
-        MIR_reg_t result = transpile_box_item(mt, un->operand);
+        MirValue operand = transpile_expr_value(mt, un->operand);
         TypeId success = mir_expr_carrier_type(mt, (AstNode*)un);
         ValueRep rep = (mir_is_native_scalar_value_type(success) ||
                 is_text_type_id(success))
             ? lambda_canonical_rep_for_type_id(success) : VALUE_REP_ITEM;
+        if (success != LMD_TYPE_ANY && operand.rep == rep &&
+                rep != VALUE_REP_ITEM) {
+            // D2.4.1: a producer-owned success lane cannot hold ItemError.
+            return mir_unary_value(mt, un, operand.reg, rep);
+        }
+        MIR_reg_t result = em_require_rep(&mt->em, operand, VALUE_REP_ITEM).reg;
         return mir_unary_value(mt, un,
             transpile_propagated_result(mt, result, (AstNode*)un), rep);
     }
@@ -23588,6 +23657,52 @@ static bool mir_alias_is_readonly_borrow(MirTranspiler* mt, AstDeclaratorNode* d
     return !ast_body_may_write_entry(statement->next, source->binding, true, last_use->next);
 }
 
+// S7.7.2v2/S7.6.3v3: this sole immediate ^ cannot observe a retained failure
+// before propagating it, so its scalar admission may keep the success lane.
+static bool mir_binding_immediately_propagated(MirTranspiler* mt,
+        AstLetNode* statement, AstDeclaratorNode* declaration) {
+    if (!mt->in_user_func || mir_in_inline_context(mt) || !mt->ast_index ||
+            statement->node_type != AST_NODE_LET_STAM ||
+            statement->declare != (AstNode*)declaration || declaration->next ||
+            !declaration->entry || declaration->entry->is_mutable ||
+            !declaration->declared_type ||
+            lambda_type_accepts_error(declaration->declared_type) ||
+            lambda_type_accepts_null(declaration->declared_type)) return false;
+    bool nullable = false;
+    if (!mir_plain_scalar_contract(declaration->declared_type, &nullable) || nullable)
+        return false;
+    AstNode* next = statement->next;
+    if (!next) return false;
+    if (next->node_type == AST_NODE_RETURN_STAM) next = ((AstReturnNode*)next)->value;
+    else if (next->node_type == AST_NODE_ASSIGN_STAM) next = ((AstAssignStamNode*)next)->value;
+    else if (next->node_type == AST_NODE_LET_STAM) {
+        next = ((AstLetNode*)next)->declare;
+        if (!next || next->next || next->node_type != AST_NODE_VARIABLE_DECLARATOR)
+            return false;
+        next = ((AstDeclaratorNode*)next)->init;
+    }
+    next = ast_unwrap_primary(next);
+    if (!next || next->node_type != AST_NODE_UNARY ||
+            ((AstUnaryNode*)next)->op != OPERATOR_PROPAGATE) return false;
+    AstNode* operand = ast_unwrap_primary(((AstUnaryNode*)next)->operand);
+    if (!operand || operand->node_type != AST_NODE_IDENT ||
+            ((AstIdentNode*)operand)->entry != declaration->entry) return false;
+    const AstIndex* index = mt->ast_index;
+    AstBindingId binding = ast_index_find_binding_entry(index, declaration->entry);
+    uint32_t count = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index, binding, &count);
+    bool found = false;
+    for (uint32_t i = 0; uses && i < count; i++) {
+        AstNode* original = index->nodes[uses[i]];
+        AstNode* use = original;
+        if (original == (AstNode*)declaration ||
+                mir_index_use_parent(index, &use) == (AstNode*)declaration) continue;
+        if (original != operand) return false;
+        found = true;
+    }
+    return found;
+}
+
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     MirSourceScope source_scope(mt, let_node);
     AstNode* declare = let_node->declare;
@@ -23605,6 +23720,9 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
         if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
             bool outcome_binding = asn->entry && asn->entry->admission_may_fail;
+            bool immediate_propagation = outcome_binding &&
+                mir_binding_immediately_propagated(mt, let_node, asn);
+            bool fused_propagation = false;
             if (!outcome_binding && (mir_try_scalar_array_binding(mt, asn) ||
                     mir_try_scalar_array_call_binding(mt, asn))) {
                 declare = declare->next;
@@ -23760,6 +23878,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     expr_tid = LMD_TYPE_INT;
                 } else if (initializer_value.rep != VALUE_REP_NONE) {
                     expr_tid = mir_value_carrier_type(initializer_value);
+                }
+                if (immediate_propagation &&
+                        (expr_tid == LMD_TYPE_INT || expr_tid == LMD_TYPE_FLOAT) &&
+                        expr_tid == mir_decl_type_id(asn->declared_type) &&
+                        initializer_value.rep == lambda_canonical_rep_for_type_id(expr_tid) &&
+                        mir_expr_proves_native_return_lane(mt, asn->init, expr_tid)) {
+                    outcome_binding = false;
+                    fused_propagation = true;
                 }
                 // The AST retains the source annotation explicitly.  Inferring
                 // annotation-ness from a numeric TypeId made `let x: T` and
@@ -24011,7 +24137,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
                         (int)asn->name->len, asn->name->chars);
                     val = emit_native_scalar_declaration_boundary(mt, val,
-                        declared_value_type, boundary);
+                        declared_value_type, boundary, fused_propagation);
                     // The boundary preserved a proved native success lane.
                     // Keep the descriptor aligned with that physical result
                     // instead of retaining the source's boxed fallback
@@ -43394,18 +43520,13 @@ static bool mir_return_boundary_may_fail(MirTranspiler* mt, AstFuncNode* fn) {
         // the emitter's own native-lane proof, recursive calls counted at the
         // lane under proof (infer_proc_native_return_lane): a proven lane is
         // converted at the return, never re-admitted
-        AstFuncNode* saved_fn = mt->native_return_analysis_fn;
-        TypeId saved_tid = mt->native_return_analysis_tid;
-        mt->native_return_analysis_fn = fn;
-        mt->native_return_analysis_tid = lane;
+        MirNativeReturnAnalysisScope analysis(mt, fn, lane);
         int returns = 0;
         MirDefectOriginScan narrowing = {};
         narrowing.mt = mt;
         bool proven = mir_proc_return_values_prove(mt, fn->body, lane,
                 &returns, false, &narrowing) &&
             (!tail || mir_solve_value_proves_lane(&narrowing, tail, lane, 0));
-        mt->native_return_analysis_fn = saved_fn;
-        mt->native_return_analysis_tid = saved_tid;
         if (proven) return false;
     }
     // the emitter's body scope: an expression body's record literal adopts
@@ -43443,16 +43564,13 @@ static bool mir_body_originates_defect(MirTranspiler* mt, AstFuncNode* fn_node) 
     if (signature && signature->has_explicit_return_contract && signature->return_contract) {
         (void)mir_contract_native_scalar_type(signature->return_contract, &own_lane);
     }
-    AstFuncNode* saved_fn = mt->native_return_analysis_fn;
-    TypeId saved_tid = mt->native_return_analysis_tid;
-    if (own_lane == LMD_TYPE_INT || own_lane == LMD_TYPE_FLOAT || own_lane == LMD_TYPE_BOOL) {
-        mt->native_return_analysis_fn = fn_node;
-        mt->native_return_analysis_tid = own_lane;
+    {
+        bool native = own_lane == LMD_TYPE_INT || own_lane == LMD_TYPE_FLOAT ||
+            own_lane == LMD_TYPE_BOOL;
+        MirNativeReturnAnalysisScope analysis(mt, native ? fn_node : NULL, own_lane);
+        walk_lambda_ast(fn_node ? fn_node->body : NULL, mir_find_defect_origin,
+            &scan, false);
     }
-    walk_lambda_ast(fn_node ? fn_node->body : NULL, mir_find_defect_origin,
-        &scan, false);
-    mt->native_return_analysis_fn = saved_fn;
-    mt->native_return_analysis_tid = saved_tid;
     bool return_fails = !scan.found && mir_return_boundary_may_fail(mt, fn_node);
     bool found = scan.found || return_fails;
     if (found) {
@@ -43988,6 +44106,11 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
 
     if (node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_PROPAGATE) {
+            TypeId success = mir_admitted_scalar_propagation_type(mt, unary);
+            return success == expected || (!exact_kind &&
+                expected == LMD_TYPE_FLOAT && success == LMD_TYPE_INT);
+        }
         if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
             return mir_expr_proves_native_return_lane(mt, unary->operand, expected, exact_kind);
         }
@@ -44280,9 +44403,8 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
     if (!mt || !fn_node || ((AstNode*)fn_node)->node_type != AST_NODE_PROC) {
         return LMD_TYPE_ANY;
     }
-    TypeFunc* signature = fn_node->type && fn_node->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)fn_node->type : NULL;
-    if (signature && signature->can_raise) return LMD_TYPE_ANY;
+    // D5.2.1v5: ordinary errors use the companion lane; prove the normal
+    // returns independently instead of boxing every error-admitting procedure.
     // A failing interior array admission exits with an ItemError, even when
     // every explicit return is scalar. A native-only ABI would lose it.
     if (function_body_may_check_array_call(mt, fn_node)) return LMD_TYPE_ANY;
@@ -44303,15 +44425,10 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
     const TypeId candidates[] = {LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL,
         LMD_TYPE_STRING};
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-        AstFuncNode* saved_fn = mt->native_return_analysis_fn;
-        TypeId saved_tid = mt->native_return_analysis_tid;
-        mt->native_return_analysis_fn = fn_node;
-        mt->native_return_analysis_tid = candidates[i];
+        MirNativeReturnAnalysisScope analysis(mt, fn_node, candidates[i]);
         int return_count = 0;
         bool proven = mir_proc_return_values_prove(mt, body, candidates[i],
             &return_count);
-        mt->native_return_analysis_fn = saved_fn;
-        mt->native_return_analysis_tid = saved_tid;
         log_debug("mir: proc return lane candidate=%d proven=%d returns=%d",
             candidates[i], proven, return_count);
         if (proven && return_count > 0) return candidates[i];
@@ -44499,6 +44616,7 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
                 // S7.4.2v3: current ordinary union admission preserves a conforming member.
                 // A native return must prove its actual kind, not merely that
                 // numeric admission could convert it to the declared arm.
+                MirNativeReturnAnalysisScope analysis(mt, fn_node, ret_tid);
                 int returns = 0;
                 bool exact = is_proc
                     ? mir_proc_return_values_prove(mt, fn_node->body, ret_tid,
