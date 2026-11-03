@@ -22,6 +22,6 @@ pn main() {
     let indexed = box["n"]
     let message = box.message
     let code = box.code;
-    [value is error, admitted is error, indexed == null,
+    [value is error, admitted is error, indexed is error,
      message is string, code is int, (box.n ^ { 99 }), member_loop()]
 }

@@ -1,6 +1,7 @@
 # Lambda — Type and Error Handling Implementation Plan
 
-**Status:** M1–M8 product changes and authored caller migration are implemented
+**Status:** complete for production T0/MIR Direct, with the user parity waiver.
+M1–M8 product changes and authored caller migration are implemented
 and qualified by the Lambda, MIR, GC, input and Test262 gates in
 `codex/error-handling-20261102`. On 2026-11-03 the user waived the final full
 parity sweep and interpreter-manifest refresh and requested merge to remote
@@ -10,7 +11,7 @@ normal admission ruling and approved MIR repair are implemented; safety
 assertions remain intact. See the
 [M8 qualification boundary](#m8-qualification-boundary-2026-11-03). Earlier
 progress entries are historical checkpoints; their pending items do not override
-the phase table or M8 record.
+the phase table or final production-integration record.
 **Date:** 2026-11-02.
 **Design:** [Type and Error Handling](../Lambda_Design_Type_Error_Handling.md),
 TE-13.1–TE-13.4, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
@@ -517,11 +518,11 @@ result. Keep all artifacts under `temp/`.
 | Phase | Status | Evidence required before completion |
 |---|---|---|
 | P0 | Complete | Starting behavior, fixtures, caller and binding inventories are recorded below. |
-| P1 | Complete | Normalized outcomes, admission, composition and overwritten-result diagnostics pass 321/321 diagnostic cases and the 6,456/6,456 Lambda aggregate. |
-| P2 | Complete | Retained outcomes, normal admission through error unions and physical carriers pass 288/288 tier/GC runs, 282/282 MIR checks and 352/352 MIR GC cases. |
-| P3 | Qualified in M1 | Handler/fallback parsing, residual errors, chaining, results and suspension are implemented. |
-| P4 | Complete within the migration scope | All 4,081 authored non-negative scripts are audited: 4,035 compile, with only the same 46 reviewed failures. Package/demo binding shorthand is migrated; unrelated host limits are recorded separately. |
-| P5 | Accepted with user parity waiver, 2026-11-03 | Lambda 6,456/6,456, Test262 40,261/40,261 and input baselines 2,112/2,112 pass. The user explicitly skipped the final full sweep and three-manifest refresh; the lists remain unchanged, with no final parity claim. Assertions stay intact; emission growth is reviewed under D8.6.1. |
+| P1 | Complete | Admission/composition diagnostics pass 324/324 and the final Lambda aggregate passes 6,594/6,594. |
+| P2 | Complete | M8 passed 288/288 tier/GC runs; the final host passes 12/12 integration runs, 285/285 MIR checks and 355/355 MIR GC cases. |
+| P3 | Complete | Handler/fallback parsing, residual errors, chaining, results and suspension are qualified on production T0/MIR Direct. |
+| P4 | Complete for production; MVP adaptation deferred by USER | Current inventory: 4,084/4,141 compile, with 46 reviewed legacy failures and 11 deferred MVP fixtures (LR01-22); no unexpected failures. Authored production callers and binding shorthand are migrated. |
+| P5 | Accepted with user parity waiver, 2026-11-03 | Final Lambda 6,594/6,594, input 2,112/2,112 and Test262 40,261/40,261 pass. The user skipped full parity/manifest refresh and deferred MVP adaptation. Assertions remain intact; emission growth is reviewed under D8.6.1. |
 
 
 <a id="m1-handler-outcomes"></a>
@@ -2077,7 +2078,7 @@ status. In particular, the user settled normal admission through error unions
 The complete final parity sweep remains incomplete.
 
 > The phased work and qualification criteria are recorded in
-> [Type and Error Handling Implementation Plan](Lambda_Impl_Type_Error_Handling.md).
+> [Type and Error Handling Implementation Plan](<Lambda_Impl_Type_Error_Handling (done).md>).
 > M1 completes handler forms/results. M2/M3 implement core admission and
 > ordinary outcomes; package/demo migration and aggregate qualification remain
 > in progress. It includes the requested `T | error` to `T^`
@@ -2094,7 +2095,7 @@ The complete final parity sweep remains incomplete.
 > M1 tests. Explicit `is (error | null)` classification uses the existing operator and
 > acknowledges its subject under the M2/M3 receiver checks.
 > S7.5.7 needs no keyword implementation: `empty` is an ordinary user alias.
-> See the [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+> See the [M1 record](<Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 >
 > ### Typed-caret retirement
 >
@@ -2103,7 +2104,7 @@ The complete final parity sweep remains incomplete.
 > alternatives, with broad `T^` retained. Four authored broad contracts were
 > migrated; the parser gate passes C 461/461 and Tree-sitter 448/448. General
 > package/demo qualification is still in progress. See the
-> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+> [M2/M3 record](<Lambda_Impl_Type_Error_Handling (done).md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02>).
 >
 > ### Ordinary-error unification
 >
@@ -2115,7 +2116,7 @@ The complete final parity sweep remains incomplete.
 > The non-error default of an unannotated `fn` is preserved. S11.4.6v3's base-only
 > constraint admission is also preserved; predicate enforcement is not added by
 > this change. Current package migration and remaining qualification are in the
-> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+> [M2/M3 record](<Lambda_Impl_Type_Error_Handling (done).md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02>).
 >
 > ### Success-arm retirement
 >
@@ -2124,7 +2125,7 @@ The complete final parity sweep remains incomplete.
 > 510 authored uses were migrated to one-handler expressions, error checks, or
 > explicit branching. Parser conformance and existing handler goldens qualify
 > single evaluation, result preservation, and restored lexical subjects.
-> See the [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+> See the [M1 record](<Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 >
 > ### Validation and reassignment outcomes
 >
@@ -2202,32 +2203,32 @@ The complete final parity sweep remains incomplete.
 > now matches its JIT golden after this boundary repair. A complete interpreter
 > sweep still reports legacy and vendor divergences and has not published new
 > manifests; detailed comparisons and qualification limits are in the
-> [implementation record](Lambda_Impl_Type_Error_Handling.md).
+> [implementation record](<Lambda_Impl_Type_Error_Handling (done).md>).
 > S7.7.3/D8.2.6 tail-call rejection retains its ordinary error outcome even when
 > the successful path becomes a backedge. D5.1.3/D5.2.3 interpreter publication
 > also captures wide scalar payloads before frame teardown, preserving snapshots
 > when a later outcome replaces the variable. Qualification and the remaining
 > vendor divergence are tracked in the
-> [tail-call and ownership record](Lambda_Impl_Type_Error_Handling.md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03).
+> [tail-call and ownership record](<Lambda_Impl_Type_Error_Handling (done).md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03>).
 > S7.6.3v3/S11.4.6v3 validated plain scalar locals also retain their proven
 > normal kind after propagation. D5.2.1v5 procedure planning keeps the ordinary
 > error companion independently of that success lane. An immediate, sole `^`
 > may fuse a local's check without skipping intervening user code or changing its
 > error location (S7.7.2v2/S7.4.4); other observations retain the boxed outcome.
-> The [scalar qualification record](Lambda_Impl_Type_Error_Handling.md#admitted-scalar-success-lanes-and-immediate-propagation-2026-11-03)
+> The [scalar qualification record](<Lambda_Impl_Type_Error_Handling (done).md#admitted-scalar-success-lanes-and-immediate-propagation-2026-11-03>)
 > records the restored libm budget and remaining aggregate work.
 > D8.6.1 also requires making intended emission growth explicit. The remaining
 > cube/delta/printer comparisons retain validation outcomes and checked argument
 > entry rather than relying on the retired declaration exit. Their reviewed
 > zero-slack budgets pass 20/20; benchmark output matches the original compiler,
 > and invalid-input tier/GC probes pass. The
-> [emission review](Lambda_Impl_Type_Error_Handling.md#reviewed-emission-cost-of-retained-outcomes-2026-11-03)
+> [emission review](<Lambda_Impl_Type_Error_Handling (done).md#reviewed-emission-cost-of-retained-outcomes-2026-11-03>)
 > records the measured cost, conservative proof limits and qualification scope.
 > The final complete tier sweep has 1,431 matches, eight exclusions and one
 > vendor-loop mismatch among 1,440 scripts, without timeouts (S1.6). That mismatch
 > prevents manifest publication. At that M7 checkpoint, the two ordinary-union admission proof checks
 > awaited the ruling now settled by TE-13.4; the
-> [final qualification boundary](Lambda_Impl_Type_Error_Handling.md#final-independent-qualification-boundary-2026-11-03)
+> [final qualification boundary](<Lambda_Impl_Type_Error_Handling (done).md#final-independent-qualification-boundary-2026-11-03>)
 > names the exact checks and required inputs. No assertion is waived.
 >
 > Return-admission inference publishes resolved declared results before a body
@@ -2247,7 +2248,7 @@ The complete final parity sweep remains incomplete.
 > failure outcome. A known incompatible source remains a static error. The same
 > rule applies to whole-variable reassignment. Focused tier/GC and diagnostic
 > qualification is recorded in the
-> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+> [M2/M3 record](<Lambda_Impl_Type_Error_Handling (done).md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02>).
 >
 > ### Handler results
 >
@@ -2258,7 +2259,7 @@ The complete final parity sweep remains incomplete.
 > return of fresh recovery errors were removed while preserving procedure fault
 > protection. Focused tests cover explicit return, chained recovery, nested
 > subjects, and forced GC. See the
-> [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+> [M1 record](<Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 >
 
 ### M8 qualification boundary (2026-11-03)
@@ -2313,3 +2314,50 @@ no engine rebuild or regression rerun was needed for this cleanup. Evidence:
 remote master and delete the implementation worktree. This waives only the final
 parity sweep and its three-manifest refresh. The passing gates above retain
 their recorded scope; no partial sweep is promoted to a passing result.
+
+## Production integration and user acceptance (2026-11-03)
+
+The merge preserves master's function-local control/capture homes and pure
+benchmark migration. Completed `fn` bodies validate explicit exits without an
+invented collected fallthrough (S12.1.2v3). The shared MIR exit walk retains
+independent success/error carriers and exact-kind proofs (D5.2.1v5).
+Binding outcomes initialize shared local capture homes without declaration
+exits (S7.7.2v2); the paired `fn_local_error_outcomes` regression covers them.
+
+Caller migration includes the newly published chat/file-picker, scene audio
+and pure benchmark helpers. Fallible returns disclose outcomes; dynamic guards
+and IO explicitly propagate. Best-effort chat notification helpers accept
+errors and recover with a clean `null` contract. UI fallbacks use handlers and
+`or^`. No new syntax is introduced.
+
+Master advanced from `88d30f849` to `1b0927e30` during qualification. The latter's
+MVP implementation/additions and shared error-index metadata fix are preserved.
+Two older admission fixtures had treated indexing an error as absence; they
+now assert error preservation under S7.9.3 and S7.1.1v3's non-error-base
+qualification. Their expected output files are unchanged. USER deferred
+experimental MVP adaptation (LR01-22); it is not qualified here.
+
+| Production check | Result |
+|---|---|
+| Lambda baseline after latest master | 6,594/6,594 across 32 suites; runtime 2,039/2,039, diagnostics 324/324, MIR 285/285, ratchets 20/20, MIR GC 355/355 |
+| Required input baselines | 2,112/2,112 |
+| Test262 baseline | 40,261/40,261 on the final merged host |
+| Focused shared-home/normal admission | 12/12 exact-output runs on the latest host, interp/JIT/AUTO with normal and forced/poisoned GC |
+| Benchmark output oracles | Cube, DeltaBlue and printer match original output excluding timing; no performance claim |
+| Current authored-source inventory | 4,084/4,141 compile; 46 reviewed legacy failures and 11 deferred MVP fixtures; zero unexpected failures |
+| Full parity and three-manifest refresh | Skipped by USER; manifests unchanged; no final parity pass claimed |
+
+D8.6.1 emission review combines both changes. Cube's module shrinks
+19,194→19,072; its body gains exactly 12 join MOVs (11,720→11,732), with no new
+calls. DeltaBlue's module grows 14,486→14,646: pure callees expose borrowed
+aliases, requiring 3/2/5 guarded COW/boundary paths in
+`constraint_execute`/`constraint_recalc`/`incremental_remove` (+84/+54/+122).
+Five wrappers shrink by 17 each and the empty module collector by 15.
+`choose_method` and all frame/root ceilings remain unchanged. Exact default
+caps record the measured cost; other profiles are untouched.
+
+Evidence is preserved outside the worktree under
+`temp/error-handling-merge-20261103T054805Z/`. `qualification-evidence.tar.gz`
+contains the earlier `temp/error-handling/` records; final native reports,
+source inventories, MIR diffs, host hashes and focused/oracle results accompany
+it. Standalone validation syntax and general cleanup remain separate questions.

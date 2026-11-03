@@ -50,7 +50,7 @@ Acknowledgement means accepting the outcome as a possible bound value. It
 does not establish success, recover, or propagate out of the enclosing
 procedure. An error accepted by the binding remains an ordinary error value;
 subsequent statements can execute. The resulting type preserves the error
-possibility, independently of its origin (S7.4.1v2–S7.4.2v3, TE-13.2).
+possibility, independently of its origin (S7.4.1v2–S7.4.2v4, TE-13.2).
 
 **`any` definitely admits error** (S11.4.3); it is not an undecidable case.
 `any` and `any | error` acknowledge identically. Admission follows the meaning
@@ -198,7 +198,7 @@ present (S7.6.3v3). Receiving an error in an ordinary binding does neither.
 
 **`T^` means `T | error` in every type position, including function returns.**
 Equivalent annotations have identical admission and caller obligations, and
-either permits `raise` when the error fits the return contract (S7.4.2v3).
+either permits `raise` when the error fits the return contract (S7.4.2v4).
 
 ```lambda
 pn first() int^ {
@@ -223,7 +223,7 @@ Plain successful `T` cannot silently return an error.
 TE-13.3 below closes the typed-error-set question: remove `T^E`, retain `T^`,
 and express particular error outcomes using ordinary unions. All ordinary
 errors must fit the contract; the former implicit broad-error allowance is
-retired (S7.4.2v3, S11.4.2v3).
+retired (S7.4.2v4, S11.4.2v3).
 
 ### Acknowledgement retains, handles, or forwards an outcome
 
@@ -1003,22 +1003,26 @@ These topics await further decisions; they do not alter current rulings.
 
 ## Appendix A — Implementation status
 
-**Current as of 2026-11-03, M8.** The ratified implementation and authored caller
-migration are complete. The Lambda baseline passes **6,456/6,456**, input
-baselines **2,112/2,112**, Test262 **40,261/40,261**, and the focused tier/GC
-matrix **288/288**. MIR emission **282/282**, size ratchets **20/20**, native
-admission **55/55**, and MIR GC **352/352** pass with their assertions intact.
-The authored-source audit compiles **4,035/4,081** scripts, retaining the same
-**46** reviewed failures with no new failures or timeouts.
+**Production qualification, 2026-11-03.** The ratified implementation and
+authored caller migration are complete. Lambda passes **6,594/6,594**, input
+baselines **2,112/2,112**, MIR emission **285/285**, size ratchets **20/20**,
+native admission **55/55**, and MIR GC **355/355** with assertions intact.
+M8's focused tier/GC matrix passed **288/288**; the final merged host passes
+**12/12** focused shared-home/normal-admission runs. The authored-source
+inventory compiles **4,084/4,141** scripts: **46** reviewed legacy failures and
+**11** explicitly deferred MVP fixtures remain, with no unexpected failures.
+Final Test262 evidence is in the production-integration record below.
 
 **P5 is accepted with a user waiver (2026-11-03):** skip the full official
 parity sweep and the three interpreter-manifest refreshes, and merge the
 implemented changes. Earlier attempts were interrupted by external SIGTERM;
 no final parity pass is claimed, and the manifests remain unchanged.
-The [M8 qualification record](impl/Lambda_Impl_Type_Error_Handling.md#m8-qualification-boundary-2026-11-03)
-is the current evidence and completion boundary. Earlier measurements and
+The [production integration record](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>)
+is the final completion boundary. Experimental MVP adaptation is deferred by
+USER to the ongoing main-checkout work; its eleven incompatible fixtures are
+[LR01-22](Lambda_Issue_Ledger.md#lr01-22), outside production qualification. Earlier measurements and
 implementation details are preserved in the
-[historical status notes](impl/Lambda_Impl_Type_Error_Handling.md#historical-design-document-implementation-status-m1m7-superseded).
+[historical status notes](<impl/Lambda_Impl_Type_Error_Handling (done).md#historical-design-document-implementation-status-m1m7-superseded>).
 
 ### Handler convenience status
 

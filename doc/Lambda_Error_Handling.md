@@ -14,7 +14,9 @@ GC, input and Test262 gates are qualified. The user waived the complete parity
 sweep and interpreter-manifest refresh on 2026-11-03; the manifests retain their
 last qualified contents, and no final parity pass is claimed. Exact results and
 limits are in the
-[M8 qualification record](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m8-qualification-boundary-2026-11-03).
+[production qualification record](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
+Experimental Lambda MIR MVP adaptation is deferred separately
+([LR01-22](../vibe/Lambda_Issue_Ledger.md#lr01-22)).
 General `fn`-local control, including explicit `return` in `fn`, is qualified
 separately in the [completed extension](<../vibe/impl/Lambda_Impl_Function_Local_State (done).md>).
 

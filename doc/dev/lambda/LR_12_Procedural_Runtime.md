@@ -115,7 +115,7 @@ position (S7.6.1v9, S7.6.7v5). `is_statement` retains the procedure fault
 regime independently of result production. `validate_handler_await_node`
 still rejects a potentially suspending operand without that procedure
 classification. M1 qualification is recorded in
-[the error-handling plan](../../../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+[the error-handling plan](<../../../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 
 `concurrency_js.cpp` is the JS membrane. A `pn` that `wait`s on a JavaScript Promise registers two reactions and parks through `lambda_task_suspend` (`lambda_wait_js_promise`). The reaction resumes it with the fulfilment, or with the rejection converted to a Lambda error. A Lambda handle can be observed as a Promise through `toPromise`, and module namespaces wrap every exported `pn` as a Promise-returning JavaScript function that starts it as a fresh task. Both sides share the same scheduler and libuv loop; no exception representation crosses the boundary.
 

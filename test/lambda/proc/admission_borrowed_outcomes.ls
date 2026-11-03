@@ -21,8 +21,8 @@ pn main() {
     var failed_array: int[] = [3, 4]
     let kept_array = failed_array
     let outcome = forward_array_outcome(failed_array, "bad")
-    // S7.1.1v3: an invalid index read of the retained error yields null.
-    let array_failed = failed_array is error and failed_array[0] is null
+    // S7.9.3: indexing a retained error preserves it; S7.1.1v3 covers non-error bases.
+    let array_failed = failed_array is error and failed_array[0] is error
     failed_array = [8];
     [before(), observed is error, value is error, unchanged, early.message,
         values, snapshot, array_failed, failed_array, kept_array]

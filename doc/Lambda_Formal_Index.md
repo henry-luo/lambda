@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v81.0.0 (2026-11-03)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v81.0.1 (2026-11-03)
 
 | ID | Line | Title |
 |---|---|---|
@@ -492,7 +492,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3351 | How an element pattern spells *content must be empty* |
 | SO48 | 3352 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v60.0.0 (2026-11-03)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v60.0.1 (2026-11-03)
 
 | ID | Line | Title |
 |---|---|---|

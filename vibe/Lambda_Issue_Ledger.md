@@ -494,7 +494,24 @@ artifact kind without changing the requested execution tier (D8.1.1v18,
 D8.5.1v3). This is separate from error-union admission. Bounded LLDB trace and
 source comparison: `temp/error-handling/m8-terminal-no-cache-stack.log` and
 `m8-cache-retry-root-review.json`; qualification record:
-[type/error implementation](impl/Lambda_Impl_Type_Error_Handling.md).
+[type/error implementation](<impl/Lambda_Impl_Type_Error_Handling (done).md>).
+
+<a id="lr01-22"></a>**LR01-22 · Experimental Lambda MIR MVP needs the new error rules · OPEN (2026-11-03)**
+
+The production frontend enforces S7.7.2v2/S7.7.4v2 retained binding outcomes
+and S11.4.6v4 normal admission through error unions. Experimental MVP fixtures
+still use clean returns after fallible admissions/assignments and unchecked
+loop conversions. Six incompatible fixtures were found against `88d30f849`;
+the latest MVP work at `1b0927e30` brings the current count to eleven.
+`admitted_call` explicitly rejects propagation, and unary admission excludes
+`OPERATOR_PROPAGATE` (`lambda/runtime/mvp/mvp_plan.cpp`). Adapt fixtures and
+prototype together; do not restore declaration exits or erase error outcomes.
+Normal admission and post-binding recovery also need prototype qualification.
+**USER, 2026-11-03: leave MVP adaptation to the ongoing main-checkout work.**
+This merge preserves that implementation without claiming MVP qualification.
+Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
+and `final-source-audit.json`.
+[Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
 
 ## 2. Parsing & AST construction (LR_02)
 
