@@ -38,6 +38,8 @@ struct MvpBinding {
     MvpIntRange range;
     MIR_reg_t var_home;
     MIR_reg_t array_native;
+    MIR_reg_t array_float_native;
+    MIR_reg_t record_writable;
     MIR_reg_t array_writable;
     MIR_reg_t array_length;
     int64_t array_extent;
@@ -54,6 +56,7 @@ struct MvpBinding {
     bool readonly_literal;
     bool inferred_array;
     bool array_present;
+    bool record_written;
 };
 
 struct LambdaMvpModule {
@@ -110,6 +113,7 @@ struct MvpCompiler {
     MvpControl* control;
     MvpScope* scope;
     MvpInline* inlining;
+    MvpErrorTarget* condition_failure;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;
@@ -125,6 +129,7 @@ struct MvpCompiler {
     MvpFunction* dense_callee;
     bool dense_calls;
     bool checked_bitwise;
+    bool checked_float_compare;
 };
 
 struct MvpArraySumPlan {
@@ -194,6 +199,7 @@ bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, 
 bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
 bool mvp_index_key(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
+TypeMap* mvp_scalar_record_contract(Type* contract);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);

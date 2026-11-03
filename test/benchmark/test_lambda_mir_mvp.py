@@ -80,6 +80,11 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_array_domains.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_borrow_kernel.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_proven_domains.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_numeric_cast.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_record_witness.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_string_arrays.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_predicate_branch.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -426,11 +431,61 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("\tdiv\t", body)
             self.assertIn("lambda_int_lane_divmod_slow", body)
 
+    def test_nullable_numeric_cast_emission(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_numeric_cast.ls"
+        for name in ("float_literals", "int_literals"):
+            body = self.function_mir(source, name)
+            self.assertNotIn("\tcall\tfn_int", body)
+            self.assertNotIn("\tcall\tfn_float", body)
+        for name, helper in (("as_int", "fn_int"), ("from_float", "fn_int"),
+                             ("widen_optional", "fn_float"), ("same_float", "fn_float")):
+            body = self.function_mir(source, name)
+            self.assertIn("\tcall\t" + helper, body)
+            # conversion helpers remain only on the absent arm.
+            before_helper = body[:body.index("\tcall\t" + helper)]
+            self.assertIn("\tjmp\t", before_helper)
+        store = self.function_mir(source, "store_cast")
+        self.assertIn("lambda_array_set_checked_item", store)
+        self.assertNotIn("lambda_array_set_checked_preplanned", store)
+
+    def test_float_predicate_branch(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls", "find_prefix")
+        native = body[:body.index("\tcall\tfn_index")]
+        self.assertIn("\tdlt\t", native)
+        self.assertNotRegex(native, r"\tor\t[^\n]+, 216172782113783808\n")
+
+    def test_native_string_array_read(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_string_arrays.ls", "fetch_string")
+        native = body[:body.index("\tcall\tfn_index")]
+        self.assertNotRegex(native, r"\tand\t[^\n]+, 17\n")
+        self.assertRegex(native, r"\tand\t[^\n]+, 72057594037927935\n")
+
+    def test_scalar_record_witness(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_record_witness.ls", "bump")
+        native = body[:body.index("\tcall\tlambda_map_set_checked")]
+        self.assertEqual(native.count("u8:1("), 1)
+        self.assertIn("\tadd\t", native)
+
+    def test_erased_float_comparison(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls"
+        for name in ("relation", "reversed"):
+            body = self.function_mir(source, name)
+            native = body[:body.index("\tcall\tfn_index")]
+            self.assertIn("\tdlt\t", native)
+            self.assertNotIn("\tcall\tfn_lt", native)
+            self.assertIn("\tcall\tfn_lt", body)
+
     def test_modular_array_update(self):
-        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls", "step")
+        source = ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls"
+        body = self.function_mir(source, "step")
         first = body[:body.index("\tcall\tfn_index")]
         self.assertRegex(first, r"\tand\t[^\n]+, 15\n")
         self.assertGreater(body.count("lambda_array_set_checked_item"), 0)
+        affine = self.function_mir(source, "affine")
+        first = affine[:affine.index("\tcall\tfn_index")]
+        self.assertRegex(first, r"\tmul\t[^\n]+, 13\n")
+        self.assertRegex(first, r"\tmod\t[^\n]+, 31\n")
+        self.assertIn("\tcall\tfn_int", affine)
 
     def test_single_use_string_constructor(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")

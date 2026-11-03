@@ -7269,11 +7269,12 @@ static Item fn_index_select(Item source, Item index_array) {
 
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
-    // Quick null/error guard: indexing null returns null to propagate
-    // null safely through algorithms. Operations like null[field]
-    // should not crash or return a wrong result.
+    // computed error metadata uses the same member path as dot access; other
+    // keys preserve the failure (S7.4.4, S8.2.1v4, S7.9.3).
     TypeId item_type = get_type_id(item);
-    if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_ERROR) {
+    if (item_type == LMD_TYPE_ERROR) return fn_member(item, index_item);
+    if (item_is_error(index_item)) return index_item;
+    if (item_type == LMD_TYPE_NULL) {
         return ItemNull;
     }
     if (item_type == LMD_TYPE_VMAP) {
