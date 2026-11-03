@@ -1492,3 +1492,103 @@ initializers in `julia/micro_common{,2}.ls`. They now spell the admitted outcome
 as `any^` instead of `any | error` (S7.4.2v3); both modules compile. Explicit
 union fixtures remain unchanged where they test union equivalence or particular
 error admission. Evidence: `m3-final-micro_common{,2}-ast.{dump,err}`.
+
+### Rebuilt aggregate and UI review (2026-11-03)
+
+The rebuilt core aggregate completes **6,441/6,449**: main **2,001/2,003**,
+native optimization **55/55**, MIR emission **278/280**, MIR GC **351/351**,
+runtime diagnostics **321/321**, REPL **50/50**, and HTTP **152/152**.
+Required input suites pass **2,112/2,112**. Eight failing test cases remain:
+two union-normal-admission optimization checks, four size ratchets, the
+multi-fixture tier-parity case, and the previously reproduced MVP alias
+difference. The tier-parity case includes a pending vendor MIR optimizer
+defect, a boolean propagation regression and two stale interpreter-rejection
+expectations; the latter three are addressed below. This is an observed gate,
+not a claim that every failure is pre-existing. Evidence:
+`m3-final-boundary-lambda.log`, its per-suite results directory, and
+`m3-final-boundary-input-{wpt,markdown,yaml,ascii,math}.log`.
+
+The rebuilt map gate passes **20/20**, and the migrated native-view/scene
+selection passes **11/11**. A focused review of 90 previously failing UI
+scenarios passes **67/90** in the parallel run, plus its three scheduler
+checks. Five earlier runtime failures now pass: directory-row click, PGF
+navigation, both document-editor splash cases, and Northstar slides. Two
+previously recovered scenarios exit 137 in that parallel run; each passes
+all **three** fresh isolated reruns. Their kill cause is unestablished.
+The other **21** runtime scenarios remain unqualified, including slide
+aborts; no Radiant production change or assertion weakening is included.
+The home-actions abort reaches a DOM text node with no laid-out text view,
+where caret movement requires `ViewText`. Media insertion also newly aborts
+relative to the original source/compiler run; the original animations case
+already aborts on a different stack. These are recorded separately from the
+error-handling core, not described as a green Radiant aggregate. Evidence:
+`m3-ui-boundary-review.{json,log}`, `m3-ui-killed-isolated-{1,2,3}.json`,
+`m3-final-boundary-{map,native-view}.json`, and the slide differential logs.
+
+### Concrete return admission and boolean outcome carriers (2026-11-03)
+
+S11.4.1v5/S11.4.6v3: a concrete scalar source still crosses the full receiving
+return contract. JIT skipped that check for both expression and explicit
+returns: `int^ => 1.0` returned a float, and `int^ => 1.5` escaped as a normal
+value. T0 respectively admits an integer and produces an error. Expression
+returns, explicit returns, boxed slow bodies and return-failure analysis now
+share `mir_return_boundary_applies`, reusing the existing deferred-admission
+relation and record-reification predicate. The expanded return fixture covers
+literal and parameter values, successful conversion and rejected integrality,
+including nullable numeric contracts. A matching scalar lane proves identity
+only for an unadorned scalar target and admitted nullability; different numeric
+kinds, literals, constraints and particular-error contracts remain checked.
+This preserves existing union admission while its normal-conversion policy
+remains pending; it does not introduce a new numeric ruling.
+
+Qualification caught a boxed-tail carrier error exposed by the stricter gate:
+the body already produced an Item, but admission boxed its bits as the old
+scalar kind a second time. The boundary now consumes that Item directly.
+The existing read-handle fixture checks its ordinary integer result and now
+also checks missing record elements yielding return-admission errors. Native
+return guards likewise inspect an error tag only on an Item producer.
+
+S7.6.3v3/D2.4.1–D2.4.3: raw boolean system calls box their outcome for `^`.
+The producer previously published that register as a native bool because the
+post-propagation AST names only its success kind. Propagation consequently
+skipped the Item error test. The shared boolean-result helper now returns a
+`MirValue` carrying its actual representation; both native string fast paths
+and generic system-call lowering consume that descriptor. The existing bool
+error-lane fixture additionally covers prefix/suffix propagation, invalid
+operands, and typed-string success/false results.
+
+The expanded focused matrix passes **232/232** tier/GC executions, and the
+full MIR emission gate returns to **278/280**, with only the two previously
+recorded union-normal-admission optimization checks failing. No assertions or
+size budgets change. Both map
+growth fixtures also match their goldens on interp/JIT/AUTO, with zero
+interpreter fallback. Their parity entries now require that successful
+execution instead of asserting interpreter rejection. The earlier interpreter
+sweep was stopped after the boxed-tail defect was found; it published no
+manifests. Final rebuilt aggregate qualification and a new complete sweep
+remain required. Manifest updates must come from that one complete sweep.
+Evidence: `m3-physical-return-boundary-{focused.log,mir.json}` and the final
+gate logs below.
+
+The final rebuilt aggregate completes **6,441/6,449**, including native
+optimization **55/55**, MIR emission **278/280**, full MIR GC **351/351**,
+diagnostics **321/321**, HTTP **152/152** and main **2,001/2,003**.
+The tier-parity case now fails only on the independently reproduced vendor
+optimizer defect; boolean propagation, record-field return values and both
+map-growth parity entries pass. The other seven failing cases are the two
+union-normal-admission optimization checks, four unchanged size budgets and
+the earlier MVP alias difference. The map and native-view/scene selections
+also pass **20/20** and **11/11**. The graphics selection needs its normal GUI
+access; its initial restricted-sandbox launch was stopped and rerun with that
+access, with the same assertions. Evidence:
+`m3-return-outcomes-final-lambda.log`, its per-suite results directory, and
+`m3-return-outcomes-final-{map,native-view-gui}.json`.
+
+Further proof work should review the AST's conservative declaration/block
+defect summaries against retained outcomes before changing any size budget
+(S7.7.2v2/S7.7.4v2). `ast_block_may_carry_defect` and
+`ast_find_defect_origin` still describe deferred local checks as possible
+completion sources; MIR's retained-local scans already distinguish them.
+An optimization needs a concrete producer/consumer witness and must preserve
+parameter/store containment and explicit propagation. This is an investigation
+entry point, not a claim that it explains all four remaining budget failures.

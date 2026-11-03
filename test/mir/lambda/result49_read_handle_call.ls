@@ -59,4 +59,6 @@ pn main() {
     print(read_after_alias(alias_box, 0)); print(" ")
     print(snapshot.cells[0].x); print(" ")
     print(box.cells[0].x); print("\n")
+    print([observe({cells: []}) is error, observe_alloc({cells: []}) is error])
+    print("\n")
 }

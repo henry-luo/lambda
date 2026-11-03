@@ -5504,11 +5504,17 @@ static MIR_reg_t emit_box_bool(MirTranspiler* mt, MIR_reg_t val_reg) {
 // and `or` read by Lambda truthiness (S7.9.2) rather than as C truth. Postfix
 // `^` also takes the Item: transpile_propagated_result tests its error tag
 // before unboxing, and a raw lane there was read as an Item pointer.
-static MIR_reg_t emit_sys_bool_result(MirTranspiler* mt, AstCallNode* call_node,
+static MirValue emit_sys_bool_result(MirTranspiler* mt, AstCallNode* call_node,
         MIR_reg_t raw) {
-    return !call_node->propagate &&
-            mir_expr_carrier_type(mt, (AstNode*)call_node) == LMD_TYPE_BOOL
-        ? emit_uext8(mt, raw) : emit_box_bool(mt, raw);
+    AstNode* node = (AstNode*)call_node;
+    bool native = !call_node->propagate &&
+        mir_expr_carrier_type(mt, node) == LMD_TYPE_BOOL;
+    // D2.4.1-D2.4.3: ^ consumes the boxed outcome before its normal bool.
+    // publish that carrier with the value so propagation cannot skip its tag.
+    return mir_value_from_reg(mt, node,
+        native ? emit_uext8(mt, raw) : emit_box_bool(mt, raw),
+        native ? VALUE_REP_I64 : VALUE_REP_ITEM, node->type,
+        native ? LMD_TYPE_BOOL : mir_expr_semantic_type(node));
 }
 
 static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg) {
@@ -8184,6 +8190,19 @@ static Type* mir_error_preserving_normal_type(Type* target) {
     return wanted;
 }
 
+// proof domain only; constrained and particular-error targets stay checked.
+static Type* mir_plain_scalar_contract(Type* target, bool* nullable) {
+    *nullable = false;
+    Type* normal = mir_error_preserving_normal_type(target);
+    Type* payload = normal && (normal->kind == TYPE_KIND_UNARY ||
+            lambda_type_is_union(normal))
+        ? lambda_type_nullable_lane_base(normal, nullable) : normal;
+    return payload && payload->kind == TYPE_KIND_SIMPLE &&
+        !payload->is_literal && !payload->is_const &&
+        (payload->type_id == LMD_TYPE_INT || payload->type_id == LMD_TYPE_FLOAT)
+        ? type_info[payload->type_id].type : NULL;
+}
+
 static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
         AstCallNode* call, Type* target) {
     // particular-error contracts still need their error-admission firewall.
@@ -8640,14 +8659,28 @@ static bool mir_return_contract_is_homogeneous_array(Type* contract) {
     return lambda_array_contract_info(contract, &info) && info.array_contract;
 }
 
-static bool mir_body_return_needs_admission(MirTranspiler* mt, AstNode* body,
-        TypeId carrier) {
-    Type* contract = mt->current_return_type;
-    return return_contract_needs_checked_boundary(contract) &&
-        (mir_return_contract_is_homogeneous_array(contract) ||
-         carrier == LMD_TYPE_ANY || carrier == LMD_TYPE_NULL || carrier == LMD_TYPE_ERROR ||
-         (mir_decl_type_id(contract) == LMD_TYPE_MAP && carrier == LMD_TYPE_MAP &&
-          body->type != contract));
+static bool mir_map_contract_needs_reification(Type* contract,
+    AstNode* value, TypeId value_tid);
+
+static bool mir_return_boundary_applies(MirTranspiler* mt, AstNode* value,
+        TypeId carrier, Type* contract) {
+    if (!return_contract_needs_checked_boundary(contract)) return false;
+    Type* expected = mir_unwrap_decl_type(contract);
+    bool nullable = false;
+    Type* scalar = mir_plain_scalar_contract(expected, &nullable);
+    // a matching scalar lane already meets the normal contract; only a
+    // rejected null needs admission. Different numeric kinds stay checked.
+    if (scalar && carrier == scalar->type_id &&
+            (nullable || !mir_expr_may_be_null(mt, value))) return false;
+    // S11.4.1v5: concrete carriers can still require admission, e.g. a float
+    // entering int^. Returns use the same deferred relation as local writes.
+    return mir_return_contract_is_homogeneous_array(contract) ||
+        (!mir_boundary_is_redundant(mt, value, expected) &&
+         (carrier == LMD_TYPE_ANY || carrier == LMD_TYPE_NULL ||
+          carrier == LMD_TYPE_ERROR ||
+          (mir_expr_may_be_null(mt, value) && !lambda_type_accepts_null(expected)) ||
+          mir_map_contract_needs_reification(contract, value, carrier) ||
+          mir_boundary_statically_deferred(value, expected, carrier)));
 }
 
 static bool mir_param_short_circuits_item_error(TypeParam* parameter) {
@@ -9750,8 +9783,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 static MirValue transpile_expr_with_map_contract(MirTranspiler* mt,
         AstNode* value, Type* target, bool* constructed);
 static Type* mir_direct_map_contract(AstNode* value, Type* target);
-static bool mir_map_contract_needs_reification(Type* contract,
-    AstNode* source_node, TypeId val_tid);
 static bool mir_map_literal_matches_contract(AstMapNode* map_node, TypeMap* expected,
     bool require_identity = false, MirTranspiler* mt = NULL);
 
@@ -34135,7 +34166,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_reg_t result = emit_call_2(mt, "fn_starts_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
-                RETURN_CALL_VALUE(emit_sys_bool_result(mt, call_node, result));
+                return emit_sys_bool_result(mt, call_node, result);
             }
         }
         if (info->fn == SYSFUNC_ENDS_WITH && arg_count == 2) {
@@ -34151,7 +34182,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_reg_t result = emit_call_2(mt, "fn_ends_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
-                RETURN_CALL_VALUE(emit_sys_bool_result(mt, call_node, result));
+                return emit_sys_bool_result(mt, call_node, result);
             }
         }
 
@@ -34666,7 +34697,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 
         #define POST_PROCESS_BOOL(result) \
             if (c_ret_tid == LMD_TYPE_BOOL) { \
-                result = emit_sys_bool_result(mt, call_node, result); \
+                MirValue boolean = emit_sys_bool_result(mt, call_node, result); \
+                result = boolean.reg; \
+                returned_boxed_item = boolean.rep == VALUE_REP_ITEM; \
             }
 
 
@@ -37459,20 +37492,13 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             !map_contract_constructed && !empty_array_result_admitted &&
             mir_boundary_join_success_redundant(mt, ret_node->value,
                 mir_unwrap_decl_type(mt->current_return_type));
-        if (join_error_arm_only) emit_return_if_item_error(mt, val);
+        if (join_error_arm_only && value_producer.rep == VALUE_REP_ITEM)
+            emit_return_if_item_error(mt, val);
         bool return_error_checked = join_error_arm_only;
         if (!join_error_arm_only &&
-                return_contract_needs_checked_boundary(mt->current_return_type) &&
                 !map_contract_constructed && !empty_array_result_admitted &&
-                (array_return_contract ||
-                 (!mir_boundary_is_redundant(mt, ret_node->value,
-                    mir_unwrap_decl_type(mt->current_return_type)) &&
-                (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL || val_tid == LMD_TYPE_ERROR ||
-                 (mir_expr_may_be_null(mt, ret_node->value) &&
-                 !lambda_type_accepts_null(mir_unwrap_decl_type(
-                      mt->current_return_type))) ||
-                 mir_map_contract_needs_reification(mt->current_return_type,
-                     ret_node->value, val_tid))))) {
+                mir_return_boundary_applies(mt, ret_node->value, val_tid,
+                    mt->current_return_type)) {
             MIR_reg_t checked = emit_checked_value_boundary(mt, value_producer,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, checked);
@@ -43217,13 +43243,8 @@ static bool mir_return_value_may_fail(MirTranspiler* mt, AstNode* value,
     Type* expected = mir_unwrap_decl_type(contract);
     if (!value) return true;
     if (mir_array_admission_cannot_fail(value, expected)) return false;
-    if (mir_return_contract_is_homogeneous_array(contract)) return true;
-    if (mir_boundary_is_redundant(mt, value, expected)) return false;
-    // as transpile_return: a native carrier is converted, not re-admitted
-    TypeId tid = mir_expr_carrier_type(mt, value);
-    return tid == LMD_TYPE_ANY || tid == LMD_TYPE_NULL ||
-        (mir_expr_may_be_null(mt, value) && !lambda_type_accepts_null(expected)) ||
-        mir_map_contract_needs_reification(contract, value, tid);
+    return mir_return_boundary_applies(mt, value,
+        mir_expr_carrier_type(mt, value), contract);
 }
 
 struct MirReturnScan {
@@ -44840,8 +44861,9 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
     MIR_reg_t result = transpile_box_item(mt, fn_node->body);
     if (!mt->block_returned) {
         TypeId body_tid = mir_expr_carrier_type(mt, fn_node->body);
-        if (mir_body_return_needs_admission(mt, fn_node->body, body_tid)) {
-            result = emit_checked_boundary(mt, result, body_tid,
+        if (mir_return_boundary_applies(mt, fn_node->body, body_tid,
+                mt->current_return_type)) {
+            result = emit_checked_boundary(mt, result, LMD_TYPE_ANY,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, result);
         }
@@ -46859,8 +46881,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     mir_unwrap_decl_type(mt->current_return_type));
             if (join_error_arm_only) emit_return_if_item_error(mt, body_result);
             if (!join_error_arm_only && !body_contract.contract &&
-                    mir_body_return_needs_admission(mt, fn_node->body, body_tid)) {
-                body_result = emit_checked_boundary(mt, body_result, body_tid,
+                    mir_return_boundary_applies(mt, fn_node->body, body_tid,
+                        mt->current_return_type)) {
+                // transpile_box_item already published an Item; using the
+                // source's scalar kind here would box its tag bits again.
+                body_result = emit_checked_boundary(mt, body_result, LMD_TYPE_ANY,
                     mir_unwrap_decl_type(mt->current_return_type), "function return");
                 emit_return_if_item_error(mt, body_result);
             }

@@ -752,10 +752,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // D3.4.3v5 / D3.4.4v4: maps grow through the runtime tree from symbol
     // keys and from external parents (literal, parsed, contract, nominal,
     // retyped, element types); the parsed copy also pins LR12-39
-    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt",
-     "AST_NODE_INDEX_ASSIGN_STAM"},
-    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt",
-     "AST_NODE_INDEX_ASSIGN_STAM"},
+    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt"},
+    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt"},
     // a type definition read in a function, and a call returning a type value,
     // give that type; the JIT gave a `pub type` a module slot and unboxed a
     // type-valued call as the value its type names (`0` for `int`)

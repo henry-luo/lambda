@@ -6,6 +6,13 @@ fn checked_bool(value) bool => opaque(value)
 fn widened_plain(value: int) float => value
 fn widened_union(value: int) float^ => value
 fn mixed_union(flag: bool) float^ => if (flag) 7 else 7.5
+// A concrete float still crosses int^ admission; nonintegral values fail.
+fn narrowed_literal() int^ => 1.0
+fn rejected_literal() int^ => 1.5
+fn narrowed_value(value: float) int^ => value
+pn narrowed_explicit(value: float) int^ { return value }
+fn narrowed_optional(value: float) int? => value
+fn widened_optional(value: int) float? => value
 pn propagated_union() any^ { return widened_union(7)^ }
 pn mixed_explicit(flag: bool) float^ {
     if (flag) { return 7 }
@@ -74,5 +81,10 @@ pn main() {
      type(widened_plain(7)) == float, type(widened_union(7)) == int, type(propagated_union()) == int,
      type(mixed_union(true)) == int, type(mixed_union(false)) == float,
      type(mixed_explicit(true)) == int, type(mixed_explicit(false)) == float, returned_native(-1) is error, returned_native(7), vector, flags, type(scalar_member^) == int,
-     record_member^.a, type(filled_members[0]) == int, absent_int is error, absent_float is error, absent_bool is error, rejected_float_literals([1.0], 5)]
+     record_member^.a, type(filled_members[0]) == int, absent_int is error, absent_float is error, absent_bool is error, rejected_float_literals([1.0], 5),
+     [type(narrowed_literal()) == int, rejected_literal() is error,
+      type(narrowed_value(1.0)) == int, narrowed_value(1.5) is error,
+      type(narrowed_explicit(1.0)) == int, narrowed_explicit(1.5) is error,
+      type(narrowed_optional(1.0)) == int, narrowed_optional(1.5) is error,
+      type(widened_optional(7)) == float]]
 }
