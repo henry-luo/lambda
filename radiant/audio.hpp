@@ -21,6 +21,7 @@ void radiant_audio_unbind_lease_locked(DomDocument* document, uint64_t token, vo
 uint64_t radiant_audio_open(DomDocument* document, const void* bytes, size_t length);
 // output-free preparation registers the quota owner before borrowers; adoption always consumes the player.
 size_t radiant_audio_available_pcm(DomDocument* document);
+bool radiant_audio_prepare_document(DomDocument* document);
 uint64_t radiant_audio_adopt(DomDocument* document, RdtAudio* player);
 // scene sources retain independent players over an existing immutable sample owner.
 // reuse replaces a prepared player at a buffer boundary; rejection preserves the old player.

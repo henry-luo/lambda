@@ -2,6 +2,7 @@
 #include "audio_bus.hpp"
 #include "speech.hpp"
 #include "audio_cue_owner.hpp"
+#include "audio_capture.hpp"
 #include "document_clock.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/mem.h"
@@ -82,6 +83,7 @@ static AudioSlot* document_audio_slot(DomDocument* doc, uint64_t token) {
     if (audio) for (AudioSlot& slot : audio->slots) if (slot.token == token) return &slot;
     return nullptr;
 }
+bool radiant_audio_prepare_document(DomDocument* doc) { return document_audio(doc, true) != nullptr; }
 bool radiant_audio_bind_owner(DomDocument* doc, void* owner, AudioOwnerPoll poll) {
     auto* audio = document_audio(doc, true);
     if (!audio || !owner || !poll) return false;
@@ -610,6 +612,7 @@ uint64_t radiant_audio_frame(DomDocument* doc) {
 
 bool radiant_audio_tick(DomDocument* doc, double now_ms) {
     audio_bus_poll();
+    bool capture_pending = radiant_capture_tick(doc);
     DocumentAudio* audio = document_audio(doc);
     if (!audio) return false;
     // a hook may retire its scene and clear its slot while main-thread sampling runs.
@@ -621,7 +624,7 @@ bool radiant_audio_tick(DomDocument* doc, double now_ms) {
     // offline output: the sub-mix follows this document's frame clock while it has voices.
     double delta_ms = audio->last_tick_ms < 0 ? 0 : now_ms - audio->last_tick_ms;
     audio->last_tick_ms = now_ms;
-    if (!audio_bus_offline() || !audio_submix_has_work(audio->submix)) { audio->pending_frames = 0; return false; }
+    if (!audio_bus_offline() || !audio_submix_has_work(audio->submix)) { audio->pending_frames = 0; return capture_pending; }
     // a resumed background document starts a new interval, not a catch-up burst.
     if (delta_ms < 0 || delta_ms > 1000) delta_ms = 0;
     audio->pending_frames += delta_ms * AUDIO_BUS_RATE / 1000.0;
@@ -635,7 +638,7 @@ bool radiant_audio_frames_pending(DomDocument* doc) {
     // device output still needs main-owner polling to retire ended readers and completed tails.
     DocumentAudio* audio = document_audio(doc);
     if (audio) for (AudioSlot& slot : audio->slots) audio_slot_poll(&slot);
-    return audio && audio_submix_has_work(audio->submix);
+    return radiant_capture_pending(doc) || (audio && audio_submix_has_work(audio->submix));
 }
 
 void radiant_audio_prune(DomDocument* doc) {

@@ -65,7 +65,7 @@ does not revise those contracts.
 | M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused/current aggregate gates pass with recorded profile limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, rotation/velocity curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; analytic GPU plane/sphere collision, bounded seeded CPU/GPU noise, color/opacity with per-emitter depth ordering, texture sheets, billboard presentation and bounded CPU/GPU ribbon trails and copied spawn commands implemented and qualified with the recorded limits; depth collision awaits M9; presets/effect/sub-emitter rules moved to M13 |
-| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits; microphone acquisition awaits policy ratification; physical/release/integration qualification remains open; music/voice/occlusion policy and factories remain M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits. USER ratified capture as D7.5.9; its macOS core acquisition, bounded reads, lifecycle and dry monitor profile is qualified below. Named capture routing and physical/release/integration qualification remain open; music/voice/occlusion policy and factories remain M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
@@ -6068,13 +6068,13 @@ partial cases, two skips and zero failures. Boundary validation stays at 133
 imports against baseline 165; dimension lint and whitespace pass. Lambda engine
 and `.ls` package source are unchanged from the earlier 8,647-case core gate.
 
-**Open behavior / next action:** the capture policy remains pending user
-ratification under proposal §9.3; its unapplied draft is in the evidence folder.
+**Open behavior / next action:** USER ratified the capture policy on 2026-11-03
+as **D7.5.9**; the approved draft and review record are in the evidence folder.
 Starting synthesis within a job, live-history continuation, additional video backends,
 physical input/output and release/combined-scene qualification are not claimed
 by this prepared-provider profile. Remaining M1–M6 extensions, M8–M12 and
-M13 retain the full goal scope. Capture implementation follows ratification;
-M8 is the next independent native milestone while that decision is pending.
+M13 retain the full goal scope. Capture implementation follows in the next
+component below; M8 remains the next independent native milestone.
 
 Evidence: `temp/scene3d-provider-export/{base-parser-status.json,
 provider-admission-base-parser.log,native-final-*.log,stable-*.log,
@@ -6082,3 +6082,69 @@ ui-normal-status.json,ui-asan-status.json,provider-output-normal.wav,
 provider-output-asan.wav,qualification-status.json,qualification-*.log,
 frozen-source-hashes.json,lambda-engine-carry-forward.json,
 capture-policy-proposal.patch,checkpoint.json}`.
+
+### M7 explicit microphone capture — qualified 2026-11-03
+
+**Authority/outcome:** USER ratified **D7.5.9** on 2026-11-03. Capture needs
+explicit procedural acquisition plus OS and per-document host grants; monitoring
+starts off and separately obeys **D7.5.4**. The policy approval does not authorize
+access to the user's microphone. Preserve **D4.5.2 / D5.3.3 / D7.5.3v2** and the
+existing IO/host waist; pure scene evaluation never opens an input device.
+
+**Finite implementation:** timestamped bounded native PCM with separate SPSC
+record/monitor readers, bounded producer work and explicit overrun diagnostics;
+OS authorization and device callbacks; document-scoped host grant, explicit
+open/status/read/monitor/stop operations; cleanup on stop, revocation, device
+loss and document teardown. Host grants do not propagate to child documents or
+navigation. Reuse the existing audio device library and output submix.
+
+**Verification budget:** independent PCM/time/gap/wrap/overflow and concurrent
+producer controls; deterministic host backend tests for denial/pending/revoked/
+unavailable/loss and callback retirement; procedural UI across both JS and all
+Lambda tiers with forced GC; supported ASan then required engine/boundary gates
+at the stable profile boundary. Physical microphone tests remain opt-in and
+separate from policy and simulated ownership qualification.
+
+**Delivered behavior:** `audio_capture_pcm` carries exact sample stamps through
+independent fixed record/monitor rings. The producer validates at most 4096
+frames, never allocates/waits and drops excess/new overflow input with copied
+counters. Host reads return one contiguous interval without synthesizing gaps.
+The device adapter asks AVFoundation for consent only after its document grant,
+then miniaudio supplies converted stereo 48-kHz f32 input. The OS completion
+retains no document, queue or GC pointer (**D4.5.2**). Pending/active input keeps
+host polling alive. Permission denial, cancellation and teardown cannot start a
+device later; revocation and device loss retire input before freeing queues.
+
+`dom.audio_capture(owner,request)` appends to the neutral catalog without moving
+published slots. Exact ticket/count decoding and precisely rooted copied
+records/binaries preserve **S4.9.1 / D5.3.3**. `view --microphone` grants only its
+initial document, including transformed/paged views; it neither acquires input
+nor grants output. The CLI embeds a purpose string through build configuration;
+Foundation metadata lookup was verified without a permission request. Monitoring
+starts off and uses the existing document submix, with separate recording reads.
+Output loss disables the monitor while recording continues. The native quota
+owner is registered before its capture borrower, so LIFO teardown remains safe.
+
+**Qualified evidence:** six kernel and nine host/bridge cases pass, including
+concurrent overflow/sample identity, malformed/oversized packets, exact counters
+above 2^53, pending denial/stop/teardown, independent OS/document grants, input/
+output loss, quota exhaustion and copied PCM after close. The normal imported
+capture/shared-audio matrix passes 12 replays / 210 assertions across JS AST/MIR
+and Lambda interpreter/JIT/AUTO with forced/poisoned GC. Supported ASan passes
+146 native capture/audio/scene controls and four imported replays / 70 assertions;
+leak detection is disabled. The fresh required gates pass: Lambda/Input
+8,647/8,647; Radiant 9,135 passed, 304 configured partial cases, two skips and
+zero failures (9,441 total). Module imports remain 133 against baseline 165;
+dimension lint, whitespace and added document file links pass. All 28 frozen
+source/config/fixture hashes are unchanged after qualification.
+
+**Open behavior / next action:** this closes the selected macOS capture core,
+not the full M7 or Scene3D goal. No physical microphone or OS consent dialog was
+accessed. Named capture-bus routing is the next native M7 component. Other OS
+backends, physical permission/hotplug and release/combined-scene qualification
+remain open, alongside the retained M1–M6 extensions, M8–M12 and deferred M13.
+
+Evidence: `temp/scene3d-capture/{kernel-tests.log,capture-host-final.log,
+focused-audio.log,ui-normal-status.json,ui-asan-status.json,
+qualification-status.json,qualification-*.log,qualified-source-hashes.json,
+document-checks.json,info-probe.mm,checkpoint.json}`.

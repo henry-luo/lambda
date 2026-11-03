@@ -57,6 +57,7 @@ struct AudioBus {
 };
 static AudioBus bus = {{}, {}, {}, false, 0, -1, 0};
 static bool bus_has_work();
+void audio_control_yield() { ma_yield(); }
 
 static bool lock_try(int* lock) {
     int idle = LOCK_IDLE;
@@ -66,7 +67,7 @@ static void lock_ui(int* lock) {
     for (;;) {
         int idle = LOCK_IDLE;
         if (__atomic_compare_exchange_n(lock, &idle, LOCK_UI, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return;
-        ma_yield();
+        audio_control_yield();
     }
 }
 static void lock_release(int* lock) { __atomic_store_n(lock, LOCK_IDLE, __ATOMIC_RELEASE); }

@@ -3,6 +3,7 @@
 #include "../radiant/audio_bus.hpp"
 #include "../radiant/audio_cues.hpp"
 #include "../radiant/audio_stream.hpp"
+#include "../radiant/audio_capture_pcm.hpp"
 #include "../lib/str.h"
 #include "../lib/mem.h"
 #include "../lib/file.h"
@@ -132,6 +133,100 @@ TEST_F(NativeAudioStream, ConcurrentProducerAndConsumerKeepSampleOrderAcrossRing
     __atomic_store_n(&control.stopped, 1, __ATOMIC_RELEASE); EXPECT_EQ(pthread_join(producer, nullptr), 0);
     EXPECT_EQ(cursor, 24000u); float samples[2] = {}; audio_stream_mix(stream, samples, 1, cursor);
     EXPECT_EQ(audio_stream_snapshot(stream).state, AUDIO_STREAM_ENDED);
+}
+
+class NativeAudioCapture : public ::testing::Test {
+protected:
+    AudioCapturePcm* pcm = nullptr;
+    void SetUp() override { pcm = audio_capture_pcm_create(4); ASSERT_NE(pcm, nullptr); }
+    void TearDown() override { audio_capture_pcm_destroy(pcm); }
+};
+TEST_F(NativeAudioCapture, OverrunPreservesExactTimestampsAndNeverFillsGaps) {
+    const float input[] = {.1f,-.1f,.2f,-.2f,.3f,-.3f,.4f,-.4f,.5f,-.5f,.6f,-.6f};
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 0, input, 6), 4u);
+    float output[16] = {}; uint64_t first = UINT64_MAX;
+    ASSERT_EQ(audio_capture_pcm_read(pcm, output, 3, &first), 3u); EXPECT_EQ(first, 0u);
+    for (unsigned i = 0; i < 6; i++) EXPECT_FLOAT_EQ(output[i], input[i]);
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 6, input + 8, 2), 2u);
+    ASSERT_EQ(audio_capture_pcm_read(pcm, output, 8, &first), 1u); EXPECT_EQ(first, 3u);
+    EXPECT_FLOAT_EQ(output[0], .4f); EXPECT_FLOAT_EQ(output[1], -.4f);
+    ASSERT_EQ(audio_capture_pcm_read(pcm, output, 8, &first), 2u); EXPECT_EQ(first, 6u);
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], input[8 + i]);
+    auto info = audio_capture_pcm_info(pcm); EXPECT_EQ(info.captured, 8u); EXPECT_EQ(info.next_frame, 8u);
+    EXPECT_EQ(info.dropped, 2u); EXPECT_EQ(info.read_frames, 6u); EXPECT_EQ(info.queued, 0u);
+    EXPECT_FLOAT_EQ(info.peak, .6f); EXPECT_NEAR(info.rms, sqrtf((.25f + .36f) / 2), 1e-6f);
+}
+TEST_F(NativeAudioCapture, MonitoringAndRecordingHaveIndependentReadersAndDefaultIsSilent) {
+    const float input[] = {.25f,-.25f,.5f,-.5f}; float output[8] = {};
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 0, input, 2), 2u); audio_capture_pcm_mix(pcm, output, 2, 0);
+    for (float value : output) EXPECT_FLOAT_EQ(value, 0);
+    ASSERT_TRUE(audio_capture_pcm_monitor(pcm, true, .5f));
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 2, input, 2), 2u);
+    uint64_t first = 0; ASSERT_EQ(audio_capture_pcm_read(pcm, output, 4, &first), 4u);
+    memset(output, 0, sizeof(output)); audio_capture_pcm_mix(pcm, output, 4, 0);
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], input[i] * .5f);
+    for (unsigned i = 4; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    EXPECT_EQ(audio_capture_pcm_info(pcm).read_frames, 4u);
+    ASSERT_TRUE(audio_capture_pcm_monitor(pcm, false, 1));
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 4, input, 2), 2u);
+    EXPECT_EQ(audio_capture_pcm_info(pcm).monitor_queued, 0u);
+    EXPECT_FALSE(audio_capture_pcm_monitor(pcm, true, NAN)); EXPECT_FALSE(audio_capture_pcm_monitor(pcm, true, 2));
+}
+TEST_F(NativeAudioCapture, OversizedCallbackIsBoundedAndItsRemainderIsVisibleAsDropped) {
+    float input[(AUDIO_CAPTURE_PACKET + 1) * 2] = {};
+    ASSERT_EQ(audio_capture_pcm_write(pcm, 0, input, AUDIO_CAPTURE_PACKET + 1), 4u);
+    auto info = audio_capture_pcm_info(pcm); EXPECT_EQ(info.captured, AUDIO_CAPTURE_PACKET + 1u);
+    EXPECT_EQ(info.dropped, AUDIO_CAPTURE_PACKET - 3u); EXPECT_EQ(info.next_frame, AUDIO_CAPTURE_PACKET + 1u);
+    uint64_t first = 0; float output[8]; EXPECT_EQ(audio_capture_pcm_read(pcm, output, AUDIO_CAPTURE_PACKET + 1, &first), 0u);
+    EXPECT_EQ(audio_capture_pcm_create(0), nullptr); EXPECT_EQ(audio_capture_pcm_create(AUDIO_CAPTURE_CAPACITY + 1), nullptr);
+    EXPECT_GT(audio_capture_pcm_bytes(), AUDIO_CAPTURE_CAPACITY * 2u * sizeof(float) * 2u);
+}
+TEST_F(NativeAudioCapture, MalformedPacketsPublishNothingAndSilenceMonitoring) {
+    ASSERT_TRUE(audio_capture_pcm_monitor(pcm, true, 1));
+    const float valid[] = {.25f,-.25f}; ASSERT_EQ(audio_capture_pcm_write(pcm, 0, valid, 1), 1u);
+    const float invalid[] = {.1f,.1f,NAN,.2f}; EXPECT_EQ(audio_capture_pcm_write(pcm, 1, invalid, 2), 0u);
+    auto info = audio_capture_pcm_info(pcm); EXPECT_TRUE(info.faulted); EXPECT_EQ(info.captured, 1u); EXPECT_EQ(info.queued, 1u);
+    float output[2] = {}; audio_capture_pcm_mix(pcm, output, 1, 0);
+    EXPECT_FLOAT_EQ(output[0], 0); EXPECT_FLOAT_EQ(output[1], 0);
+    EXPECT_EQ(audio_capture_pcm_write(pcm, 1, valid, 1), 0u);
+}
+TEST_F(NativeAudioCapture, RegressingOrOverflowingSampleTimeCannotAliasAValidInterval) {
+    uint64_t wide = (UINT64_C(1) << 53) + 17; uint64_t first = 0; float output[4];
+    ASSERT_EQ(audio_capture_pcm_write(pcm, wide, nullptr, 2), 2u);
+    ASSERT_EQ(audio_capture_pcm_read(pcm, output, 2, &first), 2u); EXPECT_EQ(first, wide);
+    for (float value : output) EXPECT_FLOAT_EQ(value, 0);
+    EXPECT_EQ(audio_capture_pcm_write(pcm, wide + 1, nullptr, 2), 0u); EXPECT_TRUE(audio_capture_pcm_info(pcm).faulted);
+    audio_capture_pcm_destroy(pcm); pcm = audio_capture_pcm_create(4); ASSERT_NE(pcm, nullptr);
+    EXPECT_EQ(audio_capture_pcm_write(pcm, UINT64_MAX - 1, nullptr, 2), 0u);
+    EXPECT_TRUE(audio_capture_pcm_info(pcm).faulted); EXPECT_EQ(audio_capture_pcm_info(pcm).queued, 0u);
+}
+struct CaptureProducerControl { AudioCapturePcm* pcm; int stopped, done; };
+static void* capture_test_producer(void* argument) {
+    auto* control = (CaptureProducerControl*)argument; float input[74];
+    for (unsigned next = 0; next < 24000 && !__atomic_load_n(&control->stopped, __ATOMIC_ACQUIRE);) {
+        unsigned count = 24000 - next < 37 ? 24000 - next : 37;
+        for (unsigned i = 0; i < count; i++) { input[i * 2] = (float)(next + i); input[i * 2 + 1] = -input[i * 2]; }
+        audio_capture_pcm_write(control->pcm, next, input, count); next += count; sched_yield();
+    }
+    __atomic_store_n(&control->done, 1, __ATOMIC_RELEASE); return nullptr;
+}
+TEST_F(NativeAudioCapture, ConcurrentReadersObserveSampleIdentityAndAccountForEveryOverrun) {
+    CaptureProducerControl control{pcm, 0, 0}; pthread_t producer;
+    ASSERT_EQ(pthread_create(&producer, nullptr, capture_test_producer, &control), 0);
+    uint64_t start = time_now_ns(), end = 0, read = 0;
+    while (time_now_ns() - start < UINT64_C(10000000000)) {
+        float output[34]; uint64_t first = 0; unsigned count = audio_capture_pcm_read(pcm, output, 17, &first);
+        if (count) {
+            EXPECT_GE(first, end); end = first + count; read += count;
+            for (unsigned i = 0; i < count; i++) {
+                EXPECT_FLOAT_EQ(output[i * 2], (float)(first + i)); EXPECT_FLOAT_EQ(output[i * 2 + 1], -(float)(first + i));
+            }
+        } else if (__atomic_load_n(&control.done, __ATOMIC_ACQUIRE)) break;
+        else sched_yield();
+    }
+    __atomic_store_n(&control.stopped, 1, __ATOMIC_RELEASE); EXPECT_EQ(pthread_join(producer, nullptr), 0);
+    auto info = audio_capture_pcm_info(pcm); EXPECT_EQ(info.captured, 24000u);
+    EXPECT_EQ(read + info.dropped + info.queued, info.captured); EXPECT_FALSE(info.faulted);
 }
 
 class DecodedAudioPlayer : public ::testing::Test {

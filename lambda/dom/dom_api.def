@@ -829,6 +829,9 @@ DOM_RAW(broadcast_destroy, messaging, void, (void* channel), dom_broadcast_chann
 // native font metadata appends without moving existing host catalog slots (D7.4.4).
 DOM_OP(CORE, query_local_fonts, window, 1, "fn(options: any) -> [map]^", dom_engine_query_local_fonts, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "", none, "", "")
 
+// D7.5.9: explicit capture acquisition/control; append without moving published catalog slots.
+DOM_OP(CORE, audio_capture, media, 2, "pn(n: any, request: map) -> map|null", dom_engine_audio_capture, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

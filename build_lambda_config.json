@@ -1045,6 +1045,7 @@
         "lambda/module/radiant/*.cpp"
       ],
       "objcxx_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
@@ -2327,6 +2328,7 @@
     },
     "macos": {
       "exclude_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
@@ -2345,6 +2347,7 @@
       "linker_flags": [
         "mmacosx-version-min=15.7"
       ],
+      "info_plist": "radiant/host_info.plist",
       "libraries": [
         {
           "name": "CoreFoundation",
@@ -4369,6 +4372,7 @@
               "radiant/audio_graph.cpp",
               "radiant/audio_cues.cpp",
               "radiant/audio_stream.cpp",
+              "radiant/audio_capture_pcm.cpp",
               "radiant/audio_reverb.cpp"
             ],
             "macos": {"libraries": ["AudioToolbox"]},

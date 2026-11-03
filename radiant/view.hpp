@@ -4752,6 +4752,7 @@ typedef struct DocumentJsHostConfig {
     InputResourcePolicy resource_policy;
     const struct RenderPagedOptions* paged_media;
     bool scripting_disabled;    // DomDocument::scripting_disabled for the loaded document
+    bool microphone_granted;   // D7.5.9: initial document only, never inherited
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);

@@ -26,6 +26,9 @@
 #include "../../../radiant/clipboard.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
+#include "../../../radiant/audio_capture.hpp"
+#include "../../runtime/value_builder.hpp"
+#include "../../runtime/lambda-number-runtime.hpp"
 #include "../../../radiant/speech.hpp"
 #include "../../../radiant/scene3d/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
@@ -2355,6 +2358,56 @@ RADIANT_C_API Item fn_radiant_audio_open(Item node_item, Item bytes) {
     if (!doc || get_type_id(bytes) != LMD_TYPE_BINARY) return ItemNull;
     uint64_t token = radiant_audio_open(doc, binary_data(bytes.get_binary()), bytes.get_binary()->len);
     return token ? radiant_int_item((int64_t)token) : ItemNull;
+}
+
+// D7.5.9: the procedural seam consumes copied requests; grants remain exclusively host-owned.
+RADIANT_C_API Item fn_radiant_audio_capture(Item node_item, Item request_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_CAPTURE");
+    ItemReader request(request_item.to_const()); if (!doc || !request.isMap()) return ItemNull;
+    MapReader fields = request.asMap(); ItemReader op = fields.get("op"), id = fields.get("token");
+    const char* operation = op.isString() ? op.cstring() : op.isSymbol() ? op.asSymbol()->chars : nullptr;
+    if (!operation) return ItemNull;
+    // S4.9.1: tickets accept exact integer carriers; floating identities must stay in the JS safe range.
+    int64_t number = 0;
+    uint64_t token = lambda_item_to_int64_exact(id.item(), &number) && number > 0 &&
+        (id.getType() != LMD_TYPE_FLOAT || number <= INT64_C(9007199254740991)) ? (uint64_t)number : 0;
+    bool read = !strcmp(operation, "read"); unsigned frames = AUDIO_CAPTURE_PACKET;
+    if (!strcmp(operation, "open")) token = radiant_capture_open(doc);
+    else if (!token) return ItemNull;
+    else if (!strcmp(operation, "stop")) { if (!radiant_capture_stop(doc, token)) return ItemNull; }
+    else if (!strcmp(operation, "monitor")) {
+        ItemReader gain = fields.get("gain"); float volume = 0;
+        if (!gain.isNumber() || !radiant_item_to_float(gain.item(), &volume) || !radiant_capture_monitor(doc, token, volume)) return ItemNull;
+    } else if (read) {
+        ItemReader count = fields.get("frames");
+        if (!count.isNull()) {
+            if (!lambda_item_to_int64_exact(count.item(), &number) || number < 1 || number > AUDIO_CAPTURE_PACKET) return ItemNull;
+            frames = (unsigned)number;
+        }
+    } else if (strcmp(operation, "status")) return ItemNull;
+    AudioCaptureInfo info = {}; if (!radiant_capture_info(doc, token, &info)) return ItemNull;
+    float pcm[AUDIO_CAPTURE_PACKET * 2]; unsigned count = 0; uint64_t first = info.pcm.next_frame;
+    if (read) {
+        count = radiant_capture_read(doc, token, pcm, frames, &first);
+        if (!radiant_capture_info(doc, token, &info)) return ItemNull;
+    }
+    RootedValueBuilder result;
+    result.put("token", box_uint64_value(token)); result.put("state", radiant_string_item(info.state));
+    result.put("granted", radiant_bool_item(info.granted)); result.put("rate", radiant_int_item(AUDIO_BUS_RATE));
+    result.put("channels", radiant_int_item(2)); result.put("format", radiant_string_item("f32le"));
+    result.put("start_ms", radiant_float_item(info.start_ms)); result.put("next_frame", box_uint64_value(info.pcm.next_frame));
+    result.put("captured", box_uint64_value(info.pcm.captured)); result.put("dropped", box_uint64_value(info.pcm.dropped));
+    result.put("read_frames", box_uint64_value(info.pcm.read_frames)); result.put("queued", radiant_int_item(info.pcm.queued));
+    result.put("capacity", radiant_int_item(info.pcm.capacity)); result.put("peak", radiant_float_item(info.pcm.peak));
+    result.put("rms", radiant_float_item(info.pcm.rms)); result.put("monitor_gain", radiant_float_item(info.monitor_gain));
+    result.put("monitor_lost", radiant_bool_item(info.monitor_lost)); result.put("monitor_dropped", box_uint64_value(info.pcm.monitor_dropped));
+    if (read) {
+        unsigned char bytes[AUDIO_CAPTURE_PACKET * 8];
+        for (unsigned i = 0; i < count * 2; i++) { uint32_t bits; memcpy(&bits, pcm + i, 4); write_le32(bytes + i * 4, bits); }
+        result.put("first_frame", box_uint64_value(first)); result.put("frames", radiant_int_item(count));
+        result.put("data", Item{.item=x2it(heap_binary_from_bytes((const char*)bytes, count * 8))});
+    }
+    return result.value.get();
 }
 
 enum RadiantAudioOperation { AUDIO_PLAY, AUDIO_PAUSE, AUDIO_CLOSE, AUDIO_STATE };
@@ -5778,6 +5831,7 @@ RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
 RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
 RADIANT_PROVIDE_ENGINE_2(set_canvas_pixels, fn_radiant_set_canvas_pixels)
 RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
+RADIANT_PROVIDE_ENGINE_2(audio_capture, fn_radiant_audio_capture)
 RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_3(midi_open, fn_radiant_midi_open)
 RADIANT_PROVIDE_ENGINE_4(midi_command, fn_radiant_midi_command)

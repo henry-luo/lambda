@@ -3157,8 +3157,8 @@ frames on that submix. The scene integration below adds sources/listeners,
 Doppler, bounded bus/DSP graphs, native sample-time cues and explicit offline
 PCM/WAV jobs, named MIDI/speech routes and macOS video-track output with named
 scene routes. Prepared MIDI/speech/video snapshots now join explicit offline jobs;
-microphone input remains subsequent M7 work
-(**D7.5.3v2 / D7.5.4**).
+explicit microphone acquisition uses the host capture seam below
+(**D7.5.3v2 / D7.5.4 / D7.5.9**).
 
 Opening encoded bytes prepares owned 48000-Hz interleaved stereo float PCM
 without opening an output device. The portable decoder supports PCM WAV, MP3
@@ -3361,8 +3361,8 @@ Reverb tails continue after MIDI voice retirement. A muted MIDI transport may
 play without activation; positive audible starts and live gain changes retain
 **D7.5.4**. Graph/source snapshots copy ordered insert parameters, send target/
 current gains, bus peak/RMS/frame meters, routing generation/storage/activity and
-fault state. Prepared provider export uses the render jobs below; ratified microphone capture remains native M7
-work. Routing factories and music/voice/occlusion
+fault state. Prepared provider export uses the render jobs below; explicit
+microphone capture uses its own document grant. Routing factories and music/voice/occlusion
 policy remain deferred M13.
 
 ### Native Scene3D sample-time cues
@@ -3429,9 +3429,10 @@ overwrite old rows. Source rows add `armed` and `pitch_follow`.
 Native readers and commands have explicit ownership (**D4.5.2 / D5.3.3**).
 Preparation and retired-reader cleanup occur on the main owner; the callback
 only applies copied commands and swaps retained PCM readers at split-buffer
-deadlines. Prepared provider snapshots join render jobs below; microphone acquisition and release
-callback/memory qualification remain M7/M12
-work; cue selection and voice policy remain deferred M13.
+deadlines. Prepared provider snapshots join render jobs below; microphone
+acquisition uses the explicit capture seam below. Physical device and release
+callback/memory qualification remain M7/M12 work; cue selection and voice
+policy remain deferred M13.
 
 ### Native Scene3D MIDI and speech routes
 
@@ -3592,9 +3593,54 @@ host-wide offline playback backend retains audible-output gating.
 
 Native jobs reuse the submix, cue and DSP kernel with explicit reader ownership
 (**D4.5.2 / D5.3.3**). File output uses the existing IO provider; microphone
-capture remains separate native M7 work. Release
+acquisition uses the separate input permission below. Release
 deadlines/peak memory, cross-platform execution and broader combined-scene
 qualification remain M12 work.
+
+### Explicit microphone capture
+
+**D7.5.9** requires an explicit procedure plus both an OS permission and a
+host grant for the requesting document. `view --microphone document.html`
+grants the initial document; it does not start capture or grant audible output.
+Embedded hosts use `radiant_capture_grant(document, granted)`. Child frames and
+navigation never inherit this grant. The host owns grant UI; request fields
+such as `granted` cannot grant permission. macOS supplies the native input
+backend and the CLI embeds its microphone purpose string. Other platforms
+report `unavailable` until a host supplies an OS-authorized native backend.
+
+`dom.audio_capture(owner, request)` is a procedure returning a copied map or
+`null` for an invalid operation/ticket. It shares the existing host waist
+(**D7.5.3v2**) and supports:
+
+| Request | Behavior |
+|---|---|
+| `{op: "open"}` | Mint a document-local ticket; request OS consent only after the host grant. A second pending/active acquisition is rejected. |
+| `{op: "status", token: ticket}` | Poll permission/device state and copy diagnostics. |
+| `{op: "read", token: ticket, frames: 4096}` | Copy up to 4096 contiguous frames into `data`, an interleaved stereo `f32le` binary at 48000 Hz. Empty reads return an empty binary. |
+| `{op: "monitor", token: ticket, gain: 0.5}` | Enable separate dry monitoring through the document submix; positive gain requires **D7.5.4** output permission. Zero disables monitoring. Gain is finite and within `[0,1]`. |
+| `{op: "stop", token: ticket}` | Retire the device and monitor, release native PCM and keep terminal diagnostics. |
+
+States are `denied`, `pending`, `capturing`, `unavailable`, `stopped`, `revoked`,
+`lost` or `error`. A ticket is valid only for its owning document's latest
+acquisition. Tokens and sample counters cross JS as exact BigInts (**S4.9.1**).
+JS can inspect the returned binary with `new Uint8Array(packet.data)`.
+`first_frame` identifies the first copied sample and `next_frame` the device
+callback timeline. `start_ms` is the document-clock acquisition anchor, not a
+hardware presentation timestamp. Polling meters/counters is advisory while
+the producer runs. `captured` counts delivered callback frames; `dropped`
+counts queue overflow, callback-limit discards and explicit timestamp gaps.
+
+Recording and monitoring have independent two-second bounded queues, charged
+against the existing document PCM/reader quota. Each callback processes at most
+4096 frames without allocating, waiting or calling scripts/GC. Overflow drops
+new input and records its count; reads stop at timestamp gaps instead of
+inventing silence. Monitoring starts off, and `monitor_dropped` reports its
+independent overflow. Output-device loss disables monitoring while recording
+continues; `monitor_lost` requires an explicit re-enable. Input-device loss,
+OS/host revocation, stop and document teardown join the producer before freeing
+queues (**D4.5.2 / D5.3.3**); unread native PCM is discarded. Source code keeps
+only copied records/binaries. Named capture-bus routing, hardware timing and
+physical permission/hotplug qualification remain outside this initial profile.
 
 ### Native CPU/GPU mesh particles
 

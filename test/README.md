@@ -340,6 +340,18 @@ HTML source by SHA-256. Regenerate full and compact controls together with
 `node utils/capture_layout_reference_controls.js test/css/atomic_no_break_reference_controls.json`;
 run `node test/test_layout_reference_controls.js` to check the oracle contract.
 
+Microphone capture (**D7.5.9 / D7.5.4 / S4.9.1**) uses
+`NativeAudioCapture.*` in `test_audio_player_gtest` for bounded timestamped PCM,
+independent monitor/record queues and concurrent overrun accounting.
+`RadiantAudioCapture.*` in `test_radiant_text_query_gtest` injects a trusted native
+backend for OS/document grant separation, pending denial/stop/teardown,
+revocation, input/output loss, quotas, exact wide counters and copied GC values.
+`test/ui/audio_capture.json` belongs to the baseline UI suite and imports the
+procedural API across JS/Lambda backends; it attempts self-grant fields and must
+remain denied. These controls never access a physical microphone. Physical
+OS permission/hotplug and release callback deadlines require separate explicit
+host/device qualification. See the [capture contract](../doc/Lambda_Packages.md#explicit-microphone-capture).
+
 ## 4. Script-driven harnesses
 
 | Harness | Fixture dirs | Discovery | Expected output | Adding a test |

@@ -6,6 +6,7 @@
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_capture.hpp"
 #include "../radiant/audio_cue_owner.hpp"
 #include "../radiant/audio_render.hpp"
 #include "../radiant/document_clock.hpp"
@@ -19,11 +20,14 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_core.h"
+#include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/dom/dom_cssom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/value_builder.hpp"
 #include "../lib/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "radiant_flow_test_utils.hpp"
@@ -18965,6 +18969,161 @@ protected:
         return audio_fixture_midi(owner, duration);
     }
 };
+
+struct CaptureHostFixture {
+    AudioCapturePermission permission = AUDIO_CAPTURE_ALLOWED;
+    AudioCapturePcm* sink = nullptr;
+    unsigned requests = 0, opens = 0, closes = 0;
+    bool loss = false, fail_open = false;
+    static AudioCapturePermission permission_read(void* context, bool request) {
+        auto* host = (CaptureHostFixture*)context; if (request) host->requests++; return host->permission;
+    }
+    static void* open(void* context, AudioCapturePcm* sink) {
+        auto* host = (CaptureHostFixture*)context; host->opens++;
+        if (host->fail_open) return nullptr; host->sink = sink; return host;
+    }
+    static bool lost(void* context, void*) { return ((CaptureHostFixture*)context)->loss; }
+    static void close(void* context, void*) { auto* host = (CaptureHostFixture*)context; host->closes++; host->sink = nullptr; }
+    AudioCaptureBackend backend() { return {this, permission_read, open, lost, close}; }
+};
+class RadiantAudioCapture : public RadiantDecodedAudio {
+protected:
+    CaptureHostFixture host;
+    void prepare() {
+        ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+        auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend));
+    }
+};
+TEST_F(RadiantAudioCapture, HostGrantAndOsPermissionAreIndependentAndAcquisitionIsExplicit) {
+    prepare(); uint64_t denied = radiant_capture_open(document); ASSERT_NE(denied, 0u);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_DENIED; uint64_t os_denied = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, os_denied, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    EXPECT_FALSE(radiant_capture_info(document, denied, &info));
+    host.permission = AUDIO_CAPTURE_PENDING; uint64_t pending = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, pending, &info)); EXPECT_STREQ(info.state, "pending");
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_EQ(radiant_capture_open(document), 0u);
+    ASSERT_TRUE(radiant_capture_stop(document, pending)); host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_FALSE(radiant_capture_tick(document)); EXPECT_EQ(host.opens, 0u);
+    uint64_t active = radiant_capture_open(document); ASSERT_NE(active, 0u);
+    ASSERT_TRUE(radiant_capture_info(document, active, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.granted); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+}
+TEST_F(RadiantAudioCapture, PendingConsentKeepsTheHostAliveAndStartsOnlyOnce) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); ASSERT_NE(token, 0u); EXPECT_TRUE(radiant_audio_tick(document, 0));
+    EXPECT_TRUE(dom_document_has_pending_work(document));
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u);
+    host.permission = AUDIO_CAPTURE_ALLOWED; EXPECT_TRUE(radiant_audio_tick(document, 1)); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_tick(document, 2)); EXPECT_EQ(host.opens, 1u);
+    ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 1u); EXPECT_EQ(bytes, audio_capture_pcm_bytes());
+    const float samples[] = {.25f,-.25f,.5f,-.5f}; ASSERT_NE(host.sink, nullptr);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 123, samples, 2), 2u);
+    float output[4]; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    EXPECT_EQ(first, 123u); for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i]);
+    ASSERT_TRUE(radiant_capture_stop(document, token)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    EXPECT_FALSE(radiant_audio_frames_pending(document)); ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes));
+    EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "stopped");
+    EXPECT_EQ(info.pcm.captured, 2u); EXPECT_EQ(info.pcm.dropped, 123u); EXPECT_EQ(info.pcm.queued, 0u);
+}
+TEST_F(RadiantAudioCapture, ProceduralReadCopiesWideTimestampsAndPcmIntoOrdinaryGcValues) {
+    DomElement* element = load("test/ui/audio_shared_bus.html", true); ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(radiant_eval_context_switch(runtime_get_eval_context(dom_document_script_runtime(document))));
+    auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend)); ASSERT_TRUE(radiant_capture_grant(document, true));
+    RootFrame roots(2); ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, radiant_dom_wrap_node(element)), result(roots, ItemNull);
+    RootedValueBuilder request(RootedValueBuilder::DATA_MAP);
+    request.put("op", Item{.item=s2it(heap_create_name("open"))});
+    result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    auto field = [&](const char* key) {
+        Item name = {.item=s2it(heap_create_name(key))}; return fn_member(result.get(), name);
+    };
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    auto token = field("token").get_uint64(); ASSERT_NE(token, 0u);
+    const float input[] = {.25f,-.25f,.5f,-.5f}; uint64_t wide = (UINT64_C(1) << 53) + 17;
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, wide, input, 2), 2u);
+    request.put("op", Item{.item=s2it(heap_create_name("read"))}); request.put("token", box_uint64_value(token));
+    request.put("frames", push_d(2)); result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    EXPECT_EQ(field("first_frame").get_uint64(), wide); EXPECT_EQ(field("next_frame").get_uint64(), wide + 2);
+    EXPECT_EQ(field("dropped").get_uint64(), wide); EXPECT_EQ(it2l(field("frames")), 2);
+    ASSERT_EQ(get_type_id(field("data")), LMD_TYPE_BINARY); auto* bytes = field("data").get_binary(); ASSERT_EQ(bytes->len, 16u);
+    for (unsigned i = 0; i < 2; i++) for (unsigned channel = 0; channel < 2; channel++)
+        EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), i, channel), input[i * 2 + channel]);
+    ASSERT_TRUE(radiant_capture_stop(document, token));
+    // the copied binary survives closure of the producer and its native queues (D5.3.3).
+    EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), 1, 0), .5f);
+    request.put("frames", push_d(1.5)); EXPECT_EQ(dom_engine_audio_capture(owner.get(), request.value.get()).item, ItemNull.item);
+}
+TEST_F(RadiantAudioCapture, PendingDenialOrDocumentRetirementNeverStartsADeviceLater) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED; AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_PENDING; ASSERT_NE(radiant_capture_open(document), 0u);
+    ui.document = nullptr; free_document(document); document = nullptr; host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_EQ(host.opens, 0u); EXPECT_EQ(host.closes, 0u); EXPECT_EQ(host.sink, nullptr);
+}
+TEST_F(RadiantAudioCapture, RecordingDoesNotNeedOutputActivationAndMonitoringUsesTheSharedGate) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto* local = document->url.get(); auto* network = url_parse("https://example.test/capture"); ASSERT_NE(network, nullptr);
+    document->url = lam::own(network); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    EXPECT_FALSE(radiant_document_may_start_audio(document)); EXPECT_FALSE(radiant_capture_monitor(document, token, .5f));
+    const float samples[] = {.5f,-.5f,.25f,-.25f}; ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, samples, 2), 2u);
+    radiant_audio_note_activation(document); ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 2, samples, 2), 2u);
+    float output[8] = {}; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 4, &first), 4u);
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 4));
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i] * .5f);
+    for (unsigned i = 4; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, 0)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+    document->url = lam::own(local); url_destroy(network);
+}
+TEST_F(RadiantAudioCapture, RevocationAndDeviceLossJoinTheProducerAndReleaseItsQuota) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_capture_monitor(document, token, 1));
+    ASSERT_TRUE(radiant_capture_grant(document, false)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked");
+    EXPECT_FALSE(radiant_capture_monitor(document, token, 1)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); token = radiant_capture_open(document); host.loss = true;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(host.closes, 2u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+    host.loss = false; token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(host.closes, 3u);
+}
+TEST_F(RadiantAudioCapture, OutputLossLeavesRecordingActiveAndMonitoringMustBeReenabled) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f)); audio_bus_retire_output(); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.monitor_lost); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.closes, 0u);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, nullptr, 2), 2u); float output[4]; uint64_t first = 0;
+    EXPECT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_FALSE(info.monitor_lost);
+}
+TEST_F(RadiantAudioCapture, FailedDeviceAndFullDocumentBudgetLeaveNoReaderOrDeviceBehind) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto reservation = radiant_audio_storage_acquire(document, 512u * 1024u * 1024u); ASSERT_NE(reservation, 0u);
+    auto token = radiant_capture_open(document); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "error"); EXPECT_EQ(host.opens, 0u);
+    radiant_audio_storage_release(document, reservation); host.fail_open = true; token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "unavailable"); EXPECT_EQ(host.opens, 1u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+}
+TEST_F(RadiantAudioCapture, TeardownClosesBeforeItsQuotaOwnerAndNoGrantIsInherited) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    auto inherited = document_js_host_config_inherit(&ui, document); EXPECT_FALSE(inherited.microphone_granted);
+    struct Peer { DomDocument* doc; ~Peer() { dom_document_destroy(doc); } } peer{dom_document_create(document->input)};
+    ASSERT_NE(peer.doc, nullptr); dom_document_borrow_input_resources(peer.doc); auto backend = host.backend();
+    ASSERT_TRUE(radiant_capture_set_backend(peer.doc, &backend)); document_apply_js_host_config(peer.doc, &inherited);
+    AudioCaptureInfo info; EXPECT_FALSE(radiant_capture_info(peer.doc, token, &info));
+    auto denied = radiant_capture_open(peer.doc); ASSERT_TRUE(radiant_capture_info(peer.doc, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    dom_document_destroy(peer.doc); peer.doc = nullptr;
+    ui.document = nullptr; free_document(document); document = nullptr; EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+}
 
 TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);

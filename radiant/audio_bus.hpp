@@ -18,6 +18,8 @@ static constexpr unsigned AUDIO_ROUTE_REFERENCES = 128;
 enum AudioVoiceLoss { AUDIO_VOICE_OK, AUDIO_VOICE_DEVICE_LOST, AUDIO_VOICE_ROUTE_LOST };
 // shared opaque native identities never wrap; provider rows may impose their signed-token bound.
 uint64_t audio_bus_identity(uint64_t maximum = UINT64_MAX - 1);
+// control-thread exclusion only; device callbacks never wait for another thread.
+void audio_control_yield();
 
 // adds `frames` stereo frames to `out`, the first at sub-mix frame `clock`. It
 // runs on the audio thread, or on the UI thread when the bus is offline, and

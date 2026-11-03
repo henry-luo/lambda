@@ -1,5 +1,9 @@
-// import-only host fixture; exercises existing pn rows without a new public API.
+// import-only host fixture for procedural shared-audio and explicit capture rows.
 import dom
+
+pub pn capture_request(owner, request) {
+    return dom.audio_capture(owner, request)
+}
 
 pub pn request(owner, operation, token, value) map {
     let result = if (operation == "open") dom.audio_open(owner, value)

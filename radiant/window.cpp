@@ -1609,7 +1609,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    UiAppMode app_mode,
                                                    const RenderPagedOptions* paged_options = nullptr,
                                                    bool fullscreen = false,
-                                                   int inspector_fd = -1) {
+                                                   int inspector_fd = -1,
+                                                   bool microphone_granted = false) {
     struct DeferredRetirement {
         bool previous = dom_retire_set_deferred(true);
         ~DeferredRetirement() { dom_retire_set_deferred(previous); }
@@ -1797,6 +1798,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             false,
             false
         };
+        js_host_config.microphone_granted = microphone_granted;
         if (paged_options) {
             js_host_config.paged_media = paged_options;
             js_host_config.disable_css_animations = true;
@@ -2153,21 +2155,21 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
                                     bool enable_event_log, bool enable_state_dump,
-                                    const RenderPagedOptions* paged_options, bool fullscreen) {
+                                    const RenderPagedOptions* paged_options, bool fullscreen, bool microphone_granted) {
     return view_doc_in_window_with_events_internal(doc_file, nullptr, nullptr, 0,
                                                    event_file, headless,
                                                    font_dirs, font_dir_count, enable_event_log,
-                                                   enable_state_dump, UI_APP_MODE_VIEW, paged_options, fullscreen);
+                                                   enable_state_dump, UI_APP_MODE_VIEW, paged_options, fullscreen, -1, microphone_granted);
 }
 
 int view_lambda_document_transform_with_events(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         const char* event_file, bool headless, const char** font_dirs,
-        int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen) {
+        int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen, bool microphone_granted) {
     return view_doc_in_window_with_events_internal(document_file, transform, options,
         option_count, event_file, headless, font_dirs, font_dir_count,
-        enable_event_log, enable_state_dump, UI_APP_MODE_VIEW, nullptr, fullscreen);
+        enable_event_log, enable_state_dump, UI_APP_MODE_VIEW, nullptr, fullscreen, -1, microphone_granted);
 }
 
 int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
@@ -2190,7 +2192,7 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr, false);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr, false, false);
 }
 
 int view_doc_with_devtools(const char* path, int fd, bool headless) {
