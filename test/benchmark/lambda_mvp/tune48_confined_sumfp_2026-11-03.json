@@ -1,0 +1,851 @@
+{
+  "schema": 2,
+  "date": "2026-11-03T14:31:28.290864+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "be132020c6d2de2b1316e987879391f16894b7da",
+  "working_tree": "M AGENTS.md\n M build_lambda_config.json\n M doc/Doc_Convention.md\n M doc/Lambda_Formal_Index.md\n M doc/Lambda_Formal_Semantics.md\n M doc/Lambda_Sys_Func.md\n M doc/dev/Lambda_Document_Updates.md\n M lambda/lambda.h\n M lambda/runtime/build_ast.cpp\n M lambda/runtime/concurrency.cpp\n M lambda/runtime/concurrency.h\n M lambda/runtime/interp.cpp\n M lambda/runtime/interp.hpp\n M lambda/runtime/interp_plan.cpp\n M lambda/runtime/mvp/mvp_internal.hpp\n M lambda/runtime/mvp/mvp_mir.cpp\n M lambda/runtime/mvp/mvp_plan.cpp\n M lambda/runtime/sys_func_registry.c\n M lambda/runtime/transpile-mir.cpp\n M lambda/runtime/write_set.cpp\n M lambda/runtime/write_set.hpp\n M lib/rdb.c\n M lib/rdb.h\n M lib/rdb_abi.h\n M lib/rdb_sqlite.c\n M test/README.md\n M test/benchmark/lambda_mir_mvp.py\n M test/benchmark/test_lambda_mir_mvp.py\n M test/test_lambda_concurrency_gtest.cpp\n M test/test_rdb_gtest.cpp\n M test/test_security_runtime_gtest.cpp\n M vibe/Lambda_Design_MIR_MVP.md\n M vibe/Lambda_Design_Reference.md\n M vibe/Lambda_IO_RDB.md\n M vibe/impl/Lambda_Impl_MIR_MVP.md\n?? lambda/runtime/io_sqlite.cpp\n?? lambda/runtime/io_sqlite.hpp\n?? lambda/runtime/mir_cow_analysis.hpp\n?? lib/rdb_sqlite_tx.h\n?? test/benchmark/lambda_mvp/tune48_guarded_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_guarded_analysis_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_guarded_sumfp_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_guarded_triangl_confirmation_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_guarded_triangl_mir_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_guarded_validation_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_analysis_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_awfy-nbody_confirmation_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_beng-binarytrees_confirmation_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_binarytrees_mir_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_full_failures_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_jetstream-nbody_confirmation_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_phase1_partial_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_sumfp_2026-11-03.json\n?? test/benchmark/lambda_mvp/tune48_outcomes_validation_2026-11-03.json\n?? test/lambda/mvp/mir_mvp_confined_arrays.ls\n?? test/lambda/mvp/mir_mvp_confined_arrays.txt\n?? test/lambda/mvp/mir_mvp_propagation.ls\n?? test/lambda/mvp/mir_mvp_propagation.txt\n?? test/lambda/mvp/mir_mvp_snapshot_loop.ls\n?? test/lambda/mvp/mir_mvp_snapshot_loop.txt\n?? test/lambda/mvp/mir_mvp_string_outcomes.ls\n?? test/lambda/mvp/mir_mvp_string_outcomes.txt\n?? test/lambda/proc/boxed_container_branch.ls\n?? test/lambda/proc/boxed_container_branch.txt\n?? test/lambda/proc/open_scope_exit.ls\n?? test/lambda/proc/open_scope_exit.txt\n?? test/lambda/proc/open_scope_unwind.ls\n?? test/lambda/proc/open_scope_unwind.txt\n?? test/lambda/proc/sqlite_autocommit.ls\n?? test/lambda/proc/sqlite_autocommit.txt\n?? test/lambda/proc/sqlite_cancel.ls\n?? test/lambda/proc/sqlite_cancel.txt\n?? test/lambda/proc/sqlite_existing.ls\n?? test/lambda/proc/sqlite_existing.txt\n?? test/lambda/proc/sqlite_parallel.ls\n?? test/lambda/proc/sqlite_parallel.txt\n?? test/lambda/proc/sqlite_scoped.ls\n?? test/lambda/proc/sqlite_scoped.txt\n?? test/lambda/proc/sqlite_task_scope.ls\n?? test/lambda/proc/sqlite_task_scope.txt\n?? vibe/impl/Lambda_Impl_RDB_Write.md",
+  "release_confirmed": true,
+  "benchmark_root": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/benchmarks",
+  "c2mir_allowance_percent": 20.0,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "dccfed18823b3c66e33a19a86d1f772a5cab74e3192e8dd0cba6e1a68ad9d703",
+      "file_count": 39,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "a6b62f2397248e614cef2db041286ca79f27cac9ea79275f6d2b86aac5a4c7ba"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "6d996b70e2e85a9003d15d0109c9e0c90852400a5b3d032417eb2c388a5f0342"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "a622c83632a2475fb1de028d91316410a8318c5a1e21e0ba14a242e7446ef87f"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+        },
+        {
+          "path": "lambda/runtime/mir_cow_analysis.hpp",
+          "sha256": "88c933da7b1f9c09c4b71cc12af18ba025babbba3de38e8c6ae20fcc03e3f6ae"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "68d157ebdd8e48b929c52ec68684ea229c343a5229c005cf888f8e8a65c8ac59"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "13da7641c9bc13a988a486fc1eb04597743168a207795d5e5e1f1cb252fd7109"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "e6c1605cc2287047e18a3d848fd6dc84a35844ef371968f2d680f2c80ffe5a27"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "15c103e9456e2c0dcc64cb21adf05eb5b81ad97ae717d61e92451017fd05f093"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "d120d19b96d5859c7f47010f2c0091f439bc17ba8dd0ffc8ff6f400357077aa4"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/final-release.exe",
+      "sha256": "11c3c626a452ebdb515d02f64598c0ba5197958cfd5d9e8fe4d0aea642c0fca3"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/final-release.exe",
+      "sha256": "11c3c626a452ebdb515d02f64598c0ba5197958cfd5d9e8fe4d0aea642c0fca3"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/c2m-reference",
+      "sha256": "8f4ae53199ee0654ec22c49994298bfb9a1bae02789113566edaacb73cfe3214"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/control-release.exe",
+      "sha256": "83a653e3d678eff9c6dbd30278e37a23467ae8c2e99cacd4361188dc8437a6fe"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "2499093d45e8e53e31704de91a05580760581b14660cabf24031f0e6dc49c81d",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "50de29fc5dda6f869af737b79e4efc2383e90a4819b61b6a6eb6b467b4cf5059"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "reference_helpers": {
+    "sha256": "8bab39b2d1ea69654997211ec32fb469668ca2da0c8b73ca4ec53785f3e38331",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_lcg.h",
+        "sha256": "7b28fdea98296e466bc3f44a3d2e102b31009a8a6e96a473bdbe9592b2871f31"
+      },
+      {
+        "path": "test/benchmark/c2mir/nbody_kernel.h",
+        "sha256": "c721dc702fb5972c6ce8b755661f746cf2065f3f778f41c392e37dbd5392a71e"
+      },
+      {
+        "path": "test/benchmark/c2mir/tree_benchmark.h",
+        "sha256": "92184c7785e97b45ac4e654b8d9ce088e37401e8c42a28b9f53e426a38695b13"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "7420dcb23f6454a6398b88c9ecd82cb0346b9c4268d2b61cf641a301950daa4c",
+    "file_count": 4,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "c033de0d31e6d730b3e4a75b3e5b3374cf3cfee34812b9c9600a7e46c5797d7a"
+      },
+      {
+        "path": "test/benchmark/run_c2mir_benchmarks.py",
+        "sha256": "fb28fa56d48e8dc1ae1cf10102c2d5c076c922425946130817d5507a3e4fe029"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "matched per-row execution boundaries; compilation excluded; see each row for timed output",
+  "runs": 30,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "6282b901a111c63170bbeb0254458162ed8fa147be9c852ba65b675fa7296e8b",
+      "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded",
+      "c_sha256": "86b95b6620a28345342a0064b5253c8e42587dcacd15bd19578f8fa44eeca8d9",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/c2m-reference",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/control-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.012,
+          0.00999999,
+          0.011,
+          0.013,
+          0.00999999,
+          0.011,
+          0.011,
+          0.014,
+          0.011,
+          0.014,
+          0.013,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.014,
+          0.00999999,
+          0.00999999,
+          0.011,
+          0.013,
+          0.013,
+          0.014
+        ],
+        "production": [
+          755.854,
+          748.446,
+          768.841,
+          673.412,
+          671.012,
+          758.408,
+          685.182,
+          693.423,
+          743.8,
+          696.729,
+          758.428,
+          757.679,
+          712.952,
+          759.883,
+          667.235,
+          766.343,
+          747.46,
+          742.159,
+          752.558,
+          762.202,
+          745.192,
+          772.341,
+          759.446,
+          705.516,
+          750.613,
+          755.26,
+          762.357,
+          762.813,
+          672.996,
+          760.511
+        ],
+        "c2mir": [
+          716.434082,
+          672.402832,
+          755.049805,
+          748.116943,
+          780.369141,
+          760.399902,
+          742.666992,
+          768.940918,
+          759.601074,
+          728.610107,
+          723.310791,
+          737.205078,
+          732.415039,
+          749.670166,
+          766.323975,
+          670.562988,
+          768.243164,
+          679.553223,
+          700.021973,
+          755.857178,
+          706.01001,
+          702.482178,
+          730.24292,
+          718.662109,
+          755.183105,
+          703.019043,
+          674.624023,
+          762.524902,
+          769.72998,
+          679.74707
+        ],
+        "previous_mvp": [
+          0.00999999,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.015,
+          0.011,
+          0.011,
+          0.00999999,
+          0.013,
+          0.00999999,
+          0.014,
+          0.012,
+          0.00999999,
+          0.013,
+          0.011,
+          0.011,
+          0.00999999,
+          0.011,
+          0.014,
+          0.011,
+          0.011,
+          0.013,
+          0.013,
+          0.00999999,
+          0.011,
+          0.012,
+          0.011,
+          0.012
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.011,
+        "production": 751.5855,
+        "c2mir": 734.8100585,
+        "previous_mvp": 0.011
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ]
+      ],
+      "engine_failures": {},
+      "discarded_rounds": [],
+      "mvp_over_c2mir": 1.4969854961504994e-05,
+      "mvp_over_production": 1.4635726740337591e-05,
+      "timer_resolution_limited": {
+        "mvp": false,
+        "production": false,
+        "c2mir": false,
+        "previous_mvp": false
+      },
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.4788921753159451e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.4503683935719672e-05,
+          "two_sided_upper_bound": 1.482162178185537e-05
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.5306219518524803e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.4566003830289609e-05,
+          "two_sided_upper_bound": 1.535382008808453e-05
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.0,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9166666666666666,
+          "two_sided_upper_bound": 1.0
+        }
+      },
+      "derived_workload": {
+        "count": 10000,
+        "lambda_sha256": "8c806f8cb909868ee8493828b52b07392ba647f58b23ca7712598b45b62e4842",
+        "c_sha256": "a89c77a0f9de7568750ada47d673d06c3acf9a766f31c50eafa9710143053049",
+        "lambda_source": "// R7RS Benchmark: sumfp (Typed version)\n// Sum of floats from 0.0 to 100000.0, repeated 1 time\n// Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)\n\nfn run(n: float) float {\n    var work_n: float = n\n\n    var s: float = 0.0\n    while (work_n >= 0.0) {\n        s = s + work_n\n        work_n = work_n - 1.0\n    }\n    return s\n}\n\nfn benchmark() float {\n    var result = run(100000.0)\n    return result\n}\n\npn main() {\n    let t0 = clock()\n    var total: float = 0.0\n    var i: int = 0\n    while (i < 10000) { total = total + benchmark(); i = i + 1 }\n    let elapsed = (clock() - t0) * 1000.0\n    if (abs(total - 5000050000.0 * 10000.0) < 1.0) { print(\"sumfp: PASS\\n\") }\n    else { print(\"sumfp: FAIL\\n\") }\n    print(\"__TIMING__:\" ++ elapsed ++ \"\\n\")\n}\n",
+        "c_source": "/* Native C2MIR port of r7rs/sumfp2.ls. */\nextern int printf(const char *, ...);\n#include \"/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_kernel_timer.h\"\n\nstatic double run_sumfp(double n) {\n    double sum = 0.0;\n    while (n >= 0.0) {\n        sum += n;\n        n -= 1.0;\n    }\n    return sum;\n}\n\nint main(void) {\n    BENCH_KERNEL_BEGIN();\n    double total = 0.0;\n    long i;\n    for (i = 0; i < 10000; i++) total += run_sumfp(100000.0);\n    BENCH_KERNEL_END();\n    double diff = total - 5000050000.0 * 10000.0;\n    if (diff < 0.0) diff = -diff;\n    printf(diff < 1.0 ? \"sumfp: PASS\\n\" : \"sumfp: FAIL\\n\");\n    BENCH_KERNEL_REPORT();\n    return diff >= 1.0;\n}\n",
+        "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded"
+      },
+      "mvp_over_previous": 1.0,
+      "previous_mvp_comparison": {
+        "statistically_faster": false,
+        "statistically_slower": false
+      },
+      "performance_gates": {
+        "faster_than_full_mir": true,
+        "within_c2mir_allowance": true,
+        "within_10_percent_of_c2mir": true
+      }
+    }
+  ],
+  "pause_for_jobs": true,
+  "observed_checkout_identity": {
+    "experiment_sources": {
+      "sha256": "1fabded70269641390accf541636003f35d28715afbef178cb5461384c5d35c5",
+      "file_count": 39,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "a6b62f2397248e614cef2db041286ca79f27cac9ea79275f6d2b86aac5a4c7ba"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "64c05eba308328d670ca1844ab367ebdf96d96f003a7f909fc9186c564493851"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "cde3ef7c6a0b1339309bfe36d4fbc278b365adc7acb3d12650326d419c00baff"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "a8a8e68ceb4ddadaacc91398c71c3858fe03520ca4b1a47efa7d22970f4dfda8"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+        },
+        {
+          "path": "lambda/runtime/mir_cow_analysis.hpp",
+          "sha256": "88c933da7b1f9c09c4b71cc12af18ba025babbba3de38e8c6ae20fcc03e3f6ae"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "68d157ebdd8e48b929c52ec68684ea229c343a5229c005cf888f8e8a65c8ac59"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "13da7641c9bc13a988a486fc1eb04597743168a207795d5e5e1f1cb252fd7109"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "e6c1605cc2287047e18a3d848fd6dc84a35844ef371968f2d680f2c80ffe5a27"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "1ece9584a2df94192c82cea292a9be825f8c8df7acc2b056463f56226b1e38d0"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "f4b8ee160232c85061241dc366be80c92e591b4aab38749de90f5da5508af59a"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "Apple M4"
+  },
+  "candidate_source_manifest": {
+    "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/final-source.json",
+    "sha256": "699311b8d4037dc56f0a789b79a8c98ad82754ec68789c86dfe80882fdb9ae45"
+  },
+  "geomean_mvp_over_production": 1.4635726740337583e-05,
+  "geomean_mvp_over_c2mir": 1.496985496150499e-05,
+  "geomean_mvp_over_previous_mvp": 1.0,
+  "qualification": "all subset; coverage and per-row performance qualification are separate; matched workload boundaries, paired bootstrap per row"
+}

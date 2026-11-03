@@ -1,0 +1,598 @@
+{
+  "candidate_source_reference": {
+    "revision": "793d58bd55d74c8e547d196121ba61a3e8d7f581",
+    "binary_sha256": "716b8cfe006de13905aa847f6e3440cf6a91a0163512e012adeba85d010442f2",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "48e3920d45c97a27de4cff8b2e7a2bb64e88a8f3aee51edaa2fb44b850890021",
+        "file_count": 38,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "050ebe3f24f60705a9892a7d58f7d822d69d1bc0bf02619673b9585e79c4ee4f"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "b966969b51dc7bf9fcf142502c2f80beba392d4404eddc2d308537a53ef6aa65"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "edec4d1447d13ef2cfe191abba7d73333e623928ff2b248fb2068c4bbc4fea03"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "95652dac392c8c5d4a82b149ec657bf758e9ce3012a6ff9460c23e79b2d6ccfa"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "e5a03954c32d2b240f63a9c1d92fc6131166e8ac61d78be600c51bd38ae7b653"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "c0f7cbc0dc08bcfafa9603b7c52437480ab840feed654b66dea9863947abc8e0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    }
+  },
+  "baseline": {
+    "command": "make test-lambda-baseline",
+    "source_log": "temp/accounting-lambda-baseline-final.log",
+    "log_sha256": "765bf8b40b3a3defa3950a03db9e6fa343d766c1084795db49e2d76b852cd619",
+    "returncode_inferred_from_complete_all_pass_summary": 0,
+    "lambda_passed": 6608,
+    "input_passed": 2112,
+    "combined_passed": 8720,
+    "combined_total": 8720,
+    "source_before": {
+      "experiment_sources": {
+        "sha256": "9a43a06f24aada803450ad3f5737f75a1d8f58cbb4d3bcae22d15ec3eec30399",
+        "file_count": 38,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "050ebe3f24f60705a9892a7d58f7d822d69d1bc0bf02619673b9585e79c4ee4f"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "b966969b51dc7bf9fcf142502c2f80beba392d4404eddc2d308537a53ef6aa65"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "edec4d1447d13ef2cfe191abba7d73333e623928ff2b248fb2068c4bbc4fea03"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "95652dac392c8c5d4a82b149ec657bf758e9ce3012a6ff9460c23e79b2d6ccfa"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "e5a03954c32d2b240f63a9c1d92fc6131166e8ac61d78be600c51bd38ae7b653"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "2cb851fe92820c13b4f493ef002e1cd19a22d2de20612b9c558506eb2f7d094c"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "source_after": {
+      "experiment_sources": {
+        "sha256": "9a43a06f24aada803450ad3f5737f75a1d8f58cbb4d3bcae22d15ec3eec30399",
+        "file_count": 38,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "050ebe3f24f60705a9892a7d58f7d822d69d1bc0bf02619673b9585e79c4ee4f"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "b966969b51dc7bf9fcf142502c2f80beba392d4404eddc2d308537a53ef6aa65"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "edec4d1447d13ef2cfe191abba7d73333e623928ff2b248fb2068c4bbc4fea03"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "95652dac392c8c5d4a82b149ec657bf758e9ce3012a6ff9460c23e79b2d6ccfa"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "e5a03954c32d2b240f63a9c1d92fc6131166e8ac61d78be600c51bd38ae7b653"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "2cb851fe92820c13b4f493ef002e1cd19a22d2de20612b9c558506eb2f7d094c"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "scope": "integration baseline on shared checkout; MVP files match the frozen release; shared Full MIR source differs from the performance snapshot"
+  },
+  "targeted": {
+    "groups": 7,
+    "returncode": 0,
+    "benchmark_goldens": 48,
+    "array_gc_cases": 18,
+    "string_and_outcome_gc_modes": 3,
+    "recursive_constructor_gc_modes": 2,
+    "native_nbody_variants": 3,
+    "private_reference_provenance": "pass"
+  },
+  "focused_aggregate": {
+    "groups": 55,
+    "failing_subtests": 58,
+    "failing_groups": 17,
+    "failures": [
+      "test_allocating_vector_emission (__main__.LambdaMirMvpTests)",
+      "test_array_reduction_mir (__main__.LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (__main__.LambdaMirMvpTests)",
+      "test_guarded_float_body (__main__.LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (__main__.LambdaMirMvpTests)",
+      "test_modular_array_update (__main__.LambdaMirMvpTests)",
+      "test_module_initialization (__main__.LambdaMirMvpTests)",
+      "test_native_string_array_read (__main__.LambdaMirMvpTests)",
+      "test_nonzero_fft (__main__.LambdaMirMvpTests) (compiler='production')",
+      "test_nullable_comparison_mir (__main__.LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (__main__.LambdaMirMvpTests)",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_power_two_divmod (__main__.LambdaMirMvpTests)",
+      "test_readonly_array_tail (__main__.LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (__main__.LambdaMirMvpTests)",
+      "test_scalar_record_witness (__main__.LambdaMirMvpTests)",
+      "test_single_use_string_constructor (__main__.LambdaMirMvpTests)"
+    ]
+  },
+  "changed_since_performance_snapshot": [
+    "lambda/runtime/transpile-mir.cpp"
+  ],
+  "mvp_sources_match_snapshot": true,
+  "logs": {
+    "targeted": {
+      "path": "temp/lambda_mir_mvp/tune48g/targeted.log",
+      "sha256": "80002783e2ca727a630c478516d0e0e017a31d5273a75103a1ec765e808e773b"
+    },
+    "focused": {
+      "path": "temp/lambda_mir_mvp/tune48g/focused.log",
+      "sha256": "210fac960c6660dc8eb82455d7a66cc3959ad10aff04fcd62554ea018d71bd4f"
+    },
+    "baseline": {
+      "path": "temp/lambda_mir_mvp/tune48g/baseline.log",
+      "sha256": "765bf8b40b3a3defa3950a03db9e6fa343d766c1084795db49e2d76b852cd619"
+    }
+  },
+  "test_driver_sha256": "45594954b50bfac4d1f7947719da715f40850fb0c39ce3367da3e2ae3340eecb",
+  "scope": "frozen release correctness/performance; required shared integration baseline has identical MVP sources and a later shared Full MIR file; broad legacy failures remain asserted"
+}

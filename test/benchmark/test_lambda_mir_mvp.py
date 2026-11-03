@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Run the MVP's admission, ownership, error and emission checks."""
 import os
+import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
+import lambda_mir_mvp
 from lambda_mir_mvp import GC_CASES, CASES, ROOT
+from benchmark_provenance import sha256_file
 from run_c2mir_benchmarks import C2M, ensure_c2m, strip_timing
 
 
@@ -15,6 +21,7 @@ class LambdaMirMvpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.exe = Path(os.environ.get("LAMBDA_TEST_EXE", ROOT / "lambda.exe")).resolve()
+        cls.benchmark_root = Path(os.environ.get("LAMBDA_TEST_BENCHMARK_ROOT", ROOT / "test/benchmark")).resolve()
         (ROOT / "temp").mkdir(exist_ok=True)
         cls.scratch = tempfile.TemporaryDirectory(prefix="mir_mvp_", dir=ROOT / "temp")
 
@@ -22,7 +29,12 @@ class LambdaMirMvpTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.scratch.cleanup()
 
+    def script_source(self, source):
+        benchmark_root = ROOT / "test/benchmark"
+        return self.benchmark_root / source.relative_to(benchmark_root) if source.is_relative_to(benchmark_root) else source
+
     def run_script(self, source, overrides=None, logging=False):
+        source = self.script_source(source)
         env = os.environ.copy()
         for key in tuple(env):
             if key.startswith(("LAMBDA_", "MIR_")):
@@ -36,6 +48,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         return subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
 
     def check_golden(self, source, overrides=None):
+        source = self.script_source(source)
         result = self.run_script(source, overrides)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
@@ -137,7 +150,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source.write_text(body + '''pn main() {
     var a: float[] = [1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
     let snapshot: float[] = a
-    four1(a, 8)
+    four1(a, 8)^
     var expected: float[] = [10.0, 0.0, -2.0, -2.0, -2.0, 0.0, -2.0, 2.0]
     var ok: bool = true
     for i in 0 to 7 { if (abs(a[i] - expected[i]) <= 0.000000001) { } else { ok = false } }
@@ -168,6 +181,170 @@ class LambdaMirMvpTests(unittest.TestCase):
         native = lazy[:lazy.index("\tcall\tfn_index")]
         self.assertRegex(native, r"\tb(?:eq|ne)\t[^\n]+, 1\n")
         self.assertNotRegex(native, r"\teq\t[^\n]+, 1\n")
+
+    def test_confined_array_snapshots(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_confined_arrays.ls"
+        for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+                self.check_golden(ROOT / "test/benchmark/larceny/puzzle2.ls", mode)
+        for name in ("local_sum", "sibling"):
+            body = self.function_mir(source, name)
+            self.assertIn("\talloca\t", body)
+            self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
+        prefix = self.function_mir(source, "sibling").split("\tcall\tlambda_array_scalar_snapshot", 1)[0]
+        for argument in ("arg1", "arg2"):
+            self.assertRegex(prefix, rf"\tmov\t[^,\n]+, {argument}\n")
+        self.assertRegex(prefix, r"\tmov\ti64:\d+\(runtime\), 0\n")
+        body = self.function_mir(source, "call_sibling")
+        self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
+        recursive = re.search(r"\tcall\tmvp_\d+_sibling_dp", body)
+        self.assertIsNotNone(recursive)
+        self.assertLess(body.index("\tcall\tlambda_array_scalar_snapshot"), recursive.start())
+        for name in ("retained", "keyed_escape"):
+            self.assertNotIn("lambda_array_scalar_snapshot", self.function_mir(source, name))
+        body = self.function_mir(ROOT / "test/benchmark/larceny/puzzle2.ls", "solve")
+        self.assertEqual(body.count("\tcall\tlambda_array_scalar_snapshot"), 3)
+        self.assertNotIn("cow_capture_value", body)
+
+    def test_snapshot_loop_lifetime(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_snapshot_loop.ls"
+        for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "repeat")
+        self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
+        # every reservation precedes the loop condition and its back edge.
+        last_alloca = body.rindex("\talloca\t")
+        self.assertLess(last_alloca, body.index("\tcall\tlambda_array_scalar_snapshot"))
+        branches = [m for m in re.finditer(r"\tb(?:ge|gt|le|lt)\t", body)]
+        self.assertTrue(branches)
+        self.assertLess(last_alloca, branches[0].start())
+
+    def test_propagation_outcomes(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_propagation.ls"
+        for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "plus_one")
+        self.assertIn("i64, i64, p:runtime", body)
+        self.assertNotIn("\tcall\tint2it_lane", body)
+        self.assertNotIn("\tcall\tint2it_lane", self.function_mir(source, "fused"))
+        native = self.function_mir(source, "float_update").split("\tcall\tfn_index", 1)[0]
+        self.assertIn("\tdmul\t", native)
+        self.assertNotIn("lambda_type_check", native)
+        body = self.function_mir(source, "repeated_float")
+        call = re.search(r"\tcall\tmvp_\d+_float_update_dp", body)
+        self.assertIsNotNone(call)
+        self.assertIn("\tdmul\t", body[:call.start()])
+        self.assertNotIn("lambda_type_check", body[:call.start()])
+
+    def test_string_outcome_appends(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_string_outcomes.ls"
+        for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "repeat_text")
+        self.assertIn("\tcall\tfn_strcat3", body)
+        self.assertIn("\tcall\tfn_join", body)
+
+    def test_failed_engine_remains_unqualified(self):
+        executable = Path(self.scratch.name) / "failed.exe"
+        executable.write_text("#!/bin/sh\nexit 17\n")
+        executable.chmod(0o755)
+        report = Path(self.scratch.name) / "failed.json"
+        manifest = Path(self.scratch.name) / "source.json"
+        identity = {"fixture": "archived identity"}
+        manifest.write_text(json.dumps({"binary_sha256": sha256_file(executable), "compiler_identity": identity}))
+        self.assertIsNone(ensure_c2m())
+        reference = Path(self.scratch.name) / "reference.exe"
+        reference.write_bytes(C2M.read_bytes())
+        reference.chmod(0o755)
+        corpus = Path(self.scratch.name) / "benchmarks"
+        (corpus / "r7rs/c2mir").mkdir(parents=True)
+        for name in ("fib2.ls", "fib2.txt", "c2mir/fib.c"):
+            shutil.copy2(ROOT / "test/benchmark/r7rs" / name, corpus / "r7rs" / name)
+        shutil.copytree(ROOT / "test/benchmark/c2mir", corpus / "c2mir")
+        command = [sys.executable, str(ROOT / "test/benchmark/lambda_mir_mvp.py"),
+            "--release", "--exe", str(executable), "--record-failures", "--case", "r7rs/fib",
+            "--runs", "3", "--warmups", "1", "--output", str(report), "--source-manifest", str(manifest),
+            "--c2mir-exe", str(reference), "--benchmark-root", str(corpus)]
+        result = subprocess.run(command,
+            cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        data = json.loads(report.read_text())
+        self.assertEqual(data["compiler_identity"], identity)
+        self.assertIn("observed_checkout_identity", data)
+        self.assertEqual(data["executables"]["c2mir"]["sha256"], sha256_file(reference))
+        self.assertEqual(data["benchmark_root"], str(corpus))
+        row = data["cases"][0]
+        self.assertEqual(row["commands"]["mvp"][2], str(corpus / "r7rs/fib2.ls"))
+        self.assertEqual(row["commands"]["c2mir"][0], str(reference))
+        self.assertEqual(set(row["engine_failures"]), {"mvp", "production"})
+        self.assertIn("exit 17", row["engine_failures"]["production"]["error"])
+        self.assertIsNone(row["median_ms"]["mvp"])
+        self.assertIsNone(row["performance_gates"]["faster_than_full_mir"])
+        self.assertIsNone(row["performance_gates"]["within_c2mir_allowance"])
+        self.assertEqual(len(row["samples_ms"]["c2mir"]), 3)
+        self.assertTrue(all(order == ["c2mir"] for order in row["execution_order"]))
+        manifest.write_text(json.dumps({"binary_sha256": "0" * 64, "compiler_identity": identity}))
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("source manifest does not identify", result.stderr)
+
+    def test_recursive_constructor_gc(self):
+        original = (ROOT / "test/benchmark/larceny/gcbench2.ls").read_text()
+        source = Path(self.scratch.name) / "recursive_constructor.ls"
+        source.write_text(original[:original.index("pn main()")] + '''pn main() {
+    let retained = make_tree(5)
+    let temporary = make_tree(4)
+    print([check_tree(retained), check_tree(temporary)]); print("\\n")
+}
+''')
+        source.with_suffix(".txt").write_text("[63, 31]\n")
+        for mode in ({"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+
+    def test_interrupted_round_is_retried(self):
+        report = Path(self.scratch.name) / "interrupted.json"
+        expected = (ROOT / "test/benchmark/r7rs/fib2.txt").read_text().strip()
+        state = {"calls": 0, "busy": False}
+
+        def invoke(command, env):
+            state["calls"] += 1
+            # the first measured round overlaps a build after one observation.
+            elapsed = 999 if state["calls"] == 4 else 1
+            state["busy"] = elapsed == 999
+            return expected + f"\n__TIMING__:{elapsed}\n"
+
+        def competitors(group):
+            busy = state["busy"]
+            state["busy"] = False
+            return [{"pid": 123, "program": "make"}] if busy else []
+
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+            "--pause-for-jobs", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
+            "--output", str(report)]
+        with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
+                mock.patch.object(lambda_mir_mvp, "competing_benchmark_jobs", competitors), \
+                mock.patch.object(lambda_mir_mvp.time, "sleep"), mock.patch("builtins.print"):
+            lambda_mir_mvp.main()
+        row = json.loads(report.read_text())["cases"][0]
+        self.assertEqual(len(row["execution_order"]), 3)
+        self.assertEqual(len(row["discarded_rounds"]), 1)
+        self.assertIn(999, row["discarded_rounds"][0]["samples_ms"].values())
+        self.assertTrue(all(values == [1, 1, 1] for values in row["samples_ms"].values()))
 
     def test_static_scalar_fallback(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls"
@@ -256,6 +433,14 @@ class LambdaMirMvpTests(unittest.TestCase):
         for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check"):
             self.assertNotIn("\tcall\t" + helper, first)
             self.assertIn("\tcall\t" + helper, body)
+    def test_guarded_float_loop(self):
+        for suite, entry in (("awfy", "benchmark"), ("beng", "main"),
+                             ("jetstream", "run_nbody_system")):
+            with self.subTest(suite=suite):
+                caller = self.function_mir(ROOT / f"test/benchmark/{suite}/nbody2.ls", entry)
+                checked = re.search(r"\tcall\tmvp_\d+_advance_dp", caller)
+                self.assertIsNotNone(checked)
+                self.assertIn("\tcall\tsqrt_", caller[:checked.start()])
 
     def test_records_and_readonly_kernel_emission(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_records.ls", "chain")
@@ -301,9 +486,11 @@ class LambdaMirMvpTests(unittest.TestCase):
         for name in ("sum_tail", "even_read", "odd_read"):
             body = self.function_mir(source, name)
             self.assertEqual(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0, name)
-        for name in ("retain", "plain_write"):
-            body = self.function_mir(source, name)
-            self.assertGreater(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0, name)
+        body = self.function_mir(source, "retain")
+        self.assertGreater(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0)
+        body = self.function_mir(source, "plain_write")
+        self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
+        self.assertNotRegex(body, r"\tcall\tcow_capture_value_")
         for name in ("bounded_up", "bounded_down", "near_limit"):
             body = self.function_mir(source, name)
             self.assertNotIn("lambda_int_lane_add_slow", body)

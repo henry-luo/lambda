@@ -1,0 +1,7 @@
+["p[ok]", "p[7]", "p[]"]
+[true, true]
+["aλ🙂b", "aλ🙂bcλ🙂"]
+λ!λ!λ!λ!
+[true, 12]
+[false, 24]
+[true, true]

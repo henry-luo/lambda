@@ -1,0 +1,821 @@
+{
+  "candidate_source_reference": {
+    "revision": "793d58bd55d74c8e547d196121ba61a3e8d7f581",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "dccfed18823b3c66e33a19a86d1f772a5cab74e3192e8dd0cba6e1a68ad9d703",
+        "file_count": 39,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "a6b62f2397248e614cef2db041286ca79f27cac9ea79275f6d2b86aac5a4c7ba"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "6d996b70e2e85a9003d15d0109c9e0c90852400a5b3d032417eb2c388a5f0342"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "a622c83632a2475fb1de028d91316410a8318c5a1e21e0ba14a242e7446ef87f"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "88c933da7b1f9c09c4b71cc12af18ba025babbba3de38e8c6ae20fcc03e3f6ae"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "68d157ebdd8e48b929c52ec68684ea229c343a5229c005cf888f8e8a65c8ac59"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "13da7641c9bc13a988a486fc1eb04597743168a207795d5e5e1f1cb252fd7109"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "e6c1605cc2287047e18a3d848fd6dc84a35844ef371968f2d680f2c80ffe5a27"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "15c103e9456e2c0dcc64cb21adf05eb5b81ad97ae717d61e92451017fd05f093"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "d120d19b96d5859c7f47010f2c0091f439bc17ba8dd0ffc8ff6f400357077aa4"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "binary_sha256": "11c3c626a452ebdb515d02f64598c0ba5197958cfd5d9e8fe4d0aea642c0fca3",
+    "note": "final MVP emission rebuilt privately against frozen i runtime objects and matching header bytes; current shared Full/parser edits are independent integration state"
+  },
+  "control_source_reference": {
+    "revision": "793d58bd55d74c8e547d196121ba61a3e8d7f581",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "1697b522baa6e8169d2bf65626f2ea48ea94e8f66b9d654c337f508e403868d4",
+        "file_count": 39,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "a6b62f2397248e614cef2db041286ca79f27cac9ea79275f6d2b86aac5a4c7ba"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "6d996b70e2e85a9003d15d0109c9e0c90852400a5b3d032417eb2c388a5f0342"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "a622c83632a2475fb1de028d91316410a8318c5a1e21e0ba14a242e7446ef87f"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "ec1e9a35b10246263c8a6cd31dc75da84e08a797ed50bed81df1235e77958976"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "88c933da7b1f9c09c4b71cc12af18ba025babbba3de38e8c6ae20fcc03e3f6ae"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "95652dac392c8c5d4a82b149ec657bf758e9ce3012a6ff9460c23e79b2d6ccfa"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "15c103e9456e2c0dcc64cb21adf05eb5b81ad97ae717d61e92451017fd05f093"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "d120d19b96d5859c7f47010f2c0091f439bc17ba8dd0ffc8ff6f400357077aa4"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "binary_sha256": "83a653e3d678eff9c6dbd30278e37a23467ae8c2e99cacd4361188dc8437a6fe",
+    "note": "fresh current-runtime control; MVP files match the pre-snapshot optimization; shared production proof extraction is present on both sides"
+  },
+  "baseline": {
+    "input_passed": 2112,
+    "input_total": 2112,
+    "lambda_passed": 6621,
+    "lambda_total": 6621,
+    "total": 8733,
+    "passed": 8733,
+    "failed": 0,
+    "returncode": 0,
+    "workspace": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP",
+    "conditions": "same pinned executables; Makefile and README fixture copies; localhost networking permitted; no assertions or goldens changed",
+    "provenance": {
+      "workspace": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP",
+      "executable": {
+        "source": "/Users/henryluo/Projects/lambda/lambda.exe",
+        "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/lambda.exe",
+        "sha256": "94d4c154aac8d2fb5d073f6d0c498429357ccc3f1d3f282f028704b882e19653"
+      },
+      "tests": [
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_binary_storage_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_binary_storage_gtest.exe",
+          "sha256": "f9365af22bb58acdaa5d7ec77597c455b7f3260450162ad32f79aa805645537f"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_compiler_pass_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_compiler_pass_gtest.exe",
+          "sha256": "023be311098d09494bcf44e09a3b13669aacb615a5ce937c6c9451c6d11030f5"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_input_script_cache_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_input_script_cache_gtest.exe",
+          "sha256": "44d232cdc0cd2b1befdb2e005de854fe24760d0392047cceacdf0b4ede5527bb"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_io_terminal_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_io_terminal_gtest.exe",
+          "sha256": "2d98513c7f5b14ffd290bf48a95e08446bb3dae5959c2de91fa1e269bd91dad3"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_item_repr_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_item_repr_gtest.exe",
+          "sha256": "1cb212a5ec8f8bde442a3493f480c25d07b91c244ebc8d764fcbbe9d364afb39"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_bt_regex_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_bt_regex_gtest.exe",
+          "sha256": "1dced2b004261fff46c3e099b40b8c9a9d71ca2a7f4b8797d605357a59286b47"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_c_parser_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_c_parser_gtest.exe",
+          "sha256": "e73b137877e00f9dc0002f1a4e357389a4b1c3e1070d610e609b233a40c498dd"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_coerce_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_coerce_gtest.exe",
+          "sha256": "48c12100576a4ca9a39e216a831045d45610f5f11ac146635875b060a2ab3296"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_gtest.exe",
+          "sha256": "556ff66aaccf3220ddca4f7d9df219f43ffbc0d5a5074c5a147bc6eb9af95e10"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_mir_emission_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_mir_emission_gtest.exe",
+          "sha256": "3fe3ec10a185c8f88180c54aaad8a1c0c604495874d87a304bdedfaf5c20560f"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_mvp_lmd_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_mvp_lmd_gtest.exe",
+          "sha256": "60487482c7a12e47310b09bf52cd4b2fc883592b49bbefde4f519d30cbfb4184"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_opt_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_opt_gtest.exe",
+          "sha256": "ce0df15003bce0c5f83692e72564974462572bcf83ecb7c316910e7348d23404"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_regex_router_poc_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_regex_router_poc_gtest.exe",
+          "sha256": "7cbdd31ebe4168b76f49e6c045777d62cc8ca80e7c7982a3acdbf1c9f7e0a82b"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_script_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_script_gtest.exe",
+          "sha256": "1584389b5e2a09a49d27169d4a8e4a4c1565b03b6bfb73051a0503517930b0f8"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_js_test262_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_js_test262_gtest.exe",
+          "sha256": "8bd3c77338bb63aaa6e4c5f01c261105333465d3b462b57e5376242c4c6abf5a"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_gtest.exe",
+          "sha256": "4fd3daa8cd57b134914bcc1fa592710513428989d9c7b8d32d8c583e440eaac0"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_opt_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_opt_gtest.exe",
+          "sha256": "49652eabbacf4d0c1849e309fb56c09c90d033a3133d0aff5d6f763e74a57bd3"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_parser_poc_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_parser_poc_gtest.exe",
+          "sha256": "b7accf4d6e15c369eae268d566f200aeed647b7b8e0c432e3249cdeb9022b38c"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_proc_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_proc_gtest.exe",
+          "sha256": "f73b919be237602092514ae3fb2f5f5000b80b1cce7fa0eb8673cf75a3b534f1"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_repl_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_repl_gtest.exe",
+          "sha256": "c5a6b2cd091b2863d3dc29965e175c3c1bec73608e6ae3261490ae5ceff4130d"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_runtime_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_runtime_gtest.exe",
+          "sha256": "4f7a2d27bab5d02da868f28de070ce2cd102a61c5189832039f2900c86552eab"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_std_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_std_gtest.exe",
+          "sha256": "fc4f48c2ebbafa4642ff27f8362144d4fe7849decc5e990d4f0c9ff32daad971"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_lambda_typed.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_lambda_typed.exe",
+          "sha256": "1e5abc4ea5cab3c6273d146c24f62da21bfc8c34b9052cb7f3854a753028e06a"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_mir_emission_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_mir_emission_gtest.exe",
+          "sha256": "7126b36d501b47c770af25188482aafc85850201cc2568d2b9af83cbf1b6efb8"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_mir_gc_stress_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_mir_gc_stress_gtest.exe",
+          "sha256": "7715c58fe6d4e91209cf9f2bf83d6e8a8ef1ef64476c63bf8f37943813c3b6a4"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_mir_ratchet_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_mir_ratchet_gtest.exe",
+          "sha256": "371247529bc1dbc6fef844337163b330e8d4df91c45f8b5acb8c5141aefdff51"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_scalar_compare_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_scalar_compare_gtest.exe",
+          "sha256": "e5630127e0dcbd28fd0ef0a38c28b219cd0d2f15965312ebc9b1037c6ec116fb"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_security_runtime_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_security_runtime_gtest.exe",
+          "sha256": "235bd6b2c3d5bd7d2cfe25808018f09b8a7f6c894089377c93f0848616071d63"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_serve_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_serve_gtest.exe",
+          "sha256": "78c0bab2a13a427a285bb5da41fa9e066563b29b2086871ae8a6385aea9c08e4"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_ts_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_ts_gtest.exe",
+          "sha256": "5754c0e293cce1911e618ba82fc09ade954118a67bfbb46c6ee76f6a43dfee0e"
+        },
+        {
+          "source": "/Users/henryluo/Projects/lambda/test/test_zip_gtest.exe",
+          "path": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/test/test_zip_gtest.exe",
+          "sha256": "1753aa291199f990afb8392b091f92fc0d01df5e443dbc56b83a7811a6a084cd"
+        }
+      ],
+      "command": [
+        "test/test_run.js",
+        "--target=lambda",
+        "--category=baseline",
+        "--exclude-test=test_node_prelim_gtest",
+        "--exclude-test=test_lambda_concurrency_gtest",
+        "--parallel",
+        "--input-results=/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-artifacts/input_baseline_results.json"
+      ],
+      "scope": "same baseline inventory; private executable snapshots and scratch; no test/golden changes"
+    },
+    "scope": "required integration baseline inventory, pinned later-runtime executables; separate from frozen release performance",
+    "input_baseline": {
+      "path": "temp/lambda_mir_mvp/tune48j/baseline-artifacts/input_baseline_results.json",
+      "sha256": "2deee3e0c93881ce4ae1bc349e27e1d73a284355b0b6918876d5e31a0eacf9c5"
+    },
+    "final_log": {
+      "path": "temp/lambda_mir_mvp/tune48j/isolated-qualified.log",
+      "sha256": "6c4b7e959080cb8b8b51c14b7b7a7f5e4f68c38523de576042eff2a76919d778"
+    },
+    "earlier_attempts": [
+      {
+        "returncode": 2,
+        "summary": {
+          "input_passed": 2112,
+          "input_total": 2112,
+          "lambda_passed": 3645,
+          "lambda_total": 5701,
+          "total": 7813,
+          "passed": 5757,
+          "failed": 2056
+        },
+        "log": {
+          "path": "temp/lambda_mir_mvp/tune48j/baseline.log",
+          "sha256": "89877e2362604d24837f829f91660db32dcc80284380c720f14aac4e45577fb3"
+        },
+        "diagnosis": "another build removed/relinked shared lambda.exe during the run; ENOENT retained"
+      },
+      {
+        "returncode": 1,
+        "summary": {
+          "input_passed": 2112,
+          "input_total": 2112,
+          "lambda_passed": 6610,
+          "lambda_total": 6621,
+          "total": 8733,
+          "passed": 8722,
+          "failed": 11
+        },
+        "log": {
+          "path": "temp/lambda_mir_mvp/tune48j/isolated-baseline.log",
+          "sha256": "e8ab0e8e3d48c623c7fa7371e2ff7a58be5350231a6d8d997a418fd1ed727a29"
+        },
+        "diagnosis": "three missing Makefile fixture assertions and eight denied localhost listener tests"
+      }
+    ],
+    "environmental_rechecks": {
+      "checks": [
+        {
+          "executable": "test_serve_gtest",
+          "repeat": 1,
+          "returncode": 0,
+          "tests": 7,
+          "failures": 0,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_serve_gtest-1.json"
+        },
+        {
+          "executable": "test_lambda_gtest",
+          "repeat": 1,
+          "returncode": 0,
+          "tests": 4,
+          "failures": 0,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_lambda_gtest-1.json"
+        },
+        {
+          "executable": "test_serve_gtest",
+          "repeat": 2,
+          "returncode": 1,
+          "tests": 7,
+          "failures": 1,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_serve_gtest-2.json"
+        },
+        {
+          "executable": "test_lambda_gtest",
+          "repeat": 2,
+          "returncode": 0,
+          "tests": 4,
+          "failures": 0,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_lambda_gtest-2.json"
+        },
+        {
+          "executable": "test_serve_gtest",
+          "repeat": 3,
+          "returncode": 0,
+          "tests": 7,
+          "failures": 0,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_serve_gtest-3.json"
+        },
+        {
+          "executable": "test_lambda_gtest",
+          "repeat": 3,
+          "returncode": 0,
+          "tests": 4,
+          "failures": 0,
+          "json": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/baseline-recheck-test_lambda_gtest-3.json"
+        }
+      ],
+      "conditions": "same pinned executable snapshots; Makefile/README fixtures copied; local networking permitted",
+      "all_pass": false
+    },
+    "recheck_flakiness": "Hotwire JS MIR exited 137 in one of three focused repeats; two repeats and final complete baseline pass. Cause unestablished; no assertion changes."
+  },
+  "targeted": {
+    "groups": 9,
+    "returncode": 0,
+    "benchmark_goldens": 48,
+    "array_gc_cases": 18,
+    "new_fixtures_gc_modes": 3,
+    "native_nbody_variants": 3
+  },
+  "focused_aggregate": {
+    "groups": 57,
+    "failing_subtests": 58,
+    "failing_groups": 17,
+    "failures": [
+      "test_allocating_vector_emission (__main__.LambdaMirMvpTests)",
+      "test_array_reduction_mir (__main__.LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (__main__.LambdaMirMvpTests)",
+      "test_guarded_float_body (__main__.LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (__main__.LambdaMirMvpTests)",
+      "test_modular_array_update (__main__.LambdaMirMvpTests)",
+      "test_module_initialization (__main__.LambdaMirMvpTests)",
+      "test_native_string_array_read (__main__.LambdaMirMvpTests)",
+      "test_nonzero_fft (__main__.LambdaMirMvpTests) (compiler='production')",
+      "test_nullable_comparison_mir (__main__.LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (__main__.LambdaMirMvpTests)",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_power_two_divmod (__main__.LambdaMirMvpTests)",
+      "test_readonly_array_tail (__main__.LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (__main__.LambdaMirMvpTests)",
+      "test_scalar_record_witness (__main__.LambdaMirMvpTests)",
+      "test_single_use_string_constructor (__main__.LambdaMirMvpTests)"
+    ],
+    "new_failures": [],
+    "resolved_failures": []
+  },
+  "lifetime_reproducer": {
+    "source": "test/lambda/mvp/mir_mvp_snapshot_loop.ls",
+    "source_sha256": "da9d5f7bdf48b5de35b6e15482b358e5b8995e26e82a8c2bdbdb5fbe9f2bcfcc",
+    "pre_fix_binary_sha256": "5139ca2ca17c5ce6abfdf998c7c7f3001d531eade26ec969ae908d28e56e43da",
+    "pre_fix_output": "error[E308]: Stack overflow\n",
+    "pre_fix_control_output": "[450000, 3]\n\n",
+    "final": "normal, force-every/poison and seeded/poison modes pass; MIR reservations precede the caller loop",
+    "cancelled_pre_fix_campaigns": "h:37 rows, loop lifetime failure; i:37 rows, early-entry ownership and live benchmark drift; diagnostic only"
+  },
+  "current_runtime_mvp": {
+    "new_ownership_gc_emission_groups_passed": 6,
+    "benchmark_recheck": {
+      "returncode": 1,
+      "executable": "/Users/henryluo/Projects/lambda/temp/mvp-base-45UphP/lambda.exe",
+      "benchmark_changes": [
+        {
+          "path": "larceny/quicksort2.ls",
+          "performance_sha256": "8daeb0d345017785723f9afb54b3cdb04b8317ccc410b42e3d0c853c7a97281e",
+          "integration_sha256": "e59576674a0a03d67812c9e4803b2c17e970a426358b0004f326a839cd8b5b87"
+        },
+        {
+          "path": "kostya/matmul2.ls",
+          "performance_sha256": "e0e5f55b530377a7531520aba771546f449e724f2ed0c3d81fe463f0fc6594c2",
+          "integration_sha256": "5ea8389193fd13d5b572325cdc4e41ef5b9e428af81a222328b11296287776b6"
+        },
+        {
+          "path": "kostya/json_gen2.ls",
+          "performance_sha256": "23db33f5c3c6e478a819ab6d26dd134ab27b06c6299ad8e97330f9f6024f0f8c",
+          "integration_sha256": "e1f76c6f8ace7114cff0f75908f2b7fcf5401f9ce6b7181e5641e63134429532"
+        }
+      ],
+      "scope": "current-runtime correctness using a frozen copy of current benchmark fixtures, separate from frozen performance corpus",
+      "failure_headers": [
+        "FAIL: test_benchmark_goldens (__main__.LambdaMirMvpTests) (suite='r7rs', name='fft')",
+        "FAIL: test_array_benchmarks_under_gc (__main__.LambdaMirMvpTests) (suite='r7rs', name='fft')"
+      ],
+      "diagnostics": [
+        "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/integration-benchmarks/r7rs/fft2.ls:24:22: error[E200]: postfix `^` used on an expression whose explicit contract excludes error",
+        "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48j/integration-benchmarks/r7rs/fft2.ls:28:17: error[E200]: postfix `^` used on an expression whose explicit contract excludes error"
+      ]
+    },
+    "remaining_failure": "unchanged FFT benchmark is rejected by subsequent shared frontend: E200 at lines24/28; both normal and GC checks fail before MVP lowering",
+    "initial_frozen_corpus_diagnostic": {
+      "returncode": 1,
+      "failures": 8,
+      "reason": "frozen performance inputs are incompatible with subsequent frontend contract changes; Quicksort, Matmul, FFT and JSONgen each fail normal/GC checks"
+    }
+  },
+  "towers_confirmation": {
+    "qualified": true,
+    "pairs": 61,
+    "ratio": 1.0031847133757963,
+    "uncertainty": {
+      "method": "paired_bootstrap_ratio_of_medians",
+      "confidence": 0.95,
+      "tail": "one_sided_upper",
+      "seed": 1101,
+      "resamples_requested": 10000,
+      "resamples_valid": 10000,
+      "upper_bound": 1.0636942675159236,
+      "two_sided_confidence": 0.95,
+      "two_sided_lower_bound": 0.9298780487804877,
+      "two_sided_upper_bound": 1.0725552050473186
+    },
+    "primary_flag_retained": true
+  },
+  "changed_since_performance_snapshot": [
+    "lambda/lambda.h",
+    "lambda/runtime/build_ast.cpp",
+    "lambda/runtime/lambda-eval-num.cpp",
+    "lambda/runtime/sys_func_registry.c",
+    "lambda/runtime/transpile-mir.cpp"
+  ],
+  "mvp_sources_match_snapshot": true,
+  "logs": {
+    "targeted": {
+      "path": "temp/lambda_mir_mvp/tune48j/targeted.log",
+      "sha256": "f81e44a84b54a5fd070f0465d3081e7fb630b959094e8e5446086e6deb01fa36"
+    },
+    "focused": {
+      "path": "temp/lambda_mir_mvp/tune48j/focused.log",
+      "sha256": "0897b73a6ee3cd34d26115a83cfb0606494cf61748ea3b9b7842f56c4ad463a8"
+    },
+    "baseline": {
+      "path": "temp/lambda_mir_mvp/tune48j/baseline.log",
+      "sha256": "89877e2362604d24837f829f91660db32dcc80284380c720f14aac4e45577fb3"
+    },
+    "isolated-baseline": {
+      "path": "temp/lambda_mir_mvp/tune48j/isolated-baseline.log",
+      "sha256": "e8ab0e8e3d48c623c7fa7371e2ff7a58be5350231a6d8d997a418fd1ed727a29"
+    },
+    "isolated-qualified": {
+      "path": "temp/lambda_mir_mvp/tune48j/isolated-qualified.log",
+      "sha256": "6c4b7e959080cb8b8b51c14b7b7a7f5e4f68c38523de576042eff2a76919d778"
+    },
+    "integration-mvp": {
+      "path": "temp/lambda_mir_mvp/tune48j/integration-mvp.log",
+      "sha256": "f6df6c54644a507729d552cd20c233b6dd3e65f241c75776754f217209727819"
+    },
+    "integration-current-fixtures": {
+      "path": "temp/lambda_mir_mvp/tune48j/integration-current-fixtures.log",
+      "sha256": "8a86028ccb34c4918cfd5bb2f7e55ee32094ab6665d4bbc95956a9055891b5fa"
+    }
+  },
+  "test_driver_sha256": "dfdda7eb9772348ff6f0f42fdd2774ab822618f61e9579464577a12a64ca2b54",
+  "scope": "frozen final release comparison; pinned later-runtime integration baseline; legacy focused failures and later frontend FFT incompatibility remain asserted",
+  "post_qualification_cleanup": [
+    {
+      "path": "lambda/runtime/mir_cow_analysis.hpp",
+      "change": "remove one trailing blank line at EOF; no code changes",
+      "measured_sha256": "88c933da7b1f9c09c4b71cc12af18ba025babbba3de38e8c6ae20fcc03e3f6ae",
+      "committed_sha256": "4faf16c311ebfa0cd1d5d78f3281431852334663182720db62aa3623c0ae8e10",
+      "code_unchanged": true
+    }
+  ]
+}

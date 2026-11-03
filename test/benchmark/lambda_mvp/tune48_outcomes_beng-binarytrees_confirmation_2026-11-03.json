@@ -1,0 +1,2626 @@
+{
+  "schema": 2,
+  "date": "2026-11-03T11:42:27.221078+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "6b68618a2a0fd40ef8122d6e0c4c5da49d9c4977",
+  "working_tree": "M AGENTS.md\n M doc/Doc_Convention.md\n M doc/Lambda_Formal_Index.md\n M doc/Lambda_Formal_Semantics.md\n M lambda/runtime/mvp/mvp_internal.hpp\n M lambda/runtime/mvp/mvp_mir.cpp\n M lambda/runtime/mvp/mvp_plan.cpp\n M lib/rdb_sqlite.c\n M test/README.md\n M test/benchmark/lambda_mir_mvp.py\n M test/benchmark/test_lambda_mir_mvp.py\n M test/test_rdb_gtest.cpp\n M vibe/Lambda_Design_MIR_MVP.md\n M vibe/Lambda_IO_RDB.md\n M vibe/impl/Lambda_Impl_MIR_MVP.md\n?? lib/rdb_sqlite_tx.h\n?? test/lambda/mvp/mir_mvp_propagation.ls\n?? test/lambda/mvp/mir_mvp_propagation.txt\n?? vibe/impl/Lambda_Impl_Place_Borrow_Views.md\n?? vibe/impl/Lambda_Impl_RDB_Write.md",
+  "release_confirmed": true,
+  "c2mir_allowance_percent": 20.0,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "c301686ddc63e57041e9062163a488f7663aa2a60ff933b645250b6b572bb5de",
+      "file_count": 38,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "050ebe3f24f60705a9892a7d58f7d822d69d1bc0bf02619673b9585e79c4ee4f"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "3adadcaba839d24f6e5069919fdede17b6312a3dc1b54da9b8031bf5eaa02ed5"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "ce63ab8bcaede3ae9a0598dc7f682f21fbbf4dd5d22e1b0d467779eeac2fd1a9"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "c14e180b108238526bc68cbf844596ba7b54d14a6121a7190eaeb7efc3713a25"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "5216e11424865cfc62b91114fcf6519b373bfb6ccff466602341d50cf2789380"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "736845465e3777c2beabc7b838eef72d33a6ab233cb8de20ca76eca87ea38164"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "124e72bb36e23b3ec2f0b294525af7f381bad522ad7842aff196d4ffc328479a"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "cd5a5d8493cff88a677e7b0d143ee75ff67d36d6a46ac0678d4d7654b96e3231"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "2757fad5eeb71509408a6eaf676ea8c2b55ffef1fceceb96bc3781b708f2fe1f"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48f/final-release.exe",
+      "sha256": "1749a4a8ed18a59905e960772e2d056fe76098c364991de51523b507a30a8c7d"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48f/final-release.exe",
+      "sha256": "1749a4a8ed18a59905e960772e2d056fe76098c364991de51523b507a30a8c7d"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "4972468d8178c31e1b820ec86668c5311cf3dd2ce345a47f6004143760fe1def"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48e/final-release.exe",
+      "sha256": "00aa127ce633a10cb53079e01416a50e74a64d11509f361a2256a59da700f9f3"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "2499093d45e8e53e31704de91a05580760581b14660cabf24031f0e6dc49c81d",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "50de29fc5dda6f869af737b79e4efc2383e90a4819b61b6a6eb6b467b4cf5059"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "reference_helpers": {
+    "sha256": "8bab39b2d1ea69654997211ec32fb469668ca2da0c8b73ca4ec53785f3e38331",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_lcg.h",
+        "sha256": "7b28fdea98296e466bc3f44a3d2e102b31009a8a6e96a473bdbe9592b2871f31"
+      },
+      {
+        "path": "test/benchmark/c2mir/nbody_kernel.h",
+        "sha256": "c721dc702fb5972c6ce8b755661f746cf2065f3f778f41c392e37dbd5392a71e"
+      },
+      {
+        "path": "test/benchmark/c2mir/tree_benchmark.h",
+        "sha256": "92184c7785e97b45ac4e654b8d9ce088e37401e8c42a28b9f53e426a38695b13"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "6debb53f70a35374479e3d9a09ff64b7e3603a3a5cb64748f31d34a7104ce9e6",
+    "file_count": 4,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "8176b0e9778dcbc56878bc8e891fce6fae137bb054bdf64e81712e8e4bb9dd12"
+      },
+      {
+        "path": "test/benchmark/run_c2mir_benchmarks.py",
+        "sha256": "fb28fa56d48e8dc1ae1cf10102c2d5c076c922425946130817d5507a3e4fe029"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "matched per-row execution boundaries; compilation excluded; see each row for timed output",
+  "runs": 200,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "beng/binarytrees",
+      "lambda_sha256": "e288d460678a2020d7ef12786ea19e1d15a97314696f7acb38cdd58a4330c25b",
+      "timer_scope": "workload plus formatting/output",
+      "c_sha256": "aacdfe70a120bc26c73072ebc1400ff4e1746881b14ce1e6abe64d0690b6beb3",
+      "golden_sha256": "17372957422513c00ee70732324eb7bce7f1f74d5d5b821786492c69c4ba70a3",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48f/final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/beng/binarytrees2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48f/final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/beng/binarytrees2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/test/benchmark/beng/c2mir/binarytrees.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48e/final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/beng/binarytrees2.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          2.549,
+          2.37,
+          2.412,
+          2.358,
+          2.518,
+          2.402,
+          2.493,
+          2.471,
+          2.276,
+          2.34,
+          2.264,
+          2.437,
+          2.856,
+          2.559,
+          2.568,
+          2.309,
+          2.527,
+          2.559,
+          2.457,
+          2.486,
+          2.595,
+          2.253,
+          2.492,
+          2.407,
+          2.592,
+          2.656,
+          2.466,
+          2.464,
+          2.266,
+          2.234,
+          2.263,
+          2.306,
+          2.661,
+          2.537,
+          2.571,
+          2.457,
+          2.56,
+          2.613,
+          2.633,
+          2.475,
+          2.506,
+          2.268,
+          2.256,
+          2.237,
+          2.624,
+          2.438,
+          2.486,
+          2.482,
+          2.584,
+          2.377,
+          2.427,
+          2.568,
+          2.597,
+          2.301,
+          2.224,
+          2.204,
+          2.438,
+          2.31,
+          2.391,
+          2.358,
+          2.519,
+          2.62,
+          2.469,
+          2.325,
+          2.288,
+          2.313,
+          2.208,
+          2.261,
+          2.636,
+          2.506,
+          2.403,
+          2.642,
+          2.615,
+          2.631,
+          2.364,
+          2.389,
+          2.325,
+          2.492,
+          2.515,
+          2.405,
+          2.486,
+          2.369,
+          2.514,
+          2.217,
+          2.249,
+          2.241,
+          2.212,
+          2.253,
+          2.758,
+          2.469,
+          2.498,
+          2.547,
+          2.416,
+          2.443,
+          2.372,
+          2.549,
+          2.532,
+          2.233,
+          2.239,
+          2.144,
+          2.226,
+          2.531,
+          2.35,
+          2.456,
+          2.61,
+          2.614,
+          2.403,
+          2.421,
+          2.551,
+          2.267,
+          2.232,
+          2.3,
+          2.323,
+          2.261,
+          2.507,
+          2.571,
+          2.391,
+          3.395,
+          2.276,
+          2.463,
+          2.35,
+          2.524,
+          2.484,
+          2.55,
+          2.597,
+          2.419,
+          2.375,
+          2.361,
+          2.214,
+          2.235,
+          2.273,
+          2.665,
+          2.567,
+          2.562,
+          2.43,
+          2.373,
+          2.53,
+          2.516,
+          2.407,
+          2.591,
+          2.523,
+          2.226,
+          2.237,
+          2.234,
+          2.269,
+          2.761,
+          2.576,
+          2.396,
+          2.419,
+          2.625,
+          2.353,
+          2.48,
+          2.515,
+          2.271,
+          2.226,
+          2.296,
+          2.265,
+          2.575,
+          2.524,
+          2.506,
+          2.54,
+          2.343,
+          2.575,
+          2.424,
+          2.391,
+          2.456,
+          2.23,
+          2.24,
+          2.239,
+          2.337,
+          2.456,
+          2.311,
+          2.638,
+          2.551,
+          2.379,
+          2.228,
+          2.517,
+          2.585,
+          2.46,
+          2.236,
+          2.244,
+          2.221,
+          2.689,
+          2.407,
+          2.47,
+          2.353,
+          2.487,
+          2.499,
+          2.434,
+          2.573,
+          2.441,
+          2.273,
+          2.263,
+          2.187,
+          2.236,
+          2.306,
+          2.88,
+          2.427,
+          2.58,
+          2.486
+        ],
+        "production": [
+          3.243,
+          3.38,
+          3.488,
+          3.502,
+          3.563,
+          3.507,
+          3.424,
+          3.141,
+          3.12,
+          3.054,
+          3.064,
+          3.32,
+          3.547,
+          3.341,
+          3.525,
+          3.255,
+          3.559,
+          3.439,
+          3.669,
+          3.675,
+          3.119,
+          3.087,
+          4.02,
+          3.487,
+          3.424,
+          3.496,
+          3.42,
+          3.557,
+          3.21,
+          2.937,
+          3.126,
+          3.087,
+          3.316,
+          3.492,
+          3.511,
+          3.474,
+          3.788,
+          3.57,
+          3.595,
+          3.677,
+          3.366,
+          3.125,
+          3.202,
+          3.135,
+          3.258,
+          3.351,
+          3.597,
+          3.515,
+          3.62,
+          3.551,
+          3.455,
+          3.354,
+          3.483,
+          3.217,
+          3.204,
+          3.182,
+          3.17,
+          3.262,
+          3.63,
+          3.372,
+          3.481,
+          3.533,
+          3.597,
+          3.403,
+          3.602,
+          3.211,
+          3.185,
+          3.09,
+          3.419,
+          3.739,
+          3.55,
+          3.541,
+          3.397,
+          3.399,
+          3.648,
+          3.628,
+          3.413,
+          3.479,
+          3.371,
+          3.736,
+          3.406,
+          3.453,
+          3.498,
+          3.326,
+          3.119,
+          3.157,
+          3.191,
+          3.324,
+          3.55,
+          3.51,
+          3.327,
+          3.418,
+          3.347,
+          3.381,
+          3.441,
+          3.524,
+          3.127,
+          3.213,
+          3.195,
+          3.216,
+          3.188,
+          3.221,
+          3.337,
+          3.358,
+          3.59,
+          3.51,
+          3.55,
+          3.342,
+          3.434,
+          3.324,
+          3.181,
+          3.2,
+          3.246,
+          3.168,
+          3.529,
+          3.389,
+          3.439,
+          3.244,
+          3.171,
+          4.132,
+          3.502,
+          3.546,
+          3.484,
+          3.396,
+          4.058,
+          3.473,
+          3.588,
+          3.242,
+          3.195,
+          3.175,
+          3.196,
+          3.226,
+          3.404,
+          3.478,
+          3.654,
+          3.376,
+          3.3,
+          3.525,
+          3.707,
+          3.509,
+          3.07,
+          3.217,
+          3.148,
+          3.232,
+          3.611,
+          3.43,
+          3.362,
+          3.423,
+          3.563,
+          3.709,
+          3.498,
+          3.264,
+          3.076,
+          3.596,
+          3.111,
+          3.182,
+          3.243,
+          4.08,
+          3.55,
+          3.469,
+          3.529,
+          3.527,
+          3.534,
+          3.397,
+          3.451,
+          3.096,
+          3.123,
+          3.11,
+          3.13,
+          3.522,
+          3.288,
+          3.501,
+          3.531,
+          3.505,
+          3.533,
+          3.474,
+          3.489,
+          3.433,
+          3.197,
+          3.236,
+          3.074,
+          3.105,
+          3.613,
+          3.505,
+          3.491,
+          3.437,
+          3.447,
+          3.289,
+          3.434,
+          3.284,
+          3.369,
+          3.617,
+          3.211,
+          3.291,
+          3.102,
+          3.253,
+          3.301,
+          3.476,
+          3.447,
+          3.326
+        ],
+        "c2mir": [
+          2.979004,
+          2.71582,
+          2.974854,
+          2.862061,
+          2.75,
+          2.992188,
+          2.854004,
+          2.60791,
+          2.571045,
+          2.706055,
+          2.707031,
+          2.804932,
+          2.819824,
+          2.883057,
+          2.873047,
+          2.765137,
+          2.860107,
+          2.812988,
+          2.842041,
+          2.740967,
+          2.630859,
+          2.436035,
+          2.570068,
+          2.739014,
+          2.864014,
+          2.851807,
+          2.939209,
+          2.971924,
+          2.645996,
+          2.583008,
+          2.564941,
+          2.609131,
+          2.574951,
+          2.895996,
+          2.866943,
+          2.98999,
+          2.875,
+          4.231934,
+          2.727051,
+          2.973877,
+          2.584961,
+          2.552979,
+          2.558838,
+          3.416992,
+          2.802979,
+          2.7771,
+          2.761963,
+          3.025146,
+          2.920166,
+          3.01001,
+          2.784912,
+          2.841064,
+          2.828857,
+          7.13501,
+          2.614014,
+          2.623779,
+          2.562988,
+          2.968018,
+          2.697021,
+          3.062012,
+          2.934082,
+          2.760986,
+          3.011963,
+          2.650879,
+          2.578125,
+          2.643799,
+          2.649902,
+          2.964844,
+          2.5979,
+          3.00293,
+          2.88208,
+          3.026855,
+          2.846191,
+          2.874023,
+          3.093018,
+          2.978027,
+          2.869141,
+          2.875977,
+          2.882812,
+          2.657959,
+          2.796875,
+          2.837891,
+          2.923828,
+          2.937988,
+          2.575928,
+          2.580078,
+          2.542969,
+          2.687988,
+          2.581055,
+          2.861084,
+          2.961914,
+          2.827148,
+          2.875,
+          3.067139,
+          2.908936,
+          2.966064,
+          2.937988,
+          2.576904,
+          2.580078,
+          2.628906,
+          2.648926,
+          2.956055,
+          2.873047,
+          2.686035,
+          2.893799,
+          3.038086,
+          2.846924,
+          2.798096,
+          2.853027,
+          2.606201,
+          2.545898,
+          2.587891,
+          2.610107,
+          2.676025,
+          3.013916,
+          2.77002,
+          2.830078,
+          2.559082,
+          2.608887,
+          2.984863,
+          2.881836,
+          2.928955,
+          2.920166,
+          3.016113,
+          3.006104,
+          2.710938,
+          2.838135,
+          2.868164,
+          2.60083,
+          2.683105,
+          2.87207,
+          2.698975,
+          3.019043,
+          3.092041,
+          2.861084,
+          2.792969,
+          2.986084,
+          2.871094,
+          2.781006,
+          2.909912,
+          2.567871,
+          2.649902,
+          2.553955,
+          2.62793,
+          2.677979,
+          2.98999,
+          3.042969,
+          2.826904,
+          2.696045,
+          2.726074,
+          2.928955,
+          2.885986,
+          2.767822,
+          2.568115,
+          2.657959,
+          2.51709,
+          2.900879,
+          2.912842,
+          2.735107,
+          2.892822,
+          2.851807,
+          3.065918,
+          2.815918,
+          2.925049,
+          3.008057,
+          2.555908,
+          2.744873,
+          2.677002,
+          3.135986,
+          2.575928,
+          3.076172,
+          2.781982,
+          2.981201,
+          3.064941,
+          7.837891,
+          3.020996,
+          2.841064,
+          2.914062,
+          2.552979,
+          2.61377,
+          2.548096,
+          2.666992,
+          2.613037,
+          2.719971,
+          2.753174,
+          2.823975,
+          2.957031,
+          2.782959,
+          2.823975,
+          2.874023,
+          2.979004,
+          2.730957,
+          2.635986,
+          2.625,
+          2.783936,
+          3.565918,
+          2.916992,
+          2.671875,
+          2.691895,
+          2.922852
+        ],
+        "previous_mvp": [
+          2.443,
+          2.363,
+          2.538,
+          2.35,
+          2.446,
+          2.164,
+          2.304,
+          2.453,
+          2.111,
+          2.159,
+          2.216,
+          2.226,
+          2.349,
+          2.387,
+          2.329,
+          2.309,
+          2.401,
+          2.486,
+          2.439,
+          2.388,
+          2.389,
+          2.171,
+          3.281,
+          2.449,
+          2.378,
+          2.161,
+          2.509,
+          2.384,
+          2.544,
+          2.179,
+          2.193,
+          2.185,
+          2.43,
+          2.352,
+          2.464,
+          2.463,
+          2.537,
+          2.271,
+          2.47,
+          2.335,
+          2.372,
+          2.127,
+          2.177,
+          2.183,
+          2.155,
+          2.156,
+          3.601,
+          2.501,
+          2.37,
+          2.37,
+          2.333,
+          2.466,
+          2.337,
+          2.172,
+          2.128,
+          2.235,
+          2.161,
+          2.22,
+          2.324,
+          2.296,
+          2.407,
+          2.402,
+          2.417,
+          2.376,
+          2.539,
+          2.148,
+          2.217,
+          2.17,
+          2.326,
+          2.49,
+          2.403,
+          2.489,
+          2.46,
+          2.381,
+          3.89,
+          2.566,
+          2.526,
+          2.392,
+          2.351,
+          2.538,
+          2.48,
+          2.468,
+          2.683,
+          2.315,
+          2.142,
+          2.186,
+          2.273,
+          2.218,
+          3.451,
+          2.523,
+          2.505,
+          2.311,
+          2.414,
+          2.269,
+          2.395,
+          2.485,
+          2.358,
+          2.096,
+          2.168,
+          2.215,
+          2.173,
+          2.513,
+          2.359,
+          2.788,
+          2.447,
+          2.445,
+          2.653,
+          2.38,
+          2.607,
+          2.182,
+          2.179,
+          2.149,
+          2.328,
+          2.73,
+          2.38,
+          2.463,
+          2.408,
+          3.243,
+          2.152,
+          2.189,
+          2.411,
+          2.481,
+          2.493,
+          2.254,
+          2.455,
+          2.336,
+          2.323,
+          2.158,
+          2.158,
+          2.186,
+          2.236,
+          2.194,
+          2.322,
+          2.282,
+          2.425,
+          2.456,
+          2.505,
+          2.403,
+          2.489,
+          2.453,
+          2.177,
+          2.174,
+          2.131,
+          2.19,
+          2.455,
+          2.388,
+          2.428,
+          2.35,
+          2.353,
+          2.359,
+          2.251,
+          2.328,
+          2.286,
+          2.186,
+          2.151,
+          2.148,
+          2.153,
+          2.373,
+          2.487,
+          2.28,
+          2.465,
+          2.406,
+          3.577,
+          2.405,
+          2.277,
+          2.196,
+          2.162,
+          2.157,
+          2.234,
+          2.153,
+          2.441,
+          2.386,
+          2.383,
+          2.303,
+          2.309,
+          2.443,
+          2.507,
+          2.357,
+          2.113,
+          2.203,
+          2.113,
+          2.149,
+          2.175,
+          2.432,
+          2.347,
+          2.38,
+          2.266,
+          2.327,
+          2.433,
+          2.406,
+          2.342,
+          2.161,
+          2.259,
+          2.162,
+          2.139,
+          2.403,
+          2.706,
+          2.442,
+          2.481,
+          2.321
+        ]
+      },
+      "median_ms": {
+        "mvp": 2.4355,
+        "production": 3.4095,
+        "c2mir": 2.827026,
+        "previous_mvp": 2.3550000000000004
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ]
+      ],
+      "engine_failures": {},
+      "discarded_rounds": [
+        {
+          "iteration": 22,
+          "execution_order": [
+            "c2mir",
+            "production",
+            "mvp",
+            "previous_mvp"
+          ],
+          "samples_ms": {
+            "c2mir": 2.556885
+          },
+          "competing_jobs": [
+            {
+              "pid": 60580,
+              "cpu": 0.0,
+              "program": "make"
+            }
+          ]
+        },
+        {
+          "iteration": 63,
+          "execution_order": [
+            "production",
+            "c2mir",
+            "previous_mvp",
+            "mvp"
+          ],
+          "samples_ms": {
+            "production": 3.409,
+            "c2mir": 2.621094
+          },
+          "competing_jobs": [
+            {
+              "pid": 68511,
+              "cpu": 0.0,
+              "program": "make"
+            },
+            {
+              "pid": 68515,
+              "cpu": 0.0,
+              "program": "make"
+            },
+            {
+              "pid": 68516,
+              "cpu": 0.0,
+              "program": "make"
+            }
+          ]
+        },
+        {
+          "iteration": 77,
+          "execution_order": [
+            "production",
+            "previous_mvp",
+            "c2mir",
+            "mvp"
+          ],
+          "samples_ms": {
+            "production": 3.104,
+            "previous_mvp": 2.182,
+            "c2mir": 2.605957,
+            "mvp": 2.325
+          },
+          "competing_jobs": [
+            {
+              "pid": 69167,
+              "cpu": 6.0,
+              "program": "test_lambda_gtest.exe"
+            }
+          ]
+        },
+        {
+          "iteration": 117,
+          "execution_order": [
+            "mvp",
+            "previous_mvp",
+            "c2mir",
+            "production"
+          ],
+          "samples_ms": {
+            "mvp": 2.338,
+            "previous_mvp": 2.439
+          },
+          "competing_jobs": [
+            {
+              "pid": 69497,
+              "cpu": 0.0,
+              "program": "make"
+            }
+          ]
+        }
+      ],
+      "mvp_over_c2mir": 0.8615060491130963,
+      "mvp_over_production": 0.7143276140196511,
+      "timer_resolution_limited": {
+        "mvp": false,
+        "production": false,
+        "c2mir": false,
+        "previous_mvp": false
+      },
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 0.72328525169267,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.7040070195963732,
+          "two_sided_upper_bound": 0.7250515160435679
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 0.8733936490238083,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.849038507565003,
+          "two_sided_upper_bound": 0.87621063161729
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.0459770114942528,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.019409282700422,
+          "two_sided_upper_bound": 1.0484693877551021
+        }
+      },
+      "mvp_over_previous": 1.0341825902335455,
+      "previous_mvp_comparison": {
+        "statistically_faster": false,
+        "statistically_slower": true
+      },
+      "performance_gates": {
+        "faster_than_full_mir": true,
+        "within_c2mir_allowance": true,
+        "within_10_percent_of_c2mir": true
+      }
+    }
+  ],
+  "pause_for_jobs": true,
+  "observed_checkout_identity": {
+    "experiment_sources": {
+      "sha256": "c301686ddc63e57041e9062163a488f7663aa2a60ff933b645250b6b572bb5de",
+      "file_count": 38,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "050ebe3f24f60705a9892a7d58f7d822d69d1bc0bf02619673b9585e79c4ee4f"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "3adadcaba839d24f6e5069919fdede17b6312a3dc1b54da9b8031bf5eaa02ed5"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "ce63ab8bcaede3ae9a0598dc7f682f21fbbf4dd5d22e1b0d467779eeac2fd1a9"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "c14e180b108238526bc68cbf844596ba7b54d14a6121a7190eaeb7efc3713a25"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "3958f0294de38442ba4ad932e7ebfde2620e8f55a8ce16c290dea9ea6c919656"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "5216e11424865cfc62b91114fcf6519b373bfb6ccff466602341d50cf2789380"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "736845465e3777c2beabc7b838eef72d33a6ab233cb8de20ca76eca87ea38164"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "81b8db4142e366deafdacf04e0bcc7e0a5d34fe0bb01bd729640c8bb19ea0dd4"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "54640d21f7aac4d04c9eb7e865ad199a4eb45c01a3bf427a4c2c8fed8eb04881"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "124e72bb36e23b3ec2f0b294525af7f381bad522ad7842aff196d4ffc328479a"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "f50c854b590744b20f8e34897fec8bed295b7f3ad86f5435d81b17a133c0d0b1"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "098daa1618d12ae3ea7cc363d304f6ae9317d3e7d8d4504a170316e1fa8d0561"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "cd5a5d8493cff88a677e7b0d143ee75ff67d36d6a46ac0678d4d7654b96e3231"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "2757fad5eeb71509408a6eaf676ea8c2b55ffef1fceceb96bc3781b708f2fe1f"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "Apple M4"
+  },
+  "candidate_source_manifest": {
+    "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48f/final-source.json",
+    "sha256": "8eb285bdbc77aa6ac6d301dd6745bc6500c6d51861d408b075ccd68fb5798859"
+  },
+  "geomean_mvp_over_production": 0.7143276140196511,
+  "geomean_mvp_over_c2mir": 0.8615060491130963,
+  "geomean_mvp_over_previous_mvp": 1.0341825902335455,
+  "qualification": "all subset; coverage and per-row performance qualification are separate; matched workload boundaries, paired bootstrap per row"
+}

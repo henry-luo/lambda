@@ -8,29 +8,31 @@ write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest release pass makes Triangl **4.35× faster** (433.45 → 99.61 ms),
-beating Full MIR at 124.25 ms. Pidigits improves about **5%**, with its Full
-MIR confidence bound still spanning parity. Runtime types, layouts and precise
-ownership remain shared (**D2.4.3, D5.3, D8.2.6v2**).
+The latest frozen pass reuses the shared confinement proof and scalar-array
+snapshot helper for recursive plain parameters (**S9.1.2–S9.1.3v2, D5.3,
+D8.2.6v2**). Puzzle improves **18.759→4.1115 ms**, faster than Full MIR at
+**4.903 ms**, while still **3.28× C2MIR's 1.25293 ms**. Runtime data models
+and ownership remain shared.
 
-The primary 100-sample campaign qualifies **40/48 against Full MIR and 25/48
-against both targets**. The original 28 retain **28/28 Full MIR** qualifications
-and **19/28 combined** qualifications, including the matched Sumfp batch.
-The 20 additions qualify **12/20 Full and 6/20 combined**. The sole primary
-regression flag, Levenshtein, does not reproduce in a separate 200-sample
-confirmation, which also passes both targets. Its primary miss remains in
-the count above. GCbench loses a marginal Full MIR qualification despite
-unchanged starting/final MIR and no paired regression. The preceding campaign's
-40/48 and 27/48 result is retained as history. **The performance milestone
-remains open.**
+The 30-sample primary, including matched batched Sumfp, qualifies **42/48
+against Full MIR and 22/48 against both targets**, versus 41 and 22 for the
+fresh pre-snapshot MVP control. The original 28 have
+**27 Full wins, 15 combined wins and no regression flags**. Additional Towers
+retains a 3.2% primary slowdown flag. An independent qualified 61-pair audit
+measures 0.3% and does not confirm it; normalized MIR matches. Archived Full
+MIR's FFT/Fasta crashes and incorrect Navier–Stokes checksum keep three
+comparisons unqualified.
 
-All **49 focused groups** and the required **8,647/8,647 baseline cases** pass.
-Immutable indirect keys reuse their proof for ownership and native reads;
-Boolean predicates retain selected-arm ordering; decimal consumers reuse
-successful domain facts and rooted inlining (**S3.4–S3.5, S4.4–S4.5,
-S7.1.1v3, S7.9.3, S9.1.2–S9.1.3v2**). These are matched execution-window
-timings, excluding startup and compilation, using one-sided 95% paired
-confidence gates. See the [complete measurements and independent confirmation](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-immutable-indirect-keys-and-decimal-consumers).
+All 48 frozen MVP benchmark goldens and nine targeted GC/emission/provenance
+groups pass. The broader experimental gate retains **58 failing subtests
+across 17 of 57 groups**, with no new failure headers. The pinned later-runtime
+integration baseline passes **8,733/8,733**. Its MVP benchmark recheck still
+rejects the unchanged FFT fixture before lowering under newer frontend contracts.
+Timings use matched execution windows, excluding startup and compilation,
+with one-sided 95% confidence gates. Sources, benchmark inputs and executables
+are archived; subsequent shared frontend/Full MIR edits are outside that
+performance identity. **The performance milestone remains open.** See the
+[latest measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-confined-recursive-array-snapshots).
 
 **Destination:** `lambda/runtime/mvp/`
 

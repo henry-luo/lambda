@@ -1,0 +1,4 @@
+{
+  "normalization": "prototype pointer names and decimal immediates in the native-pointer range [2^32,2^48); no tagged Item constants fall in that range",
+  "normalized_mir_equal": true
+}
