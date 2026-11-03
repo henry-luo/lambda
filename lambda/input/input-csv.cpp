@@ -110,13 +110,18 @@ bool is_header_line(const char* csv_string, char separator) {
 }
 
 // Helper: parse a single CSV field (handles quoted fields)
-String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int line_num, int field_num) {
+String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int line_num, int field_num, bool strict) {
     if (**csv != '"') {
         // unquoted: the field is a slice of the source, up to the separator, a
         // line break or the end -- created in one copy, with no scratch buffer
         const char* start = *csv;
         const char* end = start;
-        while (*end && !is_table_separator(*end, separator) && *end != '\n' && *end != '\r') end++;
+        bool invalid_quote = false;
+        while (*end && !is_table_separator(*end, separator) && *end != '\n' && *end != '\r') {
+            if (strict && *end == '"') invalid_quote = true;
+            end++;
+        }
+        if (invalid_quote) ctx->addError("Quote in unquoted field at line %d, field %d", line_num, field_num);
         *csv = end;
         if (end > start) return ctx->builder.createString(start, (size_t)(end - start));
         return nullptr;  // empty string maps to null
@@ -148,6 +153,9 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
 
     if (!quote_closed) {
         ctx->addError("Unclosed quoted field at line %d, field %d", line_num, field_num);
+    } else if (strict && **csv && **csv != separator && **csv != '\r' && **csv != '\n') {
+        // A closing quote must end the field; otherwise the old reader creates an extra field.
+        ctx->addError("Text after closing quote at line %d, field %d", line_num, field_num);
     }
 
     if (sb->length > 0) {
@@ -157,8 +165,14 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
 }
 
 // CSV and TSV share field construction; TSV alone accepts comment preambles.
-static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode) {
+static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode, bool strict) {
     if (!csv_string || !*csv_string) {
+        if (strict) {
+            input->parse_failed = true;
+            input->parse_error_message = pool_strdup(input->pool, "Strict CSV requires a header");
+            input->root = ItemError;
+            return;
+        }
         input->root = {.item = ITEM_NULL};
         return;
     }
@@ -193,14 +207,14 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
         whitespace_field_count(commented_header) == whitespace_field_count(csv) &&
         identifier_header_line(commented_header) &&
         data_line_has_non_identifier_field(csv, ' ');
-    char separator = tsv_mode ? (whitespace_table ? ' ' : '\t') : detect_csv_separator(csv_string);
+    char separator = strict ? ',' : tsv_mode ? (whitespace_table ? ' ' : '\t') : detect_csv_separator(csv_string);
     int header_columns = commented_header ?
         (separator == ' ' ? whitespace_field_count(commented_header) : tab_field_count(commented_header)) : 0;
     int data_columns = separator == ' ' ? whitespace_field_count(csv) : tab_field_count(csv);
     bool commented_columns = tsv_mode && commented_header && header_columns > 1 &&
         header_columns == data_columns && identifier_header_line(commented_header) &&
         data_line_has_non_identifier_field(csv, separator);
-    bool has_header = commented_columns || is_header_line(csv, separator);
+    bool has_header = strict || commented_columns || is_header_line(csv, separator);
     const char* header_cursor = commented_columns ? commented_header : csv;
 
     if (separator == '\t') {
@@ -221,7 +235,7 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
 
         int field_num = 0;
         while (*header_cursor && *header_cursor != '\n' && *header_cursor != '\r') {
-            String *field = parse_csv_field(&ctx, &header_cursor, separator, line_num, field_num);
+            String *field = parse_csv_field(&ctx, &header_cursor, separator, line_num, field_num, strict);
 
             // Check for duplicate headers
             if (field) {
@@ -230,22 +244,29 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
                     if (existing.item != ITEM_NULL) {
                         String* existing_str = existing.get_safe_string();
                         if (existing_str && strcmp(existing_str->chars, field->chars) == 0) {
-                            ctx.addWarning("Duplicate header name '%s' at column %d", field->chars, field_num);
+                            if (strict) ctx.addError("Duplicate header name '%s' at column %d", field->chars, field_num);
+                            else ctx.addWarning("Duplicate header name '%s' at column %d", field->chars, field_num);
                         }
                     }
                 }
             } else {
-                ctx.addWarning("Empty header name at column %d", field_num);
+                if (strict) ctx.addError("Empty header name at column %d", field_num);
+                else ctx.addWarning("Empty header name at column %d", field_num);
             }
 
             Item item = field ? (Item){.item = s2it(field)} : (Item){.item = ITEM_NULL};
             array_append(headers, item, input->pool);
             field_num++;
+            bool had_separator = *header_cursor == separator;
             skip_table_separator(&header_cursor, separator);
+            if (strict && had_separator && (!*header_cursor || *header_cursor == '\n' || *header_cursor == '\r')) {
+                ctx.addError("Empty header name at column %d", field_num);
+            }
         }
 
 
         expected_columns = headers->length;
+        if (strict && expected_columns == 0) ctx.addError("Strict CSV requires a header");
         ctx.addNote("%s has %d columns with headers", tsv_mode ? "TSV" : "CSV", expected_columns);
 
         // Skip newline after header
@@ -281,7 +302,7 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
 
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
-                String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_index);
+                String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_index, strict);
 
                 // Get header name for this field
                 if (field_index < headers->length) {
@@ -299,18 +320,28 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
                     }
                 } else {
                     // More fields than headers
-                    ctx.addWarning("Extra field at line %d, column %d (expected %d columns)",
-                                   line_num, field_index, expected_columns);
+                    if (strict) ctx.addError("Extra field at line %d, column %d (expected %d columns)", line_num, field_index, expected_columns);
+                    else ctx.addWarning("Extra field at line %d, column %d (expected %d columns)", line_num, field_index, expected_columns);
                 }
 
                 field_index++;
+                bool had_separator = *csv == separator;
                 skip_table_separator(&csv, separator);
+                if (strict && had_separator && (!*csv || *csv == '\n' || *csv == '\r')) {
+                    // The final delimiter denotes an empty field, not a missing column.
+                    if (field_index < headers->length) {
+                        Item header_item = headers->items[field_index];
+                        String* key = header_item.item != ITEM_NULL ? header_item.get_safe_string() : nullptr;
+                        if (key) row_builder.putNull(key->chars);
+                    } else ctx.addError("Extra field at line %d, column %d (expected %d columns)", line_num, field_index, expected_columns);
+                    field_index++;
+                }
             }
 
             // Check for missing fields
             if (field_index < expected_columns) {
-                ctx.addWarning("Row at line %d has only %d fields (expected %d)",
-                               line_num, field_index, expected_columns);
+                if (strict) ctx.addError("Row at line %d has only %d fields (expected %d)", line_num, field_index, expected_columns);
+                else ctx.addWarning("Row at line %d has only %d fields (expected %d)", line_num, field_index, expected_columns);
             }
 
             // Build the map and append to rows
@@ -322,7 +353,7 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
             // Track columns for first row to set expectation
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
-                String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_index);
+                String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_index, strict);
 
                 // Append field to array - handles NULL appropriately
                 if (!field) {
@@ -367,9 +398,13 @@ static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode)
 }
 
 void parse_csv(Input* input, const char* csv_string) {
-    parse_delimited(input, csv_string, false);
+    parse_delimited(input, csv_string, false, false);
+}
+
+void parse_csv_strict(Input* input, const char* csv_string) {
+    parse_delimited(input, csv_string, false, true);
 }
 
 void parse_tsv(Input* input, const char* tsv_string) {
-    parse_delimited(input, tsv_string, true);
+    parse_delimited(input, tsv_string, true, false);
 }

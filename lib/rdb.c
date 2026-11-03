@@ -407,6 +407,26 @@ void rdb_conn_life_release(RdbConnLife* life) {
     }
 }
 
+static bool rdb_resolve_authorized(const RdbDriver* driver, const char* name, const char* uri,
+                                   RdbTarget* targets, int* count) {
+    memset(targets, 0, RDB_MAX_TARGETS * sizeof(RdbTarget));
+    *count = 0;
+    if (driver->resolve_targets(uri, targets, RDB_MAX_TARGETS, count) != RDB_OK ||
+            *count <= 0 || *count > RDB_MAX_TARGETS) return false;
+    return !rdb_registry_hooks || !rdb_registry_hooks->authorize ||
+        rdb_registry_hooks->authorize(name, targets, *count) == RDB_OK;
+}
+
+bool rdb_target_authorized(const char* uri, const char* type) {
+    if (!uri) return false;
+    const char* name = type ? type : rdb_detect_driver(uri);
+    const RdbDriver* driver = name ? rdb_get_driver(name) : NULL;
+    if (!driver) return false;
+    RdbTarget targets[RDB_MAX_TARGETS];
+    int count = 0;
+    return rdb_resolve_authorized(driver, name, uri, targets, &count);
+}
+
 static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, bool readonly,
                               bool sqlite_no_create) {
     if (!pool || !uri) return NULL;
@@ -435,16 +455,9 @@ static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, boo
 
     // JA16.3: resolve the URI into concrete targets and authorise them first
     RdbTarget targets[RDB_MAX_TARGETS];
-    memset(targets, 0, sizeof(targets));
     int target_count = 0;
-    if (driver->resolve_targets(uri, targets, RDB_MAX_TARGETS, &target_count) != RDB_OK ||
-            target_count <= 0) {
-        log_error("rdb: driver '%s' cannot resolve '%s'", driver_name, redacted);
-        return NULL;
-    }
-    if (rdb_registry_hooks && rdb_registry_hooks->authorize &&
-            rdb_registry_hooks->authorize(driver_name, targets, target_count) != RDB_OK) {
-        log_error("rdb: connection to '%s' is not authorised", redacted);
+    if (!rdb_resolve_authorized(driver, driver_name, uri, targets, &target_count)) {
+        log_error("rdb: cannot resolve or authorize '%s'", redacted);
         return NULL;
     }
 

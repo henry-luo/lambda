@@ -1,6 +1,6 @@
 # Lambda Documentation Convention
 
-**Version:** 1.2.0 (2026-10-07)
+**Version:** 1.3.0 (2026-11-03)
 
 **Status:** normative for how Lambda documentation is organized, written, and
 kept honest. Codifies the conventions previously scattered across CLAUDE.md
@@ -132,6 +132,48 @@ issue fixes.
   their detail and evidence.
 - An impl doc may freely carry code-level detail, measurements, and war
   stories — that is its job.
+
+### 5.1 Working notes and task checkpoints
+
+Substantial tasks that span milestones or sessions maintain one short,
+current checkpoint so work can resume after interruption or context
+compaction. Small, single-step changes do not need a checkpoint.
+
+- **Location and discovery:** put a `Current checkpoint` section near the top
+  of the task's existing `vibe/impl/Lambda_Impl_<Area>.md` plan. For a temporary
+  investigation without a plan, use `temp/<task>/checkpoint.md`. When an
+  investigation gains a plan, move the checkpoint into it. Keep one current
+  checkpoint per task; avoid a shared project-wide status file.
+- **Contents:** record the task's goal and scope; worktree, branch and last
+  update date; settled decisions and constraints; remaining questions;
+  implementation state; verification evidence; outstanding failures; and
+  the concrete next action. Cite formal ruling IDs where applicable and
+  distinguish agreed decisions from proposals awaiting an answer.
+- **Size and history:** aim for 30–60 lines, updated in place. Keep detailed
+  rationale and implementation history in the plan body, design records and
+  Git history; link to logs and reports instead of copying their output.
+- **Update timing:** refresh after a material decision or scope change, at
+  milestone and verification boundaries, and before a handoff or planned
+  interruption. Updating after every command is unnecessary.
+- **Verification identity:** record the tested commit plus relevant
+  uncommitted changes, executable/build configuration and execution backend
+  where relevant, commands and results, and evidence paths. Identify skipped
+  checks and known failures. If affected inputs change, mark earlier results
+  as superseded rather than implying they qualify the current tree.
+- **Resuming:** read the task's checkpoint, confirm the actual worktree,
+  branch and working-tree changes, and reconcile any differences before
+  continuing. Repeat checks when changed inputs or unresolved concerns
+  justify them; resuming alone does not invalidate recorded evidence.
+- **Completion and retention:** replace the active checkpoint with a compact
+  completion record in the plan. Temporary notes may be removed once their
+  useful findings and evidence references are preserved. Before deleting a
+  worktree, preserve any checkpoint still needed for unfinished work and the
+  evidence it references outside that worktree. Checkpoints are informative;
+  formal rulings and the central issue ledger retain their existing roles.
+
+`AGENTS.md` carries only the rule for finding and maintaining checkpoints,
+with a link here; task state and the convention's detailed format live in
+the locations above.
 
 ## 6. The issue ledger (`vibe/Lambda_Issue_Ledger.md`)
 

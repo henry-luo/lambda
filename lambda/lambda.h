@@ -759,6 +759,9 @@ typedef enum SysFunc {
     SYSFUNC_RNG_UNIFORM,         // math.rng_uniform(keys, counters) - row-major draws
     SYSFUNC_TRANSFORM_BUFFER,    // math.transform_buffer(matrix, positions, normals)
     SYSFUNC_POLYGON_DISTANCES,   // math.polygon_distances(points, outline)
+    SYSPROC_IO_SQLITE_CREATE,   // lambda.io.sqlite create(path) - create-only target
+    SYSPROC_IO_SQLITE_CLONE,    // lambda.io.sqlite clone(source, path) - snapshot target
+    SYSPROC_IO_SQLITE_PREIMAGE, // lambda.io.sqlite preimage(tx, path) - pre-write backup
 } SysFunc;
 
 typedef struct Type {
@@ -3643,6 +3646,9 @@ extern "C" {
     Item pn_io_websocket_accept2(Item listener, Item timeout_ms);
     Item pn_io_sqlite_database(Item path);
     Item pn_io_sqlite_existing(Item path);
+    Item pn_io_sqlite_create(Item path);
+    Item pn_io_sqlite_clone(Item source, Item path);
+    Item pn_io_sqlite_preimage(Item handle, Item path);
     Item pn_io_sqlite_execute2(Item path, Item sql);
     Item pn_io_sqlite_execute3(Item path, Item sql, Item params);
     Item pn_io_sqlite_query2(Item path, Item sql);

@@ -1360,6 +1360,8 @@ let api_data = input(https.'api.example.com'.'users.json')^
 // Input with options map
 let math_expr = input(/.'formula.txt', {type: 'math', flavor: 'latex'})^
 let csv_data = input(/.'data.csv', {type: 'csv'})^
+// Strict CSV requires an explicit header and rejects malformed or lossy rows.
+let strict_csv = input(/.'data.csv', 'csv-strict')^
 
 // Auto-detection (based on file extension)
 let auto_data = input(/.'document.md')^  // Automatically detects Markdown
@@ -2041,7 +2043,10 @@ park while SQLite executes (D7.2.4v4).
 |----------|--------|----------|
 | `database(path)` | target or error | Create a target for an `open` block; acquisition occurs when entering the block. |
 | `existing(path)` | target or error | Create an `open` target that requires an existing file and does not create a missing database. |
-| `execute(path_or_tx, sql, params?)` | `null` or error | Execute one statement with no result columns. |
+| `create(path)` | target or error | Create an `open` target that publishes a new file only after a successful transaction, and never replaces an existing path. |
+| `clone(source, path)` | target or error | Open a consistent, validated SQLite snapshot for a scoped transaction and publish it to a new path only on success. |
+| `preimage(tx, path)` | `null` or error | Publish the unchanged image from an active clone scope to a new path before its first modifying statement. |
+| `execute(path_or_tx, sql, params?)` | `null` or error | Execute one statement that returns no rows. |
 | `query(path_or_tx, sql, params?)` | array of rows or error | Execute one statement and return each row as an array in column order. |
 
 `path` and `sql` are strings; `params` is an array and defaults to `[]`.
@@ -2054,7 +2059,9 @@ datetime values need an explicit application conversion.
 
 SQL is limited to one statement per call. Transaction-control statements,
 `ATTACH`, `DETACH`, pragmas, virtual-table creation and extension loading are
-rejected. Input SQL is limited to 1 MiB, paths to 32 KiB, and parameters to
+rejected. `execute` accepts statements that expose result metadata but return
+no rows, as SQLite can do for a strict-table alteration; a returned row fails
+the statement and rolls it back. Input SQL is limited to 1 MiB, paths to 1,023 UTF-8 bytes, and parameters to
 1,024 and 16 MiB of text/binary data. A query returns at most 100,000 rows,
 1,024 columns, 1,000,000 cells and 16 MiB of text/binary data; exceeding a
 limit fails and rolls back the statement. Cancellation interrupts execution
@@ -2071,15 +2078,47 @@ handle belongs to its task and becomes invalid on leaving the block. SQL calls
 inside the block must use that handle, not a path. Nested `open` blocks,
 document updates and explicit `commit` or `rollback` are currently rejected
 within a SQLite block; SQL inside a document update block is rejected.
-`existing` opens read/write without SQLite's create flag and rejects
-`:memory:` and SQLite `file:` URIs. Prefix a literal filename beginning with
-`file:` with `./`. It is suitable when a missing file must remain missing;
+SQLite `file:` URIs are rejected because globally enabled URI parsing could
+otherwise open a different target from the path authorized by the host. Prefix
+a literal filename beginning with `file:` with `./`. `existing` also rejects
+`:memory:` and opens read/write without SQLite's create flag. It is suitable
+when a missing file must remain missing;
 `database` and standalone calls may create a database file.
+
+`create` runs the transaction on a private in-memory database, then publishes
+its committed image atomically through an authorized parent directory. An
+error or cancellation in the block body publishes nothing. An existing destination, even
+an empty file or symlink, is never replaced. The serialized image is limited
+to 64 MiB, and the final serialization and file publication run on the
+caller. If publication succeeds but directory synchronization fails, the
+error reports an uncertain durability outcome; inspect the destination before
+retrying. Creation uses the anchored-file implementation and currently fails
+closed on Windows. macOS is tested; Linux remains to be qualified. A crash
+can leave a private staging file, so recovery and cleanup remain open work.
+
+`clone` reads an existing SQLite database into a bounded, consistent snapshot,
+including committed WAL data, then opens that snapshot as a transaction. The
+snapshot is checked with SQLite integrity and foreign-key checks before the
+block runs. A successful block publishes it using the same create-only rules as
+`create`; errors and cancellation publish nothing. The source is opened
+read-only, while the snapshot may be changed within the block. The 64 MiB limit
+applies to the database image, and attachments are not included. It is the
+application's responsibility to validate its own data and check uncertain
+publication outcomes. The same platform and staging limitations apply.
+
+`preimage` publishes the original image from an active `clone` scope to a
+second new path. It may be called once, after read-only validation and before
+any modifying statement. A failed or uncertain publication makes the scope
+rollback-only. The preimage is an independent file effect: after it has been
+published, it remains even if the enclosing transaction later rolls back
+(S12.4.4v4, D7.5.6). A later upgrade-destination publication can also fail or
+be uncertain, so inspect both paths before retrying. The snapshot size,
+authorization, platform and staging limits of `create` apply.
 
 The initial confined-app profile has no database broker and denies acquisition
 before opening a file (D7.5.2). macOS has been exercised; Windows and Linux
 remain to be qualified. These primitives do not by themselves provide the
-accounting app's migrations, backups or business controls.
+accounting app's migrations, recovery or business controls.
 
 ```lambda
 import sqlite: lambda.io.sqlite

@@ -2543,6 +2543,15 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
 #ifndef LAMBDA_NO_IMAGE_IO
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif
+        else if (!strcmp(effective_type, "csv-strict") ||
+                (!strcmp(effective_type, "csv") && flavor && !strcmp(flavor->chars, "strict"))) {
+            // The cursor reader must never silently truncate transported CSV bytes.
+            if (memchr(source, 0, source_len) || !str_utf8_valid(source, source_len)) {
+                input->parse_failed = true;
+                input->parse_error_message = pool_strdup(input->pool, "Strict CSV requires UTF-8 without NUL bytes");
+                input->root = ItemError;
+            } else parse_csv_strict(input, source);
+        }
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (input_parse_mesh(input, source, source_len, effective_type)) {}
         else if (input_parse_source_exact(effective_type, input, source)) {}

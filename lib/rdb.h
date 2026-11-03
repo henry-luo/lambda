@@ -197,6 +197,8 @@ typedef struct RdbRegistryHooks {
     void (*remove)(void* owner, uint32_t rid);
 } RdbRegistryHooks;
 void rdb_set_registry_hooks(const RdbRegistryHooks* hooks);
+// Resolve and authorize a concrete target without opening it.
+bool rdb_target_authorized(const char* uri, const char* type);
 
 /** The registry's close callback: closes the native connection exactly once. */
 void rdb_conn_life_close(RdbConnLife* life);

@@ -2480,7 +2480,7 @@ full-auth request (`0x04`) is answered with the password only when the mode is
 
 **Ruling:** S12.4.4v4; user decisions 2026-11-03. **Status:** single-statement
 autocommit and task-owned SQLite `open` transactions are implemented; the
-shared Lambda baseline passes after the URI guard. Platform and
+shared Lambda baseline passes. Platform and
 failure-injection work remains open.
 Scope: a SQLite transaction accessed from a Lambda procedure;
 this is not a ruling for every RDB backend. The resource lifetime remains
@@ -2519,7 +2519,11 @@ one-statement `execute` and positional-row `query` for unconfined callers.
 An `open` handle belongs to its task, reads its own writes and is invalidated
 at scope exit. Nested transactions and explicit `commit`/`rollback` inside a
 SQLite scope are currently rejected. `existing(path)` supplies a target that
-fails if the file is absent and rejects transient-memory paths and `file:` URIs;
+fails if the file is absent and rejects transient-memory paths. All SQLite
+entry points reject `file:` URIs and paths longer than the registry target's
+1,023-byte capacity: D7.5.2 requires the authorized path to match the actual
+open, even if SQLite URI processing is globally enabled. Prefix a literal
+filename beginning `file:` with `./`;
 the SQLite driver reads its additive `sqlite_no_create` open option only when
 the ABI record's `struct_size` includes that field. The owning task authorizes
 and pins a transaction; an offload worker executes with a cancellation progress
@@ -2528,6 +2532,28 @@ owner materializes Lambda values and commits or rolls back. An owner-held pin
 protects the connection if the registry is cleared while work is in flight.
 Opening and committing the SQLite file still occur on the owner thread;
 cross-platform qualification remains open.
+`create(path)` instead acquires a private, registered in-memory SQLite
+transaction and publishes its committed image through a held create-only file
+anchor. Both the requested and canonical destination are authorized and
+rechecked during publication (D7.5.2). The image is capped at 64 MiB; a file
+published with unconfirmed directory durability reports an uncertain outcome.
+The anchor implementation fails closed on Windows; Linux and interruption
+recovery remain to be qualified. `clone(source,path)` takes an online SQLite
+backup under a pinned read snapshot, checks SQLite integrity and foreign keys,
+then exposes it as an `open` transaction that publishes through the same
+create-only anchor (S12.4.4v4, D7.5.2, D7.5.6). The snapshot includes committed
+WAL data and is capped at 64 MiB. Worker cancellation is joined before release,
+and owner-held pins protect both connections during teardown. Application-level
+validation and attachments remain the caller's responsibility.
+`preimage(tx,path)` publishes the untouched memory image from a clone scope to
+a separate create-only destination before its first modifying SQL statement.
+Failure or uncertainty poisons the scope; an already published preimage is an
+independent external effect and survives a later scope rollback (S12.4.4v4,
+D7.5.6). Both paths need separate authorization and uncertain outcomes require
+inspection. The 64 MiB and platform limitations also apply. `execute` accepts
+SQLite statement metadata when no rows are returned; a returned row poisons
+the transaction. SQLite's internal `quick_check` is admitted only while
+stepping an authorizer-identified ALTER; direct pragmas remain denied.
 The existing D7.5.2 confined-app denial is unchanged. See
 [the implementation checkpoint](impl/Lambda_Impl_RDB_Write.md) for limits,
 security, tests and remaining work.

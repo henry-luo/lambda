@@ -28,6 +28,7 @@ void input_fbx(Input* input, const char* source, size_t length);
 // the common <character> schema of lambda.scene3d.motion (Lambda_Pkg_Motion.md §7)
 void input_character(Input* input, const char* source, size_t length, const char* flavor);
 void parse_csv(Input* input, const char* csv_string);
+void parse_csv_strict(Input* input, const char* csv_string);
 void parse_tsv(Input* input, const char* tsv_string);
 void parse_ini(Input* input, const char* ini_string);
 void parse_properties(Input* input, const char* prop_string);

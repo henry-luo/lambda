@@ -169,6 +169,19 @@ TEST_F(FileAnchorTest, InvalidRequestsCannotCreatePartialDirectories) {
     EXPECT_FALSE(file_anchor_validate(nullptr));
 }
 
+TEST_F(FileAnchorTest, RootPathAcceptsDotWithoutAllowingParentTraversal) {
+    char* dotted = file_path_join(root, "./project/.");
+    char* parent = file_path_join(root, "./project/../project");
+    ASSERT_NE(dotted, nullptr);
+    ASSERT_NE(parent, nullptr);
+    FileAnchor* anchor = keep(file_anchor_open(dotted, nullptr));
+    ASSERT_NE(anchor, nullptr);
+    EXPECT_TRUE(file_anchor_validate(anchor));
+    EXPECT_EQ(file_anchor_open(parent, nullptr), nullptr);
+    mem_free(parent);
+    mem_free(dotted);
+}
+
 TEST_F(FileAnchorTest, IntermediateFinalAndHardLinkAliasesAreRejected) {
     char* private_dir = file_path_join(root, "private");
     ASSERT_EQ(mkdir(private_dir, 0700), 0);

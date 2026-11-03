@@ -1028,6 +1028,11 @@ static int file_anchor_open_absolute(const char* path, const FileAnchorOptions* 
         if (!*component) return fd;
         char* slash = strchr(component, '/');
         if (slash) *slash = '\0';
+        // A dot names the held directory itself; parent traversal remains forbidden.
+        if (!strcmp(component, ".")) {
+            component = slash ? slash + 1 : component + 1;
+            continue;
+        }
         if (!file_anchor_component_valid(component)) { errno = EINVAL; break; }
         if (!file_anchor_namespace(options, fd, component)) break;
         int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);

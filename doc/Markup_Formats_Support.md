@@ -586,6 +586,14 @@ Carol,35,Chicago,9.8
 </tbody>
 </table>
 
+The optional `csv-strict` format (also `{type:'csv', flavor:'strict'}`) treats the first row as a
+required comma-separated header and rejects duplicate or empty header names,
+malformed quoted fields, rows with missing or extra fields, NUL bytes and
+invalid UTF-8. Quoted fields can contain commas, line breaks and doubled
+quotes. An empty field is represented as `null`; an ending comma supplies an
+empty last field. Empty physical lines are ignored. The ordinary `csv` reader
+retains its existing separator/header detection and warning behavior.
+
 **Typical processing pipeline:**
 
 ```lambda
