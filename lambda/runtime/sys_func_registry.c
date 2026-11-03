@@ -2503,6 +2503,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
     {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
+    {"lambda_array_set_checked_preplanned", FPTR(lambda_array_set_checked_preplanned)},
     {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"lambda_array_path_set_checked", FPTR(lambda_array_path_set_checked)},
     {"lambda_array_path_set_checked_inplace", FPTR(lambda_array_path_set_checked_inplace)},

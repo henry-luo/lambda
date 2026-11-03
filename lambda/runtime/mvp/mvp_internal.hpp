@@ -52,6 +52,8 @@ struct MvpBinding {
     Item constant_item;
     bool constant_ready;
     bool readonly_literal;
+    bool inferred_array;
+    bool array_present;
 };
 
 struct LambdaMvpModule {
@@ -176,6 +178,7 @@ ValueRep mvp_rep(Type* type);
 Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
 MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
+Type* mvp_binding_return_contract(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
 AstNode* mvp_single_statement(AstNode* node);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);

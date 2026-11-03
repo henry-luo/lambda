@@ -30,3 +30,5 @@
 ["XHTML documents cannot be edited yet; open it with 'lambda view' instead"]
 "rowspans preserve covered empty rows:"
 [true, true, true, true, true]
+"fragment envelope comments survive save:"
+[true, true, true, true, true, true, true, true]

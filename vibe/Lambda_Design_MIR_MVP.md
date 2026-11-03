@@ -8,26 +8,28 @@ write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest release campaign detects **no statistically established performance
-regression across the original 28** against a release built from the merged
-starting revision. Spectralnorm improves about **20%**. Including the separate
-matched 10,000-invocation Sumfp batch, those rows qualify **28/28 against Full
-MIR and 19/28 within 20% of C2MIR (and both gates)**. Single-run zero-duration
-Sumfp samples remain recorded and unqualified.
+The latest 100-sample release campaign detects **no statistically established
+performance regression across all 48** against the committed starting MVP.
+Including the separate matched 10,000-invocation Sumfp batch, the original
+rows qualify **28/28 against Full MIR and 20/28 within 20% of C2MIR (and both
+gates)**. Single-run zero-duration Sumfp samples remain recorded and unqualified.
 
-The 20 additions qualify **7/20 against Full MIR and 5/20 against both targets**.
-The qualifying additions are CPSTak, Diviter, Larceny Primes, BENG NBody and
-JetStream NBody. The requested all-20 performance milestone remains open;
-coverage does not imply a performance pass. These are execution-window timings,
-excluding startup and compilation, with one-sided 95% paired confidence gates.
+The 20 additions qualify **10/20 against Full MIR and 6/20 against both targets**,
+up from 7/20 and 5/20 in the expansion campaign. GCbench and Binarytrees now
+clear both targets; 12 added rows improve against the starting MVP. BENG NBody
+has a median within 10% of C2MIR, but its confidence bound does not qualify in
+this run. The requested performance milestone remains open: **38/48 beat Full
+MIR and 26/48 meet both targets**. These are execution-window timings, excluding
+startup and compilation, with one-sided 95% paired confidence gates.
 
-All **41 focused test groups** pass, including all 48 Lambda and C reference
-goldens, precise-root/poisoned-GC fixtures and MIR emission checks. The aggregate
-baseline passes **8,646/8,646**. The implementation now preserves nullable native
-returns, stages native record fields across allocation, folds closed literal
-tables and admits guarded read-only siblings without dropping required alias
-snapshots (**D2.4.3, D5.3, S9.1.3v2, S9.3.1, S12.2.1v3**).
-See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-twenty-row-coverage-expansion).
+All **42 focused test groups** pass, including all 48 Lambda and C reference
+goldens, precise-root/poisoned-GC fixtures and MIR emission checks. The latest
+aggregate baseline and focused failure rechecks are recorded in the
+implementation notes. The compiler now retains proven record and private array
+domains, guards allocating vector bodies while rooting their owners, forwards
+precise `var` homes, and avoids redundant captures on fresh return-only owners
+(**D2.4.3, D5.3, S9.1.3v2, S9.3.1, S12.2.1v3**).
+See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-tuning-the-slower-expansion-rows).
 
 **Destination:** `lambda/runtime/mvp/`
 

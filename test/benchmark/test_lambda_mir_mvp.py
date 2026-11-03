@@ -79,6 +79,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_records.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_array_domains.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_borrow_kernel.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_proven_domains.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -219,6 +220,25 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("\tcall\tsqrt_", native)
         # the ordinary call remains for layout, alias and short-array misses.
         self.assertIn("\tcall\tmvp_1_advance_dp", caller)
+
+    def test_allocating_vector_emission(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_proven_domains.ls"
+        for name in ("cell", "transient_cell"):
+            constructor = self.function_mir(source, name)
+            self.assertIn("map_alloc_for_type", constructor)
+            self.assertNotIn("map_fill", constructor)
+            self.assertNotIn("cow_capture_value", constructor)
+        body = self.function_mir(source, "shifted")
+        native = body[:body.index("\tcall\tarray_plain_")]
+        self.assertIn("lambda_fill_primitive_bits", native)
+        self.assertGreaterEqual(native.count("\tdadd\t"), 3)
+        self.assertNotIn("\tcall\tfn_index_", native)
+        self.assertNotIn("\tcall\tlambda_type_check_", native)
+        # short arrays and other layouts retain the checked construction path.
+        self.assertIn("\tcall\tfn_index_", body)
+        self.assertIn("\tcall\tlambda_type_check_", body)
+        store = self.function_mir(source, "put_erased")
+        self.assertIn("lambda_array_set_checked_preplanned", store)
 
     def test_guarded_iterations_and_borrow_inlining(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls", "butterfly")

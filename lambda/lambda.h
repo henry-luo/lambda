@@ -3126,6 +3126,10 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
+    // shared resolved store plan; primitive proofs still guard the live carrier.
+    Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
+        Type* expected, Type* element, const LaneStorageDesc* lane,
+        const char* boundary, bool inplace, bool uncounted_primitive);
     Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,

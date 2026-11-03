@@ -254,12 +254,12 @@ static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding) {
     return false;
 }
 
-static bool binding_reassigned(LambdaMvpModule* m, MvpBinding* binding, bool elements) {
+static bool binding_reassigned(LambdaMvpModule* m, MvpBinding* binding, bool elements, bool whole = true) {
     AstIndex* index = &m->tp->ast_index;
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
-        if (node->node_type == AST_NODE_ASSIGN_STAM && ((AstAssignStamNode*)node)->target_entry == binding->entry) return true;
-        if (elements && node->node_type == AST_NODE_INDEX_ASSIGN_STAM &&
+        if (whole && node->node_type == AST_NODE_ASSIGN_STAM && ((AstAssignStamNode*)node)->target_entry == binding->entry) return true;
+        if (elements && (node->node_type == AST_NODE_INDEX_ASSIGN_STAM || node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) &&
                 mvp_local_binding(m, ((AstAssignStamNode*)node)->object) == binding) return true;
     }
     return false;
@@ -286,11 +286,87 @@ bool mvp_array_index_present(LambdaMvpModule* m, MvpBinding* b, AstNode* key) {
     return !binding_reassigned(m, b, false) && !binding_var_borrow(m, b);
 }
 
+Type* mvp_binding_return_contract(LambdaMvpModule* m, NameEntry* entry) {
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    AstDeclaratorNode* declaration = (AstDeclaratorNode*)entry->node;
+    AstIndex* index = &m->tp->ast_index;
+    AstFunctionId declared_owner = index->owner_functions[ast_index_find(index, declaration)];
+    uint32_t count = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, entry), &count);
+    Type* target = NULL;
+    for (uint32_t i = 0; i < count; i++) {
+        AstNodeId use = uses[i];
+        if (index->nodes[use] == declaration || (declaration->id &&
+                ast_index_node_descends(index, use, ast_index_find(index, declaration->id)))) continue;
+        if (index->nodes[use]->node_type != AST_NODE_IDENT) return NULL;
+        use = ast_index_parent_id(index, use);
+        while (use < index->count && index->nodes[use]->node_type == AST_NODE_PRIMARY)
+            use = ast_index_parent_id(index, use);
+        if (use >= index->count || index->nodes[use]->node_type != AST_NODE_RETURN_STAM) return NULL;
+        AstFunctionId owner = index->owner_functions[use];
+        if (owner >= m->function_count || owner != declared_owner) return NULL;
+        Type* result = m->functions[owner].result_contract;
+        if (target && target != result) return NULL;
+        target = result;
+    }
+    return target;
+}
+
+// mirror enforced constructor destinations; inferred local shapes alone
+// never establish an admission contract.
+static Type* contextual_contract(LambdaMvpModule* m, AstNode* literal) {
+    AstIndex* index = &m->tp->ast_index;
+    AstNodeId parent = ast_index_parent_id(index, ast_index_find(index, literal));
+    while (parent < index->count && index->nodes[parent]->node_type == AST_NODE_PRIMARY)
+        parent = ast_index_parent_id(index, parent);
+    if (parent >= index->count) return NULL;
+    AstNode* node = index->nodes[parent];
+    Type* target = NULL;
+    if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        target = declaration->declared_type;
+        // a producer observed only as a return can adopt that layout once
+        // its field proofs succeed, even when declared with `var`.
+        if (!target) target = mvp_binding_return_contract(m, declaration->entry);
+    } else if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstFunctionId owner = index->owner_functions[parent];
+        if (owner < m->function_count) target = m->functions[owner].result_contract;
+    }
+    return target;
+}
+
+static TypeMap* contextual_map_contract(LambdaMvpModule* m, AstNode* literal) {
+    TypeMap* shape = (TypeMap*)lambda_type_nonnull_map_contract(contextual_contract(m, literal));
+    return shape && shape->is_trusted_contract && ast_map_literal_keys_follow_contract((AstMapNode*)literal, shape)
+        ? shape : NULL;
+}
+
 // query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5v3).
 Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool dense_arrays) {
     AstNode* n = ast_unwrap_primary_to_leaf(source);
     if (!n) return &TYPE_NULL;
     if (depth > 32) return &TYPE_ANY;
+    if (n->node_type == AST_NODE_MAP) {
+        TypeMap* target = contextual_map_contract(m, n);
+        if (target) {
+            ShapeEntry* field = target->shape;
+            for (AstNode* item = ((AstMapNode*)n)->item; item; item = item->next, field = typemap_next_field(target, field)) {
+                AstNode* input = item->node_type == AST_NODE_KEY_EXPR ? ((AstNamedNode*)item)->as : item;
+                if (!mvp_boundary_proven(mvp_value_contract(m, input, depth + 1, dense_arrays), field->type)) return &TYPE_ANY;
+            }
+            return target;
+        }
+    }
+    if (n->node_type == AST_NODE_ARRAY) {
+        Type* target = contextual_contract(m, n);
+        Type* element = mvp_array_element(target);
+        if (element && lambda_array_contract_is_plain(target) && !lambda_type_counts_array_length(target)) {
+            bool proven = true;
+            for (AstNode* item = ((AstArrayNode*)n)->item; proven && item; item = item->next)
+                proven = mvp_boundary_proven(mvp_value_contract(m, item, depth + 1, dense_arrays), element);
+            if (proven) return target;
+        }
+    }
     if (n->node_type == AST_NODE_MEMBER_EXPR) {
         ShapeEntry* field = mvp_member_field(m, (AstFieldNode*)n);
         if (!field) return &TYPE_ANY;
@@ -303,12 +379,16 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
     if (n->node_type == AST_NODE_INDEX_EXPR) {
         MvpBinding* b = mvp_local_binding(m, ((AstFieldNode*)n)->object);
         Type* element = b ? mvp_array_element(b->contract) : NULL;
-        if (mvp_value_contract(m, ((AstFieldNode*)n)->field, depth + 1, dense_arrays)->type_id != LMD_TYPE_INT)
-            return &TYPE_ANY;
+        bool optional_key = false;
+        Type* key = lambda_type_nullable_lane_base(
+            mvp_value_contract(m, ((AstFieldNode*)n)->field, depth + 1, dense_arrays), &optional_key);
+        // an absent integer key yields absence too, not an arbitrary value.
+        // Keep that domain through nested typed indexing (S7.1.1v3).
+        if (!key || key->type_id != LMD_TYPE_INT) return &TYPE_ANY;
         Type* pointer_element = b ? lambda_array_contract_element(b->contract) : NULL;
         if (!element && pointer_element == &TYPE_STRING)
             return lambda_type_nullable_normalized(m->tp->pool, &TYPE_STRING);
-        return element ? dense_arrays || mvp_array_index_present(m, b, ((AstFieldNode*)n)->field)
+        return element ? dense_arrays || b->array_present || mvp_array_index_present(m, b, ((AstFieldNode*)n)->field)
             ? element : mvp_nullable_contract(m, element) : &TYPE_ANY;
     }
     if (n->node_type == AST_NODE_IDENT) {
@@ -373,15 +453,17 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
             if (b->op == OPERATOR_IDIV && left == LMD_TYPE_INT && right == LMD_TYPE_INT) return &TYPE_INT;
         }
         if ((b->op == OPERATOR_AND || b->op == OPERATOR_OR || b->op == OPERATOR_EQ || b->op == OPERATOR_NE) &&
-                left == LMD_TYPE_BOOL && right == LMD_TYPE_BOOL) return &TYPE_BOOL;
+                left == LMD_TYPE_BOOL && right == LMD_TYPE_BOOL)
+            return (b->op == OPERATOR_AND || b->op == OPERATOR_OR) && (left_null || right_null)
+                ? m->nullable_bool : &TYPE_BOOL;
         return &TYPE_ANY;
     }
     if (n->node_type == AST_NODE_UNARY) {
         AstUnaryNode* u = (AstUnaryNode*)n;
         Type* operand = mvp_value_contract(m, u->operand, depth + 1, dense_arrays);
-        if (u->op == OPERATOR_NOT && operand->type_id == LMD_TYPE_BOOL) return &TYPE_BOOL;
         bool optional = false;
         Type* base = lambda_type_nullable_lane_base(operand, &optional);
+        if (u->op == OPERATOR_NOT && base && base->type_id == LMD_TYPE_BOOL) return &TYPE_BOOL;
         if ((u->op == OPERATOR_POS || u->op == OPERATOR_NEG) && base &&
                 (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_FLOAT)) return operand;
         return &TYPE_ANY;
@@ -1306,9 +1388,44 @@ static void plan_float_parameters(LambdaMvpModule* m) {
     }
 }
 
+static Type* inferred_array_element(LambdaMvpModule* m, AstNode* initializer) {
+    AstNode* source = ast_unwrap_primary_to_leaf(initializer);
+    if (!source) return NULL;
+    AstNode* items = NULL;
+    if (source->node_type == AST_NODE_ARRAY) items = ((AstArrayNode*)source)->item;
+    else if (source->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)source;
+        AstNode* target = ast_unwrap_primary_to_leaf(call->function);
+        if (!target || target->node_type != AST_NODE_SYS_FUNC ||
+                ((AstSysFuncNode*)target)->fn_info->fn != SYSFUNC_FILL) return NULL;
+        MvpIntRange count = mvp_int_range(m, call->argument);
+        // a failed fill remains an ordinary inferred error value; it cannot
+        // acquire an internal typed-declaration failure path (S11.4.1v5).
+        if (!count.finite || count.lower < 0) return NULL;
+        items = call->argument->next;
+    }
+    Type* element = NULL;
+    for (AstNode* item = items; item; item = item->next) {
+        Type* contract = mvp_value_contract(m, item);
+        Type* kind = lambda_canonical_type_for_id(contract->type_id);
+        if ((kind != &TYPE_INT && kind != &TYPE_FLOAT && kind != &TYPE_BOOL) ||
+                (element && element != kind)) return NULL;
+        element = kind;
+    }
+    return element;
+}
+
 static bool widen_inferred_binding(LambdaMvpModule* m, MvpBinding* b, Type* source) {
     if (!b || b->contract == &TYPE_ANY || b->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
             ((AstDeclaratorNode*)b->entry->node)->declared_type) return false;
+    if (b->inferred_array) {
+        // every initializer and indexed write is checked at the same effect
+        // fixed point; this is a private proof, never a new user contract.
+        Type* element = inferred_array_element(m, ((AstDeclaratorNode*)b->entry->node)->init);
+        if (element == mvp_array_element(b->contract)) return false;
+        b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
+        return true;
+    }
     Type* joined = b->contract;
     bool source_null = false, binding_null = false;
     Type* from = lambda_type_nullable_lane_base(source, &source_null);
@@ -1318,6 +1435,10 @@ static bool widen_inferred_binding(LambdaMvpModule* m, MvpBinding* b, Type* sour
     else if (from && to && from->type_id == to->type_id && source_null && !binding_null)
         joined = mvp_nullable_contract(m, to);
     else if (!from || !to || from->type_id != to->type_id) joined = &TYPE_ANY;
+    // a private record cursor keeps only the same enforced shape across all
+    // writes; a different inferred record must remain unrestricted (S12.2.1v3).
+    if (joined != &TYPE_ANY && from && to && to->type_id == LMD_TYPE_MAP &&
+            source != &TYPE_NULL && from != to) joined = &TYPE_ANY;
     if (joined == b->contract) return false;
     b->contract = joined; b->rep = mvp_rep(joined);
     return true;
@@ -1723,25 +1844,19 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         if (!b->entry || !b->entry->node || b->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         AstDeclaratorNode* d = (AstDeclaratorNode*)b->entry->node;
         AstNode* source = ast_unwrap_primary_to_leaf(d->init);
-        if (d->declared_type || !source || source->node_type != AST_NODE_ARRAY ||
-                !((AstArrayNode*)source)->item || !readonly_literal_binding(m, b)) continue;
-        TypeId kind = LMD_TYPE_NULL;
-        for (AstNode* item = ((AstArrayNode*)source)->item; item; item = item->next) {
-            AstNode* leaf = ast_unwrap_primary_to_leaf(item);
-            if (!leaf || leaf->node_type != AST_NODE_PRIMARY || !leaf->type ||
-                    (leaf->type->type_id != LMD_TYPE_INT && leaf->type->type_id != LMD_TYPE_BOOL && leaf->type->type_id != LMD_TYPE_FLOAT) ||
-                    (kind != LMD_TYPE_NULL && kind != leaf->type->type_id)) { kind = LMD_TYPE_NULL; break; }
-            kind = leaf->type->type_id;
-        }
-        if (kind == LMD_TYPE_NULL) continue;
-        // an inferred literal with no writes/borrows keeps this packed domain
-        // for its whole activation; the public inferred type is unchanged.
+        if (d->declared_type || !source ||
+                binding_reassigned(m, b, false) || binding_var_borrow(m, b)) continue;
+        Type* element = inferred_array_element(m, d->init);
+        if (!element) continue;
+        // keep a private primitive domain only while the fixed point proves
+        // every write. The public inferred type remains unrestricted.
         TypeArray* contract = (TypeArray*)alloc_type(m->tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
-        contract->nested = lambda_canonical_type_for_id(kind); contract->length = -1; contract->type_index = -1;
-        b->contract = contract; b->rep = mvp_rep(contract); b->readonly_literal = true;
+        contract->nested = element; contract->length = -1; contract->type_index = -1;
+        b->contract = contract; b->rep = mvp_rep(contract); b->inferred_array = true;
+        b->readonly_literal = source->node_type == AST_NODE_ARRAY && readonly_literal_binding(m, b);
         b->array_cert = lambda_array_rep_cert_create(m->tp->pool, contract);
     }
-    // seed inferred scalar lanes from producers, then widen monotonically as assignment/call effects converge.
+    // seed producer domains, then widen monotonically as assignment/call effects converge.
     for (AstNodeId i = 0; i < index->count; i++) {
         if (index->nodes[i]->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         AstDeclaratorNode* d = (AstDeclaratorNode*)index->nodes[i];
@@ -1750,9 +1865,13 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         Type* source = mvp_value_contract(m, d->init);
         bool optional = false;
         Type* base = lambda_type_nullable_lane_base(source, &optional);
-        if (!b || !base || (base->type_id != LMD_TYPE_FLOAT && base->type_id != LMD_TYPE_INT &&
-                base->type_id != LMD_TYPE_BOOL && base->type_id != LMD_TYPE_STRING)) continue;
-        base = lambda_canonical_type_for_id(base->type_id);
+        if (!b || !base) continue;
+        TypeMap* record = (TypeMap*)lambda_type_nonnull_map_contract(source);
+        bool closed_record = record && record->is_trusted_contract &&
+            !binding_reassigned(m, b, true, false) && !binding_var_borrow(m, b);
+        if (!closed_record && base->type_id != LMD_TYPE_FLOAT && base->type_id != LMD_TYPE_INT &&
+                base->type_id != LMD_TYPE_BOOL && base->type_id != LMD_TYPE_STRING) continue;
+        base = closed_record ? (Type*)record : lambda_canonical_type_for_id(base->type_id);
         b->contract = optional ? mvp_nullable_contract(m, base) : base;
         b->rep = mvp_rep(b->contract);
     }
@@ -1874,10 +1993,14 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             AstFunctionId owner = index->owner_functions[i];
             MvpFunction* f = owner < m->function_count ? &m->functions[owner] : &m->entry;
             bool collects = false, fails = false, reenters = false;
-            if (node->node_type == AST_NODE_ARRAY || node->node_type == AST_NODE_MAP ||
+            if (node->node_type == AST_NODE_ARRAY ||
                     node->node_type == AST_NODE_MATCH_EXPR ||
                     node->node_type == AST_NODE_MEMBER_ASSIGN_STAM || node->node_type == AST_NODE_INDEX_ASSIGN_STAM)
                 collects = fails = true;
+            if (node->node_type == AST_NODE_MAP) {
+                collects = true;
+                fails = contextual_map_contract(m, node) && mvp_value_contract(m, node) == &TYPE_ANY;
+            }
             if (node->node_type == AST_NODE_MEMBER_EXPR) {
                 collects = true;
                 fails = mvp_value_contract(m, node)->type_id == LMD_TYPE_ANY;
@@ -1942,6 +2065,14 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 Type* source = mvp_value_contract(m, a->value);
                 changed |= widen_inferred_binding(m, b, source);
                 fails |= !b || !mvp_boundary_proven(source, b->contract);
+            }
+            if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+                AstAssignStamNode* a = (AstAssignStamNode*)node;
+                MvpBinding* b = mvp_local_binding(m, a->object);
+                if (b && b->inferred_array && b->contract != &TYPE_ANY &&
+                        !mvp_boundary_proven(mvp_value_contract(m, a->value), mvp_array_element(b->contract))) {
+                    b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM; changed = true;
+                }
             }
             if (node->node_type == AST_NODE_RETURN_STAM) {
                 AstNode* v = ((AstReturnNode*)node)->value;
