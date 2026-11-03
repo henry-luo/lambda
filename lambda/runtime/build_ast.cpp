@@ -964,7 +964,7 @@ static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     // it mirrors the concrete fn_int/fn_float/fn_decimal switch arms that never
     // reject a value. A union/error or a broad numeric abstraction retains the
     // registry effect and therefore its checked Item result lane.
-    if (!type || lambda_type_accepts_error(type)) return false;
+    if (!type || lambda_type_accepts_error(type) || lambda_type_accepts_null(type)) return false;
     switch (type->type_id) {
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
@@ -1070,6 +1070,10 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
         return !root || root->node_type != AST_NODE_ELEMENT;
     }
     case SYSFUNC_INT:
+        // S4.1.6: decimal/integer magnitudes also saturate rather than fail.
+        return !sys_conversion_has_error_free_numeric_input(first_arg->type) &&
+            (first_arg->type->type_id != LMD_TYPE_DECIMAL ||
+             lambda_type_accepts_null(first_arg->type));
     case SYSFUNC_FLOAT:
     case SYSFUNC_DECIMAL:
         // Conversion effects depend on the source domain. For these concrete
@@ -1553,13 +1557,14 @@ TypeId census_any_type_id(Transpiler* tp, AnyReason reason) {
     return LMD_TYPE_ANY;
 }
 
-// relaxed mode downgrades type findings, but an unbound name has no runtime
-// binding to evaluate and must still reject the module (S16.10.4).
+// unbound names and non-structural type cycles have no evaluable meaning even
+// in relaxed mode (S16.10.4, S11.4.12v2).
 // Parse/syntax failures never reach here, so they are never downgraded.
 static bool record_as_static_warning(Transpiler* tp, LambdaErrorCode code,
         LambdaError* error) {
     if (!tp->static_warning || !ERR_IS_SEMANTIC(code) ||
-            code == ERR_UNDEFINED_VARIABLE || code == ERR_UNDEFINED_FUNCTION) return false;
+            code == ERR_UNDEFINED_VARIABLE || code == ERR_UNDEFINED_FUNCTION ||
+            code == ERR_TYPE_CYCLE) return false;
     tp->warning_count++;
     if (!tp->warnings) tp->warnings = arraylist_new(8);
     arraylist_append(tp->warnings, error);

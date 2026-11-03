@@ -31,6 +31,6 @@ max_u64 + 1u64;
 top_tag_int64
 top_tag_int64 + 1i64
 
-// Ordinary constructors also preserve full unsigned magnitude.
+// decimal preserves the full magnitude; int saturates at the int53 band (S4.1.6).
 decimal(max_u64)
 int(max_u64)

@@ -71,6 +71,14 @@ The callable sized-integer conversions are `i8(x)`, `i16(x)`, `i32(x)`,
 `i64(x)`, `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)` (S17.5.1); `f16(x)` and
 `f32(x)` are the sized-float conversions.
 
+`int(x)` truncates numeric fractions toward zero and saturates values outside
+±(2^53−1) to `inf` or `-inf`; numeric `inf`/`nan` convert to the corresponding
+`int` values. Strings and symbols accept signed decimal integer digits with
+optional surrounding ASCII whitespace. Fractional or exponent text is an
+error: `int("3.7")` and `int("1e3")` fail, while `int(3.7)` is `3` and
+`int("9007199254740992")` is `inf`. Every successful result has type `int`
+(S4.1.6).
+
 ### Return Type of Counts and Indices
 
 System functions that yield a **count** or a **position** return Lambda `int`, the unsized

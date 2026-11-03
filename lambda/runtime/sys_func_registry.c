@@ -396,9 +396,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_NAME, "name", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false,
      C_RET_SYMBOL, NULL, "fn_name", FPTR(fn_name), NULL, NULL, false, 0},
 
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+    {SYSFUNC_INT, "int", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_int", FPTR(fn_int), NULL, NULL, false, 0,
-     false, &TYPE_NUMBER, true},
+     false, &TYPE_INT, true},
 
     // `i64` is the one surface spelling of this type (S2.1.1): the former
     // `int64` conversion row was dropped with the `int64` type spelling, so

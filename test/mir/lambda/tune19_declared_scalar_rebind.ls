@@ -27,8 +27,8 @@ pn last_element() int^ {
 
 pn checked_rebind(source) int^ {
     var checked: int = 7
-    // S7.6.8: recover an invalid conversion before checked assignment.
-    checked = int(source) or^ { 5 }
+    // a float conversion can succeed fractionally, so int admission stays checked.
+    checked = float(source) or^ { 5 }
     return checked
 }
 

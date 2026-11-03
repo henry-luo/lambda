@@ -1500,37 +1500,19 @@ Item fn_neg(Item item) {
     }
 }
 
-// S4.1.1 (v5): the int domain is the int53 band, so every in-band value
-// converts exactly. Callers keep their prior fallback for an out-of-band
-// finite value: whether int() saturates it or reports error() is not yet
-// ruled (LR04-9). The retired int32 bound here had turned in-band values into
-// floats and wrapped parsed text.
-static bool int_box_if_in_band(int64_t value, Item* out) {
-    if (value < INT53_MIN || value > INT53_MAX) return false;
-    *out = (Item){.item = i2it(value)};
-    return true;
-}
-
 static Item int_from_double(double dval) {
-    // inf, -inf and nan are themselves int values (S4.1.1, S4.2.2)
-    if (!isfinite(dval)) return (Item){.item = lambda_int_box_double(dval)};
-    dval = trunc(dval);  // drop any fractional part
-    if (dval >= (double)INT53_MIN && dval <= (double)INT53_MAX) {
-        return (Item){.item = i2it((int64_t)dval)};
-    }
-    return push_d(dval);
+    // S4.1.6: truncate before the shared int53 saturation/poison boundary.
+    return (Item){.item = lambda_int_box_double(trunc(dval))};
 }
 
 Item fn_int(Item item) {
     GUARD_ERROR1(item);
-    Item boxed;
     if (get_type_id(item) == LMD_TYPE_INT) {
         return item;
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
-        int64_t ival = item.get_int64();
-        if (int_box_if_in_band(ival, &boxed)) return boxed;
-        return push_d((double)ival);
+        // in-band integers are exactly representable; wider magnitudes saturate.
+        return int_from_double((double)item.get_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_FLOAT) {
         return int_from_double(item.get_double());
@@ -1540,45 +1522,35 @@ Item fn_int(Item item) {
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
             return int_from_double(item.get_num_sized_as_double());
         }
-        int64_t ival = item.get_num_sized_as_int64();
-        if (int_box_if_in_band(ival, &boxed)) return boxed;
-        return box_int64_value(ival);
+        return int_from_double((double)item.get_num_sized_as_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
-        uint64_t uval = item.get_uint64();
-        // Do not reinterpret a wide unsigned value as negative merely because
-        // it crossed INT64_MAX; ordinary numeric conversion preserves value.
-        if (uval > (uint64_t)INT64_MAX) return decimal_from_uint64(uval);
-        if (int_box_if_in_band((int64_t)uval, &boxed)) return boxed;
-        return box_int64_value((int64_t)uval);
+        return int_from_double((double)item.get_uint64());
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
-        // truncate fractional part and convert to int64
+        // truncate in decimal space: binary64 rounding at the band edge could
+        // turn 9007199254740991.9m into an out-of-band integer before truncation.
         int64_t result = 0;
-        if (!decimal_try_to_int64(item, &result)) return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
-        if (int_box_if_in_band(result, &boxed)) return boxed;
-        return box_int64_value(result);
+        if (decimal_try_to_int64(item, &result)) return int_from_double((double)result);
+        if (decimal_item_is_nan(item)) return int_from_double(NAN);
+        int order = 0;
+        if (decimal_cmp_items(item, (Item){.item = i2it(0)}, &order))
+            return int_from_double(order < 0 ? -INFINITY : INFINITY);
+        return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
     }
     else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
-        uint32_t len = item.get_len();
-        if (!chars || len == 0) {
+        size_t len = item.get_len();
+        str_trim(&chars, &len);
+        size_t sign = len && (chars[0] == '+' || chars[0] == '-') ? 1 : 0;
+        if (len <= sign || str_span_digits(chars + sign, len - sign) != len - sign) {
             return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
         }
-        char* endptr;
-        errno = 0;  // clear errno before calling strtoll
-        long long val = strtoll(chars, &endptr, 10);
-        if (endptr == chars) {
-            log_debug("Cannot convert string '%s' to int", chars);
-            return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
-        }
-        // an overflowing or partial parse, and an out-of-band value, take the
-        // decimal parse
-        if (errno == ERANGE || (*endptr != '\0') ||
-                !int_box_if_in_band((int64_t)val, &boxed)) {
-            return decimal_from_string(chars);
-        }
-        return boxed;
+        // validate the complete span before treating integer-parser overflow as
+        // saturation; malformed suffixes and embedded NULs must still fail.
+        int64_t value = 0;
+        if (str_to_int64(chars, len, &value, NULL)) return int_from_double((double)value);
+        return int_from_double(chars[0] == '-' ? -INFINITY : INFINITY);
     }
     else {
         log_debug("Cannot convert type %d to int", get_type_id(item));

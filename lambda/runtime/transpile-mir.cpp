@@ -12647,14 +12647,13 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                 // surrounding binding does not immediately box the raw lane
                 // back into an Item (S4.5.3, D2.2.2).
                 if (info->fn == SYSFUNC_INT &&
+                        !mir_expr_may_be_null(mt, call->argument) &&
                         (argument_tid == LMD_TYPE_INT ||
                          argument_tid == LMD_TYPE_FLOAT ||
                          mir_exact_compact_integer_kind(mt,
                              call->argument) != LAMBDA_NUM_INVALID)) {
-                    // IntLane represents null explicitly, so int() keeps its
-                    // carrier across a nullable numeric read. Reporting the
-                    // result as an Item lets a generic numeric consumer pass
-                    // the raw lane to fn_add/fn_sub (D2.4.1-D2.4.3, D2.8.1).
+                    // nullable sources need the checked Item conversion:
+                    // int(null) is an error, not the lane's null sentinel.
                     return LMD_TYPE_INT;
                 }
                 // chr's only error is an error operand; a proved integer
@@ -34518,7 +34517,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         // concrete scalar already owns the exact carrier that the conversion
         // needs. Keep the checked generic path for every other type; these
         // arms remove only the redundant Item round-trip (S4.5.3, D2.2.2).
-        if (arg_count == 1 && info->fn == SYSFUNC_INT) {
+        if (arg_count == 1 && info->fn == SYSFUNC_INT &&
+                !mir_expr_may_be_null(mt, call_node->argument)) {
             arg = call_node->argument;
             TypeId arg_tid = mir_expr_carrier_type(mt, arg);
             AstNode* rounded = ast_unwrap_primary(arg);
@@ -34544,6 +34544,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // an int join is already int() of itself: int(n) is n and int(e)
             // is e (S7.9.3); the call is typed as the same join
             if (mir_join_int_success(mt, arg)) {
+                returned_boxed_item = true;
                 RETURN_CALL_VALUE(transpile_box_item(mt, arg));
             }
             if (arg_tid == LMD_TYPE_INT) {
@@ -34621,6 +34622,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_new_reg_op(mt->ctx, result),
                     MIR_new_reg_op(mt->ctx, converted)));
                 emit_label(mt, done);
+                // both arms publish an Item, including the operand's error.
+                returned_boxed_item = true;
                 RETURN_CALL_VALUE(result);
             }
         }
@@ -47403,14 +47406,9 @@ static bool mir_store_may_change_elem_type(MirTranspiler* mt,
         AstNode* conversion_callee = ast_unwrap_primary(conversion->function);
         if (conversion_callee && conversion_callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)conversion_callee)->fn_info;
-            // T19-B: `int()`/`float()` name the lane they produce, but their
-            // registry success_type is the looser `number` (fn_int is generic
-            // over its input). Reading only that declared type made
-            // `a[i] = int(x)` look representation-changing, which guarded EVERY
-            // later read of a declared int[] with a header probe and an item_at
-            // fallback -- so the annotated body paid for a retag the store
-            // cannot perform. The error arm cannot retag either: a typed store
-            // REJECTS an ItemError rather than writing it (D2.6.2, D3.2.2).
+            // T19-B/S4.1.6: int()/float() produce the destination lane on
+            // success. Their error arm cannot retag a typed array either:
+            // the store rejects ItemError before writing (D2.6.2, D3.2.2).
             if (info && ((info->fn == SYSFUNC_INT && elem == LMD_TYPE_INT) ||
                     (info->fn == SYSFUNC_FLOAT && elem == LMD_TYPE_FLOAT))) {
                 return false;

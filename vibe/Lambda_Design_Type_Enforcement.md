@@ -1784,7 +1784,16 @@ An unresolved type name is E204 (`resolve_type_name`); a pattern reference that 
 
 **Residue.** A reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder: a parameter or object field typed with it is checked against an empty map (a false E207/E201). No corpus code does this; a fix would re-apply such a contract when the alias completes. A `grammar` is not bound before the walk, and an object base clause (`type B : A`) still needs `A` first. The separate packed-literal defect `[2] is Lit[]` with `type Lit = 1` was fixed 2026-10-28: kind-only shortcuts now defer to singleton membership ([LR03-44](<Lambda_Issue_Ledger (fixed).md#lr03-44>); S11.1.1v3, S11.2.1).
 
-**Spec linkage.** TE-23 → S11.4.12* (Formal Semantics 71.0.0); the conformance gap is its Appendix A row.
+**Relaxed-mode clarification (USER, 2026-11-03; S11.4.12v2).** E240 remains
+a compile error in every mode, including `--static-warning`. Relaxing an
+admission finding can retain the original value, but a non-structural cycle
+defines no executable type. Allowing the diagnosed cycle to reach matching,
+printing or code generation had caused unbounded recursion and crashes on all
+tiers. Valid structural recursion remains allowed. The common semantic
+diagnostic policy enforces this for alias, occurrence, signature, pattern and
+binary-layout E240 findings.
+
+**Spec linkage.** TE-23 → S11.4.12v2*; the conformance gap is its Appendix A row.
 
 ## 8. Phasing
 

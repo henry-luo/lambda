@@ -17,7 +17,7 @@ pn tune30_walk(n: int) int^ {
     var i: int = 0
     while (i < n) {
         total = total + tune30_ms2(i)
-        seed = tune30_lcg(seed)^
+        seed = tune30_lcg(seed)
         i = i + 1
     }
     return total + seed
@@ -25,8 +25,7 @@ pn tune30_walk(n: int) int^ {
 
 pn main() {
     print(tune30_walk(6)); print(" ")
-    // in-band only: a saturated dividend makes T0 and the JIT disagree on
-    // `int(inf div 2)`, which is LR12-23's family and not what this pins
+    // pin the finite inline path; int poison conversion is covered separately.
     print(tune30_ms2(11)); print(" ")
     print(tune30_lcg(0 - 5)); print("\n")
 }

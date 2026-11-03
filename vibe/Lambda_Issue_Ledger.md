@@ -18,6 +18,17 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Numeric conversion and recursive type follow-up — 2026-11-03
+
+The user adopted **S4.1.6 / S11.4.12v2**. `int()` now returns an int with
+sign-preserving saturation; E240 stays fatal in strict and relaxed modes.
+[LR04-9](<Lambda_Issue_Ledger (fixed).md#lr04-9>) and
+[LR07-41](<Lambda_Issue_Ledger (fixed).md#lr07-41>) moved to the fixed ledger.
+The inferred-string outcome from [LR07-18](#lr07-18) already follows
+S7.7.4v2 and is covered by a new regression; its separate effect-policy
+questions remain open. Focused qualification passed **102/102** tier/GC/
+strictness runs; the final Lambda/input baseline passed **8,732/8,732**. [Implementation and qualification](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
+
 ## Place borrows, row snapshots and async requalification — 2026-11-03
 
 The user clarified **S9.1.3v3 / S9.2.2v2 / D4.4.7**. Rooted place homes now
@@ -284,7 +295,7 @@ This is consistent with CLAUDE.md rule 14.
 A seven-area survey of runtime behaviour against `doc/Lambda_Formal_Semantics.md`
 (probes under `temp/spec_survey/`) surfaced eight defects that return a **wrong
 value with no error**. Each was re-reproduced on both tiers before filing:
-[LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>), [LR04-9](#lr04-9), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>),
+[LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>), [LR04-9](<Lambda_Issue_Ledger (fixed).md#lr04-9>), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>),
 [LR07-18](#lr07-18), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-27](#lr12-27).
 The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
 they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
@@ -332,7 +343,7 @@ Setup note: the checkout first needed `npm install`. `node_modules` still held C
 
 The "wrong value, no error" group was triaged against the rulings; each defect a ruling covers was fixed on both tiers, and the rest wait on a decision.
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
-- **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
+- **Fixed in part:** [LR04-9](<Lambda_Issue_Ledger (fixed).md#lr04-9>) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
 - **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), plus the residues above.
 - **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](<Lambda_Issue_Ledger (fixed).md#lr12-31>)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
@@ -439,7 +450,7 @@ Found on the way and fixed with them, each covered by those fixtures:
 - A named call that skipped a required parameter split the tiers; it is now E206.
 - `name(map)`, `name(element)` and `name(object)` crashed, and so did `{a: int} <: map` and `<p> <: element`. Both read a shape past the end of the bare generic kinds. `object <: map` is now `false`, since `object` holds nominal values of every kind (S2.1.1v4), and `object`, `date` and `time` print and name as themselves rather than as `map` and `datetime` (`type_alias_name`).
 
-Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](<Lambda_Issue_Ledger (fixed).md#lr07-39>) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
+Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](<Lambda_Issue_Ledger (fixed).md#lr07-39>) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](<Lambda_Issue_Ledger (fixed).md#lr07-41>) (the JIT crashes on a self-referencing union's value).
 
 Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_EXEC_BACKEND=interp` (1005/1005) and `LAMBDA_EXEC_BACKEND=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
@@ -794,23 +805,6 @@ Division-by-zero and invalid decimal results can still collapse to a generic
 are the finest precision. Out-of-range construction yields
 `DATETIME_MAKE_ERROR()`.
 
-<a id="lr04-9"></a>**LR04-9 · `int()` truncates to 32 bits, returns non-`int` kinds, and splits by tier · PARTIAL (found 2026-09-21; in-band values fixed 2026-09-25)**
-`int("3000000000")` is `-1294967296` and `int("9007199254740991")` is `-1`:
-the string arm parses into an `int32_t` (`lambda-eval-num.cpp:1525`, in
-`fn_int` at `:1465`). `int("3.7")` returns a `decimal` (the unparsed tail
-falls back to `decimal_from_string`). Out-of-band floats diverge by tier —
-`int(1e20)` is `inf` on the JIT and `9223372036854776000` on the interpreter,
-`int(nan)` is `nan` versus `0`, and `type(int(1e10))` is `int` versus
-`float`. Contradicts **S4.1.1** (in-band values are exact), the S4 ingress
-rule (a failed cast reports `error()`), and **S1.6**. The result type,
-rounding, and accepted string grammar of `int()` are themselves unruled.
-
-*Fixed 2026-09-25 (the ruled part):* `fn_int` (`lambda-eval-num.cpp`) still had the pre-v5 int32 bound. Every branch now keeps an in-band value exact (S4.1.1): `int("3000000000")` is `3000000000`, `int("9007199254740991")` is 2⁵³ − 1, and `type(int(1e10))` is `int` on T0. `inf`, `-inf` and `nan` pass through, since they are int values (S4.1.1, S4.2.2), so T0's `int(nan)` is no longer `0`; the float branch no longer casts a double of 2⁶³ or more to `int64_t` (undefined behaviour, the source of `9223372036854776000`). Fixture `test/lambda/int_conversion_band.ls` (tier parity).
-*Residue, unruled:* an out-of-band finite value — `int(1e20)` is `1e20` (float) on T0 and `inf` on the JIT; an out-of-band string keeps the decimal fallback — and the rounding and accepted string grammar (`int("3.7")` is a decimal).
-
----
-
-
 ## 5. Strings, symbols & vectors (LR_05)
 
 
@@ -926,8 +920,15 @@ same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 (errors are never ordinary values) and **S1.6**.
 
 *Fixed 2026-09-25:* the `max` case had been fixed by a20e59b4f. The rest were registry rows that return an ordinary error but declared `may_error=false`, so a call typed as its success shape and the JIT unboxed the error: `slice` (both arities), `take`, `drop`, `replace` (both), `url_resolve`, `symbol/2`, `chr`, `real`, `imag`, `ndim` and `sort/2` (a string became `"<error>"`, a symbol null, a float `nan`, an int `0`). They now declare it (S11.4.9, D6.1.3), and `sys_func_call_may_return_error` keeps provably clean calls clean: constant integer offsets on a text, materialized or range source; all-text `replace`; a complex `real`/`imag`; an error-free `chr` or `ndim` operand. `format` returned `String*`; it now returns an Item (D6.4.1), so an error operand stays an error instead of the text `"<error>"`, and a bad format is an error on both tiers. The string builders keep their in-place appends: a `string | error` part of an owned chain or a flattened leaf takes a cold error edge or the all-string guard (hyphen2's append profile is unchanged at 11,092 calls). Corpus: three typed benchmark bindings (`hyphen_typed.ls`, `json2.ls`) and `openapi_json` rescue with `or ""`, and `Lambda_Func.md`'s variadic `printf` example, which never worked (`format` has no printf mode), was replaced. Fixture `test/lambda/proc/sysfunc_text_error_lane.ls`; `slice_float_indices.ls` is now pinned on every tier (it was wrong on the JIT, hidden by `auto`).
-*Residue:*
-- **An error assigned to an inferred `string` variable.** `var line = "a"; line = line ++ slice(s, 1.5, 3)` binds the error on T0 and continues; the JIT returns the error from the function, because its `string` lane cannot hold one (before, it continued with the text `"<error>"`). Parity needs such a variable boxed at its declaration, as numeric lanes are, which costs the in-place append in fasta, the crypto ports and hyphen: a performance-versus-parity decision.
+*Requalified 2026-11-03:* **the inferred-string reassignment residue is fixed**
+by S7.7.4v2's continued binding outcomes. `var line = "a"; line = line ++
+slice(s, 1.5, 3)` retains the error and executes later statements on interp,
+auto and jit, including forced poisoned GC and low promotion thresholds.
+`proc/inferred_string_error_outcome.ls` pins explicit recovery, later appends,
+snapshots and capture transport. No new runtime change is needed for this
+reported case. [Qualification](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
+
+*Remaining effect-policy questions (not reproduced tier mismatches):*
 - **Unproven `int` offsets.** `fn f(s: string, i: int) => slice(s, i, i + 1)` is now E208, because `int` admits `nan` and `inf` and a non-finite offset errors. Whether such an offset should clamp or read as absent (S7.10.2 admission) is unruled; a ruling would let an `int`-typed offset prove the call clean.
 - **`format`.** A function returning `format(x, 'json')` is E208 too: formatting a value that holds a complex number fails.
 
@@ -946,9 +947,6 @@ Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation 
 
 <a id="lr07-40"></a>**LR07-40 · Unknown argument names are dropped; duplicate slots are diagnosed (S12.3.2) · PARTIAL (found 2026-09-26, while fixing LR07-19)**
 Original reproducer: with `fn f(a, b = 2) => [a, b]`, both `f(1, zz: 5)` and `f(5, a: 1)` silently produced `[1, 2]`; argument normalization either skipped an unknown name or overwrote a filled slot. **Fixed 2026-10-28:** duplicate positional/named and named/named slots report E206 before normalization, including method calls. Positional arguments after named ones still fill the next empty slot, as documented. **Residue:** unknown argument names are still ignored; their policy remains outside this implementation pass. See [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
-
-<a id="lr07-41"></a>**LR07-41 · JIT: a self-referencing union's value crashes (S1.6) · OPEN (found 2026-09-26, while fixing LR03-29)**
-`type U = U | int` then `[U]` segfaults on the JIT; T0 prints it, and `5 is U` is `true` on both tiers. The binary from before the type-value fix pass crashes the same way, so type equality is not involved: emitting the alias's value recurses through its own arm.
 
 <a id="lr07-42"></a>**LR07-42 · An async procedure's state machine grows quadratically with its calls: ~300 ms to compile `beng/knucleotide` (D8.1.1v2) · OPEN (found 2026-10-03, by the AUTO benchmark sweep)**
 `test/benchmark/beng/knucleotide.ls` (rewritten in `c839925ca`) runs a 2–3 ms workload, but AUTO takes ~318 ms end to end and eager JIT ~236 ms (quiet machine, release). The v50 binary shows the same cost on the new script, so this is a codegen cost, not a recent regression. `main` reads its input with `io.read(INPUT_PATH)^`. That makes it an async procedure (the concurrency planner logs "pn main suspends because it calls io_read"), and an async procedure must run as a resumable MIR state machine. T0 therefore compiles it synchronously at first entry, together with its 8 direct callees (`interp_make_closure` → `compile_ast_function_satellite`). Under `LAMBDA_SATELLITE_CLUSTER_SKIP`, the image costs 315 ms with every member and 23 ms with `main` alone. Most of the cost follows `print_count`, a one-line callee: skipping it leaves 82 ms. The size is in `main` itself: **54,254 MIR lines**, of 59,238 for the whole module.

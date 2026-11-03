@@ -506,7 +506,7 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
         "<AST_NODE_PROC <name \"procedural\"> <return_contract \"any\"> "
         "<return_contract_explicit false> <effective_return \"any \\\\ error\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "<AST_NODE_SYS_FUNC <name \"int\"> <success_type \"number\"> "
+        "<AST_NODE_SYS_FUNC <name \"int\"> <success_type \"int\"> "
         "<may_return_error true>"), nullptr);
 
     shell_result_free(&result);
@@ -1438,17 +1438,22 @@ struct ScriptResult {
 };
 
 ScriptResult run_lambda_script(const char* script_path, bool procedural = false,
-                               const char* tier = NULL) {
+                               const char* tier = NULL, bool static_warning = false) {
     ScriptResult result;
-    const char* direct_args[] = {LAMBDA_EXE, "--no-log", script_path, NULL};
-    const char* procedural_args[] = {LAMBDA_EXE, "run", "--no-log", script_path, NULL};
+    const char* args[6];
+    int count = 0;
+    args[count++] = LAMBDA_EXE;
+    if (procedural) args[count++] = "run";
+    args[count++] = "--no-log";
+    if (static_warning) args[count++] = "--static-warning";
+    args[count++] = script_path;
+    args[count] = NULL;
     ShellOptions options = {0};
     options.merge_stderr = true;
     const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
     if (tier) options.env = env;
     // Negative paths are untrusted test data and must not be interpolated into a shell command.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE,
-        procedural ? procedural_args : direct_args, &options);
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     if (shell_result.stdout_buf) {
         result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
@@ -1725,6 +1730,28 @@ TEST_F(NegativeScriptTest, PatternCycleIsE240) {
 TEST_F(NegativeScriptTest, TypeAliasCycleIsE240) {
     ExpectErrorMessage("test/lambda/negative/semantic/type_cycle_alias.ls",
         "type 'A' refers to itself through no structural position");
+}
+
+TEST_F(NegativeScriptTest, InvalidTypeCyclesRejectInEveryMode) {
+    const char* scripts[] = {
+        "test/lambda/negative/semantic/type_cycle_union_value.ls",
+        "test/lambda/negative/semantic/type_cycle_alias.ls",
+        "test/lambda/negative/semantic/type_cycle_occurrence.ls",
+        "test/lambda/negative/semantic/type_cycle_function.ls",
+        "test/lambda/negative/semantic/string_pattern_cycle.ls",
+    };
+    const char* tiers[] = {"interp", "auto", "jit"};
+    // S11.4.12v2: relaxed checking cannot make an invalid cycle executable.
+    for (const char* script : scripts) for (const char* tier : tiers) {
+        for (bool relaxed : {false, true}) {
+            ScriptResult result = run_lambda_script(script, false, tier, relaxed);
+            EXPECT_EQ(result.exit_code, 1) << script << " tier=" << tier
+                << " relaxed=" << relaxed << "\n" << result.output;
+            EXPECT_NE(strstr(result.output.c_str(), "error[E240]"), nullptr)
+                << script << " tier=" << tier << " relaxed=" << relaxed
+                << "\n" << result.output;
+        }
+    }
 }
 
 TEST_F(NegativeScriptTest, TypeOccurrenceCycleIsE240) {
@@ -2916,7 +2943,7 @@ TEST_F(NegativeScriptTest, SemanticError_ReturnErrorIdentifiesUncontainedOrigin)
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'handled'"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'second'"), nullptr) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
-        "function 'builtin' may return error from call to 'int': call result has type number | error"),
+        "function 'builtin' may return error from call to 'int': call result has type int | error"),
         nullptr) << result.output;
 }
 

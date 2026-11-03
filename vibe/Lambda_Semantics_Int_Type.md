@@ -3,6 +3,7 @@
 - **Status:** **v5 DECIDED (2026-08-04), detailed design IN PROGRESS (§5)** — v4 (int-ft)
   remains the implemented semantics until the v5 migration lands.
 - **Date:** 2026-08-04
+- **Conversion follow-up:** 2026-11-03, USER; S4.1.6 (§5.9).
 - **Co-Author:** Anthropic Fable
 - **Scope:** the single home for the `int` type — its full design history (v1–v5), the
   extracted normative record of v4, and the active v5 design. `doc/Lambda_Formal_Semantics.md`
@@ -825,3 +826,28 @@ Second-order consequences that come out in the wash (no separate workstreams):
 
 Expected surface: the v4 migration (G1 + merge endgame) touched ~28 files and surfaced
 ~a dozen latent bugs; budget the same order of magnitude here.
+
+### 5.9 Explicit int conversion — RULED 2026-11-03
+
+**S4.1.6 (USER).** `int(x)` truncates numeric fractions toward zero, preserves
+numeric infinity/NaN as the corresponding int closure points, and saturates a
+finite out-of-band result to sign-preserving `±inf`. It never succeeds as a
+float, decimal or sized integer. Strings and symbols accept an optional sign
+and one or more ASCII decimal digits with optional surrounding ASCII
+whitespace; valid arbitrarily large magnitudes saturate. Fractional/exponent
+text and malformed text are errors. Existing errors propagate unchanged.
+
+This is an explicit numeric conversion, distinct from S4.1.4 narrowing
+admission: annotating an out-of-band value as `int` still rejects it. The user
+selected saturation over the proposed out-of-band conversion error. Saturation
+keeps conversion closed in int and agrees with int arithmetic without letting
+the runtime choose a result kind from a failed int53 fit.
+
+Decimal fractions truncate in decimal space before testing the band. Rounding
+`9007199254740991.9m` to binary64 first would create `9007199254740992.0` and
+incorrectly saturate instead of producing `9007199254740991`. Text is fully
+validated before parser overflow becomes saturation: `999…999x` remains an
+error, and an embedded NUL cannot terminate a shorter successful parse.
+
+Implementation and verification are recorded in
+[the tier-fix plan](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).

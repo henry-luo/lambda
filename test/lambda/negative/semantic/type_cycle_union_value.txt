@@ -1,0 +1,1 @@
+error[E240]: type 'U' refers to itself through no structural position

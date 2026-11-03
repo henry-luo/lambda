@@ -655,6 +655,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // inf/nan through. T0 wrapped parsed text to int32, returned in-band
     // floats beyond int32 as floats, and read int(nan) as 0.
     {"test/lambda/int_conversion_band.ls", "test/lambda/int_conversion_band.txt"},
+    // S4.1.6: every numeric/text conversion retains int53 saturation and kind.
+    {"test/lambda/int_conversion_saturation.ls", "test/lambda/int_conversion_saturation.txt"},
     // S7.4.4 (LR10-7): an error value owns its code and message. Both tiers
     // read context->last_error, so every error reported the last one built.
     {"test/lambda/error_value_payload.ls", "test/lambda/error_value_payload.txt"},
@@ -674,6 +676,9 @@ static const TierParityFixture kTune27TierParity[] = {
     // the JIT keeps the error instead of unboxing it into "<error>", nan or 0.
     {"test/lambda/proc/sysfunc_text_error_lane.ls",
      "test/lambda/proc/sysfunc_text_error_lane.txt"},
+    // S7.7.4v2: error reassignment keeps the inferred string outcome and tail.
+    {"test/lambda/proc/inferred_string_error_outcome.ls",
+     "test/lambda/proc/inferred_string_error_outcome.txt"},
     // The same defect was already pinned here, hidden because the baseline
     // runs goldens on `auto`, which starts in T0.
     {"test/lambda/slice_float_indices.ls", "test/lambda/slice_float_indices.txt"},
@@ -726,6 +731,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // LR03-30: a one-literal alias is a type value (S11.2.1); `type T = 1` had
     // published the literal Type's address as an int on both tiers.
     {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
+    // S11.4.12: structural recursive aliases survive ordinary value transport.
+    {"test/lambda/recursive_type_values.ls", "test/lambda/recursive_type_values.txt"},
     // S16.6.7v2: a procedure arrow is an anonymous AST_NODE_PROC; each tier
     // must create, call, pass, refuse and promote it as a named nested `pn`.
     // Its `start` launch runs in T0 too (vibe/Lambda_Design_Runtime_Async.md RA12).

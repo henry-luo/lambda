@@ -61,7 +61,7 @@ pn benchmark() int^ {
     var seed: int = 42
     var i: int = 0
     while (i < size) {
-        seed = lcg_next(seed)^
+        seed = lcg_next(seed)
         arr[i] = seed
         i = i + 1
     }

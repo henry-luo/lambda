@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **275 anchored records**, preserving fixed, resolved,
+This archive contains **277 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -3878,3 +3878,62 @@ Implementation and final qualification:
 **Final resolution:** **S16.9.5 / D3.2.4v4:** the remaining nominal constructors and required element attributes now preserve field presence independently of nullability. Optional constructors retain sparse fields, defaults, spreads, inheritance and nominal identity on both tiers. Read-only methods and untaken assignments do not add absent keys; a taken nullable assignment stores a present null. Full and fast element validation reject missing required attributes, including nullable ones. The earlier map/pattern slice remains covered.
 
 Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+## Numeric conversion and recursive type follow-up — 2026-11-03
+
+<a id="lr04-9"></a>**LR04-9 · int() conversion kind and tier parity · FIXED 2026-11-03**
+
+**S4.1.6 / S1.6:** the user selected sign-preserving saturation. All numeric
+conversions truncate toward zero, saturate outside int53 and return int
+closure points for poison. Text accepts signed ASCII decimal integers
+with surrounding ASCII whitespace; malformed/fractional/exponent text
+returns an error. The runtime no longer returns float, decimal or i64
+fallbacks, and the registry exposes int success. Nullable sources retain
+the checked path; boxed conversion joins explicitly preserve operand errors.
+Focused qualification passed 102/102 tier/GC/strictness runs; affected MIR,
+profile and benchmark fixtures pass. [Implementation and full qualification](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
+
+<details>
+<summary>Original report and earlier qualification</summary>
+
+`int("3000000000")` is `-1294967296` and `int("9007199254740991")` is `-1`:
+the string arm parses into an `int32_t` (`lambda-eval-num.cpp:1525`, in
+`fn_int` at `:1465`). `int("3.7")` returns a `decimal` (the unparsed tail
+falls back to `decimal_from_string`). Out-of-band floats diverge by tier —
+`int(1e20)` is `inf` on the JIT and `9223372036854776000` on the interpreter,
+`int(nan)` is `nan` versus `0`, and `type(int(1e10))` is `int` versus
+`float`. Contradicts **S4.1.1** (in-band values are exact), the S4 ingress
+rule (a failed cast reports `error()`), and **S1.6**. The result type,
+rounding, and accepted string grammar of `int()` are themselves unruled.
+
+*Fixed 2026-09-25 (the ruled part):* `fn_int` (`lambda-eval-num.cpp`) still had the pre-v5 int32 bound. Every branch now keeps an in-band value exact (S4.1.1): `int("3000000000")` is `3000000000`, `int("9007199254740991")` is 2⁵³ − 1, and `type(int(1e10))` is `int` on T0. `inf`, `-inf` and `nan` pass through, since they are int values (S4.1.1, S4.2.2), so T0's `int(nan)` is no longer `0`; the float branch no longer casts a double of 2⁶³ or more to `int64_t` (undefined behaviour, the source of `9223372036854776000`). Fixture `test/lambda/int_conversion_band.ls` (tier parity).
+*Residue, unruled:* an out-of-band finite value — `int(1e20)` is `1e20` (float) on T0 and `inf` on the JIT; an out-of-band string keeps the decimal fallback — and the rounding and accepted string grammar (`int("3.7")` is a decimal).
+
+</details>
+
+<a id="lr07-41"></a>**LR07-41 · Invalid recursive type values cannot reach execution · FIXED 2026-11-03**
+
+**S11.4.12v2 / S1.6:** E240 rejects compilation in every mode, including
+`--static-warning`. The common diagnostic policy no longer downgrades
+a type cycle into an executable warning. Strict and relaxed checks cover
+union-value, alias, occurrence, function-signature and pattern cycles on
+interp/auto/jit with normal and forced poisoned GC. Valid structural
+recursive types remain usable as values. [Implementation and qualification](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
+
+<details>
+<summary>Original report and earlier qualification</summary>
+
+**Current:** strict mode rejects `type U = U | int; let result = [U]; result`
+with E240 on interp, auto and jit under S11.4.12. With `--static-warning`,
+`record_as_static_warning` downgrades E240 and permits the invalid cycle to
+reach execution; all three tiers segfault, with normal and forced poisoned
+GC. Valid structural recursive type values pass on all tiers. The remaining
+decision is whether E240 stays fatal in relaxed mode or that mode must
+produce a runtime error. Reproductions and qualification:
+[tier-fix investigation](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
+
+*Original report (2026-09-26):* `type U = U | int` then `[U]` segfaults on
+the JIT; T0 prints it, and `5 is U` is `true` on both tiers. Emitting the
+alias's value recursed through its own arm; type equality was not involved.
+
+</details>
