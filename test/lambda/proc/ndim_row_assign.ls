@@ -28,8 +28,8 @@ pn main() {
     spliced[1] = (5, 6)
     print("list splice: " ++ format(spliced, 'json') ++ "\n")
     var built: array = []
-    built.push([1, 2])
-    built.push([1, 2])
+    built.push([1, 2])^
+    built.push([1, 2])^
     var through = [for (x in built) x]
     through[0] = [9, 2]
     print("for copy: " ++ format(through, 'json') ++ "\n")

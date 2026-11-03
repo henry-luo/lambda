@@ -12,12 +12,12 @@ pn ret_null(k: int) N? { if (k < 0) { return null } return null }
 pn read_field(t: T) N? { var x: N? = t.root; return x }
 pn alias_param(t: T) T { var u = t; return u }
 pn twice(m: float[]) float[] { return [m[0] * 2.0, m[1] * 2.0] }
-pn decl_from_call(m: float[]) float { var nv: float[] = twice(m); return nv[0] + nv[1] }
+pn decl_from_call(m: float[]) float^ { var nv: float[] = twice(m)^; return nv[0] + nv[1] }
 pn take(v: float[]) float { return v[0] + v[1] }
-pn literal_arg(q: float[], i: int) float { return take([q[i], q[i + 1]]) }
-pn const_index() float { var v: float[] = fill(4, 0.0); v[1] = 2.5; return v[1] + v[3] }
+pn literal_arg(q: float[], i: int) float^ { return take([q[i], q[i + 1]]) }
+pn const_index() float^ { var v: float[] = fill(4, 0.0)^; v[1] = 2.5; return v[1] + v[3] }
 // the push makes the length dynamic again: the read keeps its null arm
-pn const_index_pushed() float { var v: float[] = fill(4, 0.0); push(v, 1.0); return v[4] }
+pn const_index_pushed() float^ { var v: float[] = fill(4, 0.0)^; push(v, 1.0); return v[4] }
 
 pn main() {
     var t: T = {root: {key: 1.5, left: null}}

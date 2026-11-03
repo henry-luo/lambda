@@ -13,7 +13,7 @@ pub let CATALOG=[
 pub let DETAILS={full:{segments:10,section_stride:1,leaf_stride:1,leaf_scale:1.0},
     coarse:{segments:5,section_stride:3,leaf_stride:3,leaf_scale:1.45}}
 pub fn description(id) map => [for (item in CATALOG where item.id == id) item][0]
-pub fn home() map => camera.prepare({position:[8.0,6.0,10.0],target:[0.0,2.2,0.0],fov:36.0})
+pub fn home() map^ => camera.prepare({position:[8.0,6.0,10.0],target:[0.0,2.2,0.0],fov:36.0})
 pub fn stage_label(st,level) string => (if (st.document.generator == "plant.apex") "Generation " else "Level ")++string(level)
 pub fn viewport(st,options={}) element {
     let id=options.id or "tree-scene",preview=options.preview == true
@@ -42,7 +42,7 @@ fn remesh(st) map^ {
 fn regenerate(st,doc) map^ {
     let base=st.documents[st.id],sk=plant.architecture(doc)^
     let levels=if (doc.generator == "plant.apex") [1,int(ceil(base.parameters.iterations/2.0)),base.parameters.iterations]
-        else [for (level in 1 to min(3,len(base.parameters.levels))) level]
+        else [for (level in ((1 to min(3,len(base.parameters.levels))) ^ { [] })) level]
     let current={*:st,document:doc,skeleton:sk}
     let stages=[for (level in levels) {level:level,
         skeleton:if (level == depth(current)) sk else plant.architecture(specimen(doc,base,level))^}];
@@ -52,7 +52,7 @@ pub fn initial(documents) map^ {
     let doc=documents.broadleaf;
     regenerate({seed:doc.seed,id:"broadleaf",documents:documents,detail:"full",leaves:true},doc)^
 }
-pub fn depth(st) int => if (st.document.generator == "plant.apex") st.document.parameters.iterations else len(st.document.parameters.levels)
+pub fn depth(st) int^ => if (st.document.generator == "plant.apex") st.document.parameters.iterations else len(st.document.parameters.levels)
 pub fn command(st,action) map^ {
     if (action == "leaves") {*:st,leaves:not st.leaves}
     else if (action == "full" or action == "coarse")
@@ -64,7 +64,7 @@ pub fn command(st,action) map^ {
         let p=source.parameters
         let old=if (source.generator == "plant.apex") p.iterations else len(p.levels)
         let limit=if (source.generator == "plant.apex") 7 else len(st.documents[id].parameters.levels)
-        let selected=[for (item in st.stages where action == "stage-"++string(item.level)) item][0]
+        let selected=[for (item in st.stages where ((action == "stage-"++string(item.level)) ^ { false })) item][0]
         let next=if (selected != null) selected.level else if (action == "prune") max(1,old-1) else if (action == "grow") min(limit,old+1) else old
         let strength=if (action == "bend-up") min(1.5,p.force.strength+0.15) else if (action == "bend-down") max(0.0,p.force.strength-0.15) else p.force.strength
         let doc=specimen(<tree *:{*:map(source),seed:seed,parameters:{*:p,force:{*:p.force,strength:strength}}}>,st.documents[id],next);

@@ -41,7 +41,7 @@ fn matches(m, value, letter) bool^ {
     }
 }
 
-fn finite(v) => obj.is_number(v) and not (v is nan) and not (v is inf) and v != -inf
+fn finite(v) any^ => obj.is_number(v) and not (v is nan) and not (v is inf) and v != -inf
 
 pub pn numeric(m, op, args) any^ {
     let integer_inputs = obj.is_integer(args[0]) and (len(args) == 1 or obj.is_integer(args[1]))
@@ -69,8 +69,8 @@ pub pn numeric(m, op, args) any^ {
         return {kind: "integer", int_value: int(value)}
     }
     // separate returns retain guest integer tags across Lambda's mixed numeric value joins.
-    if (op == "cvr" or op == "div" or op == "sqrt" or op == "sin" or op == "cos" or op == "atan" or
-        op == "exp" or op == "ln" or op == "log" or not integer_inputs or value < -2147483648 or value > 2147483647) { return {kind: "real", real_value: float(value)} }
+    if ((op == "cvr" or op == "div" or op == "sqrt" or op == "sin" or op == "cos" or op == "atan" or
+        op == "exp" or op == "ln" or op == "log" or not integer_inputs or value < -2147483648 or value > 2147483647)^) { return {kind: "real", real_value: float(value)} }
     return {kind: "integer", int_value: int(value)}
 }
 
@@ -88,7 +88,7 @@ fn same(m, a, b) bool^ {
 
 pn mark_index(m) int^ {
     var index = len(m.stack) - 1
-    while (index >= 0) {
+    while ((index >= 0)^) {
         if (m.stack[index] is map and m.stack[index].kind == "mark") { return index }
         index = index - 1
     }
@@ -100,11 +100,11 @@ pub pn dispatch(var m, op) int^ {
     let signature = SIGNATURES[op]
     let raw_args = if (signature == "*") [] else obj.take_operands(m, len(signature))^
     if (signature != "*") {
-        for (i in 0 to (len(signature) - 1)) {
+        for (i in ((0 to (len(signature) - 1)) ^ { [] })) {
             let valid = obj.require(m, matches(m, raw_args[i], signature[i])^, "typecheck: " ++ op)^
         }
     }
-    let args = [for (i in 0 to (len(raw_args) - 1)) if (signature[i] == "i") int(obj.number_value(raw_args[i]))
+    let args = [for (i in ((0 to (len(raw_args) - 1)) ^ { [] })) if (signature[i] == "i") int(obj.number_value(raw_args[i]))
         else if (signature[i] == "n") obj.number_value(raw_args[i]) else raw_args[i]]
     if (op at vm.SIGNATURES) { let applied = vm.dispatch(m, op, args)^; return 0 }
     if (op at gfx.SIGNATURES) { let applied = gfx.dispatch(m, op, args)^; return 0 }
@@ -113,16 +113,16 @@ pub pn dispatch(var m, op) int^ {
     if (op at files.SIGNATURES) { let applied = files.dispatch(m, op, args)^; return 0 }
     if (op at images.SIGNATURES) { let applied = images.start_image(m, op)^; return 0 }
     if (op at text.SIGNATURES) { let applied = text.dispatch(m, op, args)^; return 0 }
-    if (op in ARITHMETIC) { obj.push_operand(m, numeric(m, op, raw_args)^); return 0 }
+    if (op in ARITHMETIC) { obj.push_operand(m, numeric(m, op, raw_args)^)^; return 0 }
     if (op == "pop" or op == "showpage") { return 0 }
-    if (op == "dup") { obj.push_operand(m, args[0]); obj.push_operand(m, args[0]); return 0 }
-    if (op == "exch") { obj.push_operand(m, args[1]); obj.push_operand(m, args[0]); return 0 }
+    if (op == "dup") { obj.push_operand(m, args[0])^; obj.push_operand(m, args[0])^; return 0 }
+    if (op == "exch") { obj.push_operand(m, args[1])^; obj.push_operand(m, args[0])^; return 0 }
     if (op == "clear") { m.stack = []; return 0 }
-    if (op == "count") { obj.push_operand(m, len(m.stack)); return 0 }
+    if (op == "count") { obj.push_operand(m, len(m.stack))^; return 0 }
     if (op == "index") {
         let n = args[0]
         let valid = obj.require(m, n >= 0 and n < len(m.stack), "rangecheck: index")^
-        obj.push_operand(m, m.stack[len(m.stack) - n - 1])
+        obj.push_operand(m, m.stack[len(m.stack) - n - 1])^
         return 0
     }
     if (op == "roll") {
@@ -135,21 +135,21 @@ pub pn dispatch(var m, op) int^ {
         }
         return 0
     }
-    if (op == "mark" or op == "[" or op == "<<") { obj.push_operand(m, {kind: "mark", value: op}); return 0 }
+    if (op == "mark" or op == "[" or op == "<<") { obj.push_operand(m, {kind: "mark", value: op})^; return 0 }
     if (op == "counttomark" or op == "cleartomark" or op == "]" or op == ">>") {
         let index = mark_index(m)^
         let tail = slice(m.stack, index + 1)
-        if (op == "counttomark") { obj.push_operand(m, len(tail)); return 0 }
+        if (op == "counttomark") { obj.push_operand(m, len(tail))^; return 0 }
         {
-            m.stack = slice(m.stack, 0, index)
+            m.stack = slice(m.stack, 0, index)^
             if (op == "]") {
                 let collection = obj.allocate(m, "array", tail)^
-                obj.push_operand(m, collection)
+                obj.push_operand(m, collection)^
             } else if (op == ">>") {
                 let even = obj.require(m, len(tail) % 2 == 0, "rangecheck: dictionary construction")^
                 let dictionary = obj.allocate(m, "dict", {})^
-                for (i in 0 to (len(tail) - 1) where i % 2 == 0) { let stored = obj.put_value(m, dictionary, tail[i], tail[i + 1])^ }
-                obj.push_operand(m, dictionary)
+                for (i in ((0 to (len(tail) - 1)) ^ { [] }) where i % 2 == 0) { let stored = obj.put_value(m, dictionary, tail[i], tail[i + 1])^ }
+                obj.push_operand(m, dictionary)^
             }
         }
         return 0
@@ -161,13 +161,13 @@ pub pn dispatch(var m, op) int^ {
         let empty_dictionary = {}
         let data = if (op == "dict") empty_dictionary else fill(n, if (op == "string") 0 else null)
         let value = obj.allocate(m, op, data)^
-        obj.push_operand(m, value)
+        obj.push_operand(m, value)^
         return 0
     }
-    if (op == "begin") { let readable = obj.values(m, args[0])^; push(m.dicts, args[0]); return 0 }
+    if (op == "begin") { let readable = obj.values(m, args[0])^; push(m.dicts, args[0])^; return 0 }
     if (op == "end") {
         let valid = obj.require(m, len(m.dicts) > 2, "dictstackunderflow")^
-        m.dicts = slice(m.dicts, 0, len(m.dicts) - 1)
+        m.dicts = slice(m.dicts, 0, len(m.dicts) - 1)^
         return 0
     }
     if (op == "def" or op == "store") {
@@ -177,34 +177,34 @@ pub pn dispatch(var m, op) int^ {
         let stored = obj.put_value(m, id, args[0], args[1])^
         return 0
     }
-    if (op == "load") { obj.push_operand(m, obj.lookup(m, obj.key_name(m, args[0])^)^); return 0 }
-    if (op == "get") { obj.push_operand(m, obj.get_value(m, args[0], args[1])^); return 0 }
+    if (op == "load") { obj.push_operand(m, obj.lookup(m, obj.key_name(m, args[0])^)^)^; return 0 }
+    if (op == "get") { obj.push_operand(m, obj.get_value(m, args[0], args[1])^)^; return 0 }
     if (op == "put") { let stored = obj.put_value(m, args[0], args[1], args[2])^; return 0 }
-    if (op == "length") { obj.push_operand(m, obj.object_length(m, args[0])^); return 0 }
+    if (op == "length") { obj.push_operand(m, obj.object_length(m, args[0])^)^; return 0 }
     if (op == "known") {
         let data = obj.values(m, args[0])^
-        obj.push_operand(m, obj.key_name(m, args[1])^ at data)
+        obj.push_operand(m, obj.key_name(m, args[1])^ at data)^
         return 0
     }
     if (op == "where") {
         let hit = obj.find_name(m, obj.key_name(m, args[0])^)^
-        if (hit.found) { obj.push_operand(m, hit.owner) }
-        obj.push_operand(m, hit.found)
+        if (hit.found) { obj.push_operand(m, hit.owner)^ }
+        obj.push_operand(m, hit.found)^
         return 0
     }
     if (op == "currentdict" or op == "userdict" or op == "systemdict") {
-        obj.push_operand(m, if (op == "currentdict") m.dicts[len(m.dicts) - 1] else obj.reference(if (op == "systemdict") 0 else 1))
+        obj.push_operand(m, if (op == "currentdict") m.dicts[len(m.dicts) - 1] else obj.reference(if (op == "systemdict") 0 else 1))^
         return 0
     }
     if (op == "aload") {
         for (v in obj.values(m, args[0])^) { obj.push_operand(m, v) }
-        obj.push_operand(m, args[0])
+        obj.push_operand(m, args[0])^
         return 0
     }
     if (op == "astore") {
         let data = obj.take_operands(m, obj.object_length(m, args[0])^)^
         let stored = obj.put_sequence(m, args[0], 0, data)^
-        obj.push_operand(m, args[0])
+        obj.push_operand(m, args[0])^
         return 0
     }
     if (op == "getinterval") {
@@ -212,7 +212,7 @@ pub pn dispatch(var m, op) int^ {
         let valid = obj.require(m, args[1] >= 0 and args[2] >= 0 and args[1] <= n and args[2] <= n - args[1], "rangecheck: interval")^
         let e = obj.entry(m, args[0])^
         let type_ok = obj.require(m, e.kind != "dict", "typecheck: interval")^
-        obj.push_operand(m, {*: args[0], start: args[0].start + args[1], count: args[2]})
+        obj.push_operand(m, {*: args[0], start: args[0].start + args[1], count: args[2]})^
         return 0
     }
     if (op == "putinterval") {
@@ -226,7 +226,7 @@ pub pn dispatch(var m, op) int^ {
     }
     if (op == "copy") {
         let top = obj.take_operands(m, 1)^
-        if (obj.is_integer(top[0])) {
+        if (obj.is_integer(top[0])^) {
             let n = obj.number_value(top[0])
             let valid = obj.require(m, n >= 0 and n <= len(m.stack), "rangecheck: copy")^
             let data = slice(m.stack, len(m.stack) - n)
@@ -242,39 +242,39 @@ pub pn dispatch(var m, op) int^ {
             } else {
                 let stored = obj.put_sequence(m, top[0], 0, data)^
             }
-            obj.push_operand(m, if (e.kind == "dict") top[0] else {*: top[0], count: len(data)})
+            obj.push_operand(m, if (e.kind == "dict") top[0] else {*: top[0], count: len(data)})^
         }
         return 0
     }
     if (op == "cvx" or op == "cvlit") {
-        if (args[0] is map) { obj.push_operand(m, {*: args[0], executable: op == "cvx"}) }
-        else { obj.push_operand(m, args[0]) }
+        if (args[0] is map) { obj.push_operand(m, {*: args[0], executable: op == "cvx"})^ }
+        else { obj.push_operand(m, args[0])^ }
         return 0
     }
     if (op == "readonly" or op == "noaccess" or op == "executeonly") {
         let e = obj.entry(m, args[0])^
         let permitted = obj.require(m, e.access != "noaccess" and not (e.access == "executeonly" and op == "readonly"), "invalidaccess")^
-        obj.push_operand(m, {*: args[0], access: op})
+        obj.push_operand(m, {*: args[0], access: op})^
         return 0
     }
     if (op == "rcheck" or op == "wcheck" or op == "xcheck") {
-        if (not obj.is_ref(args[0])) {
-            obj.push_operand(m, if (op == "xcheck") (args[0] is map and args[0].executable == true) else true)
+        if ((not obj.is_ref(args[0]))^) {
+            obj.push_operand(m, if (op == "xcheck") (args[0] is map and args[0].executable == true) else true)^
             return 0
         }
         let e = obj.entry(m, args[0])^
-        obj.push_operand(m, if (op == "xcheck") args[0].executable else if (op == "wcheck") e.access == "unlimited" else e.access != "noaccess" and e.access != "executeonly")
+        obj.push_operand(m, if (op == "xcheck") args[0].executable else if (op == "wcheck") e.access == "unlimited" else e.access != "noaccess" and e.access != "executeonly")^
         return 0
     }
     if (op == "type") {
         let v = args[0]
         let kind = if (obj.is_integer(v)) "integer" else if (obj.is_number(v)) "real" else if (v is bool) "boolean"
             else if (v == null) "null" else if (obj.is_ref(v)) obj.entry(m, v)^.kind else v.kind
-        obj.push_operand(m, obj.literal_name(kind ++ "type"))
+        obj.push_operand(m, obj.literal_name(kind ++ "type"))^
         return 0
     }
-    if (op == "true" or op == "false" or op == "null") { obj.push_operand(m, if (op == "null") null else op == "true"); return 0 }
-    if (op == "bind") { let bound = obj.bind_object(m, args[0])^; obj.push_operand(m, args[0]); return 0 }
+    if (op == "true" or op == "false" or op == "null") { obj.push_operand(m, if (op == "null") null else op == "true")^; return 0 }
+    if (op == "bind") { let bound = obj.bind_object(m, args[0])^; obj.push_operand(m, args[0])^; return 0 }
     if (op == "exec") { let scheduled = obj.schedule(m, args[0])^; return 0 }
     if (op == "if" or op == "ifelse") {
         if (args[0] or op == "ifelse") { let scheduled = obj.schedule(m, args[if (args[0]) 1 else 2])^ }
@@ -283,31 +283,31 @@ pub pn dispatch(var m, op) int^ {
     if (op == "repeat" or op == "loop") {
         let n = if (op == "loop") -1 else args[0]
         let valid = obj.require(m, op == "loop" or n >= 0, "rangecheck: repeat")^
-        push(m.exec, {kind: "repeat", remaining: n, value: args[len(args) - 1]})
+        push(m.exec, {kind: "repeat", remaining: n, value: args[len(args) - 1]})^
         return 0
     }
-    if (op == "for") { push(m.exec, {kind: "for", current: raw_args[0], step: raw_args[1], limit: raw_args[2], value: args[3]}); return 0 }
+    if (op == "for") { push(m.exec, {kind: "for", current: raw_args[0], step: raw_args[1], limit: raw_args[2], value: args[3]})^; return 0 }
     if (op == "forall") {
         let e = obj.entry(m, args[0])^
         let data = obj.values(m, args[0])^
-        push(m.exec, {kind: "forall", composite: args[0], value: args[1], index: 0, keys: if (e.kind == "dict") (data |> string(~key)) else null})
+        push(m.exec, {kind: "forall", composite: args[0], value: args[1], index: 0, keys: if (e.kind == "dict") (data |> string(~key)) else null})^
         return 0
     }
     if (op == "exit") {
         var index = len(m.exec) - 1
-        while (index >= 0 and not (m.exec[index].kind in ["repeat", "for", "forall"])) { index = index - 1 }
+        while ((index >= 0 and not (m.exec[index].kind in ["repeat", "for", "forall"]))^) { index = index - 1 }
         let valid = obj.require(m, index >= 0, "invalidexit")^
-        m.exec = slice(m.exec, 0, index)
+        m.exec = slice(m.exec, 0, index)^
         return 0
     }
-    if (op == "eq" or op == "ne") { obj.push_operand(m, if (op == "eq") same(m, args[0], args[1])^ else not same(m, args[0], args[1])^); return 0 }
+    if (op == "eq" or op == "ne") { obj.push_operand(m, if (op == "eq") same(m, args[0], args[1])^ else not same(m, args[0], args[1])^)^; return 0 }
     if (op == "lt" or op == "le" or op == "gt" or op == "ge") {
-        obj.push_operand(m, if (op == "lt") args[0] < args[1] else if (op == "le") args[0] <= args[1] else if (op == "gt") args[0] > args[1] else args[0] >= args[1])
+        obj.push_operand(m, if (op == "lt") args[0] < args[1] else if (op == "le") args[0] <= args[1] else if (op == "gt") args[0] > args[1] else args[0] >= args[1])^
         return 0
     }
-    if (op == "not") { obj.push_operand(m, not args[0]); return 0 }
+    if (op == "not") { obj.push_operand(m, not args[0])^; return 0 }
     if (op == "and" or op == "or" or op == "xor") {
-        obj.push_operand(m, if (op == "and") args[0] and args[1] else if (op == "or") args[0] or args[1] else args[0] != args[1])
+        obj.push_operand(m, if (op == "and") args[0] and args[1] else if (op == "or") args[0] or args[1] else args[0] != args[1])^
         return 0
     }
     raise obj.failure(m, "unsupported: " ++ op)

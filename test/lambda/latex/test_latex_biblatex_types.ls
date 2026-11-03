@@ -13,8 +13,8 @@ let types = ["book", "article", "inbook", "incollection", "inproceedings",
     "thesis", "report", "online", "misc", "unpublished"]
 
 "entry types:"; [for (kind in types)
-    any([for (entry in loaded.entries) entry.kind == kind])]
-"data diagnostics:"; [for (issue in loaded.diagnostics) issue.code]
+    any([for (entry in ((loaded.entries) ^ { [] })) entry.kind == kind])]
+"data diagnostics:"; [for (issue in ((loaded.diagnostics) ^ { [] })) issue.code]
 "render diagnostics:"; [for (issue in result.diagnostics) issue.code]
 "all entries printed:"; all([for (key in ["parent", "article", "inbook", "collection",
     "proceedings", "thesis", "report", "online", "misc", "unpublished"])
@@ -39,10 +39,10 @@ let types = ["book", "article", "inbook", "incollection", "inproceedings",
 
 let protected_ast = input("test/lambda/latex/fixtures/biblatex_phase2.tex", {type: "latex"}) ^ { null }
 let protected = bib_data.load(protected_ast, base)
-let ada = [for (entry in protected.entries where entry.key == "ada1843") entry][0]
+let ada = [for (entry in ((protected.entries) ^ { [] }) where entry.key == "ada1843") entry][0]
 "protected title:"; ada.raw_fields.title == "Notes on the {Analytical Engine}" and
     ada.fields.title == "Notes on the Analytical Engine"
-"string concat:"; any([for (entry in protected.entries where entry.key == "smith2020a")
+"string concat:"; any([for (entry in ((protected.entries) ^ { [] }) where entry.key == "smith2020a")
     entry.fields.journaltitle == "Math Notes"])
 "cross-file resources:"; len(protected.entries) == 10
 

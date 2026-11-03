@@ -30,7 +30,7 @@ pub fn descriptor(props, child) element^ {
 }
 fn busy(props, clock) => (let config = settings(props), config.active and
     (config.delay == 0 or (clock.settings == config and clock.shown)))
-fn content_parts(node, shown) {
+fn content_parts(node, shown) any^ {
     let p = c.props(node)
     let config = loading_config(p)
     let icon = if (p.icon != null and not shown) p.icon else if (config.active and config.icon != null) config.icon
@@ -42,7 +42,7 @@ fn content_parts(node, shown) {
         if (len(contents) > 0) <span *:c.part_attrs(p,"content","dtna-button-content"),
             *(if (inserted) [slice(contents[0],0,1) ++ " " ++ slice(contents[0],1,2)] else c.contents(node))> else null]
 }
-fn presentation(node, clock) {
+fn presentation(node, clock) any^ {
     let p = c.props(node)
     let shown = busy(p,clock)
     let root = c.part_attrs(p,"root",c.classes('button',p,(if (p.danger) "dtna-danger" else "") ++
@@ -65,24 +65,24 @@ pn advance(node, evt, previous) {
     let changed = config != previous.settings
     let start = if (changed) evt.time_stamp else previous.start
     let shown = config.active and evt.time_stamp-start >= config.delay;
-    if (changed and previous.token > 0) { dom.cancel_frame(evt.target,previous.token) }
+    if ((changed and previous.token > 0)^) { dom.cancel_frame(evt.target,previous.token) }
     {settings:config,start:start,shown:shown,token:if (config.active and not shown) dom.request_frame(evt.target,"dtna_button_tick") else 0}
 }
-view dtna_button: <dtna.button> state clock:{settings:null,start:0,shown:false,token:0} {
+view dtna_button: <dtna.button> () any^ state clock:{settings:null,start:0,shown:false,token:0} {
     presentation(~,clock)
 }
 on render(evt) {
-    if (evt.event_phase == 2 and clock.settings != settings(c.props(~))) { clock = advance(~,evt,clock) }
+    if ((evt.event_phase == 2 and clock.settings != settings(c.props(~)))^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on dtna_button_tick(evt) {
-    if (evt.detail == clock.token and clock.token > 0) { clock = advance(~,evt,clock) }
+    if ((evt.detail == clock.token and clock.token > 0)^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on click(evt) {
-    if (interaction.root(~,evt) == null) { return 'pass' }
-    if (c.props(~).disabled or busy(c.props(~),clock)) { return 'prevent-default' }
-    emit("ui_action",c.action(~,'click'))
+    if ((interaction.root(~,evt) == null)^) { return 'pass' }
+    if ((c.props(~).disabled or busy(c.props(~),clock))^) { return 'prevent-default' }
+    emit("ui_action",c.action(~,'click')^)
     'pass'
 }
 // appearance rules set tokens; one state selector applies each hover/active/disabled policy.

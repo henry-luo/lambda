@@ -15,12 +15,12 @@ pub let CHUNK = 256
 // Construction and export
 // ---------------------------------------------------------------------------
 
-fn strip_cr(l) => if (ends_with(l, "\r")) slice(l, 0, len(l) - 1) else l
+fn strip_cr(l) any^ => if (ends_with(l, "\r")) slice(l, 0, len(l) - 1) else l
 
 // "\r\n" only when every line break is one; a file mixing both keeps its
 // carriage returns inside the lines, so writing it back is exact.
 fn eol_of(raw) =>
-  if (len(raw) > 1 and all([for (l in take(raw, len(raw) - 1)) ends_with(l, "\r")])) "\r\n" else "\n"
+  if (len(raw) > 1 and all([for (l in ((take(raw, len(raw) - 1)) ^ { [] })) ends_with(l, "\r")])) "\r\n" else "\n"
 
 // Even split of `lines` into chunks of at most CHUNK lines; never empty.
 fn chunks_of(lines) {
@@ -39,7 +39,7 @@ fn make(lines, eol, final_newline, version) {
    final_newline: final_newline, version: version}
 }
 
-pub fn from_text(text: string) {
+pub fn from_text(text: string) any^ {
   let raw = split(text, "\n")
   let eol = eol_of(raw)
   let final_newline = len(raw) > 1 and raw[len(raw) - 1] == ""
@@ -63,14 +63,14 @@ fn chunk_search(starts, i, lo, hi) {
   }
 }
 
-pub fn chunk_of(b, i) => chunk_search(b.starts, i, 0, len(b.starts))
+pub fn chunk_of(b, i) any^ => chunk_search(b.starts, i, 0, len(b.starts))
 
 pub fn line(b, i) string {
   let c = chunk_of(b, i)
   b.chunks[c][i - b.starts[c]]
 }
 
-pub fn line_len(b, i) int => len(line(b, i))
+pub fn line_len(b, i) int^ => len(line(b, i))
 
 // Lines [first, first + n), clipped to the buffer.
 pub fn lines(b, first, n) {
@@ -89,21 +89,21 @@ pub fn pos_cmp(a, b) int =>
   else if (a.col != b.col) (if (a.col < b.col) -1 else 1)
   else 0
 
-pub fn pos_min(a, b) => if (pos_cmp(a, b) <= 0) a else b
-pub fn pos_max(a, b) => if (pos_cmp(a, b) >= 0) a else b
+pub fn pos_min(a, b) any^ => if (pos_cmp(a, b) <= 0) a else b
+pub fn pos_max(a, b) any^ => if (pos_cmp(a, b) >= 0) a else b
 
-pub fn clamp(b, p) {
+pub fn clamp(b, p) any^ {
   let l = min(max(p.line, 0), b.count - 1)
   loc(l, min(max(p.col, 0), line_len(b, l)))
 }
 
-pub fn doc_end(b) {
+pub fn doc_end(b) any^ {
   let l = b.count - 1
   loc(l, line_len(b, l))
 }
 
 // The text between two positions, lines joined with "\n".
-pub fn text_between(b, from, to) string {
+pub fn text_between(b, from, to) string^ {
   let a = pos_min(from, to)
   let z = pos_max(from, to)
   if (a.line == z.line) slice(line(b, a.line), a.col, z.col)
@@ -123,14 +123,14 @@ pub fn delta(from, to, insert) => {from: from, to: to, insert: insert}
 pub fn text_lines(text: string) => split(text, "\n")
 
 // Where an inserted run of lines ends when it starts at `from`.
-pub fn insert_end(from, insert) {
+pub fn insert_end(from, insert) any^ {
   let n = len(insert)
   if (n == 1) loc(from.line, from.col + len(insert[0]))
   else loc(from.line + n - 1, len(insert[n - 1]))
 }
 
 // The replacement lines for one delta, with the kept head and tail joined on.
-fn spliced_lines(b, d) {
+fn spliced_lines(b, d) any^ {
   let head = slice(line(b, d.from.line), 0, d.from.col)
   let last_text = line(b, d.to.line)
   let tail = slice(last_text, d.to.col, len(last_text))
@@ -148,7 +148,7 @@ pub fn apply_delta(b, d) {
   let cf = chunk_of(b, d.from.line)
   let cl0 = chunk_of(b, d.to.line)
   let base = b.starts[cf]
-  let old_region = [for (j in cf to cl0) for (l in b.chunks[j]) l]
+  let old_region = [for (j in ((cf to cl0) ^ { [] })) for (l in b.chunks[j]) l]
   let region = [*slice(old_region, 0, d.from.line - base), *new_lines,
                 *slice(old_region, d.to.line - base + 1, len(old_region))]
   // a region shrunk below a quarter chunk merges with the next chunk
@@ -159,7 +159,7 @@ pub fn apply_delta(b, d) {
   let shift = len(new_lines) - (d.to.line - d.from.line + 1)
   let chunks = [*take(b.chunks, cf), *pieces, *drop(b.chunks, cl + 1)]
   let starts = [*take(b.starts, cf), *piece_starts(base, pieces),
-                *[for (s in drop(b.starts, cl + 1)) s + shift]]
+                *[for (s in ((drop(b.starts, cl + 1)) ^ { [] })) s + shift]]
   {buf: {*: b, chunks: chunks, starts: starts, count: b.count + shift, version: b.version + 1},
    inverse: delta(d.from, insert_end(d.from, d.insert), removed_text),
    chunk: cf, removed: cl - cf + 1, added: len(pieces)}

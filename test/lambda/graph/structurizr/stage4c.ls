@@ -3,7 +3,7 @@ import structurizr: lambda.graph.structurizr.structurizr
 import expression: lambda.graph.structurizr.expressions
 
 fn direct(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn ids(values) => [for (value in values) string(value.id)]
@@ -20,10 +20,10 @@ let workspace = structurizr.normalize(source)
 let c4_model = direct(workspace, "c4-model")[0]
 let all_elements = direct(c4_model, "c4-element")
 let all_relationships = direct(c4_model, "c4-relationship")
-let custom_entries = [for (entry in direct(c4_model, "c4-element")
+let custom_entries = [for (entry in ((direct(c4_model, "c4-element")) ^ { [] })
   where entry.kind == "custom") entry]
-let critical = [for (relation in direct(c4_model, "c4-relationship")
-  where contains(tags(relation), "Critical")) relation][0]
+let critical = [for (relation in ((direct(c4_model, "c4-relationship")) ^ { [] })
+  where ((contains(tags(relation), "Critical")) ^ { false })) relation][0]
 let context_all = structurizr.project(workspace, "ContextAll")
 let context_reluctant = structurizr.project(workspace, "ContextReluctant")
 let components = structurizr.project(workspace, "Components")
@@ -60,17 +60,17 @@ let html_edges = direct(coupled_html, "edge")
   components: [ids(model.nodes(components)), edge_pairs(components)],
   coupled: [ids(model.nodes(coupled)), edge_pairs(coupled)],
   custom: [
-    [for (node in model.nodes(custom)) [node.id, node.label, node.metadata, tags(node)]],
+    [for (node in ((model.nodes(custom)) ^ { [] })) [node.id, node.label, node.metadata, tags(node)]],
     edge_pairs(custom)
   ],
   filtered: [
     [core["base-view-key"], core.direction, ids(model.nodes(core)), edge_pairs(core)],
     [external["base-view-key"], ids(model.nodes(external)), edge_pairs(external)]
   ],
-  diagnostics: [for (value in model.diagnostics(workspace))
+  diagnostics: [for (value in ((model.diagnostics(workspace)) ^ { [] }))
     [value.code, value.severity]],
   styles: [
-    [for (assignment in model.style_assignments(coupled))
+    [for (assignment in ((model.style_assignments(coupled)) ^ { [] }))
       [assignment["target-kind"], assignment.targets, assignment.declarations]],
     [for (node in html_nodes) [node["data-node-id"], node["data-style-declarations"]]],
     [for (edge in html_edges) [edge["data-edge-id"], edge["data-style-declarations"],

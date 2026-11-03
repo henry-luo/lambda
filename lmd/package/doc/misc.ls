@@ -12,7 +12,7 @@ fn checked(options,extra = []) map^ {
     // Bind validation so its null success value does not join the returned map.
     let valid_options = if (options != null and not (options is map)) raise c.fail("options must be a map")
     let opts = if (options == null) {} else options
-    let unknown = [for (key,item in opts where not (string(key) in ["type","flavor","loss","title","section","date","source","manual"] ++ extra)) key]
+    let unknown = [for (key,item in opts where ((not (string(key) in ["type","flavor","loss","title","section","date","source","manual"] ++ extra)) ^ { false })) key]
     let target = canonical(string(c.get(opts,"type",c.get(opts,"flavor","asciidoc"))))
     let loss = c.get(opts,"loss","error");
     if (len(unknown) > 0) raise c.fail("unknown option " ++ string(unknown[0]))
@@ -42,7 +42,7 @@ pub fn format_native(value,target,options = null) string^ =>
 pub fn format_file(path,options = null) string^ {
     let opts = checked(options,["input_type","input_flavor"])^
     let value = input(path,{type:c.get(opts,"input_type","auto"),flavor:c.get(opts,"input_flavor","")})^
-    let writer_options = map([for (key,item in opts where not (string(key) in ["input_type","input_flavor"])) (key,item)]);
+    let writer_options = map([for (key,item in opts where ((not (string(key) in ["input_type","input_flavor"])) ^ { false })) (key,item)]);
     format(value,writer_options)^
 }
 pub fn asciidoc(value,options = null) string^ => format_native(value,"asciidoc",options)^

@@ -61,18 +61,18 @@ pub fn landing(board, piece) {
   if (fits(board, below)) landing(board, below) else piece
 }
 
-fn shuffled(seed, remaining) {
+fn shuffled(seed, remaining) any^ {
   if (len(remaining) == 0) {bag: [], seed: seed}
   else {
     let random = math.random(seed)
     let index = int(floor(random[0] * len(remaining)))
     let rest = shuffled(random[1], [for (i in 0 to (len(remaining) - 1)
-      where i != index) remaining[i]])
+      where ((i != index) ^ { false })) remaining[i]])
     {bag: [remaining[index], *rest.bag], seed: rest.seed}
   }
 }
-pub fn seven_bag(seed) => shuffled(seed, [0, 1, 2, 3, 4, 5, 6])
-fn refill(game) {
+pub fn seven_bag(seed) any^ => shuffled(seed, [0, 1, 2, 3, 4, 5, 6])
+fn refill(game) any^ {
   if (len(game.queue) >= 4) game
   else {
     let fresh = seven_bag(game.seed)
@@ -86,7 +86,7 @@ pub fn new_game(seed) {
     held: -1, can_hold: true, score: 0, lines: 0, level: 1,
     mode: "ready", last_clear: 0, autoplay: false}
 }
-fn next_piece(game) {
+fn next_piece(game) any^ {
   let next = refill({*:game, piece: spawn(game.queue[0]),
     queue: slice(game.queue, 1, len(game.queue)), can_hold: true})
   if (fits(next.board, next.piece)) next else {*:next, mode: "over"}
@@ -106,9 +106,9 @@ fn board_with_piece(board, piece) {
   [for (i in 0 to (WIDTH * HEIGHT - 1))
     if (contains(indices, i)) piece.kind + 1 else board[i]]
 }
-pub fn lock(game) {
+pub fn lock(game) any^ {
   // A kicked piece above the ceiling cannot silently lose its hidden cells.
-  if (len([for (cell in cells(game.piece) where cell[1] < 0) cell]) > 0) {
+  if (len([for (cell in ((cells(game.piece)) ^ { [] }) where cell[1] < 0) cell]) > 0) {
     {*:game, mode: "over"}
   } else {
     let merged = board_with_piece(game.board, game.piece)
@@ -119,12 +119,12 @@ pub fn lock(game) {
       score: game.score + [0, 100, 300, 500, 800][cleared.count] * game.level})
   }
 }
-fn down(game, points) {
+fn down(game, points) any^ {
   let candidate = move(game.board, game.piece, 0, 1)
   if (candidate.y == game.piece.y) lock(game)
   else {*:game, piece: candidate, score: game.score + points}
 }
-fn hold(game) {
+fn hold(game) any^ {
   if (not game.can_hold) game
   else {
     let swapped = if (game.held < 0) next_piece(game)
@@ -134,7 +134,7 @@ fn hold(game) {
   }
 }
 pub fn gravity_ms(level) => max(100, 700 - (level - 1) * 65)
-pub fn action(game, command) {
+pub fn action(game, command) any^ {
   if (command == "restart" or command == "auto")
     {*:new_game(game.seed), mode: "playing", autoplay: command == "auto"}
   else if (command == "pause") {
@@ -159,19 +159,19 @@ pub fn action(game, command) {
 }
 
 // Prefer low, even stacks without buried holes, rewarding completed rows.
-fn placement_cost(game, piece) {
+fn placement_cost(game, piece) any^ {
   let placed = clear_rows(board_with_piece(game.board, landing(game.board, piece)))
   let heights = [for (x in 0 to (WIDTH - 1))
-    max([0, for (y in 0 to (HEIGHT - 1) where placed.board[y * WIDTH + x] != 0) HEIGHT - y])]
+    max([0, for (y in 0 to (HEIGHT - 1) where ((((((placed.board[y * WIDTH + x] != 0) ^ { false })))))) HEIGHT - y])]
   let holes = len([for (x in 0 to (WIDTH - 1), y in 0 to (HEIGHT - 1)
-    where y >= HEIGHT - heights[x] and placed.board[y * WIDTH + x] == 0) y])
+    where ((((((y >= HEIGHT - heights[x] and placed.board[y * WIDTH + x] == 0) ^ { false })))))) y])
   sum(heights) + 8 * holes + 2 * sum([for (x in 1 to (WIDTH - 1)) abs(heights[x] - heights[x - 1])]) -
     12 * placed.count + (if (not fits(placed.board, spawn(game.queue[0]))) 10000 else 0)
 }
-pub fn auto_plan(game) {
+pub fn auto_plan(game) any^ {
   let choices = [for (turns in 0 to 3, x in -3 to (WIDTH - 1),
     let rotated = reduce([game.piece, *[for (i in 1 to turns) i]],
-      (piece, unused) => rotate_piece(game.board, piece, 1)),
+      (piece, unused) any^ => rotate_piece(game.board, piece, 1)),
     let candidate = {*:rotated, x: x}
     // Every intermediate horizontal position must be reachable by normal moves.
     where all([for (cx in min(x, rotated.x) to max(x, rotated.x)) fits(game.board, {*:rotated, x: cx})]))

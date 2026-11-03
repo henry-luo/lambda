@@ -5,6 +5,6 @@ pn tag(var row) { row.value = 17 }
 pn main() {
     var root = {rows: [{value: 1}]}
     var snapshot = root
-    tag(root.rows[0])
+    tag(root.rows[0])^
     print([root.rows[0].value, snapshot.rows[0].value])
 }

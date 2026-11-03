@@ -13,7 +13,7 @@ let take = motion.clips_of(hero)[0]
 
 fn origin(m) => [m[12], m[13], m[14]]
 // the largest coordinate difference, in metres, over the reference joints
-fn drift(frame) {
+fn drift(frame) any^ {
     let world = motion.pose(hero, "jump", frame)^
     let want = expected.positions[string(frame)];
     max([for (k, p in want) max([for (i in 0 to 2) abs(origin(world[string(k)])[i] - p[i] * 0.01)])])
@@ -21,8 +21,8 @@ fn drift(frame) {
 
 let figure = motion.mannequin(hero)^
 let group = motion.scene(figure, {id: "jumper", autoplay: "jump"})^
-let clip_node = [for (x in content(group) where name(x) == 'animation-clip') x][0]
-let mesh_node = [for (x in content(group) where name(x) == 'mesh') x][0];
+let clip_node = [for (x in ((content(group)) ^ { [] }) where ((name(x) == 'animation-clip') ^ { false })) x][0]
+let mesh_node = [for (x in ((content(group)) ^ { [] }) where ((name(x) == 'mesh') ^ { false })) x][0];
 
 "1 the raw tree keeps the file's structure";
 [name(raw), name(content(raw)[0]), block.frames, len(block.data), len(block.data[0]), block.data[15][1]];

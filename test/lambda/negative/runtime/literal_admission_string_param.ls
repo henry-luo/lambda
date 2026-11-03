@@ -3,4 +3,5 @@
 // runtime check and bound "c"; the interpreter rejected it.
 fn dyn(v) => v
 fn h(x: "a") { x }
-"bound: " ++ h(dyn("c"))
+let admitted = h(dyn("c"))
+admitted

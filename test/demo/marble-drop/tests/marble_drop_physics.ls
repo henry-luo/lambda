@@ -13,8 +13,8 @@ let p0 = motion.position(spring,mid-100.0)
 let p1 = motion.position(spring,mid)
 let p2 = motion.position(spring,mid+100.0)
 let dropped = game.drop(game.new_game(),0,0)
-let junction = reduce([dropped,*[for (i in 1 to int(ceil(dropped.active.motion.duration/game.STEP_MS))) i]],
-    (st,i)=>game.tick(st))
+let junction = reduce([dropped,*[for (i in ((1 to int(ceil(dropped.active.motion.duration/game.STEP_MS))) ^ { [] })) i]],
+    (st,i)any^ =>game.tick(st))
 {
     fall_duration:abs(fall.duration-1000.0*sqrt(2.0*160.0/(motion.GRAVITY*5.0/7.0))) < .001,
     accelerates_from_rest:abs(half.y-40.0) < .15 and abs(quarter.y-10.0) < .15,

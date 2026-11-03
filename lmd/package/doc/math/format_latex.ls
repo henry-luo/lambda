@@ -1,19 +1,19 @@
 // TeX source serialization; conversion policy stays in the package (D7.2.8).
 import common: .format_common
 
-pub fn to_latex(ast) => item(ast, 0)
-fn item(value, depth) => common.item(value, depth, node, symbol_text)
-fn children(value, depth, separator = " ") => common.children(value, depth, item, separator)
-fn text(value) => common.text(value)
+pub fn to_latex(ast) any^ => item(ast, 0)
+fn item(value, depth) any^ => common.item(value, depth, node, symbol_text)
+fn children(value, depth, separator = " ") any^ => common.children(value, depth, item, separator)
+fn text(value) any^ => common.text(value)
 fn symbol_text(value) => if (value == "row_sep") " \\\\ " else if (value == "col_sep") " & " else "\\" ++ value
-fn prefixed(value, fallback = "") => if (value is string)
+fn prefixed(value, fallback = "") any^ => if (value is string)
     (if (starts_with(value, "\\")) "" else "\\") ++ value else fallback
-fn braces(value, depth) => "{" ++ item(value, depth+1) ++ "}"
+fn braces(value, depth) any^ => "{" ++ item(value, depth+1) ++ "}"
 fn arguments(values, depth) => join([for (value in values) braces(value, depth)], "")
-fn optional(value, depth) => if (value == null) "" else "[" ++
+fn optional(value, depth) any^ => if (value == null) "" else "[" ++
     (if (common.is_tag(value, "brack_group")) children(value, depth+1) else item(value, depth+1)) ++ "]"
 
-fn script(value, marker, depth) {
+fn script(value, marker, depth) any^ {
     if (value == null) ""
     else {
         let needs_braces = if (value is string) len(value)>1
@@ -25,48 +25,48 @@ fn script(value, marker, depth) {
     }
 }
 
-fn two_arguments(n, first, second, fallback, depth) => common.text(n.cmd,fallback) ++
+fn two_arguments(n, first, second, fallback, depth) any^ => common.text(n.cmd,fallback) ++
     optional(n.options,depth) ++ arguments([first,second],depth)
 
-fn with_option(n, option, body, depth) => text(n.cmd) ++ optional(option,depth) ++ braces(body,depth)
+fn with_option(n, option, body, depth) any^ => text(n.cmd) ++ optional(option,depth) ++ braces(body,depth)
 
 fn generic_command(n, depth) {
     if (not (n.name is string)) "\\?"
-    else "\\" ++ n.name ++ join([for (child in content(n))
+    else "\\" ++ n.name ++ join([for (child in ((content(n)) ^ { [] }))
         if (common.is_tag(child,"brack_group")) optional(child,depth)
         else if (child is element) braces(child,depth)
         else item(child,depth+1)], "")
 }
 
-fn frac_like(n, depth) {
+fn frac_like(n, depth) any^ {
     if (n.numer != null and n.denom != null) two_arguments(n,n.numer,n.denom,"\\frac",depth)
     else {
         let values = content(n)
         let explicit_command = values[0] is string and starts_with(values[0],"\\");
         if (len(values)==0) ""
         else (if (explicit_command) values[0] else "\\frac") ++
-            join([for (i in (if (explicit_command) 1 else 0) to (len(values)-1))
+            join([for (i in (((if (explicit_command) 1 else 0) to (len(values)-1)) ^ { [] }))
                 if (not explicit_command or common.is_tag(values[i],"group")) braces(values[i],depth)
                 else item(values[i],depth+1)], "")
     }
 }
 
-fn environment(n, depth) => "\\begin{" ++ text(n.name) ++ "}" ++
+fn environment(n, depth) any^ => "\\begin{" ++ text(n.name) ++ "}" ++
     (if (n.columns is string) "{" ++ n.columns ++ "}" else "") ++
     (if (n.alignment is string) "[" ++ n.alignment ++ "]" else "") ++
     (if (n.pairs is string) "{" ++ n.pairs ++ "}" else "") ++
     " " ++ item(n.body,depth+1) ++ " \\end{" ++ text(n.name) ++ "}"
 
-fn color(n, depth) => text(n.cmd) ++
+fn color(n, depth) any^ => text(n.cmd) ++
     (if (n.border_color != null) braces(n.border_color,depth) else "") ++
     braces(if (n.color_raw != null) n.color_raw else n.color,depth) ++
     (if (n.content != null) braces(n.content,depth) else "")
 
-fn transform(n, depth) => if (n.raise == null) with_option(n,n.options,n.body,depth)
+fn transform(n, depth) any^ => if (n.raise == null) with_option(n,n.options,n.body,depth)
     else text(n.cmd) ++ braces(n.raise,depth) ++ optional(n.height,depth) ++
         optional(n.depth,depth) ++ braces(n.body,depth)
 
-fn node(n, depth) {
+fn node(n, depth) any^ {
     let kind = string(name(n));
     if (kind in ["operator","relation","punctuation","delimiter","space_command","spacing_command","hspace_command","skip_command"]) text(n.value)
     else if (kind == "subsup") item(n.base,depth+1) ++

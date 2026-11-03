@@ -3,17 +3,17 @@ import records: .records
 import parse: .parse
 import util: .util
 
-fn operations(step) {
+fn operations(step) any^ {
     if (step.window != null) step.window
     else if (step.ops != null) [for (index, op in step.ops)
         {op: op, field: step.fields[index], as: step.as[index], param: step.params[index]}]
-    else if (step is element) [for (child in content(step)) parse.attributes(child)]
+    else if (step is element) [for (child in ((content(step)) ^ { [] })) parse.attributes(child)]
     else []
 }
 
-fn valid_offset(value) => value == null or (util.finite_number(value) and floor(value) == value)
+fn valid_offset(value) any^ => value == null or (util.finite_number(value) and floor(value) == value)
 
-pub fn valid_frame(frame) => frame is array and len(frame) == 2 and
+pub fn valid_frame(frame) any^ => frame is array and len(frame) == 2 and
     valid_offset(frame[0]) and valid_offset(frame[1]) and
     (frame[0] == null or frame[1] == null or frame[0] <= frame[1])
 
@@ -21,7 +21,7 @@ pub fn frame_bounds(frame, index, count) => [
     if (frame[0] == null) 0 else max([0, index + int(frame[0])]),
     if (frame[1] == null) count - 1 else min([count - 1, index + int(frame[1])])]
 
-fn validate_operation(entry) {
+fn validate_operation(entry) any^ {
     let op = entry.op;
     if (not contains(["row_number", "rank", "dense_rank", "percent_rank", "cume_dist", "ntile",
         "lag", "lead", "first_value", "last_value", "nth_value", "count", "sum", "mean", "average",
@@ -36,7 +36,7 @@ fn validate_operation(entry) {
     else null
 }
 
-pub fn evaluate(data, step) {
+pub fn evaluate(data, step) any^ {
     let ops = operations(step);
     let frame = if (step.frame != null) step.frame else [null, 0];
     let groups = if (step.groupby != null) step.groupby else [];
@@ -56,26 +56,26 @@ pub fn evaluate(data, step) {
             for (index, item in ordered,
                 let ties = if (len(definitions) == 0) [index]
                     else [for (i, candidate in ordered
-                        where i == index or records.sort_key(candidate.row, definitions) == records.sort_key(item.row, definitions)) i],
+                        where ((i == index or records.sort_key(candidate.row, definitions) == records.sort_key(item.row, definitions)) ^ { false })) i],
                 let frame_range = frame_bounds(frame, index, len(ordered)),
                 let bounds = expand_frame(ordered, definitions, frame_range[0], frame_range[1], step.ignore_peers == true),
-                let rows = [for (i in bounds[0] to bounds[1] where i of ordered) ordered[i].row])
+                let rows = [for (i in bounds[0] to bounds[1] where ((i of ordered) ^ { false })) ordered[i].row])
                 {index: item.index, row: add_results(item.row, ordered, index, ties, rows, definitions, ops, 0)}];
         records.sort_rows(calculated, {field: "index"}) |> ~.row
     }
 }
 
-fn expand_frame(ordered, definitions, start, end, ignore) {
+fn expand_frame(ordered, definitions, start, end, ignore) any^ {
     if (ignore or len(definitions) == 0 or start > end) [start, end]
     else {
         let first_key = records.sort_key(ordered[start].row, definitions);
         let last_key = records.sort_key(ordered[end].row, definitions);
-        [min([for (i, item in ordered where i == start or records.sort_key(item.row, definitions) == first_key) i]),
-            max([for (i, item in ordered where i == end or records.sort_key(item.row, definitions) == last_key) i])]
+        [min([for (i, item in ordered where ((i == start or records.sort_key(item.row, definitions) == first_key) ^ { false })) i]),
+            max([for (i, item in ordered where ((i == end or records.sort_key(item.row, definitions) == last_key) ^ { false })) i])]
     }
 }
 
-fn add_results(row, ordered, index, ties, frame, definitions, ops, offset) {
+fn add_results(row, ordered, index, ties, frame, definitions, ops, offset) any^ {
     if (offset >= len(ops)) row
     else {
         let entry = ops[offset];
@@ -85,7 +85,7 @@ fn add_results(row, ordered, index, ties, frame, definitions, ops, offset) {
     }
 }
 
-fn calculate(ordered, index, ties, frame, definitions, entry) {
+fn calculate(ordered, index, ties, frame, definitions, entry) any^ {
     let op = entry.op;
     let n = len(ordered);
     let param = if (entry.param != null) int(entry.param) else 1;

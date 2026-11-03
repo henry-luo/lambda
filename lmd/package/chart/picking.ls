@@ -5,7 +5,7 @@ import affine: .svg_transform
 import geometry: .geometry
 import util: .util
 
-pub fn outlines(node) {
+pub fn outlines(node) any^ {
     let tag=name(node);
     if (tag=='path') paths.sample(node.d)
     else if (tag=='rect' or tag=='image') [{closed:true,points:[[node.x,node.y],[node.x+node.width,node.y],
@@ -23,23 +23,23 @@ pub fn collect(node, inherited=affine.identity) {
         [if (len(shape)>0 and not (shape is error)) {row:parse(node["data-chart-row"],'json') ^ {null},
             key:node["data-chart-key"],part:node["data-chart-part"],filled:node.fill!=null and node.fill!="none",
             lines:[for (line in shape) {*:line,points:line.points |> affine.project(matrix,~)}]},
-         for (child in content(node) where not (child is element and child["data-chart-frame"]!=null))
-            for (record in collect(child,matrix)) record] |: ~!=null
+         for (child in ((content(node)) ^ { [] }) where not (child is element and child["data-chart-frame"]!=null))
+            for (record in ((collect(child,matrix)) ^ { [] })) record] |: ~!=null
     }
 }
-pub fn refresh(node) {
+pub fn refresh(node) any^ {
     if (not (node is element)) node else {
         let children=content(node) |> refresh(~);
         let frame=if (node["data-chart-frame"]!=null) parse(node["data-chart-frame"],'json') ^ {null} else null;
         svg.rebuild(name(node),{*:map(node),*:(if (frame!=null) {'data-chart-frame':format({*:frame,
-            geometry:[for (child in children) for (record in collect(child)) record]},'json')} else {})},children)
+            geometry:[for (child in children) for (record in ((collect(child)) ^ { [] })) record]},'json')} else {})},children)
     }
 }
 pub fn distance(record, point) {
-    let contained=record.filled and len([for (line in record.lines where line.closed and geometry.contains_point(line.points,point)) true])%2==1;
+    let contained=record.filled and len([for (line in record.lines where ((line.closed and geometry.contains_point(line.points,point)) ^ { false })) true])%2==1;
     if (contained) 0.0 else min([inf,for (line in record.lines)
         if (len(line.points)==1) paths.distance(point,line.points[0]) else
-        for (i in 0 to (len(line.points)-(if (line.closed) 1 else 2)))
+        for (i in ((0 to (len(line.points)-(if (line.closed) 1 else 2))) ^ { [] }))
             geometry.distance_segment(point,line.points[i],line.points[(i+1)%len(line.points)])])
 }
 pub fn nearest(records, point) {

@@ -4,7 +4,7 @@ import color: .color
 import samples: .sample
 import palette: .theme
 
-fn compatible(a, b) => a.tag == b.tag and a.source.style == b.source.style and
+fn compatible(a, b) any^ => a.tag == b.tag and a.source.style == b.source.style and
     (if (a.tag == 'shape') c.value(a.source.kind, 'rect') == c.value(b.source.kind, 'rect') and
         a.source.stroke == b.source.stroke and a.source.stroke_width == b.source.stroke_width and a.source.radius == b.source.radius
      else if (a.tag == 'text') content(a.source) == content(b.source) and a.font_size == b.font_size and

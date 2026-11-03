@@ -12,7 +12,7 @@
 import buf: lambda.edit.source_buffer
 
 // The language a file highlights as, or null for plain text.
-pub fn language_of(path) {
+pub fn language_of(path) any^ {
   let p = lower(path)
   if (ends_with(p, ".md") or ends_with(p, ".markdown")) 'markdown'
   else if (ends_with(p, ".html") or ends_with(p, ".htm")) 'html'
@@ -27,11 +27,11 @@ fn run(s, e, c) => {s: s, e: e, c: c}
 
 // Paint [s, e) with class c over existing runs: later paint wins, so nested
 // constructs are painted after the constructs that contain them.
-fn paint(runs, s, e, c) {
+fn paint(runs, s, e, c) any^ {
   if (e <= s) runs
   else {
     let kept = [for (r in runs) for (part in [run(r.s, min(r.e, s), r.c), run(max(r.s, e), r.e, r.c)]
-                  where part.e > part.s and (part.e <= s or part.s >= e)) part];
+                  where ((((((part.e > part.s and (part.e <= s or part.s >= e)) ^ { false })))))) part];
     sort([*kept, run(s, e, c)], (r) => r.s)
   }
 }
@@ -75,17 +75,17 @@ fn inline_class(kind) {
 // parser reports a list or quote as one block), fence lines, table pipes.
 // ---------------------------------------------------------------------------
 
-fn indent_len(t) => len(t) - len(trim_start(t))
+fn indent_len(t) any^ => len(t) - len(trim_start(t))
 
 fn is_digit(ch) => ch >= "0" and ch <= "9"
 
 // The width of a list marker at column i ("- ", "12. ", "3) "), or 0.
-fn bullet_width(t, i) {
+fn bullet_width(t, i) any^ {
   let ch = slice(t, i, i + 1)
   let gap = slice(t, i + 1, i + 2)
   if ((ch == "-" or ch == "*" or ch == "+") and (gap == " " or gap == "\t" or i + 1 == len(t))) 1
   else {
-    let digits = len([for (j in i to min(len(t), i + 9) - 1 where is_digit(slice(t, j, j + 1))) j])
+    let digits = len([for (j in i to min(len(t), i + 9) - 1 where ((is_digit(slice(t, j, j + 1))) ^ { false })) j])
     let after = slice(t, i + digits, i + digits + 1)
     if (digits > 0 and digits == len(trim_start(slice(t, i, i + digits))) and (after == "." or after == ")")) digits + 1
     else 0
@@ -94,7 +94,7 @@ fn bullet_width(t, i) {
 
 // The list marker a line has at or after column `at` (with its task box), or
 // null on a continuation line.
-fn list_mark(t, at) {
+fn list_mark(t, at) any^ {
   let i = at + indent_len(slice(t, at, len(t)))
   let w = bullet_width(t, i)
   let task = slice(t, i + w + 1, i + w + 4)
@@ -103,7 +103,7 @@ fn list_mark(t, at) {
 }
 
 // Leading `>` markers from column i, each with the space after it.
-fn quote_end(t, i) {
+fn quote_end(t, i) any^ {
   let j = i + indent_len(slice(t, i, len(t)))
   if (slice(t, j, j + 1) == ">") quote_end(t, j + 1) else i
 }
@@ -114,7 +114,7 @@ fn is_container(kind) => kind == 'blockquote' or kind == 'ul' or kind == 'ol'
 // §7.2): each container's marker starts where the enclosing one's ended, so
 // a list in a quote colors both. Returns the runs and the column the
 // innermost container's content starts at.
-fn container_marks(t, containers, i, at, runs) {
+fn container_marks(t, containers, i, at, runs) any^ {
   if (i >= len(containers)) {runs: runs, at: at}
   else if (containers[i].kind == 'blockquote') {
     let e = quote_end(t, at)
@@ -128,39 +128,39 @@ fn container_marks(t, containers, i, at, runs) {
   }
 }
 
-fn is_fence_line(t) {
+fn is_fence_line(t) any^ {
   let s = trim_start(t)
   starts_with(s, "```") or starts_with(s, "~~~")
 }
 
 // Table pipes and the delimiter row, from column `at`.
-fn table_marks(t, at) {
+fn table_marks(t, at) any^ {
   let rest = slice(t, at, len(t))
   let delimiter_row = len(trim(rest)) > 0 and
                       len([for (ch in rest where ch != "|" and ch != "-" and ch != ":" and ch != " ") ch]) == 0;
   if (delimiter_row) [run(at, len(t), "tok-table-delim")]
-  else [for (i in at to len(t) - 1 where slice(t, i, i + 1) == "|") run(i, i + 1, "tok-table-delim")]
+  else [for (i in at to len(t) - 1 where ((slice(t, i, i + 1) == "|") ^ { false })) run(i, i + 1, "tok-table-delim")]
 }
 
 // A link's destination: from "](" to its end, or the whole of an autolink.
-fn link_url_start(t, s, e) {
+fn link_url_start(t, s, e) any^ {
   let at = index_of(slice(t, s, e), "](")
   if (slice(t, s, s + 1) == "<") s
   else if (at == null) e
   else s + at + 1
 }
 
-fn link_def_marks(t, at) {
+fn link_def_marks(t, at) any^ {
   let colon = index_of(slice(t, at, len(t)), "]:");
   if (colon == null) [] else [run(at, at + colon + 2, "tok-ref"), run(at + colon + 2, len(t), "tok-url")]
 }
 
 // YAML front matter: the lines from a first-line `---` to its closing line.
-pub fn front_matter_end(b) {
+pub fn front_matter_end(b) any^ {
   if (b.count < 2 or trim_end(buf.line(b, 0)) != "---") -1
   else {
     let limit = min(b.count, 400)
-    let closes = [for (i in 1 to limit - 1 where trim_end(buf.line(b, i)) == "---" or trim_end(buf.line(b, i)) == "...") i];
+    let closes = [for (i in 1 to limit - 1 where ((trim_end(buf.line(b, i)) == "---" or trim_end(buf.line(b, i)) == "...") ^ { false })) i];
     if (len(closes) == 0) -1 else closes[0]
   }
 }
@@ -193,36 +193,36 @@ fn span_cols(sp, line, text) =>
 fn by_start(sp) => sp.line * 1000000 + sp.col
 
 // Most lines have at most one container and one leaf: skip the sort then.
-fn outermost_first(spans) => if (len(spans) < 2) spans else sort(spans, by_start)
+fn outermost_first(spans) any^ => if (len(spans) < 2) spans else sort(spans, by_start)
 
 // Runs for one line from the spans touching it: container markers and the
 // leaf blocks inside them, then inline constructs outermost first, so nested
 // constructs paint over their parents.
-fn line_runs(text, line, spans, fm_end) {
+fn line_runs(text, line, spans, fm_end) any^ {
   if (line <= fm_end) [run(0, len(text), "tok-meta")]
   else {
     let here = [for (sp in spans where sp.line <= line and sp.end_line >= line) sp]
-    let containers = outermost_first([for (sp in here where sp.block and is_container(sp.kind)) sp])
-    let leaves = outermost_first([for (sp in here where sp.block and not is_container(sp.kind)) sp])
+    let containers = outermost_first([for (sp in here where ((sp.block and is_container(sp.kind)) ^ { false })) sp])
+    let leaves = outermost_first([for (sp in here where ((sp.block and not is_container(sp.kind)) ^ { false })) sp])
     let inlines = sort([for (sp in here where not sp.block) sp],
                        (sp) => 0 - ((sp.end_line - sp.line) * 100000 + sp.end_col - sp.col))
     let marks = container_marks(text, containers, 0, 0, [])
     // inner leaves paint over outer ones, and the markers over both
     // one leaf's runs are already sorted and disjoint
-    let leaf_list = [for (sp in leaves) for (r in leaf_runs(text, line, sp, marks.at)) r]
+    let leaf_list = [for (sp in leaves) for (r in ((leaf_runs(text, line, sp, marks.at)) ^ { [] })) r]
     let leaf = if (len(leaves) < 2) leaf_list else paint_all([], leaf_list, 0)
     let base = if (len(marks.runs) == 0) leaf else paint_all(leaf, marks.runs, 0)
     merge(inline_runs(text, line, inlines, 0, base))
   }
 }
 
-fn paint_all(runs, over, i) =>
+fn paint_all(runs, over, i) any^ =>
   if (i >= len(over)) runs else paint_all(paint(runs, over[i].s, over[i].e, over[i].c), over, i + 1)
 
 // A leaf block's runs on `line`. It starts at its own column on its first
 // line; on later lines, after the containers' markers (`at`) and the
 // indentation up to that column, so a list item's indent is not code.
-fn leaf_runs(text, line, sp, at) {
+fn leaf_runs(text, line, sp, at) any^ {
   let cols = span_cols(sp, line, text)
   let s = if (line == sp.line) cols.s else min(at + indent_len(slice(text, at, len(text))), max(at, sp.col))
   let k = sp.kind;
@@ -234,7 +234,7 @@ fn leaf_runs(text, line, sp, at) {
   else [run(s, cols.e, block_class(k))]
 }
 
-fn inline_runs(text, line, spans, i, runs) {
+fn inline_runs(text, line, spans, i, runs) any^ {
   if (i >= len(spans)) runs
   else {
     let sp = spans[i]
@@ -250,7 +250,7 @@ fn inline_runs(text, line, spans, i, runs) {
 
 // Lay `marks` ({s, e}, sorted, disjoint) over a line's runs: covered columns
 // gain the class `cls`, so a find match inside a token keeps the token's color.
-pub fn overlay(runs, marks, cls) {
+pub fn overlay(runs, marks, cls) any^ {
   if (len(marks) == 0) runs
   else {
     let cuts = sort(unique([*[for (r in runs) r.s], *[for (r in runs) r.e],
@@ -260,7 +260,7 @@ pub fn overlay(runs, marks, cls) {
                    {s: p.s, e: p.e,
                     base: [for (r in runs where r.s <= p.s and p.e <= r.e) r.c],
                     marked: len([for (m in marks where m.s <= p.s and p.e <= m.e) m]) > 0}]
-    merge([for (p in parts where p.marked or len(p.base) > 0)
+    merge([for (p in parts where ((p.marked or len(p.base) > 0) ^ { false }))
              {s: p.s, e: p.e,
               c: if (not p.marked) p.base[0] else if (len(p.base) == 0) cls else p.base[0] ++ " " ++ cls}])
   }
@@ -270,7 +270,7 @@ pub fn overlay(runs, marks, cls) {
 // them, but painting their runs would cost more than the frame allows.
 let LONG_LINE = 10000
 
-fn guarded_runs(text, line, spans, fm_end) => if (len(text) > LONG_LINE) [] else line_runs(text, line, spans, fm_end)
+fn guarded_runs(text, line, spans, fm_end) any^ => if (len(text) > LONG_LINE) [] else line_runs(text, line, spans, fm_end)
 
 // Parse the window [first, last] of a buffer in `lang` and build its runs.
 // `scan` is the restart cache {states, valid} the previous call returned.
@@ -280,7 +280,7 @@ pub fn highlight(b, first, final, scan, lang) {
   let r = parse(b.chunks, {type: lang, sourcepos: 'spans', window: [lo, hi], prescan: scan}) ^ { null }
   if (r == null) null
   else {
-    let spans = [for (i in 0 to len(r[1]) div FIELDS - 1) span_at(r, i)]
+    let spans = [for (i in ((0 to len(r[1]) div FIELDS - 1) ^ { [] })) span_at(r, i)]
     let fm_end = if (lang == 'markdown') front_matter_end(b) else -1;
     {hl: {version: b.version, first: lo, last: hi, exact: true,
           runs: [for (l in lo to hi) guarded_runs(buf.line(b, l), l, spans, fm_end)]},
@@ -311,7 +311,7 @@ fn shift(runs, d) => [for (r in runs) run(r.s + d, r.e + d, r.c)]
 fn grow_left(head, col, n) =>
   [for (r in head) if (r.e == col and r.s < col) run(r.s, r.e + n, r.c) else r]
 
-fn merge(runs) {
+fn merge(runs) any^ {
   if (len(runs) < 2) runs
   else {
     let rest = merge(drop(runs, 1))
@@ -322,7 +322,7 @@ fn merge(runs) {
 }
 
 // The runs of the lines one delta replaces, from the old first and last lines.
-fn edited_lines(first_runs, last_runs, d) {
+fn edited_lines(first_runs, last_runs, d) any^ {
   let n = len(d.insert)
   let head = clip_runs(first_runs, 0, d.from.col)
   let tail = clip_runs(last_runs, d.to.col, 1000000000)
@@ -330,7 +330,7 @@ fn edited_lines(first_runs, last_runs, d) {
   let width_last = len(d.insert[n - 1]);
   if (n == 1) [merge([*grow_left(head, d.from.col, width_first), *shift(tail, d.from.col + width_first - d.to.col)])]
   else [grow_left(head, d.from.col, width_first),
-        *[for (i in 1 to n - 2) []],
+        *[for (i in ((1 to n - 2) ^ { [] })) []],
         shift(tail, width_last - d.to.col)]
 }
 
@@ -368,12 +368,12 @@ pub fn empty_scan() => {states: [], valid: 0, labels: []}
 
 // Apply the CED14v2 mapping for a sequence of applied edits: each step is
 // {delta, applied}, where applied is source_buffer.apply_delta's result.
-pub fn after_steps(hl, scan, steps, version) {
+pub fn after_steps(hl, scan, steps, version) any^ {
   if (steps == null) {hl: null, scan: empty_scan()}
   else map_steps(hl, scan, steps, 0, version)
 }
 
-fn map_steps(hl, scan, steps, i, version) {
+fn map_steps(hl, scan, steps, i, version) any^ {
   if (i >= len(steps)) {hl: hl, scan: scan}
   else {
     let st = steps[i]

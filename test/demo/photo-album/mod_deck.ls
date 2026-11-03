@@ -20,7 +20,7 @@ fn portrait(p) => p.aspect < 0.9
 
 // Slide plan: every sixth slide shows four photos and then zooms into the first with morph;
 // consecutive portraits pair up; a single portrait gets a caption panel; landscapes go full-bleed.
-fn step(lib, ids, i, n) {
+fn step(lib, ids, i, n) any^ {
     let rest = len(ids) - i;
     if (rest <= 0) []
     else if (n % 6 == 5 and rest >= 4) [{kind:"grid", ids:slice(ids, i, i + 4)}, {kind:"zoom", ids:[ids[i]]}, *step(lib, ids, i + 4, n + 2)]
@@ -32,7 +32,7 @@ fn step(lib, ids, i, n) {
 
 pub fn plan(lib, ids) => [{kind:"title", ids:slice(ids, 0, 1)}, *step(lib, slice(ids, 0, MAX_PHOTOS), 0, 1), {kind:"credits", ids:slice(ids, 0, MAX_PHOTOS)}]
 
-pub fn years(lib, ids) {
+pub fn years(lib, ids) any^ {
     let ys = [for (id in ids) L.photo(lib, id).year]
     let lo = min(ys)
     let hi = max(ys);
@@ -127,8 +127,8 @@ let POSTCARD = [
     <text id:"postcard-stamp", x:1090, y:34, width:150, height:44, font_size:16, color:"#9b2c2c", rotation:6,
         style:"border:2px solid #9b2c2c;border-radius:4px;text-align:center;font-weight:700;background:#fffaf0;", "LAMBDA ✉">]
 fn trailing(c) => c is element and (name(c) == 'cue' or name(c) == 'notes')
-fn framed(s) => <slide *:map(s), *[for (c in content(s) where trailing(c) == false) c]; *[for (o in POSTCARD) o];
-    *[for (c in content(s) where trailing(c)) c]>
+fn framed(s) any^ => <slide *:map(s), *[for (c in ((content(s)) ^ { [] }) where ((trailing(c) == false) ^ { false })) c]; *[for (o in POSTCARD) o];
+    *[for (c in ((content(s)) ^ { [] }) where ((trailing(c)) ^ { false })) c]>
 
 // options: {title, ids, theme: "dark"|"light"|"postcard", transition: "fade"|"push"|"slide", dwell_ms, prefix}
 pub fn deck(lib, options) {
@@ -141,7 +141,7 @@ pub fn deck(lib, options) {
 }
 
 // shared with the slide editor so saved relative resources have one resolution policy.
-pub fn resolve_sources(deck, base) => resources.slide_sources(deck,base)
+pub fn resolve_sources(deck, base) any^ => resources.slide_sources(deck,base)
 
 // file name for a deck title
-pub fn file_name(title) => L.slug(title, "slideshow") ++ ".slides"
+pub fn file_name(title) any^ => L.slug(title, "slideshow") ++ ".slides"

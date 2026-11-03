@@ -2,7 +2,7 @@ import model: lambda.graph.model
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn item_by_id(items, id) {
@@ -10,7 +10,7 @@ fn item_by_id(items, id) {
   if (len(matches) > 0) matches[0] else null
 }
 
-fn first_route_point(edge) {
+fn first_route_point(edge) any^ {
   let route = children(edge, "route")[0];
   children(route, "point")[0]
 }
@@ -23,7 +23,7 @@ let edges = children(rendered.scene, "edge")
 let styled_source = (input(
   "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let styled_rendered = transform.render_scene(styled_source, 800, 600)
-let styled_node = [for (node in children(styled_rendered.scene, "node")
+let styled_node = [for (node in ((children(styled_rendered.scene, "node")) ^ { [] })
   where node.id == "i") node][0]
 let record_source = (input(
   "test/lambda/graph/graphviz/records_ports.dot", {type: "graph", flavor: "dot"})) ^ { null }

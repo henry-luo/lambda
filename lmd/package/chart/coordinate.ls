@@ -13,11 +13,11 @@ import affine: .svg_transform
 import axis:.axis
 import collision:.collision
 
-pub fn enabled(options) => options is string or (options != null and len(parse.attributes(options)) > 0)
+pub fn enabled(options) any^ => options is string or (options != null and len(parse.attributes(options)) > 0)
 fn pair(value) => (value is array and len(value) == 2 and (all(value |> util.finite_number(~)) ^ { false })) or false
 fn value(options, key, fallback) => if (options[key] != null) options[key] else fallback
 
-fn transform_error(step) {
+fn transform_error(step) any^ {
     let kind = step.type;
     let center = value(step, "center", [0.5, 0.5]);
     if (not contains(["transpose", "reflect_x", "reflect_y", "rotate", "scale", "translate", "fisheye"], kind))
@@ -69,7 +69,7 @@ fn fisheye(x, focus, distortion, inverse) {
     focus + (if (x < focus) -1.0 else 1.0) * side * mapped
 }
 
-fn vector_transform(step) => step.type!="fisheye" or
+fn vector_transform(step) any^ => step.type!="fisheye" or
     all(value(step,"focus",[0.5,0.5]) |> ~>0.0 and ~<1.0)
 
 fn prepare_transform(step, inverse = false) => {
@@ -105,7 +105,7 @@ fn transform_prepared(point, step, inverse = false) {
     [for (axis in [0, 1]) if (step.dimensions == null or contains(step.dimensions, if (axis == 0) "x" else "y")) result[axis] else point[axis]]
 }
 
-fn transforms(point, steps, index = 0, inverse = false) => if (index >= len(steps)) point else
+fn transforms(point, steps, index = 0, inverse = false) any^ => if (index >= len(steps)) point else
     transforms(transform_prepared(point, steps[index], inverse), steps, index + 1, inverse)
 
 fn projector(model, batch = false) {
@@ -114,7 +114,7 @@ fn projector(model, batch = false) {
     let steps = [for (step in model.transform) prepare_transform(step)];
     let width = model.width; let height = model.height;
     if (model is error) (point) => model
-    else if (model.type == "custom") (let callback = model.project, (point) => callback(transforms(point, steps)))
+    else if (model.type == "custom") (let callback = model.project, (point) any^ => callback(transforms(point, steps)))
     else if (model.type == "cartesian") (normalized) => (
         let point = transforms(normalized, steps), [point[0] * width, (1.0 - point[1]) * height])
     else {
@@ -137,12 +137,12 @@ fn projector(model, batch = false) {
         }
     }
 }
-pub fn project(model, normalized) => projector(model)(normalized)
+pub fn project(model, normalized) any^ => projector(model)(normalized)
 
-pub fn invert(model, displayed) {
+pub fn invert(model, displayed) any^ {
     let singular = any([for (step in model.transform,let dimensions=if (step.dimensions!=null) step.dimensions else ["x","y"],
         let partial=contains(dimensions,"x") != contains(dimensions,"y"))
-        if (step.type=="scale") any([for (i,key in ["x","y"] where contains(dimensions,key))
+        if (step.type=="scale") any([for (i,key in ["x","y"] where ((contains(dimensions,key)) ^ { false }))
             value(step,"factors",[value(step,"x",1.0),value(step,"y",1.0)])[i]==0])
         else partial and (step.type=="transpose" or step.type=="rotate" and abs(math.cos(step.angle))<0.000000000001)]);
     let dx = displayed[0] - model.width / 2.0; let dy = displayed[1] - model.height / 2.0;
@@ -165,14 +165,14 @@ pub fn invert(model, displayed) {
 fn pixel_projector(model, batch = false) {
     let project = projector(model,batch);
     let width = model.width; let height = model.height;
-    (point) => project([point[0] / width, 1.0 - point[1] / height])
+    (point) any^ => project([point[0] / width, 1.0 - point[1] / height])
 }
-pub fn pixel(model, point) => pixel_projector(model)(point)
+pub fn pixel(model, point) any^ => pixel_projector(model)(point)
 
-fn batch_projector(model) => if (model.type=="custom" or not all(model.transform |> vector_transform(~))) null
+fn batch_projector(model) any^ => if (model.type=="custom" or not all(model.transform |> vector_transform(~))) null
     else pixel_projector(model,true)
 
-fn intervals(model) => if (model.type == "helix") max(8, int(ceil((model.turns[1] - model.turns[0]) * 8.0))) else 8
+fn intervals(model) any^ => if (model.type == "helix") max(8, int(ceil((model.turns[1] - model.turns[0]) * 8.0))) else 8
 
 fn line_sampler(model) {
     let affine = not any(model.transform |> ~.type == "fisheye");
@@ -186,9 +186,9 @@ fn line_sampler(model) {
     let angular = if (model.type=="helix") util.TAU*(model.turns[1]-model.turns[0]) else model.end_angle-model.start_angle;
     let radial_u = if (model.type=="helix") model.outer_radius-model.inner_radius-model.track_width else 0.0;
     let radial_v = if (model.type=="helix") model.track_width else model.outer_radius-model.inner_radius;
-    let run=(a,b,count,linear) => paths.sample_curve((t) => project(geometry.interpolate(a,b,t)),model.precision,count,linear,
+    let run=(a,b,count,linear) any^ => paths.sample_curve((t) any^ => project(geometry.interpolate(a,b,t)),model.precision,count,linear,
         if (batch!=null) (ts) array | error => paths.point_rows(batch([a[0]+(b[0]-a[0])*ts,a[1]+(b[1]-a[1])*ts])) else null);
-    (a,b) => if (not affine or not circular and model.type!="cartesian") run(a,b,base,false)
+    (a,b) any^ => if (not affine or not circular and model.type!="cartesian") run(a,b,base,false)
         else if (model.type=="cartesian") run(a,b,1,true) else {
         let pa=transforms([a[0]/model.width,1.0-a[1]/model.height],steps);
         let pb=transforms([b[0]/model.width,1.0-b[1]/model.height],steps);
@@ -214,25 +214,25 @@ pub fn line(model, points, closed = false) {
     if (invalid is error) invalid else [for (i, segment in segments) for (j, point in segment where i == 0 or j > 0) point]
 }
 
-fn projected_path(model, points, closed = false) {
+fn projected_path(model, points, closed = false) any^ {
     let projected = line(model, points, closed);
     if (projected is error) projected else svg.line_path(projected) ++ (if (closed) " Z" else "")
 }
 
-fn without_transform(node) => map([for (key, value in map(node) where string(key) != "transform")
+fn without_transform(node) => map([for (key, value in map(node) where ((string(key) != "transform") ^ { false }))
     for (part in [string(key), value]) part]);
 
 // Mark sizes and glyphs stay in pixels; ranged regions project their complete boundary.
-pub fn warp(node, model, marker = false, inherited = affine.identity) =>
+pub fn warp(node, model, marker = false, inherited = affine.identity) any^ =>
     warp_projected(node, model, marker, inherited, pixel_projector(model),line_sampler(model),batch_projector(model))
 
-fn warp_projected(node, model, marker, inherited, project, sample, batch) {
+fn warp_projected(node, model, marker, inherited, project, sample, batch) any^ {
     if (not (node is element) or node is error) node else {
         let tag = name(node);
         let attrs = without_transform(node);
         let matrix = affine.accumulate(inherited,node.transform);
         let marker = marker or node.class == "marks points" or node.class == "marks beeswarm";
-        let children = [for (child in content(node)) warp_projected(child, model, marker, matrix, project, sample, batch)];
+        let children = [for (child in ((content(node)) ^ { [] })) warp_projected(child, model, marker, matrix, project, sample, batch)];
         let center = if (tag == 'circle' or tag == 'ellipse') [node.cx, node.cy]
             else if (tag == 'rect' and marker) [node.x + node.width / 2.0, node.y + node.height / 2.0] else [node.x, node.y];
         let projected = if (center[0] != null and center[1] != null) project(affine.project(matrix, center)) else null;
@@ -267,15 +267,15 @@ fn warp_projected(node, model, marker, inherited, project, sample, batch) {
                 let displayed = project(anchor);
                 if (source is error) source else [for (line in source) {*:line, points: [for (point in line.points)
                     [displayed[0] + point[0] - anchor[0], displayed[1] + point[1] - anchor[1]]]}]
-            } else paths.sample(segments, (point) => project(affine.project(matrix, point)), model.precision, intervals(model),
+            } else paths.sample(segments, (point) any^ => project(affine.project(matrix, point)), model.precision, intervals(model),
                 (a,b) array | error => sample(affine.project(matrix,a),affine.project(matrix,b)),
-                if (batch!=null) (columns) => batch(affine.project(matrix,columns)) else null),
+                if (batch!=null) (columns) any^ => batch(affine.project(matrix,columns)) else null),
             if (lines is error) lines else <path *:attrs, d: paths.path(lines), *children>)
         else svg.rebuild(tag, attrs, children)
     }
 }
 
-pub fn clip(image, model, scope = "chart") {
+pub fn clip(image, model, scope = "chart") any^ {
     let rectangle=[[0.0,0.0],[model.width,0.0],[model.width,model.height],[0.0,model.height]];
     let boundary = if (model.type=="geo") svg.line_path(rectangle)++" Z" else projected_path(model, rectangle, true);
     let id = scope ++ "-coordinate-" ++ util.resource_key(model);
@@ -283,7 +283,7 @@ pub fn clip(image, model, scope = "chart") {
         <g 'clip-path': "url(#" ++ id ++ ")", image>>
 }
 
-pub fn compatible(kind, model) {
+pub fn compatible(kind, model) any^ {
     if (model is error) model
     else if (contains(["treemap", "pack", "force_graph", "wordcloud", "image"], kind) and model.type != "cartesian")
         error("chart: layout-space mark requires a Cartesian coordinate")
@@ -313,7 +313,7 @@ fn guide_title_angle(model, key, guide) {
 }
 
 // nonlinear projection changes guide spacing; clear the displayed tick bounds in pixels.
-fn space_projected_title(node, model, padding, obstacles = []) {
+fn space_projected_title(node, model, padding, obstacles = []) any^ {
     if (not (node is element)) node else {
         let titles = content(node) |: name(~) == 'text';
         if (contains(["axis x-axis", "axis y-axis"], node.class) and len(titles) == 1) {
@@ -325,12 +325,12 @@ fn space_projected_title(node, model, padding, obstacles = []) {
                 let horizontal = abs(dx) > abs(dy);
                 let direction = if (horizontal) [if (dx >= 0) 1.0 else -1.0, 0.0] else [0.0, if (dy >= 0) 1.0 else -1.0];
                 let shift = collision.outward_shift(box, [*labels, *obstacles], direction, padding);
-                svg.rebuild(name(node), map(node), [for (child in content(node)) if (child != title) child
+                svg.rebuild(name(node), map(node), [for (child in ((content(node)) ^ { [] })) if (child != title) child
                     else svg.rebuild('text', {*:map(title), x: title.x + direction[0] * shift,
                         y: title.y + direction[1] * shift}, content(title))])
             }
         } else {
-            let children = [for (child in content(node)) space_projected_title(child, model, padding, obstacles)];
+            let children = [for (child in ((content(node)) ^ { [] })) space_projected_title(child, model, padding, obstacles)];
             let failure = util.first_error(children);
             if (failure is error) failure else svg.rebuild(name(node), map(node), children)
         }
@@ -346,7 +346,7 @@ fn guide_frame(model, source, horizontal, options, matrix) {
     {point: point, direction: if (length > 0.0) [(offset[0] - point[0]) / length, (offset[1] - point[1]) / length] else [0.0, 0.0]}
 }
 
-fn place_guide_text(node, frame, padding, background) {
+fn place_guide_text(node, frame, padding, background) any^ {
     let boxes = text.svg_bounds(node);
     if (boxes is error) boxes else {
         let box = boxes[0];
@@ -365,7 +365,7 @@ fn place_guide_text(node, frame, padding, background) {
 }
 
 // project guide anchors and normals, keeping glyph spacing and tick lengths in screen pixels.
-fn helix_guide(node, model, options, horizontal, background, inherited = affine.identity, opposite = false) {
+fn helix_guide(node, model, options, horizontal, background, inherited = affine.identity, opposite = false) any^ {
     if (not (node is element)) node else if (name(node) != 'g') warp(node, model, false, inherited) else {
         let matrix = affine.accumulate(inherited,node.transform);
         let normal = if (node.class == "tick") guide_frame(model, [0.0, 0.0], horizontal, options, matrix)
@@ -375,7 +375,7 @@ fn helix_guide(node, model, options, horizontal, background, inherited = affine.
         let frame = if (opposite) {*:normal, direction: normal.direction |> 0.0 - ~} else normal;
         let ticks = content(node) |: ~.class == "tick";
         let extent = if (options.ticks == false) 0.0 else options.tick_size;
-        let children = [for (child in content(node))
+        let children = [for (child in ((content(node)) ^ { [] }))
             if (node.class == "tick" and name(child) == 'line') <line *:without_transform(child),
                 x1: frame.point[0], y1: frame.point[1],
                 x2: frame.point[0] + frame.direction[0] * options.tick_size,
@@ -389,9 +389,9 @@ fn helix_guide(node, model, options, horizontal, background, inherited = affine.
     }
 }
 
-fn guide_titles(node) => if (not (node is element)) []
+fn guide_titles(node) any^ => if (not (node is element)) []
     else if (contains(["axis x-axis", "axis y-axis"], node.class)) content(node) |: name(~) == 'text'
-    else [for (child in content(node)) for (title in guide_titles(child)) title];
+    else [for (child in ((content(node)) ^ { [] })) for (title in ((guide_titles(child)) ^ { [] })) title];
 
 fn space_helix_titles(plans, model, index = 0, done = [], occupied = []) {
     if (index >= len(plans)) done else {
@@ -405,11 +405,11 @@ fn space_helix_titles(plans, model, index = 0, done = [], occupied = []) {
     }
 }
 
-fn fit_guide_labels(node, obstacles, separation) {
+fn fit_guide_labels(node, obstacles, separation) any^ {
     if (not (node is element)) node else if (contains(["axis x-axis", "axis y-axis"], node.class))
         axis.fit_frame_labels(node, obstacles, separation)
     else {
-        let children = [for (child in content(node)) fit_guide_labels(child, obstacles, separation)];
+        let children = [for (child in ((content(node)) ^ { [] })) fit_guide_labels(child, obstacles, separation)];
         let failure = util.first_error(children);
         if (failure is error) failure else svg.rebuild(name(node), map(node), children)
     }
@@ -427,11 +427,11 @@ fn fit_helix_labels(plans, index = 0, done = [], occupied = []) {
     }
 }
 
-pub fn guides(model, encoding, x_scale, y_scale, theme) {
+pub fn guides(model, encoding, x_scale, y_scale, theme) any^ {
     let plans=[for (key in ["x", "y"],
         let mapping = if (key == "x") x_scale else y_scale,
         let channel = encoding[key], let guide = cfg.axis_config(theme, channel)
-        where mapping != null and guide.enabled) (
+        where ((mapping != null and guide.enabled) ^ { false })) (
         let angular=if (contains(["theta","radial"],model.type) and model.direct_polar!=true) "y" else "x",
         let options=if (model.type=="cartesian") {*:guide,_title_angle:guide_title_angle(model,key,guide)}
             else if (model.type=="helix") {*:guide,_title_angle:0.0,orient:if (key=="x") "top" else guide.orient}
@@ -451,7 +451,7 @@ pub fn guides(model, encoding, x_scale, y_scale, theme) {
                 if (key == "x") [[value, 0.0], [value, model.height]] else [[0.0, value], [model.width, value]]),
                 fill: "none", stroke: if (guide.grid_color != null) guide.grid_color else "#ddd">]})];
     let spaced = if (model.type == "helix") space_helix_titles(plans, model) else plans;
-    let boxes = if (model.type == "helix" and not (spaced is error)) text.svg_bounds(<g *[for (plan in spaced) for (title in guide_titles(plan.image)) title]>) else [];
+    let boxes = if (model.type == "helix" and not (spaced is error)) text.svg_bounds(<g *[for (plan in spaced) for (title in ((guide_titles(plan.image)) ^ { [] })) title]>) else [];
     let fitted = if (spaced is error or boxes is error or model.type != "helix") spaced else fit_helix_labels(spaced, 0, [], boxes);
     let failure=util.first_error([spaced, boxes, fitted, for (plan in fitted) plan.image, for (plan in fitted) for (grid in plan.grids) grid]);
     // spiral grids paint below all labels, including labels from the other axis.
@@ -485,14 +485,14 @@ pub fn vector_axes(data, position, model) {
     if (failure is error) failure else axes
 }
 
-pub fn vector_marks(data, ctx, options, model) {
+pub fn vector_marks(data, ctx, options, model) any^ {
     let axes = vector_axes(data, ctx.encoding.position, model);
     let font = text.style(options, "label", 11);
     let labels = [for (axis in axes) if (axis.title != null) axis.title else axis.field];
     let metrics = text.measure(labels, font);
     let series = [for (row in data) {row: row, points: [for (axis in axes)
         geometry.interpolate(axis.a, axis.b, scale.scale_apply(axis.mapping, row[axis.field]) / axis.length)]}];
-    let ticks = if (options.axes == false) [] else [for (axis in axes) [for (tick in scale.scale_ticks(axis.mapping, 4),
+    let ticks = if (options.axes == false) [] else [for (axis in axes) [for (tick in ((scale.scale_ticks(axis.mapping, 4)) ^ { [] }),
         let point = geometry.interpolate(axis.a, axis.b, scale.scale_apply(axis.mapping, tick) / axis.length))
         <text x: point[0] + 4, y: point[1], *:text.attributes(font), util.format_value(tick, axis.format)>]];
     let field_labels = options.axes != false and options.labels != false;

@@ -17,14 +17,14 @@ let result = graph.layout({
 
 {
   size: [result.width, result.height],
-  nodes: [for (n in result.nodes) {
+  nodes: [for (n in ((result.nodes) ^ { [] })) {
     id: n.id,
     x: n.x,
     y: n.y,
     rank: n.rank,
     order: n.order
   }],
-  edges: [for (e in result.edges) {
+  edges: [for (e in ((result.edges) ^ { [] })) {
     from: e.from,
     to: e.to,
     points: e.points

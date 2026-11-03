@@ -3078,6 +3078,8 @@ extern "C" {
     // their authoritative descriptor pointer; generic containers compare the
     // same normalized kind reported by type(value).
     Bool lambda_value_type_is_exact(Item value, Type* expected);
+    // S11.4.8v2: a value binder records the admitted value's narrowest type.
+    Type* lambda_binder_value_type(Item value);
     // Box a selected contract as a first-class `type` value. Binder frames
     // retain the inner contract for admission; expression reads need this
     // self-tagged wrapper (D3.1.1v4).

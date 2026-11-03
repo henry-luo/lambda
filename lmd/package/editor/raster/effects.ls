@@ -8,7 +8,7 @@ pub let controls = [
     {key:"temperature",label:"Temperature",value:0},{key:"gamma",label:"Gamma",value:1},
     {key:"shadows",label:"Shadows",value:0},{key:"highlights",label:"Highlights",value:0},
     {key:"softness",label:"Blur",value:0},{key:"sharpen",label:"Sharpen",value:0}]
-pub fn items(node) => if (node == null) [] else [for (child in content(node) where name(child) == 'effect') child]
+pub fn items(node) any^ => if (node == null) [] else [for (child in ((content(node)) ^ { [] }) where ((name(child) == 'effect') ^ { false })) child]
 pub fn checked(options,label,adjustment=false) any^ {
     if (not (label is string) or len(label)<1 or len(label)>256) raise error("Raster: effect needs a name of 1 to 256 characters")
     else {
@@ -40,7 +40,7 @@ pub fn run_command(st,command) any^ {
             if (not (command.to is int) or command.to<0 or command.to>=len(items)) raise error("Raster: effect order is out of bounds")
             else sequence.list_splice(sequence.list_splice(items,index,1,[]),command.to,0,[items[index]]))
         else raise error("Raster: unknown effect command")
-        let node = img.with_children(row.node,[*[for (child in content(row.node) where name(child) != 'effect') child],*changed])^;
+        let node = img.with_children(row.node,[*[for (child in ((content(row.node)) ^ { [] }) where ((name(child) != 'effect') ^ { false })) child],*changed])^;
         {*:st,doc:model.replace(st.doc,row.id,node)^}
     }
 }

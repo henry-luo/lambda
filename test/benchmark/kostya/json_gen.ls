@@ -29,7 +29,7 @@ fn next_rand(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-fn benchmark() {
+fn benchmark() any^ {
     let num_objects = 1000
     var seed = 42
     var json = "["
@@ -66,7 +66,7 @@ pn main() {
     }
     var __t1 = clock()
     print("json_gen: length=" ++ result ++ "\n")
-    if (result > 0) {
+    if ((result > 0)^) {
         print("json_gen: PASS\n")
     } else {
         print("json_gen: FAIL\n")

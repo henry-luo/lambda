@@ -1,6 +1,6 @@
 import control: lambda.ui.core.control
 
-view dtna_controls: <dtna.input> | <dtna.text_area> | <dtna.select> | <dtna.checkbox> | <dtna.radio> | <dtna.switch> {
+view dtna_controls: <dtna.input> | <dtna.text_area> | <dtna.select> | <dtna.checkbox> | <dtna.radio> | <dtna.switch> () any^ {
     control.present(~,"dtna")
 }
 on input(evt) { control.edited(~,evt,"dtna") }

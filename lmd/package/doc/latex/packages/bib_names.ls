@@ -1,7 +1,7 @@
 // Shared BibLaTeX name parsing and display, kept separate from citation styles.
 import util: ~~.util
 
-fn split_names_at(source, index, start, braces, escaped, names) {
+fn split_names_at(source, index, start, braces, escaped, names) any^ {
     if (index >= len(source)) names ++ [trim(slice(source, start, len(source)))]
     else {
         let ch = slice(source, index, index + 1)
@@ -16,9 +16,9 @@ fn split_names_at(source, index, start, braces, escaped, names) {
     }
 }
 
-fn plain(source) => replace(replace(trim(source), "{", ""), "}", "")
+fn plain(source) any^ => replace(replace(trim(source), "{", ""), "}", "")
 
-fn word_list(source) => [for (word in split(trim(source), " ") where word != "") word]
+fn word_list(source) => [for (word in ((split(trim(source), " ")) ^ { [] }) where word != "") word]
 
 fn join_words(words, from, count) {
     if (from >= count) ""
@@ -26,18 +26,18 @@ fn join_words(words, from, count) {
     else words[from] ++ " " ++ join_words(words, from + 1, count)
 }
 
-fn lower_word(word) {
+fn lower_word(word) any^ {
     let first = slice(word, 0, 1)
     first != "" and first == lower(first)
 }
 
-fn prefix_start(words, index, end) {
+fn prefix_start(words, index, end) any^ {
     if (index >= end) null
     else if (lower_word(words[index])) index
     else prefix_start(words, index + 1, end)
 }
 
-fn family_parts(source) {
+fn family_parts(source) any^ {
     let words = word_list(plain(source))
     let boundary = prefix_start(words, 0, len(words) - 1)
     if (boundary == null) {prefix: "", family: plain(source)}
@@ -48,12 +48,12 @@ fn family_parts(source) {
     }
 }
 
-fn prefix_end(words, index, final_index) {
+fn prefix_end(words, index, final_index) any^ {
     if (index >= final_index or not lower_word(words[index])) index
     else prefix_end(words, index + 1, final_index)
 }
 
-fn parse_single(source) {
+fn parse_single(source) any^ {
     let raw = trim(source)
     let comma = util.split_top_level(raw, ",")
     if (starts_with(raw, "{") and ends_with(raw, "}") and len(comma) == 1) {
@@ -83,18 +83,18 @@ fn parse_single(source) {
 
 pub fn parse(source) {
     if (source == null or trim(source) == "") []
-    else [for (person in split_names_at(source, 0, 0, 0, false, [])
+    else [for (person in ((split_names_at(source, 0, 0, 0, false, [])) ^ { [] })
         where person != "") parse_single(person)]
 }
 
-pub fn primary(entry) {
+pub fn primary(entry) any^ {
     let fields = if (entry.raw_fields != null) entry.raw_fields else entry.fields
     let raw = if (fields.author != null) fields.author
         else if (fields.editor != null) fields.editor else ""
     parse(raw)
 }
 
-fn initial_words(words, index, acc) {
+fn initial_words(words, index, acc) any^ {
     if (index >= len(words)) acc
     else {
         let word = words[index]
@@ -103,11 +103,11 @@ fn initial_words(words, index, acc) {
     }
 }
 
-pub fn given_initials(person) {
+pub fn given_initials(person) any^ {
     initial_words(word_list(person.given), 0, "")
 }
 
-pub fn display_person(person, family_first, giveninits) {
+pub fn display_person(person, family_first, giveninits) any^ {
     if (person.literal != null) person.literal
     else {
         let given = if (giveninits) given_initials(person) else person.given
@@ -119,7 +119,7 @@ pub fn display_person(person, family_first, giveninits) {
     }
 }
 
-fn display_person_mode(person, mode, family_first, giveninits) {
+fn display_person_mode(person, mode, family_first, giveninits) any^ {
     if (mode == "family")
         (if (person.prefix == "") "" else person.prefix ++ " ") ++ person.family
     else if (mode == "init" or mode == "full")
@@ -127,7 +127,7 @@ fn display_person_mode(person, mode, family_first, giveninits) {
     else display_person(person, family_first, giveninits)
 }
 
-fn display_list(names, index, count, family_first, giveninits, and_word, mode) {
+fn display_list(names, index, count, family_first, giveninits, and_word, mode) any^ {
     if (index >= count) ""
     else {
         let person = display_person_mode(names[index], mode, family_first, giveninits)
@@ -139,7 +139,7 @@ fn display_list(names, index, count, family_first, giveninits, and_word, mode) {
     }
 }
 
-fn display_mode(names, maxnames, minnames, family_first, giveninits, and_word, etal, mode) {
+fn display_mode(names, maxnames, minnames, family_first, giveninits, and_word, etal, mode) any^ {
     let count = len(names)
     let shown = if (maxnames != null and count > maxnames)
         (if (minnames != null) minnames else maxnames) else count
@@ -148,10 +148,10 @@ fn display_mode(names, maxnames, minnames, family_first, giveninits, and_word, e
         (if (limit < count) (if (limit > 0) " " else "") ++ etal else "")
 }
 
-pub fn display(names, maxnames, minnames, family_first, giveninits, and_word, etal) =>
+pub fn display(names, maxnames, minnames, family_first, giveninits, and_word, etal) any^ =>
     display_mode(names, maxnames, minnames, family_first, giveninits, and_word, etal, "normal")
 
-pub fn citation(names, maxnames, minnames, and_word, etal, mode) =>
+pub fn citation(names, maxnames, minnames, and_word, etal, mode) any^ =>
     display_mode(names, maxnames, minnames, false, false, and_word, etal, mode)
 
 pub fn short(names, and_word, etal) {

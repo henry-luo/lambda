@@ -23,7 +23,7 @@ let leaf_marks = ['code', 'sub', 'sup', 'del', 's', 'u', 'span', 'em', 'i', 'str
 fn color_style(marks) {
   let css = inline_format.span_css(marks)
   join([for (key in ["color", "background-color"], let value = inline_format.css_get(css, key)
-    where value is string and component.css_color(value)) key ++ ": " ++ value], "; ")
+    where ((value is string and component.css_color(value)) ^ { false })) key ++ ": " ++ value], "; ")
 }
 
 fn mark_element(mark, marks, child) {
@@ -37,21 +37,21 @@ fn mark_element(mark, marks, child) {
   else <span style: color_style(marks), child>
 }
 
-fn wrap_leaf(marks, i, child) =>
+fn wrap_leaf(marks, i, child) any^ =>
   if (i >= len(leaf_marks)) child
   else wrap_leaf(marks, i + 1, if (has_mark(marks, leaf_marks[i])) mark_element(leaf_marks[i], marks, child) else child)
 
 // A source-surface leaf carries its highlight class (source.ls, CED15).
-fn render_text_leaf(leaf) =>
+fn render_text_leaf(leaf) any^ =>
   if (leaf.cls != null) <span class: leaf.cls, leaf_text(leaf)> else wrap_leaf(leaf.marks, 0, leaf_text(leaf))
 
-fn align_style(n) {
+fn align_style(n) any^ {
   let align = attr_get(n, 'align')
   if (align == null) null else "text-align: " ++ align
 }
 
 // A short label for retained source: its tag, first attribute, and text.
-fn source_label(source) {
+fn source_label(source) any^ {
   if (type(source) == array) join([for (x in source) source_label(x)], " ")
   else if (type(source) == string) trim(source)
   else if (type(source) != element) ""
@@ -64,7 +64,7 @@ fn source_label(source) {
 }
 
 // Kept source reads as written: Markdown keeps its text, HTML its parsed tree.
-fn kept_source(n) {
+fn kept_source(n) any^ {
   let text = attr_get(n, 'html')
   if (text != null) text else source_label(attr_get(n, 'source'))
 }
@@ -73,26 +73,26 @@ fn kept_source(n) {
 // adapter stored (view.ls). A part without one — a failed formula, or a part
 // that renders nothing on its own: a lone tag, a comment, a link definition — shows its
 // source instead, so it never hides from the reader or the caret.
-fn kept_view(n) {
+fn kept_view(n) any^ {
   let shown = attr_get(n, view_attr)
   if (shown == null or len(shown) == 0) null else shown
 }
 
-fn view_inline(n, what, source) {
+fn view_inline(n, what, source) any^ {
   let shown = kept_view(n)
   let title = what ++ " kept as written (view only)"
   if (shown == null) <span class: "edit-view-only edit-view-source", contenteditable: "false", title: title, source>
   else <span class: "edit-view-only", contenteditable: "false", title: title, *shown>
 }
 
-fn view_block(n, what, source) {
+fn view_block(n, what, source) any^ {
   let shown = kept_view(n)
   let title = what ++ " kept as written (view only)"
   if (shown == null) <div class: "edit-view-only edit-view-block edit-view-source", contenteditable: "false", title: title, source>
   else <div class: "edit-view-only edit-view-block", contenteditable: "false", title: title, *shown>
 }
 
-fn render_list_item(n, kids) {
+fn render_list_item(n, kids) any^ {
   let checked = attr_get(n, 'checked')
   if (checked == null) <li *kids>
   else <li class: if (checked) "edit-task edit-task-done" else "edit-task", *kids>
@@ -103,7 +103,7 @@ let flow_tags = ['div', 'section', 'article', 'main', 'header', 'footer', 'nav',
 
 // Links in the surface select and edit content; they never navigate the
 // session away, so the projection carries no href (proposal §5 HTML).
-fn render_node(n, kids) {
+fn render_node(n, kids) any^ {
   let tag = n.tag
   if (tag == 'doc') <div class: "edit-doc", *kids>
   // a paragraph the HTML source did not spell is its container's own text
@@ -154,7 +154,7 @@ fn render_node(n, kids) {
 }
 
 // Model nodes and text leaves are maps; the edit package applies no other maps.
-view map {
+view map () any^ {
   if (~.kind == 'text') render_text_leaf(~)
   else if (~.kind == 'node') render_node(~, surface_children(~, (child) => apply(child)))
   else ""

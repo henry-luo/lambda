@@ -5,16 +5,16 @@
 // accumulator, a literal slot or a store.
 
 // a declaration boundary originates the defect (S7.7.2) ...
-fn check(x) {
+fn check(x) any^ {
     let n: int = x
     n + 1
 }
 // ... and so does a declared return
-fn tchk(x) int {
+fn tchk(x) int^ {
     let n: int = x
     n + 1
 }
-fn sum_twice(x) int => check(x) + check(x)
+fn sum_twice(x) int^ => check(x) + check(x)
 // a failed element store returns the error from its function (S7.7.6)
 pn guarded_store(a: float[], i: int) {
     a[i] = 9.5
@@ -32,25 +32,25 @@ pn acc_typed(xs) {
 }
 pn arr_store(v) {
     var a: int[] = [0, 0, 0]
-    a[1] = check(v)
+    a[1] = check(v)^
     a
 }
 // a defect deep in a recursion reaches the outermost caller
-fn depth(n: int, s) int { if (n == 0) check(s) else depth(n - 1, s) + 1 }
+fn depth(n: int, s) int^ { if (n == 0) check(s) else depth(n - 1, s) + 1 }
 // a member or element of a defect-capable result is one too (S7.9.3)
 type P = {n: int, s: string}
 fn make(x) P {
     let k: int = x
     {n: k + 1, s: "ok"}
 }
-fn member_n(x) { make(x).n + 1 }
-fn member_s(x) { len(make(x).s) }
+fn member_n(x) any^ { make(x).n + 1 }
+fn member_s(x) any^ { len(make(x).s) }
 // value-family system functions pass it through; integer arithmetic and
 // equality over it stay exact
-fn via_abs(x) { abs(check(x)) * 2 }
-fn via_float(x) { float(check(x)) / 2.0 }
-fn chain(x) { int((tchk(x) % 10) + 1) }
-fn mix(x, y) { tchk(x) * tchk(y) - 3 }
+fn via_abs(x) any^ { abs(check(x)) * 2 }
+fn via_float(x) any^ { float(check(x)) / 2.0 }
+fn chain(x) any^ { int((tchk(x) % 10) + 1) }
+fn mix(x, y) any^ { tchk(x) * tchk(y) - 3 }
 
 pn main() {
     // operands and accumulators
@@ -77,7 +77,7 @@ pn main() {
     print([depth(3, 1), depth(3, "r")])
     print("\n")
     // an error-admitting binding receives the error as its value (S7.8.1)
-    let kept: int | error = check("k")
+    let kept: int^ = check("k")
     print([kept is error, check(9)])
     print("\n")
     // members, value-family calls, arithmetic and equality

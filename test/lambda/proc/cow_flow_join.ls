@@ -53,7 +53,7 @@ pn while_share() {
     while (i < 3) {
         c[0] = i
         var d = c
-        push(snaps, d)
+        push(snaps, d)^
         i = i + 1
     }
     print("while_share: " ++ string(snaps) ++ "\n")
@@ -64,7 +64,7 @@ pn for_share() {
     var snaps = []
     for i in 0 to 2 {
         c[1] = i
-        push(snaps, c)
+        push(snaps, c)^
     }
     print("for_share: " ++ string(snaps) ++ "\n")
 }
@@ -95,7 +95,7 @@ pn nested_share() {
             c[0] = i * 10 + j
             j = j + 1
         }
-        push(rows, {row: c})
+        push(rows, {row: c})^
         i = i + 1
     }
     print("nested_share: " ++ string(rows) ++ "\n")
@@ -138,9 +138,9 @@ pn main() {
     else_after_rebind(false)
     match_rebind(1)
     match_rebind(2)
-    while_share()
-    for_share()
+    while_share()^
+    for_share()^
     break_share()
-    nested_share()
+    nested_share()^
     nested_handle()
 }

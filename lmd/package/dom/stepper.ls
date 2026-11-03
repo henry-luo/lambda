@@ -30,7 +30,7 @@ fn spinner_operation(key) {
 
 // Any accelerator or Shift combination belongs to selection, to platform
 // navigation, or to the author — never to a value step.
-fn operation_for(evt, slider) {
+fn operation_for(evt, slider) any^ {
     if (evt.shiftKey or evt.altKey or evt.ctrlKey or evt.metaKey) { null }
     else if (slider) { slider_operation(evt.key) }
     else { spinner_operation(evt.key) }

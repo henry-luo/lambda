@@ -2,7 +2,7 @@
 import symbols: lambda.doc.math.symbols
 import math: lambda.doc.math.math
 
-pub fn render_symbol(command) {
+pub fn render_symbol(command) any^ {
     let glyph = symbols.lookup_symbol(command)
     if (glyph == null) null
     else math.render_inline(parse("\\" ++ command, 'math')^)

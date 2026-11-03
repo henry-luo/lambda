@@ -95,7 +95,7 @@ let v8 = first_varg(42)           // 42
 let v9 = first_varg(1, 2, 3)      // 1
 
 // Test 15: Variadic length check
-fn varg_len(...) => len(varg())
+fn varg_len(...) any^ => len(varg())
 
 let v10 = varg_len()              // 0
 let v11 = varg_len(1, 2, 3)       // 3

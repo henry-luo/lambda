@@ -5,7 +5,7 @@ import ui: .mod_ui
 import T: .mod_trees
 import viewer: .mod_scene_view
 let DOCUMENTS=map([for (item in T.CATALOG) (item.id,input(url_resolve(resources.entry_uri()^,"samples/"++item.file),'mark')^)])
-view <tree_studio> state st:(T.initial(DOCUMENTS)^) {
+view <tree_studio>() any^ state st:(T.initial(DOCUMENTS)^) {
  <body <div class:"app grammar-app tree-app",
   <header class:"bar",<div class:"title",<h1 "Procart"> <span class:"seed","Tree studio / seed "++string(st.seed)>>;
    ui.navigation("trees");

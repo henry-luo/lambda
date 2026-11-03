@@ -59,21 +59,21 @@ pn callable_source_paths() {
     return sort(paths)
 }
 
-pn callable_extract_function(source: string, name: string) string {
-    for (at in callable_word_positions(source, name)) {
+pn callable_extract_function(source: string, name: string) string^ {
+    for (at in callable_word_positions(source, name)^) {
         var cursor = callable_skip_space(source, at + len(name))
-        if (slice(source, cursor, cursor + 1) != "(") { continue }
+        if ((slice(source, cursor, cursor + 1) != "(")^) { continue }
         cursor = cursor + 1
-        while (cursor < len(source) and slice(source, cursor, cursor + 1) != ")" and
-               slice(source, cursor, cursor + 1) != ";") { cursor = cursor + 1 }
-        if (slice(source, cursor, cursor + 1) != ")") { continue }
+        while ((cursor < len(source) and slice(source, cursor, cursor + 1) != ")" and
+               slice(source, cursor, cursor + 1) != ";")^) { cursor = cursor + 1 }
+        if ((slice(source, cursor, cursor + 1) != ")")^) { continue }
         cursor = callable_skip_space(source, cursor + 1)
-        if (slice(source, cursor, cursor + 1) != "{") { continue }
+        if ((slice(source, cursor, cursor + 1) != "{")^) { continue }
         var depth = 0
-        while (cursor < len(source)) {
+        while ((cursor < len(source))^) {
             let ch = slice(source, cursor, cursor + 1)
-            if (ch == "{") { depth = depth + 1 }
-            else if (ch == "}") {
+            if ((ch == "{")^) { depth = depth + 1 }
+            else if ((ch == "}")^) {
                 depth = depth - 1
                 if (depth == 0) { return slice(source, at, cursor + 1) }
             }
@@ -86,33 +86,33 @@ pn callable_extract_function(source: string, name: string) string {
 
 pn callable_file_counts(source: string) {
     var counts = {}
-    counts.dispatch_declarations = callable_count_decl(source, "js_dispatch_builtin")
-    counts.dispatch_references = callable_count_call(source, "js_dispatch_builtin")
-    counts.builtin_semantic_cases = callable_count_builtin_cases(source)
-    counts.ambiguous_factory_references = callable_count_call(source, "js_new_function")
-    counts.raw_native_factory_casts = callable_count_factory_casts(source)
+    counts.dispatch_declarations = callable_count_decl(source, "js_dispatch_builtin")^
+    counts.dispatch_references = callable_count_call(source, "js_dispatch_builtin")^
+    counts.builtin_semantic_cases = callable_count_builtin_cases(source)^
+    counts.ambiguous_factory_references = callable_count_call(source, "js_new_function")^
+    counts.raw_native_factory_casts = callable_count_factory_casts(source)^
     counts.pending_new_target_references = callable_count_union(
-        source, ["js_pending_new_target", "js_has_pending_new_target"], false)
+        source, ["js_pending_new_target", "js_has_pending_new_target"], false)^
     counts.special_constructor_references = callable_count_union(
-        source, ["special_ctor", "special_ctor_kind", "special_ctor_name_id"], false)
+        source, ["special_ctor", "special_ctor_kind", "special_ctor_name_id"], false)^
     counts.receiver_name_dispatch_references = callable_count_union(source,
         ["js_string_method", "js_number_method", "js_map_method", "js_array_method",
-         "js_array_method_direct"], true)
+         "js_array_method_direct"], true)^
     counts.host_name_dispatch_references = callable_count_union(source,
         ["js_dom_element_method", "js_document_method", "js_document_proxy_method",
          "js_css_namespace_method", "js_canvas_method_dispatch", "js_classlist_method",
-         "js_dom_implementation_method", "jube_member_call"], true)
+         "js_dom_implementation_method", "jube_member_call"], true)^
     counts.property_miss_synthesis_references = callable_count_union(source,
-        ["js_get_or_create_builtin", "js_lookup_builtin_method_spec"], true)
+        ["js_get_or_create_builtin", "js_lookup_builtin_method_spec"], true)^
     counts.call_migration_flag_references = callable_count_union(source,
-        ["JS_CALL_STATS", "JS_CALL_FORCE_GENERIC", "JS_CALL_LANE_CHECK"], false)
-    counts.array_receiver_state_references = callable_count_word(source, "js_array_method_real_this")
-    counts.legacy_invoke_wrapper_references = callable_count_call(source, "js_invoke_fn")
+        ["JS_CALL_STATS", "JS_CALL_FORCE_GENERIC", "JS_CALL_LANE_CHECK"], false)^
+    counts.array_receiver_state_references = callable_count_word(source, "js_array_method_real_this")^
+    counts.legacy_invoke_wrapper_references = callable_count_call(source, "js_invoke_fn")^
     counts.legacy_class_map_bridge_definitions = callable_count_static_decl(
-        source, "js_construct_entry_legacy_class_map")
+        source, "js_construct_entry_legacy_class_map")^
     counts.legacy_class_map_bridge_references = callable_count_call(
-        source, "js_construct_entry_legacy_class_map")
-    counts.semantic_catalog_id_reads = callable_count_catalog_reads(source)
+        source, "js_construct_entry_legacy_class_map")^
+    counts.semantic_catalog_id_reads = callable_count_catalog_reads(source)^
     var nonzero = {}
     for (name in callable_names) {
         if (counts[name] != null and counts[name] > 0) { nonzero[name] = counts[name] }
@@ -132,28 +132,28 @@ pub pn callable_census() any^ {
         let label = relative_path(path)
         let source = input(path, "text")^
         let file_counts = callable_file_counts(source)
-        if (len(file_counts) > 0) {
+        if ((len(file_counts) > 0)^) {
             by_file[label] = file_counts
             for (name in callable_names) {
                 if (file_counts[name] != null) { counts[name] = counts[name] + file_counts[name] }
             }
         }
-        if (label == "lambda/js/js_runtime.cpp") { runtime_text = source }
-        if (label == "lambda/js/js_mir_expression_lowering.cpp") { lowering_text = source }
+        if ((label == "lambda/js/js_runtime.cpp")^) { runtime_text = source }
+        if ((label == "lambda/js/js_mir_expression_lowering.cpp")^) { lowering_text = source }
         if (label == "lambda/js/js_builtin_catalog.def") { catalog_text = source }
     }
-    counts.builtin_semantic_cases = callable_count_builtin_cases(runtime_text)
+    counts.builtin_semantic_cases = callable_count_builtin_cases(runtime_text)^
     var constructor_source = callable_extract_function(runtime_text, "js_construct_legacy_algorithm")
-    if (constructor_source == "") {
+    if ((constructor_source == "")^) {
         constructor_source = callable_extract_function(runtime_text, "js_new_from_class_object")
     }
-    counts.constructor_name_comparisons = callable_count_constructor_names(constructor_source)
+    counts.constructor_name_comparisons = callable_count_constructor_names(constructor_source)^
     counts.direct_global_catalog_shortcuts = callable_count_call(
-        lowering_text, "js_builtin_global_find")
+        lowering_text, "js_builtin_global_find")^
     counts.direct_global_identity_loads = callable_count_word(
-        lowering_text, "js_get_global_builtin_fn_by_id")
+        lowering_text, "js_get_global_builtin_fn_by_id")^
     let catalog_errors = callable_catalog_errors(catalog_text)
-    counts.catalog_validation_errors = len(catalog_errors)
+    counts.catalog_validation_errors = len(catalog_errors)^
     return {schema: 1,
             roots: ["lambda/js", "lambda/jube", "lambda/module/radiant", "radiant"],
             counts: counts, ratchet_max: callable_limits, by_file: by_file,

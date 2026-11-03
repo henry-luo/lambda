@@ -35,7 +35,7 @@ pub fn system(system,parts,profile) array^ {
     [*[for (st in system.staffs,i in 0 to 4) d.line(system.left,st.y+float(i),system.left+system.width,st.y+float(i),profile.rules.staffLineThickness)],
      d.line(system.left,system.staffs[0].y,system.left,system.staffs[len(system.staffs)-1].y+4.0,profile.rules.thinBarlineThickness),
      *[for (i,p in parts) d.text(profile,p.label,system.left-2.0,(grouped[i][0].y+grouped[i][len(grouped[i])-1].y+4.0)/2,1.4,"end")^],
-     *[for (staffs in grouped where len(staffs)>1) (
+     *[for (staffs in grouped where ((len(staffs)>1) ^ { false })) (
         let top=staffs[0].y,
         let bottom=staffs[len(staffs)-1].y+4.0,
         let metric=f.glyph(profile,"brace")^,
@@ -55,12 +55,12 @@ pub fn system(system,parts,profile) array^ {
             *barline(bar,if (bar.repeat=="forward") m.x+m.placed_prefix-1.1 else m.x,st.y,profile)^]]],
      *[for (dir in system.directions) *direction(dir,profile)^]]
 }
-pub fn warnings(score) array => [
-    *[for (e in score.events,a in e.notation.articulations where not contains(["accent","staccato","tenuto","staccatissimo","strong-accent"],a))
+pub fn warnings(score) array^ => [
+    *[for (e in score.events,a in e.notation.articulations where ((not contains(["accent","staccato","tenuto","staccatissimo","strong-accent"],a)) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported articulation "++a,e.id)],
     *[for (p in score.parts,m in p.measures,dir in m.directions,e in dir.entries where
-        not contains(["words","rehearsal","metronome","dynamics","wedge","segno","coda"],e.kind) or e.kind=="dynamics" and dynamics[e.value]==null)
+        ((not contains(["words","rehearsal","metronome","dynamics","wedge","segno","coda"],e.kind) or e.kind=="dynamics" and dynamics[e.value]==null) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported direction "++e.kind,p.id++"/"++m.label)],
-    *[for (p in score.parts,m in p.measures,b in m.barlines where b.location=="middle" or
-        not contains(["regular","none","light-light","light-heavy","heavy-light","heavy-heavy","heavy"],b.style))
+    *[for (p in score.parts,m in p.measures,b in m.barlines where ((b.location=="middle" or
+        not contains(["regular","none","light-light","light-heavy","heavy-light","heavy-heavy","heavy"],b.style)) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported barline style or middle placement",p.id++"/"++m.label)]]

@@ -11,7 +11,7 @@ import three: ~~.mod_botanical3d
     [p == B.generate(2026,r.id,4,25)^,p != B.generate(2027,r.id,4,25)^,
      p != B.generate(2026,r.id,5,25)^,p != B.generate(2026,r.id,4,40)^,
      len([for (part in p.solids where part.component == "blade") part]) == len(p.tips),
-     len([for (part in S.pieces(p,false,false) where part.role == "leaf" or part.role == "flower") part]) == 0,
+     len([for (part in ((S.pieces(p,false,false)) ^ { [] }) where part.role == "leaf" or part.role == "flower") part]) == 0,
      scene.validate(three.viewport(p,true,true))^])];
 
 [for (kind in ["oak-leaf","fan-leaf"])
@@ -26,4 +26,4 @@ let garden = B.command(st,"group-garden");
 let olive = B.generate(2026,"olive",4,25)^
 let berries = B.generate(2026,"berryspray",4,25)^;
 [olive.detail_count > 0,berries.detail_count > olive.detail_count,
- len([for (p in S.pieces(olive,true,false) where p.role == "flower") p]) == 0]
+ len([for (p in ((S.pieces(olive,true,false)) ^ { [] }) where p.role == "flower") p]) == 0]

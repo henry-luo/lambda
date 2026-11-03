@@ -48,10 +48,10 @@ pub pn end_resize(handoff) {
 pub pn update(ribbon,tab,labels,force=false) {
     if (ribbon==null) { return }
     let all = groups(ribbon)
-    if (len(all)==0) { return }
+    if ((len(all)==0)^) { return }
     let box = dom.bounding_box(ribbon)
     let key = string(box.width) ++ ":" ++ tab ++ ":" ++ labels
-    if (not force and dom.get_attribute(ribbon,"data-layout-key")==key) { return }
+    if ((not force and dom.get_attribute(ribbon,"data-layout-key")==key)^) { return }
     let refresh = force or dom.get_attribute(ribbon,"data-measured-tab")!=tab or
         dom.get_attribute(ribbon,"data-measured-labels")!=labels or
         any([for (group in all) dom.get_attribute(group,"data-natural-width")==null])
@@ -65,7 +65,7 @@ pub pn update(ribbon,tab,labels,force=false) {
             outer[i] - (float(dom.get_attribute(group,"data-natural-spacing")) ^ {outer[i]})]
     for (i,group in all) {
         if (refresh or dom.get_attribute(group,"data-natural-spacing")!=string(outer[i])) {
-            dom.set_attribute(group,"data-natural-width",string(natural[i]))
+            dom.set_attribute(group,"data-natural-width",string(natural[i])^)
             dom.set_attribute(group,"data-natural-spacing",string(outer[i]))
         }
     }
@@ -77,7 +77,7 @@ pub pn update(ribbon,tab,labels,force=false) {
     var used = sum(natural)
     var index = len(all)-1
     var planned = []
-    while (used > available and index >= 0) {
+    while ((used > available and index >= 0)^) {
         if (compact[index] < natural[index]) {
             planned = [*planned,index]
             used = used - natural[index] + compact[index]
@@ -91,8 +91,8 @@ pub pn update(ribbon,tab,labels,force=false) {
         if (not refresh) close(ribbon)
         for (i,group in all) {
             let was_compact = dom.get_attribute(group,"data-compact")=="true"
-            if (contains(planned,i) and not was_compact) dom.set_attribute(group,"data-compact","true")
-            else if (not contains(planned,i) and was_compact) dom.remove_attribute(group,"data-compact")
+            if ((contains(planned,i) and not was_compact)^) dom.set_attribute(group,"data-compact","true")
+            else if ((not contains(planned,i) and was_compact)^) dom.remove_attribute(group,"data-compact")
             if (dom.get_attribute(group,"data-align")!=null) dom.remove_attribute(group,"data-align")
         }
     }
@@ -110,7 +110,7 @@ pub pn toggle(trigger) {
     if (group==null or dom.get_attribute(group,"data-compact")!="true") { return }
     let was_open = dom.get_attribute(group,"data-open")=="true"
     let ribbon = dom.closest(group,".ribbon-groups,.editor-ribbon")
-    close(ribbon)
+    close(ribbon)^
     if (was_open) { return }
     dom.set_attribute(group,"data-open","true")
     dom.set_attribute(trigger,"aria-expanded","true")

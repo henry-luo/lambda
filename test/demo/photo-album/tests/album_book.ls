@@ -17,9 +17,9 @@ let small = B.plan(lib, slice(lib.order, 0, 5), "Five");
 {
     pages: len(pages),
     leaves: [len(book.leaves), book.leaves[0], book.leaves[1], book.leaves[last]],
-    kinds: [for (p in slice(pages, 0, 12)) p.kind],
-    templates: [for (p in slice(photo_pages, 0, 12)) p.template],
-    no_adjacent_repeat: all([for (i in 1 to (len(pages) - 1) where pages[i].kind == "photos" and pages[i - 1].kind == "photos")
+    kinds: [for (p in ((slice(pages, 0, 12)) ^ { [] })) p.kind],
+    templates: [for (p in ((slice(photo_pages, 0, 12)) ^ { [] })) p.template],
+    no_adjacent_repeat: all([for (i in ((1 to (len(pages) - 1)) ^ { [] }) where pages[i].kind == "photos" and pages[i - 1].kind == "photos")
         pages[i].template != pages[i - 1].template]),
     no_repeat_across_chapters: all([for (i in 1 to (len(photo_pages) - 1)) photo_pages[i].template != photo_pages[i - 1].template]),
     chapters_on_right: [for (i, p in pages where p.kind == "chapter") i % 2 == 0],
@@ -32,7 +32,7 @@ let small = B.plan(lib, slice(lib.order, 0, 5), "Five");
     choose: [B.choose([1.5, 1.5], "", 0).key, B.choose([0.7, 0.7], "two-portraits", 1).key,
         B.choose([1.5], "one-landscape", 0).key, B.choose([0.7, 1.5, 1.5, 1.0], "", 2).key],
     fits: [B.fits(B.TEMPLATES[2], [0.7, 0.66]), B.fits(B.TEMPLATES[2], [1.5, 0.7]), B.fits(B.TEMPLATES[7], [1.0, 1.0, 1.0])],
-    small: [len(small.pages), [for (p in small.pages) p.kind], len(small.leaves)],
+    small: [len(small.pages), [for (p in ((small.pages) ^ { [] })) p.kind], len(small.leaves)],
     spreads: [for (t in [0, 1, 2, 3, len(small.leaves)]) [B.spread_label(small, t), B.spread(small, t)]],
     spread_photo: [B.spread_photo(small, 0), B.spread_photo(small, 2)],
     turned_for_page: [B.turned_for_page(0), B.turned_for_page(1), B.turned_for_page(2), B.turned_for_page(5)],

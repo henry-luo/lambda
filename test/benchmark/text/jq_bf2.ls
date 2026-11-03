@@ -23,12 +23,12 @@ fn cell_add(v, delta: int) int => ((v or 0) + delta) % 256
 fn is_positive(v) bool => v != null and v > 0
 
 // assign(i; f): .[i] |= f inside the array, else pad with nulls and append f(null)
-pn assign_cell(memory: array, i: int, delta: int) array {
+pn assign_cell(memory: array, i: int, delta: int) array^ {
     var out: array = memory
     if (i >= len(out)) {
-        while (len(out) <= i) { out.push(null) }
+        while (len(out) <= i) { out.push(null)^ }
     }
-    out[i] = cell_add(out[i], delta)
+    out[i] = cell_add(out[i], delta)^
     out
 }
 
@@ -66,34 +66,34 @@ pn backward_loop(s: BfState) BfState^ {
 pn bf(program: string) string^ {
     var s: BfState = {input: program, cursor: 0, memory: [], pointer: 0, depth: 0,
         output: [], saved_depth: null}
-    while (not (s.cursor >= len(s.input))) {
+    while ((not (s.cursor >= len(s.input)))^) {
         let c: string = char_at(s)^
-        s.cursor = s.cursor + 1
-        if (c == ">") { s.pointer = s.pointer + 1 }
+        s.cursor = (s.cursor + 1)^
+        if (c == ">") { s.pointer = (s.pointer + 1)^ }
         else if (c == "<") {
-            s.pointer = s.pointer - 1
-            if (s.pointer < 0) { raise error("negative pointer") }
+            s.pointer = (s.pointer - 1)^
+            if ((s.pointer < 0)^) { raise error("negative pointer") }
         }
-        else if (c == "+") { s.memory = assign_cell(s.memory, s.pointer, 1) }
-        else if (c == "-") { s.memory = assign_cell(s.memory, s.pointer, 255) }
-        else if (c == ".") { s.output = s.output ++ [cell_at(s.memory, s.pointer)] }
+        else if (c == "+") { s.memory = assign_cell(s.memory, s.pointer, 1)^ }
+        else if (c == "-") { s.memory = assign_cell(s.memory, s.pointer, 255)^ }
+        else if (c == ".") { s.output = (s.output ++ [cell_at(s.memory, s.pointer)])^ }
         else if (c == ",") { raise error(", is not implemented") }
         else if (c == "[") {
-            s.depth = s.depth + 1
-            if (not is_positive(cell_at(s.memory, s.pointer))) {
-                s.saved_depth = s.depth
+            s.depth = (s.depth + 1)^
+            if ((not is_positive(cell_at(s.memory, s.pointer)))^) {
+                s.saved_depth = s.depth^
                 s = skip_loop(s)^
             }
         }
         else if (c == "]") {
-            s.depth = s.depth - 1
-            s.cursor = s.cursor - 1
-            s.saved_depth = s.depth
+            s.depth = (s.depth - 1)^
+            s.cursor = (s.cursor - 1)^
+            s.saved_depth = s.depth^
             s = backward_loop(s)^
         }
     }
     // .output | implode
-    join([for (cp in s.output) chr(cp)], "")
+    join([for (cp in ((s.output) ^ { [] })) chr(cp)], "")
 }
 
 pn main() {
@@ -108,7 +108,7 @@ pn main() {
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 478890292) {
+    if ((checksum == 478890292)^) {
         print("jq_bf: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_bf: FAIL checksum=" ++ string(checksum) ++ "\n")

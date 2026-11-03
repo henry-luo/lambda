@@ -33,11 +33,11 @@ pub fn lookup(rows, id) {
     let position=lower_bound(rows,id,0,len(rows));
     if (position<len(rows) and rows[position].id==id) rows[position] else null
 }
-pub fn event(index, id) {
+pub fn event(index, id) any^ {
     let row=lookup(index.ids,id);
     if (row==null) null else index.events[row.position]
 }
-pub fn group(index, id) => lookup(index.groups,id)
+pub fn group(index, id) any^ => lookup(index.groups,id)
 
 fn outside(node, domain) => node==null or node.low!=null and node.low>domain.to
     or node.high!=null and node.high<domain.from

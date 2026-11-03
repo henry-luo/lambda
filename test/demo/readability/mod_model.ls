@@ -36,7 +36,7 @@ pub fn page(st, pages) => pages[st.at]
 pub fn reading(st, pages) => pages[st.at].id in st.reader
 
 pub fn select_tab(st, pages, at) => if (at >= 0 and at < len(pages)) {*: st, at: at} else st
-pub fn toggle(st, pages) {
+pub fn toggle(st, pages) any^ {
     let id = pages[st.at].id;
     if (not pages[st.at].readerable) st
     else if (contains(st.reader, id)) {*: st, reader: [for (other in st.reader where other != id) other]}
@@ -46,7 +46,7 @@ pub fn theme(st, choice) => if (contains(THEMES, choice)) {*: st, theme: choice}
 pub fn resize_text(st, step) => {*: st, size: min(max(st.size + step, 0), len(SIZES) - 1)}
 
 // a toolbar or reader-settings button press: `command` and `value` come from its data attributes
-pub fn action(st, pages, command, value) =>
+pub fn action(st, pages, command, value) any^ =>
     if (command == "tab") select_tab(st, pages, int(value))
     else if (command == "reader") toggle(st, pages)
     else if (command == "theme") theme(st, value)
@@ -56,16 +56,16 @@ pub fn action(st, pages, command, value) =>
 
 // browser keys: Cmd/Ctrl+Shift+R toggles reader view (as in Safari), Escape leaves it,
 // Cmd/Ctrl+1-9 picks a tab; any other key returns `st` unchanged
-pub fn shortcut(st, pages, key, primary, shift) =>
+pub fn shortcut(st, pages, key, primary, shift) any^ =>
     if (primary and shift and lower(key) == "r") toggle(st, pages)
     else if (key == "Escape" and reading(st, pages)) toggle(st, pages)
     else if (primary and not shift and key is \("1" to "9")) select_tab(st, pages, int(key) - 1)
     else st
 
 // "14 July 2026" from an ISO 8601 timestamp, or null
-pub fn date_label(stamp) => if (stamp is \("\d"{4} "-" "\d"{2} "-" "\d"{2} ...))
+pub fn date_label(stamp) any^ => if (stamp is \("\d"{4} "-" "\d"{2} "-" "\d"{2} ...))
     string(int(slice(stamp, 8, 10))) ++ " " ++ MONTHS[int(slice(stamp, 5, 7)) - 1] ++ " " ++ slice(stamp, 0, 4)
     else null
-pub fn words(text) int => len([for (word in split(text, \("\s"+)) where word != "") word])
+pub fn words(text) int^ => len([for (word in ((split(text, \("\s"+))) ^ { [] }) where word != "") word])
 // reading time at 220 words a minute, never under one minute
-pub fn minutes(article) int => max(1, int(ceil(words(article.text) / 220)))
+pub fn minutes(article) int^ => max(1, int(ceil(words(article.text) / 220)))

@@ -15,7 +15,7 @@ let MAX_SYMBOLS = 100000
 // module returns its replacement (a parametric rule). A symbol without a rule stays.
 fn stochastic(body) bool => body is array and len(body) > 0 and all([for (o in body) o is array and len(o) == 2 and o[0] is number])
 
-fn choose(body, k, generation: int, at: int) =>
+fn choose(body, k, generation: int, at: int) any^ =>
     if (stochastic(body)) rng.weighted(rng.at(rng.at(k, generation), at), body |> ~[1], body |> ~[0]) else body
 
 pub fn modules_of(body) array => if (body is string) [for (i in 0 to (len(body) - 1)) slice(body, i, i + 1)] else body
@@ -73,7 +73,7 @@ pub fn derive(axiom,rules,order,options={}) array^ {
     derive_from(source,rules,order,k,0,limit)^
 }
 
-fn grow(source, rules, k, generation: int, order: int) {
+fn grow(source, rules, k, generation: int, order: int) any^ {
     if (generation >= order) source
     else (let next = if (source is string) rewrite_text(source, rules, k, generation) else rewrite_modules(source, rules, k, generation)^,
         if (len(next) > MAX_SYMBOLS) error("procart.lsystem: expansion exceeds " ++ string(MAX_SYMBOLS) ++ " symbols")
@@ -97,7 +97,7 @@ fn blocks(syms, depth, closer, lo: int, hi: int, base: int) array =>
     [for (i in lo to (hi - 1) where depth[i] == base and syms[i] != "]")
         if (syms[i] == "[") {block: blocks(syms, depth, closer, i + 1, closer[string(i)], base + 1)} else i]
 
-fn act(t, i: int, x: float, y: float, heading: float, level: int) array {
+fn act(t, i: int, x: float, y: float, heading: float, level: int) array^ {
     let s = t.syms[i]
     let p = t.params[i];
     if (contains(t.draw, s) or contains(t.move, s))
@@ -111,7 +111,7 @@ fn act(t, i: int, x: float, y: float, heading: float, level: int) array {
 }
 
 // returns [x, y, heading, segments] after items[lo, hi).
-fn walk(t, items, lo: int, hi: int, x: float, y: float, heading: float, level: int) array {
+fn walk(t, items, lo: int, hi: int, x: float, y: float, heading: float, level: int) array^ {
     if (lo >= hi) [x, y, heading, []]
     else if (hi - lo == 1)
         (let item = items[lo], if (item is map) [x, y, heading, walk(t, item.block, 0, len(item.block), x, y, heading, level + 1)[3]]
@@ -156,7 +156,7 @@ pub fn turtle(sequence, options = {}) map^ {
                 raise error("procart.lsystem.turtle: widths and decay must be finite and nonnegative")
             else (let depth = if (len(done[3]) == 0) 0 else max([for (s in done[3]) s[4]]),
                 // depth taper uses running products, preserving the exact-tier width metadata.
-                let widths = math.cumprod([float(options.width), *[for (i in 1 to depth) float(decay)]]),
+                let widths = math.cumprod([float(options.width), *[for (i in ((1 to depth) ^ { [] })) float(decay)]]),
                 {segments: [for (s in done[3]) [*s, widths[s[4]]]], end: [done[0], done[1], done[2]]}))
     }
 }

@@ -8,12 +8,12 @@ pn computed() int {
 }
 
 pn update(var record: State) {
-    record.value = computed()
+    record.value = computed()^
     record.flag = true
 }
 
 pn main() {
     var record: State = {value: 1, flag: false}
-    update(record)
+    update(record)^
     print([record.value, record.flag])
 }

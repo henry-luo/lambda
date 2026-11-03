@@ -10,7 +10,7 @@ let MAX_PER_FRAME = 6
 
 pub fn initial() => {enabled: true, failed: false, voices: [], tones: {}, played: 0, last: ""}
 pub fn status(sound) => if (sound.failed) "unavailable" else if (sound.enabled) "on" else "off"
-fn key_of(n) => n.voice ++ ":" ++ string(n.note)
+fn key_of(n) any^ => n.voice ++ ":" ++ string(n.note)
 
 pub pn silence(owner, sound) {
     bank.close(owner,sound.voices)
@@ -29,7 +29,7 @@ pn cached(sound, n) {
 
 // synthesizes at most one missing tone of `notes`
 pub pn warm(sound, notes) {
-    let missing = [for (n in notes where sound.tones[key_of(n)] == null) n]
+    let missing = [for (n in notes where ((sound.tones[key_of(n)] == null) ^ { false })) n]
     if (len(missing) == 0) { return sound }
     return cached(sound, missing[0])
 }
@@ -37,7 +37,7 @@ pub pn warm(sound, notes) {
 pn play_one(owner, sound, n) {
     let ready = cached(sound, n)
     let started=bank.start(owner,ready.voices,ready.tones[key_of(n)],n.gain,MAX_VOICES)
-    if (started.failed) { return {*:ready,voices:[],failed:true} }
+    if ((started.failed)^) { return {*:ready,voices:[],failed:true} }
     return {*:ready,voices:started.voices,played:ready.played+1,last:key_of(n)}
 }
 
@@ -45,7 +45,7 @@ pn play_one(owner, sound, n) {
 pub pn play(owner, sound, notes) {
     if (not sound.enabled or sound.failed or len(notes) == 0) { return sound }
     var out = sound
-    for (n in take(notes, MAX_PER_FRAME)) {
+    for (n in ((take(notes, MAX_PER_FRAME)) ^ { [] })) {
         out = play_one(owner, out, n)
         if (out.failed) { return out }
     }

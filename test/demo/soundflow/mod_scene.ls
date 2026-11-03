@@ -2,7 +2,7 @@
 // and the bright tips that replay each ribbon. Rendering is pure (S12.1.3).
 import m: .mod_model
 
-fn num(v) => string(round(v * 10) / 10)
+fn num(v) any^ => string(round(v * 10) / 10)
 fn ink(voice) => m.VOICES[voice].ink
 let LINE = "#4f4f4f"
 let RIM = "#8a8a8a"
@@ -18,7 +18,7 @@ fn sound_of(st, j) {
 }
 // a sounding string swings about its middle; the quadratic's control point
 // sits twice as far out as the curve
-fn string_path(s, r) {
+fn string_path(s, r) any^ {
     let l = max(1.0, m.length(s))
     let swing = if (r == null) 0.0 else 18.0 * r.gain * r.env * math.sin(r.age * 0.075)
     let cx = (s.a.x + s.b.x) / 2 - (s.b.y - s.a.y) / l * swing
@@ -44,7 +44,7 @@ fn string_view(st, j) {
 // ---- strokes
 
 // without the wide ribbons, the trail carries the voice's colour
-fn tip_view(k, at_ms, ribbons) {
+fn tip_view(k, at_ms, ribbons) any^ {
     let p = m.phase(k, at_ms)
     let head = m.tip(k, p)
     if (head == null) null

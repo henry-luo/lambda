@@ -4,4 +4,4 @@ pub grammar arith {
     num   := "\d"+
     space := " "*
 }
-pub fn sum_tree(text: string) => parse(text, arith)^
+pub fn sum_tree(text: string) any^ => parse(text, arith)^

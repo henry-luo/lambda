@@ -3,17 +3,22 @@
 Errors are values. A handler recovers locally, postfix `^` forwards an error,
 and an error-admitting receiver retains the outcome.
 
-**Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v2 in
+**Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v3 in
 [Formal Semantics](Lambda_Formal_Semantics.md).
 
-**Implementation status, 2026-11-02:** value-producing procedure handlers,
-`or^`, named filters/chains, and success-arm removal are implemented in the
-error-handling worktree. General ordinary-error unification, inferred receiving
-acknowledgement, continued deferred initializer/reassignment outcomes, and
-`T^E` parser retirement remain pending. The type/admission rules below describe
-the ratified design; executable examples use currently supported explicit
-outcome annotations. Progress is in the
-[implementation plan](../vibe/impl/Lambda_Impl_Type_Error_Handling.md).
+**Implementation status, 2026-11-03:** M1–M8 implement the ratified rules,
+including ordinary-error unification, binding acknowledgement, deferred
+initializer/reassignment outcomes, normal admission through error unions, and
+handler syntax/results. Authored package/demo migration and the Lambda, MIR,
+GC, input and Test262 gates are qualified. The user waived the complete parity
+sweep and interpreter-manifest refresh on 2026-11-03; the manifests retain their
+last qualified contents, and no final parity pass is claimed. Exact results and
+limits are in the
+[production qualification record](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
+Experimental Lambda MIR MVP adaptation is deferred separately
+([LR01-22](../vibe/Lambda_Issue_Ledger.md#lr01-22)).
+General `fn`-local control, including explicit `return` in `fn`, is qualified
+separately in the [completed extension](<../vibe/impl/Lambda_Impl_Function_Local_State (done).md>).
 
 Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
 [Expressions](Lambda_Expr_Stam.md), and [System functions](Lambda_Sys_Func.md).
@@ -41,9 +46,8 @@ result makes it the enclosing callable's outcome, subject to its return contract
 
 `raise err` completes the enclosing callable early. An existing error is
 forwarded unchanged; a non-error operand is normalized by `error(...)` first
-(S7.4.6v2). In a procedure this has the same error outcome as returning the
-normalized error. In a pure function it supplies early completion without
-introducing a `return` statement.
+(S7.4.6v3). In a procedure this has the same error outcome as returning the
+normalized error. The same early error completion applies in a pure function.
 
 ```lambda
 fn checked(fail: bool) int^ {
@@ -53,15 +57,15 @@ fn checked(fail: bool) int^ {
 checked(true) ^ { ^.message }
 ```
 
-The unified design admits `raise` whenever the return contract admits that
-error, including an ordinary union; the implementation still needs its
-spelling-dependent checks removed.
+`raise` is permitted whenever the return contract admits that error, including
+an ordinary union. Raising and returning an error have the same admission and
+acknowledgement requirements.
 
 <a id="error-return-types-te"></a>
 
 ## Outcome Types
 
-S7.4.2v3 uses ordinary unions for particular error outcomes:
+S7.4.2v4 uses ordinary unions for particular error outcomes:
 
 | Type | Admitted outcome |
 |---|---|
@@ -75,10 +79,19 @@ S7.4.2v3 uses ordinary unions for particular error outcomes:
 errors. Aliases preserve admission: naming `error` does not create a nominal
 error subtype. An ordinary map alternative stays a map.
 
-The typed-caret form `T^E` is retired by design; its parser removal is pending.
+The typed-caret form `T^E` is rejected; use `T | E` or broad `T^`.
+
+Adding an error arm preserves the normal type's admission (S11.4.6v4).
+`let x: float^ = 7` therefore binds `7.0`, just as `float` does. Arrays still
+receive their full certificates, named records their required layout, and
+admitted errors retain their original payload. The same rule applies to
+particular-error unions and to arguments, reassignment and returns.
 There is no implicit broad ordinary-error allowance in a particular union.
 A function must handle, convert, or disclose ordinary errors outside its
 contract (S11.4.2v3). Exceptional system faults retain S7.11.
+Constrained annotations currently enforce their base only (S11.4.6v4);
+full predicate enforcement remains separate. Filtered handlers use the ordinary
+runtime type/pattern test to select recovery.
 
 ### Error Forms in Parameters and Let Bindings
 
@@ -102,14 +115,23 @@ reassignment share the same admission decision:
 An inferred receiver retains possible errors; inference imprecision alone does
 not require a warning. A deferred failure keeps the declared target strict,
 while the effective type includes error. Reassignment replaces the old value.
-**Continued deferred outcomes and the wider acknowledgement checks are still
-pending in the runtime.** Typed element/field stores retain their own contract.
+Typed element/field stores retain their own contract.
+
+```lambda
+fn opaque(value) => value
+let value: int = opaque("bad") // E241 warning; runtime check binds an error
+let recovered = value ^ { 42 };
+[value is error, recovered]    // [true, 42]
+```
+
+A handler on the initializer runs before annotation validation. To recover
+that later failure, handle the bound outcome as above (S7.7.7v4).
 
 ## Error Handling at Call Sites
 
 | Form | Purpose |
 |---|---|
-| `let outcome: T^ = f()` | Retain the success/error outcome. |
+| `let outcome = f()` / `let outcome: T^ = f()` | Retain the success/error outcome. |
 | `f() ^ { fallback }` | Recover from an error and preserve non-errors. |
 | `f() or^ { fallback }` | Recover from an error or a falsy value. |
 | `f() ^E { recovery }` | Handle matching ordinary errors; retain unmatched ones. |
@@ -143,7 +165,7 @@ total(false) ^ { 0 }
 A handler evaluates its operand once. Non-errors pass through unchanged,
 including `null`, `false`, and empty text. On error, its body runs with `^`
 bound to that error; the body's normal result becomes the handler result
-(S7.6.1v8). A fresh body error remains an outcome for the actual receiver.
+(S7.6.1v9). A fresh body error remains an outcome for the actual receiver.
 `e ^ { ^ }` preserves the error; it does not soften it or prove success.
 
 ```lambda
@@ -189,11 +211,11 @@ pn main() {
 }
 ```
 
-An explicit `return` inside the handler exits the enclosing procedure. Ordinary
+An explicit `return` inside the handler exits the enclosing callable. Ordinary
 `raise`, propagation, and permitted loop-control transfers keep their targets.
 A final normal result replaces earlier results, including with `null`;
 declarations produce no result and leave the previous result intact
-(S12.1.2v2). Scope cleanup and native system faults retain their separate rules.
+(S12.1.2v3). Scope cleanup and native system faults retain their separate rules.
 
 ### Combined Error and Falsy Fallback
 
@@ -242,10 +264,20 @@ cannot enter a clean receiver without recovery or valid narrowing. A declared
 return must admit its possible ordinary outcomes; unannotated pure functions
 retain their non-error default (S11.4.2v3).
 
-The implementation still diagnoses existing enforcing calls with E228 and
-incompatible function returns with E208. Generalizing those checks to all
-ordinary errors, inferred receivers, and deferred binding warnings is pending.
-A handler never grants acknowledgement to unrelated calls in its body or scope.
+A view body is a pure transformation (S12.1.3v2) and follows the same return
+rules. An unannotated view excludes error; an explicit `any^` or `T^` admits
+it. An `on` handler has its own procedure outcome and does not acknowledge
+errors in the enclosing view body.
+
+If return admission is deferred, the call also carries its possible validation
+error (S11.4.1v5), as it does for failed parameter admission (S7.7.3). Capture
+that outcome or propagate it before using a clean value. The annotation still
+rejects the invalid value; it does not admit that value as its declared type.
+
+E228 diagnoses an unacknowledged ordinary-error outcome, E208 an incompatible
+function return, and E241 deferred local admission. An inferred binding accepts
+and retains its complete outcome. A handler never grants acknowledgement to
+unrelated calls in its body or scope.
 
 ## Error Code Categories
 

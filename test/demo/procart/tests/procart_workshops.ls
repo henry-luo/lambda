@@ -13,7 +13,7 @@ import noise: lambda.procart.noise
      len(R.generate(2026,r.id,4,0)^.parts) > len(m.parts),
      (m.parts |> ~.position) == (colored.parts |> ~.position),m.parts != colored.parts,
      len(m.edges) > len(m.parts),scene.validate(R.viewport(m,true)^)^,
-     all([for (p in m.parts) all([for (v in solids.matrix(p)) v-v == 0.0])])])];
+     all([for (p in m.parts) all([for (v in ((solids.matrix(p)) ^ { [] })) v-v == 0.0])])])];
 
 [for (r in P.CATALOG) (let m = P.generate(2026,r.id,3,0)^,
     [m == P.generate(2026,r.id,3,0)^,m.nodes != P.generate(2027,r.id,3,0)^.nodes,

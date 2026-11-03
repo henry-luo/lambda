@@ -5,19 +5,19 @@ import font_decl: ~~.elements.font_decl
 let OPTION_NAMES = ["numbers", "firstnumber", "stepnumber", "caption", "label",
     "frame", "basicstyle", "breaklines", "showstringspaces", "language"]
 
-pub fn options(node) => util.parse_kv_options(node.options_raw)
+pub fn options(node) any^ => util.parse_kv_options(node.options_raw)
 
-pub fn setting_options(node) => util.parse_kv_options(util.raw_argument(
+pub fn setting_options(node) any^ => util.parse_kv_options(util.raw_argument(
     node, "required", 0))
 
 pub fn merged(defaults, local) => {*:defaults, *:local}
 
-fn preamble_options_at(node, at, command, current) {
+fn preamble_options_at(node, at, command, current) any^ {
     if (at >= len(node)) current
     else preamble_options_at(node, at + 1, command, preamble_options_of(node[at], command, current))
 }
 
-fn preamble_options_of(node, command, current) {
+fn preamble_options_of(node, command, current) any^ {
     if (not (node is element) or string(name(node)) == "document") current
     else if (string(name(node)) == command) merged(current, setting_options(node))
     else preamble_options_at(node, 0, command, current)
@@ -25,9 +25,9 @@ fn preamble_options_of(node, command, current) {
 
 // the key settings of a preamble command (\lstset, fancyvrb's \fvset, minted's
 // \setminted), merged in source order
-pub fn preamble_settings(ast, command) => preamble_options_of(ast, command, {})
+pub fn preamble_settings(ast, command) any^ => preamble_options_of(ast, command, {})
 
-pub fn preamble_options(ast) => preamble_settings(ast, "lstset")
+pub fn preamble_options(ast) any^ => preamble_settings(ast, "lstset")
 
 pub fn issues(options, offset) {
     let unknown = [for (key, value at options
@@ -44,7 +44,7 @@ pub fn issues(options, offset) {
             "Unsupported listings frame", offset)]
     let numerical = [for (key in ["firstnumber", "stepnumber"],
         let value = options[key]
-        where value != null and ((int(value) ^ { null }) == null or int(value) < 1))
+        where ((value != null and ((int(value) ^ { null }) == null or int(value) < 1)) ^ { false }))
         util.diagnostic("invalid-listing-number", "listings", key,
             "Listings line numbers must be positive integers", offset)]
     let highlighting = if (options.language == null) []
@@ -54,7 +54,7 @@ pub fn issues(options, offset) {
     unknown ++ number_style ++ frame_style ++ numerical ++ highlighting
 }
 
-fn basic_style(options) {
+fn basic_style(options) any^ {
     let raw = if (options.basicstyle == null) "" else options.basicstyle
     let size = if (contains(raw, "\\tiny")) "font-size:0.6em;"
         else if (contains(raw, "\\scriptsize")) "font-size:0.7em;"
@@ -76,7 +76,7 @@ fn code_lines(source, options) {
         >]
 }
 
-pub fn render_environment(node, defaults, ordinal) =>
+pub fn render_environment(node, defaults, ordinal) any^ =>
     render_code(if (node.source == null) util.text_of(node) else node.source,
         merged(defaults, options(node)), ordinal)
 

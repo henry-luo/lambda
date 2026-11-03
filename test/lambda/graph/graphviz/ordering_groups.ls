@@ -4,11 +4,11 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn layer_projection(result, ids) => [
-  for (layer in result.layers, node in layer.nodes where contains(ids, node.id)) node.id
+  for (layer in result.layers, node in layer.nodes where ((contains(ids, node.id)) ^ { false })) node.id
 ]
 
 fn item_by_id(items, id) {
@@ -24,7 +24,7 @@ fn on_boundary(cluster, point) =>
     abs(point.y - cluster.y) < 0.001 or
     abs(point.y - (cluster.y + cluster.height)) < 0.001)
 
-fn compute_graph(graph) {
+fn compute_graph(graph) any^ {
   let node_entries = model.node_entries(graph);
   let cluster_entries = model.visual_subgraph_entries(graph);
   layout.compute({
@@ -34,7 +34,7 @@ fn compute_graph(graph) {
     }],
     edges: model.edges(graph), directed: true,
     constraints: [for (constraint in model.constraints(graph),
-      member in children(constraint, "member")) {
+      member in ((children(constraint, "member")) ^ { [] })) {
       kind: constraint.kind, value: constraint.value,
       scope: constraint.scope, member: member.node
     }],
@@ -45,7 +45,7 @@ fn compute_graph(graph) {
   })
 }
 
-fn new_rank_case(enabled) {
+fn new_rank_case(enabled) any^ {
   let source = (parse(
     "digraph Rank { graph [newrank=" ++ string(enabled) ++ "] " ++
       "subgraph cluster_a { a } subgraph cluster_b { b } " ++
@@ -54,9 +54,9 @@ fn new_rank_case(enabled) {
   compute_graph(normalize.normalize(source).graph)
 }
 
-fn rank_of(result, id) => item_by_id(result.nodes, id).rank
+fn rank_of(result, id) any^ => item_by_id(result.nodes, id).rank
 
-fn invalid_source() => parse(
+fn invalid_source() any^ => parse(
   "digraph Invalid { graph [ordering=sideways, compound=true] " ++
     "a [ordering=random] subgraph cluster_known { c } " ++
     "a -> b [lhead=cluster_missing] a -> b [lhead=cluster_known] }",
@@ -87,10 +87,10 @@ let nested_groups = layout.compute({
   ]
 })
 let invalid = normalize.normalize(invalid_source())
-let compound_edge = [for (edge in result.edges where edge.tail_cluster != null) edge][0]
+let compound_edge = [for (edge in ((result.edges) ^ { [] }) where edge.tail_cluster != null) edge][0]
 let source_cluster = item_by_id(result.clusters, "cluster_source")
 let target_cluster = item_by_id(result.clusters, "cluster_target")
-let html_compound = [for (edge in children(html, "edge")
+let html_compound = [for (edge in ((children(html, "edge")) ^ { [] })
   where edge["data-tail-cluster"] != null) edge][0]
 
 {
@@ -111,9 +111,9 @@ let html_compound = [for (edge in children(html, "edge")
     [node.id, node.group, node.ordering]],
   html: [html["data-ordering"], html["data-new-rank"], html["data-compound"],
     [html_compound["data-tail-cluster"], html_compound["data-head-cluster"]],
-    for (node in children(html, "node")
+    for (node in ((children(html, "node")) ^ { [] })
       where node["data-order-group"] != null or node["data-ordering"] != null)
       [node["data-node-id"], node["data-order-group"], node["data-ordering"]]],
   invalid: [invalid.valid,
-    [for (value in invalid.diagnostics) [value.code, value.path]]]
+    [for (value in ((invalid.diagnostics) ^ { [] })) [value.code, value.path]]]
 }

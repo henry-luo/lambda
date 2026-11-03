@@ -32,7 +32,7 @@ pub fn schema_hard_break(schema) =>
   else if (schema.br != null) { 'br' }
   else { 'hard_break' }
 
-fn role_of_node(schema, n) {
+fn role_of_node(schema, n) any^ {
   if (is_text(n)) { 'inline' }
   else if (is_node(n)) {
     let e = entry_for(schema, n.tag)
@@ -54,19 +54,19 @@ fn content_role_at(content, i, n) {
     else { content_role_at(content, i + 1, n) }
   }
 }
-fn content_role(entry) => content_role_at(entry.content, 0, len(entry.content))
+fn content_role(entry) any^ => content_role_at(entry.content, 0, len(entry.content))
 
 // ---------------------------------------------------------------------------
 // Content-expression filtering
 // ---------------------------------------------------------------------------
 
-fn child_satisfies_any(schema, child, terms, i, n) {
+fn child_satisfies_any(schema, child, terms, i, n) any^ {
   if (i >= n) { false }
   else if (child_satisfies_term(schema, child, terms[i])) { true }
   else { child_satisfies_any(schema, child, terms, i + 1, n) }
 }
 
-fn child_satisfies_role(schema, child, role) {
+fn child_satisfies_role(schema, child, role) any^ {
   let r = role_of_node(schema, child)
   if (r == role) { true }
   else if (role == 'inline') { r == 'inline' or r == 'mark' }
@@ -74,7 +74,7 @@ fn child_satisfies_role(schema, child, role) {
   else { false }
 }
 
-fn child_satisfies_term(schema, child, term) {
+fn child_satisfies_term(schema, child, term) any^ {
   if (term.any != null) { child_satisfies_any(schema, child, term.any, 0, len(term.any)) }
   else if (term.tag != null) { is_node(child) and child.tag == term.tag }
   else { child_satisfies_role(schema, child, term.role) }
@@ -83,19 +83,19 @@ fn child_satisfies_term(schema, child, term) {
 fn term_min(term) => if (term.qty == 'plus' or term.qty == 'one') { 1 } else { 0 }
 fn term_max(term, remaining) => if (term.qty == 'one' or term.qty == 'opt') { 1 } else { remaining }
 
-fn skip_to_term(schema, kids, ci, n, term) {
+fn skip_to_term(schema, kids, ci, n, term) any^ {
   if (ci >= n) { ci }
   else if (child_satisfies_term(schema, kids[ci], term)) { ci }
   else { skip_to_term(schema, kids, ci + 1, n, term) }
 }
 
-fn consume_term(schema, kids, ci, n, term, mx, count, acc) {
+fn consume_term(schema, kids, ci, n, term, mx, count, acc) any^ {
   if (ci >= n or count >= mx) { {index: ci, count: count, items: acc} }
   else if (not child_satisfies_term(schema, kids[ci], term)) { {index: ci, count: count, items: acc} }
   else { consume_term(schema, kids, ci + 1, n, term, mx, count + 1, [*acc, kids[ci]]) }
 }
 
-fn filter_terms_at(schema, kids, terms, ti, ci, acc) {
+fn filter_terms_at(schema, kids, terms, ti, ci, acc) any^ {
   if (ti >= len(terms) or ci >= len(kids)) { acc }
   else {
     let term = terms[ti]
@@ -107,7 +107,7 @@ fn filter_terms_at(schema, kids, terms, ti, ci, acc) {
   }
 }
 
-fn filter_children_for_entry(schema, entry, kids) =>
+fn filter_children_for_entry(schema, entry, kids) any^ =>
   if (entry == null or entry.content == null) { kids }
   else { filter_terms_at(schema, kids, entry.content, 0, 0, []) }
 
@@ -127,19 +127,19 @@ fn symbol_in_list(items, value, i, n) {
 }
 
 // `mark` is a {name, value} entry; schema lookups key on its name.
-fn mark_allowed_by_parent(schema, parent_entry, mark) {
+fn mark_allowed_by_parent(schema, parent_entry, mark) any^ {
   if (not mark_is_known(schema, mark.name)) { false }
   else if (parent_entry == null or parent_entry.marks == null or parent_entry.marks == 'all') { true }
   else if (parent_entry.marks == 'none') { false }
   else { symbol_in_list(parent_entry.marks, mark.name, 0, len(parent_entry.marks)) }
 }
 
-fn mark_excludes_all(schema, mark) {
+fn mark_excludes_all(schema, mark) any^ {
   let e = entry_for(schema, mark.name)
   e != null and e.excludes == 'all'
 }
 
-fn keep_allowed_marks_at(schema, parent_entry, marks, i, n, acc) {
+fn keep_allowed_marks_at(schema, parent_entry, marks, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (mark_allowed_by_parent(schema, parent_entry, marks[i])) {
     keep_allowed_marks_at(schema, parent_entry, marks, i + 1, n, [*acc, marks[i]])
@@ -148,25 +148,25 @@ fn keep_allowed_marks_at(schema, parent_entry, marks, i, n, acc) {
   }
 }
 
-fn has_exclusive_mark(schema, marks, i, n) {
+fn has_exclusive_mark(schema, marks, i, n) any^ {
   if (i >= n) { false }
   else if (mark_excludes_all(schema, marks[i])) { true }
   else { has_exclusive_mark(schema, marks, i + 1, n) }
 }
 
-fn keep_exclusive_marks_at(schema, marks, i, n, acc) {
+fn keep_exclusive_marks_at(schema, marks, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (mark_excludes_all(schema, marks[i])) { keep_exclusive_marks_at(schema, marks, i + 1, n, [*acc, marks[i]]) }
   else { keep_exclusive_marks_at(schema, marks, i + 1, n, acc) }
 }
 
-pub fn keep_marks_for(schema, parent_entry, marks) {
+pub fn keep_marks_for(schema, parent_entry, marks) any^ {
   let allowed = keep_allowed_marks_at(schema, parent_entry, marks, 0, len(marks), [])
   if (has_exclusive_mark(schema, allowed, 0, len(allowed))) { keep_exclusive_marks_at(schema, allowed, 0, len(allowed), []) }
   else { allowed }
 }
 
-pub fn keep_marks(schema, marks) => keep_marks_for(schema, null, marks)
+pub fn keep_marks(schema, marks) any^ => keep_marks_for(schema, null, marks)
 
 // ---------------------------------------------------------------------------
 // Attribute filtering/defaulting
@@ -193,7 +193,7 @@ fn value_in_list(items, value, i, n) {
   else { value_in_list(items, value, i + 1, n) }
 }
 
-fn attr_constraints_ok(value, spec) {
+fn attr_constraints_ok(value, spec) any^ {
   if (value == null) { true }
   else if (spec.one_of != null and not value_in_list(spec.one_of, value, 0, len(spec.one_of))) { false }
   else if (spec.min != null and value < spec.min) { false }
@@ -201,22 +201,22 @@ fn attr_constraints_ok(value, spec) {
   else { true }
 }
 
-fn attr_validate_ok(value, spec) =>
+fn attr_validate_ok(value, spec) any^ =>
   if (value == null or spec.validate == null) { true } else { spec.validate(value) }
 
 fn attr_has_default(spec) =>
   spec.default != null or type(spec.default) == string or type(spec.default) == int or type(spec.default) == bool
 
-fn attr_value_ok(value, spec) =>
+fn attr_value_ok(value, spec) any^ =>
   value != null and attr_type_ok(value, spec) and attr_constraints_ok(value, spec) and attr_validate_ok(value, spec)
 
-fn attr_clean_value(value, spec) {
+fn attr_clean_value(value, spec) any^ {
   if (attr_value_ok(value, spec)) { value }
   else if (attr_has_default(spec) and attr_value_ok(spec.default, spec)) { spec.default }
   else { null }
 }
 
-fn normalize_attrs_at(attrs, specs, i, n, acc) {
+fn normalize_attrs_at(attrs, specs, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let spec = specs[i]
@@ -226,14 +226,14 @@ fn normalize_attrs_at(attrs, specs, i, n, acc) {
   }
 }
 
-fn normalize_attrs(entry, attrs) =>
+fn normalize_attrs(entry, attrs) any^ =>
   if (entry.attrs == null) { [] } else { normalize_attrs_at(attrs, entry.attrs, 0, len(entry.attrs), []) }
 
 // ---------------------------------------------------------------------------
 // Recursive coercion
 // ---------------------------------------------------------------------------
 
-fn coerce_one_at(schema, parent_entry, n) {
+fn coerce_one_at(schema, parent_entry, n) any^ {
   if (is_text(n)) { text_marked(n.text, keep_marks_for(schema, parent_entry, n.marks)) }
   else if (not is_node(n)) { null }
   else {
@@ -248,14 +248,14 @@ fn coerce_one_at(schema, parent_entry, n) {
   }
 }
 
-fn coerce_one(schema, n) => coerce_one_at(schema, null, n)
+fn coerce_one(schema, n) any^ => coerce_one_at(schema, null, n)
 
-fn default_block_entry(schema) => entry_for(schema, schema_default_block(schema))
+fn default_block_entry(schema) any^ => entry_for(schema, schema_default_block(schema))
 
-fn filtered_pending(schema, pending) =>
+fn filtered_pending(schema, pending) any^ =>
   coerce_list_at(schema, pending, 'inline', default_block_entry(schema), 0, len(pending), [], [])
 
-fn coerce_list_at(schema, kids, parent_role, parent_entry, i, n, acc, pending) {
+fn coerce_list_at(schema, kids, parent_role, parent_entry, i, n, acc, pending) any^ {
   if (i >= n) {
     if (len(pending) > 0) { [*acc, node(schema_default_block(schema), filtered_pending(schema, pending))] } else { acc }
   } else {
@@ -287,17 +287,17 @@ fn coerce_list_at(schema, kids, parent_role, parent_entry, i, n, acc, pending) {
 // Public API
 // ---------------------------------------------------------------------------
 
-pub fn coerce_to_schema(schema, fragment) => coerce_one(schema, fragment)
+pub fn coerce_to_schema(schema, fragment) any^ => coerce_one(schema, fragment)
 
-pub fn coerce_children(schema, children, parent_role) =>
+pub fn coerce_children(schema, children, parent_role) any^ =>
   coerce_list_at(schema, children, parent_role, null, 0, len(children), [], [])
 
-pub fn coerce_children_for_parent(schema, parent_tag, children) {
+pub fn coerce_children_for_parent(schema, parent_tag, children) any^ {
   let parent_entry = entry_for(schema, parent_tag)
   if (parent_entry == null) { [] }
   else { filter_children_for_entry(schema, parent_entry,
     coerce_list_at(schema, children, content_role(parent_entry), parent_entry, 0, len(children), [], [])) }
 }
 
-pub fn coerce_for_md_block(children) =>
+pub fn coerce_for_md_block(children) any^ =>
   coerce_list_at(md_schema, children, 'block', null, 0, len(children), [], [])

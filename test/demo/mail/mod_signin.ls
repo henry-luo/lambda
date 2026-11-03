@@ -25,5 +25,5 @@ pub pn sign_in_gmail(service, endpoints, client, accounts, options) map^ {
     let info = oauth.userinfo(endpoints, tokens.access_token)^
     let account = model.gmail_account(info.email, info.name, accounts, endpoints)
     let saved = stored(service, account, tokens)^;
-    {account: saved, replaces: len([for (a in accounts where a.id == account.id) a]) > 0}
+    {account: saved, replaces: len([for (a in accounts where (a.id == account.id)^) a]) > 0}
 }

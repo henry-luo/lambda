@@ -12,7 +12,7 @@ let CATALOG = [
  {id:"surfaces",title:"Grain, bark & veins",tag:"05 / SURFACES",note:"Mineral veins follow the stone. Bark follows each branch. Leaf veins run from base to tip.",file:"surfaces.mark"}]
 let DOCUMENTS = map([for (item in CATALOG) (item.id,input(url_resolve(resources.entry_uri()^,"samples/"++item.file),'mark')^)])
 fn description(id) => [for (item in CATALOG where item.id == id) item][0]
-view <grammar_app> state st:(G.initial(DOCUMENTS)^) {
+view <grammar_app>() any^ state st:(G.initial(DOCUMENTS)^) {
  <body <div class:"app grammar-app",
   <header class:"bar",
    <div class:"title",<h1 "Procart"> <span class:"seed", "Grammar / seed "++string(st.seed)>>;

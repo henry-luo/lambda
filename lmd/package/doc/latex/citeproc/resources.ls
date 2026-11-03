@@ -5,7 +5,7 @@ import data: .data
 import bib: ~~.packages.bib_data
 import locale: .locale
 
-fn captured(names, index, base, inline, macros, entries, json_refs, issues, assets) {
+fn captured(names, index, base, inline, macros, entries, json_refs, issues, assets) any^ {
     if (index >= len(names)) {entries: entries, references: json_refs, diagnostics: issues, assets: assets}
     else {
         let resource = names[index]
@@ -44,7 +44,7 @@ fn style_capture(options, base) {
 }
 
 // Overrides and dependent parents use the same local capture contract as styles.
-fn xml_capture(value, base, kind) {
+fn xml_capture(value, base, kind) any^ {
     if (starts_with(trim(value), "<")) {xml: value, assets: [], diagnostics: []}
     else {
         let path = bib.resource_path(value, base)

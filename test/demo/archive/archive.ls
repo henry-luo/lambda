@@ -36,14 +36,14 @@ pn unpack_view(record) {
     if (record == null) { return null }
     let snapshot = ROOT_ABS ++ "/snapshots/" ++ record.id
     let dir = ROOT_ABS ++ "/.view/" ++ record.id
-    if (not exists(dir ++ "/index.html")) {
+    if ((not exists(dir ++ "/index.html"))^) {
         if (exists(dir)) io.delete(dir) ^ { null }
         io.mkdir(dir) ^ { null }
         store.unpack(snapshot ++ "/snapshot.zip", dir) ^ { null }
-        if (exists(snapshot ++ "/media")) store.copy_tree(snapshot ++ "/media", dir ++ "/media") ^ { null }
+        if (exists(snapshot ++ "/media")^) store.copy_tree(snapshot ++ "/media", dir ++ "/media") ^ { null }
     }
     var markdown = null
-    if (exists(dir ++ "/article.md")) { markdown = input(dir ++ "/article.md", 'text') ^ { null } }
+    if (exists(dir ++ "/article.md")^) { markdown = input(dir ++ "/article.md", 'text') ^ { null } }
     return {id: record.id, url: "file://" ++ dir, readable: exists(dir ++ "/readable.html"), markdown: markdown}
 }
 
@@ -51,7 +51,7 @@ pn unpack_view(record) {
 pn submit(st, service) {
     let next = model.request_add(st, CWD)
     var failed = service == null
-    if (next.request != null and service != null) { send(service, next.request) ^ { failed = true } }
+    if ((next.request != null and service != null)^) { send(service, next.request) ^ { failed = true } }
     if (failed and next.request != null) {*: next.state, note: "The archive service is not running."} else next.state
 }
 
@@ -82,8 +82,8 @@ on load(evt) {
     let root = evt.target
     // owned by the document, so it outlives this handler; the handle in state reaches it later (S13.3.1v2)
     service = start(archive.service, [lib, pn (m) => { report(root, m) }], {owner: 'document'})
-    if (len(lib.records) == 0) {
-        for (r in model.sample_requests("file://" ++ CWD ++ "/")) { send(service, {op: 'add', *: r}) ^ { null } }
+    if ((len(lib.records) == 0)^) {
+        for (r in ((model.sample_requests("file://" ++ CWD ++ "/")) ^ { [] })) { send(service, {op: 'add', *: r}) ^ { null } }
     }
     return 'handled'
 }
@@ -91,7 +91,7 @@ on load(evt) {
 on job(evt) {
     let before = st.selected
     st = model.apply_job(st, evt.detail)
-    if (st.selected != before or (evt.detail.type == "done" and evt.detail.snapshot.id == st.selected)) {
+    if ((st.selected != before or (evt.detail.type == "done" and evt.detail.snapshot.id == st.selected))^) {
         // a re-derived snapshot replaces its cache
         if (evt.detail.type == "done") io.delete(ROOT_ABS ++ "/.view/" ++ evt.detail.snapshot.id) ^ { null }
         shown = unpack_view(model.selected(st))
@@ -111,10 +111,10 @@ on click(evt) {
     } else if (name == "rerun") {
         let next = model.request_refresh(st, value)
         st = next.state
-        if (next.request != null and service != null) { send(service, next.request) ^ { null } }
+        if ((next.request != null and service != null)^) { send(service, next.request) ^ { null } }
     } else if (name == "confirm-delete") {
         let id = st.confirm
-        if (id != null and library != null) {
+        if ((id != null and library != null)^) {
             archive.remove(library, id) ^ { null }
             io.delete(ROOT_ABS ++ "/.view/" ++ id) ^ { null }
             st = model.removed(st, id)
@@ -126,7 +126,7 @@ on click(evt) {
     } else {
         let before = st.selected
         st = model.action(st, name, value)
-        if (st.selected != before) { shown = unpack_view(model.selected(st)) }
+        if ((st.selected != before)^) { shown = unpack_view(model.selected(st)) }
     }
     return 'handled'
 }

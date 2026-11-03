@@ -37,7 +37,7 @@ fn branch_specimen(plant, show_leaves, show_blooms) element {
                 else [for (tip in plant.tips) <circle class:"bud",cx:tip.x,cy:-tip.y,r:0.18,fill:plant.recipe.stem>])]> >
 }
 
-fn solid_shape(p) element {
+fn solid_shape(p) element^ {
     let cx = p.position[0]
     let cy = -p.position[1]
     let attributes = {class:p.role,fill:p.color,transform:"translate("++string(cx)++" "++string(cy)++") rotate("++string(-p.rotation[2]*180.0/math.pi)++")"};
@@ -73,7 +73,7 @@ fn solid_shape(p) element {
 }
 
 // new solid recipes use the same organ records as their native 3D counterparts.
-fn illustrated_parts(plant,leaves=true,flowers=true) array {
+fn illustrated_parts(plant,leaves=true,flowers=true) array^ {
     let parts = solids.pieces(plant,leaves,flowers);
     if (plant.recipe.illustration_pitch == null) parts
     else (let m = transforms.matrix([0.0,0.0,0.0],[plant.recipe.illustration_pitch,0.0,0.0],[1.0,1.0,1.0])^,
@@ -89,7 +89,7 @@ fn solid_specimen(plant,show_leaves,show_blooms) element {
         role:"img",'aria-label':plant.recipe.title,
         <ellipse cx:380,cy:490,rx:115,ry:7,fill:"#e0e2cc">
         <g transform:"translate("++string(tx)++" "++string(ty)++") scale("++string(scale)++")",
-            *[for (p in illustrated_parts(plant,show_leaves,show_blooms) order by p.position[2]) solid_shape(p)]>>
+            *[for (p in ((illustrated_parts(plant,show_leaves,show_blooms)) ^ { [] }) order by p.position[2]) solid_shape(p)]>>
 }
 
 pub fn specimen(plant,show_leaves,show_blooms) element =>

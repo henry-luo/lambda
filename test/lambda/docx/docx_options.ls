@@ -1,5 +1,8 @@
 import d: lambda.doc.docx
-fn code(options) int^ => d.convert("test/input/docx/minimal.docx",options) ^ { ^.code }
+fn code(options) int {
+    let converted = d.convert("test/input/docx/minimal.docx", options);
+    if (converted is error) converted.code else -1
+}
 let empty = d.convert("test/input/docx/empty.docx")^
 let preserved = d.convert("test/input/docx/empty.docx",{include_empty_paragraphs:true})^;
 [

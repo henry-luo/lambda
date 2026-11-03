@@ -7,14 +7,14 @@ let CHRSZ = 8  // bits per input character (ASCII)
 let MASK32 = 0xFFFFFFFF
 
 // 32-bit addition relies on u32 wraparound.
-fn safe_add(x: int, y: int) {
+fn safe_add(x: int, y: int) any^ {
     var ux: u32 = x
     var uy: u32 = y
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-fn rol(num: int, cnt: int) {
+fn rol(num: int, cnt: int) any^ {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
@@ -66,7 +66,7 @@ pn str2binb(str: string) {
 }
 
 // Core SHA-1 computation on array of big-endian words
-fn core_sha1(x_in, input_len) {
+fn core_sha1(x_in, input_len) any^ {
     // Copy input to mutable array with padding space
     var x_len = len(x_in)
     var padded_len = shr(input_len + 64, 9)
@@ -107,7 +107,7 @@ fn core_sha1(x_in, input_len) {
             if (j < 16) {
                 w[j] = x[i + j]
             } else {
-                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)
+                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)^
             }
             var t = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
                              safe_add(safe_add(e, w[j]), sha1_kt(j)))
@@ -131,7 +131,7 @@ fn core_sha1(x_in, input_len) {
 }
 
 // Convert array of big-endian words to hex string
-fn binb2hex(binarray) {
+fn binb2hex(binarray) any^ {
     let hex_chars = "0123456789abcdef"
     var result = ""
     var i: int = 0
@@ -165,7 +165,7 @@ pn run() {
 
     var sha1_output = hex_sha1(plain_text)
     var expected = "2524d264def74cce2498bf112bedf00e6c0b796d"
-    if (sha1_output != expected) {
+    if ((sha1_output != expected)^) {
         print("crypto-sha1: FAIL got=" ++ sha1_output ++ " expected=" ++ expected ++ "\n")
         return false
     }
@@ -178,7 +178,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 25) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

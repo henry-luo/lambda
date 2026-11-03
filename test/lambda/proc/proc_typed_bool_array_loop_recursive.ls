@@ -26,7 +26,7 @@ pn choose(values: bool[], depth: int) int {
 }
 
 pn main() {
-    var values: bool[] = fill(8, true)
+    var values: bool[] = fill(8, true)^
     print(choose(values, 1))
     print("\n")
 }

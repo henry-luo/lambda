@@ -6,13 +6,13 @@ pn stable_length(values: int[], text: string) int {
     return before + len(values) + values[0] + len(words)
 }
 
-pn changing_length(var values: int[], text: string) int {
+pn changing_length(var values: int[], text: string) int^ {
     let words = split(text, ",")
     values.push(len(words))
     return len(values) + values[0]
 }
 
-pn resize_local(values: int[], text: string) int {
+pn resize_local(values: int[], text: string) int^ {
     let before = len(values)
     let words = split(text, ",")
     values.push(len(words))

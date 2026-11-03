@@ -42,7 +42,7 @@ match (model.edit_properties({*:st,selected:"e1"},{'from-shape':"n2"}) ^ { ^ }) 
 match (model.edit_properties({*:st,selected:"n2"},{'stroke-width':-1}) ^ { ^ }) { case error: true default: false }
 match (model.edit_properties({*:st,selected:"n2"},{pattern:"unsupported"}) ^ { ^ }) { case error: true default: false }
 let old_node = model.with_attrs(model.make_shape("legacy","rect",0,0,"Old diagram"),{})
-let legacy = model.drawing([{*:old_node,attrs:[for (a in old_node.attrs where contains(['id','kind','x','y','width','height','fill','stroke','stroke-width','variant','label'],a.name)) a]}])
+let legacy = model.drawing([{*:old_node,attrs:[for (a in ((old_node.attrs) ^ { [] }) where ((contains(['id','kind','x','y','width','height','fill','stroke','stroke-width','variant','label'],a.name)) ^ { false })) a]}])
 let restored = model.restore(parse(format({version:1,drawing:legacy},'json'),'json')^)^;
 model.attr(model.lookup(restored,"legacy").shape,"pattern") == "solid"
 model.attr(model.lookup(restored,"legacy").shape,"font-size") == 14

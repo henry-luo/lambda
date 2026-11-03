@@ -4,13 +4,18 @@ type Record = {number: int, real: float, wide: i64, maybe: float?, flag: bool,
     text: string, nums: int[], optional: Child?, dynamic: any}
 
 pn main() {
-    var root: Record = {number: 1, real: -0.0, wide: 9007199254740993i64, maybe: null,
+    let initial: Record = {number: 1, real: -0.0, wide: 9007199254740993i64, maybe: null,
         flag: true, text: "scalar", nums: [1, 2], optional: {value: 3}, dynamic: {items: [4, 5]}}
+    // S7.7.2v2: mutation starts only after the complete record is admitted.
+    var root: Record = initial^
     let before = root
     root.number = 2
     root.nums[0] = 99
     root.optional.value = 9
-    root.dynamic.items[0] = 80
+    // S7.6.3v3/S9.1.2: discharge the open field, then publish its mutated copy.
+    var dynamic = root.dynamic^
+    dynamic.items[0] = 80
+    root.dynamic = dynamic
     print([before.number == 1, root.number == 2, before.nums == [1, 2], root.nums == [99, 2],
         before.optional.value == 3, root.optional.value == 9,
         before.dynamic.items == [4, 5], root.dynamic.items == [80, 5],

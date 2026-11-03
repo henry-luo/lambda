@@ -12,7 +12,7 @@ fn greet(name: string) {
 greet("world")
 
 // 2. Passing through untyped function parameter
-fn relay(x) {
+fn relay(x) any^ {
   greet(x)
 }
 "2. untyped relay"
@@ -46,7 +46,7 @@ toggle(true)
 toggle(false)
 
 // 7. Untyped arg to bool param
-fn relay_bool(x) {
+fn relay_bool(x) any^ {
   toggle(x)
 }
 "7. bool relay"

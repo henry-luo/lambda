@@ -23,7 +23,7 @@ fn swatch_style(selected) => "appearance:none;display:inline-flex;align-items:ce
 fn status_style(mode) => "display:inline-block;flex:0 0 auto;min-width:240px;text-align:right;"++
     "font:12px monospace;font-variant-numeric:tabular-nums;white-space:nowrap;color:"++
     if (mode=="error") "#b42318" else "#64748b"
-fn tree(performance,sheet) element => <section class:"lambda-music-player",'data-state':"ready",
+fn tree(performance,sheet) element^ => <section class:"lambda-music-player",'data-state':"ready",
     style:"display:flex;flex-direction:column;height:100%;max-height:100vh;box-sizing:border-box;overflow:hidden;"++
         "font:13px sans-serif;color:#243247;background:#f1f4f8;padding:16px",
     <div class:"music-controls",style:"background:white;border:1px solid #dce3eb;border-radius:12px;"++
@@ -80,11 +80,11 @@ fn control_value(owner,control) => ((if (control=="mute" or control=="solo")
 pn highlight(owner,session_value,active) {
     let control=dom.query_selector(owner,".music-highlight")
     let color=if (control==null) "red" else dom.get_attribute(control,"data-color") or "red"
-    for (id in session_value.active where not contains(active,id)) {
+    for (id in session_value.active where ((not contains(active,id)) ^ { false })) {
         dom.remove_attribute(session_value.groups[id],"fill")
         dom.remove_attribute(session_value.groups[id],"style")
     }
-    for (id in active where session_value.color!=color or not contains(session_value.active,id)) {
+    for (id in active where ((session_value.color!=color or not contains(session_value.active,id)) ^ { false })) {
         // stems use stroke:currentColor; glyphs and beams use inherited fill.
         dom.set_attribute(session_value.groups[id],"style","color:"++color)
         dom.set_attribute(session_value.groups[id],"fill",color)
@@ -99,7 +99,7 @@ pn choose_highlight(owner,color) {
     for (swatch in dom.query_selector_all(picker,".music-swatch")) {
         let selected=dom.get_attribute(swatch,"data-color")==color
         if (dom.get_attribute(swatch,"aria-pressed")!=string(selected)) {
-            dom.set_attribute(swatch,"aria-pressed",string(selected))
+            dom.set_attribute(swatch,"aria-pressed",string(selected)^)
             dom.set_attribute(swatch,"style",swatch_style(selected))
         }
     }
@@ -141,17 +141,17 @@ pn synchronize(owner,session_value,node) {
     let info=dom.midi_info(owner,session_value.token)
     if (info==null or info.state=="error") {
         status(owner,"Playback unavailable or audio device stopped","error")
-        if (session_value.token!=null) close_session(owner,session_value.token)
+        if (session_value.token!=null) (close_session(owner,session_value.token))^
         return {*:session_value,token:null,frame:0}
     }
     let occurrences=if (info.state=="playing" or info.state=="paused") [for (o in node.performance.occurrences where
         not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o] else []
     let sounding=unique([for (o in occurrences) o.id])
     let active=unique([for (o in occurrences,key in (node.highlight_links[o.id] or [o.id]) where
-        len(node.lyric_passes[key] or [])==0 or contains(node.lyric_passes[key],o.pass)) key])
+        ((len(node.lyric_passes[key] or [])==0 or contains(node.lyric_passes[key],o.pass)) ^ { false })) key])
     let highlighted=highlight(owner,session_value,active)
     if (sounding!=session_value.sounding) follow_notes(owner,session_value,node,sounding)
-    dom.set_state(dom.query_selector(owner,".music-seek"),"value",string(info.position))
+    dom.set_state(dom.query_selector(owner,".music-seek"),"value",string(info.position)^)
     status(owner,state_labels[info.state]++" · "++numbers.format_number(info.position,".1f")++" / "++
         numbers.format_number(info.duration,".1f")++" s · "++string(info.speed)++"×",info.state)
     return {*:highlighted,sounding:sounding,frame:if (info.state=="playing") dom.request_frame(owner,"music_tick") else 0}
@@ -161,16 +161,16 @@ pn handle(node,session_value,evt) {
     if (owner==null) { return session_value }
     var current=session_value
     // a stale instance: the element now presents another score, whose instance closed this session
-    if (current.token!=null and dom.get_attribute(owner,SESSION)!=string(current.token)) { return idle }
+    if ((current.token!=null and dom.get_attribute(owner,SESSION)!=string(current.token))^) { return idle }
     if (evt.type=="render") {
         dom.watch_window(owner,"closerequest",true)
         dom.watch_window(owner,"resize",true)
         let live=dom.get_attribute(owner,SESSION)
         if (current.token==null and live!=null) {
             // the score presented before this one is still playing on this element
-            close_session(owner,int(live))
+            close_session(owner,int(live))^
             dom.set_state(dom.query_selector(owner,".music-seek"),"value","0")
-            status(owner,state_labels.ready,"ready")
+            status(owner,state_labels.ready,"ready")^
         }
         return current
     }
@@ -179,11 +179,11 @@ pn handle(node,session_value,evt) {
         return current
     }
     if (evt.type=="music_follow") {
-        follow_notes(owner,current,node,current.sounding or [])
+        follow_notes(owner,current,node,current.sounding or [])^
         return current
     }
     if (evt.type=="closerequest") {
-        if (current.token!=null) close_session(owner,current.token)
+        if (current.token!=null) close_session(owner,current.token)^
         if (current.frame>0) dom.cancel_frame(owner,current.frame)
         return idle
     }
@@ -197,7 +197,7 @@ pn handle(node,session_value,evt) {
     // native controls own clicks; apply their committed value only on change.
     if (evt.type=="click" and action==null or evt.type=="change" and control==null) { return current }
     if (action=="highlight") {
-        if (choose_highlight(owner,dom.get_attribute(action_target,"data-color"))) { return highlight(owner,current,current.active) }
+        if (choose_highlight(owner,dom.get_attribute(action_target,"data-color"))^) { return highlight(owner,current,current.active) }
         return current
     }
     if (current.token==null) {
@@ -207,17 +207,17 @@ pn handle(node,session_value,evt) {
         let bytes=input(node.soundfont,'binary') ^ { problem=^.message }
         if (problem=="") { token=dom.midi_open(owner,node.performance,bytes) }
         if (token==null) {
-            status(owner,if (problem!="") problem else "Cannot open SoundFont or audio device","error")
+            status(owner,if (problem!="") problem else "Cannot open SoundFont or audio device","error")^
             return current
         }
-        dom.set_attribute(owner,SESSION,string(token))
+        dom.set_attribute(owner,SESSION,string(token)^)
         current={token:token,frame:0,active:[],
             pages:dom.query_selector_all(owner,".lambda-music-page svg"),sounding:[],
             groups:map([for (g in dom.query_selector_all(owner,"[data-highlight-id]")) (dom.get_attribute(g,"data-highlight-id"),g)])}
         // controls edited before opening the device still define the first audible state.
         for (control_name in ["speed","volume","mute","solo","seek"]) {
             if (not dom.midi_command(owner,token,control_name,control_value(owner,control_name))) {
-                close_session(owner,token)
+                close_session(owner,token)^
                 status(owner,"Invalid playback control: "++control_name,"error")
                 return {*:current,token:null}
             }
@@ -227,8 +227,8 @@ pn handle(node,session_value,evt) {
     let command=action or control
     let value=if (action!=null) 0.0 else control_value(owner,control)
     if (not dom.midi_command(owner,current.token,command,value)) {
-        close_session(owner,current.token)
-        status(owner,"Playback command failed","error")
+        close_session(owner,current.token)^
+        status(owner,"Playback command failed","error")^
         return {*:current,token:null,frame:0}
     }
     return synchronize(owner,{*:current,frame:0},node)

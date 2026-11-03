@@ -7,7 +7,7 @@ import T: .mod_templates
 import E: .mod_effects
 import P: .mod_popup
 
-fn px(v, s) => A.n(v * s) ++ "px"
+fn px(v, s) any^ => A.n(v * s) ++ "px"
 
 // the style properties a drag changes; the editor writes them directly while a gesture runs
 pub fn geometry(it, s) => {left: px(it.x, s), top: px(it.y, s), width: px(it.w, s),
@@ -17,19 +17,19 @@ pub fn geometry(it, s) => {left: px(it.x, s), top: px(it.y, s), width: px(it.w, 
     'font-size': if (it.kind == "text") px(it.size, s) else null,
     'letter-spacing': if (it.kind == "text") px(it.spacing, s) else null}
 
-fn box_style(it, s) => (let g = geometry(it, s), "left:" ++ g.left ++ ";top:" ++ g.top ++ ";width:" ++ g.width
+fn box_style(it, s) any^ => (let g = geometry(it, s), "left:" ++ g.left ++ ";top:" ++ g.top ++ ";width:" ++ g.width
     ++ (if (it.kind == "text") "" else ";height:" ++ g.height)
     ++ ";transform:" ++ g.transform
     ++ (if (it.opacity < 1.0) ";opacity:" ++ A.n(it.opacity) else ""))
 
-fn text_style(it, s) => (let g = geometry(it, s), ";font-family:" ++ A.font_of(it.font).family ++ ";font-size:" ++ g['font-size']
+fn text_style(it, s) any^ => (let g = geometry(it, s), ";font-family:" ++ A.font_of(it.font).family ++ ";font-size:" ++ g['font-size']
     ++ ";color:" ++ it.color ++ ";text-align:" ++ it.align ++ ";line-height:" ++ A.n(it.line)
     ++ (if (it.bold) ";font-weight:700" else "") ++ (if (it.italic) ";font-style:italic" else "")
     ++ (if (it.spacing != 0.0) ";letter-spacing:" ++ g['letter-spacing'] else ""))
     ++ (if (it.shadow) ";text-shadow:0 " ++ px(2, s) ++ " " ++ px(8, s) ++ " rgba(0,0,0,.4)" else "")
 
 // a photo sits in a clipping frame; the frame's ring and padding scale with the photo
-fn frame_style(it, s) => (let ring = px(max(3.0, it.w * .025), s),
+fn frame_style(it, s) any^ => (let ring = px(max(3.0, it.w * .025), s),
     if (it.frame == "rounded") "border-radius:" ++ px(it.w * .08, s)
     else if (it.frame == "circle") "border-radius:50%;border:" ++ ring ++ " solid #ffffff"
     else if (it.frame == "arch") "border-radius:" ++ px(it.w * .5, s) ++ " " ++ px(it.w * .5, s) ++ " 0 0"

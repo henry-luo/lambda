@@ -182,7 +182,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
 // Tree walk
 // ============================================================
 
-fn walk_node(node, st) {
+fn walk_node(node, st) any^ {
     if (node == null) st
     else if (node is element) walk_element(node, st)
     else st
@@ -191,8 +191,8 @@ fn walk_node(node, st) {
 // Analysis handlers for commands a package owns (registry CATALOG `commands`),
 // consulted only while that package is active, before the core arms.
 pub let PACKAGE_WALK = {
-    subcaption: {subfigure: (el, st) => walk_subfloat(el, st, "figure"),
-        subtable: (el, st) => walk_subfloat(el, st, "table")},
+    subcaption: {subfigure: (el, st) any^ => walk_subfloat(el, st, "figure"),
+        subtable: (el, st) any^ => walk_subfloat(el, st, "table")},
     caption: {captionof: walk_captionof},
     listings: {lstlisting: walk_listing},
     float: {newfloat: walk_newfloat, floatname: walk_floatname, floatstyle: walk_floatstyle,
@@ -201,35 +201,35 @@ pub let PACKAGE_WALK = {
     algorithmic: {algorithmic: walk_algorithmic},
     subfig: {subfloat: walk_subfig},
     subfigure: {subfigure: walk_subfig},
-    wrapfig: {wrapfigure: (el, st) => walk_float(el, st, "figure"),
-        wraptable: (el, st) => walk_float(el, st, "table")},
-    rotating: {sidewaysfigure: (el, st) => walk_float(el, st, "figure"),
-        sidewaystable: (el, st) => walk_float(el, st, "table")},
+    wrapfig: {wrapfigure: (el, st) any^ => walk_float(el, st, "figure"),
+        wraptable: (el, st) any^ => walk_float(el, st, "table")},
+    rotating: {sidewaysfigure: (el, st) any^ => walk_float(el, st, "figure"),
+        sidewaystable: (el, st) any^ => walk_float(el, st, "table")},
     // settings commands shape every algorithm (render alg2e_settings)
     algorithm2e: map([for (setting in algorithm2e.SETTINGS,
         x in [setting, (el, st) => ({*:st, alg2e_settings: st.alg2e_settings ++ [string(name(el))]})]) x]),
     mathtools: {newtagform: walk_newtagform, renewtagform: walk_newtagform, usetagform: walk_usetagform},
     // soul's \set…color{color} and ulem's \normalem/\ULforem hold until changed
-    soul: map([for (key in decorations.SOUL_SETTINGS, x in [key, (el, st) => record_setting(st, el, key,
-        trim(util.text_of(el)))]) x]),
+    soul: map([for (key in decorations.SOUL_SETTINGS, x in (([key, (el, st) any^ => record_setting(st, el, key,
+        trim(util.text_of(el)))]) ^ { [] })) x]),
     setspace: map([for (tag in paragraph.SETSPACE_DECLARATIONS, x in [tag, walk_setspace]) x]),
     // \newmdenv and \mdfdefinestyle hold until redefined; keys outside the profile are reported
-    mdframed: {newmdenv: (el, st) => mdframed_definition(el, st, "mdf-env:", util.optional_raw(el), 0),
-        mdfdefinestyle: (el, st) => mdframed_definition(el, st, "mdf-style:",
+    mdframed: {newmdenv: (el, st) any^ => mdframed_definition(el, st, "mdf-env:", util.optional_raw(el), 0),
+        mdfdefinestyle: (el, st) any^ => mdframed_definition(el, st, "mdf-style:",
             util.raw_argument(el, "required", 1), 0),
-        mdframed: (el, st) => walk_default(el, "mdframed",
+        mdframed: (el, st) any^ => walk_default(el, "mdframed",
             mdframed_key_issues(el, st, util.leading_option(el).option))},
     ulem: {normalem: (el, st) => record_setting(st, el, "ulem-emph", "normalem"),
         ULforem: (el, st) => record_setting(st, el, "ulem-emph", "ULforem")},
     // colortbl's rule colors and array's column types hold from where they are given
-    colortbl: {arrayrulecolor: (el, st) => walk_rule_color(el, st, "arrayrulecolor"),
-        doublerulesepcolor: (el, st) => walk_rule_color(el, st, "doublerulesepcolor")},
+    colortbl: {arrayrulecolor: (el, st) any^ => walk_rule_color(el, st, "arrayrulecolor"),
+        doublerulesepcolor: (el, st) any^ => walk_rule_color(el, st, "doublerulesepcolor")},
     array: {newcolumntype: walk_newcolumntype},
     // titlesec's formats and spacing and sectsty's fonts hold from where they are given
-    titlesec: {titleformat: walk_titleformat, titlespacing: (el, st) => record_pair(st, el, titles.titlespacing(el)),
-        titlelabel: (el, st) => record_setting(st, el, "titlelabel", util.raw_argument(el, "required", 0) or "")},
+    titlesec: {titleformat: walk_titleformat, titlespacing: (el, st) any^ => record_pair(st, el, titles.titlespacing(el)),
+        titlelabel: (el, st) any^ => record_setting(st, el, "titlelabel", util.raw_argument(el, "required", 0) or "")},
     sectsty: map([for (command in titles.SECTSTY_COMMANDS, x in [command, walk_sectsty]) x]),
-    tocloft: {cftsetindents: (el, st) => record_pair(st, el, contents.indents(el)), newlistof: walk_newlistof},
+    tocloft: {cftsetindents: (el, st) any^ => record_pair(st, el, contents.indents(el)), newlistof: walk_newlistof},
     minitoc: {mtcsettitle: walk_mtcsettitle},
     // the term registry: glossaries, acronym, nomencl and the index (terms.ls)
     glossaries: map([for (command in terms.GLS_USE_COMMANDS, x in [command, walk_gls_use]) x] ++
@@ -237,7 +237,7 @@ pub let PACKAGE_WALK = {
          "newacronym", walk_newacronym, "newglossary", walk_newglossary,
          "glsadd", (el, st) => gls_list(st, [gls_label(el)]),
          "glsaddall", (el, st) => gls_list(st, [for (e in st.terms.gls_entries) e.label]),
-         "glsreset", (el, st) => with_terms(st, {gls_firsts: [for (l in st.terms.gls_firsts where l != gls_label(el)) l]}),
+         "glsreset", (el, st) => with_terms(st, {gls_firsts: [for (l in st.terms.gls_firsts where ((l != gls_label(el)) ^ { false })) l]}),
          "glsunset", (el, st) => with_terms(st, {gls_firsts: st.terms.gls_firsts ++ [gls_label(el)]}),
          "glsresetall", (el, st) => with_terms(st, {gls_firsts: []}),
          "glsunsetall", (el, st) => with_terms(st, {gls_firsts: [for (e in st.terms.gls_entries) e.label]}),
@@ -247,19 +247,19 @@ pub let PACKAGE_WALK = {
         ["acro", walk_acro, "acrodef", walk_acro, "acroplural", walk_acroplural, "acrodefplural", walk_acroplural,
          "acused", (el, st) => with_terms(st, {ac_firsts: st.terms.ac_firsts ++ [gls_label(el)]}),
          "acresetall", (el, st) => with_terms(st, {ac_firsts: []})]),
-    nomencl: {nomenclature: walk_nomenclature, printnomenclature: (el, st) =>
+    nomencl: {nomenclature: walk_nomenclature, printnomenclature: (el, st) any^ =>
         if (util.option_enabled(registry.options_for(st.packages, "nomencl").intoc))
             add_unnumbered_head(el, st, "Nomenclature", null, "nomname") else st},
     makeidx: {index: walk_index, printindex: walk_printindex},
     imakeidx: {index: walk_index, printindex: walk_printindex,
-        makeindex: (el, st) => record_setting(st, el, "index:" ++ index_name(util.parse_kv_options(util.optional_raw(el)).name),
+        makeindex: (el, st) any^ => record_setting(st, el, "index:" ++ index_name(util.parse_kv_options(util.optional_raw(el)).name),
             util.parse_kv_options(util.optional_raw(el)))},
     // titling's \pre… and \post… code; authblk's authors and affiliations
     titling: map([for (part in frontmatter.TITLING_PARTS, side in ["pre", "post"],
         x in [side ++ part, walk_titling]) x]),
     authblk: {author: (el, st) => {*:walk_author(el, st), authblk: st.authblk ++ [{kind: "author", el: el}]},
         affil: (el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el}]}},
-    pdfpages: {includepdfset: (el, st) => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
+    pdfpages: {includepdfset: (el, st) any^ => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
     appendix: {appendices: (el, st) => walk_appendices(el, st, false),
         subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: (el, st) => add_unnumbered_head(el, st, appendix.HEAD)},
     // class families (registry.CLASSES): title-block fields and author entries
@@ -273,7 +273,7 @@ pub let PACKAGE_WALK = {
         setsecnumdepth: walk_secnumdepth, maxsecnumdepth: walk_secnumdepth},
     llncs: {institute: record_front, subtitle: record_front, keywords: record_front},
     // the frontmatter environment makes the title from what it holds
-    elsarticle: map(["frontmatter", (el, st) => record_setting(walk_children(el, 0, len(el), st), el, "front:maketitle", true),
+    elsarticle: map(["frontmatter", (el, st) any^ => record_setting(walk_children(el, 0, len(el), st), el, "front:maketitle", true),
         "author", author_entry, "address", affil_entry, "affiliation", affil_entry, "ead", affil_entry,
         "cortext", record_front, "fntext", record_front, "tnotetext", record_front, "journal", record_front] ++
         [for (field in profiles.ELSARTICLE_FIELDS, x in [field, record_front]) x]),
@@ -282,23 +282,23 @@ pub let PACKAGE_WALK = {
         [for (field in profiles.REVTEX_FIELDS, x in [field, record_front]) x]),
     // the teaser is the first figure
     acmart: map(["author", author_entry, "affiliation", affil_entry, "additionalaffiliation", affil_entry,
-        "email", affil_entry, "teaserfigure", (el, st) => front_field(el, walk_float(el, st, "figure"))] ++
+        "email", affil_entry, "teaserfigure", (el, st) any^ => front_field(el, walk_float(el, st, "figure"))] ++
         [for (field in ["abstract", "keywords", "ccsdesc", "subtitle"], x in [field, record_front]) x]),
     letter: map([for (field in profiles.LETTER_FIELDS, x in [field, (el, st) => record_setting(st, el, "letter:" ++ string(name(el)), el)]) x]),
     exam: {question: walk_exam_item, part: walk_exam_item, subpart: walk_exam_item, subsubpart: walk_exam_item,
         printanswers: (el, st) => record_setting(st, el, "exam:answers", true),
         noprintanswers: (el, st) => record_setting(st, el, "exam:answers", false),
         bracketedpoints: (el, st) => record_setting(st, el, "exam:bracketed", true),
-        pointname: (el, st) => record_setting(st, el, "exam:pointname", util.text_of(el))}
+        pointname: (el, st) any^ => record_setting(st, el, "exam:pointname", util.text_of(el))}
 }
 
 // ---- class profiles (docclass/profiles.ls) ----
 
 // a title-block field given before \maketitle (or inside elsarticle's frontmatter)
 // joins the title block; after it, the command renders where it stands
-fn record_front(el, st) => front_field(el, walk_children(el, 0, len(el), st))
+fn record_front(el, st) any^ => front_field(el, walk_children(el, 0, len(el), st))
 
-fn front_field(el, st) {
+fn front_field(el, st) any^ {
     if (util.setting_at(st.settings, "front:maketitle", null) != null) st
     else record_setting(st, el, "front:" ++ string(name(el)), el)
 }
@@ -312,7 +312,7 @@ fn affil_entry(el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el,
 
 // KOMA-Script's \addchap, \addsec and \addpart: unnumbered headings in the contents,
 // under their optional short title; starred, outside it
-fn walk_addhead(el, st) {
+fn walk_addhead(el, st) any^ {
     let short = util.optional_raw(el)
     let text = if (short != null) trim(short) else trim(util.text_of_skip_brack(el))
     if (el.starred == true) st
@@ -321,7 +321,7 @@ fn walk_addhead(el, st) {
 
 // \setkomafont and \addtokomafont: the fonts of headings, as sectsty's settings, and of
 // title-block parts; \setkomafont replaces the class's sans-serif bold
-fn walk_komafont(el, st) {
+fn walk_komafont(el, st) any^ {
     let target = trim(util.raw_argument(el, "required", 0) or "")
     let raw = util.raw_argument(el, "required", 1) or ""
     let keys = profiles.font_keys(target)
@@ -331,7 +331,7 @@ fn walk_komafont(el, st) {
         let replace = string(name(el)) == "setkomafont"
         let recorded = {*:st, settings: st.settings ++ [for (key in keys) {key: key, offset: el.source_offset,
             value: if (replace) profiles.KOMA_FONT_RESET ++ raw else (util.setting_at(st.settings, key, null) or "") ++ raw}]};
-        {*:recorded, diagnostics: st.diagnostics ++ [for (command in font_decl_unknown(raw, st.custom_colors))
+        {*:recorded, diagnostics: st.diagnostics ++ [for (command in ((font_decl_unknown(raw, st.custom_colors)) ^ { [] }))
             util.diagnostic("unsupported-title-format", st.docclass, command,
                 "Unsupported command in a KOMA-Script font: \\" ++ command, el.source_offset)]}
     }
@@ -341,14 +341,14 @@ fn walk_komafont(el, st) {
 fn walk_komaoptions(el, st) {
     let opts = util.parse_kv_options(util.raw_argument(el, "required", 0) or "");
     {*:st, diagnostics: st.diagnostics ++ [for (key, value at opts
-        where not (contains(profiles.KOMA_OPTIONS, string(key)) or false))
+        where ((not (contains(profiles.KOMA_OPTIONS, string(key)) or false)) ^ { false }))
         util.diagnostic("unsupported-option", st.docclass, string(key),
             "Unsupported " ++ st.docclass ++ " option: " ++ string(key), el.source_offset)]}
 }
 
 // memoir's \chapterstyle{name}: a named style as a titlesec chapter format; others
 // render as the default and are reported
-fn walk_chapterstyle(el, st) {
+fn walk_chapterstyle(el, st) any^ {
     let style = trim(util.text_of(el))
     let format = profiles.CHAPTER_STYLES[style]
     let recorded = record_setting(st, el, "titleformat:chapter", format or profiles.CHAPTER_STYLES.default)
@@ -364,22 +364,22 @@ fn walk_secnumdepth(el, st) {
 }
 
 // exam's \question, \part, \subpart and \subsubpart: their points, for \numpoints
-fn walk_exam_item(el, st) {
+fn walk_exam_item(el, st) any^ {
     let points = profiles.points_of(el)
     let counted = if (string(name(el)) == "question") record_setting(st, el, "exam:question", true) else st
     if (points == null) counted else record_setting(counted, el, "exam:points", points)
 }
 
 // a {key, value} setting, or nothing when the command named no heading
-fn record_pair(st, el, pair) => if (pair == null) st else record_setting(st, el, pair.key, pair.value)
+fn record_pair(st, el, pair) any^ => if (pair == null) st else record_setting(st, el, pair.key, pair.value)
 
 // \titleformat: what the format cannot express is reported where it is given
-fn walk_titleformat(el, st) {
+fn walk_titleformat(el, st) any^ {
     let level = titles.level_of(util.raw_argument(el, "required", 0))
     let pair = titles.titleformat(el, util.setting_at(st.settings, "titleformat:" ++ level, el.source_offset))
     if (pair == null) st
     else {*:record_pair(st, el, pair), diagnostics: st.diagnostics ++
-        [for (issue in titles.format_issues(pair.value, st.custom_colors))
+        [for (issue in ((titles.format_issues(pair.value, st.custom_colors)) ^ { [] }))
             util.diagnostic(issue.code, "titlesec", issue.item,
                 if (issue.code == "title-shape-approximation") "The " ++ issue.item ++ " title shape renders as hang"
                 else "Unsupported command in a title format: \\" ++ issue.item, el.source_offset)]}
@@ -399,7 +399,7 @@ fn walk_sectsty(el, st) {
 
 fn font_decl_unknown(raw, colors) => [for (issue in titles.format_issues({format: raw}, colors)) issue.item]
 
-fn walk_rule_color(el, st, key) {
+fn walk_rule_color(el, st, key) any^ {
     let css = color.command_color(el, 0, st.custom_colors)
     if (css != null) record_setting(st, el, key, css)
     else {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("invalid-color", "colortbl",
@@ -407,14 +407,14 @@ fn walk_rule_color(el, st, key) {
 }
 
 // \newcolumntype{d}[n]{body}: a column letter the preambles after it expand
-fn walk_newcolumntype(el, st) {
+fn walk_newcolumntype(el, st) any^ {
     let defined = colspec.column_type(el)
     if (defined != null) record_setting(st, el, "column-type:" ++ defined.name, defined.value)
     else {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("invalid-column-type", "array",
         null, "\\newcolumntype needs one letter and a definition", el.source_offset)]}
 }
 
-fn mdframed_definition(el, st, prefix, keys, name_index) {
+fn mdframed_definition(el, st, prefix, keys, name_index) any^ {
     let defined = util.raw_argument(el, "required", name_index)
     if (defined == null) st
     else record_setting(mdframed_key_issues(el, st, keys), el, prefix ++ trim(defined), keys or "")
@@ -434,7 +434,7 @@ fn record_setting(st, el, key, value) =>
 // number format that is not a mapped text command prints the number plain
 fn walk_newtagform(el, st) {
     // the brackets are raw text: "[" and "]" are not argument content
-    let args = [for (i in 0 to 2, let raw = util.raw_argument(el, "required", i) where raw != null) trim(raw)]
+    let args = [for (i in 0 to 2, let raw = util.raw_argument(el, "required", i) where ((raw != null) ^ { false })) trim(raw)]
     let inner = util.optional_raw(el)
     let issues = if (inner == null or amsmath.tag_format(inner) != null) [] else
         [util.diagnostic("unsupported-tag-format", "mathtools", trim(inner),
@@ -450,7 +450,7 @@ fn walk_usetagform(el, st) {
 }
 
 // subfig's \subfloat and subfigure's \subfigure: a lettered subfloat of the enclosing float
-fn walk_subfig(el, st) => walk_subfloat(el, st, if (st.env_context == "table") "table" else "figure")
+fn walk_subfig(el, st) any^ => walk_subfloat(el, st, if (st.env_context == "table") "table" else "figure")
 
 // ============================================================
 // Pseudocode: numbered lines carry the labels placed on them
@@ -466,8 +466,8 @@ fn walk_algorithmic(el, st) {
 // \algrenewcommand\algorithmicrequire{…} leaves the new label as the macro's
 // argument: name/handler pairs for the label macros
 fn alg_label_walkers() => [for (macro in algorithmic.LABEL_MACROS,
-    x in [macro, (el, st) => if (len(content(el)) == 0) st
-        else {*:st, alg_labels: add_entry(st.alg_labels, slice(macro, 11, len(macro)), el)}]) x]
+    x in (([macro, (el, st) any^ => if (len(content(el)) == 0) st
+        else {*:st, alg_labels: add_entry(st.alg_labels, slice(macro, 11, len(macro)), el)}]) ^ { [] })) x]
 
 // ============================================================
 // The float package: \newfloat, \floatname, \floatstyle, \restylefloat
@@ -476,14 +476,14 @@ fn alg_label_walkers() => [for (macro in algorithmic.LABEL_MACROS,
 fn arg_texts(el) => [for (arg in util.command_args(el)) trim(util.text_of(arg))]
 
 // \newfloat{type}{placement}{ext}[within]: a float kind in the current float style
-fn walk_newfloat(el, st) {
+fn walk_newfloat(el, st) any^ {
     let args = [for (text in arg_texts(el) where text != "") text]
     if (len(args) == 0) st
     else define_float(st, args[0], if (len(args) > 2) args[2] else null, null, util.optional_raw(el))
 }
 
 // memoir's \newfloat[within]{type}{ext}{caption name}
-fn walk_memoir_newfloat(el, st) {
+fn walk_memoir_newfloat(el, st) any^ {
     let args = [for (i in 0 to 2) trim(util.raw_argument(el, "required", i) or "")]
     if (args[0] == "") st
     else define_float(st, args[0], if (args[1] == "") null else args[1], if (args[2] == "") null else args[2],
@@ -497,13 +497,13 @@ fn define_float(st, kind, ext, caption_name, within) {
         counter_within: if (within == null) st.counter_within else add_entry(st.counter_within, kind, trim(within))}
 }
 
-fn walk_floatname(el, st) {
+fn walk_floatname(el, st) any^ {
     let args = arg_texts(el)
     if (len(args) < 2 or st.float_kinds[args[0]] == null) st
     else {*:st, float_kinds: {*:st.float_kinds, [args[0]]: {*:st.float_kinds[args[0]], name: args[1]}}}
 }
 
-fn walk_floatstyle(el, st) {
+fn walk_floatstyle(el, st) any^ {
     let style = trim(util.text_of(el))
     if (contains(["plain", "plaintop", "ruled", "boxed"], style) or false) {*:st, float_style: style} else st
 }
@@ -515,7 +515,7 @@ fn walk_restylefloat(el, st) {
     else {*:st, float_kinds: {*:st.float_kinds, [kind]: {*:st.float_kinds[kind], style: st.float_style}}}
 }
 
-fn walk_element(el, st) {
+fn walk_element(el, st) any^ {
     let tag = name(el)
     let owned = registry.handler(PACKAGE_WALK, st.packages, string(tag), st.docclass)
     if (owned != null) owned(el, st)
@@ -614,7 +614,7 @@ fn walk_element(el, st) {
     }
 }
 
-fn walk_children(el, i, n, st) {
+fn walk_children(el, i, n, st) any^ {
     if i >= n { st }
     else {
         let child = el[i]
@@ -631,14 +631,14 @@ fn walk_documentclass(el, st) {
     let cls = trim(util.text_of_skip_brack(el))
     let raw_options = util.optional_raw(el)
     let options = if (raw_options == null) []
-        else [for (option in util.split_top_level(raw_options, ",") where trim(option) != "") trim(option)]
+        else [for (option in ((util.split_top_level(raw_options, ",")) ^ { [] }) where trim(option) != "") trim(option)]
     let profile = registry.class_profile(cls)
     // a class's built-in theorem environments, as \newtheorem defines them
-    let defined = [for (thm in profile.theorems or []) {key: thm.name, val: {env_name: thm.name,
+    let defined = [for (thm in ((profile.theorems or []) ^ { [] })) {key: thm.name, val: {env_name: thm.name,
         label: thm.label, shared_counter: null, style: thm.style, numbered: true}}]
     if cls != "" { {*:st, docclass: cls, docbase: profile.base, class_options: options,
         theorem_defs: st.theorem_defs ++ defined,
-        counters: {*:st.counters, *:map([for (thm in profile.theorems or [], x in [thm.name, 0]) x])}} }
+        counters: {*:st.counters, *:map([for (thm in ((profile.theorems or []) ^ { [] }), x in [thm.name, 0]) x])}} }
     else { st }
 }
 
@@ -648,13 +648,13 @@ let CONTENTS_LEVELS = {part: 1, chapter: 1, section: 2, subsection: 3, subsubsec
 
 // \addcontentsline{file}{level}{text}: an extra ToC heading or list entry,
 // anchored where the command stands. A leading \numberline{n} is its number.
-fn walk_addcontentsline(el, st) {
+fn walk_addcontentsline(el, st) any^ {
     let args = util.command_args(el)
     let file = if (len(args) > 0) trim(util.text_of(args[0])) else ""
     let level = if (len(args) > 1) trim(util.text_of(args[1])) else ""
     // \protect only guards the entry while TeX writes it to the file
-    let entry_args = [for (arg in (if (len(args) > 2) slice(args, 2, len(args)) else [])
-        where not (arg is element and string(name(arg)) == "protect")) arg]
+    let entry_args = [for (arg in (((if (len(args) > 2) slice(args, 2, len(args)) else [])) ^ { [] })
+        where ((not (arg is element and string(name(arg)) == "protect")) ^ { false })) arg]
     let numbered = len(entry_args) > 0 and entry_args[0] is element and
         string(name(entry_args[0])) == "numberline"
     let entry_number = if (numbered) trim(util.text_of(entry_args[0])) else null
@@ -673,7 +673,7 @@ fn walk_addcontentsline(el, st) {
 }
 
 // a preamble setspace declaration sets the document's stretch, as \linespread does
-fn walk_setspace(el, st) {
+fn walk_setspace(el, st) any^ {
     let stretch = paragraph.declared_stretch(el, st.class_options)
     if (st.in_body or stretch == null) st else {*:st, line_spread: stretch}
 }
@@ -703,7 +703,7 @@ fn walk_date(el, st) {
 // Section headings
 // ============================================================
 
-fn walk_heading(el, st, counter_name, html_level) {
+fn walk_heading(el, st, counter_name, html_level) any^ {
     let starred = el.starred == true
     // starred headings do not advance the section counter or enter the TOC.
     let new_counters = if (starred) st.counters else step_counter(st, counter_name)
@@ -767,7 +767,7 @@ fn counter_name_to_depth(counter_name) {
     }
 }
 
-fn compute_section_num(raw_counters, counter_name, st) {
+fn compute_section_num(raw_counters, counter_name, st) any^ {
     let counters = subappendix_counters(raw_counters, st)
     let scheme = registry.class_numbering(st.docclass)
     if (scheme == "book") dc_book.format_section_number(counters, counter_name, st.in_appendix)
@@ -803,7 +803,7 @@ fn walk_listing(el, st) {
 
 // A float environment numbers its kind's counter. Its caption feeds the
 // \listof… list, and its number scopes only its own labels.
-fn walk_float(el, st, kind) {
+fn walk_float(el, st, kind) any^ {
     let desc = st.float_kinds[kind]
     let counters = step_counter(st, desc.counter)
     let scoped = scoped_counter({*:st, counters: counters}, desc.counter, counters[desc.counter])
@@ -825,7 +825,7 @@ fn restore_context(walked, outer) {
     {*:walked, env_context: outer.env_context, env_context_num: outer.env_context_num}
 }
 
-fn walk_subfloat(el, st, kind) {
+fn walk_subfloat(el, st, kind) any^ {
     let ordinal = (if (kind == "figure") st.subfigure_count else st.subtable_count) + 1
     let letter = if (ordinal <= 26) chr(96 + ordinal) else string(ordinal)
     let ordinal_text = st.env_context_num ++ letter
@@ -852,12 +852,12 @@ fn walk_captionof(el, st) {
     }
 }
 
-fn walk_equation(el, st) {
+fn walk_equation(el, st) any^ {
     if (registry.active(st.packages, "amsmath")) walk_amsmath(el, st)
     else walk_legacy_equation(el, st)
 }
 
-fn walk_legacy_equation(el, st) {
+fn walk_legacy_equation(el, st) any^ {
     let new_counters = step_counter(st, "equation")
     let scoped = scoped_counter({*:st, counters: new_counters},
         "equation", new_counters.equation)
@@ -905,7 +905,7 @@ fn walk_amsmath(el, st) {
     {*:folded.state, amsmath_numbers: stored}
 }
 
-fn count_list_items(node) {
+fn count_list_items(node) any^ {
     if (not (node is element)) 0
     else {
         let tag = string(name(node))
@@ -915,7 +915,7 @@ fn count_list_items(node) {
     }
 }
 
-fn count_list_items_children(node, i) {
+fn count_list_items_children(node, i) any^ {
     if (i >= len(node)) 0
     else count_list_items(node[i]) + count_list_items_children(node, i + 1)
 }
@@ -943,7 +943,7 @@ fn walk_nonnumbered_list(el, st) {
     {*:walked, list_depth: st.list_depth}
 }
 
-fn walk_numbered_env(el, st, env_type) {
+fn walk_numbered_env(el, st, env_type) any^ {
     let new_counters = step_counter(st, env_type)
     let scoped = scoped_counter({*:st, counters: new_counters}, env_type, new_counters[env_type])
     let env_text = trim(util.text_of(el))
@@ -956,7 +956,7 @@ fn walk_numbered_env(el, st, env_type) {
 }
 
 // route theorem-like env through custom defs if available, else default numbered
-fn walk_theorem_like(el, st, env_type) {
+fn walk_theorem_like(el, st, env_type) any^ {
     let thm_def = util.lookup(st.theorem_defs, env_type)
     if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
     else { walk_numbered_env(el, st, env_type) }
@@ -983,7 +983,7 @@ fn walk_printbibliography(el, st) {
     {*:st, headings: headings, bibliography_count: index}
 }
 
-fn walk_bibliography(el, st) {
+fn walk_bibliography(el, st) any^ {
     walk_children(el, 0, len(el), st)
 }
 
@@ -1048,7 +1048,7 @@ fn add_unnumbered_head(el, st, text, key = null, name_macro = null, level = null
 }
 
 // the counter name and integer value of \setcounter or \addtocounter; null otherwise
-fn counter_assignment(el) {
+fn counter_assignment(el) any^ {
     let args = util.command_args(el)
     if (len(args) < 2) null
     else {
@@ -1059,7 +1059,7 @@ fn counter_assignment(el) {
 
 // a \setcounter is also a source-order setting, for packages that read a depth
 // where they print (minitoc's minitocdepth)
-fn walk_setcounter(el, st) {
+fn walk_setcounter(el, st) any^ {
     let assignment = counter_assignment(el)
     if (assignment == null) st
     else if (assignment.name == "secnumdepth") {*:st, secnumdepth: assignment.value}
@@ -1068,7 +1068,7 @@ fn walk_setcounter(el, st) {
 }
 
 // \setlength as a source-order setting, for package lengths (tocloft's skips)
-fn walk_setlength(el, st) {
+fn walk_setlength(el, st) any^ {
     let css = if (el.length_name == null or el.length_value == null) null else util.css_dimension(el.length_value)
     if (css == null) st else record_setting(st, el, "length:" ++ el.length_name, css)
 }
@@ -1090,14 +1090,14 @@ fn walk_newlistof(el, st) {
 fn walk_titling(el, st) {
     let raw = util.raw_argument(el, "required", 0) or ""
     let recorded = record_setting(st, el, "titling:" ++ string(name(el)), raw);
-    {*:recorded, diagnostics: st.diagnostics ++ [for (command in font_decl_unknown(raw, st.custom_colors))
+    {*:recorded, diagnostics: st.diagnostics ++ [for (command in ((font_decl_unknown(raw, st.custom_colors)) ^ { [] }))
         util.diagnostic("unsupported-title-format", "titling", command,
             "Unsupported command in title code: \\" ++ command, el.source_offset)]}
 }
 
 // ---- the term registry (terms.ls) ----
 
-fn gls_label(el) => trim(util.raw_argument(el, "required", 0) or "")
+fn gls_label(el) any^ => trim(util.raw_argument(el, "required", 0) or "")
 
 fn gls_list(st, labels) => with_terms(st, {gls_listed: st.terms.gls_listed ++ labels})
 
@@ -1120,7 +1120,7 @@ fn walk_newacronym(el, st) {
 }
 
 // \newglossary[log]{name}{in}{out}{title}, or \newglossary*{name}{title}
-fn walk_newglossary(el, st) {
+fn walk_newglossary(el, st) any^ {
     let type_name = trim(util.raw_argument(el, "required", 0) or "")
     let title = util.raw_argument(el, "required", if (el.starred == true) 1 else 3)
     if (type_name == "" or title == null) st else with_terms(st, {gls_titles: add_entry(st.terms.gls_titles, type_name, title)})
@@ -1139,7 +1139,7 @@ fn walk_gls_use(el, st) {
 
 // the glossary's toc option puts each printed glossary in the contents, anchored by
 // the command's offset and the glossary's type
-fn walk_print_glossary(el, st) {
+fn walk_print_glossary(el, st) any^ {
     let options = registry.options_for(st.packages, "glossaries")
     let types = terms.printed_types(string(name(el)), util.optional_raw(el), options, st.terms.gls_titles)
     // uses link to the glossaries that are printed
@@ -1147,7 +1147,7 @@ fn walk_print_glossary(el, st) {
     if (not util.option_on(options, "toc")) printed else gls_heads(el, printed, types, 0)
 }
 
-fn gls_heads(el, st, types, i) {
+fn gls_heads(el, st, types, i) any^ {
     if (i >= len(types)) st
     else gls_heads(el, add_unnumbered_head(el, st, terms.type_title(types[i].type, st.terms.gls_titles, types[i].title),
         string(el.source_offset) ++ ":" ++ types[i].type, terms.name_macro(types[i].type, types[i].title)), types, i + 1)
@@ -1186,7 +1186,7 @@ fn walk_nomenclature(el, st) {
 fn index_name(raw) => if (raw == null or trim(string(raw)) == "") "idx" else trim(string(raw))
 
 // \index[name]{entry}
-fn walk_index(el, st) {
+fn walk_index(el, st) any^ {
     let raw = util.raw_argument(el, "required", 0)
     if (raw == null) st
     else with_terms(st, {index_entries: st.terms.index_entries ++ [{name: index_name(util.optional_raw(el)),
@@ -1194,7 +1194,7 @@ fn walk_index(el, st) {
 }
 
 // \printindex[name]: in the contents under imakeidx's intoc
-fn walk_printindex(el, st) {
+fn walk_printindex(el, st) any^ {
     let name_key = index_name(util.optional_raw(el))
     let setup = util.setting_at(st.settings, "index:" ++ name_key, el.source_offset)
     let package = registry.options_for(st.packages, "imakeidx")
@@ -1206,12 +1206,12 @@ fn walk_printindex(el, st) {
 }
 
 // \mtcsettitle{minitoc}{title}
-fn walk_mtcsettitle(el, st) {
+fn walk_mtcsettitle(el, st) any^ {
     let mini = trim(util.raw_argument(el, "required", 0) or "")
     if (mini == "") st else record_setting(st, el, "mtctitle:" ++ mini, util.raw_argument(el, "required", 1) or "")
 }
 
-fn walk_addtocounter(el, st) {
+fn walk_addtocounter(el, st) any^ {
     let assignment = counter_assignment(el)
     if (assignment == null) st
     else {*:st, counters: {*:st.counters,
@@ -1229,7 +1229,7 @@ fn walk_stepcounter(el, st, referenced) {
 }
 
 // \newcounter{name}[parent]: a zeroed counter, reset whenever its parent steps
-fn walk_newcounter(el, st) {
+fn walk_newcounter(el, st) any^ {
     let args = util.command_args(el)
     let counter_name = if (len(args) > 0) trim(util.text_of(args[0])) else ""
     let parent = util.optional_raw(el)
@@ -1239,7 +1239,7 @@ fn walk_newcounter(el, st) {
             else add_entry(st.counter_resets, trim(parent), counter_name)}
 }
 
-fn walk_definecolor(el, st) {
+fn walk_definecolor(el, st) any^ {
     let definition = color.definition(el)
     if (definition.color_name == "") st
     else {
@@ -1250,7 +1250,7 @@ fn walk_definecolor(el, st) {
     }
 }
 
-fn walk_pagecolor(el, st) {
+fn walk_pagecolor(el, st) any^ {
     let css = color.page_color(el, st.analysis_colors)
     if (css == null) st else {*:st, page_color: css}
 }
@@ -1266,7 +1266,7 @@ fn walk_theoremstyle(el, st) {
     else st
 }
 
-fn walk_numberwithin(el, st) {
+fn walk_numberwithin(el, st) any^ {
     let args = util.command_args(el)
     if (not registry.active(st.packages, "amsmath") or len(args) < 2) st
     else {*:st, counter_within: add_entry(st.counter_within,
@@ -1276,14 +1276,14 @@ fn walk_numberwithin(el, st) {
 // \newtheorem{name}{Label}       → independent counter
 // \newtheorem{name}[counter]{Label} → shared counter with existing type
 // \newtheorem*{name}{Label}      → unnumbered (star variant)
-fn walk_newtheorem(el, st) {
+fn walk_newtheorem(el, st) any^ {
     let args = util.command_args(el)
     let n = len(args)
     if (n < 2) st
     else build_newtheorem_def(args, st, n, true)
 }
 
-fn walk_newtheorem_star(el, st) {
+fn walk_newtheorem_star(el, st) any^ {
     let args = util.command_args(el)
     let n = len(args)
     if (n < 2) st
@@ -1325,7 +1325,7 @@ fn build_newtheorem_def(el, st, n, is_numbered) {
         counter_within: within_counters}
 }
 
-fn get_newthm_child_text(el, idx) {
+fn get_newthm_child_text(el, idx) any^ {
     let child = el[idx]
     if (child is string) { trim(child) }
     else if (child is element) { trim(util.text_of(child)) }
@@ -1336,7 +1336,7 @@ fn get_newthm_child_text(el, idx) {
 // Default handler: check custom theorem defs
 // ============================================================
 
-fn walk_default(el, tag, st) {
+fn walk_default(el, tag, st) any^ {
     let tag_str = string(tag)
     let thm_def = util.lookup(st.theorem_defs, tag_str)
     let float_kind = floats.kind_of(st.float_kinds, tag_str)
@@ -1347,7 +1347,7 @@ fn walk_default(el, tag, st) {
     else { walk_children(el, 0, len(el), st) }
 }
 
-fn walk_custom_theorem(el, st, thm_def) {
+fn walk_custom_theorem(el, st, thm_def) any^ {
     if (thm_def.numbered == false) {
         // unnumbered: just walk children
         let new_state = {*:st, env_context: thm_def.env_name, env_context_num: ""}
@@ -1357,7 +1357,7 @@ fn walk_custom_theorem(el, st, thm_def) {
     }
 }
 
-fn walk_custom_theorem_numbered(el, st, thm_def) {
+fn walk_custom_theorem_numbered(el, st, thm_def) any^ {
     // a shared counter ([counter] in \newtheorem) numbers both environments
     let counter_name = if (thm_def.shared_counter != null) thm_def.shared_counter
                        else thm_def.env_name
@@ -1376,7 +1376,7 @@ fn walk_custom_theorem_numbered(el, st, thm_def) {
 
 // Scope counters lazily against the current heading identity. This keeps
 // shared theorem counters and amsmath equation rows on the same reset path.
-fn scoped_counter(st, counter_name, raw_number) {
+fn scoped_counter(st, counter_name, raw_number) any^ {
     let parent = util.lookup(st.counter_within, counter_name)
     if (parent == null) {number: raw_number, positions: st.counter_positions}
     else {
@@ -1391,7 +1391,7 @@ fn scoped_counter(st, counter_name, raw_number) {
     }
 }
 
-fn heading_identity(counters, parent) {
+fn heading_identity(counters, parent) any^ {
     let chapter = string(counters.chapter)
     if (parent == "chapter") chapter
     else {
@@ -1435,7 +1435,7 @@ fn walk_label(el, st) {
 
 // Footnotes are keyed by source offset, so notes with identical text keep their
 // own numbers. \footnote[n] and \footnotemark[n] use n and leave the counter alone.
-fn walk_footnote(el, st) {
+fn walk_footnote(el, st) any^ {
     let explicit = explicit_footnote_number(el)
     let new_counters = if (explicit != null) st.counters else step_counter(st, "footnote")
     let fn_num = if (explicit != null) explicit else new_counters.footnote
@@ -1445,7 +1445,7 @@ fn walk_footnote(el, st) {
 
 // A note's text sets \@currentlabel to its mark, so a \label inside refers to the
 // note. Citation footnotes hold keys, not text, and are not walked.
-fn walk_note_body(el, st, fn_num) {
+fn walk_note_body(el, st, fn_num) any^ {
     let tag = string(name(el))
     if (tag != "footnote" and tag != "footnotetext") st
     else restore_context(walk_children(el, 0, len(el), {*:st, env_context: "footnote",
@@ -1462,7 +1462,7 @@ fn walk_footnotemark(el, st) {
 }
 
 // \footnotetext[n]{text} supplies the text for mark n, by default the current counter
-fn walk_footnotetext(el, st) {
+fn walk_footnotetext(el, st) any^ {
     let explicit = explicit_footnote_number(el)
     let fn_num = if (explicit != null) explicit else counter_value(st.counters, "footnote")
     walk_note_body(el, {*:st, footnotes: st.footnotes ++ [{number: fn_num, node: el,
@@ -1471,7 +1471,7 @@ fn walk_footnotetext(el, st) {
 
 // the [n] of \footnote, \footnotemark or \footnotetext; citation footnotes read
 // their optional arguments as notes instead
-fn explicit_footnote_number(el) {
+fn explicit_footnote_number(el) any^ {
     let tag = string(name(el))
     let raw = util.optional_raw(el)
     if (raw == null or (tag != "footnote" and tag != "footnotemark" and tag != "footnotetext")) null
@@ -1487,7 +1487,7 @@ fn explicit_footnote_number(el) {
 let RESETS = {chapter: ["section"], section: ["subsection"], subsection: ["subsubsection"],
     subsubsection: ["paragraph"]}
 
-fn step_counter(st, counter_name) {
+fn step_counter(st, counter_name) any^ {
     let stepped = {*:st.counters, [counter_name]: counter_value(st.counters, counter_name) + 1}
     reset_children(stepped, counter_name, st.counter_resets)
 }
@@ -1497,14 +1497,14 @@ fn counter_value(counters, counter_name) {
     if (value == null) 0 else value
 }
 
-fn reset_children(counters, parent, resets) {
+fn reset_children(counters, parent, resets) any^ {
     let builtin = RESETS[parent]
     let children = (if (builtin == null) [] else builtin) ++
         [for (entry in resets where entry.key == parent) entry.val]
     reset_list(counters, children, 0, resets)
 }
 
-fn reset_list(counters, children, i, resets) {
+fn reset_list(counters, children, i, resets) any^ {
     if (i >= len(children)) counters
     else reset_list(reset_children({*:counters, [children[i]]: 0}, children[i], resets),
         children, i + 1, resets)
@@ -1514,7 +1514,7 @@ fn reset_list(counters, children, i, resets) {
 // Slug deduplication
 // ============================================================
 
-fn make_unique_slug(base, counts) {
+fn make_unique_slug(base, counts) any^ {
     let current = util.lookup(counts, base)
     if (current == null) {
         {slug: base, counts: add_entry(counts, base, 1)}

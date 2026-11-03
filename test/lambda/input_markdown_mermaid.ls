@@ -7,6 +7,6 @@ let diagram = graph_doc.from_mermaid(content(fence)[0])^;
 
 name(diagram);
 diagram["data-direction"];
-[for (node in content(diagram) where name(node) == 'node') node["data-node-id"]];
-[for (edge in content(diagram) where name(edge) == 'edge') [edge["data-from"], edge["data-to"]]];
+[for (node in ((content(diagram)) ^ { [] }) where ((name(node) == 'node') ^ { false })) node["data-node-id"]];
+[for (edge in ((content(diagram)) ^ { [] }) where ((name(edge) == 'edge') ^ { false })) [edge["data-from"], edge["data-to"]]];
 count(markdown?<math>) == 2

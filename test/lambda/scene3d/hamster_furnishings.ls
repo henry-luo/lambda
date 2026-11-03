@@ -5,7 +5,7 @@ import items: ~~.~~.demo.hamster.mod_items
 
 fn solo(changes={}) => {*:model.initial(),modules:[cage.room("room-1","room",0,0)],selected:"room-1",
     pets:[{*:sim.new_pet(1,"room-1"),food:0.9,water:0.9,energy:0.9,comfort:0.9,*:changes}]}
-fn equipped(kind,changes={}) => model.furnish(solo(changes),kind)
+fn equipped(kind,changes={}) any^ => model.furnish(solo(changes),kind)
 fn invalid(st,contents) => match (model.restore(st,{*:model.archive(st),modules:[{*:st.modules[0],items:contents}]}) ^ { ^ }) { case error: true default: false }
 fn separated(st) => all([for (i,a in st.pets) for (j,b in st.pets where j>i) sim.clearance(st.modules,a,b)>=1.0])
 
@@ -56,7 +56,7 @@ let without_water = {*:stripped,pets:[{*:sim.new_pet(1,"room-3"),water:0.1}]};
     collision_rejected:invalid(bottle,["hideout","wheel"]),
     wrong_shape_rejected:invalid(bottle,"bottle"),
     evacuate_occupied:len(evacuated.modules) == 2 and len(evacuated.pets) == 2 and separated(evacuated) and
-        all([for (h in evacuated.pets) cage.lookup(evacuated.modules,h.node) != null]),
+        all([for (h in ((evacuated.pets) ^ { [] })) cage.lookup(evacuated.modules,h.node) != null]),
     cancel_deleted_destination:travelling.pets[0].node == "room-1" and travelling.pets[0].next == "",
     no_disconnected_evacuation:blocked.modules == isolated.modules and blocked.pets == isolated.pets,
     delete_tool:len(deleted.modules) == 0,

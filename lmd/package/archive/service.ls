@@ -44,7 +44,7 @@ pub pn serve(lib, notify) null^ {
             serial = serial + 1
             let tag = m.tag or ("job-" ++ string(serial))
             queue = [*queue, {op: m.op, url: m.url, id: m.id, formats: m.formats, options: m.options, tag: tag}]
-            report(notify, {type: "queued", tag: tag, url: m.url, id: m.id, op: m.op})
+            report(notify, {type: "queued", tag: tag, url: m.url, id: m.id, op: m.op})^
         } else if (m.op == 'ready') {
             idle = [*idle, m.worker]
         } else if (m.op == 'running') {
@@ -54,12 +54,12 @@ pub pn serve(lib, notify) null^ {
             idle = [*idle, m.worker]
             if (m.snapshot != null) { library = jobs.with_record(library, m.snapshot) }
             report(notify, if (m.snapshot != null) {type: "done", tag: m.tag, snapshot: m.snapshot}
-                else {type: "failed", tag: m.tag, url: m.url, message: m.message})
+                else {type: "failed", tag: m.tag, url: m.url, message: m.message})^
         } else if (m.op == 'cancel') {
             let waiting = [for (q in queue where q.tag == m.tag) q]
             if (len(waiting) > 0) {
                 queue = [for (q in queue where q.tag != m.tag) q]
-                report(notify, {type: "failed", tag: m.tag, url: waiting[0].url, message: "cancelled"})
+                report(notify, {type: "failed", tag: m.tag, url: waiting[0].url, message: "cancelled"})^
             } else if (busy[m.tag] != null) {
                 cancel(busy[m.tag])
             }
@@ -67,7 +67,7 @@ pub pn serve(lib, notify) null^ {
             running = false
         }
         // hand queued requests to idle workers, oldest first
-        while (running and len(queue) > 0 and len(idle) > 0) {
+        while ((running and len(queue) > 0 and len(idle) > 0)^) {
             send(idle[0], {*: queue[0], lib: library})^
             idle = drop(idle, 1)
             queue = drop(queue, 1)

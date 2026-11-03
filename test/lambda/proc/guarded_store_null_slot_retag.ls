@@ -13,7 +13,7 @@ pn make_list(n: int) {
     return e
 }
 
-pn total(node) int {
+pn total(node) int^ {
     if (node == null) {
         return 0
     }

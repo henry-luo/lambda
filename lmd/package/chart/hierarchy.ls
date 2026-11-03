@@ -5,7 +5,7 @@ import mark: .mark
 import text: .text
 import color: .color
 
-fn ancestry(index, parents, visited = []) {
+fn ancestry(index, parents, visited = []) any^ {
     if (index == null) true
     else if (contains(visited, index)) error("chart: hierarchy contains a parent cycle")
     else ancestry(parents[index], parents, [*visited, index])
@@ -18,16 +18,16 @@ fn node(index, data, parents, values, ids) {
         height: if (len(children) > 0) 1 + max(children |> ~.height) else 0}
 }
 
-pub fn forest(data, options = {}) {
+pub fn forest(data, options = {}) any^ {
     let id_field = if (options.node_field != null) options.node_field else "id";
     let parent_field = if (options.parent_field != null) options.parent_field else "parent";
     let value_field = if (options.value_field != null) options.value_field else "value";
     let ids = data |> ~[id_field];
     let parents = [for (row in data) if (row[parent_field] == null) null else index_of(ids, row[parent_field])];
-    let invalid_id = [for (id in ids where not (id is string or id is symbol or util.finite_number(id))) id];
+    let invalid_id = [for (id in ids where ((not (id is string or id is symbol or util.finite_number(id))) ^ { false })) id];
     let missing_parent = [for (index, row in data where row[parent_field] != null and parents[index] == null) row];
     let values = [for (row in data) if (row[value_field] == null) 1.0 else row[value_field]];
-    let invalid_value = [for (value in values where not util.finite_number(value) or value < 0) value];
+    let invalid_value = [for (value in values where ((not util.finite_number(value) or value < 0) ^ { false })) value];
     let cycles = util.first_error([for (index in 0 to (len(data) - 1)) ancestry(index, parents)]);
     if (len(invalid_id) > 0 or len(util.unique_vals(ids)) != len(ids)) error("chart: hierarchy requires unique string or finite numeric node IDs")
     else if (len(missing_parent) > 0) error("chart: hierarchy parent does not identify a node")
@@ -35,7 +35,7 @@ pub fn forest(data, options = {}) {
     else if (cycles is error) cycles
     else {
         let roots = [for (index in 0 to (len(data) - 1) where parents[index] == null) node(index, data, parents, values, ids)];
-        if (len([for (root in roots where not util.finite_number(root.value)) true]) > 0) error("chart: hierarchy total weight exceeds the finite numeric range")
+        if (len([for (root in roots where ((not util.finite_number(root.value)) ^ { false })) true]) > 0) error("chart: hierarchy total weight exceeds the finite numeric range")
         else roots
     }
 }
@@ -59,7 +59,7 @@ fn strip(row, rect) {
 }
 
 // Greedily grow each strip while its worst aspect ratio improves.
-fn squarify(rest, row, rect) {
+fn squarify(rest, row, rect) any^ {
     if (len(rest) == 0) if (len(row) == 0) [] else strip(row, rect).cells
     else if (len(row) == 0 or worst([*row, rest[0]], min(rect.width, rect.height)) <= worst(row, min(rect.width, rect.height)))
         squarify(slice(rest, 1, len(rest)), [*row, rest[0]], rect)
@@ -95,7 +95,7 @@ fn partitions(nodes, start, end, inner, step, depth = 0, branch = null) {
         *partitions(entry.children, a, b, inner, step, depth + 1, top))]
 }
 
-pub fn layout(data, width, height, options = {}) {
+pub fn layout(data, width, height, options = {}) any^ {
     let settings = {node_padding: 1.0, header_height: 0.0, *:options};
     let roots = forest(data, settings);
     let inner = if (settings.inner_radius != null) settings.inner_radius else 0.0;
@@ -114,7 +114,7 @@ pub fn layout(data, width, height, options = {}) {
     else rectangles(roots, {x: 0.0, y: 0.0, width: width, height: height}, settings)
 }
 
-fn radial_label_fits(cell, radius, angle, metric) {
+fn radial_label_fits(cell, radius, angle, metric) any^ {
     let x = radius * math.cos(angle);
     let y = radius * math.sin(angle);
     let left = x + metric.left - metric.width / 2.0;
@@ -131,7 +131,7 @@ fn radial_label_fits(cell, radius, angle, metric) {
     len(outside) == 0 and closest_x * closest_x + closest_y * closest_y >= cell.inner * cell.inner
 }
 
-fn label(cell, ctx, options, font) {
+fn label(cell, ctx, options, font) any^ {
     let field = if (options.label_field != null) options.label_field else if (options.node_field != null) options.node_field else "id";
     let title = string(cell.row[field]);
     let radial = options.kind == "sunburst";
@@ -150,13 +150,13 @@ fn label(cell, ctx, options, font) {
         fill: if (options.label_color != null) options.label_color else "#222", fit.text>
 }
 
-pub fn render(data, ctx, options) {
+pub fn render(data, ctx, options) any^ {
     let settings = {*:options, value_field: if (options.value_field != null) options.value_field
         else if (ctx.encoding.size.field != null) ctx.encoding.size.field else "value"};
     let cells = layout(data, ctx.plot_w, ctx.plot_h, settings);
     let font = text.style(options, "label", 11);
     let labels = if (cells is error or options.labels == false) [] else [for (cell in cells
-        where options.kind == "sunburst" or len(cell.children) == 0 or options.header_height > 0) label(cell, ctx, settings, font)];
+        where ((options.kind == "sunburst" or len(cell.children) == 0 or options.header_height > 0) ^ { false })) label(cell, ctx, settings, font)];
     let failure = util.first_error([cells, *labels]);
     if (failure is error) failure else svg.group_class("marks " ++ options.kind, [
         for (cell in cells) (

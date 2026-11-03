@@ -142,7 +142,7 @@ pn scheduler_queue(sched, blocks, packet) {
             return t
         }
     } else {
-        t.queue = packet_add_to(packet, t.queue)
+        t.queue = packet_add_to(packet, t.queue)^
     }
     return cur
 }
@@ -188,9 +188,9 @@ pn run_worker(sched, blocks, tcb, packet) {
 pn run_handler(sched, blocks, tcb, packet) {
     if (packet != null) {
         if (packet.kind == KIND_WORK) {
-            tcb.work_in = packet_add_to(packet, tcb.work_in)
+            tcb.work_in = packet_add_to(packet, tcb.work_in)^
         } else {
-            tcb.dev_in = packet_add_to(packet, tcb.dev_in)
+            tcb.dev_in = packet_add_to(packet, tcb.dev_in)^
         }
     }
     if (tcb.work_in != null) {
@@ -244,7 +244,7 @@ pn scheduler_schedule(sched, blocks) {
     sched.current_tcb = sched.task_list
     while (sched.current_tcb != null) {
         var tcb = sched.current_tcb
-        if (tcb_is_held_or_suspended(tcb)) {
+        if (tcb_is_held_or_suspended(tcb)^) {
             sched.current_tcb = tcb.link
         } else {
             sched.current_id = tcb.id
@@ -258,7 +258,7 @@ pn scheduler_schedule(sched, blocks) {
                     tcb.state = STATE_RUNNABLE
                 }
             }
-            sched.current_tcb = run_task(sched, blocks, tcb, packet)
+            sched.current_tcb = run_task(sched, blocks, tcb, packet)^
         }
     }
 }
@@ -267,24 +267,24 @@ pn run_richards() {
     var sched = create_scheduler()
     var blocks = fill(6, null)
 
-    scheduler_add_idle_task(sched, blocks, ID_IDLE, 0, null, COUNT)
+    scheduler_add_idle_task(sched, blocks, ID_IDLE, 0, null, COUNT)^
 
     var queue = create_packet(null, ID_WORKER, KIND_WORK)
     queue = create_packet(queue, ID_WORKER, KIND_WORK)
-    scheduler_add_worker_task(sched, blocks, ID_WORKER, 1000, queue)
+    scheduler_add_worker_task(sched, blocks, ID_WORKER, 1000, queue)^
 
     queue = create_packet(null, ID_DEVICE_A, KIND_DEVICE)
     queue = create_packet(queue, ID_DEVICE_A, KIND_DEVICE)
     queue = create_packet(queue, ID_DEVICE_A, KIND_DEVICE)
-    scheduler_add_handler_task(sched, blocks, ID_HANDLER_A, 2000, queue)
+    scheduler_add_handler_task(sched, blocks, ID_HANDLER_A, 2000, queue)^
 
     queue = create_packet(null, ID_DEVICE_B, KIND_DEVICE)
     queue = create_packet(queue, ID_DEVICE_B, KIND_DEVICE)
     queue = create_packet(queue, ID_DEVICE_B, KIND_DEVICE)
-    scheduler_add_handler_task(sched, blocks, ID_HANDLER_B, 3000, queue)
+    scheduler_add_handler_task(sched, blocks, ID_HANDLER_B, 3000, queue)^
 
-    scheduler_add_device_task(sched, blocks, ID_DEVICE_A, 4000, null)
-    scheduler_add_device_task(sched, blocks, ID_DEVICE_B, 5000, null)
+    scheduler_add_device_task(sched, blocks, ID_DEVICE_A, 4000, null)^
+    scheduler_add_device_task(sched, blocks, ID_DEVICE_B, 5000, null)^
 
     scheduler_schedule(sched, blocks)
 
@@ -304,7 +304,7 @@ pn main() {
     var i: int = 0
     while (i < 50) {
         var result = run_richards()
-        if (result == false) {
+        if ((result == false)^) {
             pass = false
         }
         i = i + 1

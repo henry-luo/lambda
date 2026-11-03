@@ -6,12 +6,12 @@ import scene: lambda.graph.scene
 import transform: lambda.graph.transform
 
 fn direct_children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn marker_components(marker) {
   let content = if (len(marker) > 0) marker[0] else null;
-  [for (child in model.element_children(content)
+  [for (child in ((model.element_children(content)) ^ { [] })
     where child["data-marker-component"] != null) child["data-marker-component"]]
 }
 
@@ -38,7 +38,7 @@ let result = layout.compute({
   direction: "LR"
 })
 let layers = paint.layers(result)
-let polygon_layout = [for (node in result.nodes where node.id == "f") node][0]
+let polygon_layout = [for (node in ((result.nodes) ^ { [] }) where node.id == "f") node][0]
 let polygon_html = [for (node in html_nodes where node["data-node-id"] == "f") node][0]
 let composed_html = [for (edge in html_edges
   where edge["data-from"] == "e" and edge["data-to"] == "f") edge][0]

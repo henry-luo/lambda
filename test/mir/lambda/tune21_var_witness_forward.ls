@@ -35,6 +35,6 @@ pn main() {
     var taken = fill(4, -1)
     print(place(rows, taken, 0)); print(" "); print(taken); print(" "); print(rows); print("\n")
     var xs = fill(3, 0)
-    widen(xs, 1, "x")
+    widen(xs, 1, "x")^
     print(xs); print("\n")
 }

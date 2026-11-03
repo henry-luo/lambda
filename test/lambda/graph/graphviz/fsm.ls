@@ -22,7 +22,7 @@ let source = (input("test/lambda/graph/graphviz/fsm.dot",
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let routed = layout.compute({
-  nodes: [for (node in model.nodes(graph))
+  nodes: [for (node in ((model.nodes(graph)) ^ { [] }))
     {id: node.id, width: 40, height: 40, shape: "circle"}],
   edges: model.edges(graph), direction: "LR", route_mode: "curved",
   loop_side: "top",
@@ -39,25 +39,25 @@ let back86 = by_endpoints(routed.edges, "8", "6")
 let back85 = by_endpoints(routed.edges, "8", "5")
 let long25 = by_endpoints(routed.edges, "2", "5")
 let html = transform.to_html(graph)
-let circle_html = [for (child in model.element_children(html)
+let circle_html = [for (child in ((model.element_children(html)) ^ { [] })
   where child["data-node-id"] == "2") child][0]
 let curve_probe = {route_mode: "curved", points: [
   {x: 0, y: 0}, {x: 10, y: -10}, {x: 20, y: 0}, {x: 30, y: 0}
 ]}
 let fsm_children = [
-  for (i, node in model.nodes(graph))
+  for (i, node in ((model.nodes(graph)) ^ { [] }))
     {tag: "node", index: i, width: 40, height: 40,
       attrs: {'data-node-id': node.id, 'data-shape': node.shape}},
-  for (i, edge in model.edges(graph))
+  for (i, edge in ((model.edges(graph)) ^ { [] }))
     {tag: "edge-label", index: 100 + i, width: 40, height: 30,
       attrs: {'data-edge-id': edge.id, 'data-label-placement': "above"}}
 ]
 let placed = layout.from_velmts(
   {attrs: {'data-graph-flavor': "dot", 'data-direction': "LR"}},
   fsm_children, null, {edges: model.edges(graph)})
-let loop6_index = [for (i, edge in model.edges(graph)
+let loop6_index = [for (i, edge in ((model.edges(graph)) ^ { [] })
   where edge.from == "6" and edge.to == "6") 100 + i][0]
-let placed_loop6 = [for (entry in placed.placements
+let placed_loop6 = [for (entry in ((placed.placements) ^ { [] })
   where entry.index == loop6_index) entry][0]
 let placed_node6 = by_id(placed.nodes, "6")
 let measured = layout.from_velmts(

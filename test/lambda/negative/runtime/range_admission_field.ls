@@ -3,4 +3,5 @@
 // read the int as a pointer and crashed.
 fn dyn(v) => v
 fn f(p: {a: 1 to 5}) { p.a }
-"bound: " ++ string(f(dyn({a: 9})))
+let admitted = f(dyn({a: 9}))
+admitted

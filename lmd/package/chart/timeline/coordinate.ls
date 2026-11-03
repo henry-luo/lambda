@@ -9,18 +9,18 @@ fn unit(vector, fallback = [1.0,0.0]) {
     let length=math.sqrt(vector[0]*vector[0]+vector[1]*vector[1]);
     if (length==0) fallback else [vector[0]/length,vector[1]/length]
 }
-fn vertex_tangent(points, index) {
+fn vertex_tangent(points, index) any^ {
     let before=if (index>0) unit([points[index][0]-points[index-1][0],points[index][1]-points[index-1][1]]) else null;
     let after=if (index+1<len(points)) unit([points[index+1][0]-points[index][0],points[index+1][1]-points[index][1]]) else null;
     if (before==null) after else if (after==null) before else unit([before[0]+after[0],before[1]+after[1]],after)
 }
-fn table(points, index = 0, length = 0.0, result = []) {
+fn table(points, index = 0, length = 0.0, result = []) any^ {
     if (index >= len(points)) result else {
         let next = length + (if (index == 0) 0.0 else paths.distance(points[index - 1], points[index]));
         table(points, index + 1, next, [*result, {point:points[index], distance:next,tangent:vertex_tangent(points,index)}])
     }
 }
-fn serpent(options, width, height, vertical) {
+fn serpent(options, width, height, vertical) any^ {
     let levels = c.option(options, "levels", 4);
     let long = if (vertical) height else width;
     let cross = if (vertical) width else height;
@@ -28,7 +28,7 @@ fn serpent(options, width, height, vertical) {
     let radius = min(c.option(options, "turn_radius", step / 2.0), min(step / 2.0, long / 2.0));
     let point = (x,y) => if (vertical) [y,x] else [x,y];
     let a = point(radius, 0);
-    svg.M(a[0], a[1]) ++ " " ++ join([for (index in 0 to (levels - 1),
+    svg.M(a[0], a[1]) ++ " " ++ join([for (index in ((0 to (levels - 1)) ^ { [] }),
         let y = index * step, let forward = index % 2 == 0,
         let x = if (forward) long - radius else radius, let edge = if (forward) long else 0,
         let b = point(x,y), let control_a = point(edge,y),
@@ -37,7 +37,7 @@ fn serpent(options, width, height, vertical) {
             control_b[0],control_b[1],end[0],end[1]) else "")], " ")
 }
 
-pub fn configure(options, box, orientation = "horizontal") {
+pub fn configure(options, box, orientation = "horizontal") any^ {
     let kind = c.text(c.option(options, "kind", "straight"));
     let precision = c.option(options, "precision", 0.5);
     let vertical = orientation == "vertical";
@@ -92,7 +92,7 @@ pub fn configure(options, box, orientation = "horizontal") {
 pub fn project(model, fraction, offset = 0.0) {
     let t = if (model.reverse) 1.0 - fraction else fraction;
     let distance = util.lerp(model.start,model.end,util.clamp_val(t,0,1))*model.length;
-    let matches = [for (index in 1 to (len(model.entries)-1) where model.entries[index].distance >= distance) index];
+    let matches = [for (index in ((1 to (len(model.entries)-1)) ^ { [] }) where ((model.entries[index].distance >= distance) ^ { false })) index];
     let index = if (len(matches)>0) matches[0] else len(model.entries)-1;
     let a = model.entries[index-1]; let b = model.entries[index];
     let length = b.distance-a.distance;
@@ -106,7 +106,7 @@ pub fn project(model, fraction, offset = 0.0) {
 
 pub fn invert(model, point) {
     let local = [for (axis in [0,1]) point[axis]-model.origin[axis]];
-    let candidates = [for (index in 1 to (len(model.entries)-1),
+    let candidates = [for (index in ((1 to (len(model.entries)-1)) ^ { [] }),
         let a=model.entries[index-1], let b=model.entries[index],
         let hit=geometry.nearest_segment(local,a.point,b.point))
         {*:hit,distance_along:util.lerp(a.distance,b.distance,hit.t)}];

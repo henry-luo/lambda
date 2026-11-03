@@ -23,7 +23,7 @@ let css = "body{margin:0;font:16px Helvetica,Arial,sans-serif;background:#f4f1ea
     "text-align:center;line-height:50px;transform:translate(0px,0px)}" ++
     ".label{position:absolute;left:40px;top:500px}"
 
-fn r2(v) => string(round(v * 100) / 100)
+fn r2(v) any^ => string(round(v * 100) / 100)
 
 // the tree is built once and passed in: state changes must not regenerate (and so replace) it
 let tree = <div id:"stage", class:"stage",
@@ -49,9 +49,9 @@ on tick(evt) {
     let n = frame_count + 1
     let f = float(n)
     dom.presentation_style_set_property(dom.get_element_by_id(owner, "slider"), "transform",
-        "translate(" ++ r2(f * 9.0) ++ "px," ++ r2(math.sin(f / 6.0) * 30.0) ++ "px)")
-    dom.presentation_style_set_property(dom.get_element_by_id(owner, "fader"), "opacity", r2(0.5 + 0.5 * math.cos(f / 5.0)))
-    dom.presentation_style_set_property(dom.get_element_by_id(owner, "card"), "transform", "rotateY(" ++ r2(f * 7.0) ++ "deg)")
+        "translate(" ++ r2(f * 9.0)^ ++ "px," ++ r2(math.sin(f / 6.0) * 30.0)^ ++ "px)")
+    dom.presentation_style_set_property(dom.get_element_by_id(owner, "fader"), "opacity", r2(0.5 + 0.5 * math.cos(f / 5.0))^)
+    dom.presentation_style_set_property(dom.get_element_by_id(owner, "card"), "transform", "rotateY(" ++ r2(f * 7.0)^ ++ "deg)")
     dom.presentation_style_set_property(dom.get_element_by_id(owner, "comet"), "transform", "translate(" ++ r2(f * 12.0) ++ "px,0px)")
     // an authored-style write in the same frame is not paint-only: that frame repaints in full
     if (n % 8 == 0) dom.style_set_property(dom.get_element_by_id(owner, "label"), "color", if (n % 16 == 0) "#9b2c2c" else "#1f3557")

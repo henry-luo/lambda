@@ -12,16 +12,16 @@ fn piped_call(m: any) { let p = m |> split(","); [p, "reached"] }
 // had judged these by the pipe's static `int` and read the error as 0
 fn inc(x: int) => x + 1
 fn piped_arg(m: any) { [inc(m |> len), "reached"] }
-fn piped_decl(m: any) { let n: int = m |> len; [n, "reached"] }
-pn piped_ret(m: any) int { return m |> len }
+fn piped_decl(m: any) any^ { let n: int = (m |> len)^; [n, "reached"] }
+pn piped_ret(m: any) int^ { return m |> len }
 // a dynamic read of a container that holds the error
 fn member(r) { let n = len(r.x); [n, "reached"] }
 fn slot(xs) { let s = string(xs[1]); [s, "reached"] }
 // rescued, handled, and propagated on request
 fn rescued(m: any) { let n = len(m) ^ { 0 }; [n, "reached"] }
 fn handled(m: any) { len(m) ^ { 0 - 1 } }
-fn propagated(m: any) { let p = split(m, ",")^; [p, "reached"] }
-fn propagated_pipe(m: any) { let p = (m |> split(","))^; [p, "reached"] }
+fn propagated(m: any) any^ { let p = split(m, ",")^; [p, "reached"] }
+fn propagated_pipe(m: any) any^ { let p = (m |> split(","))^; [p, "reached"] }
 // an unannotated parameter never admits it: that call's value is the error
 fn untyped(m) { let n = len(m); [n, "reached"] }
 // a typed-array argument's error is the call's value too (S7.7.3)

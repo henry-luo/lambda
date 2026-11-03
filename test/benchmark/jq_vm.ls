@@ -136,7 +136,7 @@ fn truthy(v) bool => not (v == null or v == false)
 fn sorted_keys(o) string[] => sort([for (k at o) string(k)])
 
 // jq's total order
-pn jcmp(a, b) int {
+pn jcmp(a, b) int^ {
     let ta = jtype(a)
     let tb = jtype(b)
     if (ta != tb) { return if (ta < tb) -1 else 1 }
@@ -146,20 +146,20 @@ pn jcmp(a, b) int {
         var i: int = 0
         while (i < len(a) and i < len(b)) {
             let c = jcmp(a[i], b[i])
-            if (c != 0) { return c }
+            if ((c != 0)^) { return c }
             i = i + 1
         }
         return if (len(a) < len(b)) -1 else if (len(a) > len(b)) 1 else 0
     }
     if (ta == 6) {
-        let ka: string[] = sorted_keys(a)
-        let kb: string[] = sorted_keys(b)
+        let ka: string[] = sorted_keys(a)^
+        let kb: string[] = sorted_keys(b)^
         let ck = jcmp(ka, kb)
-        if (ck != 0) { return ck }
+        if ((ck != 0)^) { return ck }
         var j: int = 0
         while (j < len(ka)) {
             let c = jcmp(a[ka[j]], b[ka[j]])
-            if (c != 0) { return c }
+            if ((c != 0)^) { return c }
             j = j + 1
         }
         return 0
@@ -167,12 +167,12 @@ pn jcmp(a, b) int {
     return 0
 }
 
-pn jequal(a, b) bool {
+pn jequal(a, b) bool^ {
     jcmp(a, b) == 0
 }
 
 // stable merge sort of values by jcmp
-pn jsort(xs: array) array {
+pn jsort(xs: array) array^ {
     var items: array = xs
     let n: int = len(items)
     var width: int = 1
@@ -185,20 +185,20 @@ pn jsort(xs: array) array {
             var i: int = lo
             var j: int = mid
             while (i < mid and j < hi) {
-                if (jcmp(items[j], items[i]) < 0) {
-                    out.push(items[j])
+                if ((jcmp(items[j], items[i]) < 0)^) {
+                    out.push(items[j])^
                     j = j + 1
                 } else {
-                    out.push(items[i])
+                    out.push(items[i])^
                     i = i + 1
                 }
             }
             while (i < mid) {
-                out.push(items[i])
+                out.push(items[i])^
                 i = i + 1
             }
             while (j < hi) {
-                out.push(items[j])
+                out.push(items[j])^
                 j = j + 1
             }
             lo = lo + 2 * width
@@ -210,17 +210,19 @@ pn jsort(xs: array) array {
 }
 
 // stable sort of indices by keys[index]
-pn jsort_indices(keys: array) int[] {
+pn jsort_indices(keys: array) int[]^ {
     let n: int = len(keys)
-    var idx: int[] = []
+    let _admitted_idx_215: int[] = []
+    var idx: int[] = _admitted_idx_215
     var k: int = 0
     while (k < n) {
-        idx.push(k)
+        idx.push(k)^
         k = k + 1
     }
     var width: int = 1
     while (width < n) {
-        var out: int[] = []
+        let _admitted_out_223: int[] = []
+        var out: int[] = _admitted_out_223
         var lo: int = 0
         while (lo < n) {
             let mid: int = if (lo + width < n) lo + width else n
@@ -228,20 +230,20 @@ pn jsort_indices(keys: array) int[] {
             var i: int = lo
             var j: int = mid
             while (i < mid and j < hi) {
-                if (jcmp(keys[idx[j]], keys[idx[i]]) < 0) {
-                    out.push(idx[j])
+                if ((jcmp(keys[idx[j]], keys[idx[i]]) < 0)^) {
+                    out.push(idx[j])^
                     j = j + 1
                 } else {
-                    out.push(idx[i])
+                    out.push(idx[i])^
                     i = i + 1
                 }
             }
             while (i < mid) {
-                out.push(idx[i])
+                out.push(idx[i])^
                 i = i + 1
             }
             while (j < hi) {
-                out.push(idx[j])
+                out.push(idx[j])^
                 j = j + 1
             }
             lo = lo + 2 * width
@@ -277,17 +279,17 @@ let jq_empty_object = {}
 // through an expression can alias it, LR12-35)
 fn copy_array(a) array => [for (x in a) x]
 
-fn hex4(c: int) string {
+fn hex4(c: int) string^ {
     let digits: string = "0123456789abcdef"
     "\\u00" ++ slice(digits, c / 16, c / 16 + 1) ++ slice(digits, c % 16, c % 16 + 1)
 }
 
-pn json_string(s: string) string {
+pn json_string(s: string) string^ {
     var parts: string[] = ["\""]
     var i: int = 0
     while (i < len(s)) {
-        let ch: string = slice(s, i, i + 1) or ""
-        let c: int = ord(ch)
+        let ch: string = (slice(s, i, i + 1) or "")^
+        let c: int = ord(ch)^
         parts.push(if (c == 34) "\\\""
             else if (c == 92) "\\\\"
             else if (c == 10) "\\n"
@@ -296,15 +298,15 @@ pn json_string(s: string) string {
             else if (c == 8) "\\b"
             else if (c == 12) "\\f"
             else if (c < 32 or c == 127) hex4(c)
-            else ch)
+            else ch)^
         i = i + 1
     }
-    parts.push("\"")
+    parts.push("\"")^
     join(parts, "")
 }
 
 // jq's compact JSON text (Lambda's JSON writer only indents, LR09-32)
-pn json_text(v) string {
+pn json_text(v) string^ {
     if (v == null) { return "null" }
     if (v is bool) { return if (v) "true" else "false" }
     if (v is int or v is float) { return string(v) }
@@ -313,14 +315,14 @@ pn json_text(v) string {
     "{" ++ join([for (k, x at v) json_string(string(k)) ++ ":" ++ json_text(x)], ",") ++ "}"
 }
 
-pn tostring_value(v) string {
+pn tostring_value(v) string^ {
     if (v is string) { return v }
     json_text(v)
 }
 
 // "T (value)" as jq's error messages describe a value
-pn describe(v) string {
-    let text: string = json_text(v)
+pn describe(v) string^ {
+    let text: string = json_text(v)^
     type_name(v) ++ " (" ++ (if (len(text) > 11) slice(text, 0, 10) ++ "..." else text) ++ ")"
 }
 
@@ -341,7 +343,8 @@ pn index_value(t, k) {
         if (d < 0 or d >= len(t)) { return ok(null) }
         return ok(t[int(d)])
     }
-    let what: string = if (kt == 4) json_text(k) else type_name(k)
+    let _admitted_what_344: string = if (kt == 4) json_text(k) else type_name(k)
+    let what: string = _admitted_what_344^
     fail("Cannot index " ++ type_name(t) ++ " with " ++ what)
 }
 
@@ -391,10 +394,10 @@ pn binop_value(op: int, l, r) {
                 var keep: bool = true
                 var j: int = 0
                 while (j < len(r) and keep) {
-                    if (jequal(l[i], r[j])) { keep = false }
+                    if (jequal(l[i], r[j])^) { keep = false }
                     j = j + 1
                 }
-                if (keep) { out.push(l[i]) }
+                if (keep) { out.push(l[i])^ }
                 i = i + 1
             }
             return ok(out)
@@ -404,13 +407,15 @@ pn binop_value(op: int, l, r) {
     if (op == OPB_MUL) {
         if (lt == 3 and rt == 3) { return ok(l * r) }
         if ((lt == 4 and rt == 3) or (lt == 3 and rt == 4)) {
-            let s: string = if (lt == 4) l else r
+            let _admitted_s_407: string = if (lt == 4) l else r
+            let s: string = _admitted_s_407^
             let n = if (lt == 3) l else r
             if (n <= 0) { return ok(null) }
-            var parts: string[] = []
+            let _admitted_parts_410: string[] = []
+            var parts: string[] = _admitted_parts_410
             var i: int = 0
-            while (i < int(n) or i == 0) {
-                parts.push(s)
+            while ((i < int(n) or i == 0)^) {
+                parts.push(s)^
                 i = i + 1
             }
             return ok(join(parts, ""))
@@ -426,8 +431,10 @@ pn binop_value(op: int, l, r) {
     }
     if (op == OPB_MOD) {
         if (lt == 3 and rt == 3) {
-            let a: int = int(l) ^ { 0 }
-            var b: int = int(r) ^ { 0 }
+            let _admitted_a_429: int = int(l) ^ { 0 }
+            let a: int = _admitted_a_429^
+            let _admitted_b_430: int = int(r) ^ { 0 }
+            var b: int = _admitted_b_430^
             if (b == 0) { return fail(describe(l) ++ " and " ++ describe(r) ++ " cannot be divided because the divisor is zero") }
             if (b < 0) { b = 0 - b }
             return ok(a % b)
@@ -444,13 +451,13 @@ pn binop_value(op: int, l, r) {
 }
 
 // jq's jv_contains: a type mismatch below the top level is just false
-pn contains_value(a, b) bool {
+pn contains_value(a, b) bool^ {
     let ta = jtype(a)
     let tb = jtype(b)
     if (ta == 6 and tb == 6) {
         for (k, y at b) {
             let name: string = string(k)
-            if (a[name] == null and not (has_key(a, name))) { return false }
+            if ((a[name] == null and not (has_key(a, name)))^) { return false }
             if (not contains_value(a[name], y)) { return false }
         }
         return true
@@ -461,7 +468,7 @@ pn contains_value(a, b) bool {
             var found: bool = false
             var i: int = 0
             while (i < len(a) and not found) {
-                found = contains_value(a[i], b[j])
+                found = contains_value(a[i], b[j])^
                 i = i + 1
             }
             if (not found) { return false }
@@ -473,15 +480,15 @@ pn contains_value(a, b) bool {
     jequal(a, b)
 }
 
-fn has_key(o, name: string) bool => len([for (k at o where string(k) == name) k]) > 0
+fn has_key(o, name: string) bool^ => len([for (k at o where ((string(k) == name) ^ { false })) k]) > 0
 
 pn getpath_value(t, p: array) {
     var cur = t
     var i: int = 0
     while (i < len(p)) {
-        if (cur == null) { return ok(null) }
+        if ((cur == null)^) { return ok(null) }
         let r = index_value(cur, p[i])
-        if (not r.ok) { return r }
+        if ((not r.ok)^) { return r }
         cur = r.value
         i = i + 1
     }
@@ -493,26 +500,27 @@ pn setpath_rec(t, p: array, i: int, v) {
     let k = p[i]
     if (k is string) {
         let base = if (t == null) jq_empty_object else t
-        if (jtype(base) != 6) { return index_value(base, k) }
+        if ((jtype(base) != 6)^) { return index_value(base, k) }
         let child = setpath_rec(base[k], p, i + 1, v)
-        if (not child.ok) { return child }
+        if ((not child.ok)^) { return child }
         return ok(obj_with(base, k, child.value))
     }
     if (k is int or k is float) {
         let base = if (t == null) [] else t
-        if (jtype(base) != 5) {
+        if ((jtype(base) != 5)^) {
             let bad = index_value(base, k)
             return if (bad.ok) fail("Cannot index " ++ type_name(base) ++ " with number") else bad
         }
         var d = floor(k)
-        if (d < 0) { d = d + len(base) }
-        if (d < 0) { return fail("Out of bounds negative array index") }
-        let idx: int = int(d) ^ { 0 }
+        if ((d < 0)^) { d = d + len(base) }
+        if ((d < 0)^) { return fail("Out of bounds negative array index") }
+        let _admitted_idx_510: int = int(d) ^ { 0 }
+        let idx: int = _admitted_idx_510^
         let child = setpath_rec(if (idx < len(base)) base[idx] else null, p, i + 1, v)
-        if (not child.ok) { return child }
+        if ((not child.ok)^) { return child }
         var out = copy_array(base)
-        while (len(out) <= idx) { out.push(null) }
-        out[idx] = child.value
+        while ((len(out) <= idx)^) { out.push(null)^ }
+        out[idx] = child.value^
         return ok(out)
     }
     fail("Invalid path component")
@@ -523,30 +531,31 @@ pn delpath_rec(t, p: array, i: int) {
     let k = p[i]
     let is_last: bool = i == len(p) - 1
     if (jtype(t) == 6 and k is string) {
-        if (not has_key(t, k)) { return ok(t) }
+        if ((not has_key(t, k))^) { return ok(t) }
         if (is_last) { return ok(obj_without(t, k)) }
         let child = delpath_rec(t[k], p, i + 1)
-        if (not child.ok) { return child }
+        if ((not child.ok)^) { return child }
         return ok(obj_with(t, k, child.value))
     }
     if (jtype(t) == 5 and (k is int or k is float)) {
         var d = floor(k)
         if (d < 0) { d = d + len(t) }
         if (d < 0 or d >= len(t)) { return ok(t) }
-        let idx: int = int(d) ^ { 0 }
+        let _admitted_idx_536: int = int(d) ^ { 0 }
+        let idx: int = _admitted_idx_536^
         if (is_last) {
             var out: array = []
             var j: int = 0
             while (j < len(t)) {
-                if (j != idx) { out.push(t[j]) }
+                if (j != idx) { out.push(t[j])^ }
                 j = j + 1
             }
             return ok(out)
         }
         let child = delpath_rec(t[idx], p, i + 1)
-        if (not child.ok) { return child }
+        if ((not child.ok)^) { return child }
         var out2 = copy_array(t)
-        out2[idx] = child.value
+        out2[idx] = child.value^
         return ok(out2)
     }
     index_value(t, k)
@@ -554,15 +563,16 @@ pn delpath_rec(t, p: array, i: int) {
 
 pn delpaths_value(t, ps) {
     if (jtype(ps) != 5) { return fail("Paths must be specified as an array") }
-    let sorted: array = jsort(ps)
+    let sorted: array = jsort(ps)^
     var cur = t
-    var i: int = len(sorted) - 1
+    let _admitted_i_559: int = len(sorted) - 1
+    var i: int = _admitted_i_559
     while (i >= 0) {
         let p = sorted[i]
-        if (jtype(p) != 5) { return fail("Path must be specified as an array") }
-        if (len(p) == 0) { return ok(null) }
+        if ((jtype(p) != 5)^) { return fail("Path must be specified as an array") }
+        if ((len(p) == 0)^) { return ok(null) }
         let r = delpath_rec(cur, p, 0)
-        if (not r.ok) { return r }
+        if ((not r.ok)^) { return r }
         cur = r.value
         i = i - 1
     }
@@ -572,17 +582,18 @@ pn delpaths_value(t, ps) {
 pn flatten_into(a, var out: array) {
     var i: int = 0
     while (i < len(a)) {
-        if (a[i] is array) { flatten_into(a[i], out) }
-        else { out.push(a[i]) }
+        if (a[i] is array) { flatten_into(a[i], out)^ }
+        else { out.push(a[i])^ }
         i = i + 1
     }
 }
 
-pn codepoints(s: string) int[] {
-    var out: int[] = []
+pn codepoints(s: string) int[]^ {
+    let _admitted_out_582: int[] = []
+    var out: int[] = _admitted_out_582
     var i: int = 0
     while (i < len(s)) {
-        out.push(ord(slice(s, i, i + 1)))
+        out.push(ord(slice(s, i, i + 1)))^
         i = i + 1
     }
     out
@@ -603,10 +614,11 @@ pn call_native(id: int, input, args: array) {
             return ok(if (id == NAT_KEYS) sorted_keys(input) else [for (k at input) string(k)])
         }
         if (t == 5) {
-            var idx: int[] = []
+            let _admitted_idx_606: int[] = []
+            var idx: int[] = _admitted_idx_606
             var i: int = 0
             while (i < len(input)) {
-                idx.push(i)
+                idx.push(i)^
                 i = i + 1
             }
             return ok(idx)
@@ -615,13 +627,13 @@ pn call_native(id: int, input, args: array) {
     }
     if (id == NAT_HAS) {
         if (t == 6 and args[0] is string) { return ok(has_key(input, args[0])) }
-        if (t == 5 and jtype(args[0]) == 3) { return ok(args[0] >= 0 and args[0] < len(input)) }
+        if ((t == 5 and jtype(args[0]) == 3)^) { return ok(args[0] >= 0 and args[0] < len(input)) }
         return fail(describe(input) ++ ", " ++ describe(args[0]) ++ ": cannot check whether one has a key")
     }
     if (id == NAT_CONTAINS) {
         let tb = jtype(args[0])
-        let bools: bool = (t == 1 or t == 2) and (tb == 1 or tb == 2)
-        if (t != tb and not bools) {
+        let bools: bool = ((t == 1 or t == 2) and (tb == 1 or tb == 2))^
+        if ((t != tb and not bools)^) {
             return fail(describe(input) ++ " and " ++ describe(args[0]) ++ " cannot have their containment checked")
         }
         return ok(contains_value(input, args[0]))
@@ -645,11 +657,12 @@ pn call_native(id: int, input, args: array) {
     }
     if (id == NAT_ASCII_UPCASE or id == NAT_ASCII_DOWNCASE) {
         if (t != 4) { return fail(describe(input) ++ " cannot be case-converted") }
-        let cps: int[] = codepoints(input)
-        let mapped: string[] = [for (c in cps) chr(
+        let cps: int[] = codepoints(input)^
+        let _admitted_mapped_649: string[] = [for (c in cps) chr(
             if (id == NAT_ASCII_UPCASE and c >= 97 and c <= 122) c - 32
             else if (id == NAT_ASCII_DOWNCASE and c >= 65 and c <= 90) c + 32
             else c)]
+        let mapped: string[] = _admitted_mapped_649^
         return ok(join(mapped, ""))
     }
     if (id == NAT_EXPLODE) {
@@ -667,7 +680,8 @@ pn call_native(id: int, input, args: array) {
     }
     if (id == NAT_JOIN) {
         if (t != 5) { return fail(describe(input) ++ " cannot be joined") }
-        let sep: string = if (args[0] is string) args[0] else ""
+        let _admitted_sep_670: string = if (args[0] is string) args[0] else ""
+        let sep: string = _admitted_sep_670^
         return ok(join([for (x in input) if (x == null) "" else tostring_value(x)], sep))
     }
     if (id == NAT_ADD) {
@@ -682,19 +696,20 @@ pn call_native(id: int, input, args: array) {
         var i: int = 1
         while (i < len(input)) {
             let x = input[i]
-            let at: int = if (mode == 1) 5 else if (mode == 2) 6 else jtype(acc)
+            let _admitted_at_685: int = if (mode == 1) 5 else if (mode == 2) 6 else jtype(acc)
+            let at: int = _admitted_at_685^
             let xt = jtype(x)
-            if (at == 5 and xt == 5) {
+            if ((at == 5 and xt == 5)^) {
                 if (mode != 1) {
-                    fresh_array = copy_array(acc)
+                    fresh_array = copy_array(acc)^
                     mode = 1
                 }
                 var j: int = 0
-                while (j < len(x)) {
-                    fresh_array.push(x[j])
+                while ((j < len(x))^) {
+                    fresh_array.push(x[j])^
                     j = j + 1
                 }
-            } else if (at == 6 and xt == 6) {
+            } else if ((at == 6 and xt == 6)^) {
                 if (mode != 2) {
                     fresh_object = {}
                     for (k0, y0 at acc) { fresh_object[string(k0)] = y0 }
@@ -706,7 +721,7 @@ pn call_native(id: int, input, args: array) {
                 if (mode == 2) { acc = fresh_object }
                 mode = 0
                 let r = binop_value(OPB_ADD, acc, x)
-                if (not r.ok) { return r }
+                if ((not r.ok)^) { return r }
                 acc = r.value
             }
             i = i + 1
@@ -716,7 +731,7 @@ pn call_native(id: int, input, args: array) {
     if (id == NAT_FLATTEN) {
         if (t != 5) { return fail(describe(input) ++ " cannot be flattened") }
         var out: array = []
-        flatten_into(input, out)
+        flatten_into(input, out)^
         return ok(out)
     }
     if (id == NAT_FLOOR or id == NAT_CEIL) {
@@ -730,35 +745,35 @@ pn call_native(id: int, input, args: array) {
         var i: int = 1
         while (i < len(input)) {
             let c = jcmp(input[i], best)
-            if (if (id == NAT_MIN) c < 0 else c >= 0) { best = input[i] }
+            if ((if (id == NAT_MIN) c < 0 else c >= 0)^) { best = input[i] }
             i = i + 1
         }
         return ok(best)
     }
     if (id == NAT_SORT or id == NAT_UNIQUE) {
         if (t != 5) { return fail(describe(input) ++ " cannot be sorted, as it is not an array") }
-        let sorted: array = jsort(input)
+        let sorted: array = jsort(input)^
         if (id == NAT_SORT or len(sorted) < 2) { return ok(sorted) }
         var out: array = [sorted[0]]
         var i: int = 1
         while (i < len(sorted)) {
-            if (not jequal(sorted[i], out[len(out) - 1])) { out.push(sorted[i]) }
+            if ((not jequal(sorted[i], out[len(out) - 1]))^) { out.push(sorted[i])^ }
             i = i + 1
         }
         return ok(out)
     }
     if (id == NAT_REVERSE) {
         if (t == 0) { return ok([]) }
-        if (t == 4) { return ok(join(reverse([for (c in codepoints(input)) chr(c)]), "")) }
+        if (t == 4) { return ok(join(reverse([for (c in codepoints(input)^) chr(c)]), "")) }
         if (t != 5) { return fail(describe(input) ++ " cannot be reversed") }
         return ok(reverse(input))
     }
     if (id == NAT_GETPATH) {
-        if (jtype(args[0]) != 5) { return fail("Path must be specified as an array") }
+        if ((jtype(args[0]) != 5)^) { return fail("Path must be specified as an array") }
         return getpath_value(input, args[0])
     }
     if (id == NAT_SETPATH) {
-        if (jtype(args[0]) != 5) { return fail("Path must be specified as an array") }
+        if ((jtype(args[0]) != 5)^) { return fail("Path must be specified as an array") }
         return setpath_rec(input, args[0], 0, args[1])
     }
     if (id == NAT_DELPATHS) { return delpaths_value(input, args[0]) }
@@ -769,38 +784,40 @@ pn call_native(id: int, input, args: array) {
         var i: int = 0
         while (i < len(input)) {
             let e = input[i]
-            if (jtype(e) != 6) { return fail(describe(e) ++ " cannot be indexed as an entry") }
+            if ((jtype(e) != 6)^) { return fail(describe(e) ++ " cannot be indexed as an entry") }
             var key = null
             var n: int = 0
-            while (n < 6 and not truthy(key)) {
+            while ((n < 6 and not truthy(key))^) {
                 key = e[names[n]]
                 n = n + 1
             }
-            let name: string = if (key is string) key else json_text(key)
-            r[name] = if (has_key(e, "value")) e["value"] else e["v"]
+            let _admitted_name_779: string = if (key is string) key else json_text(key)
+            let name: string = _admitted_name_779^
+            r[name] = if (has_key(e, "value")^) e["value"] else e["v"]
             i = i + 1
         }
         return ok(r)
     }
     if (id == NAT_SORT_BY_IMPL or id == NAT_GROUP_BY_IMPL) {
-        if (t != 5 or jtype(args[0]) != 5 or len(args[0]) != len(input)) {
+        if ((t != 5 or jtype(args[0]) != 5 or len(args[0]) != len(input))^) {
             return fail(describe(input) ++ " cannot be sorted, as it is not an array")
         }
-        let keys: array = args[0]
-        let order: int[] = jsort_indices(keys)
+        let _admitted_keys_789: array = args[0]
+        let keys: array = _admitted_keys_789^
+        let order: int[] = jsort_indices(keys)^
         if (id == NAT_SORT_BY_IMPL) { return ok([for (i in order) input[i]]) }
         var groups: array = []
         var group: array = []
         var i: int = 0
         while (i < len(order)) {
-            if (i > 0 and not jequal(keys[order[i]], keys[order[i - 1]])) {
-                groups.push(group)
+            if ((i > 0 and not jequal(keys[order[i]], keys[order[i - 1]]))^) {
+                groups.push(group)^
                 group = []
             }
-            group.push(input[order[i]])
+            group.push(input[order[i]])^
             i = i + 1
         }
-        if (len(order) > 0) { groups.push(group) }
+        if (len(order) > 0) { groups.push(group)^ }
         return ok(groups)
     }
     if (id == NAT_ERROR0) { return fail(input) }
@@ -870,7 +887,8 @@ pn ch(p: Parser) int {
 
 pn skip_ws(var p: Parser) {
     while (p.pos < p.n) {
-        let c: int = p.codes[p.pos]
+        let _admitted_c_873: int = p.codes[p.pos]
+        let c: int = _admitted_c_873^
         if (c == 32 or c == 9 or c == 10 or c == 13) {
             p.pos = p.pos + 1
         } else if (c == 35) {
@@ -881,14 +899,14 @@ pn skip_ws(var p: Parser) {
     }
 }
 
-pn peek(var p: Parser, tok: string) bool {
-    skip_ws(p)
+pn peek(var p: Parser, tok: string) bool^ {
+    skip_ws(p)^
     let n: int = len(tok)
     p.pos + n <= p.n and slice(p.src, p.pos, p.pos + n) == tok
 }
 
-pn accept(var p: Parser, tok: string) bool {
-    if (peek(p, tok)) {
+pn accept(var p: Parser, tok: string) bool^ {
+    if (peek(p, tok)^) {
         p.pos = p.pos + len(tok)
         return true
     }
@@ -899,33 +917,33 @@ pn expect(var p: Parser, tok: string) {
     if (not accept(p, tok)) { parse_fail(p, "expected '" ++ tok ++ "'") }
 }
 
-pn read_ident(var p: Parser) string {
-    skip_ws(p)
+pn read_ident(var p: Parser) string^ {
+    skip_ws(p)^
     let start: int = p.pos
-    if (p.pos >= p.n or not is_ident_start(p.codes[p.pos])) { return "" }
-    while (p.pos < p.n and is_ident_char(p.codes[p.pos])) { p.pos = p.pos + 1 }
+    if ((p.pos >= p.n or not is_ident_start(p.codes[p.pos]))^) { return "" }
+    while ((p.pos < p.n and is_ident_char(p.codes[p.pos]))^) { p.pos = p.pos + 1 }
     slice(p.src, start, p.pos) or ""
 }
 
-pn peek_keyword(var p: Parser, kw: string) bool {
-    skip_ws(p)
+pn peek_keyword(var p: Parser, kw: string) bool^ {
+    skip_ws(p)^
     let n: int = len(kw)
     p.pos + n <= p.n and slice(p.src, p.pos, p.pos + n) == kw and
         (p.pos + n == p.n or not is_ident_char(p.codes[p.pos + n]))
 }
 
-pn accept_keyword(var p: Parser, kw: string) bool {
-    if (not peek_keyword(p, kw)) { return false }
+pn accept_keyword(var p: Parser, kw: string) bool^ {
+    if ((not peek_keyword(p, kw))^) { return false }
     p.pos = p.pos + len(kw)
     true
 }
 
-pn read_var(var p: Parser) string {
-    if (not accept(p, "$")) {
+pn read_var(var p: Parser) string^ {
+    if ((not accept(p, "$"))^) {
         parse_fail(p, "expected $variable")
         return "?"
     }
-    let name: string = read_ident(p)
+    let name: string = read_ident(p)^
     if (name == "") { parse_fail(p, "expected variable name") }
     name
 }
@@ -941,7 +959,8 @@ fn codes_text(codes: int[]) string => join([for (c in codes) chr(c)], "")
 
 // string literal with \(...) interpolation, built as "a" + (e|tostring) + ...
 pn parse_string(var p: Parser) {
-    var codes: int[] = []
+    let _admitted_codes_944: int[] = []
+    var codes: int[] = _admitted_codes_944
     var result = null
     p.pos = p.pos + 1
     while (true) {
@@ -949,20 +968,22 @@ pn parse_string(var p: Parser) {
             parse_fail(p, "unterminated string")
             break
         }
-        let c: int = p.codes[p.pos]
+        let _admitted_c_952: int = p.codes[p.pos]
+        let c: int = _admitted_c_952^
         p.pos = p.pos + 1
         if (c == 34) { break }
         if (c != 92) {
-            codes.push(c)
+            codes.push(c)^
             continue
         }
-        let e: int = ch(p)
+        let e: int = ch(p)^
         p.pos = p.pos + 1
         if (e == 40) {
             let piece = mk_lit(codes_text(codes))
-            codes = []
+            let _admitted_codes_963: int[] = []
+            codes = _admitted_codes_963
             let expr = parse_pipe(p)
-            expect(p, ")")
+            expect(p, ")")^
             let text = mk(N_PIPE, expr, mk_call("tostring", []))
             let joined = mk_binop(OPB_ADD, piece, text)
             result = if (result == null) joined else mk_binop(OPB_ADD, result, joined)
@@ -972,15 +993,16 @@ pn parse_string(var p: Parser) {
             var cp: int = 0
             var k: int = 0
             while (k < 4 and p.pos < p.n) {
-                cp = cp * 16 + hex_value(p.codes[p.pos])
+                let _admitted_cp_975: int = cp * 16 + hex_value(p.codes[p.pos])
+                cp = _admitted_cp_975^
                 p.pos = p.pos + 1
                 k = k + 1
             }
-            codes.push(cp)
+            codes.push(cp)^
             continue
         }
         codes.push(if (e == 110) 10 else if (e == 116) 9 else if (e == 114) 13
-            else if (e == 98) 8 else if (e == 102) 12 else e)
+            else if (e == 98) 8 else if (e == 102) 12 else e)^
     }
     let tail = mk_lit(codes_text(codes))
     if (result == null) tail else mk_binop(OPB_ADD, result, tail)
@@ -989,7 +1011,8 @@ pn parse_string(var p: Parser) {
 pn parse_number(var p: Parser) {
     let start: int = p.pos
     while (p.pos < p.n) {
-        let c: int = p.codes[p.pos]
+        let _admitted_c_992: int = p.codes[p.pos]
+        let c: int = _admitted_c_992^
         if ((c >= 48 and c <= 57) or c == 46) {
             p.pos = p.pos + 1
         } else if ((c == 101 or c == 69) and p.pos + 1 < p.n) {
@@ -999,54 +1022,54 @@ pn parse_number(var p: Parser) {
             break
         }
     }
-    let text: string = slice(p.src, start, p.pos) or "0"
+    let text: string = (slice(p.src, start, p.pos) or "0")^
     mk_lit(parse(text, 'json') ^ { 0 })
 }
 
 // object value: ExpD := ExpD '|' ExpD | '-' ExpD | Term
 pn parse_object_value(var p: Parser) {
-    if (accept(p, "-")) { return mk(N_NEG, parse_object_value(p), null) }
+    if (accept(p, "-")^) { return mk(N_NEG, parse_object_value(p), null) }
     let v = parse_postfix(p, false)
-    if (not peek(p, "|=") and accept(p, "|")) { return mk(N_PIPE, v, parse_object_value(p)) }
+    if ((not peek(p, "|=") and accept(p, "|"))^) { return mk(N_PIPE, v, parse_object_value(p)) }
     v
 }
 
 pn parse_object(var p: Parser) {
     var pairs: array = []
-    if (accept(p, "}")) { return {*: mk(N_OBJECT, null, null), list: pairs} }
+    if (accept(p, "}")^) { return {*: mk(N_OBJECT, null, null), list: pairs} }
     while (true) {
-        skip_ws(p)
+        skip_ws(p)^
         var key = null
         var val = null
-        if (peek(p, "$")) {
-            let name: string = read_var(p)
+        if (peek(p, "$")^) {
+            let name: string = read_var(p)^
             key = mk_lit(name)
             val = mk_named(N_VAR, name, null, null)
         } else {
-            if (peek(p, "\"")) {
+            if (peek(p, "\"")^) {
                 key = parse_string(p)
-            } else if (accept(p, "(")) {
+            } else if (accept(p, "(")^) {
                 key = parse_pipe(p)
-                expect(p, ")")
+                expect(p, ")")^
             } else {
-                let id: string = read_ident(p)
+                let id: string = read_ident(p)^
                 if (id == "") {
                     parse_fail(p, "bad object key")
                     return mk(N_OBJECT, null, null)
                 }
                 key = mk_lit(id)
             }
-            if (accept(p, ":")) {
+            if (accept(p, ":")^) {
                 val = parse_object_value(p)
             } else {
                 // {a} is {a: .a}
                 val = mk(N_INDEX, mk(N_IDENTITY, null, null), key)
             }
         }
-        pairs.push(key)
-        pairs.push(val)
-        if (not accept(p, ",")) {
-            expect(p, "}")
+        pairs.push(key)^
+        pairs.push(val)^
+        if ((not accept(p, ","))^) {
+            expect(p, "}")^
             break
         }
     }
@@ -1057,9 +1080,10 @@ pn parse_object(var p: Parser) {
 pn parse_suffixes(var p: Parser, start, allow_as: bool) {
     var term = start
     while (true) {
-        skip_ws(p)
-        let c: int = ch(p)
-        let next: int = if (p.pos + 1 < p.n) p.codes[p.pos + 1] else -1
+        skip_ws(p)^
+        let c: int = ch(p)^
+        let _admitted_next_1062: int = if (p.pos + 1 < p.n) p.codes[p.pos + 1] else -1
+        let next: int = _admitted_next_1062^
         if (c == 46 and (is_ident_start(next) or next == 34 or next == 91)) {
             p.pos = p.pos + 1
             if (next == 34) {
@@ -1067,50 +1091,51 @@ pn parse_suffixes(var p: Parser, start, allow_as: bool) {
             } else if (next != 91) {
                 term = mk(N_INDEX, term, mk_lit(read_ident(p)))
             }
-        } else if (accept(p, "[")) {
-            if (accept(p, "]")) {
+        } else if (accept(p, "[")^) {
+            if (accept(p, "]")^) {
                 term = mk(N_ITER, term, null)
-            } else if (accept(p, ":")) {
+            } else if (accept(p, ":")^) {
                 let upper = parse_pipe(p)
-                expect(p, "]")
+                expect(p, "]")^
                 term = {*: mk(N_SLICE, term, null), c: upper}
             } else {
                 let idx = parse_pipe(p)
-                if (accept(p, ":")) {
+                if (accept(p, ":")^) {
                     let upper = if (peek(p, "]")) null else parse_pipe(p)
-                    expect(p, "]")
+                    expect(p, "]")^
                     term = {*: mk(N_SLICE, term, idx), c: upper}
                 } else {
-                    expect(p, "]")
+                    expect(p, "]")^
                     term = mk(N_INDEX, term, idx)
                 }
             }
-        } else if (not peek(p, "?//") and accept(p, "?")) {
+        } else if ((not peek(p, "?//") and accept(p, "?"))^) {
             term = mk(N_TRY, term, null)
         } else {
             break
         }
     }
-    if (allow_as and peek_keyword(p, "as")) {
-        accept_keyword(p, "as")
-        let name: string = read_var(p)
-        expect(p, "|")
+    if ((allow_as and peek_keyword(p, "as"))^) {
+        accept_keyword(p, "as")^
+        let name: string = read_var(p)^
+        expect(p, "|")^
         return mk_named(N_BIND, name, term, parse_pipe(p))
     }
     term
 }
 
 pn parse_primary(var p: Parser) {
-    skip_ws(p)
+    skip_ws(p)^
     if (p.pos >= p.n) {
         parse_fail(p, "unexpected end")
         return mk(N_IDENTITY, null, null)
     }
-    let c: int = p.codes[p.pos]
+    let _admitted_c_1109: int = p.codes[p.pos]
+    let c: int = _admitted_c_1109^
     if (c == 46) {
-        if (accept(p, "..")) { return mk(N_RECURSE_DEFAULT, null, null) }
+        if (accept(p, "..")^) { return mk(N_RECURSE_DEFAULT, null, null) }
         p.pos = p.pos + 1
-        if (p.pos < p.n and is_ident_start(p.codes[p.pos])) {
+        if ((p.pos < p.n and is_ident_start(p.codes[p.pos]))^) {
             return mk(N_INDEX, mk(N_IDENTITY, null, null), mk_lit(read_ident(p)))
         }
         if (p.pos < p.n and p.codes[p.pos] == 34) {
@@ -1120,54 +1145,54 @@ pn parse_primary(var p: Parser) {
     }
     if (c >= 48 and c <= 57) { return parse_number(p) }
     if (c == 34) { return parse_string(p) }
-    if (accept(p, "(")) {
+    if (accept(p, "(")^) {
         let e = parse_pipe(p)
-        expect(p, ")")
+        expect(p, ")")^
         return e
     }
-    if (accept(p, "[")) {
-        if (accept(p, "]")) { return mk(N_ARRAY, null, null) }
+    if (accept(p, "[")^) {
+        if (accept(p, "]")^) { return mk(N_ARRAY, null, null) }
         let body = parse_pipe(p)
-        expect(p, "]")
+        expect(p, "]")^
         return mk(N_ARRAY, body, null)
     }
-    if (accept(p, "{")) { return parse_object(p) }
+    if (accept(p, "{")^) { return parse_object(p) }
     if (c == 36) { return mk_named(N_VAR, read_var(p), null, null) }
-    if (accept_keyword(p, "if")) { return parse_if(p) }
-    if (accept_keyword(p, "try")) {
+    if (accept_keyword(p, "if")^) { return parse_if(p) }
+    if (accept_keyword(p, "try")^) {
         let body = parse_postfix(p, false)
         let handler = if (accept_keyword(p, "catch")) parse_postfix(p, false) else null
         return mk(N_TRY, body, handler)
     }
-    if (peek_keyword(p, "reduce") or peek_keyword(p, "foreach")) {
-        let is_foreach: bool = accept_keyword(p, "foreach")
-        if (not is_foreach) { accept_keyword(p, "reduce") }
+    if ((peek_keyword(p, "reduce") or peek_keyword(p, "foreach"))^) {
+        let is_foreach: bool = accept_keyword(p, "foreach")^
+        if (not is_foreach) { accept_keyword(p, "reduce")^ }
         let source = parse_postfix(p, false)
-        if (not accept_keyword(p, "as")) { parse_fail(p, "expected as") }
-        let name: string = read_var(p)
-        expect(p, "(")
+        if ((not accept_keyword(p, "as"))^) { parse_fail(p, "expected as") }
+        let name: string = read_var(p)^
+        expect(p, "(")^
         let init = parse_pipe(p)
-        expect(p, ";")
+        expect(p, ";")^
         let update = parse_pipe(p)
         let extract = if (is_foreach and accept(p, ";")) parse_pipe(p) else null
-        expect(p, ")")
+        expect(p, ")")^
         return {kind: if (is_foreach) N_FOREACH else N_REDUCE, op: 0, a: source, b: init,
             c: update, d: extract, list: [], name: name, value: null, pvar: []}
     }
-    if (accept_keyword(p, "label")) {
-        let name: string = read_var(p)
-        expect(p, "|")
+    if (accept_keyword(p, "label")^) {
+        let name: string = read_var(p)^
+        expect(p, "|")^
         return mk_named(N_LABEL, name, parse_pipe(p), null)
     }
-    if (accept_keyword(p, "break")) { return mk_named(N_BREAK, read_var(p), null, null) }
+    if (accept_keyword(p, "break")^) { return mk_named(N_BREAK, read_var(p), null, null) }
     if (is_ident_start(c)) {
-        let name: string = read_ident(p)
+        let name: string = read_ident(p)^
         var args: array = []
-        if (accept(p, "(")) {
+        if (accept(p, "(")^) {
             while (true) {
-                args.push(parse_pipe(p))
-                if (not accept(p, ";")) {
-                    expect(p, ")")
+                args.push(parse_pipe(p))^
+                if ((not accept(p, ";"))^) {
+                    expect(p, ")")^
                     break
                 }
             }
@@ -1182,15 +1207,15 @@ pn parse_primary(var p: Parser) {
 // if c then t (elif c then t)* (else e)? end, with elif as nested ifs
 pn parse_if(var p: Parser) {
     let cond = parse_pipe(p)
-    if (not accept_keyword(p, "then")) { parse_fail(p, "expected then") }
+    if ((not accept_keyword(p, "then"))^) { parse_fail(p, "expected then") }
     let then_branch = parse_pipe(p)
     var else_branch = null
-    if (accept_keyword(p, "elif")) {
+    if (accept_keyword(p, "elif")^) {
         else_branch = parse_if(p)
         return {*: mk(N_IF, cond, then_branch), c: else_branch}
     }
-    if (accept_keyword(p, "else")) { else_branch = parse_pipe(p) }
-    if (not accept_keyword(p, "end")) { parse_fail(p, "expected end") }
+    if (accept_keyword(p, "else")^) { else_branch = parse_pipe(p) }
+    if ((not accept_keyword(p, "end"))^) { parse_fail(p, "expected end") }
     {*: mk(N_IF, cond, then_branch), c: else_branch}
 }
 
@@ -1199,8 +1224,8 @@ pn parse_postfix(var p: Parser, allow_as: bool) {
 }
 
 pn parse_unary(var p: Parser) {
-    skip_ws(p)
-    if (ch(p) == 45 and not peek(p, "-=")) {
+    skip_ws(p)^
+    if ((ch(p) == 45 and not peek(p, "-="))^) {
         p.pos = p.pos + 1
         return mk(N_NEG, parse_postfix(p, true), null)
     }
@@ -1210,10 +1235,10 @@ pn parse_unary(var p: Parser) {
 pn parse_mul(var p: Parser) {
     var l = parse_unary(p)
     while (true) {
-        if (peek(p, "*=") or peek(p, "/=") or peek(p, "%=")) { break }
-        if (accept(p, "*")) { l = mk_binop(OPB_MUL, l, parse_unary(p)) }
-        else if (not peek(p, "//") and accept(p, "/")) { l = mk_binop(OPB_DIV, l, parse_unary(p)) }
-        else if (accept(p, "%")) { l = mk_binop(OPB_MOD, l, parse_unary(p)) }
+        if ((peek(p, "*=") or peek(p, "/=") or peek(p, "%="))^) { break }
+        if (accept(p, "*")^) { l = mk_binop(OPB_MUL, l, parse_unary(p)) }
+        else if ((not peek(p, "//") and accept(p, "/"))^) { l = mk_binop(OPB_DIV, l, parse_unary(p)) }
+        else if (accept(p, "%")^) { l = mk_binop(OPB_MOD, l, parse_unary(p)) }
         else { break }
     }
     l
@@ -1222,9 +1247,9 @@ pn parse_mul(var p: Parser) {
 pn parse_add(var p: Parser) {
     var l = parse_mul(p)
     while (true) {
-        if (peek(p, "+=") or peek(p, "-=")) { break }
-        if (accept(p, "+")) { l = mk_binop(OPB_ADD, l, parse_mul(p)) }
-        else if (accept(p, "-")) { l = mk_binop(OPB_SUB, l, parse_mul(p)) }
+        if ((peek(p, "+=") or peek(p, "-="))^) { break }
+        if (accept(p, "+")^) { l = mk_binop(OPB_ADD, l, parse_mul(p)) }
+        else if (accept(p, "-")^) { l = mk_binop(OPB_SUB, l, parse_mul(p)) }
         else { break }
     }
     l
@@ -1232,24 +1257,24 @@ pn parse_add(var p: Parser) {
 
 pn parse_cmp(var p: Parser) {
     let l = parse_add(p)
-    if (accept(p, "==")) { return mk_binop(OPB_EQ, l, parse_add(p)) }
-    if (accept(p, "!=")) { return mk_binop(OPB_NE, l, parse_add(p)) }
-    if (accept(p, "<=")) { return mk_binop(OPB_LE, l, parse_add(p)) }
-    if (accept(p, ">=")) { return mk_binop(OPB_GE, l, parse_add(p)) }
-    if (accept(p, "<")) { return mk_binop(OPB_LT, l, parse_add(p)) }
-    if (accept(p, ">")) { return mk_binop(OPB_GT, l, parse_add(p)) }
+    if (accept(p, "==")^) { return mk_binop(OPB_EQ, l, parse_add(p)) }
+    if (accept(p, "!=")^) { return mk_binop(OPB_NE, l, parse_add(p)) }
+    if (accept(p, "<=")^) { return mk_binop(OPB_LE, l, parse_add(p)) }
+    if (accept(p, ">=")^) { return mk_binop(OPB_GE, l, parse_add(p)) }
+    if (accept(p, "<")^) { return mk_binop(OPB_LT, l, parse_add(p)) }
+    if (accept(p, ">")^) { return mk_binop(OPB_GT, l, parse_add(p)) }
     l
 }
 
 pn parse_and(var p: Parser) {
     var l = parse_cmp(p)
-    while (accept_keyword(p, "and")) { l = mk(N_AND, l, parse_cmp(p)) }
+    while (accept_keyword(p, "and")^) { l = mk(N_AND, l, parse_cmp(p)) }
     l
 }
 
 pn parse_or(var p: Parser) {
     var l = parse_and(p)
-    while (accept_keyword(p, "or")) { l = mk(N_OR, l, parse_and(p)) }
+    while (accept_keyword(p, "or")^) { l = mk(N_OR, l, parse_and(p)) }
     l
 }
 
@@ -1257,25 +1282,25 @@ pn parse_assign(var p: Parser) {
     let l = parse_or(p)
     var kind: int = 0
     var op: int = 0
-    if (accept(p, "|=")) { kind = N_UPDATE }
-    else if (accept(p, "+=")) {
+    if (accept(p, "|=")^) { kind = N_UPDATE }
+    else if (accept(p, "+=")^) {
         kind = N_ARITH_UPDATE
         op = OPB_ADD
-    } else if (accept(p, "-=")) {
+    } else if (accept(p, "-=")^) {
         kind = N_ARITH_UPDATE
         op = OPB_SUB
-    } else if (accept(p, "*=")) {
+    } else if (accept(p, "*=")^) {
         kind = N_ARITH_UPDATE
         op = OPB_MUL
-    } else if (accept(p, "/=")) {
+    } else if (accept(p, "/=")^) {
         kind = N_ARITH_UPDATE
         op = OPB_DIV
-    } else if (accept(p, "%=")) {
+    } else if (accept(p, "%=")^) {
         kind = N_ARITH_UPDATE
         op = OPB_MOD
-    } else if (accept(p, "//=")) {
+    } else if (accept(p, "//=")^) {
         kind = N_ALT_UPDATE
-    } else if (not peek(p, "==") and accept(p, "=")) {
+    } else if ((not peek(p, "==") and accept(p, "="))^) {
         kind = N_ASSIGN
     }
     if (kind == 0) { return l }
@@ -1284,49 +1309,50 @@ pn parse_assign(var p: Parser) {
 
 pn parse_alt(var p: Parser) {
     let l = parse_assign(p)
-    if (not peek(p, "//=") and accept(p, "//")) { return mk(N_ALT, l, parse_alt(p)) }
+    if ((not peek(p, "//=") and accept(p, "//"))^) { return mk(N_ALT, l, parse_alt(p)) }
     l
 }
 
 pn parse_comma(var p: Parser) {
     var l = parse_alt(p)
-    while (accept(p, ",")) { l = mk(N_COMMA, l, parse_alt(p)) }
+    while (accept(p, ",")^) { l = mk(N_COMMA, l, parse_alt(p)) }
     l
 }
 
 pn parse_funcdef(var p: Parser) {
-    let name: string = read_ident(p)
+    let name: string = read_ident(p)^
     if (name == "") { parse_fail(p, "expected function name") }
     var params: array = []
-    var pvar: bool[] = []
-    if (accept(p, "(")) {
+    let _admitted_pvar_1301: bool[] = []
+    var pvar: bool[] = _admitted_pvar_1301
+    if (accept(p, "(")^) {
         while (true) {
-            let is_var: bool = peek(p, "$")
-            let pname: string = if (is_var) read_var(p) else read_ident(p)
+            let is_var: bool = peek(p, "$")^
+            let pname: string = (if (is_var) read_var(p) else read_ident(p))^
             if (pname == "") {
                 parse_fail(p, "expected parameter")
                 break
             }
-            params.push(mk_named(N_VAR, pname, null, null))
-            pvar.push(is_var)
-            if (not accept(p, ";")) {
-                expect(p, ")")
+            params.push(mk_named(N_VAR, pname, null, null))^
+            pvar.push(is_var)^
+            if ((not accept(p, ";"))^) {
+                expect(p, ")")^
                 break
             }
         }
     }
-    expect(p, ":")
+    expect(p, ":")^
     let body = parse_pipe(p)
-    expect(p, ";")
+    expect(p, ";")^
     let rest = parse_pipe(p)
     {kind: N_FUNCDEF, op: 0, a: body, b: rest, c: null, d: null, list: params, name: name,
         value: null, pvar: pvar}
 }
 
 pn parse_pipe(var p: Parser) {
-    if (accept_keyword(p, "def")) { return parse_funcdef(p) }
+    if (accept_keyword(p, "def")^) { return parse_funcdef(p) }
     let l = parse_comma(p)
-    if (not peek(p, "|=") and accept(p, "|")) { return mk(N_PIPE, l, parse_pipe(p)) }
+    if ((not peek(p, "|=") and accept(p, "|"))^) { return mk(N_PIPE, l, parse_pipe(p)) }
     l
 }
 
@@ -1384,13 +1410,13 @@ pn compile_fail(var cs: Comp, what: string, name: string) {
     }
 }
 
-pn emit_op(var cs: Comp, x: int) int {
-    cs.code.push(x)
+pn emit_op(var cs: Comp, x: int) int^ {
+    cs.code.push(x)^
     len(cs.code) - 1
 }
 
-pn add_const(var cs: Comp, v) int {
-    cs.consts.push(v)
+pn add_const(var cs: Comp, v) int^ {
+    cs.consts.push(v)^
     len(cs.consts) - 1
 }
 
@@ -1398,178 +1424,190 @@ pn patch_here(var cs: Comp, at: int) {
     cs.code[at] = len(cs.code)
 }
 
-pn new_fn(var cs: Comp, nparams: int) int {
-    cs.fn_entry.push(0)
-    cs.fn_nparams.push(nparams)
-    cs.fn_nlocals.push(0)
+pn new_fn(var cs: Comp, nparams: int) int^ {
+    cs.fn_entry.push(0)^
+    cs.fn_nparams.push(nparams)^
+    cs.fn_nlocals.push(0)^
     len(cs.fn_entry) - 1
 }
 
-pn new_ctx(var cs: Comp, parent: int, fn_index: int) int {
-    cs.ctx_parent.push(parent)
-    cs.ctx_level.push(if (parent < 0) 0 else cs.ctx_level[parent] + 1)
-    cs.ctx_fn.push(fn_index)
-    cs.ctx_scope.push(-1)
-    cs.ctx_nlocals.push(0)
+pn new_ctx(var cs: Comp, parent: int, fn_index: int) int^ {
+    cs.ctx_parent.push(parent)^
+    cs.ctx_level.push(if (parent < 0) 0 else cs.ctx_level[parent] + 1)^
+    cs.ctx_fn.push(fn_index)^
+    cs.ctx_scope.push(-1)^
+    cs.ctx_nlocals.push(0)^
     len(cs.ctx_parent) - 1
 }
 
 pn scope_push(var cs: Comp, c: int, kind: int, name: string, arity: int, index: int) {
-    cs.sc_kind.push(kind)
-    cs.sc_name.push(name)
-    cs.sc_arity.push(arity)
-    cs.sc_index.push(index)
+    cs.sc_kind.push(kind)^
+    cs.sc_name.push(name)^
+    cs.sc_arity.push(arity)^
+    cs.sc_index.push(index)^
     cs.sc_prev.push(cs.ctx_scope[c])
     cs.ctx_scope[c] = len(cs.sc_kind) - 1
 }
 
-pn new_local(var cs: Comp, c: int) int {
-    let slot: int = cs.ctx_nlocals[c]
+pn new_local(var cs: Comp, c: int) int^ {
+    let _admitted_slot_1427: int = cs.ctx_nlocals[c]
+    let slot: int = _admitted_slot_1427^
     cs.ctx_nlocals[c] = slot + 1
     slot
 }
 
 pn emit_var_op(var cs: Comp, op: int, hops: int, slot: int) {
-    emit_op(cs, op)
-    emit_op(cs, hops)
+    emit_op(cs, op)^
+    emit_op(cs, hops)^
     emit_op(cs, slot)
 }
 
 // `code` with SUBEXP brackets: leaves [result, input] on the stack
 pn compile_subexp(var cs: Comp, c: int, n) {
-    emit_op(cs, OP_SUBEXP_BEGIN)
-    compile(cs, c, n, false)
+    emit_op(cs, OP_SUBEXP_BEGIN)^
+    compile(cs, c, n, false)^
     emit_op(cs, OP_SUBEXP_END)
 }
 
 // [slot, hops] of a variable, resolved through the lexical contexts
-pn lookup_var(var cs: Comp, c: int, name: string) int[] {
+pn lookup_var(var cs: Comp, c: int, name: string) int[]^ {
     var x: int = c
     while (x >= 0) {
-        var s: int = cs.ctx_scope[x]
+        let _admitted_s_1449: int = cs.ctx_scope[x]
+        var s: int = _admitted_s_1449^
         while (s >= 0) {
             if (cs.sc_kind[s] == SC_VAR and cs.sc_name[s] == name) {
                 return [cs.sc_index[s], cs.ctx_level[c] - cs.ctx_level[x]]
             }
-            s = cs.sc_prev[s]
+            let _admitted_s_1454: int = cs.sc_prev[s]
+            s = _admitted_s_1454^
         }
-        x = cs.ctx_parent[x]
+        let _admitted_x_1456: int = cs.ctx_parent[x]
+        x = _admitted_x_1456^
     }
     compile_fail(cs, "undefined variable $", name);
     [0, 0]
 }
 
 // compile an argument as a closure: an inline function of the call site
-pn compile_closure(var cs: Comp, c: int, body) int {
-    emit_op(cs, OP_JUMP)
-    let target: int = emit_op(cs, 0)
-    let fn_index: int = new_fn(cs, 0)
-    let inner: int = new_ctx(cs, c, fn_index)
+pn compile_closure(var cs: Comp, c: int, body) int^ {
+    emit_op(cs, OP_JUMP)^
+    let target: int = emit_op(cs, 0)^
+    let fn_index: int = new_fn(cs, 0)^
+    let inner: int = new_ctx(cs, c, fn_index)^
     cs.fn_entry[fn_index] = len(cs.code)
-    compile(cs, inner, body, true)
-    emit_op(cs, OP_RET)
+    compile(cs, inner, body, true)^
+    emit_op(cs, OP_RET)^
     cs.fn_nlocals[fn_index] = cs.ctx_nlocals[inner]
     patch_here(cs, target)
     fn_index
 }
 
-fn find_native(name: string, arity: int) int {
-    let hits: int[] = [for (i in 0 to len(native_names) - 1 where native_names[i] == name and native_arity[i] == arity) i + 1]
+fn find_native(name: string, arity: int) int^ {
+    let _admitted_hits_1477: int[] = [for (i in 0 to len(native_names) - 1 where native_names[i] == name and native_arity[i] == arity) i + 1]
+    let hits: int[] = _admitted_hits_1477^
     if (len(hits) > 0) hits[0] else 0
 }
 
 pn compile_call(var cs: Comp, c: int, n, tail: bool) {
-    let name: string = n.name
-    let args: array = n.list
+    let _admitted_name_1482: string = n.name
+    let name: string = _admitted_name_1482^
+    let _admitted_args_1483: array = n.list
+    let args: array = _admitted_args_1483^
     let arity: int = len(args)
     // user/prelude definitions and parameters, innermost first
     var x: int = c
     while (x >= 0) {
-        var s: int = cs.ctx_scope[x]
+        let _admitted_s_1488: int = cs.ctx_scope[x]
+        var s: int = _admitted_s_1488^
         while (s >= 0) {
             if (cs.sc_name[s] == name) {
                 if (cs.sc_kind[s] == SC_PARAM and arity == 0) {
-                    emit_op(cs, if (tail) OP_TAIL_CALL_PARAM else OP_CALL_PARAM)
-                    emit_op(cs, cs.ctx_level[c] - cs.ctx_level[x])
-                    emit_op(cs, cs.sc_index[s])
+                    emit_op(cs, if (tail) OP_TAIL_CALL_PARAM else OP_CALL_PARAM)^
+                    emit_op(cs, cs.ctx_level[c] - cs.ctx_level[x])^
+                    emit_op(cs, cs.sc_index[s])^
                     return null
                 }
                 if (cs.sc_kind[s] == SC_DEF and cs.sc_arity[s] == arity) {
-                    var closures: int[] = []
+                    let _admitted_closures_1498: int[] = []
+                    var closures: int[] = _admitted_closures_1498
                     var i: int = 0
                     while (i < arity) {
-                        closures.push(compile_closure(cs, c, args[i]))
+                        closures.push(compile_closure(cs, c, args[i]))^
                         i = i + 1
                     }
-                    emit_op(cs, if (tail) OP_TAIL_CALL_JQ else OP_CALL_JQ)
-                    emit_op(cs, cs.sc_index[s])
-                    emit_op(cs, cs.ctx_level[c] - cs.ctx_level[x])
-                    emit_op(cs, arity)
+                    emit_op(cs, if (tail) OP_TAIL_CALL_JQ else OP_CALL_JQ)^
+                    emit_op(cs, cs.sc_index[s])^
+                    emit_op(cs, cs.ctx_level[c] - cs.ctx_level[x])^
+                    emit_op(cs, arity)^
                     var j: int = 0
                     while (j < arity) {
-                        emit_op(cs, closures[j])
+                        emit_op(cs, closures[j])^
                         j = j + 1
                     }
                     return null
                 }
             }
-            s = cs.sc_prev[s]
+            let _admitted_s_1516: int = cs.sc_prev[s]
+            s = _admitted_s_1516^
         }
-        x = cs.ctx_parent[x]
+        let _admitted_x_1518: int = cs.ctx_parent[x]
+        x = _admitted_x_1518^
     }
     if (arity == 0 and name == "empty") {
-        emit_op(cs, OP_BACKTRACK)
+        emit_op(cs, OP_BACKTRACK)^
         return null
     }
     if (arity == 0 and (name == "true" or name == "false" or name == "null")) {
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, if (name == "true") true else if (name == "false") false else null))
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, if (name == "true") true else if (name == "false") false else null))^
         return null
     }
     if (arity == 1 and name == "path") {
-        emit_op(cs, OP_PATH_BEGIN)
-        compile(cs, c, args[0], false)
-        emit_op(cs, OP_PATH_END)
+        emit_op(cs, OP_PATH_BEGIN)^
+        compile(cs, c, args[0], false)^
+        emit_op(cs, OP_PATH_END)^
         return null
     }
     if ((arity == 2 or arity == 3) and name == "range") {
         var i: int = 0
         while (i < arity) {
-            compile_subexp(cs, c, args[i])
+            compile_subexp(cs, c, args[i])^
             i = i + 1
         }
-        emit_op(cs, OP_RANGE)
-        emit_op(cs, arity)
+        emit_op(cs, OP_RANGE)^
+        emit_op(cs, arity)^
         return null
     }
-    let id: int = find_native(name, arity)
+    let id: int = find_native(name, arity)^
     if (id == 0) {
         compile_fail(cs, "undefined function", name)
         return null
     }
     var k: int = 0
     while (k < arity) {
-        compile_subexp(cs, c, args[k])
+        compile_subexp(cs, c, args[k])^
         k = k + 1
     }
-    emit_op(cs, OP_CALL_NATIVE)
-    emit_op(cs, id)
+    emit_op(cs, OP_CALL_NATIVE)^
+    emit_op(cs, id)^
     emit_op(cs, arity)
 }
 
 pn compile_funcdef(var cs: Comp, c: int, n, tail: bool) {
-    let params: array = n.list
+    let _admitted_params_1561: array = n.list
+    let params: array = _admitted_params_1561^
     let nparams: int = len(params)
-    let fn_index: int = new_fn(cs, nparams)
+    let fn_index: int = new_fn(cs, nparams)^
     // visible in its own body (recursion) and in the rest of the scope
-    scope_push(cs, c, SC_DEF, n.name, nparams, fn_index)
-    emit_op(cs, OP_JUMP)
-    let target: int = emit_op(cs, 0)
-    let inner: int = new_ctx(cs, c, fn_index)
+    scope_push(cs, c, SC_DEF, n.name, nparams, fn_index)^
+    emit_op(cs, OP_JUMP)^
+    let target: int = emit_op(cs, 0)^
+    let inner: int = new_ctx(cs, c, fn_index)^
     cs.fn_entry[fn_index] = len(cs.code)
     var i: int = 0
     while (i < nparams) {
-        scope_push(cs, inner, SC_PARAM, params[i].name, 0, i)
+        scope_push(cs, inner, SC_PARAM, params[i].name, 0, i)^
         i = i + 1
     }
     // def f($a): body  ==  def f(a): a as $a | body
@@ -1581,8 +1619,8 @@ pn compile_funcdef(var cs: Comp, c: int, n, tail: bool) {
         }
         j = j - 1
     }
-    compile(cs, inner, body, true)
-    emit_op(cs, OP_RET)
+    compile(cs, inner, body, true)^
+    emit_op(cs, OP_RET)^
     cs.fn_nlocals[fn_index] = cs.ctx_nlocals[inner]
     patch_here(cs, target)
     compile(cs, c, n.b, tail)
@@ -1595,172 +1633,173 @@ pn synthetic_var(var cs: Comp) string {
 
 pn compile(var cs: Comp, c: int, n, tail: bool) {
     if (cs.failed) { return null }
-    let kind: int = n.kind
+    let _admitted_kind_1598: int = n.kind
+    let kind: int = _admitted_kind_1598^
     if (kind == N_IDENTITY) { return null }
     if (kind == N_RECURSE_DEFAULT) {
-        compile_call(cs, c, mk_call("recurse", []), tail)
+        compile_call(cs, c, mk_call("recurse", []), tail)^
         return null
     }
     if (kind == N_LITERAL) {
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, n.value))
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, n.value))^
         return null
     }
     if (kind == N_VAR) {
-        let at: int[] = lookup_var(cs, c, n.name)
-        emit_var_op(cs, OP_LOADV, at[1], at[0])
+        let at: int[] = lookup_var(cs, c, n.name)^
+        emit_var_op(cs, OP_LOADV, at[1], at[0])^
         return null
     }
     if (kind == N_INDEX) {
         if (n.b.kind == N_LITERAL) {
-            compile(cs, c, n.a, false)
-            emit_op(cs, OP_INDEXK)
-            emit_op(cs, add_const(cs, n.b.value))
+            compile(cs, c, n.a, false)^
+            emit_op(cs, OP_INDEXK)^
+            emit_op(cs, add_const(cs, n.b.value))^
             return null
         }
         // the key is evaluated against the term's own input
-        compile_subexp(cs, c, n.b)
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_INDEX)
+        compile_subexp(cs, c, n.b)^
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_INDEX)^
         return null
     }
     if (kind == N_ITER) {
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_EACH)
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_EACH)^
         return null
     }
     if (kind == N_SLICE) {
-        compile_subexp(cs, c, if (n.b == null) mk_lit(null) else n.b)
-        compile_subexp(cs, c, if (n.c == null) mk_lit(null) else n.c)
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_SLICE)
+        compile_subexp(cs, c, if (n.b == null) mk_lit(null) else n.b)^
+        compile_subexp(cs, c, if (n.c == null) mk_lit(null) else n.c)^
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_SLICE)^
         return null
     }
     if (kind == N_TRY) {
-        emit_op(cs, OP_TRY_BEGIN)
-        let handler: int = emit_op(cs, 0)
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_TRY_END)
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        emit_op(cs, OP_TRY_BEGIN)^
+        let handler: int = emit_op(cs, 0)^
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_TRY_END)^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, handler)
-        if (n.b != null) { compile(cs, c, n.b, tail) }
-        else { emit_op(cs, OP_BACKTRACK) }
+        if (n.b != null) { compile(cs, c, n.b, tail)^ }
+        else { emit_op(cs, OP_BACKTRACK)^ }
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_ARRAY) {
         if (n.a == null) {
-            emit_op(cs, OP_NEWARR)
+            emit_op(cs, OP_NEWARR)^
             return null
         }
-        let slot: int = new_local(cs, c)
-        emit_op(cs, OP_DUP)
-        emit_op(cs, OP_NEWARR)
-        emit_var_op(cs, OP_STOREV, 0, slot)
-        emit_op(cs, OP_FORK)
-        let done: int = emit_op(cs, 0)
-        compile(cs, c, n.a, false)
-        emit_var_op(cs, OP_APPEND, 0, slot)
-        emit_op(cs, OP_BACKTRACK)
+        let slot: int = new_local(cs, c)^
+        emit_op(cs, OP_DUP)^
+        emit_op(cs, OP_NEWARR)^
+        emit_var_op(cs, OP_STOREV, 0, slot)^
+        emit_op(cs, OP_FORK)^
+        let done: int = emit_op(cs, 0)^
+        compile(cs, c, n.a, false)^
+        emit_var_op(cs, OP_APPEND, 0, slot)^
+        emit_op(cs, OP_BACKTRACK)^
         patch_here(cs, done)
-        emit_var_op(cs, OP_LOADVN, 0, slot)
+        emit_var_op(cs, OP_LOADVN, 0, slot)^
         return null
     }
     if (kind == N_OBJECT) {
-        emit_op(cs, OP_OBJ_START)
+        emit_op(cs, OP_OBJ_START)^
         var i: int = 0
-        while (i < len(n.list)) {
-            compile_subexp(cs, c, n.list[i])
-            compile_subexp(cs, c, n.list[i + 1])
-            emit_op(cs, OP_INSERT)
+        while ((i < len(n.list))^) {
+            compile_subexp(cs, c, n.list[i])^
+            compile_subexp(cs, c, n.list[i + 1])^
+            emit_op(cs, OP_INSERT)^
             i = i + 2
         }
-        emit_op(cs, OP_POP)
+        emit_op(cs, OP_POP)^
         return null
     }
     if (kind == N_NEG) {
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_NEG)
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_NEG)^
         return null
     }
     if (kind == N_BINOP) {
         // jq evaluates the right operand in the outer loop
-        compile_subexp(cs, c, n.b)
-        compile_subexp(cs, c, n.a)
-        emit_op(cs, OP_BINOP)
-        emit_op(cs, n.op)
+        compile_subexp(cs, c, n.b)^
+        compile_subexp(cs, c, n.a)^
+        emit_op(cs, OP_BINOP)^
+        emit_op(cs, n.op)^
         return null
     }
     if (kind == N_AND) {
-        compile_subexp(cs, c, n.a)
-        emit_op(cs, OP_JUMP_F_SUB)
-        let no: int = emit_op(cs, 0)
-        compile(cs, c, n.b, false)
-        emit_op(cs, OP_TOBOOL)
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        compile_subexp(cs, c, n.a)^
+        emit_op(cs, OP_JUMP_F_SUB)^
+        let no: int = emit_op(cs, 0)^
+        compile(cs, c, n.b, false)^
+        emit_op(cs, OP_TOBOOL)^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, no)
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, false))
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, false))^
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_OR) {
-        compile_subexp(cs, c, n.a)
-        emit_op(cs, OP_JUMP_F_SUB)
-        let other: int = emit_op(cs, 0)
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, true))
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        compile_subexp(cs, c, n.a)^
+        emit_op(cs, OP_JUMP_F_SUB)^
+        let other: int = emit_op(cs, 0)^
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, true))^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, other)
-        compile(cs, c, n.b, false)
-        emit_op(cs, OP_TOBOOL)
+        compile(cs, c, n.b, false)^
+        emit_op(cs, OP_TOBOOL)^
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_ALT) {
         // a // b: every truthy output of a (errors suppressed); b when none
-        let found: int = new_local(cs, c)
-        emit_op(cs, OP_DUP)
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, false))
-        emit_var_op(cs, OP_STOREV, 0, found)
-        emit_op(cs, OP_FORK)
-        let other: int = emit_op(cs, 0)
-        emit_op(cs, OP_TRY_BEGIN)
-        let skip: int = emit_op(cs, 0)
-        compile(cs, c, n.a, false)
-        emit_op(cs, OP_TRY_END)
-        emit_op(cs, OP_JUMP_F_KEEP)
-        let skip2: int = emit_op(cs, 0)
-        emit_op(cs, OP_DUP)
-        emit_op(cs, OP_LOADK)
-        emit_op(cs, add_const(cs, true))
-        emit_var_op(cs, OP_STOREV, 0, found)
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        let found: int = new_local(cs, c)^
+        emit_op(cs, OP_DUP)^
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, false))^
+        emit_var_op(cs, OP_STOREV, 0, found)^
+        emit_op(cs, OP_FORK)^
+        let other: int = emit_op(cs, 0)^
+        emit_op(cs, OP_TRY_BEGIN)^
+        let skip: int = emit_op(cs, 0)^
+        compile(cs, c, n.a, false)^
+        emit_op(cs, OP_TRY_END)^
+        emit_op(cs, OP_JUMP_F_KEEP)^
+        let skip2: int = emit_op(cs, 0)^
+        emit_op(cs, OP_DUP)^
+        emit_op(cs, OP_LOADK)^
+        emit_op(cs, add_const(cs, true))^
+        emit_var_op(cs, OP_STOREV, 0, found)^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, skip)
         patch_here(cs, skip2)
-        emit_op(cs, OP_BACKTRACK)
+        emit_op(cs, OP_BACKTRACK)^
         patch_here(cs, other)
-        emit_op(cs, OP_DUP)
-        emit_var_op(cs, OP_LOADV, 0, found)
-        emit_op(cs, OP_JUMP_F)
-        let run: int = emit_op(cs, 0)
-        emit_op(cs, OP_BACKTRACK)
+        emit_op(cs, OP_DUP)^
+        emit_var_op(cs, OP_LOADV, 0, found)^
+        emit_op(cs, OP_JUMP_F)^
+        let run: int = emit_op(cs, 0)^
+        emit_op(cs, OP_BACKTRACK)^
         patch_here(cs, run)
-        compile(cs, c, n.b, tail)
+        compile(cs, c, n.b, tail)^
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_UPDATE) {
-        compile_call(cs, c, mk_call("_modify", [n.a, n.b]), tail)
+        compile_call(cs, c, mk_call("_modify", [n.a, n.b]), tail)^
         return null
     }
     if (kind == N_ASSIGN) {
-        compile_call(cs, c, mk_call("_assign", [n.a, n.b]), tail)
+        compile_call(cs, c, mk_call("_assign", [n.a, n.b]), tail)^
         return null
     }
     if (kind == N_ARITH_UPDATE or kind == N_ALT_UPDATE) {
@@ -1769,134 +1808,141 @@ pn compile(var cs: Comp, c: int, n, tail: bool) {
         let var_node = mk_named(N_VAR, name, null, null)
         let update = if (kind == N_ARITH_UPDATE) mk_binop(n.op, mk(N_IDENTITY, null, null), var_node)
             else mk(N_ALT, mk(N_IDENTITY, null, null), var_node)
-        compile(cs, c, mk_named(N_BIND, name, n.b, mk_call("_modify", [n.a, update])), tail)
+        compile(cs, c, mk_named(N_BIND, name, n.b, mk_call("_modify", [n.a, update])), tail)^
         return null
     }
     if (kind == N_PIPE) {
-        compile(cs, c, n.a, false)
-        compile(cs, c, n.b, tail)
+        compile(cs, c, n.a, false)^
+        compile(cs, c, n.b, tail)^
         return null
     }
     if (kind == N_COMMA) {
-        emit_op(cs, OP_FORK)
-        let second: int = emit_op(cs, 0)
-        compile(cs, c, n.a, tail)
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        emit_op(cs, OP_FORK)^
+        let second: int = emit_op(cs, 0)^
+        compile(cs, c, n.a, tail)^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, second)
-        compile(cs, c, n.b, tail)
+        compile(cs, c, n.b, tail)^
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_BIND) {
-        let slot: int = new_local(cs, c)
-        compile_subexp(cs, c, n.a)
-        emit_var_op(cs, OP_STOREV_UNDER, 0, slot)
-        let saved: int = cs.ctx_scope[c]
-        scope_push(cs, c, SC_VAR, n.name, 0, slot)
-        compile(cs, c, n.b, tail)
+        let slot: int = new_local(cs, c)^
+        compile_subexp(cs, c, n.a)^
+        emit_var_op(cs, OP_STOREV_UNDER, 0, slot)^
+        let _admitted_saved_1795: int = cs.ctx_scope[c]
+        let saved: int = _admitted_saved_1795^
+        scope_push(cs, c, SC_VAR, n.name, 0, slot)^
+        compile(cs, c, n.b, tail)^
         cs.ctx_scope[c] = saved
         return null
     }
     if (kind == N_REDUCE) {
-        let acc: int = new_local(cs, c)
-        let x: int = new_local(cs, c)
-        emit_op(cs, OP_DUP)
-        compile(cs, c, n.b, false)
-        emit_var_op(cs, OP_STOREV, 0, acc)
-        emit_op(cs, OP_FORK)
-        let end_at: int = emit_op(cs, 0)
-        emit_op(cs, OP_DUP)
-        compile(cs, c, n.a, false)
-        emit_var_op(cs, OP_STOREV, 0, x)
-        emit_var_op(cs, OP_LOADVN, 0, acc)
-        let saved: int = cs.ctx_scope[c]
-        scope_push(cs, c, SC_VAR, n.name, 0, x)
-        compile(cs, c, n.c, false)
+        let acc: int = new_local(cs, c)^
+        let x: int = new_local(cs, c)^
+        emit_op(cs, OP_DUP)^
+        compile(cs, c, n.b, false)^
+        emit_var_op(cs, OP_STOREV, 0, acc)^
+        emit_op(cs, OP_FORK)^
+        let end_at: int = emit_op(cs, 0)^
+        emit_op(cs, OP_DUP)^
+        compile(cs, c, n.a, false)^
+        emit_var_op(cs, OP_STOREV, 0, x)^
+        emit_var_op(cs, OP_LOADVN, 0, acc)^
+        let _admitted_saved_1813: int = cs.ctx_scope[c]
+        let saved: int = _admitted_saved_1813^
+        scope_push(cs, c, SC_VAR, n.name, 0, x)^
+        compile(cs, c, n.c, false)^
         cs.ctx_scope[c] = saved
-        emit_var_op(cs, OP_STOREV, 0, acc)
-        emit_op(cs, OP_BACKTRACK)
+        emit_var_op(cs, OP_STOREV, 0, acc)^
+        emit_op(cs, OP_BACKTRACK)^
         patch_here(cs, end_at)
-        emit_var_op(cs, OP_LOADVN, 0, acc)
+        emit_var_op(cs, OP_LOADVN, 0, acc)^
         return null
     }
     if (kind == N_FOREACH) {
-        let acc: int = new_local(cs, c)
-        let x: int = new_local(cs, c)
-        emit_op(cs, OP_DUP)
-        compile(cs, c, n.b, false)
-        emit_var_op(cs, OP_STOREV, 0, acc)
-        emit_op(cs, OP_DUP)
-        compile(cs, c, n.a, false)
-        emit_var_op(cs, OP_STOREV, 0, x)
-        emit_var_op(cs, OP_LOADV, 0, acc)
-        let saved: int = cs.ctx_scope[c]
-        scope_push(cs, c, SC_VAR, n.name, 0, x)
-        compile(cs, c, n.c, false)
-        emit_op(cs, OP_DUP)
-        emit_var_op(cs, OP_STOREV, 0, acc)
-        if (n.d != null) { compile(cs, c, n.d, tail) }
+        let acc: int = new_local(cs, c)^
+        let x: int = new_local(cs, c)^
+        emit_op(cs, OP_DUP)^
+        compile(cs, c, n.b, false)^
+        emit_var_op(cs, OP_STOREV, 0, acc)^
+        emit_op(cs, OP_DUP)^
+        compile(cs, c, n.a, false)^
+        emit_var_op(cs, OP_STOREV, 0, x)^
+        emit_var_op(cs, OP_LOADV, 0, acc)^
+        let _admitted_saved_1833: int = cs.ctx_scope[c]
+        let saved: int = _admitted_saved_1833^
+        scope_push(cs, c, SC_VAR, n.name, 0, x)^
+        compile(cs, c, n.c, false)^
+        emit_op(cs, OP_DUP)^
+        emit_var_op(cs, OP_STOREV, 0, acc)^
+        if (n.d != null) { compile(cs, c, n.d, tail)^ }
         cs.ctx_scope[c] = saved
         return null
     }
     if (kind == N_IF) {
-        compile_subexp(cs, c, n.a)
-        emit_op(cs, OP_JUMP_F_SUB)
-        let other: int = emit_op(cs, 0)
-        compile(cs, c, n.b, tail)
-        emit_op(cs, OP_JUMP)
-        let end_at: int = emit_op(cs, 0)
+        compile_subexp(cs, c, n.a)^
+        emit_op(cs, OP_JUMP_F_SUB)^
+        let other: int = emit_op(cs, 0)^
+        compile(cs, c, n.b, tail)^
+        emit_op(cs, OP_JUMP)^
+        let end_at: int = emit_op(cs, 0)^
         patch_here(cs, other)
-        if (n.c != null) { compile(cs, c, n.c, tail) }
+        if (n.c != null) { compile(cs, c, n.c, tail)^ }
         patch_here(cs, end_at)
         return null
     }
     if (kind == N_FUNCDEF) {
-        let saved: int = cs.ctx_scope[c]
-        compile_funcdef(cs, c, n, tail)
+        let _admitted_saved_1855: int = cs.ctx_scope[c]
+        let saved: int = _admitted_saved_1855^
+        compile_funcdef(cs, c, n, tail)^
         cs.ctx_scope[c] = saved
         return null
     }
     if (kind == N_CALL) {
-        compile_call(cs, c, n, tail)
+        compile_call(cs, c, n, tail)^
         return null
     }
     if (kind == N_LABEL) {
-        let slot: int = new_local(cs, c)
-        emit_var_op(cs, OP_LABEL_BEGIN, 0, slot)
-        let saved: int = cs.ctx_scope[c]
-        scope_push(cs, c, SC_VAR, n.name, 0, slot)
-        compile(cs, c, n.a, false)
+        let slot: int = new_local(cs, c)^
+        emit_var_op(cs, OP_LABEL_BEGIN, 0, slot)^
+        let _admitted_saved_1867: int = cs.ctx_scope[c]
+        let saved: int = _admitted_saved_1867^
+        scope_push(cs, c, SC_VAR, n.name, 0, slot)^
+        compile(cs, c, n.a, false)^
         cs.ctx_scope[c] = saved
-        emit_op(cs, OP_TRY_END)
+        emit_op(cs, OP_TRY_END)^
         return null
     }
     if (kind == N_BREAK) {
-        let at: int[] = lookup_var(cs, c, n.name)
-        emit_var_op(cs, OP_BREAK, at[1], at[0])
+        let at: int[] = lookup_var(cs, c, n.name)^
+        emit_var_op(cs, OP_BREAK, at[1], at[0])^
         return null
     }
     compile_fail(cs, "unsupported construct", string(kind))
 }
 
 // compile prelude + user program as one top-level function (fn 0)
-pn compile_program(user_src: string) Comp {
+pn compile_program(user_src: string) Comp^ {
     let text: string = jq_prelude ++ "\n" ++ user_src
-    var p: Parser = {src: text, codes: [for (i in 0 to len(text) - 1) ord(slice(text, i, i + 1))],
+    let _admitted_p_1885: Parser = {src: text, codes: [for (i in 0 to len(text) - 1) ord(slice(text, i, i + 1))],
         pos: 0, n: len(text), failed: false, msg: ""}
+    var p: Parser = _admitted_p_1885^
     let ast = parse_pipe(p)
-    skip_ws(p)
+    skip_ws(p)^
     if (not p.failed and p.pos != p.n) { parse_fail(p, "trailing input") }
-    var cs: Comp = {code: [], consts: [], fn_entry: [], fn_nparams: [], fn_nlocals: [],
+    let _admitted_cs_1890: Comp = {code: [], consts: [], fn_entry: [], fn_nparams: [], fn_nlocals: [],
         ctx_parent: [], ctx_level: [], ctx_fn: [], ctx_scope: [], ctx_nlocals: [],
         sc_kind: [], sc_name: [], sc_arity: [], sc_index: [], sc_prev: [],
         failed: p.failed, msg: p.msg, synth: 0}
+    var cs: Comp = _admitted_cs_1890^
     if (cs.failed) { return cs }
-    let top_fn: int = new_fn(cs, 0)
-    let top: int = new_ctx(cs, -1, top_fn)
+    let top_fn: int = new_fn(cs, 0)^
+    let top: int = new_ctx(cs, -1, top_fn)^
     cs.fn_entry[top_fn] = len(cs.code)
-    compile(cs, top, ast, true)
-    emit_op(cs, OP_RET)
+    compile(cs, top, ast, true)^
+    emit_op(cs, OP_RET)^
     cs.fn_nlocals[top_fn] = cs.ctx_nlocals[top]
     cs
 }
@@ -1919,14 +1965,15 @@ type Vm = {stv: array, stp: int[], top: int, lim: int, high: int,
     fk_auxi: int[], fk_active: bool[], fk_label: int[], nforks: int,
     fr_env: int[], fr_caller: int[], fr_retpc: int[], fr_fn: int[], fr_base: int[],
     fr_locals: int[], fr_params: int[], nframes: int, locals: array, pfn: int[], penv: int[],
-    fp: int, path: array?, vat: any?, subexp: int, labels: int, outputs: array, err: any?,
+    // jq's error payloads and tracked values are data, excluding Lambda errors.
+    fp: int, path: array?, vat: (any ! error)?, subexp: int, labels: int, outputs: array, err: (any ! error)?,
     frame_limit: int}
 
 pn st_push(var vm: Vm, v) {
     let idx: int = (if (vm.top > vm.lim) vm.top else vm.lim) + 1
     while (len(vm.stv) <= idx) {
-        vm.stv.push(null)
-        vm.stp.push(-1)
+        vm.stv.push(null)^
+        vm.stp.push(-1)^
     }
     vm.stv[idx] = v
     vm.stp[idx] = vm.top
@@ -1941,23 +1988,23 @@ pn st_pop(var vm: Vm) {
 }
 
 // push a fork record; every live stack cell is protected from later pushes
-pn fork_push(var vm: Vm, kind: int, pc: int) int {
+pn fork_push(var vm: Vm, kind: int, pc: int) int^ {
     let i: int = vm.nforks
     while (len(vm.fk_kind) <= i) {
-        vm.fk_kind.push(0)
-        vm.fk_pc.push(0)
-        vm.fk_top.push(0)
-        vm.fk_lim.push(0)
-        vm.fk_fp.push(0)
-        vm.fk_path.push(null)
-        vm.fk_vat.push(null)
-        vm.fk_subexp.push(0)
-        vm.fk_aux.push(null)
-        vm.fk_aux2.push(null)
-        vm.fk_aux3.push(null)
-        vm.fk_auxi.push(0)
-        vm.fk_active.push(true)
-        vm.fk_label.push(0)
+        vm.fk_kind.push(0)^
+        vm.fk_pc.push(0)^
+        vm.fk_top.push(0)^
+        vm.fk_lim.push(0)^
+        vm.fk_fp.push(0)^
+        vm.fk_path.push(null)^
+        vm.fk_vat.push(null)^
+        vm.fk_subexp.push(0)^
+        vm.fk_aux.push(null)^
+        vm.fk_aux2.push(null)^
+        vm.fk_aux3.push(null)^
+        vm.fk_auxi.push(0)^
+        vm.fk_active.push(true)^
+        vm.fk_label.push(0)^
     }
     vm.fk_kind[i] = kind
     vm.fk_pc[i] = pc
@@ -1989,29 +2036,29 @@ pn fork_restore(var vm: Vm, i: int) {
     vm.subexp = vm.fk_subexp[i]
 }
 
-pn frame_new(var vm: Vm, cs: Comp, fn_index: int, env: int, caller: int, retpc: int) int {
+pn frame_new(var vm: Vm, cs: Comp, fn_index: int, env: int, caller: int, retpc: int) int^ {
     let id: int = vm.nframes
     let base: int = len(vm.locals)
     var i: int = 0
     while (i < cs.fn_nlocals[fn_index]) {
-        vm.locals.push(null)
+        vm.locals.push(null)^
         i = i + 1
     }
     let pbase: int = len(vm.pfn)
     var j: int = 0
     while (j < cs.fn_nparams[fn_index]) {
-        vm.pfn.push(0)
-        vm.penv.push(-1)
+        vm.pfn.push(0)^
+        vm.penv.push(-1)^
         j = j + 1
     }
     while (len(vm.fr_env) <= id) {
-        vm.fr_env.push(-1)
-        vm.fr_caller.push(-1)
-        vm.fr_retpc.push(0)
-        vm.fr_fn.push(0)
-        vm.fr_base.push(0)
-        vm.fr_locals.push(0)
-        vm.fr_params.push(0)
+        vm.fr_env.push(-1)^
+        vm.fr_caller.push(-1)^
+        vm.fr_retpc.push(0)^
+        vm.fr_fn.push(0)^
+        vm.fr_base.push(0)^
+        vm.fr_locals.push(0)^
+        vm.fr_params.push(0)^
     }
     vm.fr_env[id] = env
     vm.fr_caller[id] = caller
@@ -2024,11 +2071,12 @@ pn frame_new(var vm: Vm, cs: Comp, fn_index: int, env: int, caller: int, retpc: 
     id
 }
 
-pn frame_hop(vm: Vm, f: int, hops: int) int {
+pn frame_hop(vm: Vm, f: int, hops: int) int^ {
     var x: int = f
     var h: int = hops
     while (h > 0) {
-        x = vm.fr_env[x]
+        let _admitted_x_2031: int = vm.fr_env[x]
+        x = _admitted_x_2031^
         h = h - 1
     }
     x
@@ -2039,77 +2087,95 @@ pn frame_hop(vm: Vm, f: int, hops: int) int {
 // their locals and parameters. Runs at a call, before any frame id is taken.
 pn vm_compact_frames(var vm: Vm) {
     let n: int = vm.nframes
-    var marked: bool[] = []
+    let _admitted_marked_2042: bool[] = []
+    var marked: bool[] = _admitted_marked_2042
     var k: int = 0
     while (k < n) {
-        marked.push(false)
+        marked.push(false)^
         k = k + 1
     }
     var work: int[] = [vm.fp]
     var f: int = 0
     while (f < vm.nforks) {
-        work.push(vm.fk_fp[f])
+        work.push(vm.fk_fp[f])^
         f = f + 1
     }
     // a work queue read by index: each marked frame enqueues its edges once
     var head: int = 0
     while (head < len(work)) {
-        let id: int = work[head]
+        let _admitted_id_2057: int = work[head]
+        let id: int = _admitted_id_2057^
         head = head + 1
         if (id >= 0 and id < n and not marked[id]) {
             marked[id] = true
-            work.push(vm.fr_env[id])
-            work.push(vm.fr_caller[id])
-            let pbase: int = vm.fr_params[id]
-            let pend: int = if (id + 1 < n) vm.fr_params[id + 1] else len(vm.pfn)
+            work.push(vm.fr_env[id])^
+            work.push(vm.fr_caller[id])^
+            let _admitted_pbase_2063: int = vm.fr_params[id]
+            let pbase: int = _admitted_pbase_2063^
+            let _admitted_pend_2064: int = if (id + 1 < n) vm.fr_params[id + 1] else len(vm.pfn)
+            let pend: int = _admitted_pend_2064^
             var q: int = pbase
             while (q < pend) {
-                work.push(vm.penv[q])
+                work.push(vm.penv[q])^
                 q = q + 1
             }
         }
     }
-    var remap: int[] = []
+    let _admitted_remap_2072: int[] = []
+    var remap: int[] = _admitted_remap_2072
     var live: int = 0
     var r: int = 0
     while (r < n) {
-        remap.push(if (marked[r]) live else -1)
+        remap.push(if (marked[r]) live else -1)^
         if (marked[r]) { live = live + 1 }
         r = r + 1
     }
-    var env2: int[] = []
-    var caller2: int[] = []
-    var retpc2: int[] = []
-    var fn2: int[] = []
-    var base2: int[] = []
-    var locals_at2: int[] = []
-    var params_at2: int[] = []
+    let _admitted_env2_2080: int[] = []
+    var env2: int[] = _admitted_env2_2080
+    let _admitted_caller2_2081: int[] = []
+    var caller2: int[] = _admitted_caller2_2081
+    let _admitted_retpc2_2082: int[] = []
+    var retpc2: int[] = _admitted_retpc2_2082
+    let _admitted_fn2_2083: int[] = []
+    var fn2: int[] = _admitted_fn2_2083
+    let _admitted_base2_2084: int[] = []
+    var base2: int[] = _admitted_base2_2084
+    let _admitted_locals_at2_2085: int[] = []
+    var locals_at2: int[] = _admitted_locals_at2_2085
+    let _admitted_params_at2_2086: int[] = []
+    var params_at2: int[] = _admitted_params_at2_2086
     var locals2: array = []
-    var pfn2: int[] = []
-    var penv2: int[] = []
+    let _admitted_pfn2_2088: int[] = []
+    var pfn2: int[] = _admitted_pfn2_2088
+    let _admitted_penv2_2089: int[] = []
+    var penv2: int[] = _admitted_penv2_2089
     var id2: int = 0
     while (id2 < n) {
         if (marked[id2]) {
-            env2.push(if (vm.fr_env[id2] >= 0) remap[vm.fr_env[id2]] else -1)
-            caller2.push(if (vm.fr_caller[id2] >= 0) remap[vm.fr_caller[id2]] else -1)
-            retpc2.push(vm.fr_retpc[id2])
-            fn2.push(vm.fr_fn[id2])
-            base2.push(vm.fr_base[id2])
-            let lbase: int = vm.fr_locals[id2]
-            let lend: int = if (id2 + 1 < n) vm.fr_locals[id2 + 1] else len(vm.locals)
-            locals_at2.push(len(locals2))
+            env2.push(if (vm.fr_env[id2] >= 0) remap[vm.fr_env[id2]] else -1)^
+            caller2.push(if (vm.fr_caller[id2] >= 0) remap[vm.fr_caller[id2]] else -1)^
+            retpc2.push(vm.fr_retpc[id2])^
+            fn2.push(vm.fr_fn[id2])^
+            base2.push(vm.fr_base[id2])^
+            let _admitted_lbase_2098: int = vm.fr_locals[id2]
+            let lbase: int = _admitted_lbase_2098^
+            let _admitted_lend_2099: int = if (id2 + 1 < n) vm.fr_locals[id2 + 1] else len(vm.locals)
+            let lend: int = _admitted_lend_2099^
+            locals_at2.push(len(locals2))^
             var a: int = lbase
             while (a < lend) {
-                locals2.push(vm.locals[a])
+                locals2.push(vm.locals[a])^
                 a = a + 1
             }
-            let pbase: int = vm.fr_params[id2]
-            let pend: int = if (id2 + 1 < n) vm.fr_params[id2 + 1] else len(vm.pfn)
-            params_at2.push(len(pfn2))
+            let _admitted_pbase_2106: int = vm.fr_params[id2]
+            let pbase: int = _admitted_pbase_2106^
+            let _admitted_pend_2107: int = if (id2 + 1 < n) vm.fr_params[id2 + 1] else len(vm.pfn)
+            let pend: int = _admitted_pend_2107^
+            params_at2.push(len(pfn2))^
             var b: int = pbase
             while (b < pend) {
-                pfn2.push(vm.pfn[b])
-                penv2.push(if (vm.penv[b] >= 0) remap[vm.penv[b]] else -1)
+                pfn2.push(vm.pfn[b])^
+                penv2.push(if (vm.penv[b] >= 0) remap[vm.penv[b]] else -1)^
                 b = b + 1
             }
         }
@@ -2168,28 +2234,32 @@ fn range_more(cur, upto, step) bool => if (step > 0) cur < upto else if (step < 
 // run the compiled program on `input`; outputs collect in vm.outputs.
 // mode: 0 executes, 1 backtracks, 2 raises vm.err. Each case ends in
 // `continue`, so the dispatch stops at its first match like a switch.
-pn vm_run(cs: Comp, input) Vm {
+pn vm_run(cs: Comp, input) Vm^ {
     let code: int[] = cs.code
-    var vm: Vm = {stv: [], stp: [], top: -1, lim: -1, high: -1,
+    let _admitted_vm_2173: Vm = {stv: [], stp: [], top: -1, lim: -1, high: -1,
         fk_kind: [], fk_pc: [], fk_top: [], fk_lim: [], fk_fp: [], fk_path: [], fk_vat: [],
         fk_subexp: [], fk_aux: [], fk_aux2: [], fk_aux3: [], fk_auxi: [], fk_active: [],
         fk_label: [], nforks: 0, fr_env: [], fr_caller: [], fr_retpc: [], fr_fn: [], fr_base: [],
         fr_locals: [], fr_params: [], nframes: 0, locals: [], pfn: [], penv: [],
         fp: -1, path: null, vat: null, subexp: 0, labels: 0, outputs: [], err: null,
         frame_limit: 50000}
-    vm.fp = frame_new(vm, cs, 0, -1, -1, -1)
-    st_push(vm, input)
-    var pc: int = cs.fn_entry[0]
+    var vm: Vm = _admitted_vm_2173^
+    vm.fp = frame_new(vm, cs, 0, -1, -1, -1)^
+    st_push(vm, input)^
+    let _admitted_pc_2182: int = cs.fn_entry[0]
+    var pc: int = _admitted_pc_2182^
     var mode: int = 0
     while (true) {
         if (mode == 1) {
             // backtrack to the newest fork record that resumes
             if (vm.nforks == 0) { return vm }
             let i: int = vm.nforks - 1
-            let kind: int = vm.fk_kind[i]
+            let _admitted_kind_2189: int = vm.fk_kind[i]
+            let kind: int = _admitted_kind_2189^
             if (kind == FK_FORK) {
                 fork_restore(vm, i)
-                pc = vm.fk_pc[i]
+                let _admitted_pc_2192: int = vm.fk_pc[i]
+                pc = _admitted_pc_2192^
                 vm.nforks = i
                 mode = 0
                 continue
@@ -2198,12 +2268,14 @@ pn vm_run(cs: Comp, input) Vm {
                 fork_restore(vm, i)
                 let c = vm.fk_aux[i]
                 let keys = vm.fk_aux2[i]
-                let idx: int = vm.fk_auxi[i]
+                let _admitted_idx_2201: int = vm.fk_auxi[i]
+                let idx: int = _admitted_idx_2201^
                 vm.fk_auxi[i] = idx + 1
-                pc = vm.fk_pc[i]
-                if (idx + 1 >= len(c)) { vm.nforks = i }
-                if (idx + 1 < len(c) and vm.top > vm.lim) { vm.lim = vm.top }
-                each_produce(vm, c, keys, idx)
+                let _admitted_pc_2203: int = vm.fk_pc[i]
+                pc = _admitted_pc_2203^
+                if ((idx + 1 >= len(c))^) { vm.nforks = i }
+                if ((idx + 1 < len(c) and vm.top > vm.lim)^) { vm.lim = vm.top }
+                each_produce(vm, c, keys, idx)^
                 mode = 0
                 continue
             }
@@ -2212,12 +2284,13 @@ pn vm_run(cs: Comp, input) Vm {
                 let cur = vm.fk_aux[i]
                 let step = vm.fk_aux3[i]
                 let next = cur + step
-                pc = vm.fk_pc[i]
+                let _admitted_pc_2215: int = vm.fk_pc[i]
+                pc = _admitted_pc_2215^
                 let more = range_more(next, vm.fk_aux2[i], step)
                 if (more) { vm.fk_aux[i] = next }
-                if (more and vm.top > vm.lim) { vm.lim = vm.top }
-                if (not more) { vm.nforks = i }
-                st_push(vm, cur)
+                if ((more and vm.top > vm.lim)^) { vm.lim = vm.top }
+                if ((not more)^) { vm.nforks = i }
+                st_push(vm, cur)^
                 mode = 0
                 continue
             }
@@ -2236,7 +2309,7 @@ pn vm_run(cs: Comp, input) Vm {
             if (vm.fk_kind[i] != FK_TRY or not vm.fk_active[i]) { continue }
             if (vm.fk_label[i] != 0) {
                 // `label` catches only its own break, then backtracks
-                if (is_label(vm.err) and vm.err == label_value(vm.fk_label[i])) {
+                if ((is_label(vm.err) and vm.err == label_value(vm.fk_label[i]))^) {
                     fork_restore(vm, i)
                     mode = 1
                 }
@@ -2245,33 +2318,35 @@ pn vm_run(cs: Comp, input) Vm {
             // a break passes through try
             if (is_label(vm.err)) { continue }
             fork_restore(vm, i)
-            st_push(vm, vm.err)
-            pc = vm.fk_pc[i]
+            st_push(vm, vm.err)^
+            let _admitted_pc_2249: int = vm.fk_pc[i]
+            pc = _admitted_pc_2249^
             mode = 0
             continue
         }
-        let op: int = code[pc]
+        let _admitted_op_2253: int = code[pc]
+        let op: int = _admitted_op_2253^
         pc = pc + 1
         if (op == OP_DUP) {
-            st_push(vm, vm.stv[vm.top])
+            st_push(vm, vm.stv[vm.top])^
             continue
         }
         if (op == OP_LOADK) {
             st_pop(vm)
-            st_push(vm, cs.consts[code[pc]])
+            st_push(vm, cs.consts[code[pc]])^
             pc = pc + 1
             continue
         }
         if (op == OP_SUBEXP_BEGIN) {
-            st_push(vm, vm.stv[vm.top])
+            st_push(vm, vm.stv[vm.top])^
             vm.subexp = vm.subexp + 1
             continue
         }
         if (op == OP_SUBEXP_END) {
             let a = st_pop(vm)
             let b = st_pop(vm)
-            st_push(vm, a)
-            st_push(vm, b)
+            st_push(vm, a)^
+            st_push(vm, b)^
             vm.subexp = vm.subexp - 1
             continue
         }
@@ -2281,46 +2356,50 @@ pn vm_run(cs: Comp, input) Vm {
             if (op == OP_INDEXK) { k = cs.consts[code[pc]] }
             if (op == OP_INDEXK) { pc = pc + 1 }
             if (op == OP_INDEX) { k = st_pop(vm) }
-            if (not path_check(vm, t)) {
-                vm.err = "Invalid path expression with result " ++ describe(t)
+            if ((not path_check(vm, t))^) {
+                vm.err = ("Invalid path expression with result " ++ describe(t))^
                 mode = 2
                 continue
             }
             let r = index_value(t, k)
-            if (not r.ok) {
-                vm.err = r.value
+            if ((not r.ok)^) {
+                vm.err = r.value^
                 mode = 2
                 continue
             }
             if (vm.path != null and vm.subexp == 0) {
                 vm.path = vm.path ++ [k]
-                vm.vat = r.value
+                vm.vat = r.value^
             }
-            st_push(vm, r.value)
+            st_push(vm, r.value)^
             continue
         }
         if (op == OP_JUMP) {
-            pc = code[pc]
+            let _admitted_pc_2303: int = code[pc]
+            pc = _admitted_pc_2303^
             continue
         }
         if (op == OP_JUMP_F) {
             let cnd = st_pop(vm)
-            pc = if (truthy(cnd)) pc + 1 else code[pc]
+            let _admitted_pc_2308: int = if (truthy(cnd)) pc + 1 else code[pc]
+            pc = _admitted_pc_2308^
             continue
         }
         if (op == OP_JUMP_F_SUB) {
             let inp = st_pop(vm)
             let cnd = st_pop(vm)
-            st_push(vm, inp)
-            pc = if (truthy(cnd)) pc + 1 else code[pc]
+            st_push(vm, inp)^
+            let _admitted_pc_2315: int = if (truthy(cnd)) pc + 1 else code[pc]
+            pc = _admitted_pc_2315^
             continue
         }
         if (op == OP_JUMP_F_KEEP) {
-            pc = if (truthy(vm.stv[vm.top])) pc + 1 else code[pc]
+            let _admitted_pc_2319: int = if (truthy(vm.stv[vm.top])) pc + 1 else code[pc]
+            pc = _admitted_pc_2319^
             continue
         }
         if (op == OP_FORK) {
-            fork_push(vm, FK_FORK, code[pc])
+            fork_push(vm, FK_FORK, code[pc])^
             pc = pc + 1
             continue
         }
@@ -2329,8 +2408,9 @@ pn vm_run(cs: Comp, input) Vm {
             continue
         }
         if ((op >= OP_STOREV and op <= OP_APPEND) or op == OP_LABEL_BEGIN or op == OP_BREAK) {
-            let f: int = frame_hop(vm, vm.fp, code[pc])
-            let slot: int = vm.fr_locals[f] + code[pc + 1]
+            let f: int = frame_hop(vm, vm.fp, code[pc])^
+            let _admitted_slot_2333: int = vm.fr_locals[f] + code[pc + 1]
+            let slot: int = _admitted_slot_2333^
             pc = pc + 2
             if (op == OP_STOREV) {
                 vm.locals[slot] = st_pop(vm)
@@ -2339,24 +2419,24 @@ pn vm_run(cs: Comp, input) Vm {
             if (op == OP_STOREV_UNDER) {
                 let inp = st_pop(vm)
                 vm.locals[slot] = st_pop(vm)
-                st_push(vm, inp)
+                st_push(vm, inp)^
                 continue
             }
             if (op == OP_LOADV or op == OP_LOADVN) {
                 st_pop(vm)
-                st_push(vm, vm.locals[slot])
+                st_push(vm, vm.locals[slot])^
                 if (op == OP_LOADVN) { vm.locals[slot] = null }
                 continue
             }
             if (op == OP_APPEND) {
                 // the collector array is private to this [..] until LOADVN
-                vm.locals[slot].push(st_pop(vm))
+                vm.locals[slot].push(st_pop(vm))^
                 continue
             }
             if (op == OP_LABEL_BEGIN) {
                 vm.labels = vm.labels + 1
                 vm.locals[slot] = label_value(vm.labels)
-                let at: int = fork_push(vm, FK_TRY, -1)
+                let at: int = fork_push(vm, FK_TRY, -1)^
                 vm.fk_label[at] = vm.labels
                 continue
             }
@@ -2367,45 +2447,50 @@ pn vm_run(cs: Comp, input) Vm {
         if (op == OP_EACH) {
             let c = st_pop(vm)
             let ct = jtype(c)
-            if (ct != 5 and ct != 6) {
-                vm.err = "Cannot iterate over " ++ describe(c)
+            if ((ct != 5 and ct != 6)^) {
+                vm.err = ("Cannot iterate over " ++ describe(c))^
                 mode = 2
                 continue
             }
-            if (not path_check(vm, c)) {
-                vm.err = "Invalid path expression with result " ++ describe(c)
+            if ((not path_check(vm, c))^) {
+                vm.err = ("Invalid path expression with result " ++ describe(c))^
                 mode = 2
                 continue
             }
-            if (len(c) == 0) {
+            if ((len(c) == 0)^) {
                 mode = 1
                 continue
             }
             let keys = if (ct == 6) [for (k at c) string(k)] else null
-            if (len(c) > 1) {
-                let at: int = fork_push(vm, FK_EACH, pc)
+            if ((len(c) > 1)^) {
+                let at: int = fork_push(vm, FK_EACH, pc)^
                 vm.fk_aux[at] = c
                 vm.fk_aux2[at] = keys
                 vm.fk_auxi[at] = 1
             }
-            each_produce(vm, c, keys, 0)
+            each_produce(vm, c, keys, 0)^
             continue
         }
         if (op == OP_CALL_JQ or op == OP_TAIL_CALL_JQ) {
-            if (vm.nframes >= vm.frame_limit) { vm_compact_frames(vm) }
-            let fn_index: int = code[pc]
-            let hops: int = code[pc + 1]
-            let nargs: int = code[pc + 2]
+            if (vm.nframes >= vm.frame_limit) { vm_compact_frames(vm)^ }
+            let _admitted_fn_index_2396: int = code[pc]
+            let fn_index: int = _admitted_fn_index_2396^
+            let _admitted_hops_2397: int = code[pc + 1]
+            let hops: int = _admitted_hops_2397^
+            let _admitted_nargs_2398: int = code[pc + 2]
+            let nargs: int = _admitted_nargs_2398^
             var caller: int = vm.fp
             var retpc: int = pc + 3 + nargs
             // a tail call reuses the frame when no fork point refers into it
             if (op == OP_TAIL_CALL_JQ and vm.nforks == vm.fr_base[vm.fp] and vm.fr_caller[vm.fp] >= 0) {
-                caller = vm.fr_caller[vm.fp]
-                retpc = vm.fr_retpc[vm.fp]
+                let _admitted_caller_2403: int = vm.fr_caller[vm.fp]
+                caller = _admitted_caller_2403^
+                let _admitted_retpc_2404: int = vm.fr_retpc[vm.fp]
+                retpc = _admitted_retpc_2404^
             }
-            let env: int = frame_hop(vm, vm.fp, hops)
+            let env: int = frame_hop(vm, vm.fp, hops)^
             let site: int = vm.fp
-            let f: int = frame_new(vm, cs, fn_index, env, caller, retpc)
+            let f: int = frame_new(vm, cs, fn_index, env, caller, retpc)^
             var i: int = 0
             while (i < nargs) {
                 vm.pfn[vm.fr_params[f] + i] = code[pc + 3 + i]
@@ -2413,45 +2498,55 @@ pn vm_run(cs: Comp, input) Vm {
                 i = i + 1
             }
             vm.fp = f
-            pc = cs.fn_entry[fn_index]
+            let _admitted_pc_2416: int = cs.fn_entry[fn_index]
+            pc = _admitted_pc_2416^
             continue
         }
         if (op == OP_CALL_PARAM or op == OP_TAIL_CALL_PARAM) {
-            if (vm.nframes >= vm.frame_limit) { vm_compact_frames(vm) }
-            let owner: int = frame_hop(vm, vm.fp, code[pc])
-            let slot: int = vm.fr_params[owner] + code[pc + 1]
-            let cl_fn: int = vm.pfn[slot]
-            let cl_env: int = vm.penv[slot]
+            if (vm.nframes >= vm.frame_limit) { vm_compact_frames(vm)^ }
+            let owner: int = frame_hop(vm, vm.fp, code[pc])^
+            let _admitted_slot_2422: int = vm.fr_params[owner] + code[pc + 1]
+            let slot: int = _admitted_slot_2422^
+            let _admitted_cl_fn_2423: int = vm.pfn[slot]
+            let cl_fn: int = _admitted_cl_fn_2423^
+            let _admitted_cl_env_2424: int = vm.penv[slot]
+            let cl_env: int = _admitted_cl_env_2424^
             var caller: int = vm.fp
             var retpc: int = pc + 2
             if (op == OP_TAIL_CALL_PARAM and vm.nforks == vm.fr_base[vm.fp] and vm.fr_caller[vm.fp] >= 0) {
-                caller = vm.fr_caller[vm.fp]
-                retpc = vm.fr_retpc[vm.fp]
+                let _admitted_caller_2428: int = vm.fr_caller[vm.fp]
+                caller = _admitted_caller_2428^
+                let _admitted_retpc_2429: int = vm.fr_retpc[vm.fp]
+                retpc = _admitted_retpc_2429^
             }
-            vm.fp = frame_new(vm, cs, cl_fn, cl_env, caller, retpc)
-            pc = cs.fn_entry[cl_fn]
+            vm.fp = frame_new(vm, cs, cl_fn, cl_env, caller, retpc)^
+            let _admitted_pc_2432: int = cs.fn_entry[cl_fn]
+            pc = _admitted_pc_2432^
             continue
         }
         if (op == OP_RET) {
             if (vm.fr_caller[vm.fp] < 0) {
                 // top level: an output of the program
-                vm.outputs.push(st_pop(vm))
+                vm.outputs.push(st_pop(vm))^
                 mode = 1
                 continue
             }
-            pc = vm.fr_retpc[vm.fp]
+            let _admitted_pc_2442: int = vm.fr_retpc[vm.fp]
+            pc = _admitted_pc_2442^
             vm.fp = vm.fr_caller[vm.fp]
             continue
         }
         if (op == OP_CALL_NATIVE) {
-            let id: int = code[pc]
-            let nargs: int = code[pc + 1]
+            let _admitted_id_2447: int = code[pc]
+            let id: int = _admitted_id_2447^
+            let _admitted_nargs_2448: int = code[pc + 1]
+            let nargs: int = _admitted_nargs_2448^
             pc = pc + 2
             let inp = st_pop(vm)
             var args: array = []
             var i: int = 0
             while (i < nargs) {
-                args.push(null)
+                args.push(null)^
                 i = i + 1
             }
             var j: int = nargs - 1
@@ -2459,41 +2554,42 @@ pn vm_run(cs: Comp, input) Vm {
                 args[j] = st_pop(vm)
                 j = j - 1
             }
-            if (id == NAT_GETPATH and not path_check(vm, inp)) {
-                vm.err = "Invalid path expression with result " ++ describe(inp)
+            if ((id == NAT_GETPATH and not path_check(vm, inp))^) {
+                vm.err = ("Invalid path expression with result " ++ describe(inp))^
                 mode = 2
                 continue
             }
             let r = call_native(id, inp, args)
-            if (not r.ok) {
-                vm.err = r.value
+            if ((not r.ok)^) {
+                vm.err = r.value^
                 mode = 2
                 continue
             }
             if (id == NAT_GETPATH and vm.path != null and vm.subexp == 0) {
                 vm.path = vm.path ++ args[0]
-                vm.vat = r.value
+                vm.vat = r.value^
             }
-            st_push(vm, r.value)
+            st_push(vm, r.value)^
             continue
         }
         if (op == OP_BINOP) {
-            let bop: int = code[pc]
+            let _admitted_bop_2481: int = code[pc]
+            let bop: int = _admitted_bop_2481^
             pc = pc + 1
             st_pop(vm)
             let l = st_pop(vm)
             let r0 = st_pop(vm)
             let r = binop_value(bop, l, r0)
-            if (not r.ok) {
-                vm.err = r.value
+            if ((not r.ok)^) {
+                vm.err = r.value^
                 mode = 2
                 continue
             }
-            st_push(vm, r.value)
+            st_push(vm, r.value)^
             continue
         }
         if (op == OP_TRY_BEGIN) {
-            fork_push(vm, FK_TRY, code[pc])
+            fork_push(vm, FK_TRY, code[pc])^
             pc = pc + 1
             continue
         }
@@ -2504,7 +2600,7 @@ pn vm_run(cs: Comp, input) Vm {
             while (i >= 0 and not (vm.fk_kind[i] == FK_TRY and vm.fk_active[i])) { i = i - 1 }
             if (i >= 0) {
                 vm.fk_active[i] = false
-                let at: int = fork_push(vm, FK_TRY_EXIT, -1)
+                let at: int = fork_push(vm, FK_TRY_EXIT, -1)^
                 vm.fk_auxi[at] = i
             }
             continue
@@ -2515,13 +2611,13 @@ pn vm_run(cs: Comp, input) Vm {
         }
         if (op == OP_NEWARR) {
             st_pop(vm)
-            st_push(vm, [])
+            st_push(vm, [])^
             continue
         }
         if (op == OP_OBJ_START) {
             let inp = st_pop(vm)
-            st_push(vm, {})
-            st_push(vm, inp)
+            st_push(vm, {})^
+            st_push(vm, inp)^
             continue
         }
         if (op == OP_INSERT) {
@@ -2530,12 +2626,12 @@ pn vm_run(cs: Comp, input) Vm {
             let key = st_pop(vm)
             let obj = st_pop(vm)
             if (not (key is string)) {
-                vm.err = "Object keys must be strings, not " ++ describe(key)
+                vm.err = ("Object keys must be strings, not " ++ describe(key))^
                 mode = 2
                 continue
             }
-            st_push(vm, obj_with(obj, key, val))
-            st_push(vm, inp)
+            st_push(vm, obj_with(obj, key, val))^
+            st_push(vm, inp)^
             continue
         }
         if (op == OP_SLICE) {
@@ -2548,54 +2644,55 @@ pn vm_run(cs: Comp, input) Vm {
                 continue
             }
             let r = slice_value(t, lower, upper)
-            if (not r.ok) {
-                vm.err = r.value
+            if ((not r.ok)^) {
+                vm.err = r.value^
                 mode = 2
                 continue
             }
-            st_push(vm, r.value)
+            st_push(vm, r.value)^
             continue
         }
         if (op == OP_RANGE) {
-            let nargs: int = code[pc]
+            let _admitted_nargs_2560: int = code[pc]
+            let nargs: int = _admitted_nargs_2560^
             pc = pc + 1
             st_pop(vm)
             let step = if (nargs == 3) st_pop(vm) else 1
             let upto = st_pop(vm)
             let from = st_pop(vm)
-            if (jtype(from) != 3 or jtype(upto) != 3 or jtype(step) != 3) {
+            if ((jtype(from) != 3 or jtype(upto) != 3 or jtype(step) != 3)^) {
                 vm.err = "Range bounds must be numeric"
                 mode = 2
                 continue
             }
-            if (not range_more(from, upto, step)) {
+            if ((not range_more(from, upto, step))^) {
                 mode = 1
                 continue
             }
-            if (range_more(from + step, upto, step)) {
-                let at: int = fork_push(vm, FK_RANGE, pc)
+            if (range_more(from + step, upto, step)^) {
+                let at: int = fork_push(vm, FK_RANGE, pc)^
                 vm.fk_aux[at] = from + step
                 vm.fk_aux2[at] = upto
                 vm.fk_aux3[at] = step
             }
-            st_push(vm, from)
+            st_push(vm, from)^
             continue
         }
         if (op == OP_PATH_BEGIN) {
             let v = st_pop(vm)
-            st_push(vm, vm.path)
-            st_push(vm, vm.vat)
-            st_push(vm, vm.subexp)
+            st_push(vm, vm.path)^
+            st_push(vm, vm.vat)^
+            st_push(vm, vm.subexp)^
             vm.path = []
             vm.vat = v
             vm.subexp = 0
-            st_push(vm, v)
+            st_push(vm, v)^
             continue
         }
         if (op == OP_PATH_END) {
             let r = st_pop(vm)
-            if (not path_check(vm, r)) {
-                vm.err = "Invalid path expression with result " ++ describe(r)
+            if ((not path_check(vm, r))^) {
+                vm.err = ("Invalid path expression with result " ++ describe(r))^
                 mode = 2
                 continue
             }
@@ -2603,21 +2700,21 @@ pn vm_run(cs: Comp, input) Vm {
             vm.subexp = st_pop(vm)
             vm.vat = st_pop(vm)
             vm.path = st_pop(vm)
-            st_push(vm, p)
+            st_push(vm, p)^
             continue
         }
         if (op == OP_NEG) {
             let v = st_pop(vm)
-            if (jtype(v) != 3) {
-                vm.err = describe(v) ++ " cannot be negated"
+            if ((jtype(v) != 3)^) {
+                vm.err = (describe(v) ++ " cannot be negated")^
                 mode = 2
                 continue
             }
-            st_push(vm, 0 - v)
+            st_push(vm, 0 - v)^
             continue
         }
         if (op == OP_TOBOOL) {
-            st_push(vm, truthy(st_pop(vm)))
+            st_push(vm, truthy(st_pop(vm)))^
             continue
         }
         print("jq-core: bad opcode " ++ string(op) ++ " at " ++ string(pc - 1) ++ "\n")
@@ -2634,8 +2731,9 @@ pub let JQ_INPUT_RAW = 2
 
 // run test/benchmark/text/jq/<name>.jq on the input and check its checksum
 pub pn jq_vm_benchmark(name: string, input_kind: int, input_path: string, expected: int) {
-    let filter: string = input("test/benchmark/text/jq/" ++ slice(name, 3) ++ ".jq", 'text')^
-    let cs: Comp = compile_program(filter)
+    let _admitted_filter_2637: string = input("test/benchmark/text/jq/" ++ slice(name, 3) ++ ".jq", 'text')^
+    let filter: string = _admitted_filter_2637^
+    let cs: Comp = compile_program(filter)^
     if (cs.failed) {
         print(name ++ ": " ++ cs.msg ++ "\n")
         return null
@@ -2647,9 +2745,9 @@ pub pn jq_vm_benchmark(name: string, input_kind: int, input_path: string, expect
     let t0 = clock()
     let vm = vm_run(cs, data)
     let t1 = clock()
-    if (len(vm.outputs) != 1) {
+    if ((len(vm.outputs) != 1)^) {
         print(name ++ ": FAIL expected one output, got " ++ string(len(vm.outputs)) ++ "\n")
-    } else if (vm.outputs[0] == expected) {
+    } else if ((vm.outputs[0] == expected)^) {
         print(name ++ ": CHECKSUM:" ++ string(vm.outputs[0]) ++ "\n")
     } else {
         print(name ++ ": FAIL checksum=" ++ string(vm.outputs[0]) ++ "\n")
@@ -2658,8 +2756,8 @@ pub pn jq_vm_benchmark(name: string, input_kind: int, input_path: string, expect
 }
 
 // development harness: run a filter on a JSON input value, outputs as JSON lines
-pub pn jq_vm_eval(filter: string, data) array {
-    let cs: Comp = compile_program(filter)
+pub pn jq_vm_eval(filter: string, data) array^ {
+    let cs: Comp = compile_program(filter)^
     if (cs.failed) { return [cs.msg] }
     let vm = vm_run(cs, data)
     vm.outputs

@@ -4,7 +4,7 @@ fn local_writer(seed) {
     var a, b = [seed, seed + 1]
     pn update() { a = a + 1; b = b + 1 }
     let alias, unused = [update, 0]
-    discard(alias)
+    let discarded_alias = discard(alias)
     a = a + 2
     return [a, b]
 }
@@ -38,7 +38,7 @@ fn fresh() {
 fn scalars() {
     var small, big = [1e-310, 9223372036854775806i64]
     pn update() { small = 3e-310; big = 1i64 }
-    discard(update)
+    let discarded_update = discard(update)
     let before = () => [small, big]
     small = 2e-310
     big = 9223372036854775805i64

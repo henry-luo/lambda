@@ -15,19 +15,19 @@ let BATCH = 25
 pub fn mailboxes() => [{path: INBOX, name: INBOX, delimiter: null, role: 'inbox', selectable: true}]
 
 // UIDL's listing ("1 uid-alpha\r\n2 uid-beta\r\n") as [{number, uidl}], in server order.
-pub fn listing(text) => [for (line in split(replace(text, "\r\n", "\n"), "\n"),
-    let words = [for (w in split(trim(line), " ") where w != "") w] where len(words) == 2)
+pub fn listing(text) any^ => [for (line in ((split(replace(text, "\r\n", "\n"), "\n")) ^ { [] }),
+    let words = [for (w in ((split(trim(line), " ")) ^ { [] }) where w != "") w] where len(words) == 2)
     {number: int(words[0]), uidl: words[1]}]
 
 // The listed messages the local entries lack. `except` settles the common
 // case, nothing new, in one pass; the filter then scans only what is new.
-pub fn missing(listed, entries) {
+pub fn missing(listed, entries) any^ {
     let wanted = except([for (m in listed) m.uidl], [for (e in entries) e.uidl]);
     if (len(wanted) == 0) [] else [for (m in listed where m.uidl in wanted) m]
 }
 
 // A message's store id: its UIDL, which RFC 1939 limits to printable ASCII.
-pub fn message_id(uidl) => "pop-" ++ store.safe_name(uidl)
+pub fn message_id(uidl) any^ => "pop-" ++ store.safe_name(uidl)
 
 // RETR's "+OK 1234 octets" reply: the size, or null
 pub fn octets(text) => (let words = split(trim(text or ""), " "), int(words[0]) ^ { null })
@@ -70,7 +70,7 @@ pub pn sync_inbox(session, root, progress) map^ {
         entries = [*entries, {uid: uid, uidl: m.uidl, file: file, flags: [], *: sync.header_entry(message),
             *: sync.body_entry(message), internaldate: null, size: octets(reply.text), thread: null, has_file: true}]
         done = done + 1
-        if (progress != null) { progress(done) }
+        if (progress != null) { progress(done)^ }
         if (done % BATCH == 0) { index = saved(index_file, index, entries)^ }
     }
     saved(index_file, index, entries)
@@ -78,7 +78,7 @@ pub pn sync_inbox(session, root, progress) map^ {
 
 // The local Inbox with one message's read state changed: POP3 keeps none on
 // the server, so the store is the only record (ML9).
-pub pn mark_seen(root, uid, seen) map^ {
+pub pn mark_seen(root, uid, seen) map?^ {
     let index_file = store.index_path(root, INBOX)
     let loaded = store.load_index(index_file)
     if (loaded == null) { return null }

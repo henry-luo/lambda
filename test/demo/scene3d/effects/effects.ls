@@ -9,7 +9,7 @@ let SOURCES = [
     {id: "raster", label: "Raster image", src: "../../photo/assets/coast.jpg", width: 1600.0, height: 1064.0}
 ]
 fn source_image(selected) => [for (source in SOURCES where source.id == selected) source][0]
-fn stage(effect, selected, strength) element {
+fn stage(effect, selected, strength) element^ {
     let source = source_image(selected)
     let aspect = source.width / source.height;
     s.scene([
@@ -48,7 +48,7 @@ view <gallery> state selected: "text", strength: 40 {
 }
 on click(evt) {
     let choice = dom.get_attribute(evt.target, "data-source")
-    if (choice != null and contains(["text", "svg", "raster"], choice)) { selected = choice; return 'handled' }
+    if ((choice != null and contains(["text", "svg", "raster"], choice))^) { selected = choice; return 'handled' }
     return 'pass'
 }
 on input(evt) {

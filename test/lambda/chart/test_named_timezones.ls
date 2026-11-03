@@ -8,7 +8,7 @@ import vega: lambda.chart.vega
 import transform: lambda.chart.transform
 
 fn stamp(value) float | error => calendar.timestamp(value)
-fn ticks(first, final_value, unit, zone, step = 1) => calendar.ticks(stamp(first), stamp(final_value), {interval: unit, step: step}, zone)
+fn ticks(first, final_value, unit, zone, step = 1) any^ => calendar.ticks(stamp(first), stamp(final_value), {interval: unit, step: step}, zone)
 fn labels(values, zone, pattern = "YYYY-MM-DD hh:mm") => [for (value in values) calendar.wall_time(value, zone).format(pattern)]
 let ny = "America/New_York";
 let spring = ticks("2024-03-10T05:00Z", "2024-03-10T09:00Z", "hour", ny);

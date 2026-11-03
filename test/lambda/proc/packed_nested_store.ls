@@ -48,15 +48,15 @@ pn bump_copy(a: int[], i: int, v: int) int {
     return a[i]
 }
 
-pn flags(n: int) int {
-    var f: bool[] = fill(n, true)
+pn flags(n: int) int^ {
+    var f: bool[] = fill(n, true)^
     f[1] = false
     return if (f[0] and not f[1]) 1 else 0
 }
 
 pn main() {
     var g: (int*)* = [for (i in 0 to 2) fill(3, 0)]
-    fill_grid(g, 3)
+    fill_grid(g, 3)^
     print("grid=" ++ g[2][1] ++ " " ++ g[0][2] ++ "\n")
     print("local=" ++ local_grid(3) ++ " snapshot=" ++ snapshot(3) ++
         " cube=" ++ cube(2) ++ "\n")

@@ -178,7 +178,7 @@ Reading `books.svg` back finds 25 runs of text: the heading, four column headers
 
 ```lambda
 // books_text.ls
-count(input("books.svg")^?<text>)
+count(input("books.svg")^?<text>)^
 ```
 
 ```bash

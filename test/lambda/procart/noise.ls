@@ -18,9 +18,9 @@ let pts = [[0.3, 0.7, 1.1], [-5.25, 3.5, 0.125], [100.9, -42.1, 7.7], [255.5, 25
 let xs = [for (i in 0 to 1999) [rng.between(rng.at(rng.key(5), 3 * i), -50.0, 50.0),
     rng.between(rng.at(rng.key(5), 3 * i + 1), -50.0, 50.0), rng.between(rng.at(rng.key(5), 3 * i + 2), -50.0, 50.0)]]
 fn bounded(vs) => all([for (v in vs) v >= -1.0 and v <= 1.0]) and abs(math.mean(vs)) < 0.06
-let kernels = [(x: float, y: float, z: float) => noise.value2(p, x, y), (x: float, y: float, z: float) => noise.perlin2(p, x, y), (x: float, y: float, z: float) => noise.simplex2(p, x, y),
-    (x: float, y: float, z: float) => noise.value3(p, x, y, z), (x: float, y: float, z: float) => noise.perlin3(p, x, y, z), (x: float, y: float, z: float) => noise.simplex3(p, x, y, z),
-    (x: float, y: float, z: float) => noise.white2(p, x, y), (x: float, y: float, z: float) => noise.white3(p, x, y, z)];
+let kernels = [(x: float, y: float, z: float) any^ => noise.value2(p, x, y), (x: float, y: float, z: float) any^ => noise.perlin2(p, x, y), (x: float, y: float, z: float) any^ => noise.simplex2(p, x, y),
+    (x: float, y: float, z: float) any^ => noise.value3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.perlin3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.simplex3(p, x, y, z),
+    (x: float, y: float, z: float) any^ => noise.white2(p, x, y), (x: float, y: float, z: float) any^ => noise.white3(p, x, y, z)];
 [for (f in kernels) bounded([for (q in xs) f(q[0], q[1], q[2])])];
 [all([for (q in xs) (let c = noise.cellular2(p, q[0], q[1]), c[0] >= 0.0 and c[0] <= c[1])]),
  all([for (q in xs) (let c = noise.cellular3(p, q[0], q[1], q[2]), c[0] >= 0.0 and c[0] <= c[1])])];
@@ -33,7 +33,7 @@ let f = noise.field(g, 24, 16);
 [len(f), len(f[0]), sum([for (row in f) sum(row)]), noise.field(noise.make(rng.key(2), spec)^, 24, 16) == f,
  noise.field(noise.make(rng.key(3), spec)^, 24, 16) != f];
 [for (fr in ['none', 'fbm', 'ridged', 'billow']) (let gen = noise.make(rng.key(2), {*:spec, fractal: fr})^,
-    let vs = [for (row in noise.field(gen, 24, 16)) for (v in row) v], [fr, gen.octaves, all([for (v in vs) v >= -1.0 and v <= 1.0])])];
+    let vs = [for (row in ((noise.field(gen, 24, 16)) ^ { [] })) for (v in row) v], [fr, gen.octaves, all([for (v in vs) v >= -1.0 and v <= 1.0])])];
 [for (kind in ['simplex', 'perlin', 'value', 'white', 'cellular']) (let gen = noise.make(rng.key(2), {kind: kind, frequency: 0.1})^,
     [kind, noise.sample(gen, 3.0, 4.0), noise.sample3(gen, 3.0, 4.0, 5.0)])];
 [for (cell in ['f1', 'f2', 'f2-f1']) noise.sample(noise.make(rng.key(2), {kind: 'cellular', cell: cell, frequency: 0.1})^, 3.0, 4.0)];

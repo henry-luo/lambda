@@ -17,14 +17,14 @@
 // Moves: each move is (from, over, to)
 // We encode as parallel arrays for from, over, to
 
-fn benchmark() int {
+fn benchmark() int^ {
     // All valid jump moves
     var mfrom = [0,0,1,1,2,2,3,3,3,3,4,4,5,5,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,12,12,13,13,14,14]
     var mover = [1,2,3,4,4,5,1,4,6,7,7,8,2,4,8,9,3,7,4,8,4,7,5,8,6,11,7,12,7,8,11,13,8,12,9,13]
     var mto   = [3,5,6,8,7,9,0,5,10,12,11,13,0,3,12,14,1,8,2,9,1,6,2,7,3,12,4,13,3,5,10,14,4,11,5,12]
     let num_moves: int = 36
 
-    var board: bool[] = fill(15, true)
+    var board: bool[] = fill(15, true)^
     board[0] = false
 
     var solutions: int = 0
@@ -49,13 +49,13 @@ fn benchmark() int {
             board[mover[last_m]] = true
             board[mto[last_m]] = false
             pegs = pegs + 1
-            stack[depth] = last_m + 1
+            stack[depth] = (last_m + 1)^
         }
 
         // Find next valid move at current depth
         var found = false
         var mi: int = stack[depth]
-        while (mi < num_moves) {
+        while ((mi < num_moves)^) {
             if (board[mfrom[mi]] and board[mover[mi]] and (not board[mto[mi]])) {
                 // Make move
                 board[mfrom[mi]] = false
@@ -82,7 +82,7 @@ fn benchmark() int {
                 board[mover[last_m]] = true
                 board[mto[last_m]] = false
                 pegs = pegs + 1
-                stack[depth] = last_m + 1
+                stack[depth] = (last_m + 1)^
             }
         }
     }
@@ -95,7 +95,7 @@ pn main() {
     let result = benchmark()
     var __t1 = clock()
     print("triangl: solutions=" ++ result ++ "\n")
-    if (result == 29760) {
+    if ((result == 29760)^) {
         print("triangl: PASS\n")
     } else {
         print("triangl: DONE\n")

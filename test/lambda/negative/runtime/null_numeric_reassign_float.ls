@@ -6,5 +6,5 @@ pn main() {
     let v: float[] = [1.0]
     var total: float = 1.5
     total = total + math.sqrt(v[4])
-    print(["bound: ", total])
+    total
 }

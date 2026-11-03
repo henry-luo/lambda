@@ -4,4 +4,5 @@ fn dynamic_person() any { {name: "Ana", age: "very old"} }
 
 pn main() {
     var person: Person = dynamic_person()
+    person
 }

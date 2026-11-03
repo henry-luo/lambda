@@ -24,7 +24,7 @@ pub let CATALOG = [
 fn spine(t,branch) array => [0.5*t*t+branch*t,3.4*t,0.1*sin(t*3.0+branch)]
 fn above(p) array => [p[0],p[1]+0.009,p[2]]
 
-fn leaf(recipe,position,heading,length,width) array {
+fn leaf(recipe,position,heading,length,width) array^ {
     let parent = transforms.matrix(position,[0.0,0.0,heading],[1.0,1.0,1.0])^
     let blade = solid.oval([0.0,0.0,0.0],[length,0.1,width],recipe.leaf,"leaf",[math.pi/2.0,0.0,0.0],recipe.blade)
     let m = solid.matrix(blade)

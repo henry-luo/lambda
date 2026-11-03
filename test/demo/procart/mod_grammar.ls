@@ -14,9 +14,9 @@ pub fn registry() map => {*:plants.registry(),'plant@1':{validate:meadow.check_p
     'rock.faceted@1':{validate:meadow.check_parameters,generate:generated},
     'grass.blades@1':{validate:meadow.check_parameters,generate:generated}}
 pub fn model(document) map^ => scene.expand(document,registry())^
-pub fn home(id) map => camera.prepare({position:if (id == "primitives") [9.8,8.0,11.5] else if (id == "garden") [8.8,7.2,11.0] else [8.0,7.5,12.0],
+pub fn home(id) map^ => camera.prepare({position:if (id == "primitives") [9.8,8.0,11.5] else if (id == "garden") [8.8,7.2,11.0] else [8.0,7.5,12.0],
     target:[0.0,0.6,0.0],fov:42.0})
-pub fn viewport(model,id) element {
+pub fn viewport(model,id) element^ {
     let lens=home(id);
     scene.to_scene3d(model,{id:"grammar-scene",position:lens.position,target:lens.target,background:"#eeeae0"})
 }

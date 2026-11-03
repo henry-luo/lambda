@@ -5,7 +5,7 @@ pub fn at(book,chapter,offset) map^ {
     let valid = if (not (offset is int) or offset < 0 or offset > len(chapter.text))
         raise c.fail("invalid-location","Text offset is outside the chapter",chapter.href) else true
     let segment = c.first([for (segment in chapter.source_map where
-        offset >= segment.offset and offset < segment.offset+len(segment.text)) segment]);
+        ((offset >= segment.offset and offset < segment.offset+len(segment.text)) ^ { false })) segment]);
     {version:1,publication_fingerprint:book.source_identity,rendition:book.rendition,
         spine_occurrence:chapter.occurrence,href:chapter.href,node:segment.node,
         source_text_position:offset,quote:slice(chapter.text,offset,min(len(chapter.text),offset+32))}
@@ -26,11 +26,11 @@ pub fn resolve(book,locator) map^ {
 }
 // a word character for whole-word matching: a digit, an underscore, or a cased letter
 fn word_char(ch) => ch != "" and (ch == "_" or (ch >= "0" and ch <= "9") or lower(ch) != upper(ch))
-fn whole_word_at(text,offset,length) => not word_char(if (offset > 0) slice(text,offset-1,offset) else "") and
+fn whole_word_at(text,offset,length) any^ => not word_char(if (offset > 0) slice(text,offset-1,offset) else "") and
     not word_char(slice(text,offset+length,min(len(text),offset+length+1)))
 // excerpts read as one line: line breaks become spaces and space runs collapse
-fn spaces(text) => if (contains(text,"  ")) spaces(replace(text,"  "," ")) else text
-fn flat(text) => spaces(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," "))
+fn spaces(text) any^ => if (contains(text,"  ")) spaces(replace(text,"  "," ")) else text
+fn flat(text) any^ => spaces(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," "))
 // The match with up to ~40 characters before and ~70 after, cut at word
 // boundaries so neither side opens or closes mid-word.
 fn excerpt(text,offset,length) {
@@ -49,7 +49,7 @@ fn matches(book,chapter,query,opts,remaining) array^ {
     let folded = if (opts.match_case) null else lower(chapter.text)
     let exact = opts.match_case or len(folded) != len(chapter.text)
     let hits = find(if (exact) chapter.text else folded,if (exact) query else lower(query))
-    let kept = take([for (hit in hits where not opts.whole_word or whole_word_at(chapter.text,hit.index,len(query))) hit.index],remaining);
+    let kept = take([for (hit in hits where ((not opts.whole_word or whole_word_at(chapter.text,hit.index,len(query))) ^ { false })) hit.index],remaining);
     [for (offset in kept) {*:excerpt(chapter.text,offset,len(query)),locator:at(book,chapter,offset)^,length:len(query),
         chapter:chapter.occurrence,snippet:slice(chapter.text,max(0,offset-24),min(len(chapter.text),offset+len(query)+48))}]
 }

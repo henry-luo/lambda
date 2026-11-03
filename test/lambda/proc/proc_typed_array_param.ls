@@ -145,35 +145,35 @@ pn main() {
     b[0] = 1.5; b[1] = 2.5; b[2] = 3.5; b[3] = 4.5
 
     // Test 1: read
-    test_int_array_read(a, 5)
+    test_int_array_read(a, 5)^
 
     // Test 2: sum
-    test_int_array_sum(a, 5)
+    test_int_array_sum(a, 5)^
 
     // Test 3: write+read (modifies array in-place)
-    var c: int[] = fill(3, 0)
+    var c: int[] = fill(3, 0)^
     c[0] = 1; c[1] = 2; c[2] = 3
-    test_int_array_write(c, 3)
+    test_int_array_write(c, 3)^
     // A typed procedure parameter preserves the legacy caller-visible write ABI.
     print(c)
     print("\n")
 
     // Test 4: int[] only annotation (no second native param)
-    test_int_array_only(a)
+    test_int_array_only(a)^
 
     // Test 5: float[] sum
-    test_float_array_sum(b, 4)
+    test_float_array_sum(b, 4)^
 
     // Test 6: fill creates ArrayInt; pass directly
-    var d: int[] = fill(5, 0)
+    var d: int[] = fill(5, 0)^
     d[0] = 99; d[4] = 77
-    test_fill_to_int_param(d, 5)
+    test_fill_to_int_param(d, 5)^
 
     // Test 7: nested calls
-    test_nested_int_array(a, 4)
+    test_nested_int_array(a, 4)^
 
     // Test 8: comparison (find max)
-    test_int_array_compare(a, 5)
+    test_int_array_compare(a, 5)^
 
     // Test 9: direct list literals are coerced for float[] params
     test_float_array_literals([1.0, 0.0], [0.0, 1.0])

@@ -20,10 +20,10 @@ pub fn read(pkg, reference, width, height, colors) map^ {
         if (root.uri != c.DGM or root.tag != "dataModel") issue(pkg,"Unsupported SmartArt data root")
         else {
             // presentation and transition points repeat labels or carry layout metadata.
-            let labels = [for (point in c.children(c.child(root,"ptLst",c.DGM),"pt",c.DGM),
-                paragraph in c.descendants(c.child(point,"t",c.DGM),"p",c.A),
-                let value = c.drawing_text(paragraph) where (c.attr(point,"type","") == null or
-                    contains(["node","asst"],c.attr(point,"type",""))) and value != "") value];
+            let labels = [for (point in ((c.children(c.child(root,"ptLst",c.DGM),"pt",c.DGM)) ^ { [] }),
+                paragraph in ((c.descendants(c.child(point,"t",c.DGM),"p",c.A)) ^ { [] }),
+                let value = c.drawing_text(paragraph) where (((c.attr(point,"type","") == null or
+                    contains(["node","asst"],c.attr(point,"type",""))) and value != "") ^ { false })) value];
             if (len(labels) == 0) issue(pkg,"SmartArt has no supported saved text")
             else {
                 let image = layout.render(root,part(pkg,reference,"lo","diagramLayout")^,

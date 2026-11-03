@@ -62,6 +62,6 @@ pub let extensions = [
 
 pub let registry = common.merge_extensions(extensions)
 
-pub fn descriptor(spelling) => common.descriptor_in(registry, spelling)
-pub fn descriptor_for_intent(input_type) =>
+pub fn descriptor(spelling) any^ => common.descriptor_in(registry, spelling)
+pub fn descriptor_for_intent(input_type) any^ =>
   common.descriptor_for_intent_in(registry, input_type)

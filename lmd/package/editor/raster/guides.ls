@@ -8,9 +8,9 @@ pub let limit = 64
 pub let layouts = [{id:"center",label:"Center",columns:2,rows:2},
     {id:"thirds",label:"Rule of thirds",columns:3,rows:3},{id:"quarters",label:"Quarters",columns:4,rows:4},
     {id:"custom",label:"Custom"}]
-pub fn container(image) => metadata.container(image,'photos_guides')
-pub fn items(image) => metadata.items(image,'photos_guides')
-pub fn lookup(image,id) => [for (guide in items(image) where guide.id == id) guide][0]
+pub fn container(image) any^ => metadata.container(image,'photos_guides')
+pub fn items(image) any^ => metadata.items(image,'photos_guides')
+pub fn lookup(image,id) any^ => [for (guide in ((items(image)) ^ { [] }) where guide.id == id) guide][0]
 fn has_position(entries,axis,position) => any([for (g in entries) g.axis == axis and g.position == position])
 fn extent(image,axis) => if (axis == "x") image.width else image.height
 fn position_valid(image,axis,p) => axis in ["x","y"] and p is int and p>=0 and p<=extent(image,axis)
@@ -23,7 +23,7 @@ pub fn validate(image) any^ {
     else true
 }
 fn replace(image,entries) any^ => metadata.replace(image,'photos_guides',entries)^
-fn fresh(image,index=1) => if (lookup(image,"guide-" ++ string(index)) != null) fresh(image,index+1) else "guide-" ++ string(index)
+fn fresh(image,index=1) any^ => if (lookup(image,"guide-" ++ string(index)) != null) fresh(image,index+1) else "guide-" ++ string(index)
 fn added(image,axis,position) any^ {
     let entries = items(image);
     if (has_position(entries,axis,position)) image
@@ -58,8 +58,8 @@ pub fn layout(image,options) any^ {
     }
 }
 pub fn resized(image,sx=1,sy=1,origin=[0,0]) any^ {
-    let moved = [for (g in items(image)) img.with_properties(g,{position:int(round(g.position*(if (g.axis == "x") sx else sy)))-origin[if (g.axis == "x") 0 else 1]})^];
-    if (len(moved)==0) image else replace(image,[for (g in moved where position_valid(image,g.axis,g.position)) g])^
+    let moved = [for (g in ((((((items(image)) ^ { [] })))))) img.with_properties(g,{position:int(round(g.position*(if (g.axis == "x") sx else sy)))-origin[if (g.axis == "x") 0 else 1]})^];
+    if (len(moved)==0) image else replace(image,[for (g in moved where ((position_valid(image,g.axis,g.position)) ^ { false })) g])^
 }
 pub fn run_command(st,command) any^ {
     let entries = items(st.doc)
@@ -81,10 +81,10 @@ pub fn run_command(st,command) any^ {
             // one result expression keeps validation from becoming an extra null in the returned session.
             // replacement keeps the first stable ID at coincident positions; append preserves authored entries.
             let retained = if (not replacing) entries else [for (i,g in entries where
-                has_position(positions,g.axis,g.position) and not has_position(slice(entries,0,i),g.axis,g.position)) g]
-            let missing = [for (p in positions where not has_position(retained,p.axis,p.position)) p];
+                ((has_position(positions,g.axis,g.position) and not has_position(slice(entries,0,i),g.axis,g.position)) ^ { false })) g]
+            let missing = [for (p in positions where ((not has_position(retained,p.axis,p.position)) ^ { false })) p];
             if (len(retained)+len(missing)>limit) raise error("Raster: project guide limit reached")
-            else {*:st,doc:reduce([replace(st.doc,retained)^,*missing],(image,p) => added(image,p.axis,p.position)^)}
+            else {*:st,doc:reduce([replace(st.doc,retained)^,*missing],(image,p) any^ => added(image,p.axis,p.position)^)}
         }
     }
     else if (command.id == "guide.clear") (if (len(entries)==0) st else {*:st,doc:replace(st.doc,[])^})
@@ -93,7 +93,7 @@ pub fn run_command(st,command) any^ {
         else {*:st,doc:added(st.doc,command.axis,command.position)^}
     }
     else if (guide == null) raise error("Raster: select a guide")
-    else if (command.id == "guide.remove") {*:st,doc:replace(st.doc,[for (g in entries where g.id != guide.id) g])^}
+    else if (command.id == "guide.remove") {*:st,doc:replace(st.doc,[for (g in entries where ((((((g.id != guide.id) ^ { false })))))) g])^}
     else if (command.id == "guide.update") (
         if (not position_valid(st.doc,guide.axis,command.position)) raise error("Raster: guide position must stay inside the canvas")
         else if (guide.position == command.position) st
@@ -104,7 +104,7 @@ fn anchors(box,axis) => [box[axis],box[axis]+box[if (axis == "x") "width" else "
     box[axis]+box[if (axis == "x") "width" else "height"]]
 fn snapped_axis(st,box,axis,delta,tolerance,boxes) {
     let targets = [0,extent(st.doc,axis)/2,extent(st.doc,axis),
-        *if (st.guides_visible) [for (g in items(st.doc) where g.axis == axis) g.position] else [],
+        *if (st.guides_visible) [for (g in ((items(st.doc)) ^ { [] }) where g.axis == axis) g.position] else [],
         *[for (other in boxes) *anchors(other,axis)],
         *navigation.grid_targets(st,anchors(box,axis),delta,extent(st.doc,axis))]
     // retain the first equally near target: canvas, authored guides, then foreground-first layers.

@@ -9,7 +9,7 @@ pub let DEFAULTS = {box:{},grid:{stroke:0.01},sphere:{segments:24,rings:12},line
 pub let FIELDS = {box:[],grid:["stroke"],sphere:["segments","rings"],line:["stroke"],point:["diameter"],triangle:["points"],mesh:["geometry"],cylinder:["segments"],tube:["points","radius","segments","capped"]}
 let PATH = [[-0.5,0.0,0.0],[0.5,0.0,0.0]]
 pub fn parameters(kind,node,defaults={}) map^ {
-    let authored = map([for (k,val in map(node) where contains(FIELDS[kind],string(k))) (string(k),val)])
+    let authored = map([for (k,val in map(node) where ((contains(FIELDS[kind],string(k))) ^ { false })) (string(k),val)])
     let p = {*:DEFAULTS[kind],*:c.value(defaults[kind],{}),*:authored}
     let counts = c.require((p.segments == null or c.bounded(p.segments,3,64,true)) and (p.rings == null or c.bounded(p.rings,2,48,true)),"invalid primitive tessellation")^
     let dims = c.require(all([for (k in ["stroke","diameter","radius"]) p[k] == null or c.bounded(p[k],0.0001,1000.0)]),"invalid primitive dimension")^
@@ -18,7 +18,7 @@ pub fn parameters(kind,node,defaults={}) map^ {
     let checked_triangle = if (kind == "triangle") (let n=v.cross(v.subtract(points[1],points[0]),v.subtract(points[2],points[0])),c.require(v.dot(n,n)>1e-16,"triangle points are collinear")^)
     let checked_tube = if (kind == "tube") {
         let checked_caps = c.require(p.capped is bool,"tube capped must be boolean")^
-        let edges = [for (i in 0 to (len(points)-2)) v.subtract(points[i+1],points[i])]
+        let edges = [for (i in ((0 to (len(points)-2)) ^ { [] })) v.subtract(points[i+1],points[i])]
         let lengths = c.require(all([for (e in edges) v.dot(e,e)>1e-16]),"tube has duplicate consecutive points")^
         let directions = edges |> v.unit(~);
         c.require(all([for (i in 0 to (len(directions)-2)) v.dot(directions[i],directions[i+1]) > -0.999999]),"tube reverses direction at a joint")^
@@ -26,12 +26,12 @@ pub fn parameters(kind,node,defaults={}) map^ {
     let checked_mesh = if (kind == "mesh") c.require(p.geometry is string,"mesh needs a geometry reference")^;
     {*:p,*:(if (points != null) {points:points} else {})}
 }
-pub fn estimate(kind,p) int => if (kind == "box") 24 else if (kind == "mesh") 0 else if (kind == "sphere") (p.rings+1)*(p.segments+1)
+pub fn estimate(kind,p) int^ => if (kind == "box") 24 else if (kind == "mesh") 0 else if (kind == "sphere") (p.rings+1)*(p.segments+1)
     else if (kind == "triangle") 3 else if (kind == "point") 7*13 else if (kind == "grid") 12*38 else if (kind == "line") 38
     else if (kind == "cylinder") 2*(p.segments+1)+2*(p.segments+2)
     else len(p.points)*(p.segments+1)+(if (p.capped) 2*(p.segments+2) else 0)
 // minimal rotation follows the path tangent without introducing an arbitrary ring twist.
-fn transport(normal,a,b) array {
+fn transport(normal,a,b) array^ {
     let cross = v.cross(a,b)
     let rotated = v.add(normal,v.add(v.cross(cross,normal),v.times(v.cross(cross,v.cross(cross,normal)),1.0/(1.0+v.dot(a,b)))));
     v.unit(v.subtract(rotated,v.times(b,v.dot(rotated,b))))
@@ -85,7 +85,7 @@ fn wireframe(stroke) map {
     let edges = [for (i,a in corners,j,b in corners where j>i and len([for (axis in 0 to 2 where a[axis]!=b[axis]) axis]) == 1) [a,b]]
     merge([for (e in edges) sweep(e,stroke/2.0,8,true)])
 }
-pub fn geometry(kind,p,id) element {
+pub fn geometry(kind,p,id) element^ {
     if (kind == "box") s.box([1.0,1.0,1.0],{id:id})
     else {
         let buffer = if (kind == "sphere") shapes.sphere(p.rings,p.segments)

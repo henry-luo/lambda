@@ -79,7 +79,7 @@ pub pn startup(st,node) {
         dialog:if (ready.dialog.kind=="recover") {*:ready.dialog,startup_path:request.path} else ready.dialog},node)
 }
 pub pn auto_saved(st) {
-    if (st.editor.composition!=null or not session.is_dirty(st.file_state,st.editor.doc)) { return st }
+    if ((st.editor.composition!=null or not session.is_dirty(st.file_state,st.editor.doc))^) { return st }
     let result: any^ = autosave.write_snapshot(st.autosave.root,st.autosave.document_id,st.file_state,st.editor.doc)
     return {*:st,status:if (result is error) "Auto-save failed: " ++ result.message else "Recovery snapshot saved at " ++ result.saved_at}
 }
@@ -93,7 +93,7 @@ pn art_values(node,style=null) { return {text:field(node,"art-text"),style:style
     width:field(node,"art-width"),height:field(node,"art-height"),size:field(node,"art-size"),font:field(node,"art-font"),
     fill:field(node,"art-fill"),outline:field(node,"art-outline"),rotation:field(node,"art-rotation")} }
 pn source_values(node,d) {
-    return {*:d.values,*:map([for (f in references.visible_fields(d.values.kind,d.all_fields==true))
+    return {*:d.values,*:map([for (f in references.visible_fields(d.values.kind,d.all_fields==true)^)
         for (part in [f.key,field(node,"source-" ++ f.key)]) part]),id:d.source_id or ""}
 }
 pn illustration_values(node,kind,current) {
@@ -119,34 +119,34 @@ pub pn selected_all(st,node) {
 }
 pub pn adopt(st,evt,changes_only=false) {
     // a structural selection's native caret is only a projection; toolbar/key snapshots retain the cells.
-    if (tables.structural(st.editor) and not changes_only) { return st }
-    if (selected_all(st,evt.target)) { return st }
+    if ((tables.structural(st.editor) and not changes_only)^) { return st }
+    if (selected_all(st,evt.target)^) { return st }
     let accepted = controller.adopt(st.editor,evt)
     // focus/selection echoes name the projected first-cell caret, not the logical cell range.
-    if (changes_only and tables.projected_selection(st.editor,accepted.editor.selection)) {
+    if ((changes_only and tables.projected_selection(st.editor,accepted.editor.selection))^) {
         return {*:st,editor:{*:st.editor,native_selection_revision:accepted.editor.native_selection_revision}}
     }
-    if (changes_only and not accepted.changed) { return st }
+    if ((changes_only and not accepted.changed)^) { return st }
     return {*:st,editor:accepted.editor}
 }
 pub pn selection_changed(st,evt) {
     // focusing ruler chrome must not replace the saved document range or retire pointer capture.
-    if (st.read_only or st.context!=null or ruler.dragging(evt.target)) { return st }
+    if ((st.read_only or st.context!=null or ruler.dragging(evt.target))^) { return st }
     let adopted = adopt(st,evt,true)
-    if (adopted.editor==st.editor) { return st }
+    if ((adopted.editor==st.editor)^) { return st }
     let next = {*:adopted,editor:model.clean(tables.promote(adopted.editor)),
         mini_hidden:if (adopted.editor.selection!=st.editor.selection) false else st.mini_hidden}
-    controller.restore(tables.native_editor(next.editor))
+    controller.restore(tables.native_editor(next.editor))^
     refresh_toolbar(next,evt.target)
     return next
 }
 let replaced_editor = controller.replace
 pub pn finish(st,node,restore_selection=true) {
-    spelling.update(node,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
+    spelling.update(node,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)^
     // Bind only once an editing action owns a selection. View-only changes
     // before the first caret placement have no model selection to publish.
-    controller.restore(tables.native_editor(st.editor),restore_selection and not st.read_only and st.dialog==null)
-    refresh_toolbar(st,node)
+    controller.restore(tables.native_editor(st.editor),restore_selection and not st.read_only and st.dialog==null)^
+    refresh_toolbar(st,node)^
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     dom.set_close_guard(node,dirty)
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
@@ -169,7 +169,7 @@ pn continued(st,id,node) {
     return next
 }
 pn saved(st,path,node,overwrite=false) {
-    if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
+    if (starts_with(path,"temp/word/")^) { io.mkdir("temp/word") ^ { null } }
     let result = storage.save_document(st.file_state,st.editor.doc,path,overwrite)
     let cleared = if (result.ok) autosave.clear_versions(st.autosave.root,st.autosave.document_id,path) else true
     let next = {*:st,file_state:result.session,status:result.status ++ (if (cleared) "" else " Recovery snapshots could not all be removed."),
@@ -199,14 +199,14 @@ pn math_commit(st,change,node) {
 }
 pub pn math_key(st,evt,node) {
     let k = math_edit.key(st,evt)
-    if (k==null) { return null }
-    if (k.kind=="move") { return {*:st,math:{*:st.math,caret:k.caret}} }
-    if (k.kind=="exit") { return {*:st,math:null,status:"Equation selected"} }
-    if (k.kind=="leave") {
+    if ((k==null)^) { return null }
+    if ((k.kind=="move")^) { return {*:st,math:{*:st.math,caret:k.caret}} }
+    if ((k.kind=="exit")^) { return {*:st,math:null,status:"Equation selected"} }
+    if ((k.kind=="leave")^) {
         focus_document(node)
         return {*:st,math:null,editor:edit_set_selection(mounted(st.editor,node),math_edit.beside(st.editor,k.after))}
     }
-    if (k.row==st.math.row) { return {*:st,math:{*:st.math,caret:k.caret}} }
+    if ((k.row==st.math.row)^) { return {*:st,math:{*:st.math,caret:k.caret}} }
     return math_commit(st,k,node)
 }
 pn equation_apply(st,node,values,close=false,selection=null) {
@@ -230,7 +230,7 @@ pn opened(st,path,node) {
 }
 pub pn open_finished(st,detail,node) {
     // a canceled request or an earlier conversion cannot replace a later document.
-    if (not opening.accepts(st.dialog,detail)) { return st }
+    if ((not opening.accepts(st.dialog,detail))^) { return st }
     let current = {*:st,open_task:null,dialog:{*:st.dialog,loading:false}}
     if (detail.reply.error is string) {
         picker.request(node)
@@ -257,7 +257,7 @@ pn picker_command(st,action,params,node) {
     if (st.dialog.loading==true) { return st }
     let dialog = picker.command(st.dialog,action,params)
     let next = {*:st,dialog:dialog,open_folder:dialog.browser.path}
-    if (dialog.open_path!=null) { return opened(next,dialog.open_path,node) }
+    if ((dialog.open_path!=null)^) { return opened(next,dialog.open_path,node) }
     if (contains(["navigate","back","forward","up","refresh","go","location","mode","move","activate","open"],action)) picker.request(node)
     return next
 }
@@ -273,7 +273,7 @@ pn dialog_command(st,action,node) {
         let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(loaded.doc)),file_state:loaded.session,
             autosave:{*:st.autosave,document_id:loaded.document_id},import_warnings:[],object_picks:[],dialog:null,startup_request:null,
             status:"Recovered " ++ loaded.title ++ "; save to keep it and clear recovery versions."}
-        spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
+        spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)^
         picker.request(node,"word_picker_closed")
         return next
     }
@@ -291,7 +291,7 @@ pn dialog_command(st,action,node) {
     if (action=="citation") {
         return dialog_model(st,"references.editCitation",{locator:field(node,"citation-locator")},{locator:field(node,"citation-locator")},node)
     }
-    if (starts_with(action,"table_")) {
+    if (starts_with(action,"table_")^) {
         if (action=="table_properties") {
             let p = {table_width:float(field(node,"table-preferred-width")),alignment:field(node,"table-position"),indent:float(field(node,"table-indent"))}
             return dialog_model(st,"table.properties",p,p,node)
@@ -394,7 +394,7 @@ pn dialog_command(st,action,node) {
     if (action == "internal_link") {
         let name = field(node,"link-bookmark")
         let values = {href:insert.bookmark_href(name),label:field(node,"link-label")}
-        let target = [for (b in insert.bookmarks(st.editor.doc) where b.name==name) b][0]
+        let target = [for (b in insert.bookmarks(st.editor.doc)^ where (b.name==name)^) b][0]
         if (target==null) { return {*:st,dialog:{*:st.dialog,values:values,error:"Choose an existing bookmark."}} }
         return dialog_model(st,"insert.link",values,values,node)
     }
@@ -416,7 +416,7 @@ pn dialog_command(st,action,node) {
     if (action == "link") {
         let href = trim(field(node,"link-address"))
         let label = field(node,"link-label")
-        if (not (starts_with(href,"https://") or starts_with(href,"http://") or starts_with(href,"mailto:") or starts_with(href,"#"))) {
+        if ((not (starts_with(href,"https://") or starts_with(href,"http://") or starts_with(href,"mailto:") or starts_with(href,"#")))^) {
             return {*:st,dialog:{*:st.dialog,values:{href:href,label:label},error:"Enter an http, https, mailto, or fragment address."}}
         }
         return dialog_model(st,"insert.link",{href:href,label:label},{href:href,title:"",label:label},node)
@@ -428,13 +428,13 @@ pn dialog_command(st,action,node) {
         let target = if (action == "overwrite") st.dialog.path else trim(field(node,"print-path"))
         let values = {*:st.dialog.values,path:target}
         let failed = (message) => {*:st,dialog:{kind:"print",values:values,starts:st.dialog.starts,error:message}}
-        if (lower(split(target,".")[last]) != "pdf") { return failed("Word: save the printout as a .pdf file") }
+        if ((lower(split(target,".")[last]) != "pdf")^) { return failed("Word: save the printout as a .pdf file") }
         let printed = print.document(st.editor.doc,values) ^ { return failed(^.message) }
         // composed printouts are built from the measured preview pages, so they need a finished measurement.
         let starts = st.dialog.starts
         if (print.composed(values) and starts==null) { return failed("Word: the preview is still updating; try again") }
         if (exists(target) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:target,action:"print",values:values,starts:starts}} }
-        if (starts_with(target,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
+        if (starts_with(target,"temp/word/")^) { io.mkdir("temp/word") ^ { null } }
         let exported: any^ = if (print.composed(values)) storage.export_sheets(printed,st.file_state.envelope.title,values,starts,target)
             else storage.export_document(printed,st.file_state.envelope.title,target,not values.backgrounds)
         if (exported is error) { return failed(exported.message) }
@@ -443,7 +443,7 @@ pn dialog_command(st,action,node) {
     }
     if (kind == "export") {
         if (exists(path) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:path,action:"export"}} }
-        if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
+        if (starts_with(path,"temp/word/")^) { io.mkdir("temp/word") ^ { null } }
         let exported: any^ = storage.export_document(st.editor.doc,st.file_state.envelope.title,path)
         if (exported is error) { return {*:st,status:exported.message} }
         focus_document(node)
@@ -500,17 +500,17 @@ pn lookup_command(st,id,params,node) {
     return {*:next,lookup:{*:pane,selection:null},status:"Translation inserted"}
 }
 pub pn command(st,id,params,node,retain_focus=false) {
-    if (starts_with(id,"picker.") and st.dialog.kind=="open") { return picker_command(st,slice(id,7),params,node) }
-    if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
-    if (id=="ui.dictionary" or id=="ui.translate" or starts_with(id,"ui.lookup")) { return lookup_command(st,id,params,node) }
+    if ((starts_with(id,"picker.") and st.dialog.kind=="open")^) { return picker_command(st,slice(id,7),params,node) }
+    if (starts_with(id,"dialog.")^) { return dialog_command(st,slice(id,7),node) }
+    if ((id=="ui.dictionary" or id=="ui.translate" or starts_with(id,"ui.lookup"))^) { return lookup_command(st,id,params,node) }
     // auto-opened comments follow Review instead of staying latched across ribbon changes.
     if (id == "ui.tab") { return {*:st,tab:params.tab,review:params.tab=="Review" and not st.revisions and st.lookup==null} }
-    if (starts_with(id,"ui.equation") and not contains(["ui.equation","ui.equationSettings","ui.equationPreset"],id)) {
+    if ((starts_with(id,"ui.equation") and not contains(["ui.equation","ui.equationSettings","ui.equationPreset"],id))^) {
         if (id=="ui.equationCancel" or (st.read_only and id=="ui.equationClose")) {
             if (not st.read_only) focus_document(node)
             return {*:st,equation_edit:null,tab:if (id=="ui.equationClose") "Home" else st.tab}
         }
-        if (st.read_only or equation.settings(image.selected(st.editor).node)==null) { return st }
+        if ((st.read_only or equation.settings(image.selected(st.editor).node)==null)^) { return st }
         let draft = equation_edit.draft(st)
         if (id=="ui.equationEdit") {
             equation_edit.request(node)
@@ -522,9 +522,9 @@ pub pn command(st,id,params,node,retain_focus=false) {
         }
         if (id=="ui.equationInsert") {
             let entry = equation_edit.fragment(params)
-            if (entry==null) { return {*:st,status:"Choose an equation symbol or structure."} }
+            if ((entry==null)^) { return {*:st,status:"Choose an equation symbol or structure."} }
             // with the caret inside the equation, structures insert there instead of into the LaTeX pane.
-            if (math_edit.active(st)) {
+            if (math_edit.active(st)^) {
                 let change = math_edit.insert(st,entry) ^ { return {*:st,status:^.message} }
                 return math_commit(st,change,node)
             }
@@ -539,11 +539,11 @@ pub pn command(st,id,params,node,retain_focus=false) {
         }
         if (id=="ui.equationFormat") {
             let values = {*:draft.values,*:params}
-            if (equation_edit.active(st)) { return equation_apply(st,node,values) }
+            if (equation_edit.active(st)^) { return equation_apply(st,node,values) }
             return model_command(st,"equation.format",values,node)
         }
         if (contains(["ui.equationApply","ui.equationClose"],id)) {
-            if (not equation_edit.active(st)) { focus_document(node); return {*:st,tab:"Home"} }
+            if ((not equation_edit.active(st))^) { focus_document(node); return {*:st,tab:"Home"} }
             return equation_apply(st,node,draft.values,id=="ui.equationClose")
         }
     }
@@ -552,7 +552,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (id=="ui.shapeField") {
         if (st.read_only) { return st }
         let item = shape_format.describe(image.selected(st.editor).node)
-        if (item==null) { return st }
+        if ((item==null)^) { return st }
         let value = if (item.values[symbol(params.property)] is number) (float(params.value) ^ {null}) else params.value
         let next = model_command(st,"shape.format",{values:{[params.property]:value}},node,true)
         // controlled inputs retain incomplete hex/number drafts until they become valid source values.
@@ -576,7 +576,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     }
     if (id=="ui.objectLayout") {
         let selected = image.selected(st.editor)
-        if (st.read_only or selected==null) { return st }
+        if ((st.read_only or selected==null)^) { return st }
         let p = object_layout.settings(selected.node)
         let frame = object_layout.measure(st.editor,node,st.zoom)
         return {*:st,dialog:{kind:"object_layout",values:{*:p,x:round(frame.x*100)/100,y:round(frame.y*100)/100}}}
@@ -584,7 +584,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (id=="ui.citation" or id=="ui.sources" or id=="ui.editCitation") {
         let active = references.current(st.editor)
         if (id!="ui.sources" and st.read_only) { return st }
-        if (id=="ui.editCitation" and active==null) { return {*:st,status:"Select a citation first."} }
+        if ((id=="ui.editCitation" and active==null)^) { return {*:st,status:"Select a citation first."} }
         return {*:st,dialog:if (id!="ui.sources" and active!=null) {kind:"citation",values:active.value}
             else {kind:if (id=="ui.sources") "sources" else "citations",values:{locator:""}}}
     }
@@ -607,7 +607,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return dialog_model(st,"references.insertCitation",{locator:field(node,"citation-locator")},
             {id:params.id,locator:field(node,"citation-locator")},node)
     }
-    if (id=="references.deleteSource" and contains(["sources","citations"],st.dialog.kind)) {
+    if ((id=="references.deleteSource" and contains(["sources","citations"],st.dialog.kind))^) {
         if (st.read_only) { return st }
         let next = model_command(st,id,params,node)
         return {*:next,dialog:next.dialog or st.dialog}
@@ -619,7 +619,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return model_command(st,"table.cellSize",{axis:params.axis,value:if (trim(string(params.value))=="") null else float(params.value)},node,true)
     }
     if (id=="ui.tableLayoutDialog") {
-        if (st.read_only or tables.context(st.editor)==null) { return st }
+        if ((st.read_only or tables.context(st.editor)==null)^) { return st }
         let p = table_layout.settings(st.editor)
         let values = if (params.kind=="table_split") {rows:p.rows,columns:if (p.rows==1 and p.columns==1) 2 else p.columns}
             else if (params.kind=="table_sort") {column:1,type:"text",descending:false,header:true}
@@ -633,11 +633,11 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return {*:st,table_pen:{*:st.table_pen,[params.property]:if (params.property=="width") float(params.value) else params.value}}
     }
     if (id=="ui.tableShading") {
-        if (st.read_only or model.table_context(st.editor)==null) { return st }
+        if ((st.read_only or model.table_context(st.editor)==null)^) { return st }
         return {*:st,dialog:{kind:"table_shading",values:{color:table_design.shading_value(tables.selected(st.editor)[0].node)}}}
     }
     if (id=="ui.cellBorders") {
-        if (st.read_only or model.table_context(st.editor)==null) { return st }
+        if ((st.read_only or model.table_context(st.editor)==null)^) { return st }
         return {*:st,dialog:{kind:"cell_borders",values:tables.border_settings(st.editor)}}
     }
     if (contains(["ui.headerFooter","ui.pageNumber"],id)) {
@@ -647,14 +647,14 @@ pub pn command(st,id,params,node,retain_focus=false) {
     }
     let selected_graphic = graphics.descriptor(model.current_node(st.editor,'img').node)
     let graphic_command = graphics.command(id)
-    if ((graphic_command!=null and contains([graphic_command.open,graphic_command.edit],id)) or
-        (contains(["ui.objectSettings","ui.pictureSettings"],id) and selected_graphic!=null)) {
+    if (((graphic_command!=null and contains([graphic_command.open,graphic_command.edit],id)) or
+        (contains(["ui.objectSettings","ui.pictureSettings"],id) and selected_graphic!=null))^) {
         if (st.read_only) { return st }
         let entry = graphic_command or selected_graphic
-        if (entry.kind=="group") { return command(st,"ui.objectLayout",{},node) }
+        if ((entry.kind=="group")^) { return command(st,"ui.objectLayout",{},node) }
         let editing = id!=entry.open
         let values = entry.settings(model.current_node(st.editor,'img').node)
-        if (editing and values==null) { return {*:st,status:"Select a " ++ entry.label ++ " first."} }
+        if ((editing and values==null)^) { return {*:st,status:"Select a " ++ entry.label ++ " first."} }
         return {*:st,dialog:{kind:entry.kind,editing:editing,values:if (editing) values else entry.defaults}}
     }
     if (id=="ui.emoji") {
@@ -664,7 +664,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (id=="ui.chooseEmoji" and st.dialog.kind=="emoji") {
         return {*:st,dialog:{*:st.dialog,values:{char:params.char},error:null}}
     }
-    if (contains(["ui.chooseGraphic","ui.previewGraphic"],id) and contains(graphics.illustration_kinds,st.dialog.kind)) {
+    if ((contains(["ui.chooseGraphic","ui.previewGraphic"],id) and contains(graphics.illustration_kinds,st.dialog.kind))^) {
         let kind = st.dialog.kind
         let values = {*:illustration_values(node,kind,st.dialog.values),*:params}
         let preview = graphics.kind(kind).graphic(graphics.parameters(kind,values)) ^ {
@@ -704,7 +704,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
         let href = attrs_get(model.current_node(st.editor,'a').node.attrs,'href') or ""
         let name = if (id=="ui.bookmarkText") params.name else insert.link_bookmark(href)
         let selection = insert.bookmark_selection(st.editor.doc,name)
-        if (selection==null) { return {*:st,status:"This bookmark is no longer in the document."} }
+        if ((selection==null)^) { return {*:st,status:"This bookmark is no longer in the document."} }
         focus_document(node)
         let target = dom.get_element_by_id(dom.root_node(node),insert.bookmark_id(name))
         if (target!=null) dom.scroll_into_view(target)
@@ -719,7 +719,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     }
     if (id=="ui.revisionText") {
         let selected = changes.selection(st.editor.doc,params.id)
-        if (selected==null) { return {*:st,status:"This revision no longer exists."} }
+        if ((selected==null)^) { return {*:st,status:"This revision no longer exists."} }
         focus_document(node)
         let target = dom.query_selector(dom.root_node(node),"#edit-surface [data-word-change=\"" ++ params.id ++ "\"]")
         if (target!=null) dom.scroll_into_view(target)
@@ -728,13 +728,13 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (id == "ui.resolvedComments") { return {*:st,show_resolved:not st.show_resolved} }
     if (id == "ui.comment") {
         if (st.read_only) { return st }
-        if (not model.can_comment(st.editor)) { return {*:st,status:"Select the text you want to comment on."} }
+        if ((not model.can_comment(st.editor))^) { return {*:st,status:"Select the text you want to comment on."} }
         return {*:st,dialog:{kind:"comment",values:{author:"Me",text:""}}}
     }
     if (id == "ui.commentText" or id == "ui.nextComment" or id == "ui.previousComment") {
         let target_id = if (id=="ui.commentText") params.id else model.next_comment_id(st.editor,st.show_resolved,id=="ui.nextComment")
         let selection = model.comment_selection(st.editor,target_id)
-        if (selection==null) { return {*:st,review:true,status:"The commented text is no longer in the document."} }
+        if ((selection==null)^) { return {*:st,review:true,status:"The commented text is no longer in the document."} }
         focus_document(node)
         let anchor = dom.query_selector(dom.root_node(node),"#edit-surface [data-word-comment~=\"" ++ target_id ++ "\"]")
         if (anchor!=null) dom.scroll_into_view(anchor)
@@ -785,17 +785,17 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return if (next.read_only) {*:next,editor:tables.native_editor(st.editor)} else next
     }
     if (id == "view.focusMode") { return {*:st,focused:not st.focused} }
-    if (starts_with(id,"view.zoom")) { return {*:st,zoom:if (id == "view.zoomReset") 1.0
+    if (starts_with(id,"view.zoom")^) { return {*:st,zoom:if (id == "view.zoomReset") 1.0
         else min(1.5,max(0.5,st.zoom + if (id == "view.zoomIn") 0.1 else -0.1))} }
     if (id == "ui.heading") {
-        let index = [for (i,heading in model.headings(st.editor.doc) where heading.path==params.path) i][0]
+        let index = [for (i,heading in model.headings(st.editor.doc)^ where heading.path==params.path) i][0]
         focus_document(node)
         dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_navigation_ready")
         return {*:st,editor:model.select_heading(mounted(st.editor,node),params.path),nav_target:{kind:"heading",index:index}}
     }
     if (id=="ui.page") {
         let point = navigation.page_position(st.editor.doc,params.page)
-        if (point==null) { return st }
+        if ((point==null)^) { return st }
         focus_document(node)
         dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_navigation_ready")
         return {*:st,editor:edit_set_selection(mounted(st.editor,node),text_selection(point,point)),
@@ -832,12 +832,12 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return {*:st,dialog:{*:st.dialog,error:null,starts:null,values:{*:st.dialog.values,path:field(node,"print-path"),[params.key]:params.value}}}
     }
     if (contains(["file.new","file.sample","file.open","file.close"],id)) {
-        if (session.is_dirty(st.file_state,st.editor.doc)) { return {*:st,pending:id,dialog:{kind:"unsaved"}} }
+        if (session.is_dirty(st.file_state,st.editor.doc)^) { return {*:st,pending:id,dialog:{kind:"unsaved"}} }
         return continued(st,id,node)
     }
     if (contains(["edit.findNext","edit.findPrevious","ui.findResult"],id)) {
         let hits = model.search(st.editor.doc,st.query,st.match_case)
-        if (len(hits)==0) { return {*:st,status:"No matching text"} }
+        if ((len(hits)==0)^) { return {*:st,status:"No matching text"} }
         let index = if (id=="ui.findResult") min(len(hits)-1,max(0,params.index))
             else if (st.match_index<0) (if (id=="edit.findNext") 0 else len(hits)-1)
             else (st.match_index + (if (id == "edit.findNext") 1 else -1) + len(hits)) % len(hits)
@@ -849,7 +849,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (st.read_only) { return st }
     if (id == "edit.replace") {
         let hits = model.search(st.editor.doc,st.query,st.match_case)
-        if (len(hits)==0) { return {*:st,status:"No matching text"} }
+        if ((len(hits)==0)^) { return {*:st,status:"No matching text"} }
         let selected = [for (hit in hits where hit == st.editor.selection) hit][0]
         return model_command({*:st,editor:edit_set_selection(st.editor,selected or hits[0])},"edit.replace",{replace:st.replace_text},node)
     }

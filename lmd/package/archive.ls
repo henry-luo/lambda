@@ -18,7 +18,7 @@ pub fn problems(given) => config.resolve(given).problems
 pub pn library(root, options = null) map^ {
     let o = options or {}
     let resolved = config.resolve(o.config)
-    if (len(resolved.problems) > 0) raise error("archive: invalid configuration: " ++ join(resolved.problems, "; "))
+    if ((len(resolved.problems) > 0)^) raise error("archive: invalid configuration: " ++ join(resolved.problems, "; "))
     store.ensure(root)^
     let records = store.load(root)^;
     {root: root, config: resolved.config, records: records}
@@ -29,7 +29,7 @@ pub fn plan(url, cfg, options = null) map^ => planning.plan(url, cfg, options)^
 
 // the pure derivations over a capture {source, manifest, final_url, url?, archived?} (AR3)
 fn parsed(capture) map^ => derive.capture(capture.source, capture.manifest, capture.final_url)^
-fn meta(c, art, capture) => derive.meta_of(c, art, capture.url or capture.final_url, capture.archived, null)
+fn meta(c, art, capture) any^ => derive.meta_of(c, art, capture.url or capture.final_url, capture.archived, null)
 pub fn snapshot_html(capture) string^ => derive.snapshot_html(parsed(capture)^)
 pub fn readable(capture) string?^ => (let c = parsed(capture)^, let art = derive.article_of(c),
     if (art == null) null else derive.readable_html(c, art, meta(c, art, capture)))
@@ -37,7 +37,7 @@ pub fn markdown(capture) string?^ => (let c = parsed(capture)^, let art = derive
     if (art == null) null else derive.markdown_text(c, art, meta(c, art, capture))^)
 
 // the library with one record added or replaced (callers fold a job's result in)
-pub fn with_record(lib, record) => jobs.with_record(lib, record)
+pub fn with_record(lib, record) any^ => jobs.with_record(lib, record)
 
 // One archive job (AR12v2): one first fetch to disk, the engine its kind
 // names, the worker's renderings, pack, write; meant to run as a task.
@@ -69,7 +69,7 @@ pub pn search(lib, query, options = null) array^ {
     // the index as it is now, not as `lib` last saw it: results are always current
     let rows = snapshots({*: lib, records: store.current(lib.root)^}, o)
     let text_of = (r) => lib.root ++ "/snapshots/" ++ r.id ++ "/text.txt"
-    let files = [for (r in rows where exists(text_of(r))) text_of(r)]
+    let files = [for (r in rows where ((exists(text_of(r))) ^ { false })) text_of(r)]
     if (len(files) == 0) { return [] }
     let by_file = reduce([{}, *rows], (acc, r) => {*: acc, [text_of(r)]: r})
     let hits = io.text_search(files, query, {snippet: o.snippet or 24})^
@@ -81,11 +81,11 @@ pub pn search(lib, query, options = null) array^ {
 }
 
 // the records matching a filter: kind, host, tag, since/until (ISO text), sort 'newest' | 'oldest'
-pub fn snapshots(lib, filter = null) array {
+pub fn snapshots(lib, filter = null) array^ {
     let f = filter or {}
-    let rows = [for (r in lib.records where (f.kind == null or r.kind == string(f.kind)) and
+    let rows = [for (r in lib.records where (((f.kind == null or r.kind == string(f.kind)) and
         (f.host == null or host_of(r.url) == f.host) and (f.tag == null or (f.tag in (r.tags or []))) and
-        (f.since == null or r.archived >= f.since) and (f.until == null or r.archived <= f.until)) r];
+        (f.since == null or r.archived >= f.since) and (f.until == null or r.archived <= f.until)) ^ { false })) r];
     sort(rows, {dir: if (f.sort == "oldest") 'asc' else 'desc', by: (r) => r.archived})
 }
 fn host_of(url) => (let u = planning.parse(url), if (u == null) null else u.host)
@@ -106,12 +106,12 @@ pub pn doctor(lib) map^ {
     let stale = if (exists(staging_dir)) [for (f in input(staging_dir)^ where f.is_dir) f.name] else []
     let rows = [for (r in records, let dir = lib.root ++ "/snapshots/" ++ r.id where exists(dir))
         {record: r, bytes: bytes_of(input(dir)^) + (if (exists(dir ++ "/media")) bytes_of(input(dir ++ "/media")^) else 0),
-         missing: [for (name in expected_files(r) where not exists(dir ++ "/" ++ name)) name]}]
+         missing: [for (name in ((expected_files(r)) ^ { [] }) where not exists(dir ++ "/" ++ name)) name]}]
     let gone = [for (r in records where not exists(lib.root ++ "/snapshots/" ++ r.id)) r.id]
     let kinds = reduce([{}, *rows], (acc, row) => (let k = row.record.kind, let was = acc[k] or {count: 0, bytes: 0},
         {*: acc, [k]: {count: was.count + 1, bytes: was.bytes + row.bytes}}));
     {problems: config.resolve(lib.config).problems, snapshots: len(rows), bytes: sum([for (row in rows) row.bytes]),
-     kinds: kinds, staging: stale, missing: [*[for (row in rows where len(row.missing) > 0) {id: row.record.id, files: row.missing}],
+     kinds: kinds, staging: stale, missing: [*[for (row in rows where ((len(row.missing) > 0) ^ { false })) {id: row.record.id, files: row.missing}],
         *[for (id in gone) {id: id, files: ["(folder)"]}]]}
 }
 

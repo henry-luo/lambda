@@ -55,8 +55,8 @@ pn main() {
     var g: float? = 2.5; r_floatq(g)
     var h: bool = false; r_bool(h)
     var h2: bool? = true; r_boolq(h2)
-    var p: P = {x: 1, y: 2}; let p_keep = p; r_rec(p)
-    var q: P? = {x: 1, y: 2}; r_recq(q)
+    var p: P = {x: 1, y: 2}; let p_keep = p; r_rec(p)^
+    var q: P? = {x: 1, y: 2}; r_recq(q)^
     var arr: int[] = [1]; r_arr(arr)
     print([a, b, c, d, e, e2, f, g, h, h2, p, q, arr])
     print("\n")

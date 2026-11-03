@@ -2,7 +2,7 @@ import chat: lambda.chat
 
 pub fn users(argument: string) array^ {
     let ids = [for (part in split(slice(argument, 5), ",")) trim(part)]
-    let unknown = [for (id in ids where chat.profile(id) == null) id]
+    let unknown = [for (id in ids where chat.profile(id)^ == null) id]
     if (not starts_with(argument, "user=") or len(ids) == 0 or contains(ids, ""))
         raise error("Chat: supply a comma-separated list such as user=maya,alex")
     else if (len(unique(ids)) != len(ids))

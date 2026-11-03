@@ -18,10 +18,10 @@ let shape = model.execute(empty,"insert.shape",{*:shapes.defaults,kind:"diamond"
 let lettering = model.execute(empty,"insert.wordArt",{*:art.defaults,text:"Copied words",rotation: -30})^
 let formula = model.execute(empty,"insert.equation",{*:equation.defaults,source:"E=mc^2"})^
 let editors = [picture,shape,lettering,formula]
-fn copied(editor,input_type="copy",result=null) => controller.clipboard_result(editor,input_type,
+fn copied(editor,input_type="copy",result=null) any^ => controller.clipboard_result(editor,input_type,
     if (result!=null) result else outcome.model_applied(false,false,false,"",editor.selection,editor.model_revision))
-fn pasted(editor) => edit_exec(empty,edit_cmd_paste_html(copied(editor).clipboard_html,""))
-fn value(editor,key) => attrs_get(image.images(editor.doc)[0].node.attrs,key)
+fn pasted(editor) any^ => edit_exec(empty,edit_cmd_paste_html(copied(editor).clipboard_html,""))
+fn value(editor,key) any^ => attrs_get(image.images(editor.doc)[0].node.attrs,key)
 
 all([for (editor in editors) copied(editor).clipboard_image==value(editor,'src')])
 all([for (editor in editors) copied(editor).clipboard_text==value(editor,'alt')])

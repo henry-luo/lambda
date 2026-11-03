@@ -14,7 +14,7 @@ let tool_graphics = {move:"pointer",ellipse:"circle",erase:"clear",bucket:"shadi
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
-pub fn layer_rows(st) => [for (row in editor.layers(st.doc))
+pub fn layer_rows(st) => [for (row in ((editor.layers(st.doc)) ^ { [] }))
     <div class:if (row.id in st.selected) "layer-row selected" else "layer-row",style:("padding-left:" ++ string(8+row.depth*16) ++ "px"),
         <button class:"visibility",'data-visibility':row.id,title:"Toggle visibility",if (row.node.visible == false) "○" else "●">
         <button class:"layer-name",'data-layer':row.id,title:row.node.name,
@@ -26,12 +26,12 @@ pub fn layer_rows(st) => [for (row in editor.layers(st.doc))
     >]
 pub fn effect_rows(st) {
     let row = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null;
-    [for (i,effect in effects.items(row.node)) <div class:if (i == st.effect_index) "effect-row selected" else "effect-row",
+    [for (i,effect in ((effects.items(row.node)) ^ { [] })) <div class:if (i == st.effect_index) "effect-row selected" else "effect-row",
         <button 'data-select-effect':string(i),if (effect.enabled == false) "○ " ++ effect.name else "● " ++ effect.name>>]
 }
 pub fn style_rows(st) {
     let row = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null;
-    [for (i,style in styles.items(row.node)) <button 'data-select-style':string(i),
+    [for (i,style in ((styles.items(row.node)) ^ { [] })) <button 'data-select-style':string(i),
         class:if (i == st.style_index) "selected" else "",(if (style.enabled == false) "○ " else "● ") ++ string(style.kind)>]
 }
 fn histogram_channel(counts,c) {
@@ -54,7 +54,7 @@ pub fn curve_chart(curves,channel,selected=1,mode="linear") any^ {
         *[for (i,p in points) <circle 'data-curve-point':string(i),cx:p[0]*256,cy:(1-p[1])*160,r:4,
             fill:if (i == selected) "#ffffff" else color,stroke:"#172130",'stroke-width':1>]]>
 }
-pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
+pub fn tree() any^ => <main id:"photos",tabindex:"0",'data-error':"", *[
     <header class:"menubar",<strong "λ Photos"> <nav 'aria-label':"Document commands", *[
         button("new","new","New"),button("open","open","Open…"),button("place","place","Place image…"),
         button("save","save","Save project…"),button("save-psd","psd","Export PSD…"),button("export","export","Export image…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,

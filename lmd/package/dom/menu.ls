@@ -26,7 +26,7 @@ fn bit(present, value) { if (present) value else 0 }
 // paint pass read a cached mask instead of calling into Lambda per item — the
 // quiescence rule F8 exists to protect. Caching is sound here because the menu
 // is modal: nothing these rules read can change while it is up.
-pub fn enabled_mask(elem, has_clip) {
+pub fn enabled_mask(elem, has_clip) any^ {
     if (dom.get_state(elem, "disabled")) { 0 }
     else {
         let readonly = dom.get_state(elem, "readonly");

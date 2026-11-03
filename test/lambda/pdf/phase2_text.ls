@@ -20,7 +20,7 @@ pn main() {
     var info = []
     var i = 0
     let n = len(elements)
-    while (i < n) {
+    while ((i < n)^) {
         let el = elements[i]
         info = info ++ [{
             x: el.x,

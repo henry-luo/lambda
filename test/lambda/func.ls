@@ -39,7 +39,7 @@ let greet = (name: string) => "Hello, " ++ name
 greet("world");
 
 // anonymous function as argument (higher-order)
-fn apply_fn(f, x) => f(x)
+fn apply_fn(f, x) any^ => f(x)
 apply_fn((x) => x * 10, 3);
 
 let t = string

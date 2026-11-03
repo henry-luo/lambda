@@ -24,8 +24,8 @@ let moved = m.relocated(deep,[{from:"/base/A",to:"/base/B/A"}]);
     m.remap("/base/A/child",[{from:"/base/A",to:"/new/A"}]) == "/new/A/child",
     m.remap("/base/Another",[{from:"/base/A",to:"/new/A"}]) == "/base/Another",
     renamed.path == "/base/Renamed/Nested",
-    [for (c in renamed.columns) c.path] == ["/base","/base/Renamed","/base/Renamed/Nested"],
+    [for (c in ((renamed.columns) ^ { [] })) c.path] == ["/base","/base/Renamed","/base/Renamed/Nested"],
     renamed.history == ["/base","/base/Renamed","/base/Renamed/Nested"],
-    [for (c in moved.columns) c.path] == ["/base/B/A","/base/B/A/Nested"],
+    [for (c in ((moved.columns) ^ { [] })) c.path] == ["/base/B/A","/base/B/A/Nested"],
     m.relocated(m.choose(child,"/base/A/Nested"),[{from:"/base/A",to:"/base/Renamed"}]).focus == "/base/Renamed/Nested"
 ]

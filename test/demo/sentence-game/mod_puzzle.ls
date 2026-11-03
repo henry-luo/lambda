@@ -14,7 +14,7 @@ pub let lessons = [
 ]
 fn word(st,id) => [for (card in st.cards where card.id == id) card][0]
 pub fn lesson(st) => lessons[st.round-1]
-pub fn available(st) => [for (card in st.cards where not contains(st.order,card.id)) card]
+pub fn available(st) => [for (card in st.cards where ((not contains(st.order,card.id)) ^ { false })) card]
 fn deal(st) {
     let words = split(replace(lesson(st).answers[0],"."," .")," ")
     let cards = [for (i,text in words) {id:string(i),text:text}]
@@ -26,27 +26,27 @@ pub fn new_game(seed=42,round_id=1) => deal({seed:seed,round:round_id,book:[],vi
 pub fn jump_round(st,target) => progress.jump(st,target,len(lessons),round_fields,new_game,"solved")
 pub fn placed(st) => [for (id in st.order) word(st,id)]
 pub fn assembled(st) => join([for (i,card in placed(st)) (if (i == 0 or card.text == ".") "" else " ") ++ card.text],"")
-pub fn full(st) => len(st.order) == len(st.cards)
+pub fn full(st) any^ => len(st.order) == len(st.cards)
 fn accepted(st) => [for (answer in lesson(st).answers where lower(assembled(st)) == lower(answer)) answer][0]
-fn put_word(st,id) => if (st.phase != "build" or word(st,id) == null or contains(st.order,id)) st
+fn put_word(st,id) any^ => if (st.phase != "build" or word(st,id) == null or contains(st.order,id)) st
     else {*:st,order:[*st.order,id],notice:""}
 fn remove_word(st,id) => if (st.phase != "build") st else {*:st,order:[for (value in st.order where value != id) value],notice:""}
-fn move_word(st,id,step) {
+fn move_word(st,id,step) any^ {
     let from = [for (i,value in st.order where value == id) i][0]
     let to = if (from == null) -1 else from + step
     if (st.phase != "build" or from == null or to < 0 or to >= len(st.order)) st
     else {*:st,order:[for (i,value in st.order) if (i == from) st.order[to] else if (i == to) id else value],notice:""}
 }
-fn check(st) {
+fn check(st) any^ {
     let answer = accepted(st)
     if (st.phase != "build" or not full(st)) st
     else if (answer == null) {*:st,notice:"Not quite yet. Follow the clue, put who before the action, and finish with a full stop."}
     else {*:st,phase:"solved",notice:"You unscrambled it! Read your sentence aloud.",book:progress.record(st,{text:answer,art:lesson(st).art})}
 }
-fn next(st) => if (st.phase != "solved") st
+fn next(st) any^ => if (st.phase != "solved") st
     else if (len(st.book) == len(lessons)) {*:st,phase:"done"}
     else jump_round(st,progress.pending(st,len(lessons)))
-pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
+pub fn action(st,command,value="") any^ => if (command == "reset") new_game(st.seed)
     else if (command == "primary") (if (st.phase == "solved") next(st) else check(st))
     else if (command == "round") progress.requested(st,value,len(lessons),round_fields,new_game,"solved")
     else if (command == "word") put_word(st,value)
@@ -57,7 +57,7 @@ pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
     else if (command == "clear-words" and st.phase == "build") {*:st,order:[],notice:""}
     else if (command == "hint" and st.phase == "build") {*:st,hint:not st.hint}
     else st
-pub fn shortcut(st,key) {
+pub fn shortcut(st,key) any^ {
     let index = model.bank_index(key)
     if (key == "backspace") action(st,"undo-word")
     else if (index != null) put_word(st,available(st)[index].id) else st

@@ -9,7 +9,7 @@ let deck = <presentation <slide id: "s", <text id: "t", "Hello">
 >>
 let plan = slide.compile(deck)^
 let scene = plan.slides[0]
-fn sample(cue, ms) => sampler.scene(scene, cue, ms)[0]
+fn sample(cue, ms) any^ => sampler.scene(scene, cue, ms)[0]
 let initial = sample(-1, 0.0)
 let delayed = sample(0, 10.0)
 let middle = sample(0, 70.0)

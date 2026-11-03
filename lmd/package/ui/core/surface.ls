@@ -41,7 +41,7 @@ pub fn progress(node, family, decoration = null) {
         if (c.option(c.props(node),"show_info",true)) <span class:family ++ "-progress-label",c.text(percent) ++ "%"> else null]>
 }
 
-pub fn present(node, family, variables = "", decoration = null) {
+pub fn present(node, family, variables = "", decoration = null) any^ {
     let p = c.props(node)
     let kind = c.kind(node);
     if (kind == 'config-provider') <fieldset *:attributes(node,family),

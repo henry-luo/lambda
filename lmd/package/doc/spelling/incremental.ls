@@ -4,9 +4,9 @@ import spelling: lambda.doc.spelling
 import text_offsets: lambda.dom.edit_history
 
 let empty_report = {language:"en-US",issues:[],checked:0,skipped:0}
-fn boundary(n) => document.tag(n) in document.blocks or
+fn boundary(n) any^ => document.tag(n) in document.blocks or
     document.tag(n) in ['ul','ol','table','thead','tbody','tfoot']
-fn paragraphs(n) => document.tag(n) in ['p','h1','h2','h3','h4','h5','h6']
+fn paragraphs(n) any^ => document.tag(n) in ['p','h1','h2','h3','h4','h5','h6']
 pub fn complete(unit) => unit.baseline!=null and unit.baseline.text==unit.source.text
 
 fn unit(n,path,language,previous,checked,first=null,offset=null) {
@@ -15,7 +15,7 @@ fn unit(n,path,language,previous,checked,first=null,offset=null) {
     let retained = old!=null and old.node==n and old.language==language
     let source = if (retained) old.source
         else if (first==null) document.prose(n,[],language)
-        else document.from_pieces([for (i,child in document.children(n))
+        else document.from_pieces([for (i,child in ((document.children(n)) ^ { [] }))
             *document.pieces(child,[first+i],language)])
     let blank = if (retained) old.blank else trim(source.text)==""
     let baseline = if (retained) old.baseline else if (blank) {text:source.text,report:empty_report}
@@ -25,24 +25,24 @@ fn unit(n,path,language,previous,checked,first=null,offset=null) {
 }
 
 // group loose inline siblings so formatting never splits one lexical word.
-fn groups(kids,index=0,first=0) => if (index==len(kids))
+fn groups(kids,index=0,first=0) any^ => if (index==len(kids))
     (if (index>first) [{first:first,kids:slice(kids,first,index)}] else [])
     else if (boundary(kids[index])) [*if (index>first) [{first:first,kids:slice(kids,first,index)}] else [],
         {first:index,node:kids[index]},*groups(kids,index+1,index+1)]
     else groups(kids,index+1,first)
 
-fn collect(n,path,language,previous,checked) {
+fn collect(n,path,language,previous,checked) any^ {
     let lang = document.attr(n,'lang') or language
     let kids = document.children(n);
     if (n==null or not document.included(n,lang)) []
     else if (paragraphs(n) or not any([for (child in kids) boundary(child)]))
         [unit(n,path,lang,previous,checked)]
-    else [for (group in groups(kids)) *if (group.node!=null)
+    else [for (group in ((groups(kids)) ^ { [] })) *if (group.node!=null)
         collect(group.node,[*path,group.first],lang,previous,checked)
         else [unit({tag:'fragment',content:group.kids},path,lang,previous,checked,group.first)]]
 }
 
-pub fn refresh(source,previous=[]) {
+pub fn refresh(source,previous=[]) any^ {
     let by_path = map([for (entry in previous) (entry.key,entry)])
     // reuse the completed-text index; rebuilding it per key would hash the whole article again.
     let checked = previous[0].cache or {};
@@ -58,7 +58,7 @@ pub fn refresh(source,previous=[]) {
 
 // newly edited prose takes priority over the remainder of an opening document.
 pub fn pending(units) => [for (edited in [true,false]) for (entry in units
-    where entry.edited==edited and not complete(entry))
+    where ((entry.edited==edited and not complete(entry)) ^ { false }))
     {key:entry.key,text:entry.source.text}]
 
 pub fn accept(units,results) {
@@ -81,14 +81,14 @@ fn issues(unit) {
     let suffix = if (baseline==null or complete(unit)) 0 else
         text_offsets.common_suffix(baseline.text,text,0,min(len(baseline.text),len(text))-prefix)
     let retained = [for (issue in baseline.report.issues or []
-        where issue.end<=prefix or issue.start>=len(baseline.text)-suffix) {
+        where ((issue.end<=prefix or issue.start>=len(baseline.text)-suffix) ^ { false })) {
         let shift = if (issue.end<=prefix) 0 else len(text)-len(baseline.text);
         {*:issue,start:issue.start+shift,end:issue.end+shift}
     }];
-    [for (issue in retained where complete(unit) or spelling.issue_present(text,issue))
+    [for (issue in retained where ((complete(unit) or spelling.issue_present(text,issue)) ^ { false }))
         {*:issue,start:issue.start+(unit.offset or 0),end:issue.end+(unit.offset or 0),
             ranges:document.ranges(unit.source,issue,unit.path)}]
 }
 pub fn report(units) => {language:"en-US",issues:[for (unit in units) *issues(unit)],
-    checked:sum([for (unit in units where complete(unit)) unit.baseline.report.checked]),
-    skipped:sum([for (unit in units where complete(unit)) unit.baseline.report.skipped])}
+    checked:sum([for (unit in units where ((complete(unit)) ^ { false })) unit.baseline.report.checked]),
+    skipped:sum([for (unit in units where ((complete(unit)) ^ { false })) unit.baseline.report.skipped])}

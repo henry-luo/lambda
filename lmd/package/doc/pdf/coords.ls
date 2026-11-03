@@ -14,7 +14,7 @@ import resolve: .resolve
 
 // PDF /MediaBox is [llx, lly, urx, ury]. Return {x, y, w, h} in PDF units.
 // Falls back to US Letter (612 x 792) if the box is missing or malformed.
-fn _box_rect(box) {
+fn _box_rect(box) any^ {
     if (box != null and box is array and len(box) >= 4) {
         let x = float(box[0])
         let y = float(box[1])
@@ -26,22 +26,22 @@ fn _box_rect(box) {
     else { null }
 }
 
-pub fn media_box_rect(page) {
+pub fn media_box_rect(page) any^ {
     let box = _box_rect(if (page and page.media_box) page.media_box else null)
     if (box != null) box else {x: 0.0, y: 0.0, w: 612.0, h: 792.0}
 }
 
 // Build the SVG `viewBox` string for a page.
-pub fn view_box_attr(page) {
+pub fn view_box_attr(page) any^ {
     rect_view_box(media_box_rect(page))
 }
 
-pub fn rect_view_box(rect) {
+pub fn rect_view_box(rect) any^ {
     util.fmt_num(rect.x) ++ " " ++ util.fmt_num(rect.y) ++ " " ++
     util.fmt_num(rect.w) ++ " " ++ util.fmt_num(rect.h)
 }
 
-fn _effective_crop_box(page, pdf, media) {
+fn _effective_crop_box(page, pdf, media) any^ {
     let raw = if (page and page.crop_box) resolve.deref(pdf, page.crop_box) else null
     let crop = _box_rect(raw)
     if (crop == null) media
@@ -57,7 +57,7 @@ fn _effective_crop_box(page, pdf, media) {
     }
 }
 
-fn _page_rotation(page) {
+fn _page_rotation(page) any^ {
     let raw = util.int_or(if (page) page.rotate else null, 0)
     let normalized = raw - int(floor(float(raw) / 360.0)) * 360
     if (normalized == 90 or normalized == 180 or normalized == 270) normalized
@@ -102,6 +102,6 @@ pub fn y_flip_matrix(page_top) {
 }
 
 // Same, formatted as an SVG transform string.
-pub fn y_flip_transform(page_top) {
+pub fn y_flip_transform(page_top) any^ {
     util.fmt_matrix(y_flip_matrix(page_top))
 }

@@ -1,7 +1,7 @@
 // T21-1c nullable bool lane through nested and/or/not chains (Result37 triangl2): an out-of-range
 // bool[] read is null, `x and y` returns x when x is falsy, `x or y` returns y when x is falsy.
 pn run() {
-    var b: bool[] = fill(3, true)
+    var b: bool[] = fill(3, true)^
     b[1] = false
     var i0 = 0
     var i1 = 1

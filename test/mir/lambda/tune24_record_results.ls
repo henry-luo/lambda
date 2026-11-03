@@ -10,7 +10,7 @@ fn render(depth: int) Result {
     }
 }
 
-fn project(depth: int) string {
+fn project(depth: int) string^ {
     let rendered = render(depth)
     rendered.text ++ ":" ++ string(rendered.count)
 }

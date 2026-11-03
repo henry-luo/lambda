@@ -7,7 +7,7 @@ pn build(v: int, rest: Node?) Node {
     return {val: v, next: rest}
 }
 
-pn total(n: Node?) int {
+pn total(n: Node?) int^ {
     if (n == null) { return 0 }
     return n.val + total(n.next)
 }

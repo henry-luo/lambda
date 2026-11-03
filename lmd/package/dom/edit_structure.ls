@@ -24,7 +24,7 @@ pub fn is_block(node) {
     tag == "li" or tag == "p" or tag == "pre" or tag == "section"
 }
 
-pub fn block_ancestor(host, node) {
+pub fn block_ancestor(host, node) any^ {
     if (node == null or same(host, node)) null
     else if (is_block(node)) node
     else block_ancestor(host, dom.parent_node(node))
@@ -32,13 +32,13 @@ pub fn block_ancestor(host, node) {
 
 // Formatting state is an ordinary ancestor walk.  Keeping it here makes both
 // command toggling and queryCommandState read the same live DOM fact.
-pub fn ancestor_with_tag(host, node, tag) {
+pub fn ancestor_with_tag(host, node, tag) any^ {
     if (node == null or same(host, node)) null
     else if (tag_of(node) == tag) node
     else ancestor_with_tag(host, dom.parent_node(node), tag)
 }
 
-fn selection_offset(node, codepoint_offset) {
+fn selection_offset(node, codepoint_offset) any^ {
     let value = dom.node_value(node);
     if (value == null) codepoint_offset
     else history.utf16_from_codepoint(value, codepoint_offset, 0, 0)
@@ -54,8 +54,8 @@ pub pn restore_selection(host, edit_context) {
     if (selection == null or start_node == null or end_node == null) false
     else {
         dom.set_base_and_extent(selection, start_node,
-                                selection_offset(start_node, edit_context.start),
-                                end_node, selection_offset(end_node, edit_context.end));
+                                selection_offset(start_node, edit_context.start)^,
+                                end_node, selection_offset(end_node, edit_context.end)^);
         true
     }
 }
@@ -68,7 +68,7 @@ pub pn select_contents(host, target) {
     if (selection == null or target == null) false
     else {
         dom.set_base_and_extent(selection, target, 0, target,
-                                len(dom.child_nodes(target)))
+                                len(dom.child_nodes(target))^)
         true
     }
 }
@@ -86,7 +86,7 @@ pub pn replace_range(host, token, text) {
     let end_block = block_ancestor(host, dom.edit_end_container(host, token));
     if (not dom.dom_replace_dom_range(host, token, text)) false
     else {
-        if (mergeable(start_block, end_block)) {
+        if (mergeable(start_block, end_block)^) {
             dom.dom_merge_adjacent_blocks(host, token, start_block, end_block)
         }
         true

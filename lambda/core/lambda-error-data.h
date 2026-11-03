@@ -85,7 +85,7 @@ typedef enum LambdaErrorCode {
     ERR_BREAK_OUTSIDE_LOOP = 225,     // break used outside loop
     ERR_CONTINUE_OUTSIDE_LOOP = 226,  // continue used outside loop
     ERR_RETURN_OUTSIDE_FUNCTION = 227,// return used outside function
-    ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ^, handler, or or
+    ERR_UNHANDLED_ERROR = 228,        // ordinary-error outcome has no acknowledging receiver
     ERR_UNSUPPORTED_DYNAMIC_ABI = 229,// valid dynamic call exceeds physical dispatch ABI
     ERR_FUNCTION_ARGUMENT_LIMIT = 230,// Core Lambda function/call exceeds LAMBDA_MAX_FUNCTION_ARGS
     ERR_INVALIDATED_BINDING = 231,     // read after a hidden cross-frame mutation
@@ -99,6 +99,7 @@ typedef enum LambdaErrorCode {
     ERR_FILTER_BODY_NO_CURRENT = 238, // S10.1.6: a `|:` body must mention `~`
     ERR_FOR_CLAUSE = 239,             // S14.1: misplaced, repeated or malformed for-header clause
     ERR_TYPE_CYCLE = 240,             // S11.4.12: a type refers to itself through no structural position
+    ERR_DEFERRED_ADMISSION = 241,     // advisory: explicit local admission needs runtime validation
 
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors

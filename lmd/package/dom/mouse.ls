@@ -10,7 +10,7 @@ fn as_element(node) {
 
 // A negative tabindex is excluded from sequential focus but remains a valid
 // mouse-focus target, so the predicate is deliberately programmatic focus.
-fn focus_target(node) {
+fn focus_target(node) any^ {
     let elem = as_element(node);
     if (elem == null) null
     else if (dom.is_focusable(elem)) elem
@@ -22,7 +22,7 @@ fn input_target(node) {
     if (elem == null) null else dom.closest(elem, "input")
 }
 
-fn selection_value(node) {
+fn selection_value(node) any^ {
     let elem = as_element(node);
     if (elem == null) "text" else (
         let value = dom.computed_style(elem, "user-select"),
@@ -33,7 +33,7 @@ fn selection_value(node) {
 // The click-count and modifier table is policy. `selectLine` resolves to the
 // current logical line on multiline controls and rich text; an input asks for
 // the HTML select-all convention explicitly.
-fn selection_operation(evt) {
+fn selection_operation(evt) any^ {
     // A declined context-menu press still places its caret; an opened menu exits
     // before this default action.
     if (selection_value(evt.target) == "none") null
@@ -48,7 +48,7 @@ fn selection_operation(evt) {
 pub pn press(root, evt) {
     // A non-focusable press clears the old focus through the same state-machine
     // transition, matching a document-text caret placement.
-    dom.mouse_focus(focus_target(evt.target))
+    dom.mouse_focus(focus_target(evt.target)^)
     let operation = selection_operation(evt);
     if (operation == null) 'pass' else dom.pointer_selection(root, operation)
 }

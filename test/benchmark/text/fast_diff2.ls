@@ -2,19 +2,19 @@
 // Timing includes converting the ASCII fixture to code arrays; the LCS loop
 // carries the same native integer comparison lane as C2MIR.
 
-pn text_codes(text: string) int[] {
-    var codes: int[] = fill(len(text), 0)
+pn text_codes(text: string) int[]^ {
+    var codes: int[] = fill(len(text), 0)^
     for index of text {
-        codes[index] = ord(text[index])
+        codes[index] = ord(text[index])^
     }
     codes
 }
 
-fn score_diff(left: int[], right: int[]) int {
+fn score_diff(left: int[], right: int[]) int^ {
     let n: int = len(left)
     let m: int = len(right)
     let cols: int = m + 1
-    var table: int[] = fill((n + 1) * cols, 0)
+    var table: int[] = fill((n + 1) * cols, 0)^
     var i: int = n - 1
     while (i >= 0) {
         var j: int = m - 1
@@ -24,7 +24,7 @@ fn score_diff(left: int[], right: int[]) int {
             } else {
                 var down: int = table[(i + 1) * cols + j]
                 var across: int = table[i * cols + j + 1]
-                table[i * cols + j] = if (down >= across) down else across
+                table[i * cols + j] = if ((down >= across)^) down else across
             }
             j = j - 1
         }
@@ -89,8 +89,8 @@ pn main() {
     var left_codes: int[][] = []
     var right_codes: int[][] = []
     for pair of left_text {
-        push(left_codes, text_codes(left_text[pair]))
-        push(right_codes, text_codes(right_text[pair]))
+        push(left_codes, text_codes(left_text[pair]))^
+        push(right_codes, text_codes(right_text[pair]))^
     }
     var checksum: int = 0
     var round: int = 0
@@ -102,7 +102,7 @@ pn main() {
     }
     // 748544 is the checksum every engine port must reproduce; a FAIL marker
     // makes the runner exclude a wrong result instead of timing it (T21-5)
-    if (checksum == 748544) {
+    if ((checksum == 748544)^) {
         print("fast_diff: CHECKSUM:" ++ checksum ++ "\n")
     } else {
         print("fast_diff: FAIL checksum=" ++ checksum ++ "\n")

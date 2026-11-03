@@ -34,7 +34,7 @@ pn keys(n) {
     return [n.key, keys(n.left), keys(n.right)]
 }
 
-pn make() N? {
+pn make() N?^ {
     var leaf: N? = {key: 0.25, left: null, right: null}
     var mid: N? = {key: 0.5, left: null, right: leaf}
     var top: N? = {key: 1.0, left: mid, right: null}
@@ -44,26 +44,26 @@ pn make() N? {
 pn main() {
     var b: N? = {key: 1.0, left: {key: 0.5, left: null, right: null}, right: null}
     let before = b
-    set_left(b)
+    set_left(b)^
     print([before.left == null, b.left == null])
     print("\n")
 
     // the non-optional contract (boxed entry) keeps the same rule
     var c: N = {key: 1.0, left: null, right: null}
     let c_before = c
-    set_key(c)
+    set_key(c)^
     print([c_before.key, c.key])
     print("\n")
 
     // a rotation writes the root and a borrowed child
-    var r: N? = make()
+    var r: N? = make()^
     let r_before = r
     let rotated = rotate_typed(r)
     print([keys(r_before), keys(rotated), keys(r)])
     print("\n")
 
     // repeated calls on an unshared root stay write-through
-    var u: N? = make()
+    var u: N? = make()^
     var i = 0
     while (i < 3) {
         set_left(u)

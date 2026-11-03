@@ -29,9 +29,9 @@ pn fresh() int^ {
     0
 }
 pn main() {
-    let a: map | error = stored("test/no/such/file.css")
-    let b: map | error = both_arms()
-    let c: map | error = block_body()
-    let d: int | error = fresh();
+    let a: map^ = stored("test/no/such/file.css")
+    let b: map^ = both_arms()
+    let c: map^ = block_body()
+    let d: int^ = fresh();
     [a, b, c, if (d is error) d.message else d]
 }

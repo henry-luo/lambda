@@ -11,7 +11,7 @@ pn set_dynamic_cell(var matrix: int[][], row: int, column: int, value: any) {
 pn main() {
     var matrix: int[][] = [[1, 2], [3, 4]]
     let snapshot = matrix
-    set_int_cell(matrix, 1, 0, 9)
+    set_int_cell(matrix, 1, 0, 9)^
 
     var rejected = false
     set_dynamic_cell(matrix, 0, 1, "bad") ^ { rejected = true }

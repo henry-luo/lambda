@@ -88,26 +88,26 @@ pub fn group_class(cls: string, children) {
 // ============================================================
 
 // move to
-pub fn M(x, y) string => "M" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+pub fn M(x, y) string^ => "M" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 
 // line to
-pub fn L(x, y) string => "L" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+pub fn L(x, y) string^ => "L" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 
 // close path
 pub fn Z_cmd() { "Z" }
 
 // cubic bezier
-pub fn C(x1, y1, x2, y2, x, y) string {
+pub fn C(x1, y1, x2, y2, x, y) string^ {
     "C" ++ util.fmt_num(x1) ++ " " ++ util.fmt_num(y1) ++ " " ++ util.fmt_num(x2) ++ " " ++ util.fmt_num(y2) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // arc command
-pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string {
+pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string^ {
     "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " " ++ (rotation) ++ " " ++ (large_arc) ++ " " ++ (sweep) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // build a path string from a list of points using line segments
-pub fn line_path(points, interpolate = null) string {
+pub fn line_path(points, interpolate = null) string^ {
     if len(points) == 0 { "" }
     else {
         let first = points[0];
@@ -131,7 +131,7 @@ pub fn line_path(points, interpolate = null) string {
     }
 }
 
-pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_width = null, curve = null) {
+pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_width = null, curve = null) any^ {
     let dx = x2 - x1
     let dy = y2 - y1
     let distance = math.sqrt(dx * dx + dy * dy)
@@ -142,11 +142,11 @@ pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_wid
         let base_y = y2 - uy * length
         let wing = if (half_width != null) half_width else length * 0.375;
         let centers = if (curve != null) curve else [[base_x, base_y], [x2, y2]];
-        let lengths = [for (i in 1 to (len(centers) - 1)) math.sqrt(
+        let lengths = [for (i in ((1 to (len(centers) - 1)) ^ { [] })) math.sqrt(
             (centers[i][0] - centers[i - 1][0]) ** 2 + (centers[i][1] - centers[i - 1][1]) ** 2)];
         let total = sum(lengths);
         // offset the actual curve and taper by arc length so the head meets a curved shaft centrally.
-        let edges = [for (side in [1.0, -1.0]) [for (i in 0 to (len(centers) - 2),
+        let edges = [for (side in [1.0, -1.0]) [for (i in ((0 to (len(centers) - 2)) ^ { [] }),
             let before = centers[max(0, i - 1)], let after = centers[i + 1],
             let dx = after[0] - before[0], let dy = after[1] - before[1],
             let distance = math.sqrt(dx * dx + dy * dy),
@@ -159,7 +159,7 @@ pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_wid
 }
 
 // build a closed area path: line along top, then line back along bottom
-pub fn area_path(top_points, bottom_points, interpolate = null) string {
+pub fn area_path(top_points, bottom_points, interpolate = null) string^ {
     if len(top_points) == 0 { "" }
     else {
         let bottom_rev = reverse(bottom_points);
@@ -169,7 +169,7 @@ pub fn area_path(top_points, bottom_points, interpolate = null) string {
 }
 
 // build an arc path segment for pie/donut charts
-pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = false) string {
+pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = false) string^ {
     let span = end_angle - start_angle;
     let sweep = if (span >= 0.0) 1 else 0;
     if (rounded and span == 0.0) ""
@@ -221,9 +221,9 @@ pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = fals
 // Transform string helpers
 // ============================================================
 
-pub fn translate(x, y) string => "translate(" ++ util.fmt_num(x) ++ ", " ++ util.fmt_num(y) ++ ")"
+pub fn translate(x, y) string^ => "translate(" ++ util.fmt_num(x) ++ ", " ++ util.fmt_num(y) ++ ")"
 
-pub fn rotate(angle, cx, cy) string {
+pub fn rotate(angle, cx, cy) string^ {
     "rotate(" ++ util.fmt_num(angle) ++ ", " ++ util.fmt_num(cx) ++ ", " ++ util.fmt_num(cy) ++ ")"
 }
 
@@ -255,7 +255,7 @@ pub fn clip_path_el(id: string, children) {
 }
 
 // One reconstruction seam keeps immutable SVG projections independent of literal tag syntax.
-pub fn rebuild(tag, attrs, children) {
+pub fn rebuild(tag, attrs, children) any^ {
     if (tag == 'g') <g *:attrs, *children>
     else if (tag == 'svg') <svg *:attrs, *children>
     else if (tag == 'path') <path *:attrs, *children>

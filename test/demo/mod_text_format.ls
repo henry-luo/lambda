@@ -16,7 +16,7 @@ pub let shading_colors = [{value:"#f2f2f2",label:"Light Gray"},{value:shading_gr
     {value:"#e2efd9",label:"Green"},{value:"#fff2cc",label:"Gold"},{value:"#fbe4d5",label:"Orange"},{value:"#ede2f6",label:"Purple"},{value:"#deebf6",label:"Sky"}]
 pub let defaults = {color:"#b43d47",highlight:"#f9e896",shading:"#f2f2f2"}
 // "none" clears the declaration; legacy "transparent" stays valid for saved documents.
-pub fn color_value(value) => if (value=="none") "" else if (value=="transparent" or colors.hex_color(value)) value else null
+pub fn color_value(value) any^ => if (value=="none") "" else if (value=="transparent" or colors.hex_color(value)) value else null
 
 pub fn font_step(size,grow) {
     let choices = [for (s in font_sizes where if (grow) s>size else s<size) s];
@@ -37,7 +37,7 @@ pub fn case_text(text,mode,start) => reduce([{*:start,text:""},*split(text,"")],
     sentence:if (contains(".!?",c)) true else if (is_letter(c)) false else acc.sentence})
 
 // retain an authored family even when the platform does not have it installed.
-pub fn font_options(families,current) => [for (family in sort(unique([*(families or []),current]),(name)=>lower(name)))
+pub fn font_options(families,current) any^ => [for (family in ((sort(unique([*(families or []),current]),(name)=>lower(name))) ^ { [] }))
     {value:family,label:family}]
 
 pub let bullet_styles = [{id:"disc",label:"Filled Bullet",glyph:"●"},{id:"circle",label:"Hollow Bullet",glyph:"○"},{id:"square",label:"Square Bullet",glyph:"■"}]

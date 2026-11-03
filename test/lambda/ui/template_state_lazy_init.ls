@@ -5,7 +5,7 @@ fn initial_value(changed) int^ {
 fn initial_null(changed) null^ {
     if (changed) raise error("null state was mistaken for missing state") else null
 }
-view <lazy_counter> state changed: false, count: (initial_value(changed)^), empty: (initial_null(changed)^) {
+view <lazy_counter>() any^ state changed: false, count: (initial_value(changed)^), empty: (initial_null(changed)^) {
     <button id:~.id, string(count) ++ ":" ++ string(empty)>
 }
 on click() {

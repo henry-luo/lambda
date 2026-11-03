@@ -3,7 +3,7 @@ pn work() {
     var a = []
     var i = 0
     while (i < 20000) {
-        push(a, i)
+        push(a, i)^
         i = i + 1
     }
     var sum = 0
@@ -22,7 +22,7 @@ pn main() {
     let start = clock()
     let result = work()
     let elapsed = (clock() - start) * 1000.0
-    if (result == 9999500000) {
+    if ((result == 9999500000)^) {
         print("integer_dense: PASS\n")
     } else {
         print("integer_dense: FAIL\n")

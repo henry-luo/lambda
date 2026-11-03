@@ -20,7 +20,7 @@ fn chibi_plan(doc) map {
   upper:upper,lower:lower,arm:(if (plush) 0.13 else 0.14)*p.limbs,fore:(if (plush) 0.11 else 0.12)*p.limbs,
   arm_width:if (plush) 0.15 else if (robot) 0.12 else 0.11,leg_width:if (plush) 0.16 else 0.15}
 }
-pub fn plan(doc) map {
+pub fn plan(doc) map^ {
  if (chibi(doc)) chibi_plan(doc) else {
  let p=doc.parameters,plush=doc.form=="plush",robot=doc.form=="robot",fairy=doc.form=="fairy",spirit=doc.form=="genie"
  let upper=(if (plush) 0.15 else if (robot) 0.21 else 0.25)*p.limbs,
@@ -98,7 +98,7 @@ fn chibi_head(doc,p,skin) array^ {
  [piece("head","head",if (plush) "plush_head" else "human_head",[0.0,0.0,0.0],[h,h*0.96,d],skin,[0.0,0.0,0.0],{roughness:0.62}),
   *(if (plush) [piece("muzzle","head","round",[0.0,-h*0.13,d*0.38],[h*0.5,h*0.32,h*0.26],tint(skin,1.13)^)] else []),
   *chibi_face(doc,p,skin)^,
-  *[for (part in face({*:doc,generator_version:2},p)^ where ends_with(part.id,"-ear") or ends_with(part.id,"-inner-ear") or part.id=="goatee" or starts_with(part.id,"moustache-")) part]]
+  *[for (part in face({*:doc,generator_version:2},p)^ where ((ends_with(part.id,"-ear") or ends_with(part.id,"-inner-ear") or part.id=="goatee" or starts_with(part.id,"moustache-")) ^ { false })) part]]
 }
 
 fn hair(doc,p) array^ {
@@ -125,7 +125,7 @@ fn clothes(doc,p) array^ {
    [p.width*(if (fairy) 1.75 else 1.60),(if (fairy) 0.35 else if (doc.outfit=="hide") 0.32 else 0.46)*(if (chibi(doc)) 0.66 else 1.0),p.depth*1.65],a.clothes),
    piece("waist-ribbon","hips","ring",[0.0,0.12,0.0],[p.width*0.97,0.09,p.depth*1.05],a.trim)] else []),
   *(if (suit and not robot) [piece("coat-tails","hips","coat",[0.0,-0.07,-0.01],[p.width*1.1,if (chibi(doc)) 0.24 else 0.38,p.depth*1.05],a.clothes),
-   *[for (side in [-1.0,1.0] where not chibi(doc)) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
+   *[for (side in [-1.0,1.0] where ((not chibi(doc)) ^ { false })) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
     [side*p.width*0.34,0.18,0.025],tint(a.clothes,1.25)^,[0.0,0.0,side*0.18])],
    *[for (i in 0 to 2) piece("coat-button-"++string(i),"chest","round",[0.0,0.06-float(i)*0.085,p.depth*0.52],[0.018,0.018,0.01],a.trim)]] else []),
   *(if (plush and doc.outfit!="none") [piece("shirt-hem","hips","ring",[0.0,0.06,0.0],[p.width*1.02,0.12,p.depth*1.01],tint(a.clothes,0.85)^),
@@ -202,12 +202,12 @@ fn anatomy(doc,p) array^ {
     piece(id++"-sole",id++"-foot","rounded_box",[0.0,-0.047,0.045],[p.leg_width*(if (cute) 1.28 else 1.10),0.025,if (cute) 0.195 else 0.205],tint(if (plush) a.body else a.accent,0.72)^),
     *(if (plush) [piece(id++"-paw-pad",id++"-foot","round",[0.0,-0.006,0.145],[0.08,0.045,0.025],tint(a.body,0.75)^)] else [])])]]]
 }
-fn origin(joints,id) array => if (id==null) [0.0,0.0,0.0] else
+fn origin(joints,id) array^ => if (id==null) [0.0,0.0,0.0] else
  (let j=[for (j in joints where j.id==id) j][0],j.position+origin(joints,j.parent))
 pub fn generate(doc) map^ {
  let p=plan(doc),joints=rig(doc,p),parts=anatomy(doc,p)^
  let resources=geometry.build(unique(parts |> ~.shape))^
- let bounds=map([for (g in resources,let points=[for (i in 0 to (len(g.positions) div 3-1)) slice(g.positions,i*3,i*3+3)])
+ let bounds=map([for (g in resources,let points=[for (i in ((0 to (len(g.positions) div 3-1)) ^ { [] })) slice(g.positions,i*3,i*3+3)])
   (g.id,{lo:[for (axis in 0 to 2) min(points |> ~[axis])],hi:[for (axis in 0 to 2) max(points |> ~[axis])]})])
  let corners=[for (p in parts,let b=bounds[p.geometry],let matrix=t.matrix(p.position,p.rotation,p.scale)^)
   for (x in [b.lo[0],b.hi[0]],y in [b.lo[1],b.hi[1]],z in [b.lo[2],b.hi[2]]) origin(joints,p.joint)+t.point(matrix,[x,y,z])^]

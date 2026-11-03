@@ -11,7 +11,7 @@ pub fn rewrite(n, prefix, options) element {
         (string(k), if (contains(REFERENCES, string(k))) prefixed(v, prefix)
             else if (kind == 'keyframe-track' and string(k) == "path") prefixed(v, prefix) else v)])
     // `lights: false` drops imported punctual lights so the caller's scene lighting stands alone.
-    let children = [for (child in content(n) where options.lights != false or name(child) != 'light') rewrite(child, prefix, options)]
+    let children = [for (child in ((content(n)) ^ { [] }) where ((options.lights != false or name(child) != 'light') ^ { false })) rewrite(child, prefix, options)]
     // Lambda tags are static; share attribute/reference traversal across tag constructors.
     if (kind == 'group') <group *: attrs, *children>
     else if (kind == 'lod') <lod *: attrs, *children>
@@ -38,7 +38,7 @@ pub fn load(source, options = {}) element^ {
         raise error("scene3d asset: id must be nonempty, at most 48 characters, and contain no dot")
     let source_format = if (options.format == null) 'auto' else options.format
     let raw = input(source, {type: 'scene3d-asset', flavor: source_format})^
-    let clips = [for (c in content(raw) where name(c) == 'animation-clip') c]
+    let clips = [for (c in ((content(raw)) ^ { [] }) where ((name(c) == 'animation-clip') ^ { false })) c]
     let matches = if (options.clip == null) clips else [for (c in clips where c.id == options.clip or c.label == options.clip) c]
     let checked_clip = if (options.clip != null and len(matches) != 1) raise error("scene3d asset: clip selection must match exactly one clip")
     let loaded = rewrite(raw, prefix, {*: options, clip_id: matches[0].id});

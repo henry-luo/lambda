@@ -11,9 +11,9 @@
 
 // `/` on two ints yields a float, and slice wants integer bounds, so the digit
 // split is written with floor and an explicit remainder rather than `/` and `%`.
-fn hex_digit(n) { let i = int(floor(n)); slice("0123456789ABCDEF", i, i + 1) }
-fn hex_high(code) { hex_digit(floor(code / 16)) }
-fn hex_low(code) { hex_digit(code - floor(code / 16) * 16) }
+fn hex_digit(n) any^ { let i = int(floor(n)); slice("0123456789ABCDEF", i, i + 1) }
+fn hex_high(code) any^ { hex_digit(floor(code / 16)) }
+fn hex_low(code) any^ { hex_digit(code - floor(code / 16) * 16) }
 
 // Keep set per the URL "form" serializer: ASCII letters and digits plus * - . _
 fn is_unreserved(code) {
@@ -28,7 +28,7 @@ pub fn form_encode(value) {
     join([for (i, ch of text) encode_char(ch, codes[i])], "")
 }
 
-fn pct(byte) { "%" ++ hex_high(byte) ++ hex_low(byte) }
+fn pct(byte) any^ { "%" ++ hex_high(byte) ++ hex_low(byte) }
 
 fn div(a, b) { floor(a / b) }
 fn rem(a, b) { a - floor(a / b) * b }
@@ -38,7 +38,7 @@ fn rem(a, b) { a - floor(a / b) * b }
 // point instead is the classic way to produce a body a server decodes as
 // mojibake, and it is what this said before the oracle compared it to the
 // native encoder.
-fn utf8_pct(c) {
+fn utf8_pct(c) any^ {
     if (c < 128) pct(c)
     else if (c < 2048) pct(192 + div(c, 64)) ++ pct(128 + rem(c, 64))
     else if (c < 65536)
@@ -46,7 +46,7 @@ fn utf8_pct(c) {
     else pct(240 + div(c, 262144)) ++ pct(128 + rem(div(c, 4096), 64)) ++ pct(128 + rem(div(c, 64), 64)) ++ pct(128 + rem(c, 64))
 }
 
-fn encode_char(ch, code) {
+fn encode_char(ch, code) any^ {
     if (is_unreserved(code)) ch
     else if (code == 32) "+"
     else utf8_pct(code)

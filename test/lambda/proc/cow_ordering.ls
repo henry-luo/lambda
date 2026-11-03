@@ -7,7 +7,7 @@ pn replace_first(var values: any[]) {
 }
 
 pn move_first(var values: any[]) {
-    values[0] = values[1]
+    values[0] = (values[1])^
     return 0
 }
 
@@ -18,8 +18,8 @@ pn main() {
     print(original[0] ++ " " ++ changed[0] ++ "\n")
 
     var source: any[] = [[1], [2]]
-    var target: any[] = source
+    var target: any[] = source^
     var index = 0
-    target[index] = move_first(target)
+    target[index] = move_first(target)^
     print(source[0][0] ++ " " ++ target[0] ++ " " ++ target[1][0] ++ "\n")
 }

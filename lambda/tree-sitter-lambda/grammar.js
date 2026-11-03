@@ -285,10 +285,10 @@ function fn_expr_declaration($, name) {
 }
 
 // A return contract: alternatives joined by `|`, `&` or `!`, then an optional
-// `^` error arm (`T^` any error, `T^E` a named one).
+// broad `^` shorthand. Particular errors use ordinary unions (S7.4.2v3).
 const return_contract = pattern => $ => prec.right(seq(
   field('ok', pattern($)),
-  optional(seq('^', optional(field('error', pattern($))))),
+  optional($._type_caret),
 ));
 const return_alternatives = atom => $ => prec.left(seq(
   field('type', atom($)),
@@ -363,6 +363,7 @@ module.exports = grammar({
     // S11.1.5v2: zero-width, in front of a signature's return type, which must
     // start on the `)` line; a name opening the next line gets no token at all.
     $._fn_return,
+    $._type_caret,
     // tight force fragments and complete type patterns need adjacency guards.
     $._force_fragment_start,
     $._force_end,
@@ -1470,10 +1471,9 @@ module.exports = grammar({
       seq(choice($.unary_type, $.binary_type), $._type_end),
       seq($.fn_type, $._fn_type_end),
     ),
-    // S7.4.2: outside a return, ^ admits the ordinary error value.
+    // S7.4.2v3: ^ admits any ordinary error in every type position.
     value_error_type: $ => prec.right(seq(
-      field('ok', $._type_pattern), '^',
-      optional(field('error', $.primary_type)),
+      field('ok', $._type_pattern), $._type_caret,
     )),
 
     // A type binder is a parameter-boundary construct. Its base is a complete

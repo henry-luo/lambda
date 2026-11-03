@@ -12,7 +12,7 @@ fn shout(s: Digits) => s ++ "!"
 fn width(s: \("\a"+)) => len(s)
 fn sym(s: Ident) => s
 fn pass(s: Digits) => s
-fn admit(s) { let code: Code = s; code }
+fn admit(s) any^ { let code: Code = s; code }
 
 '1. declarations and parameters'
 let code: \("\a"{3}) = "abc"

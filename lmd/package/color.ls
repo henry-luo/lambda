@@ -1,11 +1,11 @@
 // shared pure color parsing and HSV conversion (S12.1.1v3, PG12.4).
 import hex: lambda.doc.pdf.util
 fn finite(v) bool => v is number and abs(v) <= 3.4028234e38
-fn byte(text, offset, short) {
+fn byte(text, offset, short) any^ {
     let a = hex.hex_digit_value(text[offset]);
     (if (short) a * 17 else a * 16 + hex.hex_digit_value(text[offset + 1])) / 255.0
 }
-fn functional(text) {
+fn functional(text) any^ {
     let alpha=starts_with(text,"rgba(");
     let prefix=if (alpha) 5 else 4;
     let parts=split(slice(text,prefix,len(text)-1),",") |> trim(~);
@@ -17,11 +17,11 @@ fn functional(text) {
 }
 
 // paint interpolation probes compatibility before choosing its crossfade fallback.
-pub fn try_parse(value) array? {
+pub fn try_parse(value) array?^ {
     let text = if (value is string) lower(value) else ""
     let numeric = value is array and len(value) == 4 and all([for (v in value) finite(v) and v >= 0.0 and v <= 1.0])
     let valid = starts_with(text, "#") and contains([4, 5, 7, 9], len(text)) and
-        all([for (i in 1 to len(text) - 1) hex.is_hex_digit(text[i])])
+        all([for (i in ((1 to len(text) - 1) ^ { [] })) hex.is_hex_digit(text[i])])
     let rgba=if ((starts_with(text,"rgb(") or starts_with(text,"rgba(")) and ends_with(text,")")) functional(text) else null;
     if (numeric) value
     else if (rgba!=null) rgba
@@ -57,5 +57,5 @@ pub fn rgb(h,s,v,alpha=1.0) array {
     [*[for (channel in channels) channel+v-chroma],alpha]
 }
 let digits = "0123456789abcdef"
-pub fn hex_byte(v) => slice(digits,v div 16,v div 16+1) ++ slice(digits,v%16,v%16+1)
-pub fn hex(rgba) string => "#" ++ join([for (v in slice(rgba,0,3)) hex_byte(int(round(max(0,min(1,v))*255)))],"")
+pub fn hex_byte(v) any^ => slice(digits,v div 16,v div 16+1) ++ slice(digits,v%16,v%16+1)
+pub fn hex(rgba) string => "#" ++ join([for (v in ((slice(rgba,0,3)) ^ { [] })) hex_byte(int(round(max(0,min(1,v))*255)))],"")

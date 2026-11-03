@@ -1,24 +1,24 @@
 // bounded spreadsheet expressions; never execute cell contents as Lambda code.
 let LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-fn letter(ch) => ch!="" and contains(LETTERS,upper(ch))
-fn digit(ch) => ch!="" and contains("0123456789",ch)
-pub fn column(col) => if (col<26) slice(LETTERS,col,col+1) else column(int(floor(col/26))-1) ++ column(col%26)
-pub fn address(row,col) => column(col) ++ string(row+1)
-fn column_index(text,i=0,value=0) => if (i==len(text)) value-1
+fn letter(ch) any^ => ch!="" and contains(LETTERS,upper(ch))
+fn digit(ch) any^ => ch!="" and contains("0123456789",ch)
+pub fn column(col) any^ => if (col<26) slice(LETTERS,col,col+1) else column(int(floor(col/26))-1) ++ column(col%26)
+pub fn address(row,col) any^ => column(col) ++ string(row+1)
+fn column_index(text,i=0,value=0) any^ => if (i==len(text)) value-1
     else column_index(text,i+1,value*26+index_of(LETTERS,slice(text,i,i+1))+1)
-fn letters_end(text,at=0) => if (letter(slice(text,at,at+1))) letters_end(text,at+1) else at
+fn letters_end(text,at=0) any^ => if (letter(slice(text,at,at+1))) letters_end(text,at+1) else at
 pub fn position(text) map^ {
     let clean = replace(upper(trim(text)),"$","")
     let at = letters_end(clean)
     let tail = slice(clean,at)
-    if (at==0 or tail=="" or not all([for (ch in split(tail,"")) digit(ch)])) raise error("#REF!")
+    if (at==0 or tail=="" or not all([for (ch in ((split(tail,"")) ^ { [] })) digit(ch)])) raise error("#REF!")
     else {
         let row = int(tail)^-1
         let col = column_index(slice(clean,0,at))
         if (row<0 or row>=1048576 or col<0 or col>=16384) raise error("#REF!") else {row:row,col:col}
     }
 }
-fn word_end(source,at,numeric) => if (at>=len(source)) at else {
+fn word_end(source,at,numeric) any^ => if (at>=len(source)) at else {
     let ch = slice(source,at,at+1);
     if (digit(ch) or (if (numeric) ch=="." else letter(ch) or ch=="$")) word_end(source,at+1,numeric) else at
 }
@@ -132,4 +132,4 @@ pub fn value(sheet,row,col,path=[]) any^ {
     else if (trim(raw)=="") ""
     else { let parsed=float(raw) ^ {raw}; if (parsed is nan or parsed is inf or parsed == -inf) raw else parsed }
 }
-pub fn display(sheet,row,col) => value(sheet,row,col) ^ {if (starts_with(string(^.message),"#")) ^.message else "#VALUE!"}
+pub fn display(sheet,row,col) any^ => value(sheet,row,col) ^ {if (starts_with(string(^.message),"#")) ^.message else "#VALUE!"}

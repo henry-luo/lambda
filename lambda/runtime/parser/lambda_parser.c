@@ -1224,10 +1224,10 @@ static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* 
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             raised = true;
             if (token_starts_return_type(parser->current.kind)) {
-                LambdaParseValue error_type = parse_type_slot_mode(parser, true,
-                    LAMBDA_REDUCTION_FLAG_RETURN_TYPE, false);
-                if (!error_type) return false;
-                if (values && count) values[(*count)++] = error_type;
+                parser_fail(parser,
+                    "typed 'T^E' is removed; use 'T | E' for particular errors or 'T^' for any error",
+                    LAMBDA_TOK_LBRACE);
+                return false;
             }
         }
     }
@@ -2263,8 +2263,8 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     if (!pattern) return 0;
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_VIEW_BEGIN, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, 0, &pattern, 1);
     LambdaParseValue parameters = 0;
-    // a view has no return contract, but a written one still reaches the sink
-    // (after the parameters) so its type slots resolve in source order
+    // views retain the same complete return contract as pure functions
+    bool return_raised = false;
     LambdaParseValue view_children[4] = {0};
     uint32_t view_child_count = 2;
     if (parser->current.kind == LAMBDA_TOK_LPAREN) {
@@ -2273,13 +2273,14 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
                 error_expected_parameter_name,
                 error_expected_parameter_close, &signature)) return 0;
         parameters = signature.parameters;
+        return_raised = signature.raised;
         for (uint32_t i = 0; i < signature.return_count; i++) {
             view_children[view_child_count++] = signature.return_types[i];
         }
     } else {
         uint32_t return_count = 0;
         if (!parser_parse_return_types(parser, view_children + 2, &return_count,
-                NULL)) return 0;
+                &return_raised)) return 0;
         view_child_count += return_count;
     }
     if (parser_accept(parser, LAMBDA_TOK_STATE)) {
@@ -2316,7 +2317,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     }
     view_children[0] = parameters;
     view_children[1] = body;
-    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, 0, view_children, view_child_count);
+    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, return_raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0, view_children, view_child_count);
     parser_context(parser, LAMBDA_REDUCTION_FORM_VIEW_END, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first);
     return result;
 }

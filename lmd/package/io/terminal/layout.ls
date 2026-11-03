@@ -24,7 +24,7 @@ fn append_cell(screen, ch, width) {
   if (updated.col == updated.columns) finish_row(updated) else updated
 }
 
-fn step(screen, ch, tabstop) {
+fn step(screen, ch, tabstop) any^ {
   if (ch == "\n") finish_row(screen)
   else if (ch == "\t") {
     let spaces_needed = tabstop - (screen.col % tabstop)
@@ -38,7 +38,7 @@ fn step(screen, ch, tabstop) {
 
 fn scan(screen, value, tabstop) =>
   reduce([screen, *[for (i in 0 to len(value) - 1) slice(value, i, i + 1)]],
-         (current, ch) => step(current, ch, tabstop))
+         (current, ch) any^ => step(current, ch, tabstop))
 
 // offset is a code-point position in editable text, independent of prompt.
 pub fn layout_frame(frame, offset, columns, tabstop) {

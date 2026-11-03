@@ -26,14 +26,14 @@ pub fn initial() => {accounts: [], account: null, status: {}, mailboxes: {}, box
 // ---- accounts ----
 
 // a file-safe id for an address, distinct from the ids already taken
-pub fn account_id(email, taken) {
-    let base = join([for (ch in split(lower(email), "")) if (ch is \("\w") or ch == "-") ch else "-"], "")
+pub fn account_id(email, taken) any^ {
+    let base = join([for (ch in ((split(lower(email), "")) ^ { [] })) if (ch is \("\w") or ch == "-") ch else "-"], "")
     let free = [for (i in 1 to len(taken) + 1, let id = if (i == 1) base else base ++ "-" ++ string(i) where not (id in taken)) id];
     free[0]
 }
 
 pub fn account(st, id) => [for (a in st.accounts where a.id == id) a][0]
-pub fn current(st) => account(st, st.account)
+pub fn current(st) any^ => account(st, st.account)
 
 pub fn status_of(st, id) => st.status[id] or {state: "offline", text: null}
 pub fn status_label(s) => if (s.text != null) s.text
@@ -42,11 +42,11 @@ pub fn status_label(s) => if (s.text != null) s.text
 // ---- mailboxes ----
 
 // A mailbox's file name in the store; two paths never share one.
-pub fn box_id(path) => store.safe_name(path)
+pub fn box_id(path) any^ => store.safe_name(path)
 
-fn depth(path, delimiter) => if (delimiter == null or delimiter == "") 0
-    else len([for (ch in split(path, "") where ch == delimiter) ch])
-fn leaf_name(name, delimiter) => if (delimiter == null or delimiter == "") name
+fn depth(path, delimiter) any^ => if (delimiter == null or delimiter == "") 0
+    else len([for (ch in ((split(path, "")) ^ { [] }) where ch == delimiter) ch])
+fn leaf_name(name, delimiter) any^ => if (delimiter == null or delimiter == "") name
     else (let parts = split(name, delimiter), parts[len(parts) - 1])
 fn rank(b) => (let i = [for (j, r in ROLE_ORDER where b.role == r) j], if (len(i) == 0) len(ROLE_ORDER) else i[0])
 
@@ -54,11 +54,11 @@ pub fn count_key(account_id, path) => account_id ++ "/" ++ path
 
 // a mailbox's ancestors, nearest last ("A/B/C" → ["A", "A/B"])
 fn ancestors(path, delimiter) => if (delimiter == null or delimiter == "") []
-    else (let parts = split(path, delimiter), [for (i in range(1, len(parts), 1)) join(slice(parts, 0, i), delimiter)])
+    else (let parts = split(path, delimiter), [for (i in ((range(1, len(parts), 1)) ^ { [] })) join(slice(parts, 0, i), delimiter)])
 
 // the other mailboxes of a folder tree under `b`
-fn children(boxes, b) => [for (c in boxes where c.role == null and c.path != b.path and b.delimiter != null and b.delimiter != "" and
-    starts_with(c.path, b.path ++ b.delimiter)) c]
+fn children(boxes, b) any^ => [for (c in boxes where ((c.role == null and c.path != b.path and b.delimiter != null and b.delimiter != "" and
+    starts_with(c.path, b.path ++ b.delimiter)) ^ { false })) c]
 
 // sidebar keys of collapsed accounts and folders ("acct", "acct/Projects")
 pub fn toggled(keys, key) => if (key in keys) [for (k in keys where k != key) k] else [*keys, key]
@@ -68,12 +68,12 @@ pub fn is_collapsed(st, key) => key in (st.collapsed or [])
 // rest by name as a tree, each with its unread count when its index is known.
 // A folder with children has a disclosure toggle; the rows under a collapsed
 // one are left out. A parent that cannot be selected stays as a label.
-pub fn sidebar(st, account_id) {
+pub fn sidebar(st, account_id) any^ {
     let boxes = st.mailboxes[account_id] or [];
-    [for (b in sort(boxes, (b) => [rank(b), lower(b.path)]),
+    [for (b in ((sort(boxes, (b) => [rank(b), lower(b.path)])) ^ { [] }),
           let kids = if (b.role != null) [] else children(boxes, b)
-          where (b.selectable or len(kids) > 0) and (b.role != null or
-              len([for (a in ancestors(b.path, b.delimiter) where is_collapsed(st, count_key(account_id, a))) a]) == 0))
+          where (((b.selectable or len(kids) > 0) and (b.role != null or
+              len([for (a in ((ancestors(b.path, b.delimiter)) ^ { [] }) where ((is_collapsed(st, count_key(account_id, a))) ^ { false })) a]) == 0)) ^ { false }))
         (let c = st.counts[count_key(account_id, b.path)],
          {path: b.path, role: b.role, depth: if (b.role != null) 0 else depth(b.path, b.delimiter),
           name: if (b.role != null) ROLE_LABELS[b.role] else leaf_name(b.name, b.delimiter),
@@ -83,7 +83,7 @@ pub fn sidebar(st, account_id) {
 
 // the role of the shown mailbox, or null
 pub fn box_role(st) => (let found = [for (b in st.mailboxes[st.account] or [] where b.path == st.box) b.role], if (len(found) == 0) null else found[0])
-pub fn box_title(st) => (let role = box_role(st), if (role != null) ROLE_LABELS[role]
+pub fn box_title(st) any^ => (let role = box_role(st), if (role != null) ROLE_LABELS[role]
     else if (st.box == null) "Mail" else (let named = [for (b in st.mailboxes[st.account] or [] where b.path == st.box) b],
         if (len(named) == 0) st.box else leaf_name(named[0].name, named[0].delimiter)))
 
@@ -93,10 +93,10 @@ pub fn role_path(st, account_id, role) => (let found = [for (b in st.mailboxes[a
 
 // where a new mailbox can go: the account's top level, or under a folder
 pub fn mailbox_parents(st, account_id) => [["", "Top level"],
-    *[for (b in sort(st.mailboxes[account_id] or [], (b) => lower(b.path)) where b.role == null and b.selectable) [b.path, b.path]]]
+    *[for (b in ((sort(st.mailboxes[account_id] or [], (b) => lower(b.path))) ^ { [] }) where b.role == null and b.selectable) [b.path, b.path]]]
 
 // the path of a new mailbox named `name` under `parent`, or the reason it cannot be one
-pub fn new_mailbox_path(st, account_id, parent, name) {
+pub fn new_mailbox_path(st, account_id, parent, name) any^ {
     let leaf = trim(name or "")
     let path = if (parent == null or parent == "") leaf else parent ++ "/" ++ leaf;
     if (leaf == "") {error: "Type a name for the mailbox."}
@@ -111,7 +111,7 @@ pub fn inbox_path(boxes) => (let found = [for (b in boxes or [] where b.role == 
 
 pub fn is_unread(e) => not ("\\Seen" in e.flags)
 pub fn is_flagged(e) => "\\Flagged" in e.flags
-pub fn counts_of(entries) => {unread: len([for (e in entries where is_unread(e)) e]), total: len(entries)}
+pub fn counts_of(entries) any^ => {unread: len([for (e in entries where ((is_unread(e)) ^ { false })) e]), total: len(entries)}
 
 // Rows are newest first: row i is entries[count - 1 - i]. `top` and `height`
 // are the list's scroll offset and viewport in pixels.
@@ -126,7 +126,7 @@ pub fn entry(st, uid) => [for (e in st.entries where e.uid == uid) e][0]
 pub fn sender_label(e) => if (e.from == null) "(no sender)" else if (e.from.name != null and e.from.name != "") e.from.name else e.from.address
 fn short_name(a) => if (a.name != null and a.name != "") a.name else a.address
 // who a row names: the recipients in Sent and Drafts, else the sender
-pub fn who_label(e, role) => if (role == 'sent' or role == 'drafts')
+pub fn who_label(e, role) any^ => if (role == 'sent' or role == 'drafts')
     (let to = e.to or [], if (len(to) == 0) "(no recipients)" else "To: " ++ join([for (a in to) short_name(a)], ", "))
     else sender_label(e)
 
@@ -139,12 +139,12 @@ pub fn without_entry(st, uid) => {*: st, entries: [for (e in st.entries where e.
 pub fn subject_label(subject) => if (subject == null or trim(subject) == "") "(no subject)" else subject
 
 fn two(n) => if (n < 10) "0" ++ string(n) else string(n)
-fn month_of(text) => (let i = [for (j, m in MONTHS where lower(m) == lower(slice(text, 0, 3))) j], if (len(i) == 0) null else i[0] + 1)
+fn month_of(text) => (let i = [for (j, m in MONTHS where ((lower(m) == lower(slice(text, 0, 3))) ^ { false })) j], if (len(i) == 0) null else i[0] + 1)
 
 // The parts of an RFC 5322 date ("Thu, 15 Oct 2026 09:00:00 +0000") or an
 // IMAP INTERNALDATE ("21-Oct-2026 09:14:00 +0200"); null when unreadable.
-pub fn date_parts(text) {
-    let words = if (text == null) [] else [for (w in split(replace(text, "-", " "), " ") where w != "" and not ends_with(w, ",")) w]
+pub fn date_parts(text) any^ {
+    let words = if (text == null) [] else [for (w in ((split(replace(text, "-", " "), " ")) ^ { [] }) where ((w != "" and not ends_with(w, ",")) ^ { false })) w]
     let day = if (len(words) < 4) null else int(words[0]) ^ { null }
     let month = if (len(words) < 4) null else month_of(words[1])
     let year = if (len(words) < 4) null else int(words[2]) ^ { null };
@@ -154,11 +154,11 @@ pub fn date_parts(text) {
 }
 
 // "24 Oct 2026 at 09:14" for the viewer's header
-pub fn long_date(text) => (let d = date_parts(text), if (d == null) (text or "")
+pub fn long_date(text) any^ => (let d = date_parts(text), if (d == null) (text or "")
     else string(d.day) ++ " " ++ MONTHS[d.month - 1] ++ " " ++ string(d.year) ++ " at " ++ d.time)
 
 // "09:14" today, "21 Oct" this year, "21 Oct 2025" before; `now` is {year, month, day}
-pub fn date_label(e, now) {
+pub fn date_label(e, now) any^ {
     let d = date_parts(e.date) or date_parts(e.internaldate);
     if (d == null) ""
     else if (d.year == now.year and d.month == now.month and d.day == now.day) d.time
@@ -166,7 +166,7 @@ pub fn date_label(e, now) {
     else string(d.day) ++ " " ++ MONTHS[d.month - 1] ++ " " ++ string(d.year)
 }
 
-pub fn size_label(bytes) => if (bytes == null) "" else if (bytes < 1024) string(bytes) ++ " B"
+pub fn size_label(bytes) any^ => if (bytes == null) "" else if (bytes < 1024) string(bytes) ++ " B"
     else if (bytes < 1048576) string(int(round(bytes / 1024))) ++ " KB"
     else string(round(bytes / 104857.6) / 10) ++ " MB"
 
@@ -202,15 +202,15 @@ pub fn message_view(message, e, file) {
      attachments: mime.attachments(message), cids: mime.cid_parts(message)}
 }
 
-pub fn address_label(a) => compose.person_label(a)
-pub fn addresses_label(people) => compose.people_label(people)
-pub fn quote_runs(text) => compose.quote_runs(text)
+pub fn address_label(a) any^ => compose.person_label(a)
+pub fn addresses_label(people) any^ => compose.people_label(people)
+pub fn quote_runs(text) any^ => compose.quote_runs(text)
 
 // two letters for a sender's avatar, and a hue picked from the address
-pub fn initials(a) => (let words = [for (w in split(trim(short_name(a)), " ") where w != "" and not starts_with(w, "(")) w],
+pub fn initials(a) any^ => (let words = [for (w in ((split(trim(short_name(a)), " ")) ^ { [] }) where ((w != "" and not starts_with(w, "(")) ^ { false })) w],
     if (len(words) == 0) "?" else if (len(words) == 1) upper(slice(words[0], 0, 1))
     else upper(slice(words[0], 0, 1) ++ slice(words[len(words) - 1], 0, 1)))
-pub fn avatar_hue(a) => sum([for (ch in split(lower(a.address or "?"), "")) ord(ch)]) * 47 % 360
+pub fn avatar_hue(a) any^ => sum([for (ch in ((split(lower(a.address or "?"), "")) ^ { [] })) ord(ch)]) * 47 % 360
 
 // ---- compose ----
 
@@ -241,7 +241,7 @@ pub fn setup_initial() => {name: "", email: "", password: "", provider: "auto", 
     google_setup: false, client_id: "", client_secret: ""}
 
 // the preset or the looked-up settings the sheet will use, or null for manual
-pub fn setup_preset(form) => if (form.provider == "manual") null
+pub fn setup_preset(form) any^ => if (form.provider == "manual") null
     else if (form.provider == "auto") (prov.preset_for(form.email) or form.found)
     else prov.preset(form.provider)
 
@@ -251,14 +251,14 @@ fn default_port(protocol, sec) => if (protocol == "pop3") (if (sec == 'tls') 995
 
 // The OAuth endpoints the sheet's provider offers when the app has a client
 // for them in oauth.mark (MQ4), else null.
-pub fn setup_oauth(form, clients) {
+pub fn setup_oauth(form, clients) any^ {
     let preset = setup_preset(form);
     if (preset == null or preset.oauth == null or clients == null or clients[preset.oauth.provider] == null) null
     else preset.oauth
 }
 
 // "oauth" or "password": OAuth by default where it is offered
-pub fn setup_auth(form, clients) => if (setup_oauth(form, clients) == null) "password"
+pub fn setup_auth(form, clients) any^ => if (setup_oauth(form, clients) == null) "password"
     else if (form.auth == null) "oauth" else form.auth
 
 // the app's client for a provider, as lambda.oauth takes it, or null
@@ -267,7 +267,7 @@ pub fn oauth_client(clients, endpoints) => if (endpoints == null or clients == n
 
 // An account from the sheet, or the reason it cannot be one. The password
 // or refresh token goes to the secret store, never into the account (ML6).
-pub fn account_from_setup(form, taken, clients) {
+pub fn account_from_setup(form, taken, clients) any^ {
     let email = trim(form.email)
     let preset = setup_preset(form)
     let pop = form.protocol == "pop3"

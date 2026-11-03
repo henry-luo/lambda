@@ -24,33 +24,33 @@ pub fn initial() => {records: [], loaded: false, kind: "all", site: null, query:
     tab: "snapshot", jobs: [], url: "", force: "auto", formats: ["html", "readable", "markdown"], confirm: null,
     serial: 0, note: null}
 
-fn newest_first(rs) => sort(rs, {dir: 'desc', by: (r) => r.archived})
+fn newest_first(rs) any^ => sort(rs, {dir: 'desc', by: (r) => r.archived})
 pub fn loaded(st, records) => {*: st, records: newest_first(records), loaded: true,
     selected: if (len(records) == 0) null else newest_first(records)[0].id}
 
-pub fn host_of(url) => (let at = index_of(url or "", "://"), if (at == null) "" else
+pub fn host_of(url) any^ => (let at = index_of(url or "", "://"), if (at == null) "" else
     (let rest = slice(url, at + 3), let slash = index_of(rest, "/"), lower(if (slash == null) rest else slice(rest, 0, slash))))
 // the site a record lists under: its site name, else its host, else "local files"
-pub fn site_of(r) => if (r.site != null and r.site != "") r.site else (let h = host_of(r.url), if (h == "") "Local files" else h)
+pub fn site_of(r) any^ => if (r.site != null and r.site != "") r.site else (let h = host_of(r.url), if (h == "") "Local files" else h)
 
 pub fn kind_counts(records) => [for (kl in KIND_LABELS, let n = if (kl[0] == "all") len(records)
     else len([for (r in records where r.kind == kl[0]) r]) where kl[0] == "all" or n > 0) {kind: kl[0], label: kl[1], count: n}]
-pub fn site_counts(records) {
+pub fn site_counts(records) any^ {
     let names = sort(unique([for (r in records) site_of(r)]));
-    [for (s in names) {site: s, count: len([for (r in records where site_of(r) == s) r])}]
+    [for (s in names) {site: s, count: len([for (r in records where ((site_of(r) == s) ^ { false })) r])}]
 }
 
 // the rows the list shows: search hits when there is a query, else the records, filtered
-pub fn visible(st) {
+pub fn visible(st) any^ {
     let rows = if (st.hits != null) [for (h in st.hits) h.snapshot] else st.records;
-    [for (r in rows where (st.kind == "all" or r.kind == st.kind) and (st.site == null or site_of(r) == st.site)) r]
+    [for (r in rows where (((st.kind == "all" or r.kind == st.kind) and (st.site == null or site_of(r) == st.site)) ^ { false })) r]
 }
 pub fn snippet_of(st, id) => if (st.hits == null) null
     else (let hs = [for (h in st.hits where h.snapshot.id == id) h.snippet], if (len(hs) == 0) null else hs[0])
 pub fn selected(st) => (let hit = [for (r in st.records where r.id == st.selected) r], if (len(hit) == 0) null else hit[0])
 
 // a typed location as a URL: web and file URLs as they are, paths as file: URLs (against the cwd)
-pub fn url_of(text, cwd) {
+pub fn url_of(text, cwd) any^ {
     let t = trim(text or "");
     if (t == "") null
     else if (contains(t, "://")) t
@@ -59,7 +59,7 @@ pub fn url_of(text, cwd) {
 }
 
 // Archive pressed: the service request and the state that shows it, or a note
-pub fn request_add(st, cwd) {
+pub fn request_add(st, cwd) any^ {
     let url = url_of(st.url, cwd)
     if (url == null) {state: {*: st, note: "Type a URL or a path to archive."}, request: null}
     else (let tag = "job-" ++ string(st.serial + 1),
@@ -78,7 +78,7 @@ pub fn request_refresh(st, output) {
 fn job_row(m) => {tag: m.tag, url: m.url, id: m.id, op: m.op, status: "queued", stage: null, received: 0, total: null,
     rate: null, message: null}
 fn update_job(jobs, tag, f) => [for (j in jobs) if (j.tag == tag) f(j) else j]
-fn replace_record(records, r) => newest_first([r, *[for (x in records where x.id != r.id) x]])
+fn replace_record(records, r) any^ => newest_first([r, *[for (x in records where x.id != r.id) x]])
 
 // one message from the service (§8): queued adds a row, progress moves it, done
 // files the snapshot (and opens it when the user asked for it), failed keeps
@@ -118,21 +118,21 @@ pub fn action(st, name, value) {
 }
 
 // ---- labels ----
-pub fn date_label(iso) => if (not (iso is string) or len(iso) < 10) ""
+pub fn date_label(iso) any^ => if (not (iso is string) or len(iso) < 10) ""
     else (let m = int(slice(iso, 5, 7)), let d = int(slice(iso, 8, 10)),
         if (m is error or d is error or m < 1 or m > 12) "" else string(d) ++ " " ++ MONTHS[m - 1] ++ " " ++ slice(iso, 0, 4))
-pub fn size_label(bytes) => if (bytes == null) ""
+pub fn size_label(bytes) any^ => if (bytes == null) ""
     else if (bytes >= 1048576) string(round(bytes / 104857.6) / 10) ++ " MB"
     else if (bytes >= 1024) string(round(bytes / 102.4) / 10) ++ " KB" else string(bytes) ++ " B"
 // "2 of 5 assets", "412 KB of 580 KB · 9.6 MB/s", "render 3/6"
-pub fn progress_label(j) => if (j.status == "queued") "Queued"
+pub fn progress_label(j) any^ => if (j.status == "queued") "Queued"
     else if (j.status == "failed") j.message or "Failed"
     else if (j.stage == "fetch" or (j.stage == "media" and j.total != null and j.total > 1000))
         size_label(j.received) ++ (if (j.total != null) " of " ++ size_label(j.total) else "") ++
         (if (j.rate != null and j.rate > 0) " · " ++ size_label(j.rate) ++ "/s" else "")
     else if (j.total != null) string(j.stage) ++ " " ++ string(j.received) ++ "/" ++ string(j.total)
     else string(j.stage or "")
-pub fn progress_fraction(j) => if (j.total == null or j.total <= 0) null else min(1.0, float(j.received) / float(j.total))
+pub fn progress_fraction(j) any^ => if (j.total == null or j.total <= 0) null else min(1.0, float(j.received) / float(j.total))
 // the formats a record holds, as the list's badges
 pub fn badges(r) => [for (fc in [["html", "HTML"], ["readable", "R"], ["markdown", "MD"], ["pdf", "PDF"]]
     where r.outputs[fc[0]] != null and r.outputs[fc[0]].status == "ok") fc[1]]

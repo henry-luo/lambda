@@ -3,12 +3,12 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn class_members(node) => [
   for (child in model.element_children(node)
-    where model.tag(child) == "class-member") child
+    where ((model.tag(child) == "class-member") ^ { false })) child
 ]
 
 let source = (input(
@@ -25,12 +25,12 @@ let scene_edges = children(rendered.scene, "edge")
 {
   source: [source.kind, source.direction, len(source_nodes), len(source_edges)],
   members: [for (node in source_nodes) [node.id,
-    [for (member in class_members(node)) [member.kind, member.visibility, member.value]]]],
+    [for (member in ((class_members(node)) ^ { [] })) [member.kind, member.visibility, member.value]]]],
   relations: [for (edge in source_edges) [edge.from, edge.to, edge.relation,
     edge["arrow-tail"], edge["arrow-head"], edge.style, edge.label,
     edge["from-cardinality"], edge["to-cardinality"]]],
   canonical: [normalized.valid,
-    [for (node in model.nodes(normalized.graph))
+    [for (node in ((model.nodes(normalized.graph)) ^ { [] }))
       [node.id, model.tag(model.content_element(node))]]],
   html: [for (node in html_nodes)
     [node["data-node-id"], node["data-label"], model.tag(node[0])]],

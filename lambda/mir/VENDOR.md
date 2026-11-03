@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch`, `patches/mir-aarch64-long-branches.patch`, `patches/mir-aarch64-memory-validation.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch`, `patches/mir-aarch64-long-branches.patch`, `patches/mir-aarch64-memory-validation.patch`, `patches/mir-phi-address-snapshot.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -203,3 +203,21 @@ Touches only `target_memory_ok_p` in `mir-gen-aarch64.c`. The
 unsigned, float and double loads/stores at aligned and packed offsets and the
 immediate-range boundary. Reproducer:
 `temp/js_formal_mir_20261016/arm64_address_probe.c` (D8.6.2–D8.6.3).
+
+### `mir-phi-address-snapshot.patch` — preserve saved loop values in address folding
+
+Approved 2026-11-03, USER. MIR level 2 miscompiled the Lambda accumulator
+with `continue`; standalone MIR reproduces it without any Lambda runtime.
+Levels 0/1 return 9,990 for `[1, 2, 3, 4]`, while level 2 returned 8,991.
+
+Conventional SSA assigns PHI registers on incoming edges. A move after the PHI
+saves the current value; address folding must not bypass that saved value in
+another block. The old test noticed only a PHI with a same-block predecessor,
+missing multi-block loops. Reject cross-block PHI forwarding in the shared
+address-folding guard; local PHIs and other stable expressions still fold.
+All optimization passes remain enabled (S1.6, D8.2.6v2).
+
+Touches `mir-gen.c`. The standalone `phi_saved_loop_value.mir` fixture and
+`MirOptimizer.CrossBlockPhiAddressFoldingKeepsSavedValue` test cover both loop
+copies, `continue`, a runtime handoff, empty input, and repeated calls at levels
+0–3. The existing `proc/tune27_loop_accumulator.ls` checks the Lambda path.

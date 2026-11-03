@@ -39,7 +39,7 @@ fn merge_totals(totals, updates) => [*[for (entry in totals
     where not any([for (update in updates) update.key == entry.key])) entry], *updates]
 
 // Bar extents along the value axis: stacked plots start where earlier plots end.
-pub fn stack_bars(series_list, mode, index = 0, totals = [], acc = []) {
+pub fn stack_bars(series_list, mode, index = 0, totals = [], acc = []) any^ {
     if (index >= len(series_list)) acc
     else {
         let series = series_list[index]
@@ -66,13 +66,13 @@ fn entry_value(entries, key, fallback) {
 
 // Error bar settings from `error bars/.cd` key lists or full `error bars/...` keys.
 pub fn error_spec(plot) any^ {
-    let options = [for (child in plot where child is element and
-        string(name(child)) == "option") {key: trim(child.key), value: child.value}]
+    let options = [for (child in plot where ((child is element and
+        string(name(child)) == "option") ^ { false })) {key: trim(child.key), value: child.value}]
     let cd_positions = [for (index, option in options where option.key == "error bars/.cd") index]
     let cd_at = if (len(cd_positions) == 0) null else cd_positions[0]
     let scoped = [for (index, option in options where cd_at != null and index > cd_at) option]
-    let prefixed = [for (option in options where starts_with(option.key, "error bars/") and
-        option.key != "error bars/.cd")
+    let prefixed = [for (option in options where ((starts_with(option.key, "error bars/") and
+        option.key != "error bars/.cd") ^ { false }))
         {key: slice(option.key, len("error bars/"), len(option.key)), value: option.value}]
     let entries = [*scoped, *prefixed]
     let unknown = [for (entry in entries
@@ -130,7 +130,7 @@ fn whisker(low, high, fixed, vertical, cap) {
 }
 
 // Error bar segments in px for one point drawn at screen position `at`.
-pub fn error_segments(spec, point, at, xs, ys, width, height) {
+pub fn error_segments(spec, point, at, xs, ys, width, height) any^ {
     let y_extent = error_extent(spec, point, "y")
     let x_extent = error_extent(spec, point, "x")
     let cap = if (spec.mark) 3.0 else 0.0
@@ -153,7 +153,7 @@ pub fn point_extents(spec, point, axis) {
 }
 
 // One bar rectangle in px, clipped to the plot area; null when nothing remains.
-pub fn bar_rect(point, mode, shift, xs, ys, width, height) {
+pub fn bar_rect(point, mode, shift, xs, ys, width, height) any^ {
     let half = mode.width / 2.0
     let center = if (mode.direction == "y") float(scale.scale_apply(xs, point.x)) + shift
         else float(scale.scale_apply(ys, point.y)) - shift
@@ -176,7 +176,7 @@ pub fn bar_rect(point, mode, shift, xs, ys, width, height) {
 }
 
 // Grouped bars sit side by side around their coordinate (PGFPlots bar shift auto).
-pub fn bar_shift(mode, ordinal, total) =>
+pub fn bar_shift(mode, ordinal, total) any^ =>
     if (mode.stacked) 0.0
     else (float(ordinal) - float(total - 1) / 2.0) * (mode.width + mode.gap)
 
@@ -189,7 +189,7 @@ fn inside(point, axis, limit, keep_less) =>
     if (keep_less) point[axis] <= limit else point[axis] >= limit
 
 // Output of one polygon vertex against the edge (Sutherland-Hodgman).
-fn clip_vertex(points, index, axis, limit, keep_less) {
+fn clip_vertex(points, index, axis, limit, keep_less) any^ {
     let total = len(points)
     let current = points[index]
     let previous = points[(index + total - 1) % total]
@@ -205,7 +205,7 @@ fn clip_vertex(points, index, axis, limit, keep_less) {
 fn clip_against(points, axis, limit, keep_less) =>
     if (len(points) == 0) []
     else [for (index in 0 to (len(points) - 1),
-        kept in clip_vertex(points, index, axis, limit, keep_less)) kept]
+        kept in ((clip_vertex(points, index, axis, limit, keep_less)) ^ { [] })) kept]
 
 // A filled polygon clipped to the plot rectangle [0,width] x [0,height].
 pub fn clip_polygon(points, width, height) =>
@@ -254,7 +254,7 @@ pub fn soft_clip(fill_options) any^ {
 pub fn fill_between_names(fill_options) any^ {
     let checked = opts.check(fill_options, ["of", "soft clip"])^
     let raw = opts.value(fill_options, "of", null)
-    let parts = if (raw == null) [] else [for (part in split(" " ++ trim(raw) ++ " ", " and "))
+    let parts = if (raw == null) [] else [for (part in ((split(" " ++ trim(raw) ++ " ", " and ")) ^ { [] }))
         trim(part)]
     if (len(parts) != 2 or parts[0] == "" or parts[1] == "")
         raise error("PGFPlots fill between needs of=<first> and <second>")

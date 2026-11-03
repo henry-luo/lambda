@@ -172,7 +172,7 @@ let f = (a: int, b: int) => a + b
 f(5, 3)                          // 8
 
 // Passing function as argument (must use untyped params for dynamic call)
-fn apply_fn(func, a, b) { func(a, b) }
+fn apply_fn(func, a, b) any^ { func(a, b) }
 apply_fn(add_int, 10, 20)           // 30
 
 //==============================================================================

@@ -12,31 +12,31 @@ pub let symbols = symbol_sets.symbols
 pub let bookmark_prefix = "word-bookmark-"
 pub fn bookmark_id(name) => bookmark_prefix ++ name
 pub fn bookmark_href(name) => "#" ++ bookmark_id(name)
-pub fn link_bookmark(href) => if (href is string and starts_with(href,"#" ++ bookmark_prefix))
+pub fn link_bookmark(href) any^ => if (href is string and starts_with(href,"#" ++ bookmark_prefix))
     slice(href,len(bookmark_prefix)+1) else null
-pub fn bookmark_name(n) {
+pub fn bookmark_name(n) any^ {
     let id = if (is_node(n)) attrs_get(n.attrs,'id') or "" else ""
     if (id is string and starts_with(id,bookmark_prefix)) slice(id,len(bookmark_prefix)) else null
 }
-pub fn bookmarks(doc) => [for (entry in descendants(doc),let bookmark = bookmark_name(entry.node) where bookmark!=null)
+pub fn bookmarks(doc) => [for (entry in descendants(doc),let bookmark = bookmark_name(entry.node) where ((bookmark!=null) ^ { false }))
     {name:bookmark,path:entry.path,label:doc_text(entry.node)}]
-pub fn bookmark_selection(doc,name) {
+pub fn bookmark_selection(doc,name) any^ {
     let entry = [for (b in bookmarks(doc) where b.name==name) b][0]
     let leaf = if (entry==null) null else inline_format.leaves(node_at(doc,entry.path),entry.path)[0]
     let point = if (leaf==null) pos(entry.path,0) else pos(leaf.path,0)
     if (entry==null) null else text_selection(point,point)
 }
-fn bookmark_attrs(tx,path,name) {
+fn bookmark_attrs(tx,path,name) any^ {
     tx_step(tx,step_set_attr(path,'id',if (name==null) null else bookmark_id(name)))
 }
-fn remove_bookmarks(tx,entries,i=0) => if (i>=len(entries)) tx else
+fn remove_bookmarks(tx,entries,i=0) any^ => if (i>=len(entries)) tx else
     remove_bookmarks(bookmark_attrs(tx,entries[i].path,null),entries,i+1)
-fn valid_name(name) => name is string and len(name)>0 and len(name)<=40 and
+fn valid_name(name) any^ => name is string and len(name)>0 and len(name)<=40 and
     (contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_",slice(name,0,1)) ^ { false }) and
-    all([for (c in split(name,"")) contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789",c) ^ { false }])
+    all([for (c in ((split(name,"")) ^ { [] })) contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789",c) ^ { false }])
 pub fn bookmark_transaction(editor,id,p,block) map^ {
     let name = if (p.name is string) trim(p.name) else ""
-    let existing = [for (b in bookmarks(editor.doc) where b.name==name) b]
+    let existing = [for (b in ((bookmarks(editor.doc)) ^ { [] }) where b.name==name) b]
     if (id=="insert.deleteBookmark" and len(existing)==0) raise error("Word: this bookmark no longer exists")
     else if (id=="insert.bookmark" and (not valid_name(name) or block==null))
         raise error("Word: bookmark names use 1–40 letters, digits or underscores and cannot start with a digit")

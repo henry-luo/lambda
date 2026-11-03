@@ -27,7 +27,7 @@ let checks=[
     {name:"binomials remove the bar and emit explicit fences",ok:nodes("\\binom{n}{k}",'mfrac')^[0].linethickness=="0" and text("\\binom{n}{k}",'mo')^=="()"},
     {name:"display fractions explicitly scope the style",ok:nodes("\\dfrac{a}{b}",'mstyle')^[0].displaystyle=="true"},
     {name:"general fractions retain thickness, fences and style",ok:nodes("\\genfrac{(}{)}{0pt}{0}{n}{k}",'mfrac')^[0].linethickness=="0pt" and text("\\genfrac{(}{)}{0pt}{0}{n}{k}",'mo')^=="()"},
-    {name:"mathematical alphabets and groups retain scope",ok:join([for (n in svg.nodes(scoped,'mi')) util.text_of(n)],"")=="𝐱yz" and svg.nodes(scoped,'mi')[2].mathvariant=="normal"},
+    {name:"mathematical alphabets and groups retain scope",ok:join([for (n in ((svg.nodes(scoped,'mi')) ^ { [] })) util.text_of(n)],"")=="𝐱yz" and svg.nodes(scoped,'mi')[2].mathvariant=="normal"},
     {name:"TeX uppercase Greek stays upright",ok:nodes("\\Gamma",'mi')^[0].mathvariant=="normal"},
     {name:"text preserves its spaces and escapes through XML",ok:text("\\text{a b & c}",'mtext')^=="a b & c" and contains(format(convert("\\text{a b & c}")^,'xml')^,"&amp;")},
     {name:"accents attach to the base",ok:len(nodes("\\hat{x}",'mover')^)==1 and nodes("\\hat{x}",'mover')^[0].accent=="true"},

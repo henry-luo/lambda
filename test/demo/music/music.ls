@@ -19,7 +19,7 @@ let SHEETS = [
     {id: "morning-study", file: "a4-study.musicxml", about: "Piano · five systems on one page"},
     {id: "two-passes", file: "playback.musicxml", about: "Two instruments · repeats and endings"}]
 
-fn clock(seconds) => (let s = int(round(seconds)), string(int(floor(s / 60))) ++ ":" ++ (if (s % 60 < 10) "0" else "") ++ string(s % 60))
+fn clock(seconds) any^ => (let s = int(round(seconds)), string(int(floor(s / 60))) ++ ":" ++ (if (s % 60 < 10) "0" else "") ++ string(s % 60))
 
 // A sheet with its score and what the library shows of it; a score that
 // cannot be read stays listed with the reason.
@@ -33,7 +33,7 @@ fn entry(s) {
 let LIBRARY = [for (s in SHEETS) entry(s)]
 
 fn sheet_of(id) => [for (s in LIBRARY where s.id == id) s][0]
-fn details(s) => s.about ++ " · " ++ string(s.bars) ++ " bars" ++ (if (s.seconds == null) "" else " · " ++ clock(s.seconds))
+fn details(s) any^ => s.about ++ " · " ++ string(s.bars) ++ " bars" ++ (if (s.seconds == null) "" else " · " ++ clock(s.seconds))
 
 // a small staff with a note for each library row
 fn staff_icon() => <svg class:"sheet-icon", viewBox:"0 0 28 28", 'aria-hidden':"true",

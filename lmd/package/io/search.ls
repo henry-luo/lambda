@@ -1,6 +1,6 @@
 // D7.2.4v4: shared pure search for ordered package tables.
 // project encoded keys on demand without allocating a parallel key array.
-pub fn lower_bound(values,value,lo = 0,hi = null,key = null) int {
+pub fn lower_bound(values,value,lo = 0,hi = null,key = null) int^ {
     let end = if (hi == null) len(values) else hi
     let middle = (lo + end) div 2;
     if (lo >= end) lo

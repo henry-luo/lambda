@@ -19,7 +19,7 @@ view <scalability_demo> {
 }
 on click(evt) {
     let id=dom.get_attribute(evt.target,"id");
-    if (contains(["window-start","window-middle","window-end"],id)) {
+    if (contains(["window-start","window-middle","window-end"],id)^) {
         let from=if (id=="window-start") 0 else if (id=="window-middle") 5000 else 9991;
         let host=dom.query_selector(dom.closest(evt.target,"body"),"#large-history");
         dom.dispatch(host,{type:"timeline_action",detail:{type:"set_window",window:{from:from,to:from+8}}})

@@ -3,7 +3,7 @@ import structurizr: lambda.graph.structurizr.structurizr
 import expression: lambda.graph.structurizr.expressions
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn pairs(value, wanted) => [
@@ -42,10 +42,10 @@ let projected_user = model.nodes(retail)[0]
     expression.relationship_matches(entries, relation,
       "relationship.properties[protocol]==HTTPS")
   ],
-  projected: [[for (node in model.nodes(retail)) node.id],
-    [for (group in model.subgraphs(retail)) [group.id, group["c4-kind"], group.label]],
+  projected: [[for (node in ((model.nodes(retail)) ^ { [] })) node.id],
+    [for (group in ((model.subgraphs(retail)) ^ { [] })) [group.id, group["c4-kind"], group.label]],
     len(model.edges(retail)), pairs(projected_user, "property"),
     pairs(projected_user, "perspective")],
-  grouped: [for (node in model.nodes(sales)) [node.id, node.group]],
+  grouped: [for (node in ((model.nodes(sales)) ^ { [] })) [node.id, node.group]],
   excluded: len(model.edges(without_https))
 }

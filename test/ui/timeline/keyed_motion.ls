@@ -20,7 +20,7 @@ view <motion_demo> {
 on click(evt) {
     let id=dom.get_attribute(evt.target,"id");
     let root=dom.closest(evt.target,"body");
-    if (contains(["replace-axis","retarget-axis","replace-cards","replace-reduced"],id)) {
+    if (contains(["replace-axis","retarget-axis","replace-cards","replace-reduced"],id)^) {
         let spec=if (id=="replace-cards") {*:cards,events:[cards.events[1],{id:"c",title:"Gamma"}]}
             else {*:(if (id=="replace-reduced") reduced else axis),value:{window:{from:0,to:if (id=="replace-axis") 200 else 300}},
                 events:[axis.events[1],{id:"c",at:if (id=="replace-axis") 140 else 200,title:"Gamma"}]};

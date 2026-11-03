@@ -4,12 +4,12 @@ import font: lambda.doc.math.font
 import bundled: lambda.doc.math.bundled
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,{type:"math",flavor:"latex"})^
-fn render(source, options = null) => math.render_box(ast(source),options)^
+fn ast(source) any^ => parse(source,{type:"math",flavor:"latex"})^
+fn render(source, options = null) any^ => math.render_box(ast(source),options)^
 fn close(a,b) => abs(a - b) < 0.00001
-fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where g.text != "") g]
 fn signature(b) => [for (g in glyphs(b)) [g.text,g.x,g.y,g.node["font-size"]]]
-fn same(a,b) => a.type == b.type and close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth) and
+fn same(a,b) any^ => a.type == b.type and close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth) and
     signature(a) == signature(b)
 
 let styles = ["display","text","script","scriptscript"]
@@ -43,7 +43,7 @@ let checks = [
     {name:"circle stays in the existing CM symbol face",ok:all([for (entry in cases)
         glyphs(entry.box)[1].node["font-family"] == "KaTeX_Main"])},
     {name:"style sizes are 10/7/5 without outline stretching",ok:all([for (entry in cases)
-        all([for (g in glyphs(entry.box)) g.node["font-size"] == [1000,1000,700,500][entry.style] and
+        all([for (g in ((glyphs(entry.box)) ^ { [] })) g.node["font-size"] == [1000,1000,700,500][entry.style] and
             g.sx == 1.0 and g.sy == 1.0]) and len(svg.nodes(entry.box.element,'path')) == 0])},
     {name:"ooalign width is the maximum of its rows",ok:all([for (entry in cases)
         close(entry.box.width,max(entry.base.width,entry.circle.width))])},
@@ -62,14 +62,14 @@ let checks = [
     {name:"default integral limits match explicit nolimits",ok:all([for (entry in scripted)
         same(entry.normal,entry.side)])},
     {name:"side scripts attach at the compound operator advance",ok:all([for (entry in scripted)
-        (let painted = glyphs(entry.side),all([for (g in slice(painted,2,4))
+        (let painted = glyphs(entry.side),all([for (g in ((slice(painted,2,4)) ^ { [] }))
             close(g.x,entry.base.width * 1000.0)]) and painted[2].y < 0 and painted[3].y > 0)])},
     {name:"explicit limits center scripts without another font's italic correction",ok:all([for (entry in scripted)
         (let painted = glyphs(entry.stacked),
-        all([for (g in slice(painted,2,4)) close(g.x + render(g.text,{display:false}).width * 350.0,
+        all([for (g in ((slice(painted,2,4)) ^ { [] })) close(g.x + render(g.text,{display:false}).width * 350.0,
             entry.stacked.width * 500.0)]) and entry.stacked.height > entry.normal.height)])},
     {name:"size declarations scale both existing glyphs together",ok:all([for (entry in scaled)
-        all([for (g in glyphs(entry.box)) g.node["font-size"] == (if (entry.size == "small") 900 else 1200)])])},
+        all([for (g in ((glyphs(entry.box)) ^ { [] })) g.node["font-size"] == (if (entry.size == "small") 900 else 1200)])])},
     {name:"operator atom receives TeX thin space on either side",ok:close(surrounded.width,
         render("a").width + cases[2].box.width + render("b").width + 1.0 / 3.0)},
     {name:"literal Unicode contour integrals use the bundled composition",ok:

@@ -48,7 +48,7 @@ pub fn record(before,after,label,group=null) {
             hist:history.history_push(before.hist,tx)}
     }
 }
-pub fn step_history(st,redo=false) {
+pub fn step_history(st,redo=false) any^ {
     let result = if (redo) history.history_redo(st.hist,st.doc) else history.history_undo(st.hist,st.doc)
     model.restore({*:st,doc:result.doc,hist:result.hist,gesture:null,crop:null},result.sel)
 }
@@ -65,7 +65,7 @@ fn insert(st,node,parent=null) any^ {
 }
 fn duplicated(node,prefix) any^ {
     let renamed = img.with_properties(node,{id:prefix,name:model.value(node.name,"Layer") ++ " copy"})^
-    if (name(node) == 'stack') img.with_children(renamed,[for (i,child in content(node))
+    if (name(node) == 'stack') img.with_children(renamed,[for (i,child in ((content(node)) ^ { [] }))
         if (model.composition(child)) duplicated(child,prefix ++ "-" ++ string(i))^ else child])^
     else renamed
 }
@@ -79,7 +79,7 @@ fn same_parent(st) any^ {
 fn replace_selected(st,siblings,replacement) any^ {
     let chosen = [for (row in siblings.rows) row.id]
     let first = siblings.rows[0].index
-    let children = [for (i,child in content(siblings.node))
+    let children = [for (i,child in ((content(siblings.node)) ^ { [] }))
         *if (i == first) [replacement] else if (child.id in chosen) [] else [child]];
     {*:st,doc:img.replace_at(st.doc,siblings.path,img.with_children(siblings.node,children)^)^,
         selected:[replacement.id],target:"pixels"}
@@ -96,7 +96,7 @@ fn scaled(node,sx,sy) any^ {
     let geometry = if (name(node) == 'layer' and node.transform != null) (
         let m = node.transform,
         img.with_properties(changed,{transform:[m[0],m[1]*sy/sx,m[2]*sx/sy,m[3],m[4]*sx,m[5]*sy]})^) else changed;
-    img.with_children(geometry,[for (child in content(node))
+    img.with_children(geometry,[for (child in ((content(node)) ^ { [] }))
         if (name(child) == 'raster') img.resize(child,max(1,int(round(child.width*sx))),max(1,int(round(child.height*sy))))^
         else if (name(child) in ['stack','layer','mask']) scaled(child,sx,sy)^ else child])^
     }
@@ -138,10 +138,10 @@ fn edit_node(st,command) any^ {
         else img.with_children(node,[*content(node),img.mask(img.blank({width:if (model.adjustment(node)) st.doc.width else model.primary(node).width,
             height:if (model.adjustment(node)) st.doc.height else model.primary(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
             {position:[0,0],default:1.0,enabled:true,invert:false})])^)
-    else if (command.id == "mask.remove") img.with_children(node,[for (child in content(node) where name(child) != 'mask') child])^
+    else if (command.id == "mask.remove") img.with_children(node,[for (child in ((content(node)) ^ { [] }) where ((name(child) != 'mask') ^ { false })) child])^
     else if (command.id == "mask.toggle") (
         if (model.mask(node) == null) raise error("Raster: layer has no mask")
-        else img.with_children(node,[for (child in content(node)) if (name(child) == 'mask')
+        else img.with_children(node,[for (child in ((content(node)) ^ { [] })) if (name(child) == 'mask')
             img.with_properties(child,{enabled:child.enabled == false})^ else child])^)
     else raise error("Raster: unknown layer edit")
     {*:st,doc:model.replace(st.doc,row.id,changed)^,target:if (command.id == "mask.remove") "pixels" else st.target}
@@ -204,7 +204,7 @@ pub fn apply_command(st,command) any^ {
         let selected = model.unlocked_roots(st)^
         // remove deepest/rightmost siblings first so each remaining content path stays valid.
         let ordered = reverse(selected)
-        let changed = reduce([st.doc,*ordered],(image,row) => (
+        let changed = reduce([st.doc,*ordered],(image,row) any^ => (
             let container_path = sequence.parent_path(row.path),
             img.replace_at(image,container_path,img.remove(img.node_at(image,container_path)^,row.index)^)^));
         {*:st,doc:changed,selected:[],target:"pixels"}
@@ -213,14 +213,14 @@ pub fn apply_command(st,command) any^ {
         let rows = model.unlocked_roots(st)^
         if (not (command.dx is int) or not (command.dy is int)) raise error("Raster: movement requires integral pixel offsets")
         else if (command.dx == 0 and command.dy == 0) st
-        else {*:st,doc:reduce([st.doc,*rows],(image,row) => model.replace(image,row.id,model.translated(row.node,command.dx,command.dy)^)^)}
+        else {*:st,doc:reduce([st.doc,*rows],(image,row) any^ => model.replace(image,row.id,model.translated(row.node,command.dx,command.dy)^)^)}
     }
     else if (id == "layer.reorder") {
         let row = model.active(st)^
         let checked = model.unlocked_roots(st)^
         let path = sequence.parent_path(row.path)
         let container = img.node_at(st.doc,path)^
-        let entries = [for (i,child in content(container) where model.composition(child)) i]
+        let entries = [for (i,child in ((content(container)) ^ { [] }) where ((model.composition(child)) ^ { false })) i]
         let current = [for (i,index in entries where index == row.index) i][0]
         let requested = command.index
         if (not (requested is int) or requested<0 or requested>=len(entries)) raise error("Raster: invalid layer-list index")
@@ -230,7 +230,7 @@ pub fn apply_command(st,command) any^ {
     else if (id == "layer.group") {
         let siblings = same_parent(st)^
         let chosen = [for (row in siblings.rows) row.id]
-        let group = img.stack([for (child in content(siblings.node) where child.id in chosen) child],
+        let group = img.stack([for (child in ((content(siblings.node)) ^ { [] }) where child.id in chosen) child],
             {id:model.fresh_id(st.doc),name:model.value(command.name,"Group"),isolation:'isolated',visible:true,opacity:1.0});
         replace_selected(st,siblings,group)^
     }
@@ -239,7 +239,7 @@ pub fn apply_command(st,command) any^ {
         let chosen = [for (row in siblings.rows) row.id]
         let first = siblings.rows[0].index
         let last_index = siblings.rows[last].index
-        let adjacent = all([for (i,child in content(siblings.node) where model.composition(child) and i>=first and i<=last_index) child.id in chosen])
+        let adjacent = all([for (i,child in ((content(siblings.node)) ^ { [] }) where ((model.composition(child) and i>=first and i<=last_index) ^ { false })) child.id in chosen])
         if (not adjacent) raise error("Raster: select adjacent sibling layers to merge")
         else if (any([for (row in siblings.rows) model.adjustment(row.node) or not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true or
             row.node.isolation in ['pass_through',"pass_through"]]))
@@ -254,21 +254,21 @@ pub fn apply_command(st,command) any^ {
         let checked = model.unlocked_roots(st)^
         if (name(row.node) != 'stack' or model.value(row.node.opacity,1)!=1 or row.node.visible == false or
             not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or
-            (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in model.rows(row.node))
+            (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in ((model.rows(row.node)) ^ { [] }))
                 model.adjustment(descendant.node) or not (model.value(descendant.node.blend,'normal') in ['normal',"normal"]) or descendant.node.clipping == true])) or
-            model.mask(row.node) != null or any([for (c in content(row.node)) name(c) in ['effect','style']]))
+            model.mask(row.node) != null or any([for (c in ((content(row.node)) ^ { [] })) name(c) in ['effect','style']]))
             raise error("Raster: ungroup requires a visible, unmasked, full-opacity group")
         else {
             let path = sequence.parent_path(row.path)
             let parent = img.node_at(st.doc,path)^
-            let children = [for (child in content(row.node) where model.composition(child)) child]
+            let children = [for (child in ((content(row.node)) ^ { [] }) where ((model.composition(child)) ^ { false })) child]
             {*:st,doc:img.replace_at(st.doc,path,img.splice_children(parent,row.index,1,children)^)^,
                 selected:[for (child in children) child.id]}
         }
     }
     else if (id == "document.flatten") {
         let raster = img.render_frame(st.doc)^;
-        {*:st,doc:img.with_children(st.doc,[*[for (child in content(st.doc) where name(child) != 'stack') child],
+        {*:st,doc:img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where ((name(child) != 'stack') ^ { false })) child],
             img.stack([img.layer(raster,{id:model.fresh_id(st.doc),name:"Flattened",position:[0,0]})])])^,
             selected:[model.fresh_id(st.doc)],target:"pixels"}
     }

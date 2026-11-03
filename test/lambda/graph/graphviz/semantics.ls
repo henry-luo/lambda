@@ -2,8 +2,8 @@ import model: lambda.graph.model
 import normalize: lambda.graph.normalize
 
 fn property_values(value) => [
-  for (group in model.element_children(value), property in model.element_children(group)
-    where model.tag(group) == "properties" and model.tag(property) == "property")
+  for (group in model.element_children(value), property in ((model.element_children(group)) ^ { [] })
+    where ((model.tag(group) == "properties" and model.tag(property) == "property") ^ { false }))
     [property.name, property.value, property.origin, property["defining-scope"]]
 ]
 
@@ -18,12 +18,12 @@ let strict = normalize.normalize(strict_source)
   invalid: {
     valid: invalid.valid,
     codes: [for (value in invalid.diagnostics) value.code],
-    nodes: [for (value in model.nodes(invalid.graph)) value.id]
+    nodes: [for (value in ((model.nodes(invalid.graph)) ^ { [] })) value.id]
   },
   strict: {
     valid: strict.valid,
     directed: strict.graph.directed,
-    edges: [for (value in model.edges(strict.graph))
+    edges: [for (value in ((model.edges(strict.graph)) ^ { [] }))
       [value.id, value.from, value.to, value.stroke, value.weight, property_values(value)]]
   }
 }

@@ -35,8 +35,8 @@ fn label(value) => if (value == 'through-black') "Through Black" else if (value 
     else if (value == 'out') "Outward" else if (value == 'in') "Inward" else upper(slice(string(value),0,1)) ++ slice(string(value),1)
 pub fn menu_tree(st) {
     let spec = model.descriptor(st);
-    [*[for (direction in spec.directions) ribbon.item("transition-direction:" ++ string(direction),
+    [*[for (direction in ((spec.directions) ^ { [] })) ribbon.item("transition-direction:" ++ string(direction),
         if (len(spec.directions) == 2) (if (direction == 'left') "Horizontal" else "Vertical")
         else if (direction == 'left') "From Right" else if (direction == 'right') "From Left" else if (direction == 'top') "From Bottom" else "From Top","object_position")],
-        *if (len(spec.variants)>1) [for (variant in spec.variants) ribbon.item("transition-variant:" ++ string(variant),label(variant),"shapes")] else []]
+        *if (len(spec.variants)>1) [for (variant in ((spec.variants) ^ { [] })) ribbon.item("transition-variant:" ++ string(variant),label(variant),"shapes")] else []]
 }

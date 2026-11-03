@@ -2,7 +2,7 @@ import model: lambda.graph.model
 import structurizr: lambda.graph.structurizr.structurizr
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 let source = (input("test/lambda/graph/structurizr/this_relationships.dsl",
@@ -10,5 +10,5 @@ let source = (input("test/lambda/graph/structurizr/this_relationships.dsl",
 let workspace = structurizr.normalize(source)
 let c4_model = children(workspace, "c4-model")[0];
 
-[for (relation in children(c4_model, "c4-relationship"))
+[for (relation in ((children(c4_model, "c4-relationship")) ^ { [] }))
   [relation.id, relation.source, relation.destination, relation.description]]

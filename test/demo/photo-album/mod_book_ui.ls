@@ -3,11 +3,11 @@
 import L: .mod_library
 import B: .mod_book
 
-fn px(v) => string(round(v * 100) / 100) ++ "px"
+fn px(v) any^ => string(round(v * 100) / 100) ++ "px"
 fn find(items, key) => [for (it in items where it.key == key) it][0] or items[0]
 let HAND = "'Bradley Hand','Segoe Print','Comic Sans MS',cursive"
 
-fn caption(lib, p) {
+fn caption(lib, p) any^ {
     let place = L.album_name(lib, p);
     L.date_label(p) ++ (if (place != "") " · " ++ place else "")
 }
@@ -67,8 +67,8 @@ pub fn leaf(lib, book, i, s, options) => <div class:"bk-leaf", 'data-leaf':strin
     <div class:"bk-shade bk-shade-back">>
 
 // spread bar entries: one per turned-leaf count, with the spread's first photo
-pub fn spread_bar(lib, book) => <div class:"bk-spreads",
-    *[for (t in 0 to len(book.leaves)) (
+pub fn spread_bar(lib, book) any^ => <div class:"bk-spreads",
+    *[for (t in ((0 to len(book.leaves)) ^ { [] })) (
         let id = B.spread_photo(book, t),
         let p = if (id > 0) L.photo(lib, id) else null,
         <button type:"button", class:"bk-spread", 'data-spread':string(t), 'aria-current':"false", title:B.spread_label(book, t),

@@ -40,7 +40,7 @@ pub fn dialog(st) {
         <header class:"insert-dialog-heading",<h2 id:"insert-title",(if (form.target == "") "Insert " else "Edit ") ++ spec.label>;
             <button type:"button",'data-action':"insert-cancel",'aria-label':"Close dialog","×">>
         <p class:"insert-help",c.value(spec.help,"Insert settings are saved with the object and can be edited later.")>
-        <div class:"insert-fields",for (field in spec.fields) control(st,field)>
+        <div class:"insert-fields",for (field in ((spec.fields) ^ { [] })) control(st,field)>
         if (form.kind == "equation") <label class:"field",<span "Examples"><select id:"insert-example",<option value:"","Choose an equation…">;
             for (example in data.equations) <option value:example.id,example.label>>> else null;
         if (form.kind == "symbol") <div class:"insert-symbols",for (i,group in data.symbols)

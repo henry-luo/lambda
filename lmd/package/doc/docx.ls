@@ -11,7 +11,7 @@ fn checked(options) map^ {
     if (options != null and not (options is map)) raise c.fail("invalid-options","Options must be a map")
     else {
         let opts = if (options == null) {} else options
-        let unknown = [for (key,value in opts where not contains(option_names,string(key))) string(key)]
+        let unknown = [for (key,value in opts where ((not contains(option_names,string(key))) ^ { false })) string(key)]
         let mappings = c.get(opts,"style_map",{})
         let invalid = if (not (mappings is map)) [true] else [for (key,value in mappings)
             if (value is string) not contains(paragraph_tags,value) else if (value is map)
@@ -29,7 +29,7 @@ fn checked(options) map^ {
         else if (opts.presentation != null and not contains(["semantic","source"],opts.presentation))
             raise c.fail("invalid-options","presentation must be semantic or source")
         else if (opts.id_prefix != null and (not (opts.id_prefix is string) or
-            any([for (ch in split(opts.id_prefix,"")) ord(ch) < 33 or contains(["#","\\",":"],ch)])))
+            any([for (ch in ((split(opts.id_prefix,"")) ^ { [] })) ord(ch) < 33 or contains(["#","\\",":"],ch)])))
             raise c.fail("invalid-options","id_prefix must contain no whitespace or URL delimiters")
         else {style_map:mappings,include_empty_paragraphs:c.get(opts,"include_empty_paragraphs",false),
             images:c.get(opts,"images","data-uri"),id_prefix:c.get(opts,"id_prefix",""),

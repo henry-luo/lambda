@@ -4,10 +4,10 @@ import t: .time
 import d: .draw
 import l: .layout
 
-fn marks(event) => (
+fn marks(event) any^ => (
     let voice=event.part++"/"++string(event.staff)++"/"++event.voice,
     let ties=unique([*event.notation.ties,*event.notation.tied]),
-    [*[for (action in ["stop","start"] where contains(ties,action))
+    [*[for (action in ["stop","start"] where ((contains(ties,action)) ^ { false }))
         {kind:"tie",action:action,key:voice++"/tie/"++event.pitch.step++string(event.pitch.octave)++"/"++string(event.pitch.alter),id:event.id}],
      *[for (s in event.notation.slurs) {kind:"slur",action:s.kind,key:voice++"/slur/"++s.number,id:event.id,placement:s.placement}],
      *[for (s in event.notation.tuplets) {kind:"tuplet",action:s.kind,key:voice++"/tuplet/"++s.number,id:event.id,
@@ -22,7 +22,7 @@ fn connect(acc,mark) map^ {
      spans:if (mark.action=="stop") [*acc.spans,{*:opened,start:opened.id,end:mark.id,hook:mark.hook}] else acc.spans}
 }
 pub fn resolve(score) array^ {
-    let notes=[for (p in score.parts,bar in p.measures,e in bar.events,mark in marks(e))
+    let notes=[for (p in score.parts,bar in p.measures,e in bar.events,mark in ((marks(e)) ^ { [] }))
         {*:mark,position:t.add(bar.start,e.onset)^,duration:e.duration}]
     let wedges=[for (p in score.parts,bar in p.measures,i,dir in bar.directions,e in dir.entries where e.kind=="wedge")
         {kind:"wedge",action:if (contains(["crescendo","diminuendo"],e.value)) "start" else e.value,
@@ -32,7 +32,7 @@ pub fn resolve(score) array^ {
         {kind:"ending",action:if (b.ending.type=="discontinue") "stop" else b.ending.type,
          key:p.id++"/ending/"++b.ending.number,label:b.ending.number,hook:b.ending.type!="discontinue",
          id:p.id++"/measure/"++string(bar.index)++"/ending/"++string(i)}]
-    let result=c.fold([*notes,*wedges,*endings],{open:{},spans:[]},(acc,mark)=>connect(acc,mark)^)
+    let result=c.fold([*notes,*wedges,*endings],{open:{},spans:[]},(acc,mark)any^ =>connect(acc,mark)^)
     let closed=c.require(all([for (k,v in result.open) v==null]),"unclosed tie, slur, tuplet, or hairpin")^
     result.spans
 }
@@ -44,7 +44,7 @@ pub fn draw(span,layout) array^ {
     let valid=c.require(a==null and b==null or a!=null and b!=null and a.system<=b.system,
         "spanner endpoints are not in display order")^
     let profile=layout.profile;
-    if (a==null) [] else [for (system in layout.systems where system.index>=a.system and system.index<=b.system) (
+    if (a==null) [] else [for (system in layout.systems where ((system.index>=a.system and system.index<=b.system) ^ { false })) (
         let first_segment=system.index==a.system,
         let end_segment=system.index==b.system,
         let x1=if (first_segment) a.x+(if (contains(["wedge","ending"],span.kind)) 0.0 else a.glyph.advance*0.6) else system.left+0.5,

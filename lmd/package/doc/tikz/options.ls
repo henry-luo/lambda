@@ -6,19 +6,19 @@ let COLOR_NAMES = ["black", "blue", "red", "green", "darkgreen", "orange",
     "purple", "gray", "white", "yellow", "lightgray", "Silver", "Goldenrod",
     "Blue", "Red", "RoyalBlue", "VioletRed", "LightGrey"]
 
-pub fn normalize_key(key) {
+pub fn normalize_key(key) any^ {
     let spaces = replace(replace(replace(key, "\n", " "), "\t", " "),
         "\r", " ")
-    latex_util.str_join([for (part in split(spaces, " ") where part != "")
+    latex_util.str_join([for (part in ((split(spaces, " ")) ^ { [] }) where part != "")
         part], " ")
 }
 
-fn known_color(key, custom_colors) =>
+fn known_color(key, custom_colors) any^ =>
     len([for (name in COLOR_NAMES where name == key) name]) > 0 or
     (custom_colors != null and
         latex_util.lookup(custom_colors, key) != null)
 
-fn color_key(key, custom_colors = null) {
+fn color_key(key, custom_colors = null) any^ {
     let parts = split(key, "!")
     if (starts_with(key, "#") and len(key) == 7)
         latex_color.resolve_color(key, custom_colors) != null
@@ -35,21 +35,21 @@ fn color_key(key, custom_colors = null) {
 
 pub fn value(node, key, fallback = null) {
     let matches = [for (child in node
-        where child is element and string(name(child)) == "option" and
-              normalize_key(child.key) == key) child.value]
+        where ((child is element and string(name(child)) == "option" and
+              normalize_key(child.key) == key) ^ { false })) child.value]
     if (len(matches) == 0) fallback else matches[len(matches) - 1]
 }
 
 pub fn has(node, key) {
     len([for (child in node
-        where child is element and string(name(child)) == "option" and
-              normalize_key(child.key) == key) child]) > 0
+        where ((child is element and string(name(child)) == "option" and
+              normalize_key(child.key) == key) ^ { false })) child]) > 0
 }
 
 pub fn check(node, keys, custom_colors = null) bool^ {
     let unknown = [for (child in node
-        where child is element and string(name(child)) == "option" and
-              not allowed(normalize_key(child.key), keys, custom_colors)^) child.key]
+        where ((child is element and string(name(child)) == "option" and
+              not allowed(normalize_key(child.key), keys, custom_colors)^) ^ { false })) child.key]
     if (len(unknown) > 0)
         raise error("unsupported TikZ/PGFPlots option: " ++ unknown[0])
     else true
@@ -61,8 +61,8 @@ pub let STYLE_HANDLERS = ["/.style", "/.style 2 args", "/.append style", "/.defa
 
 // Handler keys on a node, after rejecting handlers outside STYLE_HANDLERS.
 pub fn handler_keys(node) any^ {
-    let handlers = [for (child in node where child is element and
-        string(name(child)) == "option" and contains(child.key, "/.")) child.key]
+    let handlers = [for (child in node where ((child is element and
+        string(name(child)) == "option" and contains(child.key, "/.")) ^ { false })) child.key]
     let unsupported = [for (key in handlers where not any([for (suffix in STYLE_HANDLERS)
         ends_with(key, suffix)])) key]
     if (len(unsupported) > 0) raise error("unsupported PGF key handler: " ++ unsupported[0])
@@ -72,8 +72,8 @@ pub fn handler_keys(node) any^ {
 // A picture-level \tikzset may only define handlers: a plain key such as `>=Stealth`
 // would change defaults the profile does not track, so it is diagnosed, not dropped.
 pub fn check_tikzset(setting) any^ {
-    let plain = [for (child in setting where child is element and
-        string(name(child)) == "option" and not contains(child.key, "/.")) child.key]
+    let plain = [for (child in setting where ((child is element and
+        string(name(child)) == "option" and not contains(child.key, "/.")) ^ { false })) child.key]
     if (len(plain) > 0) raise error("unsupported TikZ \\tikzset key: " ++ plain[0])
     else handler_keys(setting)^
 }
@@ -98,7 +98,7 @@ pub fn stroke_width(node, fallback) float^ {
 pub fn dash_array(node) any^ {
     let custom = value(node, "dash pattern", null)
     if (custom != null) {
-        let words = [for (part in split(trim(custom), " ") where trim(part) != "")
+        let words = [for (part in ((split(trim(custom), " ")) ^ { [] }) where trim(part) != "")
             trim(part)]
         if (len(words) != 4 or words[0] != "on" or words[2] != "off")
             raise error("unsupported TikZ dash pattern: " ++ custom)
@@ -148,9 +148,9 @@ pub fn dimension_px(source, text_width_px = null) float^ {
 }
 
 pub fn color(node, fallback, custom_colors = null) string^ {
-    let named = [for (child in node where child is element and
+    let named = [for (child in node where ((child is element and
         string(name(child)) == "option" and child.value == "" and
-        color_key(child.key, custom_colors)) child.key]
+        color_key(child.key, custom_colors)) ^ { false })) child.key]
     let color_name = if (len(named) > 0) named[len(named) - 1]
         else value(node, "color", fallback)
     color_value(color_name, custom_colors)^

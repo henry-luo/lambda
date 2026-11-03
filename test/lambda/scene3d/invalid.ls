@@ -1,5 +1,5 @@
 import s: lambda.scene3d
-fn message(scene) => s.normalize(scene) ^ { ^.message }
+fn message(scene) any^ => s.normalize(scene) ^ { ^.message }
 let camera = s.camera({id: "main"});
 [
  *[for (size in [0, -1, 1.5, 4097, "small"]) contains(message(s.scene([camera,

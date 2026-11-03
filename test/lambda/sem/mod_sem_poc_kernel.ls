@@ -32,7 +32,7 @@
 // `[for …]`, not a bare `for`: a computed one-item list IS its item and an
 // empty one is null (S2.5.5v2), so `len` of a bare comprehension over one hit
 // would read the hit's own content rather than 1.
-pub fn lookup(env, n) => {
+pub fn lookup(env, n) any^ => {
     let hits = [for (b in env where b.n == n) b]
     if (len(hits) == 0) stuck("unbound variable " ++ string(n))^
     else if (hits[0].l) (for (x in hits[0].v) x)
@@ -53,7 +53,7 @@ pub fn unwrap(b) => if (b.l) (for (x in b.v) x) else b.v
 // bind a parameter list to already-evaluated (wrapped) arguments, left to
 // right. Takes no terms and never calls `ev`, so it needs no mutual recursion
 // with the judgment.
-pub fn bind_params(env, ps, args, i) =>
+pub fn bind_params(env, ps, args, i) any^ =>
     if (i >= len(ps)) env
     else bind_params(bind(env, ps[i], unwrap(args[i])), ps, args, i + 1)
 
@@ -127,21 +127,21 @@ fn is_sequence(v) => not is_errv(v) and not is_closure(v) and
 // closure has no Mark spelling that reads back as itself and is left as it is,
 // which keeps its fixture pending rather than suspect.
 fn key_text(k) => "\"" ++ replace(replace(string(k), "\\", "\\\\"), "\"", "\\\"") ++ "\""
-fn unprintable(v) => is_errv(v) or type(v) == error or type(v) == type or is_closure(v)
+fn unprintable(v) any^ => is_errv(v) or type(v) == error or type(v) == type or is_closure(v)
   or is_mapv(v) or is_elmv(v)
-  or ((type(v) == array or type(v) == map) and len([for (x in v where unprintable(x)) x]) > 0)
-fn mapv_text(m) => join([for (e in content(m)) key_text(e.k) ++ ": " ++ format(printable(e.v), 'mark')], ", ")
-fn elmv_text(e) {
-    let attrs = [for (a in content(elmv_attrs(e))) key_text(a.k) ++ ": " ++ format(printable(a.v), 'mark')]
+  or ((type(v) == array or type(v) == map) and len([for (x in v where ((unprintable(x)) ^ { false })) x]) > 0)
+fn mapv_text(m) => join([for (e in ((content(m)) ^ { [] })) key_text(e.k) ++ ": " ++ format(printable(e.v), 'mark')], ", ")
+fn elmv_text(e) any^ {
+    let attrs = [for (a in ((content(elmv_attrs(e))) ^ { [] })) key_text(a.k) ++ ": " ++ format(printable(a.v), 'mark')]
     let kids = [for (c in elmv_kids(e)) format(printable(c), 'mark')]
     let sep = if (len(attrs) > 0 and len(kids) > 0) ", " else "";
     "<" ++ string(e.n) ++ (if (len(attrs) > 0) " " ++ join(attrs, ", ") else "") ++ sep ++ (if (len(kids) > 0) " " ++ join(kids, " ") else "") ++ ">"
 }
-fn printable_parts(parts) => len([for (x in parts where unprintable(printable(x))) x]) == 0
+fn printable_parts(parts) any^ => len([for (x in parts where ((unprintable(printable(x))) ^ { false })) x]) == 0
 pub fn printable(v) any | error {
     if (is_errv(v)) v.v
-    else if (is_mapv(v)) (if (printable_parts([for (e in content(v)) e.v])) (parse("{" ++ mapv_text(v) ++ "}", 'mark') ^ { v }) else v)
-    else if (is_elmv(v)) (if (printable_parts([for (x in [[for (a in content(elmv_attrs(v))) a.v], elmv_kids(v)]) for (y in x) y])) (parse(elmv_text(v), 'mark') ^ { v }) else v)
+    else if (is_mapv(v)) (if (printable_parts([for (e in ((content(v)) ^ { [] })) e.v])) (parse("{" ++ mapv_text(v) ++ "}", 'mark') ^ { v }) else v)
+    else if (is_elmv(v)) (if (printable_parts([for (x in [[for (a in ((content(elmv_attrs(v))) ^ { [] })) a.v], elmv_kids(v)]) for (y in x) y])) (parse(elmv_text(v), 'mark') ^ { v }) else v)
     else if (type(v) == array) [for (x in v) printable(x)]
     else if (type(v) == list) (for (x in v) printable(x))
     else v
@@ -153,7 +153,7 @@ pub fn printable(v) any | error {
 // an element walks its attribute values then its children (S8.1.2v3)
 fn walk_items(src) => if (is_mapv(src)) [for (e in src) e.v]
     else if (is_elmv(src)) [for (x in [walk_items(elmv_attrs(src)), elmv_kids(src)]) for (y in x) y]
-    else [for (x in raw(src)) x]
+    else [for (x in ((raw(src)) ^ { [] })) x]
 // `*v`: a sequence contributes its members, null nothing, and any other
 // scalar — text included — itself (`[*5]` is `[5]`, `[*"ab"]` is `["ab"]`)
 fn spread_items(v) => if (v is null) [] else if (is_sequence(v)) walk_items(v) else [v]
@@ -169,11 +169,11 @@ fn walk_keys(src, items) => if (is_mapv(src)) [for (e in src) symbol(e.k)]
 // and which positional (an array's or a range's items, an element's children),
 // so an `at`/`of` axis or a `k: symbol`/`k: int` key class can keep one kind
 fn walk_kinds(src, items) => if (is_mapv(src)) [for (x in items) "name"]
-    else if (is_elmv(src)) [for (x in [[for (a in content(elmv_attrs(src))) "name"], [for (c in elmv_kids(src)) "pos"]]) for (y in x) y]
+    else if (is_elmv(src)) [for (x in [[for (a in ((content(elmv_attrs(src))) ^ { [] })) "name"], [for (c in elmv_kids(src)) "pos"]]) for (y in x) y]
     else if (type(raw(src)) == map or type(raw(src)) == element) [for (x in [[for (k in host_names(src)) "name"], [for (i in host_positions(src)) "pos"]]) for (y in x) y]
     else [for (x in items) "pos"]
 // the one-name `at`/`of` form binds the key itself (S8.1.3v2)
-fn for_env(env, t, x, k) => if (t.ko == true) bind(env, t.n, k)
+fn for_env(env, t, x, k) any^ => if (t.ko == true) bind(env, t.n, k)
     else if (t.i != null) bind(bind(env, t.n, x), t.i, k) else bind(env, t.n, x)
 // What a child contributes in a SPLICE position — an array item, a list item,
 // a content item, a `for` or pipe body — as an array of items, never a bare
@@ -203,19 +203,19 @@ fn forr_items(t, env, fuel) any^ {
     let keys = walk_keys(src, items)
     let kinds = walk_kinds(src, items)
     let wanted = if (t.kf == null) null else if (string(t.kf) == "symbol") "name" else "pos"
-    let kept = [for (j in 0 to len(items) - 1
-                     where (wanted == null or kinds[j] == wanted) and
-                           ((t.w != true) or truthy(ev(t[2], for_env(env, t, items[j], keys[j]), fuel)^))) j]
+    let kept = [for (j in ((0 to len(items) - 1) ^ { [] })
+                     where (((wanted == null or kinds[j] == wanted) and
+                           ((t.w != true) or truthy(ev(t[2], for_env(env, t, items[j], keys[j]), fuel)^))) ^ { false })) j]
     // `order by` sorts the surviving rows by their key, stably (S6.2.1), then
     // `offset` drops and `limit` keeps a count of rows, in that order
     let ordered = if (t.ok == null) kept
-        else { let ks = [for (j in kept) ev(t.ok, for_env(env, t, items[j], keys[j]), fuel)^];  [for (p in sorted_positions(ks, 0, [], t.desc == true)) kept[p]] }
+        else { let ks = [for (j in kept) ev(t.ok, for_env(env, t, items[j], keys[j]), fuel)^];  [for (p in ((sorted_positions(ks, 0, [], t.desc == true)) ^ { [] })) kept[p]] }
     let off = if (t.off == null) 0 else val(ev(t.off, env, fuel)^)
     let lim = if (t.lim == null) len(ordered) else val(ev(t.lim, env, fuel)^)
-    let after = [for (p in off to len(ordered) - 1) ordered[p]]
+    let after = [for (p in ((off to len(ordered) - 1) ^ { [] })) ordered[p]]
     // `limit last N` keeps the final N rows instead of the first
-    let rows = if (t.last == true) [for (p in len(after) - lim to len(after) - 1 where p >= 0) after[p]]
-               else [for (p in 0 to lim - 1 where p < len(after)) after[p]];
+    let rows = if (t.last == true) [for (p in ((len(after) - lim to len(after) - 1) ^ { [] }) where p >= 0) after[p]]
+               else [for (p in ((0 to lim - 1) ^ { [] }) where p < len(after)) after[p]];
     [for (j in rows) for (x in items_of(t[1], for_env(env, t, items[j], keys[j]), fuel)^) x]
 }
 
@@ -260,7 +260,7 @@ fn union_type(parts, i, acc) any^ =>
 // a type may continue across a line break (`int ⏎ ?`, S16.2.2v2), and the
 // dump's span can run on into a following comment (F20), so the source is
 // read line by line with comments dropped
-fn code_line(line) { let i = index_of(line, "//");  if (i == null) line else slice(line, 0, i) }
+fn code_line(line) any^ { let i = index_of(line, "//");  if (i == null) line else slice(line, 0, i) }
 fn type_value(src) any^ {
     let s = replace(trim(join([for (line in split(string(src), "\n")) trim(code_line(line))], " ")), " ?", "?")
     if (contains(s, "|")) union_type(split(s, "|"), 0, null)^
@@ -279,9 +279,9 @@ fn type_value(src) any^ {
 // document to format) is rebuilt as a host value first (P12); one that
 // cannot be stays itself and the builtin's own arm decides
 fn arg(args, i) any => if (i < len(args)) val(host_arg(unwrap(args[i]))) else null
-fn host_arg(v) => if (is_mapv(v) or is_elmv(v)) printable(v) else v
+fn host_arg(v) any^ => if (is_mapv(v) or is_elmv(v)) printable(v) else v
 fn error_arg(args) {
-    let errs = [for (x in args where is_errv(unwrap(x))) unwrap(x)]
+    let errs = [for (x in args where ((is_errv(unwrap(x))) ^ { false })) unwrap(x)]
     if (len(errs) > 0) errs[0] else null
 }
 // a stable insertion sort of positions by their keys, the host's `<` deciding
@@ -291,7 +291,7 @@ fn insert_pos(order, keys, j, desc) {
     let after = [for (i in order where not (if (desc) keys[i] >= keys[j] else keys[i] <= keys[j])) i];
     [for (x in [before, [j], after]) for (y in x) y]
 }
-fn sorted_positions(keys, j, order, desc) =>
+fn sorted_positions(keys, j, order, desc) any^ =>
     if (j >= len(keys)) order else sorted_positions(keys, j + 1, insert_pos(order, keys, j, desc), desc)
 fn keyed_sort(a, f, desc, fuel) any^ {
     let items = walk_items(a)
@@ -525,7 +525,7 @@ pub fn ev(t, env, fuel) any^ =>
     case 'att': {
         let x = ev(t[0], env, fuel - 1)^
         let b = ev(t[1], env, fuel - 1)^
-        if (is_mapv(b) or is_elmv(b)) contains([for (kk in walk_keys(b, walk_items(b))) string(kk)], string(raw(x)))
+        if (is_mapv(b) or is_elmv(b)) contains([for (kk in ((walk_keys(b, walk_items(b))) ^ { [] })) string(kk)], string(raw(x)))
         else binop(x, b, "at")^
     }
     case 'inn': {
@@ -685,7 +685,7 @@ pub fn ev(t, env, fuel) any^ =>
         else {
             let items = walk_items(src)
             let keys = walk_keys(src, items);
-            [for (j in 0 to len(items) - 1)
+            [for (j in ((0 to len(items) - 1) ^ { [] }))
                 for (x in items_of(t[1], bind(bind(env, "~", items[j]), "~#", keys[j]), fuel - 1)^) x]
         }
     }
@@ -709,7 +709,7 @@ pub fn ev(t, env, fuel) any^ =>
         else {
             let items = walk_items(src)
             let keys = walk_keys(src, items);
-            [for (j in 0 to len(items) - 1
+            [for (j in ((0 to len(items) - 1) ^ { [] })
                   where truthy(ev(t[1], bind(bind(env, "~", items[j]), "~#", keys[j]), fuel - 1)^))
                 items[j]]
         }
@@ -767,7 +767,7 @@ pub fn ev(t, env, fuel) any^ =>
     case 'lenn': { let a = raw(ev(t[0], env, fuel - 1)^);  host(len(a))^ }
     // a system function by name, through the declared builtin table above
     case 'syscall': {
-        let args = [for (i in 0 to len(content(t)) - 1) wrap(ev(t[i], env, fuel - 1)^)]
+        let args = [for (i in ((0 to len(content(t)) - 1) ^ { [] })) wrap(ev(t[i], env, fuel - 1)^)]
         builtin(t.n, args, fuel - 1)^
     }
 
@@ -795,7 +795,7 @@ fn apply_body(body, env, fuel) any^ =>
 // a named argument: the wrapper also records the parameter name
 fn narg_wrap(t, env, fuel) any^ { let v = ev(t[0], env, fuel)^;  <b v: v, l: type(v) == list, p: t.n> }
 // bind the group's members as closures over `cenv`, each carrying the group
-fn bind_group(env, group, cenv, i) =>
+fn bind_group(env, group, cenv, i) any^ =>
     if (i >= len(group)) env
     else {
         let g = group[i]
@@ -817,7 +817,7 @@ fn apply_modelled(f, args, fuel) any^ {
     let cenv = f[1]
     let positional = [for (a in args where a.p == null) a]
     let named = [for (a in args where a.p != null) a]
-    let known = [for (a in named where contains(ps, a.p)) a]
+    let known = [for (a in named where ((contains(ps, a.p)) ^ { false })) a]
     if (len(ps) != len(args) or len(known) != len(named)) stuck("arity mismatch")^
     else {
         let env1 = bind_params(cenv, ps, positional, 0)
@@ -828,7 +828,7 @@ fn apply_modelled(f, args, fuel) any^ {
         apply_body(body, env3, fuel)^
     }
 }
-fn bind_named(env, named, i) =>
+fn bind_named(env, named, i) any^ =>
     if (i >= len(named)) env else bind_named(bind(env, named[i].p, unwrap(named[i])), named, i + 1)
 // a left fold with a modelled function: `reduce([])` is null, one item is itself
 fn fold(xs, f, fuel) any^ {
@@ -886,14 +886,14 @@ fn dedupe_ents(ents, i, acc) {
     if (i >= len(ents)) acc
     else {
         let e = ents[i]
-        let seen = [for (x in acc where string(x.k) == string(e.k)) x]
+        let seen = [for (x in acc where ((string(x.k) == string(e.k)) ^ { false })) x]
         let next = if (len(seen) == 0) [for (x in [acc, [e]]) for (y in x) y]
                    else [for (x in acc) (if (string(x.k) == string(e.k)) e else x)]
         dedupe_ents(ents, i + 1, next)
     }
 }
 fn mapv_get(m, k) {
-    let hits = [for (e in m where string(e.k) == string(k)) e.v]
+    let hits = [for (e in m where ((string(e.k) == string(k)) ^ { false })) e.v]
     if (len(hits) > 0) hits[len(hits) - 1] else null
 }
 fn mapv_keys(m) => unique([for (e in m) e.k])

@@ -8,17 +8,17 @@ import commands: .mod_commands
 import adapter: .mod_dom_adapter
 import dom
 
-fn image_node(n) => is_node(n) and contains(['img','image'],n.tag)
-pub fn images(doc) => [for (entry in descendants(doc) where image_node(entry.node)) entry]
-pub fn selected(editor) {
+fn image_node(n) any^ => is_node(n) and contains(['img','image'],n.tag)
+pub fn images(doc) => [for (entry in descendants(doc) where ((image_node(entry.node)) ^ { false })) entry]
+pub fn selected(editor) any^ {
     let path = editor.selection.path
     let n = if (editor.selection.kind=='node') node_at(editor.doc,path) else null
     if (image_node(n)) {path:path,node:n} else null
 }
 pub pn image_element(editor,surface,path=null) {
     let target = if (path==null) selected(editor).path else path
-    let entries = [for (entry in images(editor.doc) where entry.node.tag=='img') entry]
-    let index = [for (i,entry in entries where entry.path==target) i][0]
+    let entries = [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry]
+    let index = [for (i,entry in entries where (entry.path==target)^) i][0]
     return if (surface==null or index==null) null else dom.query_selector_all(surface,"img")[index]
 }
 // The projection preserves image order; a press selects its model atom before native caret placement.
@@ -27,11 +27,11 @@ pub pn hit(editor,node,surface) {
     if (target==null or surface==null or not dom.contains(surface,target)) { return null }
     let nodes = dom.query_selector_all(surface,"img")
     let index = [for (i,n in nodes where n==target) i][0]
-    return [for (entry in images(editor.doc) where entry.node.tag=='img') entry.path][index]
+    return [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry.path][index]
 }
-pub fn select_image(editor,path) => if (image_node(node_at(editor.doc,path)))
+pub fn select_image(editor,path) any^ => if (image_node(node_at(editor.doc,path)))
     edit_set_selection(editor,node_selection(path)) else editor
-pub fn resize_transaction(tx,path,width,height) =>
+pub fn resize_transaction(tx,path,width,height) any^ =>
     tx_step(tx_step(tx,step_set_attr(path,'width',width)),step_set_attr(path,'height',height))
 pub fn resize_image(editor,path,width,height) map^ {
     let image = node_at(editor.doc,path)
@@ -42,9 +42,9 @@ pub fn resize_image(editor,path,width,height) map^ {
     else edit_apply(editor,resize_transaction(tx_set_selection(tx_begin(editor.doc,editor.selection),node_selection(path)),path,width,height))
 }
 
-pub fn move_transaction(editor,path,target) => if (not image_node(node_at(editor.doc,path))) null
+pub fn move_transaction(editor,path,target) any^ => if (not image_node(node_at(editor.doc,path))) null
     else commands.cmd_move_inline_node(editor,path,target)
-pub fn move_image(editor,path,target) {
+pub fn move_image(editor,path,target) any^ {
     let tx = move_transaction(editor,path,target)
     if (tx==null) editor else edit_apply(editor,tx)
 }
@@ -57,7 +57,7 @@ pub pn drop_target(editor,path,evt,surface) {
     let hit = dom.element_from_point(dom.owner_document(surface),evt.clientX,evt.clientY)
     if (hit==null or not dom.contains(surface,hit)) { return null }
     let target = adapter.normalize_source_pos(editor.doc,evt.source_pos)
-    if (move_transaction(editor,path,target)==null) { return null }
+    if ((move_transaction(editor,path,target)==null)^) { return null }
     let boundary = dom.boundary_from_point(surface,int(evt.clientX),int(evt.clientY),null)
     if (boundary==null or not dom.contains(surface,boundary.node)) { return null }
     let caret_range = dom.document_create_range(dom.root_node(surface))

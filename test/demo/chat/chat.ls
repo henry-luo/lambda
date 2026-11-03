@@ -9,10 +9,10 @@ import tree: lambda.dom.tree
 import resources: ~~.mod_resources
 let CSS = input(url_resolve(resources.entry_uri()^, "chat.css"), 'text')^
 let ROOT = config.root
-let REQUESTED_USER = config.setting("CHAT_DEMO_USER", chat.profiles[0].id)
+let REQUESTED_USER = config.setting("CHAT_DEMO_USER", chat.profiles[0].id)^
 let VALID_USER = chat.profile(REQUESTED_USER) != null
 let DEFAULT_PEER = [for (p in chat.profiles where p.id != REQUESTED_USER) p.id][0]
-let REQUESTED_PEER = config.setting("CHAT_DEMO_PEER", DEFAULT_PEER)
+let REQUESTED_PEER = config.setting("CHAT_DEMO_PEER", DEFAULT_PEER)^
 let VALID_PEER = chat.profile(REQUESTED_PEER) != null and REQUESTED_PEER != REQUESTED_USER
 
 pn serve_demo(root) {
@@ -35,14 +35,14 @@ pn start_client(root, endpoint, user) {
 }
 pn mark_read(st, writer) {
     if (writer == null) { return null }
-    for (m in chat.conversation(st.inboxes[st.user] or [], st.user, st.peer) where m.to == st.user and m.status != "read") {
+    for (m in chat.conversation((st.inboxes[st.user] or^ { [] }), st.user, st.peer)^ where m.to == st.user and m.status != "read") {
         send(writer, {type: "read", id: m.id, from: m.from}) ^ { null }
     }
 }
 pn submit(st, writers) {
     let text = trim(st.draft)
     if (text == "" and st.attachment == null) { return {*: st, note: "Write a message first."} }
-    if (len(text) > 4000) { return {*: st, note: "Please keep messages under 4000 characters."} }
+    if (len(text)^ > 4000) { return {*: st, note: "Please keep messages under 4000 characters."} }
     if (writers[st.user] == null or st.online[st.user] != true) { return {*: st, note: "Reconnect to send your message."} }
     let id = uuid()^
     let attachment_fields = if (st.attachment == null) ({}) else ({attachment:st.attachment})
@@ -51,7 +51,7 @@ pn submit(st, writers) {
     let queued = {id: id, seq: 0, from: st.user, to: st.peer, text: text,
         stamp: now().format("hh:mm"), status: "queued", *:attachment_fields}
     return {*: st, draft: "", attachment:null, emoji:false, note: null,
-        inboxes: {*: st.inboxes, [st.user]: chat.merge(st.inboxes[st.user] or [], queued)}}
+        inboxes: {*: st.inboxes, [st.user]: chat.merge((st.inboxes[st.user] or^ { [] }), queued)}}
 }
 fn node(root, id) => dom.get_element_by_id(dom.root_node(root), id)
 pn clear_draft(root) {
@@ -91,7 +91,7 @@ view <chat_app> state st: initial(), server: null, clients: {}, writers: {} {
 }
 on load(evt) {
     if (server != null or st.ready) { return 'pass' }
-    if (not VALID_USER or not VALID_PEER) { return 'handled' }
+    if ((not VALID_USER or not VALID_PEER)^) { return 'handled' }
     let root = evt.target
     if (st.shared) {
         // one window owns one identity; it must not connect the other profiles
@@ -124,15 +124,15 @@ on chat(evt) {
             online = {}
             for (user in e.online) { online = {*: online, [user]: true} }
         }
-        st = {*: st, online: online, inboxes: {*: st.inboxes, [e.user]: reduce([(st.inboxes[e.user] or []), *e.messages], (items, m) => chat.merge(items, m))}}
-        if (e.user == st.user) mark_read(st, writers[st.user])
+        st = {*: st, online: online, inboxes: {*: st.inboxes, [e.user]: reduce([((st.inboxes[e.user] or^ { [] })), *e.messages], (items, m) => chat.merge(items, m))}}
+        if (e.user == st.user) mark_read(st, writers[st.user])^
     } else if (e.type == "presence") {
         st = {*: st, online: {*: st.online, [e.peer]: e.online}}
     } else if (e.type == "message") {
-        st = {*: st, inboxes: {*: st.inboxes, [e.user]: chat.merge(st.inboxes[e.user] or [], e.message)}}
+        st = {*: st, inboxes: {*: st.inboxes, [e.user]: chat.merge((st.inboxes[e.user] or^ { [] }), e.message)}}
         if (e.user == st.user and e.message.to == st.user and e.message.from == st.peer)
-            mark_read(st, writers[st.user])
-        scroll_messages(evt.target)
+            mark_read(st, writers[st.user])^
+        scroll_messages(evt.target)^
     } else if (e.type == "error") {
         st = {*: st, note: e.message}
     }
@@ -144,12 +144,12 @@ on click(evt) {
     let action = dom.get_attribute(button, "data-action")
     if (action == "contact") {
         st = {*: st, peer: dom.get_attribute(button, "data-value"), draft: "", attachment:null, emoji:false, note: null}
-        mark_read(st, writers[st.user])
+        mark_read(st, writers[st.user])^
     } else if (action == "send" or action == "hello") {
         let draft = if (action == "hello") "Hey " ++ split(chat.profile(st.peer).name, " ")[0] ++ ", how's your day going?" else dom.get_state(node(evt.target, "draft"), "value") or st.draft
         st = submit({*: st, draft: draft}, writers)
-        if (st.draft == "") clear_draft(evt.target)
-        scroll_messages(evt.target)
+        if ((st.draft == "")^) clear_draft(evt.target)^
+        scroll_messages(evt.target)^
     } else if (action == "emoji-toggle") {
         st = {*:st, emoji:not st.emoji}
     } else if (action == "emoji-insert") {
@@ -158,14 +158,14 @@ on click(evt) {
         let begin = dom.tc_selection_start(field)
         let end = dom.tc_selection_end(field)
         let text = dom.get_state(field, "value") or ""
-        if (len(text) - (end - begin) + len(emoji) <= 4000) {
+        if (len(text)^ - (end - begin) + len(emoji)^ <= 4000) {
             // selection helpers and the editor splice both use Lambda code points.
             dom.edit_replace_range(field, begin, end, emoji)
             st = {*:st, draft:dom.get_state(field, "value"), note:null}
             dom.focus_set(field, false)
         } else { st = {*:st, note:"Please keep messages under 4000 characters."} }
     } else if (action == "attach-file") {
-        if (st.attachment != null) { st = {*:st, note:"Send or remove the current attachment first."} }
+        if ((st.attachment != null)^) { st = {*:st, note:"Send or remove the current attachment first."} }
         else {
             let d = files.navigate(sys.proc.self.cwd#) ^ { ^ }
             st = if (d is error) {*:st, note:d.message} else {*:st, dialog:d, emoji:false}
@@ -177,7 +177,7 @@ on click(evt) {
             st = if (d is error) {*:st, dialog:{*:st.dialog, error:d.message}} else {*:st, dialog:d}
         } else {
             st = {*:st, dialog:{*:st.dialog, path:path, error:null}}
-            dom.set_state(node(evt.target, "attachment-path"), "value", path)
+            dom.set_state(node(evt.target, "attachment-path")^, "value", path)
         }
     } else if (action == "folder-up") {
         let d = files.navigate(files.parent(st.dialog.folder)) ^ { ^ }
@@ -192,15 +192,15 @@ on click(evt) {
         let snapshot = dom.clipboard_read()
         st = if (snapshot.image == null) {*:st, note:"Copy an image to the clipboard first."} else stage_image(st, snapshot.image)
     } else if (action == "save-attachment") {
-        let message = [for (m in st.inboxes[st.user] or [] where m.id == dom.get_attribute(button, "data-id")
+        let message = [for (m in (st.inboxes[st.user] or^ { [] }) where m.id == dom.get_attribute(button, "data-id")
             and m.from == dom.get_attribute(button, "data-from")) m][0]
         st = {*:st, dialog:{kind:"save", attachment:message.attachment,
             path:ROOT ++ "/downloads/" ++ st.user ++ "/" ++ message.attachment.name, error:null}}
     } else if (action == "connection") {
-        if (st.online[st.user] == true and writers[st.user] != null) {
+        if ((st.online[st.user] == true and writers[st.user] != null)^) {
             send(writers[st.user], {op: 'disconnect'}) ^ { null }
             st = {*: st, online: {*: st.online, [st.user]: false}}
-        } else if (st.endpoint != null) {
+        } else if ((st.endpoint != null)^) {
             clients = {*: clients, [st.user]: start_client(dom.root_node(evt.target), st.endpoint, st.user)}
         }
     }
@@ -210,7 +210,7 @@ on input(evt) {
     let id = dom.get_attribute(evt.target, "id")
     if (id == "draft") { st = {*: st, draft: dom.get_state(evt.target, "value") or "", note: null} }
     else if (id == "search") { st = {*: st, query: dom.get_state(evt.target, "value") or ""} }
-    else if (id == "attachment-path" and st.dialog != null) {
+    else if ((id == "attachment-path" and st.dialog != null)^) {
         st = {*:st, dialog:{*:st.dialog, path:dom.get_state(evt.target, "value") or "", error:null}}
     }
     else { return 'pass' }
@@ -220,21 +220,21 @@ on change(evt) {
     let id = dom.get_attribute(evt.target, "id")
     let value = dom.get_state(evt.target, "value")
     if (id == "profile") {
-        if (st.shared) { return 'handled' }
+        if ((st.shared)^) { return 'handled' }
         let old = st.user
         st = {*: st, user: value, peer: if (st.peer == value) old else st.peer, draft: "", attachment:null, emoji:false, note: null}
     } else if (id == "peer-select") { st = {*: st, peer: value, draft: "", attachment:null, emoji:false, note: null} }
     else if (id == "compress-images") { st = {*:st, compress_images:dom.get_state(evt.target, "checked")}; return 'handled' }
     else { return 'pass' }
-    clear_draft(evt.target)
-    mark_read(st, writers[st.user])
+    clear_draft(evt.target)^
+    mark_read(st, writers[st.user])^
     return 'handled'
 }
 on keydown(evt) {
-    if (st.dialog != null) {
+    if ((st.dialog != null)^) {
         if (evt.key == "Escape") {
             st = {*:st, dialog:null}
-            dom.focus_set(node(evt.target, "draft"), false)
+            dom.focus_set(node(evt.target, "draft")^, false)
             return 'prevent-default'
         }
         if (evt.key == "Tab") {
@@ -254,7 +254,7 @@ on keydown(evt) {
     }
     if (evt.key == "Enter" and not evt.shiftKey and dom.get_attribute(evt.target, "id") == "draft") {
         st = submit({*: st, draft: dom.get_state(evt.target, "value") or ""}, writers)
-        if (st.draft == "") clear_draft(evt.target)
+        if ((st.draft == "")^) clear_draft(evt.target)^
         return 'prevent-default'
     }
     return 'pass'

@@ -28,7 +28,7 @@ fn domain(options) map^ {
 fn cover_pair(dx2: float, dy02: float, dy12: float, r2: float) int =>
     (if (dx2 + dy02 < r2) 1 else 0) + (if (dx2 + dy12 < r2) 2 else 0)
 
-fn cell_coverage(qx: float, qy: float, x0: float, y0: float, x1: float, y1: float, r2: float) int {
+fn cell_coverage(qx: float, qy: float, x0: float, y0: float, x1: float, y1: float, r2: float) int^ {
     let mx = x0 + (x1 - x0) * 0.5
     let my = y0 + (y1 - y0) * 0.5
     let dx0 = max(abs(qx - x0), abs(qx - mx))
@@ -41,7 +41,7 @@ fn cell_coverage(qx: float, qy: float, x0: float, y0: float, x1: float, y1: floa
 
 // zero is a free candidate; bit 4 marks a conflict, low bits certify coverage.
 fn conflict_span(grid, x: float, y: float, r2: float, variable: bool, first: int, stop: int,
-        x0: float, y0: float, x1: float, y1: float) int {
+        x0: float, y0: float, x1: float, y1: float) int^ {
     if (first > stop) 0 else {
         let q = grid[first]
         let status: int = if (q is array) (let qx = float(q[0]), let qy = float(q[1]),
@@ -53,7 +53,7 @@ fn conflict_span(grid, x: float, y: float, r2: float, variable: bool, first: int
 }
 
 fn conflict_rows(grid, nx: int, ci: int, cj: int, x: float, y: float, r2: float,
-        reach: int, variable: bool, row: int, stop: int, x0: float, y0: float, x1: float, y1: float) int {
+        reach: int, variable: bool, row: int, stop: int, x0: float, y0: float, x1: float, y1: float) int^ {
     if (row > stop) 0 else {
         // constant-radius corner cells two apart are at least r away.
         let trim = if (not variable and abs(row - cj) == 2) 1 else 0
@@ -66,13 +66,13 @@ fn conflict_rows(grid, nx: int, ci: int, cj: int, x: float, y: float, r2: float,
 }
 
 fn conflicts(grid, nx: int, ny: int, ci: int, cj: int, x: float, y: float, r2: float,
-        reach: int, variable: bool, x0: float, y0: float, x1: float, y1: float) int {
+        reach: int, variable: bool, x0: float, y0: float, x1: float, y1: float) int^ {
     let first: int = max(0, cj - reach)
     let stop: int = min(ny - 1, cj + reach);
     conflict_rows(grid, nx, ci, cj, x, y, r2, reach, variable, first, stop, x0, y0, x1, y1)
 }
 
-fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int, covered: int) {
+fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int, covered: int) any^ {
     let ci = c % nx
     let cj = c div nx
     let x = (float(ci) + rng.unit(rng.at(kr, 2 * c))) * s
@@ -110,8 +110,8 @@ fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int)
     if (nx * ny > 4000000) raise error("procart.sample.poisson: more than 4,000,000 cells; raise the radius")
     else {
         // step = pass * 9 + phase
-        let grid = reduce([[for (c in 0 to (nx * ny - 1)) 0], *[for (step in 0 to (attempts * phases - 1)) step]],
-            (g, step: int) => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
+        let grid = reduce([[for (c in ((0 to (nx * ny - 1)) ^ { [] })) 0], *[for (step in ((0 to (attempts * phases - 1)) ^ { [] })) step]],
+            (g, step: int) any^ => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
         [for (q in grid where q is array) if (d.density == null) q else [q[0], q[1]]]
     }
 }
@@ -142,7 +142,7 @@ pub fn jitter(k: u64, options) array^ {
     let amount: float = if (options.jitter == null) 1.0 else float(options.jitter);
     if (size <= 0.0) raise error("procart.sample.jitter: cell must be positive")
     else (let nx = cells(d.width, size), let ny = cells(d.height, size),
-        [for (j in 0 to (ny - 1)) for (i in 0 to (nx - 1)) (let c = j * nx + i,
+        [for (j in ((0 to (ny - 1)) ^ { [] })) for (i in ((0 to (nx - 1)) ^ { [] })) (let c = j * nx + i,
             let x = (float(i) + 0.5 + (rng.unit(rng.at(k, 2 * c)) - 0.5) * amount) * size,
             let y = (float(j) + 0.5 + (rng.unit(rng.at(k, 2 * c + 1)) - 0.5) * amount) * size,
             if (x < d.width and y < d.height) [x, y] else null)] |: ~ != null)
@@ -195,7 +195,7 @@ pub fn best_candidate(k: u64, options) array^ {
 }
 
 // --- density-weighted sampling over a field: P(cell) is proportional to its value ---
-fn first_above(cumulative, target: float, lo: int, hi: int) int {
+fn first_above(cumulative, target: float, lo: int, hi: int) int^ {
     if (lo >= hi) lo
     else (let mid = (lo + hi) div 2, if (cumulative[mid] > target) first_above(cumulative, target, lo, mid)
         else first_above(cumulative, target, mid + 1, hi))

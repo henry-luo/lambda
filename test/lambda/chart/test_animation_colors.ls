@@ -3,7 +3,7 @@ import animation: lambda.chart.animation
 import color: lambda.color
 import chart: lambda.chart.chart
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (entry in elements(child)) entry] else []
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (entry in ((elements(child)) ^ { [] })) entry] else []
 fn image(attrs) => <svg width:100,height:100,<rect x:0,y:0,width:20,height:20,*:attrs>>
 let source = image({fill:"none",stroke:"#ff0000"});
 let target = image({fill:"#0000ff",stroke:"none"});

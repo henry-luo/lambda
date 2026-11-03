@@ -6,7 +6,7 @@ import tokens: lambda.ui.dtna.tokens
 import values: lambda.slide.common
 pub let css_get = inline.css_get
 pub let finite = values.finite
-pub fn length(value,em=16.0) {
+pub fn length(value,em=16.0) any^ {
     if (value==null) null else {
         let raw = lower(trim(string(value)))
         let unit = [for (u in ["px","pt","pc","mm","cm","in","em","%"] where ends_with(raw,u)) u][0]
@@ -19,33 +19,33 @@ pub fn length(value,em=16.0) {
 let named = {black:"000000",white:"ffffff",red:"ff0000",green:"008000",blue:"0000ff",yellow:"ffff00",
     gray:"808080",grey:"808080",silver:"c0c0c0",maroon:"800000",purple:"800080",lime:"00ff00",
     olive:"808000",navy:"000080",teal:"008080",aqua:"00ffff",fuchsia:"ff00ff",orange:"ffa500"}
-pub fn color(value) {
+pub fn color(value) any^ {
     let raw = if (value is string) lower(trim(value)) else ""
     let rgba = if (not starts_with(raw,"#") and not starts_with(raw,"rgb(") and not starts_with(raw,"rgba(")) null
         else colors.parse(raw,"docx-export.color") ^ { null };
     if (named[raw]!=null) named[raw]
     else if (rgba==null or rgba[3]!=1.0) null
-    else join([for (channel in take(rgba,3)) tokens.hex_byte(int(round(channel*255.0)))],"")
+    else join([for (channel in ((((((take(rgba,3)) ^ { [] })))))) tokens.hex_byte(int(round(channel*255.0)))],"")
 }
 // Flat selector rules adapt an application's existing typography without copying its defaults.
-pub fn rule(stylesheet,selector) => join([for (block in split(stylesheet,"}"),let parts=split(block,"{")
-    where len(parts)==2 and any([for (item in split(parts[0],",")) trim(item)==selector])) parts[1]],";")
-pub fn declarations(css) => [for (decl in split(css or "",";"),let parts=split(decl,":")
-    where len(parts)>1) {key:lower(trim(parts[0])),value:trim(join(drop(parts,1),":"))}]
+pub fn rule(stylesheet,selector) any^ => join([for (block in ((split(stylesheet,"}")) ^ { [] }),let parts=split(block,"{")
+    where ((((((len(parts)==2 and any([for (item in ((split(parts[0],",")) ^ { [] })) trim(item)==selector])) ^ { false })))))) parts[1]],";")
+pub fn declarations(css) any^ => [for (decl in ((split(css or "",";")) ^ { [] }),let parts=split(decl,":")
+    where ((((((len(parts)>1) ^ { false })))))) {key:lower(trim(parts[0])),value:trim(join(drop(parts,1),":"))}]
 let known = ["font-family","font-size","font-weight","font-style","text-decoration","color","background-color","background",
     "vertical-align","letter-spacing","text-transform","font-variant","text-align","line-height","margin","margin-top",
     "margin-right","margin-bottom","margin-left","text-indent","white-space","page-break-before","page-break-after",
     "break-before","break-after","page-break-inside","break-inside","width","height","border","border-top","border-right",
     "border-bottom","border-left","border-color","border-width","border-style","padding","padding-top","padding-right",
     "padding-bottom","padding-left","border-collapse","table-layout","max-width","box-sizing","outline","display","list-style-type"]
-pub fn diagnostics(node,css) => [for (entry in declarations(css),
+pub fn diagnostics(node,css) => [for (entry in ((declarations(css)) ^ { [] }),
     let invalid = not (entry.key in known) or
         (entry.key in ["color","background-color","background"] and not (entry.value in ["transparent","inherit","initial"]) and color(entry.value)==null) or
         (entry.key in ["font-size","letter-spacing","text-indent"] and not (entry.value in ["normal","inherit"]) and length(entry.value)==null) or
         (entry.key=="display" and not (entry.value in ["none","block","inline","inline-block","table","table-row","table-cell"])) or
         (entry.key=="text-transform" and not (entry.value in ["none","uppercase","inherit"]))
     where invalid) c.issue("style","CSS " ++ entry.key ++ ": " ++ entry.value ++ " is outside the DOCX export profile")]
-fn unquote(value) => if (len(value)>=2 and ((starts_with(value,"\"") and ends_with(value,"\"")) or
+fn unquote(value) any^ => if (len(value)>=2 and ((starts_with(value,"\"") and ends_with(value,"\"")) or
     (starts_with(value,"'") and ends_with(value,"'")))) slice(value,1,len(value)-1) else value
 fn choose(value,previous) => if (value==null or value=="inherit") previous else value
 pub fn inherit(n,previous,defaults="") {
@@ -93,20 +93,20 @@ pub fn run(props) { let raw = <'w:rPr'
     <'w:rPr' *c.ordered(raw,["w:rFonts","w:b","w:i","w:caps","w:smallCaps","w:strike","w:color","w:spacing","w:sz","w:szCs","w:u","w:shd","w:vertAlign"])>
 }
 pub fn sides(css,prefix,em=16.0) {
-    let values = [for (v in split(trim(css_get(css,prefix) or "")," ") where v!="") length(v,em)]
+    let values = [for (v in ((split(trim(css_get(css,prefix) or "")," ")) ^ { [] }) where v!="") length(v,em)]
     let keys = ["top","right","bottom","left"];
     map([for (i,key in keys,let direct=length(css_get(css,prefix ++ "-" ++ key),em),
         let fallback=values[if (len(values)==1) 0 else if (len(values)==2) i%2 else if (len(values)==3 and i==3) 1 else i])
         (key,if (direct==null) fallback else direct)])
 }
-pub fn edge(attrs,side) => {top:(a)=><'w:top' *:a>,right:(a)=><'w:right' *:a>,
+pub fn edge(attrs,side) any^ => {top:(a)=><'w:top' *:a>,right:(a)=><'w:right' *:a>,
     bottom:(a)=><'w:bottom' *:a>,left:(a)=><'w:left' *:a>}[side](attrs)
-pub fn border(css,side) {
+pub fn border(css,side) any^ {
     let raw = css_get(css,"border-" ++ side) or css_get(css,"border")
     let tokens = split(trim(raw or "")," ")
     let kind = [for (token in tokens where token in ["none","solid","dashed","dotted","double"]) token][0]
-    let width = [for (token in tokens,let n=length(token) where n!=null) n][0]
-    let color = [for (token in tokens,let value=color(token) where value!=null) value][0];
+    let width = [for (token in tokens,let n=length(token) where ((((((n!=null) ^ { false })))))) n][0]
+    let color = [for (token in tokens,let value=color(token) where ((((((value!=null) ^ { false })))))) value][0];
     if (raw==null or kind==null) null else edge({'w:val':if (kind=="none") "nil" else if (kind=="solid") "single" else kind,
         'w:sz':int(round(max(0.0,width or 1.0)*6.0)),'w:color':color or "000000"},side)
 }

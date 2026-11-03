@@ -44,16 +44,16 @@ pn returned_copy(var b: Box) Box {
 }
 
 // a reassigned alias (also wrong on T0 for local roots)
-pn reassigned(var b: Box) int {
-    var saved: Box = mk()
+pn reassigned(var b: Box) int^ {
+    var saved: Box = mk()^
     saved = b
     b.size = 8
     return saved.size * 100 + b.size
 }
 
-pn local_reassigned() int {
-    var b: Box = mk()
-    var saved: Box = mk()
+pn local_reassigned() int^ {
+    var b: Box = mk()^
+    var saved: Box = mk()^
     saved = b
     b.size = 8
     return saved.size * 100 + b.size
@@ -93,26 +93,26 @@ pn unshared(var b: Box) int {
 }
 
 pn main() {
-    var b: Box = mk()
+    var b: Box = mk()^
     print("nested=" ++ nested_write(b, 0) ++ " caller=" ++ b.cells[0].k ++ "\n")
-    b = mk()
+    b = mk()^
     print("flat=" ++ flat_write(b) ++ " caller=" ++ b.size ++ "\n")
     var u = mk()
     print("untyped=" ++ untyped_write(u, 1) ++ " caller=" ++ u.cells[1].k ++ "\n")
-    b = mk()
+    b = mk()^
     print("stored=" ++ stored_write(b) ++ " caller=" ++ b.size ++ "\n")
-    b = mk()
+    b = mk()^
     var r = returned_copy(b)
     print("returned=" ++ r.size ++ " caller=" ++ b.size ++ "\n")
-    b = mk()
+    b = mk()^
     print("reassigned=" ++ reassigned(b) ++ " caller=" ++ b.size ++ "\n")
     print("local_reassigned=" ++ local_reassigned() ++ "\n")
     var a: int[] = [1, 2]
     print("array=" ++ array_write(a) ++ " caller=" ++ a[0] ++ "\n")
-    b = mk()
+    b = mk()^
     print("chained=" ++ chained(b) ++ " caller=" ++ b.cells[0].k ++ "\n")
-    b = mk()
+    b = mk()^
     print("handle=" ++ handle_write(b, 1) ++ " caller=" ++ b.cells[1].k ++ "," ++ b.cells[1].n ++ "\n")
-    b = mk()
+    b = mk()^
     print("unshared=" ++ unshared(b) ++ " caller=" ++ b.size ++ "," ++ b.cells[0].k ++ "\n")
 }

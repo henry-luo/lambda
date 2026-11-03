@@ -1,23 +1,23 @@
 import game: ~~.mod_model
 
 // enter the builder through the pattern picker before exercising its transitions.
-fn begin_builder(seed=42,id="pair") => game.choose_pattern(game.new_game(seed),id)
-fn switch(st,id) => game.choose_pattern(game.show_patterns(st),id)
-fn advance(st) => game.choose_pattern(game.next(st),st.pattern)
+fn begin_builder(seed=42,id="pair") any^ => game.choose_pattern(game.new_game(seed),id)
+fn switch(st,id) any^ => game.choose_pattern(game.show_patterns(st),id)
+fn advance(st) any^ => game.choose_pattern(game.next(st),st.pattern)
 
-fn classic(st) {
+fn classic(st) any^ {
     let subject = st.hands.subject[0]
     let predicate = [for (card in st.hands.predicate where card.match == subject.id) card][0]
     let pair = game.choose(game.choose(st,"subject",subject.id),"predicate",predicate.id)
     if (game.has_object(st.pattern)) game.choose(pair,"object",predicate.object) else pair
 }
-fn pick(st,s,p,o) {
+fn pick(st,s,p,o) any^ {
     let pair = game.choose(game.choose(st,"subject",s.id),"predicate",p.id)
     if (game.has_object(st.pattern)) game.choose(pair,"object",o.id) else pair
 }
 fn pick_new(st) {
-    let choices = [for (s in st.hands.subject,p in st.hands.predicate,o in (if (game.has_object(st.pattern)) st.hands.object else [null])) pick(st,s,p,o)];
-    [for (choice in choices where not game.repeated(choice)) choice][0]
+    let choices = [for (s in st.hands.subject,p in st.hands.predicate,o in (((if (game.has_object(st.pattern)) st.hands.object else [null])) ^ { [] })) pick(st,s,p,o)];
+    [for (choice in choices where ((not game.repeated(choice)) ^ { false })) choice][0]
 }
 
 let initial = begin_builder(42)
@@ -26,8 +26,8 @@ let saved = game.save_sentence(picked)
 let advanced = advance(saved)
 {
     catalog:game.card_count == 108 and len(game.subjects) == 22 and len(game.predicates) == 22 and len(game.objects) == 22 and len(game.places) == 16 and len(game.times) == 16 and len(game.manners) == 5 and len(game.reasons) == 5,
-    hand_size:all([for (kind in game.kinds(initial.pattern)) len(initial.hands[kind]) == 3]),
-    unique_cards:all([for (kind in game.kinds(initial.pattern)) len(unique([for (card in initial.hands[kind]) card.id])) == 3]),
+    hand_size:all([for (kind in ((game.kinds(initial.pattern)) ^ { [] })) len(initial.hands[kind]) == 3]),
+    unique_cards:all([for (kind in ((game.kinds(initial.pattern)) ^ { [] })) len(unique([for (card in ((initial.hands[kind]) ^ { [] })) card.id])) == 3]),
     seeded_deal:initial == begin_builder(42),
     natural_match:all([for (seed in 0 to 20) game.ready(classic(begin_builder(seed)))]),
     incomplete:game.save_sentence(initial) == initial,
@@ -46,7 +46,7 @@ let advanced = advance(saved)
 
 let repeated_hand = {*:advanced,hands:initial.hands}
 let repeated = game.choose(game.choose(repeated_hand,"subject",picked.subject),"predicate",picked.predicate)
-let done = reduce([initial,*[for (i in 1 to game.rounds) i]],(st,unused)=>advance(game.save_sentence(pick_new(st))))
+let done = reduce([initial,*[for (i in 1 to game.rounds) i]],(st,unused)any^ =>advance(game.save_sentence(pick_new(st))))
 let reset = game.action(done,"reset")
 {
     duplicate_detected:game.repeated(repeated),
@@ -64,10 +64,10 @@ let three = begin_builder(42,"triple")
 let triple = classic(three)
 let missing_object = game.choose(game.choose(three,"subject",triple.subject),"predicate",triple.predicate)
 let triple_saved = game.save_sentence(triple)
-let three_done = reduce([three,*[for (i in 1 to game.rounds) i]],(st,unused)=>advance(game.save_sentence(pick_new(st))))
+let three_done = reduce([three,*[for (i in 1 to game.rounds) i]],(st,unused)any^ =>advance(game.save_sentence(pick_new(st))))
 let cross_pattern = classic({*:three,book:saved.book})
 {
-    three_piles:len(game.kinds(three.pattern)) == 3 and all([for (kind in game.kinds(three.pattern)) len(three.hands[kind]) == 3]),
+    three_piles:len(game.kinds(three.pattern)) == 3 and all([for (kind in ((game.kinds(three.pattern)) ^ { [] })) len(three.hands[kind]) == 3]),
     three_familiar:all([for (seed in 0 to 20) game.save_sentence(classic(begin_builder(seed,"triple"))).book[0].natural]),
     object_required:not game.complete(missing_object) and game.save_sentence(missing_object) == missing_object,
     object_completes:game.ready(triple) and triple_saved.book[0].clauses[0].object == triple.object,
@@ -88,7 +88,7 @@ let joined_ready = classic(joined)
 let mixed = classic(switch(joined,"triple"))
 let mixed_saved = game.save_sentence(mixed)
 let after_mixed = advance(mixed_saved)
-let long_story = reduce([picked,*[for (i in 1 to 7) i]],(st,unused)=>classic(game.extend(st,"and")))
+let long_story = reduce([picked,*[for (i in 1 to 7) i]],(st,unused)any^ =>classic(game.extend(st,"and")))
 {
     incomplete_no_join:game.extend(initial,"and") == initial,
     invalid_join:game.extend(picked,"nonsense") == picked,

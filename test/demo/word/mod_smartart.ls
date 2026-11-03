@@ -5,11 +5,11 @@ import colors: lambda.ui.core.component
 
 pub let layouts = [{id:"process",label:"Process"},{id:"hierarchy",label:"Hierarchy"},{id:"cycle",label:"Cycle"},{id:"list",label:"List"}]
 pub let defaults = {layout:"process",text:"Plan\nCreate\nShare",color:"#2563eb",width:520,height:240,rotation:0}
-pub fn labels(p) => if (p.text is string) [for (line in split(p.text,"\n") where trim(line)!="") trim(line)] else []
-fn valid(p) => contains([for (entry in layouts) entry.id],p.layout) and colors.hex_color(p.color) and
+pub fn labels(p) => if (p.text is string) [for (line in ((split(p.text,"\n")) ^ { [] }) where trim(line)!="") trim(line)] else []
+fn valid(p) any^ => contains([for (entry in layouts) entry.id],p.layout) and colors.hex_color(p.color) and
     objects.dimensions_valid(p) and p.text is string and len(p.text)<=1000 and
     len(labels(p))>=2 and len(labels(p))<=8 and all([for (label in labels(p)) len(split(label,""))<=60])
-pub fn settings(n) {
+pub fn settings(n) any^ {
     let p = objects.settings(n,"data-word-smartart",defaults);
     if (p!=null and valid(p)) p else null
 }
@@ -25,10 +25,10 @@ fn box(layout,i,count) {
     }
 }
 // Wrap at word boundaries; long words also fit the node rather than escaping its edge.
-fn wrapped(label,columns) {
+fn wrapped(label,columns) any^ {
     if (len(split(label,""))<=columns) label else {
         let chars = split(label,"")
-        let spaces = [for (i,c in take(chars,columns) where c==" ") i]
+        let spaces = [for (i,c in ((take(chars,columns)) ^ { [] }) where c==" ") i]
         let cut = if (len(spaces)>0) spaces[last] else columns;
         trim(join(take(chars,cut),"")) ++ "\n" ++ wrapped(trim(join(drop(chars,cut),"")),columns)
     }
@@ -36,7 +36,7 @@ fn wrapped(label,columns) {
 pub fn graphic(p) {
     let text = labels(p)
     let nodes = [for (i,label in text) box(p.layout,i,len(text))]
-    let links = if (p.layout=="list") [] else [for (i in 1 to len(text)-1) {from:if (p.layout=="hierarchy") 0 else i-1,to:i},
+    let links = if (p.layout=="list") [] else [for (i in ((1 to len(text)-1) ^ { [] })) {from:if (p.layout=="hierarchy") 0 else i-1,to:i},
         *if (p.layout=="cycle") [{from:len(text)-1,to:0}] else []];
     <svg xmlns:"http://www.w3.org/2000/svg",width:p.width,height:p.height,viewBox:"0 0 640 240",
         <g fill:"none",stroke:p.color,'stroke-width':2,

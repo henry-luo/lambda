@@ -15,7 +15,7 @@ let g = f
 let h = (a: int, b: int) => a * b
 
 // Higher-order function (uses untyped parameters for dynamic dispatch)
-fn apply_fn(func, x) => func(x)
+fn apply_fn(func, x) any^ => func(x)
 
 // Function for apply test
 fn square(n) => n * n;

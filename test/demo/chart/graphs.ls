@@ -5,7 +5,7 @@ import tikz: lambda.doc.tikz.tikz
 import gallery: .mod_gallery
 import catalog: .mod_catalog
 
-fn diagram(source, flavor) => graph.to_html(parse(source,{type:"graph",flavor:flavor})^,{theme:"light",node_sep:24,rank_sep:28});
+fn diagram(source, flavor) any^ => graph.to_html(parse(source,{type:"graph",flavor:flavor})^,{theme:"light",node_sep:24,rank_sep:28});
 let sequence = "sequenceDiagram\n participant U as Reader\n participant C as Chart\n participant D as Data\n U->>C: Select a mark\n C->>D: Filter records\n D-->>C: Matching rows\n C-->>U: Update the view";
 let dot = "digraph Pipeline { rankdir=LR; node [shape=box]; Source -> Parse; Parse -> Layout; Layout -> SVG; Layout -> PDF; Layout -> PNG; }";
 let picture = "\\begin{tikzpicture}\n" ++

@@ -2,11 +2,11 @@
 pub pn strip_c_comments(source: string) {
     var out = ""
     var pos = 0
-    while (pos < len(source)) {
+    while ((pos < len(source))^) {
         let tail = slice(source, pos)
         let block = index_of(tail, "/*")
         let line = index_of(tail, "//")
-        if (block == null and line == null) {
+        if ((block == null and line == null)^) {
             out = out ++ tail
             break
         }
@@ -15,7 +15,7 @@ pub pn strip_c_comments(source: string) {
         out = out ++ slice(tail, 0, start)
         if (use_block) {
             let close = index_of(slice(tail, start + 2), "*/")
-            if (close == null) {
+            if ((close == null)^) {
                 // An unterminated opener is ordinary text to Python's regex.
                 out = out ++ slice(tail, start)
                 break
@@ -23,7 +23,7 @@ pub pn strip_c_comments(source: string) {
             pos = pos + start + 2 + close + 2
         } else {
             let newline = index_of(slice(tail, start + 2), "\n")
-            if (newline == null) { break }
+            if ((newline == null)^) { break }
             pos = pos + start + 2 + newline
         }
     }

@@ -14,10 +14,10 @@ let leafless=o.decorate(p.generate(key,{*:parameters,leaves:{count:0}})^,key,{co
  len([for (part in decorated.parts where part.organ=="flower") part])==24,
  len([for (part in decorated.parts where part.organ=="fruit") part])==8];
 let trifoliate=p.skeleton(key,{*:parameters,leaves:{count:3,leaflets:3}})^
-let fruit_models=[for (kind in slice(o.FRUITS,1,len(o.FRUITS))) o.decorate(tree,key,{fruit:kind})^];
+let fruit_models=[for (kind in ((slice(o.FRUITS,1,len(o.FRUITS))) ^ { [] })) o.decorate(tree,key,{fruit:kind})^];
 [len(trifoliate.leaves)==18,len(unique(trifoliate.leaves |> ~.id))==18,
  all([for (m in fruit_models) len([for (part in m.parts where part.organ=="fruit") part])>=8]),
- all([for (m in fruit_models) all([for (g in m.resources where name(g)=='geometry')
+ all([for (m in fruit_models) all([for (g in m.resources where ((name(g)=='geometry') ^ { false }))
   all([for (x in g.positions) x is number and abs(x)<10000.0])])]),
  len(o.decorate(tree,key,{count:0})^.parts)==len(tree.parts),
  len(o.decorate(tree,key,{flower:"none",fruit:"none"})^.parts)==len(tree.parts)];

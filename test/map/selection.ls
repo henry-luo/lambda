@@ -2,10 +2,10 @@ import maps: lambda.map
 import dom
 pn selected(detail) {
     let output=dom.query_selector(dom.root_node(detail.node),"#selection");
-    dom.set_attribute(output,"data-selected",format(detail.features |> ~.feature_id,'json'))
+    dom.set_attribute(output,"data-selected",format(detail.features |> ~.feature_id,'json')^)
     let frame=maps.snapshot(detail.node);
     let hits=maps.query_rendered(frame,detail.point);
-    dom.set_attribute(output,"data-snapshot",format(hits |> ~.feature_id,'json'))
+    dom.set_attribute(output,"data-snapshot",format(hits |> ~.feature_id,'json')^)
     dom.set_attribute(output,"data-parity",string(hits==detail.features))
 }
 pn camera_changed(detail) {

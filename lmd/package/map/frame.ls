@@ -3,7 +3,7 @@ import models: .model
 import cameras: .camera
 
 // frames own evaluated paths and feature values; subsequent model edits cannot change them.
-pub fn plan(model, viewport = null) {
+pub fn plan(model, viewport = null) any^ {
     let checked=models.normalize(model);
     let camera=if (checked is error) checked else cameras.camera({*:checked,
         *:(if (viewport==null) {} else {width:viewport.width,height:viewport.height})});
@@ -13,23 +13,23 @@ pub fn plan(model, viewport = null) {
         else if (frame==null) error("map: frame planning failed") else frame
     }
 }
-pub fn render_frame(frame) {
+pub fn render_frame(frame) any^ {
     if (frame.type!="geomap-frame" or not (frame.svg is string)) error("map: expected a complete frame")
     else {
         let parsed=parse(frame.svg,'xml') ^ {error("map: invalid frame SVG")};
         if (parsed is error) parsed else content(parsed)[0]
     }
 }
-pub fn snapshot(node) {
+pub fn snapshot(node) any^ {
     let frame=radiant.geomap_snapshot(node);
     if (frame==null) error("map: viewport has no displayed frame")
     else if (frame is string) error("map: " ++ frame) else frame
 }
-pub fn query(frame, point_or_box, options = {}) {
+pub fn query(frame, point_or_box, options = {}) any^ {
     let result=radiant.geomap_query_frame(frame,point_or_box,options);
     if (result is string) error("map: " ++ result) else result
 }
-pub fn query_displayed(node, point_or_box, options = {}) {
+pub fn query_displayed(node, point_or_box, options = {}) any^ {
     let result=radiant.geomap_query_displayed(node,point_or_box,options);
     if (result is string) error("map: " ++ result) else result
 }

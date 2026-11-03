@@ -1,23 +1,23 @@
 // One pure Mark Doc traversal for all wiki writers (S2.6, D7.2.4).
 import tasks: .tasks
 import c: lambda.doc.misc.common
-fn twiki_word_at(chars,index) {
+fn twiki_word_at(chars,index) any^ {
     let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     let lowercase = "abcdefghijklmnopqrstuvwxyz"
     let allowed = uppercase ++ lowercase ++ "0123456789_-.#"
     let previous = if (index == 0) "" else chars[index-1];
     if (not contains(uppercase,chars[index]) or (previous != "" and contains(allowed ++ "@",previous))) false
     else {
-        let stops = [for (i in index to len(chars)-1 where not contains(allowed,chars[i])) i]
+        let stops = [for (i in index to len(chars)-1 where ((not contains(allowed,chars[i])) ^ { false })) i]
         let ending = if (len(stops) == 0) len(chars) else stops[0]
-        let lowers = [for (i in index to ending-1 where contains(lowercase,chars[i])) i];
+        let lowers = [for (i in index to ending-1 where ((contains(lowercase,chars[i])) ^ { false })) i];
         len(lowers) > 0 and any([for (i in index to ending-1) i > lowers[0] and contains(uppercase,chars[i])])
     }
 }
-fn escaped(value,profile) {
+fn escaped(value,profile) any^ {
     let chars = split(value,"")
     let special = "[]{}|*_~^+`'=!#<>\\%/@:.()-&";
-    if (profile.name == "mediawiki" and any([for (char in split(value,"")) contains(special,char)]))
+    if (profile.name == "mediawiki" and any([for (char in ((split(value,"")) ^ { [] })) contains(special,char)]))
         "<nowiki>" ++ replace(value,"</nowiki>","</nowiki>&lt;/nowiki&gt;<nowiki>") ++ "</nowiki>"
     else if (profile.name == "twiki" and (any([for (char in chars) contains(special,char)]) or any([for (i,char in chars) twiki_word_at(chars,i)])))
         "<literal>" ++ replace(value,"</literal>","</literal>&lt;/literal&gt;<literal>") ++ "</literal>"
@@ -25,7 +25,7 @@ fn escaped(value,profile) {
     else join([for (char in chars) if (char == "\\" and profile.name in ["jira","confluence"]) "&#92;"
         else if (contains(special,char)) profile.escape ++ char else char],"")
 }
-fn children(node,context) map^ => c.merge([for (child in c.kids(node)) render(child,context)^])^
+fn children(node,context) map^ => c.merge([for (child in ((c.kids(node)) ^ { [] })) render(child,context)^])^
 fn wrap(node,context,opening,closing = null) map^ {
     let body = children(node,context)^;
     c.result(opening ++ body.text ++ if (closing == null) opening else closing,body.diagnostics)
@@ -111,14 +111,14 @@ fn list_item(node,context,index,ordered) map^ {
             if (ordered) (if (profile.name == "dokuwiki") "-" else string(index) ++ ".") else (if (profile.name == "vimwiki") "-" else "*")
     let task = tasks.marker(node,profile.name)
     let task_model = tasks.model(node)
-    let inline = c.merge([for (child in c.kids(node) where not (c.tag(child) in ["ul","ol"]) and
-        not (c.tag(child) == "input" and child.type == "checkbox" and task_model.state != null)) render(child,{*:context,in_list:true})^])^
-    let nested = c.merge([for (child in c.kids(node) where c.tag(child) in ["ul","ol"]) render(child,{*:context,prefix:if (profile.lists == "repeat") marker else "",depth:context.depth+1})^])^;
+    let inline = c.merge([for (child in ((c.kids(node)) ^ { [] }) where ((not (c.tag(child) in ["ul","ol"]) and
+        not (c.tag(child) == "input" and child.type == "checkbox" and task_model.state != null)) ^ { false })) render(child,{*:context,in_list:true})^])^
+    let nested = c.merge([for (child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) in ["ul","ol"]) ^ { false })) render(child,{*:context,prefix:if (profile.lists == "repeat") marker else "",depth:context.depth+1})^])^;
     c.result((if (profile.name == "zimwiki" and task_model.state != null) indentation else marker ++ " ") ++ task.text ++ trim(inline.text) ++ "\n" ++ nested.text,
         inline.diagnostics ++ nested.diagnostics ++ if (task.code == null) [] else [c.issue(task.code,node,"Task state or progress cannot be represented in the target wiki")])
 }
 fn render_list(node,context) map^ {
-    let items = [for (child in c.kids(node) where c.tag(child) == "li") child]
+    let items = [for (child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) == "li") ^ { false })) child]
     let first_number = int(c.get(node,"start","1"))
     let body = c.merge([for (i,item in items) list_item(item,context,first_number+i,c.tag(node) == "ol")^])^;
     c.result(body.text ++ (if (context.depth == 0) "\n" else ""),body.diagnostics ++
@@ -129,11 +129,11 @@ fn mw_attributes(node,keys) => join([for (key,value in map(node) where key in ke
 fn table_attribute_issues(node,profile,keys) => [for (key,value in map(node) where key != "sourcepos" and
     (profile.name != "mediawiki" or not (key in keys) or (not (value is string or value is int or value is array))))
     c.issue("unsupported-table-attribute",node,"Table attribute has no target mapping: " ++ string(key))]
-fn rows(node,header = false) => [for (child in c.kids(node),row in
-    (if (c.tag(child) == "tr") [{node:child,header:header}] else rows(child,header or c.tag(child) == "thead"))) row]
+fn rows(node,header = false) any^ => [for (child in ((c.kids(node)) ^ { [] }),row in
+    (((if (c.tag(child) == "tr") [{node:child,header:header}] else rows(child,header or c.tag(child) == "thead"))) ^ { [] })) row]
 fn table_row(row,context) map^ {
     let profile = context.profile
-    let cells = [for (cell in c.kids(row.node) where c.tag(cell) in ["td","th"]) cell]
+    let cells = [for (cell in ((c.kids(row.node)) ^ { [] }) where ((c.tag(cell) in ["td","th"]) ^ { false })) cell]
     let values = [for (cell in cells) children(cell,context)^]
     let delimiters = [for (cell in cells) if (row.header or c.tag(cell) == "th")
         (if (profile.table == "atlassian") "||" else if (profile.table == "doku") "^" else if (profile.table == "creole") "|=" else "|") else "|"]
@@ -149,22 +149,22 @@ fn table_row(row,context) map^ {
             (if (profile.table == "twiki" and (row.header or c.tag(cell) == "th")) "*" else "") ++ " "],"") ++
             (if (len(cells) > 0 and profile.table == "atlassian" and row.header) "||" else if (profile.table == "doku" and row.header) "^" else "|") ++ "\n"
     let issues = table_attribute_issues(row.node,profile,row_keys) ++
-        [for (cell in cells,diagnostic in table_attribute_issues(cell,profile,cell_keys)) diagnostic];
+        [for (cell in cells,diagnostic in ((table_attribute_issues(cell,profile,cell_keys)) ^ { [] })) diagnostic];
     c.result(rendered,[for (value in values,diagnostic in value.diagnostics) diagnostic] ++ issues)
 }
 fn table(node,context) map^ {
     let profile = context.profile
     let table_rows = rows(node)
-    let captions = [for (child in c.kids(node) where c.tag(child) == "caption") child]
+    let captions = [for (child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) == "caption") ^ { false })) child]
     let caption = c.merge([for (child in captions) children(child,context)^]," ")^
     let body = c.merge([for (i,row in table_rows) {
         let value = table_row(row,context)^;
-        c.result(value.text ++ if (profile.table == "vim" and (row.header or any([for (cell in c.kids(row.node)) c.tag(cell) == "th"])))
-            "|" ++ join([for (cell in c.kids(row.node)) "---"],"|") ++ "|\n" else "",value.diagnostics)
+        c.result(value.text ++ if (profile.table == "vim" and (row.header or any([for (cell in ((c.kids(row.node)) ^ { [] })) c.tag(cell) == "th"])))
+            "|" ++ join([for (cell in ((c.kids(row.node)) ^ { [] })) "---"],"|") ++ "|\n" else "",value.diagnostics)
     }])^
-    let issues = caption.diagnostics ++ [for (item in captions,diagnostic in table_attribute_issues(item,profile,[])) diagnostic] ++ (if (len(captions) > 0 and profile.table != "mediawiki")
+    let issues = caption.diagnostics ++ [for (item in captions,diagnostic in ((table_attribute_issues(item,profile,[])) ^ { [] })) diagnostic] ++ (if (len(captions) > 0 and profile.table != "mediawiki")
         [c.issue("unsupported-table-caption",node,"Target table caption syntax is outside this profile")] else []) ++
-        if (profile.table in ["pipe","tiki"] and any([for (row in table_rows,cell in c.kids(row.node)) row.header or c.tag(cell) == "th"]))
+        if (profile.table in ["pipe","tiki"] and any([for (row in table_rows,cell in ((c.kids(row.node)) ^ { [] })) row.header or c.tag(cell) == "th"]))
         [c.issue("unsupported-table-header",node,"Target table has no header-cell notation")] else [];
     if (profile.table == "mediawiki") c.result("{| " ++ (if (node.class == null) "class=\"wikitable\" " else "") ++ mw_attributes(node,["id","class"]) ++ "\n" ++
         (if (len(captions) == 0) "" else "|+ " ++ caption.text ++ "\n") ++ body.text ++ "|}\n\n",body.diagnostics ++ issues)
@@ -175,13 +175,13 @@ fn blockquote(node,context) map^ {
     let body = children(node,context)^
     let profile = context.profile;
     if (profile.block == "macro") c.result("{quote}\n" ++ trim(body.text) ++ "\n{quote}\n\n",body.diagnostics)
-    else if (profile.name in ["xwiki","dokuwiki"]) c.result(join([for (line in split(trim(body.text),"\n")) "> " ++ line],"\n") ++ "\n\n",body.diagnostics)
+    else if (profile.name in ["xwiki","dokuwiki"]) c.result(join([for (line in ((split(trim(body.text),"\n")) ^ { [] })) "> " ++ line],"\n") ++ "\n\n",body.diagnostics)
     else c.result(body.text,body.diagnostics ++ [c.issue("unsupported-blockquote",node,"Target blockquote syntax is outside this writer profile")])
 }
 fn definition(node,context) map^ {
     let profile = context.profile
     let supported = profile.name in ["mediawiki","tikiwiki","vimwiki"]
-    let body = c.merge([for (child in c.kids(node)) {
+    let body = c.merge([for (child in ((c.kids(node)) ^ { [] })) {
         let value = children(child,context)^;
         c.result((if (profile.name == "vimwiki") "" else if (c.tag(child) == "dt") "; " else ": ") ++ value.text ++
             (if (profile.name == "vimwiki" and c.tag(child) == "dt") ":: " else "\n"),value.diagnostics)
@@ -208,19 +208,19 @@ fn span(node,context) map^ {
         [c.issue("unsupported-span",node,"Span semantics cannot be represented in the target wiki")] else [])
 }
 fn panel(node,context) map^ {
-    let titles = [for (child in c.kids(node) where child.class == "wiki-panel-title") child]
-    let body = c.merge([for (child in c.kids(node) where child.class != "wiki-panel-title") render(child,context)^])^;
+    let titles = [for (child in ((c.kids(node)) ^ { [] }) where child.class == "wiki-panel-title") child]
+    let body = c.merge([for (child in ((c.kids(node)) ^ { [] }) where child.class != "wiki-panel-title") render(child,context)^])^;
     if (node.class == "wiki-panel" and context.profile.block == "macro") c.result(
         "{panel" ++ (if (len(titles) == 0) "" else ":title=" ++ c.text(titles[0])) ++ "}\n" ++ trim(body.text) ++ "\n{panel}\n\n",body.diagnostics)
     else if (node.class == null and node.id == null) children(node,context)^
     else c.result(body.text,body.diagnostics ++ [c.issue("unsupported-container",node,"Container attributes have no target mapping")])
 }
-fn descendants(node) => if (not (node is element)) [] else
-    [node,*[for (child in c.kids(node),found in descendants(child)) found]]
+fn descendants(node) any^ => if (not (node is element)) [] else
+    [node,*[for (child in ((c.kids(node)) ^ { [] }),found in ((descendants(child)) ^ { [] })) found]]
 fn document(node,context) map^ {
     let all_nodes = descendants(node)
-    let metadata = [for (child in all_nodes where c.tag(child) == "meta") child]
-    let page_tags = unique([for (meta in metadata,value in c.get(meta,"tags",[])) value])
+    let metadata = [for (child in all_nodes where ((c.tag(child) == "meta") ^ { false })) child]
+    let page_tags = unique([for (meta in metadata,value in ((c.get(meta,"tags",[])) ^ { [] })) value])
     let inline_tags = unique([for (child in all_nodes where child["data-tag"] != null) child["data-tag"]])
     let missing = [for (value in page_tags where not (value in inline_tags)) value]
     let created = if (len(metadata) == 0) null else metadata[0].created

@@ -60,11 +60,12 @@ type World = {qpc: int, hc: int, ct: int, cti: int, tl: int, np: int,
 
 // --- Packet: owned by w.pkts, addressed by slot id ---
 
-pn create_packet(var w: World, link: int, identity: int, pkind: int) int {
+pn create_packet(var w: World, link: int, identity: int, pkind: int) int^ {
     var pid = w.np
     w.np = pid + 1
-    var packet: Packet = {link: link, identity: identity, pkind: pkind,
+    let _admitted_packet_66: Packet = {link: link, identity: identity, pkind: pkind,
                           datum: 0, data: [0, 0, 0, 0]}
+    var packet: Packet = _admitted_packet_66^
     w.pkts[pid] = packet
     return pid
 }
@@ -145,7 +146,7 @@ pn tcb_add_input(var w: World, tid: int, pid: int, old_task: int) int {
     return old_task
 }
 
-pn tcb_run_task(var w: World, tid: int) int {
+pn tcb_run_task(var w: World, tid: int) int^ {
     var message = NONE
     var ww = tcb_is_waiting_with_packet(w, tid)
     if (ww == 1) {
@@ -154,10 +155,10 @@ pn tcb_run_task(var w: World, tid: int) int {
         w.tasks[tid].input = msg_link
         var inp2 = w.tasks[tid].input
         if (inp2 == NONE) {
-            tcb_set_running(w, tid)
+            tcb_set_running(w, tid)^
         }
         if (inp2 != NONE) {
-            tcb_set_packet_pending(w, tid)
+            tcb_set_packet_pending(w, tid)^
         }
     }
     // the running task's data record is w.datas[tid]; tid is also w.ct here
@@ -189,7 +190,7 @@ pn mark_waiting(var w: World, ct: int) int {
     return ct
 }
 
-pn queue_packet(var w: World, pid: int, ct: int) int {
+pn queue_packet(var w: World, pid: int, ct: int) int^ {
     var did = w.pkts[pid].identity       // the packet's destination task
     if (did < 0) {
         return NONE
@@ -218,7 +219,7 @@ pn release_task(var w: World, tid: int, ct: int) int {
 
 // --- Task functions ---
 
-pn task_fn_idle(var w: World, work: int, tid: int) int {
+pn task_fn_idle(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     var ic = w.datas[tid].icount - 1
     w.datas[tid].icount = ic
@@ -237,7 +238,7 @@ pn task_fn_idle(var w: World, work: int, tid: int) int {
     return release_task(w, DEVICE_B, ct)
 }
 
-pn task_fn_worker(var w: World, work: int, tid: int) int {
+pn task_fn_worker(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work == NONE) {
         return mark_waiting(w, ct)
@@ -272,7 +273,7 @@ pn task_fn_worker(var w: World, work: int, tid: int) int {
     return queue_packet(w, work, ct)
 }
 
-pn task_fn_handler(var w: World, work: int, tid: int) int {
+pn task_fn_handler(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work != NONE) {
         var wk = w.pkts[work].pkind
@@ -310,7 +311,7 @@ pn task_fn_handler(var w: World, work: int, tid: int) int {
     return queue_packet(w, dev_pkt, ct)
 }
 
-pn task_fn_device(var w: World, work: int, tid: int) int {
+pn task_fn_device(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work == NONE) {
         var pend = w.datas[tid].pending
@@ -344,14 +345,14 @@ pn create_task(var w: World, identity: int, priority: int, work: int,
 pn schedule(var w: World) any {
     var ct = w.tl
     w.ct = ct
-    while (ct != NONE) {
+    while ((ct != NONE)^) {
         var how = tcb_is_held_or_waiting(w, ct)
-        if (how == 1) {
+        if ((how == 1)^) {
             var nxt = w.tasks[ct].link
             ct = nxt
             w.ct = ct
         }
-        if (how == 0) {
+        if ((how == 0)^) {
             var cid = w.tasks[ct].identity
             w.cti = cid
             w.ct = ct
@@ -361,21 +362,22 @@ pn schedule(var w: World) any {
     }
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     // one world value: the single owner of every task, data record, and packet
-    var w: World = {qpc: 0, hc: 0, ct: NONE, cti: 0, tl: NONE, np: 0,
+    let _admitted_w_366: World = {qpc: 0, hc: 0, ct: NONE, cti: 0, tl: NONE, np: 0,
                     tasks: fill(6, null), datas: fill(6, null),
                     pkts: fill(8, null)}
+    var w: World = _admitted_w_366^
 
     // createIdler(IDLER, 0, null, createRunning) — pp=false, tw=false, th=false
-    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)
+    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)^
     var idle_data: IdleData = {control: 1, icount: 1000}
     w.datas[IDLER] = idle_data
 
     // createWorker(WORKER, 1000, workQ, createWaitingWithPacket)
     var workq = create_packet(w, NONE, WORKER, WORK_PACKET_KIND)
     workq = create_packet(w, workq, WORKER, WORK_PACKET_KIND)
-    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)
+    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)^
     var worker_data: WorkerData = {destination: HANDLER_A, wcount: 0}
     w.datas[WORKER] = worker_data
 
@@ -383,7 +385,7 @@ pn benchmark() int {
     workq = create_packet(w, NONE, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)^
     var handler_a_data: HandlerData = {work_in: NONE, device_in: NONE}
     w.datas[HANDLER_A] = handler_a_data
 
@@ -391,26 +393,26 @@ pn benchmark() int {
     workq = create_packet(w, NONE, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)^
     var handler_b_data: HandlerData = {work_in: NONE, device_in: NONE}
     w.datas[HANDLER_B] = handler_b_data
 
     // createDevice(DEVICE_A, 4000, null, createWaiting) — pp=false, tw=true, th=false
-    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)^
     var device_a_data: DeviceData = {pending: NONE}
     w.datas[DEVICE_A] = device_a_data
 
     // createDevice(DEVICE_B, 5000, null, createWaiting)
-    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)
+    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)^
     var device_b_data: DeviceData = {pending: NONE}
     w.datas[DEVICE_B] = device_b_data
 
-    schedule(w)
+    schedule(w)^
 
     var qpc = w.qpc
     var hc = w.hc
-    if (qpc == 2322) {
-        if (hc == 928) {
+    if ((qpc == 2322)^) {
+        if ((hc == 928)^) {
             return 1
         }
     }
@@ -422,12 +424,12 @@ pn benchmark() int {
     return 0
 }
 
-pub pn run_richards_benchmark(iterations: int) bool {
+pub pn run_richards_benchmark(iterations: int) bool^ {
     var pass = true
     var k: int = 0
     while (k < iterations) {
         var result = benchmark()
-        if (result == 0) {
+        if ((result == 0)^) {
             pass = false
         }
         k = k + 1

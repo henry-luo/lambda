@@ -1,7 +1,7 @@
 // PG7.3: topology, triangle order, hull start and halfedges must all match.
 import rng: lambda.procart.rng
 import geom: lambda.procart.geom
-fn same(points) bool => geom.delaunay(points)^ == geom.delaunay_reference(points)^
+fn same(points) bool^ => geom.delaunay(points)^ == geom.delaunay_reference(points)^
 
 "native Delaunay";
 math.delaunay is fn;

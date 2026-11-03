@@ -19,7 +19,7 @@ fn non_tail(n: int) int {
     }
 }
 
-fn changing_owner(parts: string[], n: int) int {
+fn changing_owner(parts: string[], n: int) int^ {
     if (n <= 0) len(parts)
     else {
         let next = parts ++ ["z"]

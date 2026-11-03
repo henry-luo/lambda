@@ -7,14 +7,14 @@ import lambda.edit.model
 import lambda.editor.mod_doc
 
 fn load(src) => html.import_text(src) ^ { {error: ^.message} }
-fn written(src) {
+fn written(src) any^ {
   let l = load(src)
   if (l.error != null) l.error else html.export_text(l.doc, l.envelope)
 }
 fn tags(src) => [for (b in load(src).doc.content) b.tag]
 // writing, reading, and writing again changes nothing
-fn stable(src) => written(written(src)) == written(src)
-fn gate(src) {
+fn stable(src) any^ => written(written(src)) == written(src)
+fn gate(src) any^ {
   let l = load(src)
   html.check_roundtrip(l.doc, l.envelope)
 }
@@ -63,7 +63,7 @@ let broken = node('doc', [node_attrs('p', [], [text_marked("y", [{name: 'q', val
 
 let covered = "<table><tbody><tr><td rowspan=\"2\" colspan=\"2\">A<br>B</td></tr><tr></tr></tbody></table>"
 let covered_doc = load(covered).doc
-let covered_rows = [for (entry in descendants(covered_doc) where entry.node.tag=='tr') entry.node]
+let covered_rows = [for (entry in ((descendants(covered_doc)) ^ { [] }) where entry.node.tag=='tr') entry.node]
 "rowspans preserve covered empty rows:";
 [covered_doc.content[0].tag=='table',len(covered_rows)==2,len(covered_rows[1].content)==0,
  stable(covered),gate(covered)==null]

@@ -3,4 +3,5 @@
 // the type wore the range VALUE tag (D3.1.1v4).
 fn dyn(v) => v
 fn f(x: 1 to 5) { x }
-"bound: " ++ string(f(dyn(9)))
+let admitted = f(dyn(9))
+admitted

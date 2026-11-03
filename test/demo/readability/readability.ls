@@ -23,7 +23,7 @@ on click(evt) {
 }
 on keydown(evt) {
     let next = model.shortcut(st, PAGES, string(evt.key), evt.metaKey or evt.ctrlKey, evt.shiftKey)
-    if (next == st) { return 'pass' }
+    if ((next == st)^) { return 'pass' }
     st = next
     return 'prevent-default'
 }

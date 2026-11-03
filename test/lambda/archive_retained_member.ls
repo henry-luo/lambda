@@ -1,4 +1,4 @@
-fn retain(path, name) {
+fn retain(path, name) any^ {
     let root = input("test/input/archive/" ++ path)^;
     [for (entry in content(root)^ where entry.name == name) entry][0]
 }

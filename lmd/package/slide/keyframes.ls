@@ -18,7 +18,7 @@ pub fn compile(stops, channel, path) array^ {
     [for (stop in stops) [stop[0], if (channel == 'paint') color.parse(stop[1], path)^ else stop[1]]]
 }
 
-pub fn value(stops, channel, progress) {
+pub fn value(stops, channel, progress) any^ {
     let t = ease.clamp(progress)
     let after = [for (i, stop in stops where i > 0 and stop[0] >= t) i]
     let index = if (len(after) > 0) after[0] else len(stops) - 1
@@ -28,7 +28,7 @@ pub fn value(stops, channel, progress) {
     if (channel == 'paint') color.sample(a[1], b[1], fraction) else ease.lerp(a[1], b[1], fraction)
 }
 
-pub fn sample(stops, channel, progress) {
+pub fn sample(stops, channel, progress) any^ {
     let sampled = value(stops, channel, progress)
     if (channel == 'paint') color.css(sampled) else sampled
 }

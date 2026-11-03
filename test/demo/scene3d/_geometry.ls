@@ -11,7 +11,7 @@ pub fn grid_indices(rows,columns) => [for (j in 0 to (rows - 1), i in 0 to (colu
         *[a, a + 1, b, a + 1, b + 1, b]]
 
 // the duplicated seam keeps triangles local in longitude; normals remain unit length.
-pub fn sphere(id, rows, columns, colors = null) element {
+pub fn sphere(id, rows, columns, colors = null) element^ {
     let positions = [for (j in 0 to rows) for (i in 0 to columns)
         *sphere_point(j, i, rows, columns)];
     s.geometry(positions, {id: id, normals: positions, indices: grid_indices(rows,columns),

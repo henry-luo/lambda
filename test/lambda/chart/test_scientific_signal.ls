@@ -22,7 +22,7 @@ let gaps=signal.analyze({kind:"signal",sample_rate:8,samples:[1,2,3,4,null,6,7,8
 let channels=[for (i in 0 to 7) for (channel in ["a","b"]) {channel:channel,t:i/8,v:tone.samples[i]*(if (channel=="a") 1 else 2)}];
 let grouped=signal.analyze(channels,{field:"v",time:"t",groupby:["channel"]});
 let checks={
-    window:signal.window("hann",4)==[0.0,0.49999999999999994,1.0,0.5000000000000001] or all([for (i,v in signal.window("hann",4)) near(v,[0,0.5,1,0.5][i])]),
+    window:signal.window("hann",4)==[0.0,0.49999999999999994,1.0,0.5000000000000001] or all([for (i,v in ((signal.window("hann",4)) ^ { [] })) near(v,[0,0.5,1,0.5][i])]),
     tone:len(spectrum.data)==5 and near(spectrum.data[1].amplitude,1) and near(spectrum.data[1].real,4),
     phase:near(spectrum.data[1].phase,0),
     psd:near(sum(psd.data |> ~.value),0.5),
@@ -31,7 +31,7 @@ let checks={
     raw:len(stft.data)==9 and near(stft.data[0].time,1.5/8),
     spectrogram:spectrogram.data.kind=="grid" and len(spectrogram.data.x)==4 and len(spectrogram.data.y)==4 and len(spectrogram.data.cell_fields.value)==3,
     support:stft.metadata.segments[0].support==[0.0,0.375],
-    coherence:all([for (row in coherent.data where row.value!=null) near(row.value,1)]),
+    coherence:all([for (row in ((coherent.data) ^ { [] }) where row.value!=null) near(row.value,1)]),
     csd_sign:near(cross.data[1].phase,0-math.pi/2),
     correlation:correlation.data[5].lag==2 and near(correlation.data[5].value,1) and near(correlation.data[1].value,0),
     omitted:missing.diagnostics.omitted_windows==1 and missing.metadata.segment_count==1,
@@ -48,9 +48,9 @@ let checks={
     bad_raw:signal.analyze(tone,{method:"stft",scaling:"density"}) is error,
     bad_complex:signal.analyze({*:tone,samples:{real:[1,0],imag:[0,1]}},{sides:"onesided"}) is error,
     bad_rate:signal.analyze({*:tone,sample_rate:0}) is error
-    ,direct_correlation:all([for (row in oracle.data) near(row.value,sum([for (i,v in a where i+row.lag>=0 and i+row.lag<len(b)) v*b[i+row.lag]]))])
+    ,direct_correlation:all([for (row in ((oracle.data) ^ { [] })) near(row.value,sum([for (i,v in a where i+row.lag>=0 and i+row.lag<len(b)) v*b[i+row.lag]]))])
     ,padded_windows:signal.analyze(tone,{method:"stft",segment_length:4,overlap:2,boundary:"pad_zero"}).metadata.segment_count==4
-    ,missing_gap:len(gaps.data.x)==4 and all([for (row in gaps.data.cell_fields.value) row[1]==null and row[0]!=null and row[2]!=null])
+    ,missing_gap:len(gaps.data.x)==4 and all([for (row in ((gaps.data.cell_fields.value) ^ { [] })) row[1]==null and row[0]!=null and row[2]!=null])
     ,linear_detrend:all(signal.analyze({*:tone,samples:[0,1,2,3,4,5,6,7]},{method:"periodogram",detrend:"linear"}).data |> near(~.value,0))
     ,calibrated_hann:near(signal.analyze(tone,{window:"hann"}).data[1].amplitude,1)
     ,zero_coherence:all(signal.analyze({*:tone,samples:[0,0,0,0,0,0,0,0]},{method:"coherence",reference:{*:tone,samples:[0,0,0,0,0,0,0,0]}}).data |> ~.value==null)

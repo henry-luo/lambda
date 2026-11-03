@@ -14,10 +14,10 @@ pub fn classes(prefix, value) => if (value is map)
     join([for (key,part in value) prefix ++ "-" ++ string(key)]," ") else ""
 pub fn at(value, key, fallback) {
     let width = ([for (bp in breakpoints where bp.key == key) bp.width])[0]
-    let active = if (value is map) [for (bp in breakpoints where bp.width <= width and c.has(value,bp.key)) value[bp.key]] else [value];
+    let active = if (value is map) [for (bp in breakpoints where ((bp.width <= width and c.has(value,bp.key)) ^ { false })) value[bp.key]] else [value];
     if (len(active) == 0) fallback else active[len(active)-1]
 }
-pub fn variables(prefix, value, format_value) => if (value is map)
+pub fn variables(prefix, value, format_value) any^ => if (value is map)
     join([for (key,part in value) "--" ++ prefix ++ "-" ++ string(key) ++ ":" ++ format_value(part) ++ ";"],"")
     else "--" ++ prefix ++ "-base:" ++ format_value(value) ++ ";"
 pub fn rules(prefix, property) => join([for (bp in breakpoints) (

@@ -4,12 +4,12 @@ fn fail_mode() string^ {
     raise error("normalize mode error")
 }
 
-fn normalize_result(mode: string | error) {
+fn normalize_result(mode: string | error) any^ {
     let value = normalize("text", mode) ^ { ^ }
     if (value is error) "error" else value
 }
 
-fn test_normalize_error() {
+fn test_normalize_error() any^ {
     let mode = fail_mode() ^ { ^ }
     normalize_result(mode)
 }

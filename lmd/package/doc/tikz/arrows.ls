@@ -41,7 +41,7 @@ fn tip_table(name) {
 }
 
 // Index of the separating `-` outside braces and brackets, or null.
-fn separator(key, at, depth, found) {
+fn separator(key, at, depth, found) any^ {
     if (at >= len(key)) found
     else {
         let ch = slice(key, at, at + 1)
@@ -54,7 +54,7 @@ fn separator(key, at, depth, found) {
 }
 
 // One tip: `{Name[options]}`, `Name[options]`, `Name`, or a legacy `<`, `>`, `|`.
-fn parse_tip(raw, side) {
+fn parse_tip(raw, side) any^ {
     let source = trim(util.unwrap_braces(trim(raw)))
     let bracket = index_of(source, "[")
     let tip_name = trim(if (bracket == null) source else slice(source, 0, bracket))
@@ -71,7 +71,7 @@ fn parse_tip(raw, side) {
     else {kind: tip_table(tip_name).kind, name: tip_name, options: options, reversed: false}
 }
 
-fn parse_side(raw, side) {
+fn parse_side(raw, side) any^ {
     if (trim(raw) == "") {ok: true, tip: null}
     else {
         let tip = parse_tip(raw, side)
@@ -81,7 +81,7 @@ fn parse_side(raw, side) {
 
 // `start-end` arrow keys such as `->`, `<->`, `|-|`, `latex-latex`,
 // `-{Stealth[length=3mm]}` and `{Latex}-{Latex}`; null for other keys.
-pub fn parse_key(key) {
+pub fn parse_key(key) any^ {
     let raw = trim(key)
     let at = separator(raw, 0, 0, null)
     if (at == null or at < 0) null
@@ -92,18 +92,18 @@ pub fn parse_key(key) {
     }
 }
 
-pub fn is_arrow_key(key) => parse_key(key) != null
+pub fn is_arrow_key(key) any^ => parse_key(key) != null
 
 // Arrow keys present on a node, for option validation lists.
-pub fn option_keys(node) => [for (child in node where child is element and
-    string(name(child)) == "option" and child.value == "" and is_arrow_key(child.key))
+pub fn option_keys(node) any^ => [for (child in node where ((child is element and
+    string(name(child)) == "option" and child.value == "" and is_arrow_key(child.key)) ^ { false }))
     child.key] ++ (if (opts.has(node, "arrows")) ["arrows"] else [])
 
 // The node's arrow spec: the last arrow key, or `arrows=<spec>`.
-pub fn spec(node) {
-    let keys = [for (child in node where child is element and
+pub fn spec(node) any^ {
+    let keys = [for (child in node where ((child is element and
         string(name(child)) == "option" and child.value == "" and
-        is_arrow_key(child.key)) child.key]
+        is_arrow_key(child.key)) ^ { false })) child.key]
     let explicit = opts.value(node, "arrows", null)
     let chosen = if (explicit != null) explicit
         else if (len(keys) > 0) keys[len(keys) - 1] else null
@@ -112,7 +112,7 @@ pub fn spec(node) {
 
 fn option_dimension(raw, line_width_pt) float^ {
     // `length=3pt 4.5` adds a multiple of the line width, as arrows.meta does.
-    let words = [for (part in split(trim(raw), " ") where trim(part) != "") trim(part)]
+    let words = [for (part in ((split(trim(raw), " ")) ^ { [] }) where trim(part) != "") trim(part)]
     let base = opts.dimension_px(words[0])^ / PT_PX
     if (len(words) == 1) base
     else if (len(words) == 2) base + opts.numeric_value(words[1])^ * line_width_pt
@@ -121,7 +121,7 @@ fn option_dimension(raw, line_width_pt) float^ {
 
 fn tip_options(raw) any^ {
     if (raw == null or trim(raw) == "") []
-    else [for (part in util.split_top_level(raw, ",") where trim(part) != "") {
+    else [for (part in ((util.split_top_level(raw, ",")) ^ { [] }) where trim(part) != "") {
         let entry = trim(part)
         let eq = util.top_level_separator(entry, "=")
         if (eq == null) {key: entry, value: null}
@@ -209,13 +209,13 @@ pub fn shortened(from, point, distance) {
 fn local_point(end, ux, uy, x, y) =>
     [end[0] + x * ux - y * uy, end[1] + x * uy + y * ux]
 
-fn local_path(end, ux, uy, points) =>
+fn local_path(end, ux, uy, points) any^ =>
     util.str_join([for (index, point in points)
         (let mapped = local_point(end, ux, uy, point[0], point[1]),
          if (index == 0) svg.M(mapped[0], mapped[1]) else svg.L(mapped[0], mapped[1]))], " ")
 
 // Draw `tip` at `end`, pointing away from `from` (px coordinates).
-pub fn tip_svg(tip, from, end, color, stroke_width) {
+pub fn tip_svg(tip, from, end, color, stroke_width) any^ {
     let dx = end[0] - from[0]
     let dy = end[1] - from[1]
     let distance = math.sqrt(dx * dx + dy * dy)

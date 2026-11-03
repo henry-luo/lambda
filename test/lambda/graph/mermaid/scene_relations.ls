@@ -42,5 +42,5 @@ let bad_comparison = scene.compare_scenes(bad, expected,
 {
   canonical_paint_and_relations: good["equal"],
   bad_relations: sort([for (issue in bad_comparison.diagnostics
-    where starts_with(string(issue.field), "relation.")) string(issue.field)])
+    where ((starts_with(string(issue.field), "relation.")) ^ { false })) string(issue.field)])
 }

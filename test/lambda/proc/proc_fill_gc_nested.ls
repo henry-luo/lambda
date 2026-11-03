@@ -25,15 +25,15 @@ pn arr_set(var a, idx, val) {
     var i0 = shr(mid, 4)
     // S9.3.1: binding a level and mutating the local writes a copy. Write the
     // whole path instead -- each store lands in `a`, O(depth) and no subtree copy.
-    if (a.l0[i0] == null) { a.l0[i0] = null16() }
-    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32() }
+    if (a.l0[i0] == null) { a.l0[i0] = null16()^ }
+    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32()^ }
     a.l0[i0][i1][i2] = val
     return 0
 }
 
 pn main() {
     var a = arr_new()
-    arr_set(a, 0, 123)
+    arr_set(a, 0, 123)^
     var churn = fill(500000, 0)
     var n = arr_get(a, 0)
     print("gc nested: " ++ (int(n)) ++ " churn=" ++ (len(churn)) ++ "\n")

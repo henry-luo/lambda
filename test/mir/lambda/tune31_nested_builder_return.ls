@@ -5,7 +5,7 @@ pn build_codes(text) {
     var codes = []
     var index = 0
     while (index < len(text)) {
-        codes.push(ord(text[index]))
+        codes.push(ord(text[index]))^
         index = index + 1
     }
     codes
@@ -23,6 +23,6 @@ pn sum_codes(codes) {
 
 pn main() {
     var rows = []
-    rows.push(build_codes("AB"))
+    rows.push(build_codes("AB"))^
     print(sum_codes(rows[0]) ++ "\n")
 }

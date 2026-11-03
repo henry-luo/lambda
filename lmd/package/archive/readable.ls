@@ -13,15 +13,15 @@ let STYLE = "body{margin:0;background:#f6f1e7;color:#1d1a16;font:18px/1.6 Georgi
 pub fn esc(s) => replace(replace(replace(replace(string(s or ""), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), "\"", "&quot;")
 
 // the article's markup with its resources pointing at the snapshot's members
-pub fn body_html(art, table, base) {
+pub fn body_html(art, table, base) any^ {
     let parsed = lambda.sys.parse("<body>" ++ art.html ++ "</body>", 'html') ^ { null }
     if (parsed == null) art.html
     else (let body = n.first(n.of(parsed), ["body"]),
         if (body == null) art.html else rewrite.fragment(body.kids, base, table, "assets/"))
 }
 
-pub fn page(art, table, base, meta) {
-    let parts = [for (x in [meta.byline, meta.site, meta.published] where x != null and trim(string(x)) != "") esc(x)]
+pub fn page(art, table, base, meta) any^ {
+    let parts = [for (x in [meta.byline, meta.site, meta.published] where ((x != null and trim(string(x)) != "") ^ { false })) esc(x)]
     let lang = if (art.lang != null) " lang=\"" ++ esc(art.lang) ++ "\"" else ""
     let dir = if (art.dir != null) " dir=\"" ++ esc(art.dir) ++ "\"" else "";
     "<!DOCTYPE html>\n<html" ++ lang ++ dir ++ "><head><meta charset=\"utf-8\">" ++

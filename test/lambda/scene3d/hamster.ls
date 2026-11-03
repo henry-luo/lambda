@@ -67,7 +67,7 @@ let bend_center = cage.position(cage.room("bend","bend",0,0));
     occupied_relocation:len(blocked.modules) == 11 and len(blocked.pets) == 4 and
         model.pet(blocked,"ham-4").node != "room-12" and model.undo(adopted).modules == adopted.modules,
     walking:walking.pets[0].next != "" and walking.pets[0].progress > 0,
-    autonomous:all([for (h in later.pets) h.walked > 0]),
+    autonomous:all([for (h in ((later.pets) ^ { [] })) h.walked > 0]),
     eating:eating.pets[0].food > 0.5 and eating.food < 1.0,
     drinking:drinking.pets[0].water > 0.6 and drinking.water < 1.0,
     sleeping:sleeping.pets[0].energy > 0.8,

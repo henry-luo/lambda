@@ -21,6 +21,6 @@ let moved=maps.plan(maps.geomap([source,dot],{width:256,height:192,zoom:1,center
     maps.query_rendered(frame,[128,96],{radius:-1}) is error,
     maps.query_rendered(frame,[128,96],{layers:"dots"}) is error,
     maps.query_rendered({*:frame,index:[frame.index[0],frame.index[1],[0,0,256,192,2,2,-1]]},[128,96]) is error,
-    maps.query_rendered({*:frame,paths:[for (path in frame.paths) {*:path,cap:8}]},[128,96]) is error,
+    maps.query_rendered({*:frame,paths:[for (path in ((frame.paths) ^ { [] })) {*:path,cap:8}]},[128,96]) is error,
     name(maps.render_frame(frame))
 ]

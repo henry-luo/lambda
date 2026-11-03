@@ -21,7 +21,7 @@ check(all([for (bad in [{preset:"bad"},{preset:"center",columns:3},{preset:"cust
     match (editor.exec(st,{id:"guide.layout",*:bad}) ^ { ^ }) { case error: true default: false }]))
 let one = editor.exec(st,{id:"guide.add",axis:"x",position:40})^
 let applied = editor.exec(one,{id:"guide.layout",preset:"thirds"})^
-check([for (g in guides.items(applied.doc)) {axis:g.axis,position:g.position}] == thirds)
+check([for (g in ((guides.items(applied.doc)) ^ { [] })) {axis:g.axis,position:g.position}] == thirds)
 check(guides.lookup(applied.doc,"guide-1").position == 40)
 check(len(applied.hist.undo) == len(one.hist.undo)+1)
 check(editor.exec(applied,{id:"guide.layout",preset:"thirds"})^.hist == applied.hist)
@@ -53,7 +53,7 @@ let unlocked = editor.exec(locked,{id:"guide.configure",locked:false})^
 check(not unlocked.guides_locked and unlocked.doc == locked.doc and unlocked.hist == locked.hist)
 check(len(guides.items(editor.exec(unlocked,{id:"guide.clear"})^.doc)) == 0)
 let resized = editor.exec(locked,{id:"document.resize_image",width:60,height:45})^
-check(resized.guides_locked and [for (g in guides.items(resized.doc)) g.position] == [20,40,15,30])
+check(resized.guides_locked and [for (g in ((guides.items(resized.doc)) ^ { [] })) g.position] == [20,40,15,30])
 check(editor.exec(resized,{id:"history.undo"})^.guides_locked)
 let painted = editor.exec(locked,{id:"layer.insert",raster:img.blank({width:8,height:4,color:[1,0,0,1]})^,position:[38,10]})^
 let draft = interaction.preview(interaction.begin(painted,pointer(40,12,{guide:"guide-1"}))^,pointer(50,12))^
@@ -69,7 +69,7 @@ check(editor.exec(full,{id:"history.undo"})^.doc == large.doc)
 let coverage = editor.exec(st,{id:"selection.all"})^
 let channel_first = editor.exec(editor.exec(coverage,{id:"channel.save",name:"Coverage"})^,{id:"guide.add",axis:"x",position:40})^
 let guide_first = editor.exec(editor.exec(coverage,{id:"guide.add",axis:"x",position:40})^,{id:"channel.save",name:"Coverage"})^
-fn block_order(image) => [for (child in content(image)) {kind:name(child),role:child.role}]
+fn block_order(image) any^ => [for (child in ((content(image)) ^ { [] })) {kind:name(child),role:child.role}]
 check(all([for (snapshot in [channel_first,guide_first])
     editor.exec(snapshot,{id:"document.resize_canvas",width:120,height:90})^.hist == snapshot.hist]))
 check(all([for (snapshot in [channel_first,guide_first]) (

@@ -17,7 +17,7 @@ pub fn descriptor(props, child) element^ {
 fn settings(props) => {spinning:c.option(props,"spinning",true),delay:c.option(props,"delay",0),automatic:props.percent == 'auto'}
 fn percentage(props, clock) => if (props.percent == 'auto') clock.progress else max(0,min(100,c.option(props,"percent",0)))
 fn dots() => <span class:"dtna-spin-dot",*[for (index in 1 to 4) <i class:"dtna-spin-dot-item">]>
-fn indicator(props, clock) {
+fn indicator(props, clock) any^ {
     let percent = percentage(props,clock)
     let attributes = c.part_attrs(props,"indicator","dtna-spin-indicator");
     if (c.has(props,"indicator")) <span *:attributes,
@@ -57,20 +57,20 @@ pn advance(node, evt, previous) {
         value + (100-value)*(if (value <= 30) 0.05 else if (value <= 70) 0.03 else if (value <= 96) 0.01 else 0) else value
     let update_at = if (now >= deadline) now + 200 else deadline
     let waiting = config.spinning and (not shown or (config.automatic and stepped <= 96))
-    if (changed and previous.token > 0) { dom.cancel_frame(evt.target,previous.token) }
+    if ((changed and previous.token > 0)^) { dom.cancel_frame(evt.target,previous.token) }
     {settings:config,start:start,shown:shown,progress:stepped,update_at:update_at,
         token:if (waiting) dom.request_frame(evt.target,"dtna_spin_tick") else 0}
 }
-view dtna_spin: <dtna.spin> state clock:{settings:null,start:0,progress:0,update_at:0,token:0,
+view dtna_spin: <dtna.spin> () any^ state clock:{settings:null,start:0,progress:0,update_at:0,token:0,
     shown:c.option(c.props(~),"spinning",true) and c.option(c.props(~),"delay",0) == 0} {
     presentation(~,clock)
 }
 on render(evt) {
-    if (evt.event_phase == 2 and clock.settings != settings(c.props(~))) { clock = advance(~,evt,clock) }
+    if ((evt.event_phase == 2 and clock.settings != settings(c.props(~)))^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on dtna_spin_tick(evt) {
-    if (evt.detail == clock.token and clock.token > 0) { clock = advance(~,evt,clock) }
+    if ((evt.detail == clock.token and clock.token > 0)^) { clock = advance(~,evt,clock) }
     'pass'
 }
 pub let css = "

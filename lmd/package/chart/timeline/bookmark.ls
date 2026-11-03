@@ -3,17 +3,17 @@ import c: .common
 import url: lambda.dom.urlencode
 import theme: .theme
 
-fn prefix(spec) => "#timeline=" ++ url.form_encode(c.text(spec.id)) ++ "/"
-pub fn address(spec, id) {
+fn prefix(spec) any^ => "#timeline=" ++ url.form_encode(c.text(spec.id)) ++ "/"
+pub fn address(spec, id) any^ {
     if (c.id(spec.id) is error) c.fail("story.bookmarks","an authored chart ID is required")
     else if (id==null or not contains([spec.intro.id,*[for (item in spec.events) item.id]],c.text(id))) c.fail("bookmark.id","unknown event")
     else prefix(spec) ++ url.form_encode(c.text(id))
 }
-pub fn resolve(spec, fragment) {
+pub fn resolve(spec, fragment) any^ {
     let source=c.text(fragment);
     let head=prefix(spec);
     if (not starts_with(source,head)) null else {
-        let found=[for (id in [spec.intro.id,*[for (item in spec.events) item.id]] where id!=null and address(spec,id)==source) id];
+        let found=[for (id in [spec.intro.id,*[for (item in spec.events) item.id]] where ((id!=null and address(spec,id)==source) ^ { false })) id];
         if (len(found)==0) c.fail("bookmark","the addressed event is no longer available") else found[0]
     }
 }

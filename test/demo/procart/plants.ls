@@ -11,7 +11,7 @@ fn action(id, text, disabled = false) element => <button *:(if (disabled) {disab
 fn visibility(id, text, enabled, disabled = false) element => <button *:(if (disabled) {disabled:true} else {}),type:"button",class:(if (enabled) "visibility on" else "visibility"),
     'data-act':id,'aria-pressed':string(enabled),text>
 
-view <plant_app> state st: botany.initial() {
+view <plant_app>() any^ state st: (botany.initial()^) {
     let tips = if (st.mode == "3d") three.tip_count(st.plant) else len(st.plant.tips);
     let details = if (st.plant.detail_count != null) st.plant.detail_count else tips;
     <body <div class:"app glasshouse",
@@ -29,7 +29,7 @@ view <plant_app> state st: botany.initial() {
                 visibility("group-garden","Garden plants & flowers",st.section == "garden");
                 visibility("group-foliage","Leaves & foliage",st.section == "foliage")>
             <div class:"species-tabs",role:"group",'aria-label':"Plant species",
-                for (s in botany.visible(st)) <button type:"button",'data-act':s.id,class:(if (st.id == s.id) "species active" else "species"),
+                for (s in ((botany.visible(st)) ^ { [] })) <button type:"button",'data-act':s.id,class:(if (st.id == s.id) "species active" else "species"),
                     'aria-pressed':string(st.id == s.id),<span class:"species-tag",s.tag> <strong s.title>>>>
         <main class:"botanical-body",
             <section class:"specimen-card",

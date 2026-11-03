@@ -16,21 +16,21 @@
 import dom
 
 // ---- the derivations, over core only ----
-fn element_or_next(c) { if (c == null or dom.node_type(c) == 1) c else element_or_next(dom.next_sibling(c)) }
-fn element_or_prev(c) { if (c == null or dom.node_type(c) == 1) c else element_or_prev(dom.previous_sibling(c)) }
-fn chain_len(c) { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
-fn nth_from(c, i) { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
-fn siblings_from(c) array | error { [for (i in 0 to chain_len(c) - 1) nth_from(c, i)] }
+fn element_or_next(c) any^ { if (c == null or dom.node_type(c) == 1) c else element_or_next(dom.next_sibling(c)) }
+fn element_or_prev(c) any^ { if (c == null or dom.node_type(c) == 1) c else element_or_prev(dom.previous_sibling(c)) }
+fn chain_len(c) any^ { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
+fn nth_from(c, i) any^ { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
+fn siblings_from(c) array | error { [for (i in ((0 to chain_len(c) - 1) ^ { [] })) nth_from(c, i)] }
 
-fn d_first_element_child(n) { element_or_next(dom.first_child(n)) }
-fn d_last_element_child(n) { element_or_prev(dom.last_child(n)) }
-fn d_next_element_sibling(n) { element_or_next(dom.next_sibling(n)) }
-fn d_previous_element_sibling(n) { element_or_prev(dom.previous_sibling(n)) }
+fn d_first_element_child(n) any^ { element_or_next(dom.first_child(n)) }
+fn d_last_element_child(n) any^ { element_or_prev(dom.last_child(n)) }
+fn d_next_element_sibling(n) any^ { element_or_next(dom.next_sibling(n)) }
+fn d_previous_element_sibling(n) any^ { element_or_prev(dom.previous_sibling(n)) }
 fn d_parent_element(n) { if (dom.parent_node(n) != null and dom.node_type(dom.parent_node(n)) == 1) dom.parent_node(n) else null }
 fn d_child_nodes(n) array | error { siblings_from(dom.first_child(n)) }
-fn d_children(n) array | error { [for (c in d_child_nodes(n) where dom.node_type(c) == 1) c] }
-fn d_root_node(n) { if (dom.parent_node(n) == null) n else d_root_node(dom.parent_node(n)) }
-fn d_contains(a, b) { if (dom.same_node(b, a)) true else if (dom.parent_node(b) == null) false else d_contains(a, dom.parent_node(b)) }
+fn d_children(n) array | error { [for (c in ((d_child_nodes(n)) ^ { [] }) where dom.node_type(c) == 1) c] }
+fn d_root_node(n) any^ { if (dom.parent_node(n) == null) n else d_root_node(dom.parent_node(n)) }
+fn d_contains(a, b) any^ { if (dom.same_node(b, a)) true else if (dom.parent_node(b) == null) false else d_contains(a, dom.parent_node(b)) }
 
 // ---- comparison helpers (identity, not `==`: see ESO96) ----
 fn node_eq(x, y) { if (x == null or y == null) (x == null and y == null) else dom.same_node(x, y) }
@@ -43,7 +43,7 @@ fn list_eq(xs, ys) bool | error {
 }
 
 // ---- the corpus: every node in the document, in tree order ----
-fn descendants(n) { [for (c in d_child_nodes(n)) (c, *descendants(c))] }
+fn descendants(n) any^ { [for (c in ((d_child_nodes(n)) ^ { [] })) (c, *descendants(c))] }
 
 let doc = dom.load("test/js/dom_identity.html")
 let root = dom.document_element(doc)
@@ -63,5 +63,5 @@ fn agrees(n) bool | error {
 
 {
   nodes_checked: len(nodes),
-  divergent: [for (n in nodes where agrees(n) != true) dom.node_name(n)]
+  divergent: [for (n in nodes where ((agrees(n) != true) ^ { false })) dom.node_name(n)]
 }

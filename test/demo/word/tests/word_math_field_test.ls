@@ -25,7 +25,7 @@ field.move(frac.row,{path:[],index:1},"right") == null
 field.move(frac.row,{path:[0,1],index:1},"home") == {path:[],index:0}
 
 // Typing: ^ and _ open scripts, / lifts the operand into a numerator, \name resolves on space.
-let typed = (src,keys) => reduce([field.parse_field(src)^,*split(keys,"")],(s,ch)=>field.type_text(s.row,s.caret,ch))
+let typed = (src,keys) any^ => reduce([field.parse_field(src)^,*split(keys,"")],(s,ch)any^ =>field.type_text(s.row,s.caret,ch))
 field.source(typed("","x^2").row) == "x^{2}"
 field.source(typed("","x_1^2").row) == "x_{1}^{2}"
 let half = typed("","a/2")

@@ -19,13 +19,13 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
             var distance: float = math.sqrt(d_squared)
             var mag: float = dt / (d_squared * distance)
 
-            bvx[i] = bvx[i] - dx * bmass[j] * mag
-            bvy[i] = bvy[i] - dy * bmass[j] * mag
-            bvz[i] = bvz[i] - dz * bmass[j] * mag
+            bvx[i] = (bvx[i] - dx * bmass[j] * mag)^
+            bvy[i] = (bvy[i] - dy * bmass[j] * mag)^
+            bvz[i] = (bvz[i] - dz * bmass[j] * mag)^
 
-            bvx[j] = bvx[j] + dx * bmass[i] * mag
-            bvy[j] = bvy[j] + dy * bmass[i] * mag
-            bvz[j] = bvz[j] + dz * bmass[i] * mag
+            bvx[j] = (bvx[j] + dx * bmass[i] * mag)^
+            bvy[j] = (bvy[j] + dy * bmass[i] * mag)^
+            bvz[j] = (bvz[j] + dz * bmass[i] * mag)^
 
             j = j + 1
         }
@@ -41,7 +41,7 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
     }
 }
 
-fn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float {
+fn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float^ {
     var e = 0.0
     var i: int = 0
     while (i < 5) {
@@ -73,12 +73,12 @@ pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], var bma
         pz = pz + bvz[i] * bmass[i]
         i = i + 1
     }
-    bvx[0] = 0.0 - (px / SOLAR_MASS)
-    bvy[0] = 0.0 - (py / SOLAR_MASS)
-    bvz[0] = 0.0 - (pz / SOLAR_MASS)
+    bvx[0] = (0.0 - (px / SOLAR_MASS))^
+    bvy[0] = (0.0 - (py / SOLAR_MASS))^
+    bvz[0] = (0.0 - (pz / SOLAR_MASS))^
 }
 
-pn benchmark() float {
+pn benchmark() float^ {
     var bx:float[] = [0.0,
         4.84143144246472090e+00,
         8.34336671824457987e+00,
@@ -119,7 +119,7 @@ pn benchmark() float {
 
     var i: int = 0
     while (i < 36000) {
-        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
+        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)^
         i = i + 1
     }
     var r = energy(bx, by, bz, bvx, bvy, bvz, bmass)

@@ -30,7 +30,7 @@ pn make_chain(n: int) Node? {
     return e
 }
 
-pn sum_chain(node: Node?) int {
+pn sum_chain(node: Node?) int^ {
     if (node == null) { return 0 }
     return node.val + sum_chain(node.next)
 }
@@ -52,7 +52,7 @@ pn make_tree(depth: int, key: int) Tree? {
     return t
 }
 
-pn tree_sum(t: Tree?) int {
+pn tree_sum(t: Tree?) int^ {
     if (t == null) { return 0 }
     return t.key + tree_sum(t.left) + tree_sum(t.right)
 }
@@ -70,7 +70,7 @@ pn main() {
     // firewall; its nullable field must survive both the store and the read
     var r: Root = {head: make_chain(3)}
     print(sum_chain(r.head) ++ " " ++ r.head.val ++ "\n")
-    r.head = make_chain(5)
+    r.head = make_chain(5)^
     print(sum_chain(r.head) ++ " " ++ chain_len(r.head) ++ "\n")
     r.head = null
     print(sum_chain(r.head) ++ " " ++ chain_len(r.head) ++ "\n")

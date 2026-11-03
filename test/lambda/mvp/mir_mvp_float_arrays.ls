@@ -40,23 +40,23 @@ pn main() {
     write_absent(a)
     boundary(a)
     print(a[0]); print("\n")
-    var empty: float[] = fill(0, 0.0)
+    var empty: float[] = fill(0, 0.0)^
     print(absent(empty, 0)); print("\n")
     var ints: int[] = [1, 2, 3]
     var flags: bool[] = [true, false]
     print(ints[2]); print(" "); print(flags[1]); print("\n")
-    var dest: float[] = fill(3, 1.0)
-    var src: float[] = fill(3, 2.0)
-    add_three(dest, src)
+    var dest: float[] = fill(3, 1.0)^
+    var src: float[] = fill(3, 2.0)^
+    add_three(dest, src)^
     let saved: float[] = dest
-    add_three(dest, src)
+    add_three(dest, src)^
     print(saved[2]); print(" "); print(dest[2]); print("\n")
-    var short: float[] = fill(1, 4.0)
-    add_three(dest, short)
+    var short: float[] = fill(1, 4.0)^
+    add_three(dest, short)^
     print(dest[0]); print(" "); print(dest[1]); print("\n")
     print(halve(1e-310) == generic_halve(1e-310)); print(" ")
     print(halve(5e-324) == generic_halve(5e-324)); print(" ")
     print(1.0 / halve(-0.0) < 0.0); print("\n")
-    nested_counter(dest)
+    nested_counter(dest)^
     print(dest[0]); print(" "); print(dest[2]); print("\n")
 }

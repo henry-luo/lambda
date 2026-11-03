@@ -7,7 +7,7 @@ import .mod_md_schema
 
 fn is_list(v) => type(v) == array or type(v) == list
 
-fn add_mark_to_text(n, name) =>
+fn add_mark_to_text(n, name) any^ =>
   if (is_text(n)) { text_marked(n.text, [*n.marks, {name: name, value: true}]) } else { n }
 
 fn add_mark_at(nodes, mark, i, n, acc) {
@@ -20,7 +20,7 @@ fn add_mark(nodes, mark) => add_mark_at(nodes, mark, 0, len(nodes), [])
 // leaves — matching the canonical flat-mark model and the JS reference
 // (html-parser.ts, where mark wrappers disappear into each leaf's mark dict).
 // (`tag` is retained for call-site symmetry.)
-fn html_mark_fragment(schema, tag, n, mark) =>
+fn html_mark_fragment(schema, tag, n, mark) any^ =>
   add_mark(convert_inline_schema(schema, n), mark)
 
 fn frag_concat_at(a, b, i, n, acc) {
@@ -52,7 +52,7 @@ fn attr_value_at(attrs, key, i, n) {
   else if (attrs[i].name == key) { attrs[i].value }
   else { attr_value_at(attrs, key, i + 1, n) }
 }
-fn attr_value(n, key) =>
+fn attr_value(n, key) any^ =>
   if (is_node(n)) { attr_value_at(n.attrs, key, 0, len(n.attrs)) }
   else if (type(n) == element) { map(n)[string(key)] }
   else { null }
@@ -77,8 +77,8 @@ fn image_node(schema, n) map | error =>
   node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')},
     // only schema-declared extensions survive paste, including an app's editable object metadata.
     *[for (key in unique(['width','height',*[for (a in schema[image_tag(schema)].attrs
-        where not contains(['src','alt'],a.name)) a.name]]),let value=attr_value(n,key)
-        where value!=null) {name:key,value:value}]], [])
+        where ((not contains(['src','alt'],a.name)) ^ { false })) a.name]]),let value=attr_value(n,key)
+        where ((value!=null) ^ { false })) {name:key,value:value}]], [])
 
 // HTML input is dynamically shaped, so node construction reports malformed
 // attributes as ordinary data rather than pretending that paste succeeded.
@@ -90,7 +90,7 @@ fn blockquote_node(schema, n) map | error => node('blockquote', coerce_children(
 fn code_block_node(schema, n) map | error => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
 // indentation between table parts is not a paragraph that terminates the schema's row/cell run.
 fn table_children_schema(schema, n) =>
-  [for (child in convert_children_schema(schema,n) where not (is_text(child) and trim(child.text)=="")) child]
+  [for (child in ((convert_children_schema(schema,n)) ^ { [] }) where ((not (is_text(child) and trim(child.text)=="")) ^ { false })) child]
 fn table_node(schema, n) map | error => node('table', normalize_table_children(schema, table_children_schema(schema, n)))
 fn table_section_node(schema, tag, n) map | error => node(tag, table_children_schema(schema, n))
 fn table_row_node(schema, n) map | error => node('tr', table_children_schema(schema, n))
@@ -104,38 +104,38 @@ fn is_list_node(schema, n) {
 
 fn is_list_item_node(schema, n) => is_node(n) and n.tag == list_item_tag(schema)
 
-fn list_item_from_loose(schema, n) {
+fn list_item_from_loose(schema, n) any^ {
   if (is_list_node(schema, n)) { node(list_item_tag(schema), [node(paragraph_tag(schema), []), n]) }
   else { node(list_item_tag(schema), list_item_blocks_schema(schema, node('fragment', [n]))) }
 }
 
-fn normalize_list_children_at(schema, kids, i, n, acc) {
+fn normalize_list_children_at(schema, kids, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (is_list_item_node(schema, kids[i])) { normalize_list_children_at(schema, kids, i + 1, n, [*acc, kids[i]]) }
   else { normalize_list_children_at(schema, kids, i + 1, n, [*acc, list_item_from_loose(schema, kids[i])]) }
 }
 
-fn normalize_list_children(schema, kids) => normalize_list_children_at(schema, kids, 0, len(kids), [])
+fn normalize_list_children(schema, kids) any^ => normalize_list_children_at(schema, kids, 0, len(kids), [])
 
-fn has_table_section(kids, i, n) {
+fn has_table_section(kids, i, n) any^ {
   if (i >= n) { false }
   else if (is_node(kids[i]) and (kids[i].tag == 'thead' or kids[i].tag == 'tbody' or kids[i].tag == 'tfoot')) { true }
   else { has_table_section(kids, i + 1, n) }
 }
 
-fn table_direct_rows(kids, i, n, acc) {
+fn table_direct_rows(kids, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (is_node(kids[i]) and kids[i].tag == 'tr') { table_direct_rows(kids, i + 1, n, [*acc, kids[i]]) }
   else { table_direct_rows(kids, i + 1, n, acc) }
 }
 
-fn table_non_rows(kids, i, n, acc) {
+fn table_non_rows(kids, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (is_node(kids[i]) and kids[i].tag == 'tr') { table_non_rows(kids, i + 1, n, acc) }
   else { table_non_rows(kids, i + 1, n, [*acc, kids[i]]) }
 }
 
-fn normalize_table_children(schema, kids) {
+fn normalize_table_children(schema, kids) any^ {
   if (not html_schema_mode(schema) or has_table_section(kids, 0, len(kids))) { kids }
   else {
     let rows = table_direct_rows(kids, 0, len(kids), [])
@@ -144,31 +144,31 @@ fn normalize_table_children(schema, kids) {
   }
 }
 
-fn convert_children_at_schema(schema, kids, i, n, acc) {
+fn convert_children_at_schema(schema, kids, i, n, acc) any^ {
   if (i >= n) { acc }
   else { convert_children_at_schema(schema, kids, i + 1, n, frag_concat(acc, html_to_editor_fragment_for_schema(schema, kids[i]))) }
 }
-fn convert_children_schema(schema, n) {
+fn convert_children_schema(schema, n) any^ {
   let kids = html_children(n)
   convert_children_at_schema(schema, kids, 0, len(kids), [])
 }
 
-fn convert_children_at(kids, i, n, acc) => convert_children_at_schema(md_schema, kids, i, n, acc)
-fn convert_children(n) => convert_children_schema(md_schema, n)
+fn convert_children_at(kids, i, n, acc) any^ => convert_children_at_schema(md_schema, kids, i, n, acc)
+fn convert_children(n) any^ => convert_children_schema(md_schema, n)
 
-fn convert_inline_schema(schema, n) => coerce_children(schema, convert_children_schema(schema, n), 'inline')
-fn convert_inline(n) => convert_inline_schema(md_schema, n)
+fn convert_inline_schema(schema, n) any^ => coerce_children(schema, convert_children_schema(schema, n), 'inline')
+fn convert_inline(n) any^ => convert_inline_schema(md_schema, n)
 
-fn list_item_blocks_schema(schema, n) {
+fn list_item_blocks_schema(schema, n) any^ {
   let blocks = coerce_children(schema, convert_children_schema(schema, n), 'block')
   let para = paragraph_tag(schema)
   if (len(blocks) == 0) { [node(para, [])] }
   else if (blocks[0].tag == para) { blocks }
   else { list_concat([node(para, [])], blocks) }
 }
-fn list_item_blocks(n) => list_item_blocks_schema(md_schema, n)
+fn list_item_blocks(n) any^ => list_item_blocks_schema(md_schema, n)
 
-pub fn html_to_editor_fragment_for_schema(schema, n) {
+pub fn html_to_editor_fragment_for_schema(schema, n) any^ {
   if (type(n) == string) { if (len(n) == 0) { [] } else { [text(n)] } }
   else if (is_text(n)) { [n] }
   else if (is_list(n)) { convert_children_at_schema(schema, n, 0, len(n), []) }
@@ -203,10 +203,10 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
   }
 }
 
-pub fn html_to_editor_fragment(n) => html_to_editor_fragment_for_schema(md_schema, n)
+pub fn html_to_editor_fragment(n) any^ => html_to_editor_fragment_for_schema(md_schema, n)
 
-pub fn html_fragment_to_md_blocks(fragment) =>
+pub fn html_fragment_to_md_blocks(fragment) any^ =>
   coerce_for_md_block(html_to_editor_fragment(fragment))
 
-pub fn html_fragment_to_blocks_for_schema(schema, fragment) =>
+pub fn html_fragment_to_blocks_for_schema(schema, fragment) any^ =>
   coerce_children(schema, html_to_editor_fragment_for_schema(schema, fragment), 'block')

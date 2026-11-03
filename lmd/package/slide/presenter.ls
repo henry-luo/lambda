@@ -6,7 +6,7 @@ pub fn initial_state() => {console: false, overview: false, toolbar: true, black
     elapsed_ms: 0.0, anchor_ms: 0.0, running: false, started: false}
 pub fn elapsed(ui, now_ms) => ui.elapsed_ms + if (ui.running) max(0.0, now_ms - ui.anchor_ms) else 0.0
 fn two(n) => if (n < 10) "0" ++ string(n) else string(n)
-pub fn clock(ui, now_ms) {
+pub fn clock(ui, now_ms) any^ {
     let seconds = int(floor(elapsed(ui, now_ms) / 1000.0))
     two(seconds div 3600) ++ ":" ++ two((seconds div 60) % 60) ++ ":" ++ two(seconds % 60)
 }
@@ -30,7 +30,7 @@ pub fn destination(plan, value) int^ {
         if (len(matches) == 1) matches[0] else raise c.fail("picker", "enter a slide number or ID")
     }
 }
-pub fn title(scene) => c.as_text(c.value(scene.source.title, scene.id))
+pub fn title(scene) any^ => c.as_text(c.value(scene.source.title, scene.id))
 pub fn button(command, label) => <button type: "button", ["data-slide-tool"]: command, label>
 
 pub fn toolbar(plan, key) => [

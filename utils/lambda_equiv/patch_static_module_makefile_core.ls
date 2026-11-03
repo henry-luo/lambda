@@ -20,15 +20,15 @@ pn platform_libraries(target) {
 pn visit_target(target, targets, external, root,
                 var archives, var visited_targets, var visited_external) {
     let name = target.name
-    if (contains(visited_targets, name)) { return }
+    if (contains(visited_targets, name)^) { return }
     visited_targets = visited_targets ++ [name]
     for (dependency in platform_libraries(target)) {
         let library = external[dependency]
         if (library != null) {
-            if (not contains(visited_external, dependency) and library.link == "static") {
+            if ((not contains(visited_external, dependency) and library.link == "static")^) {
                 visited_external = visited_external ++ [dependency]
                 let archive = library.lib
-                if (archive != null and archive != "" and not starts_with(archive, "-")) {
+                if ((archive != null and archive != "" and not starts_with(archive, "-"))^) {
                     archives = archives ++ [if (starts_with(archive, "/")) archive else root ++ "/" ++ archive]
                 }
             }

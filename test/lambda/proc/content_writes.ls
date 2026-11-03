@@ -20,10 +20,10 @@ pn main() {
     h[0] = (3, 4)
     print(len(content(h))); print(" "); print(content(h)); print("\n")
     var k = <e "x">
-    push(k, "y")
+    push(k, "y")^
     print(len(content(k))); print(" "); print(content(k)[0]); print("\n")
     var n = <e "x">
-    push(n, null)
+    push(n, null)^
     print(len(content(n))); print("\n")
     var p = <e "a" 1 "b">
     p[1] = "-"

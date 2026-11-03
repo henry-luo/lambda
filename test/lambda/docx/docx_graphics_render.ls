@@ -3,7 +3,7 @@ import metafile: lambda.doc.docx.metafile
 import utf16: lambda.io.utf16
 import theme: lambda.doc.docx.theme
 import c: lambda.doc.docx.common
-fn tone_color(tones) => theme.drawing_color(c.xml_node(
+fn tone_color(tones) any^ => theme.drawing_color(c.xml_node(
     <solidFill xmlns:c.A,<srgbClr val:"4080C0",*tones>>),{},null,true)
 let r = d.convert("test/input/docx/diagram-composite.docx",{unsupported:"error"})^
 let diagram = content(content(content(r.document)[0])[0])[0]

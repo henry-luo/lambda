@@ -3,12 +3,15 @@ type Counter {
     count: int = 0,
     pn increment() {
         count = count + 1
+        return count
     }
     pn add(n: int) {
         count = count + n
+        return count
     }
     pn reset() {
         count = 0
+        return count
     }
 }
 
@@ -38,7 +41,7 @@ pn main() {
 
     var r = <Rect width: 3.0, height: 4.0>
     print(r.area()); print("\n")
-    r.scale(2.0)
+    r.scale(2.0)^
     print(r.area()); print("\n")
     print(r.width); print("\n")
     print(1); print("\n")

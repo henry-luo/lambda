@@ -11,9 +11,9 @@ let checks={
     outside:sampled[2]==null,
     cell:mesh.sample(prepared,[[2.5,0.5]],{association:"cell",fields:["heat"]})[0].values.heat==20,
     identities:prepared.faces[0].id==[[0,0],0] and sampled[0].cell_id==[0,0],
-    delaunay:len(triangulated.faces)==4 and all([for (f in triangulated.faces,
+    delaunay:len(triangulated.faces)==4 and all([for (f in ((triangulated.faces) ^ { [] }),
         let p=[for (i in f.vertices) mesh.point(triangulated.vertices[i])])
-        all([for (i,v in triangulated.vertices where not contains(f.vertices,i)) math.incircle(p[0],p[1],p[2],mesh.point(v))<=0])]),
+        all([for (i,v in ((triangulated.vertices) ^ { [] }) where ((not contains(f.vertices,i)) ^ { false })) math.incircle(p[0],p[1],p[2],mesh.point(v))<=0])]),
     cocircular:len(mesh.triangulate(slice(points,0,4)).faces)==2,
     reversed:mesh.sample({kind:"mesh",vertices:slice(points,0,3),faces:[{id:"reverse",vertices:[2,1,0]}]},[[0.75,0.5]],{fields:["value"]})[0].face_id=="reverse",
     mask:mesh.sample({*:grid,cell_mask:[[true,false]]},[[1,0.5]],{fields:["value"]})==[null],

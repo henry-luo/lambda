@@ -1,6 +1,6 @@
 // D2.4.1–D2.4.3: a statement's descriptor must retain its native float carrier.
 pub pn smooth(kind) array^ {
-    var samples:float[]=fill(3,0.0)
+    var samples:float[]=fill(3,0.0)^
     var value=0.0
     var i=0
     while (i<3) {

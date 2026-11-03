@@ -19,7 +19,7 @@ pub fn context(style, locales, reference, item = {}, options = {}) =>
         name_count: c.get(reference, "name_count", 0),
         disambiguate: c.get(reference, "disambiguate", false)}
 
-pub fn variable(key, context, form = "long") {
+pub fn variable(key, context, form = "long") any^ {
     let ref = context.reference
     if (c.has(context.suppressed, key)) null
     else if (key == "locator") context.item.locator
@@ -36,7 +36,7 @@ pub fn variable(key, context, form = "long") {
     else ref[key]
 }
 
-fn plural(value) {
+fn plural(value) any^ {
     if (value is array or value is list) len(value) > 1
     else contains(c.text(value), "–") or contains(c.text(value), "-") or
         contains(c.text(value), ",") or contains(c.text(value), "&")
@@ -44,26 +44,26 @@ fn plural(value) {
 
 type NumericToken = \("\a"* "\d"+ "\a"*)
 
-pub fn numeric(value) {
+pub fn numeric(value) any^ {
     let text = trim(c.text(value))
     let tokens = c.words(replace(replace(replace(replace(text, "–", " "), "-", " "), ",", " "), "&", " "))
     len(tokens) > 0 and all([for (token in tokens) token is NumericToken])
 }
 
-fn condition(node, context) {
+fn condition(node, context) any^ {
     let tests = (if (node.type == null) [] else
-        [for (key in c.words(node.type)) context.reference.type == key]) ++
+        [for (key in ((c.words(node.type)) ^ { [] })) context.reference.type == key]) ++
         (if (node.variable == null) [] else
-        [for (key in c.words(node.variable)) c.nonempty(variable(key, context))]) ++
+        [for (key in ((c.words(node.variable)) ^ { [] })) c.nonempty(variable(key, context))]) ++
         (if (node["is-numeric"] == null) [] else
-        [for (key in c.words(node["is-numeric"])) numeric(variable(key, context))]) ++
+        [for (key in ((c.words(node["is-numeric"])) ^ { [] })) numeric(variable(key, context))]) ++
         (if (node["is-uncertain-date"] == null) [] else
-        [for (key in c.words(node["is-uncertain-date"])) c.truth(variable(key, context).circa)]) ++
+        [for (key in ((c.words(node["is-uncertain-date"])) ^ { [] })) c.truth(variable(key, context).circa)]) ++
         (if (node.locator == null) [] else
-        [for (key in c.words(node.locator)) c.get(context.item, "label", "page") == key and
+        [for (key in ((c.words(node.locator)) ^ { [] })) c.get(context.item, "label", "page") == key and
             c.nonempty(context.item.locator)]) ++
         (if (node.position == null) [] else
-        [for (key in c.words(node.position))
+        [for (key in ((c.words(node.position)) ^ { [] }))
             key == context.position or (key == "ibid" and context.position == "ibid-with-locator") or
                 (key == "subsequent" and context.position != "first") or
                 (key == "near-note" and c.truth(context.item["near-note"]))]) ++
@@ -74,14 +74,14 @@ fn condition(node, context) {
     else if (match_rule == "none") not any(tests) else all(tests)
 }
 
-fn choose(branches, index, context) {
+fn choose(branches, index, context) any^ {
     if (index >= len(branches)) out.result()
     else if (c.tag(branches[index]) == "else" or condition(branches[index], context))
         children(branches[index], context)
     else choose(branches, index + 1, context)
 }
 
-fn selected_branch(branches, index, context) {
+fn selected_branch(branches, index, context) any^ {
     if (index >= len(branches)) []
     else if (c.tag(branches[index]) == "else" or condition(branches[index], context))
         c.children(branches[index])
@@ -89,10 +89,10 @@ fn selected_branch(branches, index, context) {
 }
 
 fn expanded(nodes, context) => [for (node in nodes, child in
-    (if (c.tag(node) == "choose") expanded(selected_branch(c.children(node), 0, context), context)
-        else [node])) child]
+    (((if (c.tag(node) == "choose") expanded(selected_branch(c.children(node), 0, context), context)
+        else [node])) ^ { [] })) child]
 
-fn variable_text(node, context) {
+fn variable_text(node, context) any^ {
     let key = node.variable
     let form = c.get(node, "form", "long")
     let value = variable(key, context, form)
@@ -114,7 +114,7 @@ fn variable_text(node, context) {
     out.result(linked, attempted, if (c.nonempty(value)) 1 else 0, if (c.nonempty(value)) [key] else [])
 }
 
-fn text_node(node, context) {
+fn text_node(node, context) any^ {
     if (node.macro != null) children(context.style.macros[node.macro], context)
     else if (node.variable != null) variable_text(node, context)
     else if (node.term != null) out.result([locale.term(context.locales, node.term,
@@ -122,7 +122,7 @@ fn text_node(node, context) {
     else out.literal(c.get(node, "value", ""))
 }
 
-fn label_node(node, context, override = null) {
+fn label_node(node, context, override = null) any^ {
     let key = c.get(node, "variable", override)
     let value = variable(key, context)
     let term_name = if (key == "locator") c.get(context.item, "label", "page") else key
@@ -133,7 +133,7 @@ fn label_node(node, context, override = null) {
         1, if (c.nonempty(value)) 1 else 0, if (c.nonempty(value)) [key] else [])
 }
 
-fn substitute(nodes, index, context) {
+fn substitute(nodes, index, context) any^ {
     if (index >= len(nodes)) out.result([], 1, 0)
     else {
         let rendered = render(nodes[index], context)
@@ -142,13 +142,13 @@ fn substitute(nodes, index, context) {
     }
 }
 
-fn names_node(node, context) {
+fn names_node(node, context) any^ {
     let keys = c.words(node.variable)
     let merge_roles = c.has(keys, "editor") and c.has(keys, "translator") and
         context.reference.editor == context.reference.translator and
         locale.term(context.locales, "editortranslator") != ""
-    let values = [for (key in keys where c.nonempty(variable(key, context)) and
-        not (merge_roles and key == "translator"))
+    let values = [for (key in keys where ((c.nonempty(variable(key, context)) and
+        not (merge_roles and key == "translator")) ^ { false }))
         {key: if (merge_roles and key == "editor") "editortranslator" else key, people: variable(key, context)}]
     if (len(values) > 0 and context.author_substitute != null and
         c.has(["author", "editor"], values[0].key))
@@ -175,7 +175,7 @@ fn names_node(node, context) {
     }
 }
 
-fn sequence(nodes, index, context, parts, suppressed) {
+fn sequence(nodes, index, context, parts, suppressed) any^ {
     if (index >= len(nodes)) {parts: parts, suppressed: suppressed}
     else {
         let rendered = render(nodes[index], {*:context, suppressed: context.suppressed ++ suppressed})
@@ -195,7 +195,7 @@ pub fn children(node, context) {
     {*:combined, suppressed: result.suppressed}
 }
 
-pub fn render(node, context) {
+pub fn render(node, context) any^ {
     let tag = c.tag(node)
     let value = if (tag == "text") text_node(node, context)
         else if (tag == "number") {

@@ -3,13 +3,13 @@ import c: .common
 import opc: lambda.doc.opc
 pub fn xml(parts,path,required=false) any^ => opc.xml(parts,path,required,c.fail,c.uri)^
 pub fn relationships(parts,owner,required=false) array^ => opc.relationships(parts,owner,required,c.fail,c.uri)^
-pub fn related(rels,kind) => opc.related(rels,kind)
-pub fn by_id(rels,id) => opc.by_id(rels,id)
+pub fn related(rels,kind) any^ => opc.related(rels,kind)
+pub fn by_id(rels,id) any^ => opc.by_id(rels,id)
 pub fn related_xml(pkg,kind) any^ => opc.related_xml(pkg,kind,c.fail,c.uri)^
-pub fn content_type(pkg,path) => opc.content_type(pkg,path)
+pub fn content_type(pkg,path) any^ => opc.content_type(pkg,path)
 // each annotation part owns its relationships; IDs such as rId1 are local to that part.
 fn stories(pkg) map^ => map([for (kind in ["footnote","endnote","comment"],
-    let rel = related(pkg.relationships,kind ++ "s") where rel != null)
+    let rel = related(pkg.relationships,kind ++ "s") where ((rel != null) ^ { false }))
     (kind,{
         let root = related_xml(pkg,kind ++ "s")^;
         if (root.uri != c.W or root.tag != kind ++ "s")
@@ -22,12 +22,12 @@ fn stories(pkg) map^ => map([for (kind in ["footnote","endnote","comment"],
             if (invalid) raise c.fail("invalid-package","Missing or duplicate annotation ID",rel.target)
             else {part:rel.target,relationships:relationships(pkg.parts,rel.target)^,
                 nodes:c.dictionary([for (node in nodes where
-                    not contains(["separator","continuationSeparator"],c.attr(node,"type")))
+                    ((not contains(["separator","continuationSeparator"],c.attr(node,"type"))) ^ { false }))
                     {key:c.attr(node,"id"),value:node}])}
         }
     })])
 // saved field instructions and empty paragraph marks do not make a header/footer visible (S1.8).
-fn visible_story_content(node) {
+fn visible_story_content(node) any^ {
     if (node is string) trim(node) != ""
     else if (node.uri != c.W) true
     else if (contains(["t","delText"],node.tag)) c.text(node) != ""
@@ -35,7 +35,7 @@ fn visible_story_content(node) {
         "lastRenderedPageBreak","permStart","permEnd","commentRangeStart","commentRangeEnd"],node.tag)) false
     else if (node.tag == "pPr") {
         let shading = c.child(node,"shd");
-        any([for (border in c.children(c.child(node,"pBdr"),null,null))
+        any([for (border in ((c.children(c.child(node,"pBdr"),null,null)) ^ { [] }))
             not contains(["none","nil"],c.attr(border,"val"))]) or
         (shading != null and (c.attr(shading,"themeFill") != null or
             (c.attr(shading,"fill") != null and c.attr(shading,"fill") != "auto") or

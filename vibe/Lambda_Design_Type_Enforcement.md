@@ -1,20 +1,20 @@
 # Lambda — Type Support Design: Enforcement First
 
-> **2026-11-02 typed-error syntax ruling; implementation pending:**
+> **2026-11-02 typed-error syntax ruling; core implemented:**
 > **S7.4.2v3/S11.4.2v3** remove `T^E`. Keep `T^` as `T | error`;
 > use ordinary unions such as `T | E` for particular error outcomes, with no
 > implicit broad ordinary-error allowance. Expression `e ^E { ... }` handlers
 > retain their separate grammar. Rule, migration, and legacy rationale:
 > [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
 
-> **2026-11-02 reassignment ruling; admitted stores implemented in M1:**
+> **2026-11-02 reassignment ruling; core implemented in M2/M3:**
 > **S7.5.2v4/S7.7.4v2** extend initializer admission unchanged to whole-variable
 > reassignment: proven admission stores the outcome, proven incompatibility
 > fails statically, and undecidable explicit admission warns and validates.
 > Deferred failure replaces the old variable value with a rich error and
 > continues. Field/element stores retain their separate contract (S7.7.6v2).
-> Deferred-failure outcomes and general admission remain pending; M1 fixes
-> continuation after a completed, error-admitting whole-variable store.
+> Deferred-failure outcomes and effective Item storage are implemented;
+> aggregate qualification continues in the error-handling implementation plan.
 > The rule, rationale, and retired policy are in
 > [TE-18.2](Lambda_Design_Type_Error_Handling.md#te-182--whole-variable-reassignment-follows-initializer-admission).
 
@@ -25,7 +25,7 @@
 > users can declare `type empty = error | null;` as an ordinary alias.
 > See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
 
-> **2026-11-02 ordinary-error unification; implementation pending:**
+> **2026-11-02 ordinary-error unification; core implemented:**
 > **S7.4.1v2–S7.4.2v3, S7.4.6v3, S7.5.1v6–S7.5.5** retire the soft/raised
 > distinction. `T^` and `T | error` are equivalent return contracts; `raise`
 > returns an ordinary error early; all ordinary outcomes require acknowledgement.
@@ -40,16 +40,16 @@
 > suffix does not become `finally`. General cleanup remains a separate design
 > question. See [TE-16.2](Lambda_Design_Type_Error_Handling.md#te-162--one-error-handler-no-success-or-finally-suffix).
 
-> **2026-11-02 validation ruling; implementation pending:**
-> **S7.7.2v2/S11.4.1v4** remove implicit block exit from deferred initializer
+> **2026-11-02 validation ruling; core implemented:**
+> **S7.7.2v2/S11.4.1v5** remove implicit block exit from deferred initializer
 > checks. Validation yields an admitted value or error; the binding retains
 > that outcome and execution continues. The declared target remains strict,
 > while the effective type records the possible error. See
 > [Type and Error Handling, TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
 > Earlier initializer-skipping descriptions in this record are superseded.
 
-> **2026-11-02 initializer ruling; implementation pending:**
-> **S7.5.1v4/S7.5.2v3** allow inferred error-admitting bindings, including
+> **2026-11-02 initializer ruling; core implemented:**
+> **S7.5.1v6/S7.5.2v4** allow inferred error-admitting bindings, including
 > `any`. Undecidable error admission by an explicit initializer contract warns
 > and defers to the ordinary runtime check; proven incompatibility still fails
 > statically. Both options and the decision are in
@@ -988,17 +988,17 @@ direction rather than a semantic prerequisite.
 <a id="te-9--failed-checks-produce-error-values-decided-2026-07-29-supersedes-rev-1s-panic-recommendation"></a>
 ### TE-9 — Failed checks produce ordinary error outcomes (revised 2026-11-02)
 
-**S7.4.1v2, S7.7.1v2–S7.7.2v2, S11.4.1v4** retain rich validation
+**S7.4.1v2, S7.7.1v3–S7.7.2v2, S11.4.1v5** retain rich validation
 errors without a panic or fabricated success. Deferred initializer admission
 binds the admitted value or validation error and continues; effective types
 retain that possibility. Known incompatible contracts still fail statically.
 Native storage requires proof that the actual outcome fits its lane.
 
 The earlier choice between soft return values and imposing a raised channel
-is retired by **S7.4.2v2/S7.5.1v4**. Ordinary validation errors require the
+is retired by **S7.4.2v3/S7.5.1v6**. Ordinary validation errors require the
 same acknowledgement as other ordinary errors. Retaining an inferred outcome
 acknowledges it without forcing immediate recovery; explicit return contracts
-remain strict under **S11.4.2v2**.
+remain strict under **S11.4.2v3**.
 
 Current decisions: [TE-13.2](Lambda_Design_Type_Error_Handling.md#te-132--one-ordinary-error-outcome-and-acknowledgement-rule)
 and [TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
@@ -1009,8 +1009,9 @@ in [Appendix S](Lambda_Design_Type_Error_Handling.md#additional-retired-channel-
 
 At a DEFERRED B3/B9 boundary (`let q: Q = <dynamic>`), emit a call to the **existing** entry
 point `fn_is` already uses: `schema_validator_validate_type(ctx->validator, item,
-const_type_with_tl(type_index))`. On failure → a TE-9 error value carrying the path detail,
-with no `q` binding established.
+const_type_with_tl(type_index))`. Under **S7.7.2v2/S11.4.1v5**, deferred
+failure binds a TE-9 error value carrying the path detail and execution continues.
+The declared `Q` remains the admission target; the effective binding includes error.
 
 No **type-graph** bridge is needed: schema types and script types are the same `Type*` graph.
 That does not imply that a parsed map already has the declared map's packed physical layout.
@@ -1020,7 +1021,7 @@ layout — including preservation of open extra fields — is a separate impleme
 decision required before direct-offset field access can use that layout.
 
 - **Depth: deep, on first crossing.** The value either satisfies `Q` in full or the boundary
-  yields a rich error without establishing the binding. (Witness caching to skip re-validation
+  yields a rich error retained by the initializer (S7.7.2v2). (Witness caching to skip re-validation
   of already-validated subtrees is perf-stage work; correctness first.)
 - **Openness: named map types are open by default — DECIDED 2026-07-29 (user).** Extra fields
   pass, matching the validator's current behavior, Go's unmarshal, and structural-width

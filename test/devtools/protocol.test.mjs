@@ -200,7 +200,7 @@ test('Lambda retained-value limits recover by releasing all values without losin
     assert(limited);
     await client.request('release', { all: true });
     assert.equal((await client.request('gc')).value.retained, 0);
-    assert.equal((await client.request('eval', { source: 'len(large)' })).value.result.value, 5000);
+    assert.equal((await client.request('eval', { source: 'len(large)^' })).value.result.value, 5000);
     await assert.rejects(client.request('release', { all: true, refs: [] }), error => error.code === 'invalid');
   });
 });

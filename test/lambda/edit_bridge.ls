@@ -1,7 +1,7 @@
 // Phase 4: edit bridge — MarkEditor integration tests
 
 // Test 1: edit template compiles and can be applied
-edit int {
+edit int () any^ {
   string(~)
 }
 let r1 = apply(42, {mode: "edit"})

@@ -2,5 +2,6 @@ fn add(a: int, b: int) => a + b
 fn dynamic_function() any { add }
 
 pn main() {
-    dynamic_function()(1)
+    let target = dynamic_function();
+    target(1)
 }

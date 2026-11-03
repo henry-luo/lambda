@@ -4,7 +4,7 @@ pub fn vector(v, size) bool => v is array and len(v) == size and all([for (x in 
 // the linear determinant also decides winding when a transform is baked into geometry.
 pub fn determinant(m) number => m[0] * (m[5] * m[10] - m[9] * m[6]) -
     m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2])
-pub fn affine(m) bool => vector(m, 16) and m[3] == 0 and m[7] == 0 and m[11] == 0 and m[15] == 1 and
+pub fn affine(m) bool^ => vector(m, 16) and m[3] == 0 and m[7] == 0 and m[11] == 0 and m[15] == 1 and
     abs(determinant(m)) >= 0.0000000001
 
 pub fn matrix(position, rotation, scale) array^ {

@@ -7,7 +7,7 @@ let VOLUME = {drop:.45, switch:.28, catch:.5, pocket:.42, steel:.35, miss:.4, wi
 pub fn initial() => {enabled:true,failed:false,voices:[],cache:{},played:0,last:""}
 pub fn status(sound) => if (sound.failed) "unavailable" else if (sound.enabled) "on" else "off"
 
-pub fn cue(before, after, command) {
+pub fn cue(before, after, command) any^ {
     if (contains(["undo","restart","level","next"],command) or before.stage != after.stage) ""
     else if (before.active == null and after.active != null and after.moves == before.moves+1) "drop"
     else if (command != "tick" or before.active == null or before.paused) ""
@@ -62,6 +62,6 @@ pub pn follow(owner, sound, before, after, command, base) {
     }
     if (not sound.enabled or sound.failed or after.paused) { return sound }
     let name = cue(before,after,command)
-    if (name == "") { return sound }
+    if ((name == "")^) { return sound }
     return play(owner,sound,name,base)
 }

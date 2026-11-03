@@ -1,5 +1,5 @@
 // Both primary data and lookup data use the same source and value-error contract.
-pub fn resolve(data, source = null, datasets = null) {
+pub fn resolve(data, source = null, datasets = null) any^ {
     if (data != null) data
     else if (source is array) source
     else if (source.values != null) source.values

@@ -4,11 +4,11 @@ import util: .util
 import records: .records
 
 // Explicit orders may be partial; unlisted observed series retain first appearance.
-fn complete_order(values, requested) => util.unique_vals([
+fn complete_order(values, requested) any^ => util.unique_vals([
     for (value in requested where value in values) value,
     for (value in values) value])
 
-fn inside_out(summaries, index, bottom, top, bottom_sum, top_sum) {
+fn inside_out(summaries, index, bottom, top, bottom_sum, top_sum) any^ {
     if (index >= len(summaries)) [*reverse(bottom), *top]
     else {
         let series = summaries[index];
@@ -19,13 +19,13 @@ fn inside_out(summaries, index, bottom, top, bottom_sum, top_sum) {
     }
 }
 
-fn series_order(data, value_field, group_field, position_field, order, positions) {
+fn series_order(data, value_field, group_field, position_field, order, positions) any^ {
     let groups = util.unique_vals(data |> ~[group_field]);
     if (order is array) complete_order(groups, order)
     else if (order == null or order == "none") groups
     else if (order == "reverse") reverse(groups)
     else if (order == "inside_out" or order == "ascending" or order == "descending") {
-        let vectors = [for (partition in util.group_by(data, group_field))
+        let vectors = [for (partition in ((util.group_by(data, group_field)) ^ { [] }))
             {group: partition.key, values: [for (position in positions)
                 sum([for (row in partition.items where row[position_field] == position) float(row[value_field])])]}];
         // Rescale only overflowing totals so ordinary equal sums retain their exact sort ties.
@@ -44,7 +44,7 @@ fn series_order(data, value_field, group_field, position_field, order, positions
 
 // Missing samples have zero thickness; duplicate samples add, retaining the first record's attributes.
 fn dense_samples(data, value_field, group_field, position_field, positions) {
-    [for (partition in util.group_by(data, group_field), position in positions) (
+    [for (partition in ((util.group_by(data, group_field)) ^ { [] }), position in positions) (
         let peers = partition.items |: ~[position_field] == position,
         let base = if (len(peers) > 0) peers[0] else records.group_fields(partition.items[0], [group_field]),
         records.add_field(records.add_field(base, position_field, position), value_field,
@@ -52,7 +52,7 @@ fn dense_samples(data, value_field, group_field, position_field, positions) {
 }
 
 // The weighted slope uses normalized weights to avoid multiplying two large data values.
-fn wiggle_slope(previous, current, index, prefix, weighted, total) {
+fn wiggle_slope(previous, current, index, prefix, weighted, total) any^ {
     if (index >= len(current)) weighted
     else {
         let delta = current[index] - previous[index];
@@ -70,10 +70,10 @@ fn wiggle_offsets(columns, index, offsets) {
     }
 }
 
-fn wiggle_stack(data, value_field, group_field, position_field, order, position_order) {
-    let invalid = [for (row in data where not util.finite_number(row[value_field]) or row[value_field] < 0 or
+fn wiggle_stack(data, value_field, group_field, position_field, order, position_order) any^ {
+    let invalid = [for (row in data where ((not util.finite_number(row[value_field]) or row[value_field] < 0 or
         row[group_field] == null or row[group_field] != row[group_field] or
-        not (row[position_field] is string or row[position_field] is datetime or util.finite_number(row[position_field]))) row];
+        not (row[position_field] is string or row[position_field] is datetime or util.finite_number(row[position_field]))) ^ { false })) row];
     if (len(invalid) > 0) error("chart: wiggle requires nonnegative finite values and valid series/positions")
     else {
         let values = util.unique_vals(data |> ~[position_field]);
@@ -101,7 +101,7 @@ fn wiggle_stack(data, value_field, group_field, position_field, order, position_
     }
 }
 
-pub fn apply_stack(data, value_field, group_field, position_field, mode, order = null, position_order = null) {
+pub fn apply_stack(data, value_field, group_field, position_field, mode, order = null, position_order = null) any^ {
     if (mode == "wiggle") wiggle_stack(data, value_field, group_field, position_field, order, position_order)
     else {
     let groups = series_order(data, value_field, group_field, position_field, order,
@@ -114,9 +114,9 @@ pub fn apply_stack(data, value_field, group_field, position_field, mode, order =
         let start = sum([for (previous_index, previous in data,
             let previous_group = util.find_index(groups, previous[group_field]),
             let previous_value = float(previous[value_field])
-            where previous[position_field] == row[position_field] and
+            where ((previous[position_field] == row[position_field] and
                 (previous_group < group_index or (previous_group == group_index and previous_index < index)) and
-                (previous_value < 0) == (value < 0)) previous_value]),
+                (previous_value < 0) == (value < 0)) ^ { false })) previous_value]),
         {*:row, _y0: start, _y1: start + value}
     )];
     [for (row in stacked) (

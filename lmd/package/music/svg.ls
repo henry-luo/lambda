@@ -26,7 +26,7 @@ fn primitive(item) element {
         role:"img",'aria-label':item.description,
         <title item.description> for (child in item.shapes) shape(child)>
 }
-fn shape(item) element => if (item.offset_x!=null or item.offset_y!=null)
+fn shape(item) element^ => if (item.offset_x!=null or item.offset_y!=null)
     <g transform:s.translate(item.offset_x or 0.0,item.offset_y or 0.0),primitive(item)> else primitive(item)
 pub fn svg(layout,page = 0,fit_width = false) element^ {
     let valid=c.require(layout.kind=="music-layout" and c.is_integer(page) and page>=0 and page<len(layout.pages),"invalid layout or page index")^

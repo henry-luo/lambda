@@ -31,11 +31,11 @@ check(match (editor.exec(both,{id:"guide.remove",guide:"missing"}) ^ { ^ }) { ca
 check(len(guides.items(editor.exec(both,{id:"guide.remove",guide:"guide-1"})^.doc)) == 1)
 check(len(guides.items(editor.exec(both,{id:"guide.clear"})^.doc)) == 0)
 let scaled = editor.exec(both,{id:"document.resize_image",width:50,height:40})^
-check([for (g in guides.items(scaled.doc)) g.position] == [20,17])
+check([for (g in ((guides.items(scaled.doc)) ^ { [] })) g.position] == [20,17])
 let clipped = editor.exec(both,{id:"document.resize_canvas",width:30,height:40})^
-check([for (g in guides.items(clipped.doc)) g.position] == [33])
+check([for (g in ((guides.items(clipped.doc)) ^ { [] })) g.position] == [33])
 let cropped = editor.exec(both,{id:"document.crop",rect:[20,10,80,60]})^
-check([for (g in guides.items(cropped.doc)) g.position] == [20,23])
+check([for (g in ((guides.items(cropped.doc)) ^ { [] })) g.position] == [20,23])
 check(editor.exec(cropped,{id:"history.undo"})^.doc == both.doc)
 let enabled = editor.exec(both,{id:"guide.configure",snap:true})^
 let box = model.selection_bounds(enabled)

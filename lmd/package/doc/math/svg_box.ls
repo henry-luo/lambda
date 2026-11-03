@@ -8,7 +8,7 @@ pub fn make(body: any, width: any, height: any, depth: any, atom: any = "mord") 
 
 pub fn empty(width = 0.0) => make(<g>, width, 0.0, 0.0)
 
-pub fn glyph(g, scale, atom = "mord") {
+pub fn glyph(g, scale, atom = "mord") any^ {
     let ink = g.ink
     // Unencoded OpenType construction pieces still need their font-local outline.
     let painted = if (g.codepoint != null and g.text_family != null)
@@ -45,7 +45,7 @@ pub fn compose(entries, width, atom = "mord") {
     make(<g for (entry in entries) positioned(entry.box, entry.x, entry.y)>, width, height, depth, atom)
 }
 
-pub fn row(boxes, atom = "mord") {
+pub fn row(boxes, atom = "mord") any^ {
     let entries = [for (i, bx in boxes) {box: bx, x: sum([for (j in 0 to (i - 1)) boxes[j].width]), y: 0.0}]
     compose(entries, sum([for (bx in boxes) bx.width]), atom)
 }

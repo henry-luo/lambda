@@ -53,22 +53,22 @@ fn temporal_auto_format(lo_ms, hi_ms) {
     else "hh:mm:ss"
 }
 
-fn format_tick_label(sc, tv, config = null) {
+fn format_tick_label(sc, tv, config = null) any^ {
     if (sc.kind == "temporal" or config.dtype == "temporal")
         util.format_value(tv, if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]),
             "temporal", if (sc.timezone != null) sc.timezone else if (config.timezone != null) config.timezone else 0)
     else util.format_value(tv, config.format)
 }
 
-fn tick_values(sc, config) {
+fn tick_values(sc, config) any^ {
     let values = if (config.values != null) config.values else scale.scale_ticks(sc, config.tick_count);
     if (config.tick_min_step != null and len(values) > 1)
-        [for (index, value in values where index == 0 or abs(float(value) - float(values[index - 1])) >= config.tick_min_step) value]
+        [for (index, value in values where ((index == 0 or abs(float(value) - float(values[index - 1])) >= config.tick_min_step) ^ { false })) value]
     else values
 }
 
 // keep formatted text and metrics together so layout and rendering use the same labels.
-pub fn prepare(sc, config, title_text = null) {
+pub fn prepare(sc, config, title_text = null) any^ {
     let options = merge_config(config);
     let active = sc != null and options.enabled != false and sc.kind != "identity";
     let title = if (not active or options.title_enabled == false) null else if (options.title != null) options.title else title_text;
@@ -99,7 +99,7 @@ pub fn geometry(sc, pw, ph, config, horizontal) {
     let label_anchor = anchor(options, horizontal, far_side);
     let angle = if (options.label_angle != null) options.label_angle else 0.0;
     let tick_extent = if (options.ticks == false) 0.0 else options.tick_size;
-    let rows = [for (index, value in options._values,
+    let rows = [for (index, value in ((options._values) ^ { [] }),
         let position = float(scale.scale_apply(sc, value)) + (if (sc.kind == "band") sc.bandwidth / 2.0 else 0.0),
         let label = options._labels[index],
         let local = text.bounds(label.metric, label_anchor, angle),
@@ -108,7 +108,7 @@ pub fn geometry(sc, pw, ph, config, horizontal) {
         let y = if (horizontal) (if (far_side) 0.0 - tick_extent - options.label_offset - local.bottom
             else tick_extent + options.label_offset - local.top) else position - (local.top + local.bottom) / 2.0,
         let bounds = text.bounds(label.metric, label_anchor, angle, x, y)
-        where options.labels != false and position >= -1.0 and position <= (if (horizontal) pw else ph) + 1.0)
+        where ((options.labels != false and position >= -1.0 and position <= (if (horizontal) pw else ph) + 1.0) ^ { false }))
         {index: index, value: value, position: position, text: label.text, x: x, y: y, bounds: bounds}];
     let extent = max([float(tick_extent), for (row in rows)
         if (horizontal) (if (far_side) 0.0 - row.bounds.top else row.bounds.bottom)
@@ -129,7 +129,7 @@ pub fn geometry(sc, pw, ph, config, horizontal) {
 fn interval(row, horizontal) => if (horizontal) {lo: row.bounds.left, hi: row.bounds.right}
     else {lo: row.bounds.top, hi: row.bounds.bottom}
 
-fn select_rows(rows, horizontal, gap, index, previous, endpoint) {
+fn select_rows(rows, horizontal, gap, index, previous, endpoint) any^ {
     if (index >= len(rows) - 1) []
     else {
         let candidate = rows[index];
@@ -141,7 +141,7 @@ fn select_rows(rows, horizontal, gap, index, previous, endpoint) {
 }
 
 // cull against actual positions in either direction, retaining both endpoints when they fit.
-fn visible_rows(rows, config, horizontal) {
+fn visible_rows(rows, config, horizontal) any^ {
     if (not collision.enabled(config.label_overlap) or len(rows) < 2)
         rows |> ~.index
     else {
@@ -157,17 +157,17 @@ fn visible_rows(rows, config, horizontal) {
     }
 }
 
-fn without_tick_text(node) => if (not (node is element)) node else if (name(node) == 'text') null else
-    svg.rebuild(name(node), map(node), [for (child in content(node))
+fn without_tick_text(node) any^ => if (not (node is element)) node else if (name(node) == 'text') null else
+    svg.rebuild(name(node), map(node), [for (child in ((content(node)) ^ { [] }))
         for (retained in [without_tick_text(child)] where retained != null) retained]);
 
 // projected or moving ticks share measured collision space with other guide text.
-pub fn fit_frame_labels(node, obstacles = [], separation = null) {
-    let measured = [for (index, child in content(node) where child.class == "tick")
+pub fn fit_frame_labels(node, obstacles = [], separation = null) any^ {
+    let measured = [for (index, child in ((content(node)) ^ { [] }) where child.class == "tick")
         {index: index, boxes: text.svg_bounds(child)}];
     let failure = util.first_error(measured |> ~.boxes);
     if (failure is error) failure else {
-        let rows = [for (entry in measured where len(entry.boxes) > 0,
+        let rows = [for (entry in measured where ((len(entry.boxes) > 0) ^ { false }),
             let box = {left: min(entry.boxes |> ~.left), right: max(entry.boxes |> ~.right),
                 top: min(entry.boxes |> ~.top), bottom: max(entry.boxes |> ~.bottom)})
             {index: entry.index, bounds: box}];
@@ -176,7 +176,7 @@ pub fn fit_frame_labels(node, obstacles = [], separation = null) {
         let visible = collision.select([for (row in ordered) {*:row, gap: gap, optional: true}],
             [for (box in obstacles) {bounds: box}]) |> ~.index;
         if (len(rows) == 0) node else svg.rebuild(name(node), map(node),
-            [for (index, child in content(node)) if (child.class == "tick" and not (index in visible)) without_tick_text(child) else child])
+            [for (index, child in ((content(node)) ^ { [] })) if (child.class == "tick" and not (index in visible)) without_tick_text(child) else child])
     }
 }
 
@@ -190,14 +190,14 @@ pub fn label_plan(sc, pw, ph, config, title_text, horizontal) {
     let dy = if (horizontal) (if (far_side) 0.0 else ph) + offset else 0.0;
     let active = options.enabled != false and sc != null and sc.kind != "identity";
     let visible = visible_rows(geo.rows, options, horizontal);
-    {rows: if (active) [for (row in geo.rows where row.index in visible and row.text != "")
+    {rows: if (active) [for (row in ((geo.rows) ^ { [] }) where ((row.index in visible and row.text != "") ^ { false }))
         {*:row, bounds: collision.translate(row.bounds, dx, dy), optional: collision.enabled(options.label_overlap),
             gap: collision.gap(options.label_separation)}] else [],
         title: if (active and geo.title_bounds != null) collision.translate(geo.title_bounds, dx, dy) else null,
         config: options}
 }
 
-fn render_axis(sc, pw, ph, config, title_text, horizontal) {
+fn render_axis(sc, pw, ph, config, title_text, horizontal) any^ {
     let options = prepare(sc, config, title_text);
     if (options._error is error) options._error
     else if (options.enabled == false or sc.kind == "identity") null
@@ -209,11 +209,11 @@ fn render_axis(sc, pw, ph, config, title_text, horizontal) {
             svg.line(0, baseline, pw, baseline, options.domain_color, 1)
             else svg.line(baseline, 0, baseline, ph, options.domain_color, 1);
         let visible = if (options._visible_rows != null) options._visible_rows else visible_rows(geo.rows, options, horizontal);
-        let ticks = [for (index, value in options._values,
+        let ticks = [for (index, value in ((options._values) ^ { [] }),
             let position = float(scale.scale_apply(sc, value)) + (if (sc.kind == "band") sc.bandwidth / 2.0 else 0.0),
             let row = geo.rows |: ~.index == index,
             let label = row[0]
-            where position >= -1.0 and position <= (if (horizontal) pw else ph) + 1.0)
+            where ((position >= -1.0 and position <= (if (horizontal) pw else ph) + 1.0) ^ { false }))
             <g class: "tick", transform: if (horizontal) svg.translate(position, baseline) else svg.translate(baseline, position),
                 if (options.ticks != false) (if (horizontal)
                     svg.line(0, 0, 0, geo.direction * options.tick_size, options.tick_color, 1)
@@ -240,10 +240,10 @@ fn render_axis(sc, pw, ph, config, title_text, horizontal) {
     }
 }
 
-pub fn x_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, true)
-pub fn y_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, false)
+pub fn x_axis(sc, pw, ph, config, title_text) any^ => render_axis(sc, pw, ph, config, title_text, true)
+pub fn y_axis(sc, pw, ph, config, title_text) any^ => render_axis(sc, pw, ph, config, title_text, false)
 
-fn render_grid(sc, pw, ph, config, horizontal) {
+fn render_grid(sc, pw, ph, config, horizontal) any^ {
     let cfg = merge_config(config);
     let values = tick_values(sc, cfg);
     let band_offset = if (sc.kind == "band") sc.bandwidth / 2.0 else 0.0;
@@ -260,19 +260,19 @@ fn render_grid(sc, pw, ph, config, horizontal) {
     svg.group_class(if (horizontal) "grid x-grid" else "grid y-grid", lines)
 }
 
-pub fn x_axis_grid(sc, pw, ph, config) => render_grid(sc, pw, ph, config, true)
-pub fn y_axis_grid(sc, pw, ph, config) => render_grid(sc, pw, ph, config, false)
+pub fn x_axis_grid(sc, pw, ph, config) any^ => render_grid(sc, pw, ph, config, true)
+pub fn y_axis_grid(sc, pw, ph, config) any^ => render_grid(sc, pw, ph, config, false)
 
 // ============================================================
 // Compute space needed for axes
 // ============================================================
 
-pub fn estimate_y_axis_width(sc, config, title_text = null) {
+pub fn estimate_y_axis_width(sc, config, title_text = null) any^ {
     let options = prepare(sc, config, title_text);
     geometry(sc, 0.0, max([0.0, *sc.range]), options, false).extent
 }
 
-pub fn estimate_x_axis_height(config, has_title: bool, sc = null, title_text = null) {
+pub fn estimate_x_axis_height(config, has_title: bool, sc = null, title_text = null) any^ {
     let options = prepare(sc, config, if (has_title) title_text else null);
     geometry(sc, max([0.0, *sc.range]), 0.0, options, true).extent
 }

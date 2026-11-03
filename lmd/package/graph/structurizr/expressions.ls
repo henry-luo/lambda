@@ -2,26 +2,26 @@
 
 import graph_model: lambda.graph.model
 
-fn children(value, wanted) => [
-  for (child in graph_model.element_children(value) where graph_model.tag(child) == wanted) child
+fn children(value, wanted) any^ => [
+  for (child in graph_model.element_children(value) where ((graph_model.tag(child) == wanted) ^ { false })) child
 ] or []
 
-fn tags(value) => [for (tag in children(value, "tag")) string(tag.name)]
+fn tags(value) => [for (tag in ((children(value, "tag")) ^ { [] })) string(tag.name)]
 
-fn ordered_ids(elements, ids) => [
-  for (entry in elements where contains(ids, string(entry.id))) string(entry.id)
+fn ordered_ids(elements, ids) any^ => [
+  for (entry in elements where ((contains(ids, string(entry.id))) ^ { false })) string(entry.id)
 ]
 
-fn value_after(expression, prefix) =>
+fn value_after(expression, prefix) any^ =>
   trim(slice(expression, len(prefix), len(expression)))
 
-fn selected_tags(expression, prefix) => [
-  for (tag in split(value_after(expression, prefix), ",") where trim(tag) != "") trim(tag)
+fn selected_tags(expression, prefix) any^ => [
+  for (tag in ((split(value_after(expression, prefix), ",")) ^ { [] }) where trim(tag) != "") trim(tag)
 ]
 
 fn issue(code, message) => {code: code, message: message}
 
-fn paren_balance(value, index = 0, depth = 0) {
+fn paren_balance(value, index = 0, depth = 0) any^ {
   if (index >= len(value)) { depth }
   else {
     let ch = slice(value, index, index + 1);
@@ -30,7 +30,7 @@ fn paren_balance(value, index = 0, depth = 0) {
   }
 }
 
-fn matching_close(value, index = 1, depth = 1) {
+fn matching_close(value, index = 1, depth = 1) any^ {
   if (index >= len(value)) { -1 }
   else {
     let ch = slice(value, index, index + 1);
@@ -39,14 +39,14 @@ fn matching_close(value, index = 1, depth = 1) {
   }
 }
 
-fn unwrapped(expression) {
+fn unwrapped(expression) any^ {
   let value = trim(expression);
   if (starts_with(value, "(") and matching_close(value) == len(value) - 1) {
     unwrapped(slice(value, 1, len(value) - 1))
   } else { value }
 }
 
-fn top_operator(value, operator, index = 0, depth = 0) {
+fn top_operator(value, operator, index = 0, depth = 0) any^ {
   if (index > len(value) - len(operator)) { -1 }
   else {
     let ch = slice(value, index, index + 1);
@@ -56,32 +56,32 @@ fn top_operator(value, operator, index = 0, depth = 0) {
   }
 }
 
-fn validate_pair(value, operator, index) {
+fn validate_pair(value, operator, index) any^ {
   let left = validate(slice(value, 0, index));
   if (left != null) { left }
   else { validate(slice(value, index + len(operator), len(value))) }
 }
 
-fn required_value_issue(value, prefix) =>
+fn required_value_issue(value, prefix) any^ =>
   if (trim(value_after(value, prefix)) == "")
     issue("structurizr.invalid-expression", "Expression predicate requires a value")
   else null
 
-fn property_issue(value, prefix) {
+fn property_issue(value, prefix) any^ {
   let parts = split(value_after(value, prefix), "]==");
   if (len(parts) != 2 or trim(parts[0]) == "" or trim(parts[1]) == "")
     issue("structurizr.invalid-expression", "Property expression requires [name]==value")
   else null
 }
 
-fn endpoint_issue(value) {
+fn endpoint_issue(value) any^ {
   let endpoints = split(value, "->");
   if (len(endpoints) != 2 or trim(endpoints[0]) == "" or trim(endpoints[1]) == "")
     issue("structurizr.invalid-expression", "Relationship expression requires source->destination")
   else null
 }
 
-fn atomic_issue(expression) {
+fn atomic_issue(expression) any^ {
   let value = trim(expression);
   let relation = trim(if (starts_with(value, "relationship=="))
     value_after(value, "relationship==") else value);
@@ -144,7 +144,7 @@ fn atomic_issue(expression) {
   else null
 }
 
-pub fn validate(expression) {
+pub fn validate(expression) any^ {
   let raw = trim(expression);
   let balance = paren_balance(raw);
   let value = unwrapped(raw);
@@ -157,16 +157,16 @@ pub fn validate(expression) {
   else atomic_issue(value)
 }
 
-fn has_all_tags(value, wanted) => len([
-  for (tag in wanted where contains(tags(value), tag)) tag
+fn has_all_tags(value, wanted) any^ => len([
+  for (tag in wanted where ((contains(tags(value), tag)) ^ { false })) tag
 ]) == len(wanted)
 
-fn property_matches(value, expression, prefix) {
+fn property_matches(value, expression, prefix) any^ {
   let parts = split(value_after(expression, prefix), "]==");
   if (len(parts) != 2 or trim(parts[0]) == "") false
-  else len([for (property in children(value, "property")
-    where string(property.name) == trim(parts[0]) and
-      string(property.value) == trim(parts[1])) property]) > 0
+  else len([for (property in ((children(value, "property")) ^ { [] })
+    where ((string(property.name) == trim(parts[0]) and
+      string(property.value) == trim(parts[1])) ^ { false })) property]) > 0
 }
 
 fn canonical_kind(value) {
@@ -182,7 +182,7 @@ fn canonical_kind(value) {
   else kind
 }
 
-fn reference_matches(entry, value) {
+fn reference_matches(entry, value) any^ {
   let wanted = trim(value);
   string(entry.id) == wanted or string(entry.identifier) == wanted or
     string(graph_model.optional(entry, "local-identifier")) == wanted or
@@ -190,51 +190,51 @@ fn reference_matches(entry, value) {
 }
 
 fn reference_ids(elements, value) => [
-  for (entry in elements where reference_matches(entry, value)) string(entry.id)
+  for (entry in elements where ((reference_matches(entry, value)) ^ { false })) string(entry.id)
 ]
 
-fn atomic_ids(elements, expression) {
+fn atomic_ids(elements, expression) any^ {
   let value = trim(if (starts_with(expression, "element=="))
     value_after(expression, "element==") else expression);
   if (value == "*") ordered_ids(elements, [for (entry in elements) string(entry.id)])
   else if (starts_with(value, "element.type==")) [
     for (entry in elements
-      where string(entry.kind) == canonical_kind(value_after(value, "element.type==")))
+      where ((string(entry.kind) == canonical_kind(value_after(value, "element.type=="))) ^ { false }))
       string(entry.id)
   ]
   else if (starts_with(value, "element.parent==")) {
     let parents = reference_ids(elements, value_after(value, "element.parent=="));
-    [for (entry in elements where contains(parents, string(entry.parent))) string(entry.id)]
+    [for (entry in elements where ((contains(parents, string(entry.parent))) ^ { false })) string(entry.id)]
   }
   else if (starts_with(value, "element.group==")) [
-    for (entry in elements where string(entry.group) == value_after(value, "element.group=="))
+    for (entry in elements where ((string(entry.group) == value_after(value, "element.group==")) ^ { false }))
       string(entry.id)
   ]
   else if (starts_with(value, "element.tag==")) {
     let wanted = selected_tags(value, "element.tag==");
-    [for (entry in elements where has_all_tags(entry, wanted)) string(entry.id)]
+    [for (entry in elements where ((has_all_tags(entry, wanted)) ^ { false })) string(entry.id)]
   }
   else if (starts_with(value, "element.tag!=")) {
     let wanted = selected_tags(value, "element.tag!=");
-    [for (entry in elements where not has_all_tags(entry, wanted)) string(entry.id)]
+    [for (entry in elements where ((not has_all_tags(entry, wanted)) ^ { false })) string(entry.id)]
   }
   else if (starts_with(value, "element.technology==")) [
-    for (entry in elements where string(entry.technology) ==
-      value_after(value, "element.technology==")) string(entry.id)
+    for (entry in elements where ((string(entry.technology) ==
+      value_after(value, "element.technology==")) ^ { false })) string(entry.id)
   ]
   else if (starts_with(value, "element.technology!=")) [
-    for (entry in elements where string(entry.technology) !=
-      value_after(value, "element.technology!=")) string(entry.id)
+    for (entry in elements where ((string(entry.technology) !=
+      value_after(value, "element.technology!=")) ^ { false })) string(entry.id)
   ]
   else if (starts_with(value, "element.properties[")) [
     for (entry in elements
-      where property_matches(entry, value, "element.properties[")) string(entry.id)
+      where ((property_matches(entry, value, "element.properties[")) ^ { false })) string(entry.id)
   ]
   else if (starts_with(value, "element.")) []
   else reference_ids(elements, value)
 }
 
-fn coupled_ids(elements, relationships, expression) {
+fn coupled_ids(elements, relationships, expression) any^ {
   let value = trim(if (starts_with(expression, "element=="))
     value_after(expression, "element==") else expression);
   let inbound = starts_with(value, "->");
@@ -244,16 +244,16 @@ fn coupled_ids(elements, relationships, expression) {
   let base = atomic_ids(elements, slice(value, start, finish));
   let connected = [
     for (relation in relationships)
-      for (id in if (inbound and contains(base, string(relation.destination)))
+      for (id in ((if (inbound and contains(base, string(relation.destination)))
           [string(relation.source)]
         else if (outbound and contains(base, string(relation.source)))
           [string(relation.destination)]
-        else []) id
+        else []) ^ { [] })) id
   ];
   ordered_ids(elements, unique([*base, *connected]))
 }
 
-pub fn element_ids(elements, relationships, expression) {
+pub fn element_ids(elements, relationships, expression) any^ {
   let value = unwrapped(expression);
   let alternative = top_operator(value, "||");
   let term = top_operator(value, "&&");
@@ -265,7 +265,7 @@ pub fn element_ids(elements, relationships, expression) {
   else if (term >= 0) {
     let left = element_ids(elements, relationships, slice(value, 0, term));
     let right = element_ids(elements, relationships, slice(value, term + 2, len(value)));
-    [for (id in left where contains(right, id)) id]
+    [for (id in left where ((contains(right, id)) ^ { false })) id]
   }
   else if (starts_with(value, "->") or ends_with(value, "->") or
       starts_with(value, "element==->")) coupled_ids(elements, relationships, value)
@@ -273,10 +273,10 @@ pub fn element_ids(elements, relationships, expression) {
 }
 
 // a reference list that is no sequence errors (S7.9.3): no match
-fn endpoint_matches(elements, endpoint, expression) =>
+fn endpoint_matches(elements, endpoint, expression) any^ =>
   expression == "*" or contains(reference_ids(elements, expression), string(endpoint)) or false
 
-fn relation_atomic_matches(elements, relation, expression) {
+fn relation_atomic_matches(elements, relation, expression) any^ {
   let value = trim(if (starts_with(expression, "relationship=="))
     value_after(expression, "relationship==") else expression);
   if (value == "*" or value == "*->*") true
@@ -298,7 +298,7 @@ fn relation_atomic_matches(elements, relation, expression) {
   }
 }
 
-pub fn relationship_expression(expression) {
+pub fn relationship_expression(expression) any^ {
   let value = unwrapped(expression);
   let alternative = top_operator(value, "||");
   let term = top_operator(value, "&&");
@@ -316,7 +316,7 @@ pub fn relationship_expression(expression) {
       (arrow_pos != null and arrow_pos > 0 and not ends_with(value, "->")) }
 }
 
-pub fn relationship_matches(elements, relation, expression) {
+pub fn relationship_matches(elements, relation, expression) any^ {
   let value = unwrapped(expression);
   let alternative = top_operator(value, "||");
   let term = top_operator(value, "&&");

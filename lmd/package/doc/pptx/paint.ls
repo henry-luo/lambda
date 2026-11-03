@@ -4,8 +4,8 @@ import theme: lambda.doc.docx.theme
 import images: .images
 import math
 
-fn gradient(node,ctx,bounds,placeholder) {
-    let stops = sort([for (stop in c.children(c.child(node,"gsLst",c.A),"gs",c.A))
+fn gradient(node,ctx,bounds,placeholder) any^ {
+    let stops = sort([for (stop in ((c.children(c.child(node,"gsLst",c.A),"gs",c.A)) ^ { [] }))
         {position:c.num(c.attr(stop,"pos"),-1.0)/1000.0,color:theme.drawing_color(stop,ctx.theme,placeholder,true)}],{by:(stop)=>stop.position})
     let path = c.child(node,"path",c.A)
     let line = c.child(node,"lin",c.A)
@@ -24,7 +24,7 @@ fn gradient(node,ctx,bounds,placeholder) {
     else "linear-gradient(" ++ string(direction+90.0) ++ "deg," ++ colors ++ ")"
 }
 pub fn fill(props,style,ctx,bounds) map^ {
-    let direct = [for (node in c.children(props,null,c.A) where node.tag in ["solidFill","noFill","gradFill","pattFill","blipFill","grpFill"]) node][0]
+    let direct = [for (node in ((c.children(props,null,c.A)) ^ { [] }) where node.tag in ["solidFill","noFill","gradFill","pattFill","blipFill","grpFill"]) node][0]
     let ref = c.child(style,"fillRef",c.A)
     let index = int(c.num(c.attr(ref,"idx")))
     let node = c.value(direct,if (index>0) ctx.theme.fills[index-1] else null)

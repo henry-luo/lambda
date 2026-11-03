@@ -10,7 +10,7 @@ import ~~.jq_query_common
 let rounds = 10
 
 // .input[.cursor:.cursor+1]
-fn char_at(s) => slice(s.input, s.cursor, s.cursor + 1)
+fn char_at(s) any^ => slice(s.input, s.cursor, s.cursor + 1)
 
 // .memory[.pointer], null past the end as in jq
 fn cell_at(memory, i) => if (i < len(memory)) memory[i] else null
@@ -25,9 +25,9 @@ fn is_positive(v) => v != null and v > 0
 pn assign_cell(memory, i, delta) {
     var out = memory
     if (i >= len(out)) {
-        while (len(out) <= i) { out.push(null) }
+        while (len(out) <= i) { out.push(null)^ }
     }
-    out[i] = cell_add(out[i], delta)
+    out[i] = cell_add(out[i], delta)^
     out
 }
 
@@ -37,11 +37,11 @@ pn skip_loop(s) map^ {
     var t = s
     while (true) {
         let c = char_at(t)
-        if (c == "") { raise error("unmatching loop") }
-        if (c == "]" and t.depth - 1 < t.saved_depth) { break }
+        if ((c == "")^) { raise error("unmatching loop") }
+        if ((c == "]" and t.depth - 1 < t.saved_depth)^) { break }
         t.cursor = t.cursor + 1
-        if (c == "[") { t.depth = t.depth + 1 }
-        if (c == "]") { t.depth = t.depth - 1 }
+        if ((c == "[")^) { t.depth = t.depth + 1 }
+        if ((c == "]")^) { t.depth = t.depth - 1 }
     }
     t.cursor = t.cursor + 1
     t.depth = t.depth - 1
@@ -54,11 +54,11 @@ pn backward_loop(s) map^ {
     var t = s
     while (true) {
         let c = char_at(t)
-        if (c == "[" and not (t.saved_depth < t.depth - 1)) { break }
+        if ((c == "[" and not (t.saved_depth < t.depth - 1))^) { break }
         t.cursor = t.cursor - 1
-        if (c == "[") { t.depth = t.depth - 1 }
-        if (c == "]") { t.depth = t.depth + 1 }
-        if (c != "[" and c != "]" and t.cursor < 0) { raise error("unmatching loop") }
+        if ((c == "[")^) { t.depth = t.depth - 1 }
+        if ((c == "]")^) { t.depth = t.depth + 1 }
+        if ((c != "[" and c != "]" and t.cursor < 0)^) { raise error("unmatching loop") }
     }
     t.depth = t.depth - 1
     t
@@ -66,26 +66,26 @@ pn backward_loop(s) map^ {
 
 pn bf(program) string^ {
     var s = {input: program, cursor: 0, memory: [], pointer: 0, depth: 0, output: [], saved_depth: null}
-    while (not (s.cursor >= len(s.input))) {
+    while ((not (s.cursor >= len(s.input)))^) {
         let c = char_at(s)
         s.cursor = s.cursor + 1
-        if (c == ">") { s.pointer = s.pointer + 1 }
-        else if (c == "<") {
+        if ((c == ">")^) { s.pointer = s.pointer + 1 }
+        else if ((c == "<")^) {
             s.pointer = s.pointer - 1
             if (s.pointer < 0) { raise error("negative pointer") }
         }
-        else if (c == "+") { s.memory = assign_cell(s.memory, s.pointer, 1) }
-        else if (c == "-") { s.memory = assign_cell(s.memory, s.pointer, 255) }
-        else if (c == ".") { s.output = s.output ++ [cell_at(s.memory, s.pointer)] }
-        else if (c == ",") { raise error(", is not implemented") }
-        else if (c == "[") {
+        else if ((c == "+")^) { s.memory = assign_cell(s.memory, s.pointer, 1)^ }
+        else if ((c == "-")^) { s.memory = assign_cell(s.memory, s.pointer, 255)^ }
+        else if ((c == ".")^) { s.output = s.output ++ [cell_at(s.memory, s.pointer)] }
+        else if ((c == ",")^) { raise error(", is not implemented") }
+        else if ((c == "[")^) {
             s.depth = s.depth + 1
-            if (not is_positive(cell_at(s.memory, s.pointer))) {
+            if ((not is_positive(cell_at(s.memory, s.pointer)))^) {
                 s.saved_depth = s.depth
                 s = skip_loop(s)^
             }
         }
-        else if (c == "]") {
+        else if ((c == "]")^) {
             s.depth = s.depth - 1
             s.cursor = s.cursor - 1
             s.saved_depth = s.depth
@@ -108,7 +108,7 @@ pn main() {
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 478890292) {
+    if ((checksum == 478890292)^) {
         print("jq_bf: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_bf: FAIL checksum=" ++ string(checksum) ++ "\n")

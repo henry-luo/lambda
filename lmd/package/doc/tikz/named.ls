@@ -28,8 +28,8 @@ let LABEL_KEYS = ["midway", "near start", "near end", "very near start",
     "very near end", "at start", "at end", "pos", "anchor", "color", "text", "fill",
     "font", "inner sep"]
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 let SEGMENT_POSITIONS = [{key: "at start", pos: 0.0}, {key: "very near start", pos: 0.125},
     {key: "near start", pos: 0.25}, {key: "midway", pos: 0.5}, {key: "near end", pos: 0.75},
@@ -114,7 +114,7 @@ fn coordinate_spec(node, settings) any^ {
 }
 
 fn label_position(node) any^ {
-    let named = [for (entry in SEGMENT_POSITIONS where opts.has(node, entry.key)) entry.pos]
+    let named = [for (entry in SEGMENT_POSITIONS where ((opts.has(node, entry.key)) ^ { false })) entry.pos]
     let explicit = opts.value(node, "pos", null)
     if (explicit != null) opts.numeric_value(explicit)^
     else if (len(named) > 0) named[len(named) - 1]
@@ -353,17 +353,17 @@ fn scene_bounds(found) {
 }
 
 // Consecutive segments sharing an endpoint continue one subpath.
-fn segment_commands(segments, index) {
+fn segment_commands(segments, index) any^ {
     let segment = segments[index]
     let previous = if (index == 0) null else segments[index - 1]
     let joined = previous != null and same(previous[len(previous) - 1], segment[0]);
-    [for (at in 0 to (len(segment) - 1) where at > 0 or not joined)
+    [for (at in ((0 to (len(segment) - 1)) ^ { [] }) where ((at > 0 or not joined) ^ { false }))
         if (at == 0) svg.M(segment[at][0], segment[at][1])
         else svg.L(segment[at][0], segment[at][1])]
 }
 
 fn subpath_data(segments) => join([for (index in 0 to (len(segments) - 1),
-    part in segment_commands(segments, index)) part], " ")
+    part in ((segment_commands(segments, index)) ^ { [] })) part], " ")
 
 fn edge_svg(spec, segments, map_point) {
     let paint = spec.paint
@@ -469,19 +469,19 @@ pub fn settings(picture) any^ {
 // Child plans for a named-node picture (exported for semantic tests).
 pub fn plans(picture, custom_colors = []) any^ {
     let children = [for (child in picture
-        where child is element and string(name(child)) != "option") child]
+        where ((child is element and string(name(child)) != "option") ^ { false })) child]
     let items = plan(children, settings(picture)^, custom_colors, 0, [])^;
     [for (item in items) item.spec]
 }
 
 pub fn render(picture, custom_colors = []) any^ {
     let children = [for (child in picture
-        where child is element and string(name(child)) != "option") child]
+        where ((child is element and string(name(child)) != "option") ^ { false })) child]
     let items = plan(children, settings(picture)^, custom_colors, 0, [])^
     let ids = [for (item in items where item.spec.kind == "node" and item.spec.id != null)
         item.spec.id]
     let duplicates = [for (index, id in ids
-        where len([for (earlier in slice(ids, 0, index) where earlier == id) earlier]) > 0) id]
+        where len([for (earlier in ((slice(ids, 0, index)) ^ { [] }) where earlier == id) earlier]) > 0) id]
     let valid_ids = if (len(duplicates) > 0)
         raise error("duplicate TikZ node: " ++ duplicates[0]) else true
     let validated = scene([for (item in items) item.spec], nominal_sizes(items))^;

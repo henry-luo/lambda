@@ -20,8 +20,8 @@ pn main() {
           string(len(baseline.weak_providers)) ++ "\n")
     print("STATIC_MODULE_ARCH: public_lambda_static_selectors=" ++
           string(len(report.public_header_macro_hygiene)) ++ "\n")
-    if (len(scaffold.missing) > 0 or len(scaffold.unexpected) > 0 or
-        not contains(["report-only", "enforced-with-class-f-defer"], scaffold.mode)) {
+    if ((len(scaffold.missing) > 0 or len(scaffold.unexpected) > 0 or
+        not contains(["report-only", "enforced-with-class-f-defer"], scaffold.mode))^) {
         raise error("STATIC_MODULE_ARCH: validation DSO scaffold needs repair")
     }
     if (scaffold.mode == "enforced-with-class-f-defer") {

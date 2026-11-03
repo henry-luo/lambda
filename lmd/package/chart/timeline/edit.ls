@@ -9,7 +9,7 @@ import theme: .theme
 import lanes: .groups
 
 let operations=["add","update","remove","move_time","move_group","resize","group","subgroup"]
-pub fn allowed(spec, item, operation, change = null) {
+pub fn allowed(spec, item, operation, change = null) any^ {
     let fallback=if (contains(["move_time","move_group","resize","group","subgroup"],operation)) "update" else operation;
     let permission=if (change!=null) change else operation;
     let override=if (item.editable is map) c.option(item.editable,permission,item.editable[fallback]) else item.editable;
@@ -20,12 +20,12 @@ pub fn allowed(spec, item, operation, change = null) {
 }
 fn date_value(record) => if (record.kind!="calendar") record.value else
     map([for (key in ["year","month","day","hour","minute","second","millisecond","precision","timezone"]) (key,record[key])])
-fn from_value(value, spec) => date_value(dates.from_coordinate(value,spec.scale))
-fn nearest(value, step) => dates.offset(value,-decimal(value)%decimal(step)+
+fn from_value(value, spec) any^ => date_value(dates.from_coordinate(value,spec.scale))
+fn nearest(value, step) any^ => dates.offset(value,-decimal(value)%decimal(step)+
     (if (decimal(value)%decimal(step)<0) -decimal(step) else 0)+
     (if ((decimal(value)%decimal(step)+decimal(step))%decimal(step)>=decimal(step)/2m) decimal(step) else 0))
 
-pub fn snap(value, spec, context = {}) {
+pub fn snap(value, spec, context = {}) any^ {
     let options=spec.edit;
     let unit=c.text(options.snap_unit);
     let step=c.option(options,"snap_step",1);
@@ -63,7 +63,7 @@ fn mutate(values, id, proposed, change) => if (change=="add") [*values,proposed]
     else [for (item in values) if (item.id==id) {*:item,*:proposed} else item]
 
 // the source collection is never changed in place; consumers can publish this value.
-pub fn apply_normalized(spec, request) {
+pub fn apply_normalized(spec, request) any^ {
     let source=schema.source_record(spec);
     let original=[for (item in spec.events) schema.event_record(item)];
     let operation=request.operation;
@@ -78,7 +78,7 @@ pub fn apply_normalized(spec, request) {
     let valid=schema.validate(result);
     if (valid is error) valid else result
 }
-pub fn apply_edit(raw, request) {
+pub fn apply_edit(raw, request) any^ {
     let spec=schema.validate(raw);
     if (spec is error) spec else if (not (request is map) or not contains(operations,request.operation) or
         not (request.ids is array) or len(request.ids)!=1 or c.id(request.ids[0]) is error or request.chart_id!=spec.id) c.fail("edit","invalid edit request")
@@ -87,14 +87,14 @@ pub fn apply_edit(raw, request) {
         subgroup:request.subgroup,change:request.change,origin:request.origin},{revision:spec.source.revision});
         if (checked is error) checked else checked.candidate}
 }
-pub fn prepare(spec, current, action, context) {
+pub fn prepare(spec, current, action, context) any^ {
     let operation=c.text(c.option(action,"operation","update"));
     let grouped=contains(["group","subgroup"],operation);
     let change=if (grouped) c.text(c.option(action,"change","update")) else operation;
     let creating=change=="add";
     let generated=if (operation!="add" or action.id!=null or action.proposed.id!=null) null else
-        ([for (index in (current.sequence+1) to (current.sequence+len(spec.events)+1),
-            let candidate="event-" ++ c.text(index) where not contains(spec.events |> ~.id,candidate)) candidate])[0];
+        ([for (index in (((current.sequence+1) to (current.sequence+len(spec.events)+1)) ^ { [] }),
+            let candidate="event-" ++ c.text(index) where ((not contains(spec.events |> ~.id,candidate)) ^ { false })) candidate])[0];
     let id=c.id(if (action.id!=null) action.id else if (action.proposed.id!=null and operation!="subgroup") action.proposed.id else if (operation=="add") generated else null);
     let group=if (grouped) (spec.groups |: ~.id==id)[0] else null;
     let target=if (operation=="subgroup") (c.items(group.subgroups) |: ~.id==action.subgroup)[0]
@@ -126,13 +126,13 @@ pub fn prepare(spec, current, action, context) {
     if (verdict is error) verdict else if (verdict!=true) c.fail("edit.validate","validation rejected the proposed change")
     else {*:request,candidate:candidate}
 }
-pub fn preview(spec, current) {
+pub fn preview(spec, current) any^ {
     let request=if (current.edit_gesture.request!=null) current.edit_gesture.request else current.draft;
     if (request.candidate==null or request.source_revision!=current.revision) spec
     else {let value=schema.validate(request.candidate); if (value is error) spec else value}
 }
 fn result(current) => {state:current,requests:[],notifications:[]}
-pub fn reduce(current, action, spec, context) {
+pub fn reduce(current, action, spec, context) any^ {
     if (action.type=="edit_request") {
         let request=prepare(spec,current,action,context);
         if (request is error) request else {state:{*:current,sequence:current.sequence+1,draft:request,edit_gesture:null},requests:[request],
@@ -146,8 +146,8 @@ pub fn reduce(current, action, spec, context) {
     else c.fail("action.type","unknown edit action")
 }
 
-fn instant(plan, point) => time_map.invert(plan.time_map,coordinate.invert(plan.path,point).fraction)
-pub fn pointer(current, action, spec, context) {
+fn instant(plan, point) any^ => time_map.invert(plan.time_map,coordinate.invert(plan.path,point).fraction)
+pub fn pointer(current, action, spec, context) any^ {
     let dragging=current.edit_gesture;
     let point=action.point;
     let valid=point is array and len(point)==2 and all(point |> util.finite_number(~));
@@ -187,7 +187,7 @@ pub fn pointer(current, action, spec, context) {
     }
 }
 
-fn keyboard_date(record, direction, spec, fallback, context) {
+fn keyboard_date(record, direction, spec, fallback, context) any^ {
     let base=if (record==null) dates.from_coordinate(fallback,spec.scale) else record;
     let unit=c.text(c.option(spec.edit,"snap_unit",if (spec.scale.kind=="calendar") "day" else "unit"));
     let step=c.option(spec.edit,"snap_step",1)*direction;
@@ -197,7 +197,7 @@ fn keyboard_date(record, direction, spec, fallback, context) {
     if (snapped is error) snapped else from_value(snapped,spec)
 }
 
-pub fn keyboard(current, action, spec, context) {
+pub fn keyboard(current, action, spec, context) any^ {
     let shown=preview(spec,current);
     let item=(shown.events |: ~.id==action.id)[0];
     let mode=c.text(c.option(action,"operation","move_time"));
@@ -213,7 +213,7 @@ pub fn keyboard(current, action, spec, context) {
                 (if (endpoint=="from") "open_start" else "open_end",false)])}
         else if (item.kind=="point") {at:keyboard_date(item.start,direction,spec,current.window.from,input)}
         else map([for (key,record in {from:item.start,to:item.end} where record!=null) (key,keyboard_date(record,direction,spec,current.window[string(key)],input))]);
-    let failure=util.first_error([for (key,value in c.attrs(patch)) value]);
+    let failure=util.first_error([for (key,value in ((c.attrs(patch)) ^ { [] })) value]);
     if (item==null or not contains(["move_time","move_group","resize"],mode) or not allowed(spec,item,mode)) c.fail("edit.keyboard","operation is disabled or target is missing")
     else if (direction!=1 and direction!=-1) c.fail("edit.keyboard","expected a forward or backward step")
     else if (failure is error) failure else if (patch==null) result(current)

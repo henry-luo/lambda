@@ -5,7 +5,7 @@ import outline: .mod_icons
 pub fn label_lines(label) {
     let words = split(label," ")
     let lines = if (len(words)<2) [label] else {
-        let at = sort(1 to (len(words)-1),(i)=>abs(len(join(slice(words,0,i)," "))-len(join(slice(words,i)," "))))[0];
+        let at = sort(1 to (len(words)-1),(i)any^ =>abs(len(join(slice(words,0,i)," "))-len(join(slice(words,i)," "))))[0];
         [join(slice(words,0,at)," "),join(slice(words,at)," ")]
     };
     [for (line in lines) <span class:"ribbon-label-line",line>]

@@ -29,15 +29,15 @@ fn spawn_actor(acc, thing, rules, skill) {
         ai: ai_state(stats, thing, skill, sample[0] * rules.LINE_OF_SIGHT_CHECK_INTERVAL)}
     {actors: [*acc.actors, actor], seed: sample[1]}
 }
-pub fn new_game(level, rules, visuals, skill = 1, seed = 1) {
-    let things = [for (i in 0 to (len(level.things) - 1), let thing = level.things[i]
-        where enabled(thing, skill) and (visuals.THING_SPRITES[string(thing.type)] != null or
-            visuals.THING_NAMES[string(thing.type)] != null)) {*: thing, id: i}]
+pub fn new_game(level, rules, visuals, skill = 1, seed = 1) any^ {
+    let things = [for (i in ((0 to (len(level.things) - 1)) ^ { [] }), let thing = level.things[i]
+        where ((enabled(thing, skill) and (visuals.THING_SPRITES[string(thing.type)] != null or
+            visuals.THING_NAMES[string(thing.type)] != null)) ^ { false })) {*: thing, id: i}]
     let spawned = reduce([{actors: [], seed: seed}, *things],
         (acc, thing) => spawn_actor(acc, thing, rules, skill))
-    let boss_floors = [for (i in 0 to (len(level.sectors) - 1), let sector = level.sectors[i],
+    let boss_floors = [for (i in ((0 to (len(level.sectors) - 1)) ^ { [] }), let sector = level.sectors[i],
         let lowest_floor = if (sector.tag == 666) world.lowest_adjacent(level, i) else sector.floorHeight
-        where sector.tag == 666 and lowest_floor < sector.floorHeight)
+        where ((sector.tag == 666 and lowest_floor < sector.floorHeight) ^ { false }))
         {sectorIndex: i, tag: 666, upperHeight: sector.floorHeight, lowerHeight: lowest_floor,
             oneWay: true, duration: 2, collisionEdges: []}]
     {mode: "ready", autoplay: false, skill: skill, time: 0.0, ticks: 0, seed: spawned.seed, initial_seed: seed,

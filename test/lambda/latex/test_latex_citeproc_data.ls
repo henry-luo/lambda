@@ -9,9 +9,9 @@ let ref = loaded.references[1];
 [ref.type, ref.title, ref['container-title'], ref.publisher, ref.issued['date-parts'], ref.page,
  ref.author[0].family, ref.author[0].given, ref.author[0]['non-dropping-particle'], ref.author[0].suffix,
  ref.author[1].literal, loaded.references[2].type, loaded.references[2].genre,
- [for (issue in loaded.diagnostics) issue.code]];
+ [for (issue in ((loaded.diagnostics) ^ { [] })) issue.code]];
 let decoded = markup.bibtex("G{\\\"o}del and \\emph{logic} with {CSL} and \\unknown{word}");
-[decoded.text, [for(issue in decoded.diagnostics) issue.code],
+[decoded.text, [for(issue in ((decoded.diagnostics) ^ { [] })) issue.code],
  index_of(html.to_html(decoded.content), "font-style:italic") != null];
 let json = data.json([{id:"rich",type:"book",title:"A <i>rich</i> <span class=\"nocase\" onclick=\"bad()\">CSL</span> title"}])^
 let rich_html = html.to_html(json.references[0].rich.title);

@@ -1,7 +1,7 @@
 import front: lambda.doc.spelling.front_coded
 
-fn rejected(value, count = null) => (front.validate(value,count) ^ { ^.code }) == 7821
-fn word_at(i) => "word" ++ slice("0000" ++ string(i),len(string(i)))
+fn rejected(value, count = null) any^ => (front.validate(value,count) ^ { ^.code }) == 7821
+fn word_at(i) any^ => "word" ++ slice("0000" ++ string(i),len(string(i)))
 fn matches(text, words, missing) bool^ {
     let dictionary = front.from_bytes(binary(text),len(words))^;
     all([for (i,word in words) front.lookup(dictionary,word)^ == i]) and

@@ -11,7 +11,7 @@ import text: .text
 import collision: .collision
 
 pub fn supports(kind) any | error => contains(["mesh","wireframe","contour","contour_band","streamline"],kind)
-pub fn prepare(spec) {
+pub fn prepare(spec) any^ {
     let options=spec.mark;
     let prepared=mesh.prepare(spec.data,options);
     let association=if (options.association!=null) options.association else "vertex";
@@ -33,19 +33,19 @@ pub fn prepare(spec) {
     let rows=if (invalid is error) invalid
         else if (streamline) (let traced=stream.trace(prepared,options),
             if (traced is error) traced else if (traced.diagnostics.incomplete and options.allow_partial!=true) error("chart: incomplete streamline; increase work limits or set allow_partial")
-            else [for (path in traced.paths where len(path.points)>1) {*:path,points:path.points |> [~.x,~.y],samples:path.points,
+            else [for (path in ((traced.paths) ^ { [] }) where ((len(path.points)>1) ^ { false })) {*:path,points:path.points |> [~.x,~.y],samples:path.points,
                 magnitude:avg(path.points |> ~.magnitude),face_ids:util.unique_vals(path.points |> ~.face_id)}])
         else if (contour) contours.contours(prepared,field,if (options.levels!=null) options.levels else 8,{*:options,bands:options.kind=="contour_band"})
-        else if (options.kind=="wireframe") [for (edge in prepared.edges,
-            let uses=[for (use in edge.uses where mesh.face_active(prepared,prepared.faces[use.face],fields,association)) use],
+        else if (options.kind=="wireframe") [for (edge in ((prepared.edges) ^ { [] }),
+            let uses=[for (use in edge.uses where ((mesh.face_active(prepared,prepared.faces[use.face],fields,association)) ^ { false })) use],
             let diagonal=len(edge.uses)==2 and prepared.faces[edge.uses[0].face].cell_id!=null and
                 prepared.faces[edge.uses[0].face].cell_id==prepared.faces[edge.uses[1].face].cell_id
-            where len(uses)>0 and (options.diagonals==true or not diagonal))
+            where ((len(uses)>0 and (options.diagonals==true or not diagonal)) ^ { false }))
             {id:edge.vertices,points:[for (i in edge.vertices) mesh.point(prepared.vertices[i])],
                 face_ids:[for (u in uses) prepared.faces[u.face].id],
                 *:if (field!=null) map([field,if (association=="vertex") avg([for (i in edge.vertices) float(prepared.vertices[i][field])])
                     else float(prepared.faces[uses[0].face][field])]) else {}}]
-        else [for (f in (if (association=="cell" and prepared.cells!=null) prepared.cells else prepared.faces) where mesh.face_active(prepared,f,fields,association))
+        else [for (f in (((if (association=="cell" and prepared.cells!=null) prepared.cells else prepared.faces)) ^ { [] }) where ((mesh.face_active(prepared,f,fields,association)) ^ { false }))
             {*:f,points:[for (i in f.vertices) mesh.point(prepared.vertices[i])],face_ids:[f.id],closed:true,
                 *:if (field!=null) map([field,if (association=="vertex") avg([for (i in f.vertices) float(prepared.vertices[i][field])]) else float(f[field])]) else {}}];
     let data=if (rows is error) rows else [for (row in rows)
@@ -53,19 +53,19 @@ pub fn prepare(spec) {
             *:map([for (entry in [[aliases.x,avg(row.points |> ~[0])],[aliases.y,avg(row.points |> ~[1])],
                 [if (contour) field else null,row.level]] where entry[0]!=null) for (part in entry) part])}];
     let domain=[for (row in data) for (p in row.points) {*:row,*:map([encoding.x.field,p[0],encoding.y.field,p[1]])},
-        for (v in prepared.vertices) {*:v,*:map([encoding.x.field,v.x,encoding.y.field,v.y])}];
+        for (v in ((prepared.vertices) ^ { [] })) {*:v,*:map([encoding.x.field,v.x,encoding.y.field,v.y])}];
     {*:spec,data:data,encoding:encoding,_mesh:prepared,_domain_data:domain}
 }
 
 fn screen(p,ctx) => [scale.scale_apply(ctx.x_scale,p[0]),scale.scale_apply(ctx.y_scale,p[1])]
-fn line_style(ctx,row,options) => mark.style(ctx,row,options,{fill:"none",stroke:"#4c78a8",'stroke-width':mark.appearance(ctx,"size",row,1.5),opacity:1.0},true)
-fn stream_marks(data,ctx,options) => svg.group_class("marks streamline",[for (row in data,
+fn line_style(ctx,row,options) any^ => mark.style(ctx,row,options,{fill:"none",stroke:"#4c78a8",'stroke-width':mark.appearance(ctx,"size",row,1.5),opacity:1.0},true)
+fn stream_marks(data,ctx,options) any^ => svg.group_class("marks streamline",[for (row in data,
     let arrows=if (options.arrows!=null) options.arrows else 1,let samples=row.samples,let total=samples[len(samples)-1].length)
     <g class:"streamline-path",'data-source-id':format(row.id,{type:"json",compact:true}),'data-incomplete':row.incomplete,
-        for (i in 1 to (len(samples)-1),let appearance=line_style(ctx,{*:row,magnitude:(samples[i-1].magnitude+samples[i].magnitude)/2},options))
+        for (i in ((1 to (len(samples)-1)) ^ { [] }),let appearance=line_style(ctx,{*:row,magnitude:(samples[i-1].magnitude+samples[i].magnitude)/2},options))
             <path d:svg.line_path([screen(row.points[i-1],ctx),screen(row.points[i],ctx)]),*:appearance,'stroke-linecap':"round">;
         for (index in 1 to arrows,let length=total*index/(arrows+1),
-            let i=([for (i in 1 to (len(samples)-1) where samples[i].length>=length) i])[0],
+            let i=([for (i in ((1 to (len(samples)-1)) ^ { [] }) where samples[i].length>=length) i])[0],
             let t=(length-samples[i-1].length)/(samples[i].length-samples[i-1].length),
             let tip=screen(geometry.interpolate(row.points[i-1],row.points[i],t),ctx),let from=screen(row.points[i-1],ctx),
             let appearance=line_style(ctx,{*:row,magnitude:samples[i].magnitude},options))
@@ -73,19 +73,19 @@ fn stream_marks(data,ctx,options) => svg.group_class("marks streamline",[for (ro
         mark.tooltip(ctx,row)
     >])
 
-fn contour_labels(data,ctx,options) {
+fn contour_labels(data,ctx,options) any^ {
     let font=text.style({},"label",if (options.label_size!=null) options.label_size else 11);
     let labels=data |> util.format_value(~.level,options.label_format);
     let metrics=text.measure(labels,font);
     let candidates=[for (i,row in data,let points=row.points |> screen(~,ctx),let middle=int(floor(len(points)/2)),
-        let length=sum([for (j in 1 to (len(points)-1)) math.hypot(points[j][0]-points[j-1][0],points[j][1]-points[j-1][1])])
-        where len(points)>1 and length>metrics[i].width+16)
+        let length=sum([for (j in ((1 to (len(points)-1)) ^ { [] })) math.hypot(points[j][0]-points[j-1][0],points[j][1]-points[j-1][1])])
+        where ((len(points)>1 and length>metrics[i].width+16) ^ { false }))
         {x:points[middle][0],y:points[middle][1]-3,label:labels[i],optional:true,gap:4,
             bounds:text.bounds(metrics[i],"middle",0,points[middle][0],points[middle][1]-3)}];
     [for (label in collision.select(candidates)) <text class:"contour-label",x:label.x,y:label.y,'text-anchor':"middle",*:text.attributes(font),label.label>]
 }
 
-pub fn render(data,ctx,options) {
+pub fn render(data,ctx,options) any^ {
     let line=options.kind=="wireframe" or options.kind=="contour" or options.kind=="streamline";
     if (options.kind=="streamline") stream_marks(data,ctx,options) else svg.group_class("marks "++options.kind,[for (row in data)
         <path class:options.kind++"-fragment",'data-source-id':format(row.id,{type:"json",compact:true}),

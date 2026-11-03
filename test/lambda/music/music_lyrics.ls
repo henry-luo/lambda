@@ -28,7 +28,7 @@ fn rejected(extra) => ((one(extra) ^ { null }) or "rejected")=="rejected";
  len([for (g in groups where g.lyric_kind=="extend" and g.lyric_id==shine.id) g])==2,
  contains(links[carried],shine.id),
  len(shine.members)==4,
- len([for (g in score.lyric_groups where g.lyric.text=="hold" and len(g.members)==2) g])==1,
+ len([for (g in score.lyric_groups where ((g.lyric.text=="hold" and len(g.members)==2) ^ { false })) g])==1,
  contains(xml,"Let‿our"),
  contains(xml,"data-lyric-id") and contains(xml,"data-verse=\"1\""),
  len([for (g in groups where g.lyric_kind=="hyphen") g])>2,

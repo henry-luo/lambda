@@ -1,7 +1,7 @@
 // Authored record values exercise field serialization, beyond retained-source replay.
 import writers: lambda.doc.misc
 
-fn stable(source,target) => writers.format(parse(source,target)^,{type:target})^ == source
+fn stable(source,target) any^ => writers.format(parse(source,target)^,{type:target})^ == source
 fn wire_entry(value,wanted) => [for (entry in value.entries where entry.name == wanted) entry][0]
 
 let contact_source = writers.vcf({

@@ -12,7 +12,7 @@ pn tune26_typed_reborrow_step(var values: int[], n: int) any {
 pn tune26_typed_reborrow_loop(var values: int[], rounds: int) any {
     var iteration: int = 0
     while (iteration < rounds) {
-        tune26_typed_reborrow_step(values, 4)
+        tune26_typed_reborrow_step(values, 4)^
         iteration = iteration + 1
     }
 }
@@ -20,7 +20,7 @@ pn tune26_typed_reborrow_loop(var values: int[], rounds: int) any {
 pn main() {
     var values: int[] = [0, 0, 0, 0]
     let snapshot = values
-    tune26_typed_reborrow_loop(values, 3)
+    tune26_typed_reborrow_loop(values, 3)^
     print(values[0]); print(" ")
     print(values[3]); print(" ")
     print(snapshot[0]); print("\n")

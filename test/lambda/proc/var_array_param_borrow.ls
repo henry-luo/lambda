@@ -15,8 +15,8 @@ pn put_direct(var r: Rec, i: int, v: int) any { r.values[i] = v }
 pn main() {
     var r: Rec = {values: fill(64, 0), n: 64}
     var i = 0
-    while (i < 64) { put_slot(r, i, i * 2); i = i + 1 }
-    widen(r.values, 6)
-    put_direct(r, 5, -5)
+    while (i < 64) { put_slot(r, i, i * 2)^; i = i + 1 }
+    widen(r.values, 6)^
+    put_direct(r, 5, -5)^
     print(r.values[0], " ", r.values[63], " ", r.values[5], " ", r.values[6], " ", len(r.values), "\n")
 }

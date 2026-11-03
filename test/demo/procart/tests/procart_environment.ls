@@ -5,7 +5,7 @@ import E: lambda.procart.environment
 import S: lambda.scene3d
 import T: lambda.scene3d.transform
 let doc=input("test/demo/procart/meadow.mark",'mark')^
-let definitions=[for (n in content(doc) where name(n)=='resources') n][0]
+let definitions=[for (n in ((content(doc)) ^ { [] }) where ((name(n)=='resources') ^ { false })) n][0]
 let small=<meadow version:1,seed:2026,width:28.0,depth:20.0,relief:0.8,terrain:{width:17,height:13,octaves:2},
     *[definitions,<pond id:"water",position:[6.0,-2.6]>,<environment time:14.0,humidity:0.65>,
       <flower id:"lily",recipe:"water-lily",position:[6.0,0.0,-2.6]>,
@@ -19,8 +19,8 @@ let reset=M.command(windy,"reset-environment")^
 fn lilies(model) array => [for (i in model.instances where i.species=="water-lily") i];
 [st.model.width==28.0,st.model.depth==20.0,st.model.pond != null,
  len(unique([for (o in st.model.objects where o.kind=="flower") o.recipe]))==2,
- len(lilies(st.model))==1,all([for (i in lilies(night.model)) i.response.openness==0.0]),
- all([for (i in lilies(day.model)) i.response.openness==1.0]),
+ len(lilies(st.model))==1,all([for (i in ((lilies(night.model)) ^ { [] })) i.response.openness==0.0]),
+ all([for (i in ((lilies(day.model)) ^ { [] })) i.response.openness==1.0]),
  st.model.objects==night.model.objects,st.model.height==night.model.height,st.model.resources==night.model.resources,
  st.model.parts!=night.model.parts,reset.model==st.model];
 

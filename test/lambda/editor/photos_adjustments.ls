@@ -5,7 +5,7 @@ import effects: lambda.editor.raster.effects
 import project: lambda.image.project
 import interaction: lambda.editor.raster.interaction
 fn check(value) => value
-fn pixels(st) => img.to_bytes(img.render_frame(st.doc)^)^
+fn pixels(st) any^ => img.to_bytes(img.render_frame(st.doc)^)^
 fn refused(st,command) => match (editor.exec(st,command) ^ { ^ }) { case error: true default: false }
 let source = img.from_bytes(b'204080ff80a0c080',{width:2,height:1})^
 let original = editor.open_session(img.of_raster(source))^

@@ -30,24 +30,24 @@ pn rec(var fs: float[], k: int) {
     }
 }
 pn main() {
-    var fs: float[] = fill(4, 0.0)
+    var fs: float[] = fill(4, 0.0)^
     var lit: float[] = [1.0, 2.0, 3.0]
-    var is: int[] = fill(4, 0)
+    var is: int[] = fill(4, 0)^
     var r: Rec = { pos: 1, count: 2 }
     var k = 0
     while (k < 8) {
-        store_f(fs, k % 4, float(k))
-        store_i(is, k % 4, k * 2)
-        field(r)
-        nested(fs, 2)
+        store_f(fs, k % 4, float(k))^
+        store_i(is, k % 4, k * 2)^
+        field(r)^
+        nested(fs, 2)^
         scale(lit, 2.0)
         k = k + 1
     }
     print(fs, " ", is, " ", lit, " ", r.pos, " ", r.count, "\n")
     var m = 0
-    while (m < 6) { fromalias(fs); shared_then_write(fs, m % 4); m = m + 1 }
+    while (m < 6) { fromalias(fs)^; shared_then_write(fs, m % 4)^; m = m + 1 }
     print(fs, "\n")
-    var rs: float[] = fill(4, 0.0)
-    rec(rs, 0)
+    var rs: float[] = fill(4, 0.0)^
+    rec(rs, 0)^
     print(rs, "\n")
 }

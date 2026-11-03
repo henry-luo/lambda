@@ -6,7 +6,7 @@ import lambda.editor.mod_transaction
 import lambda.editor.mod_geom
 import lambda.editor.mod_drawing_commands
 
-fn apply_all(steps, doc, i, n) { if (i >= n) { doc } else { apply_all(steps, step_apply(steps[i], doc), i + 1, n) } }
+fn apply_all(steps, doc, i, n) any^ { if (i >= n) { doc } else { apply_all(steps, step_apply(steps[i], doc), i + 1, n) } }
 
 // doc: [paragraph, drawing[layer[S1, S2]]]
 fn mk_doc() {

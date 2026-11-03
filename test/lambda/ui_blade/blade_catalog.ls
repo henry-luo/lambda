@@ -9,7 +9,7 @@ fn sample(kind) => if (kind == "tree") {id:"tree",items:[{key:1,label:"One"}]}
     else if (kind == "icon") {name:"home"}
     else if (contains(["steps","breadcrumb","descriptions","timeline"],kind)) {items:[]}
     else {}
-let all_native = [for (kind in catalog.kinds()) (
+let all_native = [for (kind in ((catalog.kinds()) ^ { [] })) (
     let source = catalog.descriptor(kind,sample(kind))^,
     starts_with(string(name(source)),"blade.") and ui.render(source)^ == c.render(catalog.native(kind,sample(kind))^))]
 let icons = [for (icon in ui.rpg_icon_names()) ui.render(ui.rpg_icon({name:icon,size:192,label:icon})^)^];

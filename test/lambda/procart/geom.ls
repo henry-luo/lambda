@@ -6,7 +6,7 @@ import sample: lambda.procart.sample
 import geom: lambda.procart.geom
 
 // ccw triangles, empty circumcircles, symmetric half-edges and t = 2n - 2 - h over the used points
-fn check(points) {
+fn check(points) any^ {
     let m = geom.delaunay(points)^
     let t = m.triangles
     let used = len(unique([for (tri in t) for (v in tri) v]))
@@ -55,7 +55,7 @@ geom.voronoi(geom.delaunay([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])^, {
 [geom.centroid([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]), geom.centroid([[0.0, 0.0], [3.0, 0.0], [0.0, 3.0]])];
 let relaxed = geom.lloyd(pts, {iterations: 3, bounds: [0.0, 0.0, 50.0, 30.0]})^
 // relaxation evens out the cells: their area variance falls
-fn area_variance(ps) => math.variance([for (c in geom.voronoi(geom.delaunay(ps)^, {bounds: [0.0, 0.0, 50.0, 30.0]})^) area(c)]);
+fn area_variance(ps) any^ => math.variance([for (c in geom.voronoi(geom.delaunay(ps)^, {bounds: [0.0, 0.0, 50.0, 30.0]})^) area(c)]);
 [len(relaxed) == len(pts), all([for (p in relaxed) p[0] >= 0.0 and p[0] <= 50.0 and p[1] >= 0.0 and p[1] <= 30.0]),
  area_variance(relaxed) < area_variance(pts) * 0.5];
 geom.lloyd(pts, {iterations: 0})^ == pts;

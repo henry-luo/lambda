@@ -2,17 +2,17 @@
 import c: .common
 import locale: .locale
 
-fn roman_parts(value, values, labels, index, acc) {
+fn roman_parts(value, values, labels, index, acc) any^ {
     if (value <= 0 or index >= len(values)) acc
     else if (value >= values[index]) roman_parts(value - values[index], values, labels, index, acc ++ labels[index])
     else roman_parts(value, values, labels, index + 1, acc)
 }
 
-pub fn roman(value) => roman_parts(value,
+pub fn roman(value) any^ => roman_parts(value,
     [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1],
     ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"], 0, "")
 
-pub fn ordinal(value, locales, gender = null) {
+pub fn ordinal(value, locales, gender = null) any^ {
     let terms = locale.ordinal_terms(locales)
     let matched = [for (term in terms where term["name"] != "ordinal") {
         let n = c.as_int(slice(term["name"], 8, len(term["name"])), -1)
@@ -34,7 +34,7 @@ pub fn ordinal(value, locales, gender = null) {
     string(value) ++ (if (len(suffixes) > 0) c.text(suffixes[0].term) else fallback)
 }
 
-pub fn render(value, form, locales, gender = null) {
+pub fn render(value, form, locales, gender = null) any^ {
     let numeric = int(value) ^ { null }
     if (numeric == null) c.text(value)
     else if (form == "roman") roman(numeric)

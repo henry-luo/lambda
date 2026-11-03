@@ -11,7 +11,9 @@ pn tune27_float_literal_nullable(q: float[], i: int, j: int) any {
 
 // a NaN member is not the null payload: the literal stays packed
 pn tune27_float_literal_nan(q: float[], i: int) any {
-    let zero: float = q[i] - q[i]
+    // S7.7.2v2/S7.6.3v3: leave on failed admission before using its float lane.
+    let checked_zero: float = q[i] - q[i]
+    let zero: float = checked_zero^
     let packed = [q[i], zero / zero]
     return packed
 }

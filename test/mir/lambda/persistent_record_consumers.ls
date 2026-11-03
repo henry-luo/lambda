@@ -80,7 +80,7 @@ pn main() {
     let before = record
     set_optional(record, 9)
     var child: Record? = {value: 11, next: null}
-    set_link(record, child)
+    set_link(record, child)^
     print([before.value, record.value, record.extra, record.next.value]); print("\n")
     let rejected = set_dynamic(record, "bad")
     print([rejected is error, record.value]); print("\n")
@@ -93,7 +93,7 @@ pn main() {
     print([admit_record([1, 2]) is error, admit_record(null)]); print("\n")
     var holder: Holder? = {child: record}
     let holder_before = holder
-    set_nested(holder, 13)
+    set_nested(holder, 13)^
     print([holder_before.child.value, holder.child.value, record.value]); print("\n")
     print([read_return(true), read_return(false), read_rebound()]); print("\n")
     var absent: Record? = null

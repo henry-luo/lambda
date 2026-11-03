@@ -6,9 +6,9 @@ let props = {id:"people",page_size:2,columns:[{key:'name',title:"Name"},{key:'ag
         {key:3,name:"Ben",age:25,status:'paused'},{key:4,name:"Dana",age:20,status:'active'}]}
 let sorted = table.model(props,{key:'age',direction:'asc'})
 let filtered = table.model(props,null,{status:'paused'},9);
-[[for (entry in sorted.rows) entry.key],[for (entry in table.model(props,{key:'age',direction:'asc'},{},2).rows) entry.key],
- filtered.current,filtered.total,[for (entry in filtered.rows) entry.key],
- [for (entry in table.model({*:props,pagination:false}).rows) entry.key],
+[[for (entry in ((sorted.rows) ^ { [] })) entry.key],[for (entry in ((table.model(props,{key:'age',direction:'asc'},{},2).rows) ^ { [] })) entry.key],
+ filtered.current,filtered.total,[for (entry in ((filtered.rows) ^ { [] })) entry.key],
+ [for (entry in ((table.model({*:props,pagination:false}).rows) ^ { [] })) entry.key],
  ((ui.table(props) ^ { null }) or null) != null,
  ((ui.table({*:props,rows:[{key:1},{key:"1"}]}) ^ { null }) or null) == null,
  ((ui.table({*:props,columns:[]}) ^ { null }) or null) == null,

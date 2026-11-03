@@ -20,7 +20,7 @@ el2[1][0]
 el2[2][0]
 
 "=== for-loop with filter ==="
-let el3 = <div for x in ["1", "2", "3", "4", "5"] { if (int(x) % 2 == 0) { <span x> } }>
+let el3 = <div for x in ["1", "2", "3", "4", "5"] { if ((int(x) % 2 == 0)^) { <span x> } }>
 len(el3)
 el3[0][0]
 el3[1][0]

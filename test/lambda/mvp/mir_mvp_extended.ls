@@ -9,8 +9,8 @@ pn optional_read(a: float[]) any {
     sample = a[3]
     print(sample); print("\n")
 }
-pn make_numbers(n: int) int[] {
-    var a: int[] = fill(n, 0)
+pn make_numbers(n: int) int[]^ {
+    var a: int[] = fill(n, 0)^
     a[0] = n
     return a
 }
@@ -21,7 +21,7 @@ pn main() {
     while (i < 3) { x = x + 0.25; i = i + 1; flag = true }
     print(x); print(" "); print(i); print(" "); print(flag); print("\n")
     var floats: float[] = [2.5, 4.5]
-    optional_read(floats)
+    optional_read(floats)^
     print(native_sine(0.0)); print(" "); print(dynamic_sine(0.0)); print(" ")
     print(dynamic_sine(null)); print(" "); print(dynamic_sine("bad")); print("\n")
     let nonfinite = native_sine(1.0 / 0.0)
@@ -39,9 +39,9 @@ pn main() {
     let mixed = a
     a[1] = "again"
     print(original[0]); print(" "); print(a[0]); print(" "); print(mixed[1]); print(" "); print(a[1]); print("\n")
-    var returned: int[] = make_numbers(3)
+    var returned: int[] = make_numbers(3)^
     let saved: int[] = returned
-    var other: int[] = make_numbers(5)
+    var other: int[] = make_numbers(5)^
     returned[0] = other[0]
     print(saved[0]); print(" "); print(returned[0]); print("\n")
 }

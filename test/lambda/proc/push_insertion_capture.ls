@@ -6,7 +6,7 @@
 type Box = {size: int, tag: int}
 type Holder = {items: Box[], n: int}
 
-pn local_push() int {
+pn local_push() int^ {
     var x: Box = {size: 1, tag: 0}
     var bag: Box[] = []
     push(bag, x)
@@ -14,21 +14,21 @@ pn local_push() int {
     return bag[0].size * 100 + x.size
 }
 
-pn param_push(var b: Box, var bag: Box[]) int {
+pn param_push(var b: Box, var bag: Box[]) int^ {
     push(bag, b)
     b.size = 5
     return bag[0].size * 100 + b.size
 }
 
 // the pushed-into owner is a field place of a var parameter
-pn place_push(var h: Holder) int {
+pn place_push(var h: Holder) int^ {
     var x: Box = {size: 2, tag: 0}
     push(h.items, x)
     x.size = 7
     return h.items[0].size * 100 + x.size
 }
 
-pn untyped_push() int {
+pn untyped_push() int^ {
     var x = {size: 1}
     var bag = []
     push(bag, x)
@@ -39,7 +39,7 @@ pn untyped_push() int {
 pn stash(var b: Box, var bag: Box[]) { push(bag, b) }
 
 // the push happens in a callee that re-borrows both parameters
-pn via_var(var b: Box, var bag: Box[]) int {
+pn via_var(var b: Box, var bag: Box[]) int^ {
     stash(b, bag)
     b.size = 9
     return bag[0].size * 100 + b.size
@@ -52,14 +52,14 @@ pn literal_then_store() int {
     return bag[0].size
 }
 
-pn fresh_push() int {
+pn fresh_push() int^ {
     var bag: Box[] = []
     push(bag, {size: 3, tag: 0})
     bag[0].size = 6
     return bag[0].size
 }
 
-pn named_push_then_store() int {
+pn named_push_then_store() int^ {
     var bag: Box[] = []
     var x: Box = {size: 3, tag: 0}
     push(bag, x)
@@ -70,7 +70,7 @@ pn named_push_then_store() int {
 // a fresh local whose only use is the push is moved, not captured; any
 // other use (a loop re-push, a later read, a closure, a second push) keeps
 // the capture
-pn moved() int {
+pn moved() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
     push(bag, x)
@@ -78,31 +78,31 @@ pn moved() int {
     return bag[0].size
 }
 
-pn reused_in_loop() int {
+pn reused_in_loop() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
     var i = 0
     while (i < 3) {
-        push(bag, x)
+        push(bag, x)^
         i = i + 1
     }
     bag[0].size = 7
     return bag[0].size * 100 + bag[1].size * 10 + bag[2].size
 }
 
-pn fresh_in_loop() int {
+pn fresh_in_loop() int^ {
     var bag: Box[] = []
     var i = 0
     while (i < 3) {
         var x: Box = {size: i, tag: 0}
-        push(bag, x)
+        push(bag, x)^
         i = i + 1
     }
     bag[0].size = 7
     return bag[0].size * 100 + bag[1].size * 10 + bag[2].size
 }
 
-pn used_after() int {
+pn used_after() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
     push(bag, x)
@@ -110,19 +110,19 @@ pn used_after() int {
     return bag[0].size * 10 + x.size
 }
 
-pn closure_seen() int {
+pn closure_seen() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
-    let peek = () => x.size
+    let peek = () any^ => x.size
     push(bag, x)
     bag[0].size = 7
     return bag[0].size * 10 + peek()
 }
 
-pn twice() int {
+pn twice() int^ {
     var bag: Box[] = []
     var x: Box = {size: 1, tag: 0}
-    push(bag, x)
+    push(bag, x)^
     push(bag, x)
     bag[0].size = 7
     return bag[0].size * 10 + bag[1].size

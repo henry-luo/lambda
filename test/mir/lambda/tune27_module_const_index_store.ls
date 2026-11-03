@@ -15,13 +15,13 @@ pn tune27_module_const_index_store(var x: float[]) any {
 }
 
 pn main() {
-    var grid: float[] = fill(ROW * 5, 0.0)
+    var grid: float[] = fill(ROW * 5, 0.0)^
     var k: int = 0
     while (k < ROW * 5) {
         grid[k] = float(k)
         k = k + 1
     }
-    tune27_module_const_index_store(grid)
+    tune27_module_const_index_store(grid)^
     print([grid[8], grid[15], grid[16], grid[23], grid[24], grid[31]])
     print("\n")
 }

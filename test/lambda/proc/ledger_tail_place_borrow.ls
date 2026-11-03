@@ -16,13 +16,13 @@ pn same_home(var node, depth: int) {
 }
 pn main() {
     var a = {k:0,next:{k:0,next:{k:0}}}
-    walk(a, 2)
+    walk(a, 2)^
     print([a.k, a.next.k, a.next.next.k]); print("\n")
     var b = {k:0,next:{k:0,next:{k:0}}}
-    walk_named(b, 2)
+    walk_named(b, 2)^
     print([b.k, b.next.k, b.next.next.k]); print("\n")
     var c = {k:0,children:[{k:0,children:[{k:0}]}]}
-    walk_index(c, 2)
+    walk_index(c, 2)^
     print([c.k, c.children[0].k, c.children[0].children[0].k]); print("\n")
     var left = {k:0}
     var right = {k:0}

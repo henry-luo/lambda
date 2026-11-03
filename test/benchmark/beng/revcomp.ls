@@ -44,14 +44,14 @@ pn output_reverse_complement(header, seq) {
     // concatenation stays bounded by LINE_WIDTH instead of the whole sequence.
     var total = len(comp)
     var pos = 0
-    while (pos < total) {
+    while ((pos < total)^) {
         var end_pos = pos + LINE_WIDTH
-        if (end_pos > total) {
+        if ((end_pos > total)^) {
             end_pos = total
         }
         var line = ""
         var k = pos
-        while (k < end_pos) {
+        while ((k < end_pos)^) {
             line = line ++ comp[total - 1 - k]
             k = k + 1
         }
@@ -69,25 +69,25 @@ pn main() {
     var header = ""
     var seq = ""
     var i = 0
-    while (i < num_lines) {
+    while ((i < num_lines)^) {
         let line = lines[i]
-        if (len(line) > 0 and slice(line, 0, 1) == ">") {
+        if ((len(line) > 0 and slice(line, 0, 1) == ">")^) {
             // output previous sequence if any
             if (len(seq) > 0) {
-                output_reverse_complement(header, seq)
+                output_reverse_complement(header, seq)^
             }
             header = line
             seq = ""
         } else {
-            if (len(line) > 0) {
+            if ((len(line) > 0)^) {
                 seq = seq ++ upper(line)
             }
         }
         i = i + 1
     }
     // output last sequence
-    if (len(seq) > 0) {
-        output_reverse_complement(header, seq)
+    if ((len(seq) > 0)^) {
+        output_reverse_complement(header, seq)^
     }
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

@@ -11,7 +11,7 @@ pub let CATALOG = [
 ]
 let ZONES = [{x:132,y:142},{x:588,y:142},{x:132,y:332},{x:588,y:332}]
 
-fn place(available,slot,seed,placed:array) array {
+fn place(available,slot,seed,placed:array) array^ {
     if (slot == len(ZONES)) placed
     else {
         let choice, s1 = math.random(seed)
@@ -27,12 +27,12 @@ fn place(available,slot,seed,placed:array) array {
         let height = width*study.h/study.w
         let item = {study:study,x:zone.x+(dx-.5)*24-width/2,y:zone.y+(dy-.5)*24-height/2,
             w:width,h:height,angle:(angle-.5)*32,opacity:.25+ink*.1};
-        place([for (i,s in available where i != index) s],slot+1,s6,[*placed,item])
+        place([for (i,s in available where ((i != index) ^ { false })) s],slot+1,s6,[*placed,item])
     }
 }
 
 // level seeds give each folio a different composition without reshuffling on redraw or undo
-pub fn layout(stage) => place(CATALOG,0,5107+stage*92821,[])
+pub fn layout(stage) any^ => place(CATALOG,0,5107+stage*92821,[])
 
 pub fn underlay(stage,composition) => <div class:"sketch-underlay", 'aria-hidden':"true",
     'data-sketch-level':string(stage+1),

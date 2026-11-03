@@ -34,8 +34,8 @@ pub fn read_snapshot(path) map^ {
 
 pub fn versions(root,document_id=null) array^ {
     if (not exists(root)) [] else [for (entry in input(root,'dir')^
-        where not entry.is_dir and ends_with(entry.name,suffix) and
-            (document_id==null or starts_with(entry.name,document_id ++ "--"))
+        where ((not entry.is_dir and ends_with(entry.name,suffix) and
+            (document_id==null or starts_with(entry.name,document_id ++ "--"))) ^ { false })
         order by entry.name desc) {path:entry.path,name:entry.name}]
 }
 

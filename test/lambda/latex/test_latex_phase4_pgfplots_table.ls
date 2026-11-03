@@ -8,7 +8,7 @@ let ast = latex.parse_file(path);
 let result = latex.render_result(ast, {base_uri: "test/latex/fixtures/tikz_phase4"});
 let out = html.to_html(result.elements) ^ { "" };
 
-"diagnostics:"; [for (issue in result.diagnostics) issue.code]
+"diagnostics:"; [for (issue in ((result.diagnostics) ^ { [] })) issue.code]
 "pictures:"; len(split(out, "<svg")) - 1
 "symbolic x coords from csv:"; index_of(out, ">north<") != null and index_of(out, ">west<") != null
 "legend entries:"; index_of(out, ">Units<") != null and index_of(out, ">Q2<") != null

@@ -36,28 +36,28 @@ fn initial() => {card: GALLERY[0].card, hist: D.history(), view: "front", page: 
 // ---- edits: pure state transitions ------------------------------------------------
 
 fn clamp(v, lo, hi) => max(lo, min(hi, v))
-fn sel_item(st) => M.item_of(st.card, st.page, st.sel)
-fn ink(st) => A.paper_of(st.card.pages[st.page].paper).ink
+fn sel_item(st) any^ => M.item_of(st.card, st.page, st.sel)
+fn ink(st) any^ => A.paper_of(st.card.pages[st.page].paper).ink
 // every card change records the card it replaces, so one undo steps back once
 fn record_edit(st, card, status = null) => if (card == st.card) st
     else {*:st, card: card, hist: D.record(st.hist, st.card), typing: false, status: if (status == null) st.status else status}
-fn patch_sel(st, patch) => if (sel_item(st) == null) st else record_edit(st, M.update(st.card, st.page, st.sel, patch))
-fn adjust(st, field, delta, lo, hi) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: clamp(it[field] + delta, lo, hi)}))
-fn toggle(st, field) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: not it[field]}))
+fn patch_sel(st, patch) any^ => if (sel_item(st) == null) st else record_edit(st, M.update(st.card, st.page, st.sel, patch))
+fn adjust(st, field, delta, lo, hi) any^ => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: clamp(it[field] + delta, lo, hi)}))
+fn toggle(st, field) any^ => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: not it[field]}))
 
 fn add_item(st, it, placed = true) {
     let id = M.fresh_id(st.card)
     let item = {*:(if (placed) M.place(st.card, it) else it), id: id};
     {*:record_edit(st, M.add(st.card, st.page, item), "Added to the " ++ lower(T.page_name(st.page)) ++ " page."), sel: id, effect_editor: null}
 }
-fn add_text(st, key) => (let t = [for (x in ui.TEXT_STYLES where x.key == key) x][0],
+fn add_text(st, key) any^ => (let t = [for (x in ui.TEXT_STYLES where x.key == key) x][0],
     add_item(st, T.text(t.text, 0, 0, t.w, t.size, t.font, ink(st))))
-fn add_art(st, key) => (let f = T.format_of(st.card.format), add_item(st, T.art(key, 0, 0, min(f.w, f.h) * .34)))
-fn add_photo(st, url) => if (sel_item(st) != null and sel_item(st).kind == "photo") patch_sel(st, {src: url})
+fn add_art(st, key) any^ => (let f = T.format_of(st.card.format), add_item(st, T.art(key, 0, 0, min(f.w, f.h) * .34)))
+fn add_photo(st, url) any^ => if (sel_item(st) != null and sel_item(st).kind == "photo") patch_sel(st, {src: url})
     else add_item(st, T.photo(url, 0, 0, 260, 260, "rounded"))
 
 // a verse replaces the selected text, or goes on the inside right page
-fn verse(st, arg) {
+fn verse(st, arg) any^ {
     let parts = split(arg, "/")
     let words = T.VERSES[parts[0]][int(parts[1])]
     let it = sel_item(st)
@@ -70,24 +70,24 @@ fn verse(st, arg) {
     }
 }
 
-fn turn(st, delta) => (let it = sel_item(st), if (it == null) st
+fn turn(st, delta) any^ => (let it = sel_item(st), if (it == null) st
     else (let r = it.rot + delta, patch_sel(st, {rot: if (r > 180.0) r - 360.0 else if (r <= -180.0) r + 360.0 else r})))
-fn grow(st, delta) => (let it = sel_item(st), if (it == null) st
+fn grow(st, delta) any^ => (let it = sel_item(st), if (it == null) st
     else (let w = clamp(it.w + delta, 20.0, 1400.0), patch_sel(st, {w: w, h: it.h * w / it.w})))
-fn frame(st, key) => (let it = sel_item(st), if (it == null) st
+fn frame(st, key) any^ => (let it = sel_item(st), if (it == null) st
     else patch_sel(st, if (key == "circle") {frame: key, h: it.w} else {frame: key}))
-fn backdrop_all(st) => (let pg = st.card.pages[st.page],
+fn backdrop_all(st) any^ => (let pg = st.card.pages[st.page],
     record_edit(st, M.set_all_pages(st.card, {paper: pg.paper, pattern: pg.pattern, pattern_color: pg.pattern_color,
         pattern_alpha: pg.pattern_alpha, border: pg.border, border_color: pg.border_color}), "Every page now has this backdrop."))
-fn set_page(st, patch) => record_edit(st, M.set_page(st.card, st.page, patch))
+fn set_page(st, patch) any^ => record_edit(st, M.set_page(st.card, st.page, patch))
 fn show_view(st, key) => {*:st, view: key, page: if (key == "inside") "right" else key, sel: null}
-fn history_step(st, forward) => (let step = if (forward) D.redo_step(st.hist, st.card) else D.undo_step(st.hist, st.card),
+fn history_step(st, forward) any^ => (let step = if (forward) D.redo_step(st.hist, st.card) else D.undo_step(st.hist, st.card),
     if (step == null) st else {*:st, card: step.value, hist: step.history, sel: if (M.item_of(step.value, st.page, st.sel) == null) null else st.sel,
         typing: false, status: if (forward) "Redone." else "Undone."})
 fn use_design(st, key) => (let g = [for (x in GALLERY where x.t.key == key) x][0],
     {*:record_edit(st, g.card, "Started from " ++ g.t.name ++ ". Undo goes back to your previous card."), view: "front", page: "front", sel: null})
 
-fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
+fn change(st, verb, arg) any^ => if (verb == "view") show_view(st, arg)
     else if (verb == "panel") (if (arg == "effects") {*:st, effect_editor: "animation", sel: null}
         else {*:st, panel: arg, effect_editor: null})
     else if (verb == "effect-settings") (let next = if (arg == "popup") {*:show_view(st, "inside"), page: "left"} else st,
@@ -142,7 +142,7 @@ fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
 
 pn ensure_dir(path) {
     var at = ""
-    for (part in split(path, "/")) {
+    for (part in split(path, "/")^) {
         at = if (at == "") part else at ++ "/" ++ part
         if (part != "" and part != "." and not exists(at)) io.mkdir(at) ^ { null }
     }
@@ -157,7 +157,7 @@ pn render_file(html, path, opts) any^ {
 pn export_files(st, kind) any^ {
     let dir = trim(st.path)
     if (dir == "") raise error("Choose a folder first.")
-    ensure_dir(dir)
+    ensure_dir(dir)^
     let stem = dir ++ "/" ++ D.slug(st.card.title, "card")
     let f = T.format_of(st.card.format)
     if (kind == "mark") {
@@ -180,7 +180,7 @@ pn export_files(st, kind) any^ {
     }
     // the PDF page is the unfolded card: 96 CSS px make an inch, card units are 1/100 in
     let page_css = CARD_CSS ++ " @page { size: " ++ A.n(f.w * .02) ++ "in " ++ A.n(f.h * .01) ++ "in; margin: 0 } .sheet { break-after: page; }"
-    let html = format(R.document(<div (R.sheet(st.card, "outside", .96)); (R.sheet(st.card, "inside", .96))>, page_css, st.card.title), 'html')
+    let html = format(R.document(<div (R.sheet(st.card, "outside", .96)^); (R.sheet(st.card, "inside", .96))>, page_css, st.card.title), 'html')
     render_file(html, stem ++ ".pdf", {format: "pdf", pagination: true})^
     return "Wrote " ++ stem ++ ".pdf: two sheets to print back to back and fold."
 }
@@ -190,7 +190,7 @@ pn open_card(st) any^ {
     if (not M.valid(card)) raise error(path ++ " is not a Greetings card.")
     return {*:record_edit(st, card, "Opened " ++ path ++ "."), dialog: null, view: "front", page: "front", sel: null}
 }
-fn file_url(path) => (let p = trim(path),
+fn file_url(path) any^ => (let p = trim(path),
     let full = if (starts_with(p, "~/")) (sys.proc.self.env.HOME# or "") ++ slice(p, 1, len(p))
         else if (starts_with(p, "/")) p else sys.proc.self.cwd# ++ "/" ++ p,
     if (starts_with(p, "file://")) p else "file://" ++ full)
@@ -208,7 +208,7 @@ pn command(st, verb, arg) {
     }
     if (verb == "photo-file") {
         let url = file_url(st.photo_path)
-        if (st.photo_path == "" or not exists(slice(url, 7, len(url)))) { return {*:st, status: "No photo at that path."} }
+        if ((st.photo_path == "" or not exists(slice(url, 7, len(url))))^) { return {*:st, status: "No photo at that path."} }
         return add_photo(st, url)
     }
     return change({*:st, typing: false}, verb, arg)
@@ -258,7 +258,7 @@ fn dragged(st, x, y, shift) {
 // still laid out as `d.start`: a move translates, a resize scales about the box centre
 // and translates that centre so the top-left corner stays put. A text box's height is
 // not in the card, so its half-diagonal comes from the grabbed corner handle.
-fn drag_transform(d, it) {
+fn drag_transform(d, it) any^ {
     let a = d.start
     let s = d.scale
     let kx = it.w / a.w
@@ -284,9 +284,9 @@ pn drag_element(root, d) {
 pn publish_drag(root, d, it, guides) {
     let el = drag_element(root, d)
     if (el.item == null) { return null }
-    if (d.mode == "width") updates.style(el.item, "width", R.geometry(it, d.scale).width)
-    else dom.presentation_style_set_property(el.item, "transform", drag_transform(d, it))
-    updates.style(dom.query_selector(el.page, ".guide-x"), "display", if (guides != null and guides.x) "block" else "none")
+    if (d.mode == "width") updates.style(el.item, "width", R.geometry(it, d.scale).width)^
+    else dom.presentation_style_set_property(el.item, "transform", drag_transform(d, it)^)
+    updates.style(dom.query_selector(el.page, ".guide-x"), "display", if (guides != null and guides.x) "block" else "none")^
     updates.style(dom.query_selector(el.page, ".guide-y"), "display", if (guides != null and guides.y) "block" else "none")
     return null
 }
@@ -331,14 +331,14 @@ on previewcommand(evt) {
 }
 on greetingpreviewready(evt) {
     let pending = st.preview_pending
-    if (pending == null) { return 'handled' }
+    if ((pending == null)^) { return 'handled' }
     st = {*:st, preview_pending: null}
     preview.follow(preview_owner(evt), pending.before, st, evt.time_stamp)
     return 'handled'
 }
 on musictick(evt) {
     let next = music.tick(audio_owner(evt), st.sound)
-    if (next != st.sound) {
+    if ((next != st.sound)^) {
         st = audible(evt, st, {*:st, sound: next})
     }
     return 'handled'
@@ -362,7 +362,7 @@ on control_change(req) {
     else if (req.action == "photo-path") { st = {*:st, photo_path: req.value} }
 }
 on pointerdown(evt) {
-    if (st.preview != null or st.dialog != null or evt.button != 0) { return 'pass' }
+    if ((st.preview != null or st.dialog != null or evt.button != 0)^) { return 'pass' }
     let canvas = dom.get_element_by_id(dom.root_node(evt.target), "canvas")
     let page = dom.closest(evt.target, "[data-page]")
     if (page == null or not dom.contains(canvas, page)) { return 'pass' }
@@ -383,19 +383,19 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (st.drag == null) { return 'pass' }
-    if (travelled(st.drag, evt)) {
+    if ((st.drag == null)^) { return 'pass' }
+    if (travelled(st.drag, evt)^) {
         let step = dragged(st, evt.clientX, evt.clientY, evt.shiftKey)
-        publish_drag(dom.root_node(evt.target), st.drag, {*:st.drag.start, *:step.patch}, step.guides)
+        publish_drag(dom.root_node(evt.target), st.drag, {*:st.drag.start, *:step.patch}, step.guides)^
     }
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     let d = st.drag
     dom.release_pointer_capture(dom.get_element_by_id(dom.root_node(evt.target), "canvas"), evt.pointerId)
     let el = drag_element(dom.root_node(evt.target), d)
-    if (el.item != null) dom.presentation_style_clear(el.item)
+    if ((el.item != null)^) dom.presentation_style_clear(el.item)^
     // the release point decides the item's geometry, and the whole gesture is one undo step
     st = if (not travelled(d, evt)) {*:st, drag: null}
         else (let step = dragged(st, evt.clientX, evt.clientY, evt.shiftKey),
@@ -404,15 +404,15 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     // the drag only touched the element: clearing its preview restores it
     let el = drag_element(dom.root_node(evt.target), st.drag)
-    if (el.item != null) dom.presentation_style_clear(el.item)
+    if ((el.item != null)^) dom.presentation_style_clear(el.item)^
     st = {*:st, drag: null}
     return 'prevent-default'
 }
 on keydown(evt) {
-    if (st.dialog != null or st.preview != null) {
+    if ((st.dialog != null or st.preview != null)^) {
         if (evt.key == "Escape") {
             st = audible(evt, st, {*:st, dialog: null, preview: null})
             return 'prevent-default'
@@ -426,7 +426,7 @@ on keydown(evt) {
         else if (mod and key == "d") "duplicate" else if (mod and key == "s") "save"
         else if (key == "delete" or key == "backspace") "delete" else if (key == "escape") "deselect"
         else if (key == "]") "forward" else if (key == "[") "backward" else null
-    if (contains(["arrowleft", "arrowright", "arrowup", "arrowdown"], key) and st.sel != null) {
+    if ((contains(["arrowleft", "arrowright", "arrowup", "arrowdown"], key) and st.sel != null)^) {
         let step = if (evt.shiftKey) 10.0 else 1.0
         let it = sel_item(st)
         st = patch_sel(st, {x: it.x + (if (key == "arrowleft") 0.0 - step else if (key == "arrowright") step else 0.0),
@@ -473,7 +473,7 @@ on keydown(evt) {
 on greetingframe(evt) {
     if (dom.get_attribute(evt.target, "data-running") != "true") { return 'handled' }
     dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), "musictick")
-    if (dom.get_attribute(evt.target, "data-running") == "true") music.schedule(evt.target)
+    if (dom.get_attribute(evt.target, "data-running") == "true") music.schedule(evt.target)^
     return 'handled'
 }
 on greetingturnframe(evt) {

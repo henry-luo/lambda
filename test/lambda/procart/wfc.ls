@@ -26,8 +26,8 @@ show(wfc.generate(rng.key(3), ov, {width: 12, height: 6, periodic: true})^);
 wfc.run(rng.key(3), ov, {width: 6, height: 3, periodic: true})^;
 
 "3 constraints hold";
-fn pairs_ok(model, cells, wrap) => (let h = len(cells), let w = len(cells[0]),
-    all([for (y in 0 to (h - 1)) for (x in 0 to (w - 1)) for (d in [0, 1]) (let nx = x + 1 - d, let ny = y + d,
+fn pairs_ok(model, cells, wrap) any^ => (let h = len(cells), let w = len(cells[0]),
+    all([for (y in 0 to (h - 1)) for (x in ((0 to (w - 1)) ^ { [] })) for (d in [0, 1]) (let nx = x + 1 - d, let ny = y + d,
         if (not wrap and (nx >= w or ny >= h)) true else model.masks[d][cells[y][x]][cells[ny % h][nx % w]] == 1)]))
 // smallest-domain collapse floods from the first pick, so maps are lopsided; this one holds all three
 let sea = wfc.generate(rng.at(rng.key(4), 0), coast, {width: 30, height: 20})^;

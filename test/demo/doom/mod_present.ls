@@ -18,7 +18,7 @@ pub pn text(node, value) {
 }
 pub pn bind(owner, map_data, game) {
     return {camera: dom.get_element_by_id(owner, "scene"), viewport: dom.get_element_by_id(owner, "viewport"),
-        sectors: [for (i in 0 to (len(map_data.sectors) - 1)) dom.get_element_by_id(owner, "sector-" ++ string(i))],
+        sectors: [for (i in ((0 to (len(map_data.sectors) - 1)) ^ { [] })) dom.get_element_by_id(owner, "sector-" ++ string(i))],
         planes: [for (plane in map_data.planes) dom.get_element_by_id(owner, plane.id)],
         actors: [for (entry in game.actors) {node: dom.get_element_by_id(owner, "actor-" ++ string(entry.id)),
             sprite: dom.get_element_by_id(owner, "sprite-" ++ string(entry.id))}],
@@ -31,15 +31,15 @@ pub pn bind(owner, map_data, game) {
         player_fov: dom.get_element_by_id(owner, "player-fov"), fuzz_noise: dom.get_element_by_id(owner, "fuzz-noise"),
         has_fuzz: len([for (entry in game.actors where entry.type == 58) entry]) > 0}
 }
-fn height(game, mover) => if (mover == null) null else
+fn height(game, mover) any^ => if (mover == null) null else
     world.motion(if (mover.kind == "door") game.doors else if (mover.kind == "lift") game.lifts else game.crushers, mover.sector).height
 pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules, visuals, images, base, write = style) any^ {
     let viewpoint = camera.pose(game)
     let previous_viewpoint = if (before == null) null else camera.pose(before)
     let pose_changed = viewpoint != previous_viewpoint
     // The shared SVG graph uses simulation time, so pause freezes its noise too.
-    if (handles.has_fuzz and (before == null or sprites.fuzz_seed(game.time) != sprites.fuzz_seed(before.time)))
-        dom.set_attribute(handles.fuzz_noise, "seed", string(sprites.fuzz_seed(game.time)))
+    if ((handles.has_fuzz and (before == null or sprites.fuzz_seed(game.time) != sprites.fuzz_seed(before.time)))^)
+        dom.set_attribute(handles.fuzz_noise, "seed", string(sprites.fuzz_seed(game.time))^)
     if (pose_changed) {
         write(handles.camera, "transform", scene.camera_transform(viewpoint))^
         write(handles.viewport, "background-position-x", scene.fmt(viewpoint.angle * 163) ++ "px")^
@@ -55,14 +55,14 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
         // variables otherwise recascade every static wall on each frame.
         if (visibility[i] and (pose_changed or previous_visibility == null or not previous_visibility[i])) {
             let filter = scene.light_filter(plane.center, viewpoint, game.spectator)
-            if (before == null or previous_visibility == null or not previous_visibility[i] or
-                filter != scene.light_filter(plane.center, previous_viewpoint, before.spectator))
+            if ((before == null or previous_visibility == null or not previous_visibility[i] or
+                filter != scene.light_filter(plane.center, previous_viewpoint, before.spectator))^)
                 write(handles.planes[i], "filter", filter)^
         }
         if (plane.mover != null) {
             let current_height = height(game, plane.mover)
             let previous_height = if (before == null) null else height(before, plane.mover)
-            if (before == null or current_height != previous_height)
+            if ((before == null or current_height != previous_height)^)
                 write(handles.planes[i], if (plane.kind == "wall") "--motion" else "--surface-z",
                     scene.fmt(if (plane.kind == "wall") plane.motion_base - current_height else current_height) ++
                         (if (plane.kind == "wall") "px" else ""))^
@@ -89,18 +89,18 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
         let sheet = sprites.definition(actor.type, visuals, images)
         let pose = sprites.pose(actor, viewpoint, sheet, images, game.time)
         let previous_pose = if (prior == null) null else sprites.pose(prior, previous_viewpoint, sheet, images, before.time)
-        if (actor.type != 58 and pose.visible) {
+        if ((actor.type != 58 and pose.visible)^) {
             let filter = scene.light_filter(actor, viewpoint, game.spectator)
-            if (prior == null or not previous_pose.visible or
-                filter != scene.light_filter(prior, previous_viewpoint, before.spectator))
+            if ((prior == null or not previous_pose.visible or
+                filter != scene.light_filter(prior, previous_viewpoint, before.spectator))^)
                 write(pair.sprite, "filter", filter)^
         }
-        if (previous_pose == null or pose.visible != previous_pose.visible)
+        if ((previous_pose == null or pose.visible != previous_pose.visible)^)
             write(pair.node, "display", if (pose.visible) "block" else "none")^
-        if (sheet.w != null) {
-            if (previous_pose == null or pose.row != previous_pose.row)
+        if ((sheet.w != null)^) {
+            if ((previous_pose == null or pose.row != previous_pose.row)^)
                 write(pair.sprite, "background-position-y", scene.fmt(-pose.row * sheet.h) ++ "px")^
-            if (previous_pose == null or pose.animation != previous_pose.animation) {
+            if ((previous_pose == null or pose.animation != previous_pose.animation)^) {
                 write(pair.sprite, "--frame-end", scene.fmt(pose.end_x) ++ "px")^
                 write(pair.sprite, "animation", pose.animation)^
             }
@@ -140,24 +140,24 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
         write(handles.weapon, "animation-play-state", weapon_pose.play_state)^
     if (previous_weapon_pose == null or weapon_pose.opacity != previous_weapon_pose.opacity)
         write(handles.weapon, "opacity", scene.fmt(weapon_pose.opacity))^
-    if (before == null or weapons.face_row(game.player.health) != weapons.face_row(before.player.health))
+    if ((before == null or weapons.face_row(game.player.health) != weapons.face_row(before.player.health))^)
         write(handles.face, "background-position-y", scene.fmt(-weapons.face_row(game.player.health) * 62) ++ "px")^
     if (before == null or game.mode != before.mode)
         write(handles.face, "animation-play-state", if (game.mode == "playing") "running" else "paused")^
     let viewport_filter = weapons.viewport_filter(game)
-    if (before == null or viewport_filter != weapons.viewport_filter(before)) write(handles.viewport, "filter", viewport_filter)^
+    if ((before == null or viewport_filter != weapons.viewport_filter(before))^) write(handles.viewport, "filter", viewport_filter)^
     let ammo = if (weapon.ammoType == null) "—" else string(game.player.ammo[weapon.ammoType])
-    if (before == null or game.player.ammo != before.player.ammo or game.player.weapon != before.player.weapon) text(handles.ammo, ammo)
-    if (before == null or game.player.health != before.player.health) text(handles.health, string(game.player.health) ++ "%")
-    if (before == null or game.player.armor != before.player.armor) text(handles.armor, string(game.player.armor) ++ "%")
+    if (before == null or game.player.ammo != before.player.ammo or game.player.weapon != before.player.weapon) text(handles.ammo, ammo)^
+    if (before == null or game.player.health != before.player.health) text(handles.health, string(game.player.health) ++ "%")^
+    if (before == null or game.player.armor != before.player.armor) text(handles.armor, string(game.player.armor) ++ "%")^
     if (before == null or game.player.keys != before.player.keys)
-        text(handles.keys, if (len(game.player.keys) == 0) "—" else join(game.player.keys, " "))
+        text(handles.keys, if (len(game.player.keys) == 0) "—" else join(game.player.keys, " "))^
     if (before == null or game.mode != before.mode) {
         write(handles.overlay, "display", if (game.mode == "playing") "none" else "block")^
         text(handles.message, if (game.mode == "dead") "You died. Press R to restart."
-            else if (game.mode == "paused") "Paused" else if (game.mode == "won") "Episode complete" else "Lambda Script / Radiant")
+            else if (game.mode == "paused") "Paused" else if (game.mode == "won") "Episode complete" else "Lambda Script / Radiant")^
     }
-    if (before == null or game.autoplay != before.autoplay) text(handles.status, scene.status_text(game))
+    if (before == null or game.autoplay != before.autoplay) text(handles.status, scene.status_text(game))^
     let pickup_flash = game.time < (game.player.pickup_until or 0)
     let flash_color = if (game.time < game.teleport_until) "#fff" else if (pickup_flash) "#ff0" else "#f00"
     let previous_flash_color = if (before == null) "" else if (before.time < before.teleport_until) "#fff"

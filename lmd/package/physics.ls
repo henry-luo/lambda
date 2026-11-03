@@ -20,10 +20,10 @@ pub fn bind_bone(node, body, options = {}) element^ {
     else raise error("physics.bind_bone: requires a bone")
 }
 pub fn ragdoll(id, bones, options = {}) element => <ragdoll id: id, bones: bones, *: options>
-pub fn trajectory(trace, body) array => analysis.trajectory(trace, body)
-pub fn chart_data(trace, options = {}) array => analysis.chart_data(trace, options)
-pub fn energy(trace, body, gravity = [0.0, -9.81, 0.0]) array => analysis.energy(trace, body, gravity)
-pub fn tracks(trace, body, target = null) array => analysis.tracks(trace, body, target)
+pub fn trajectory(trace, body) array^ => analysis.trajectory(trace, body)
+pub fn chart_data(trace, options = {}) array^ => analysis.chart_data(trace, options)
+pub fn energy(trace, body, gravity = [0.0, -9.81, 0.0]) array^ => analysis.energy(trace, body, gravity)
+pub fn tracks(trace, body, target = null) array^ => analysis.tracks(trace, body, target)
 
 pub fn attach(node, options) element^ {
     if (name(node) == 'mesh') <mesh *: node, physics: options, *content(node)>
