@@ -1,4 +1,4 @@
-// Handler-local ^ is the caught error; ~ keeps its ordinary pipe meaning.
+// handler-local ^ retains error metadata through either member spelling (S7.4.4, S8.2.1v4).
 fn fail() int^ {
     raise error("handler-current-error")
 }

@@ -1,6 +1,10 @@
 // S4.1.2, S9.1.2: native modular updates retain poison, bounds and snapshots.
 pn step(var a: int[], k: int) any { a[k] = (a[k] + 3) % 16 }
 pn down(var a: int[]) any { a[0] = (a[0] - 3) % 16 }
+let MODULUS = 31
+let INCREMENT = 7
+pn affine(var a: int[], k: int) any { a[k] = int((a[k] * 13 + INCREMENT) % MODULUS) }
+pn affine_cancel(var a: int[]) any { a[0] = int((a[0] * 2 - 9007199254740991) % MODULUS) }
 pn dynamic(seed: any) any {
     var a = fill(1, seed)
     a[0] = (a[0] + 3) % 16
@@ -25,4 +29,12 @@ pn main() {
     print_divmod(33); print_divmod(-33); print_divmod(-32); print_divmod(0)
     print_divmod(9007199254740991); print_divmod(-9007199254740991)
     print_divmod(int(inf)); print_divmod(int(-inf)); print_divmod(int(nan))
+    var seeds: int[] = [2, -2, 9007199254740991, int(inf)]
+    let old_seeds = seeds
+    affine(seeds, 0); affine(seeds, 1); affine(seeds, 2); affine(seeds, 3)
+    print(seeds); print("\n"); print(old_seeds); print("\n")
+    let invalid = affine(seeds, -1)
+    print(match invalid { case error: true default: false }); print("\n")
+    var over: int[] = [9007199254740991]
+    affine_cancel(over); print(over[0]); print("\n")
 }

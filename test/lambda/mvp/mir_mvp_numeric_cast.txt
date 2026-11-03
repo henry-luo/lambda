@@ -1,0 +1,6 @@
+[5.5, 5]
+[7, -2, 7, -2.75]
+[true, true, true, true]
+[inf, -inf, nan, inf, -inf, nan]
+[inf, -inf, nan, nan]
+[3, 8, true]

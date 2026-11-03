@@ -11,25 +11,23 @@ numerical workloads. Runtime types and data layouts remain unchanged.
 The latest 100-sample release campaign detects **no statistically established
 performance regression across all 48** against the committed starting MVP.
 Including the separate matched 10,000-invocation Sumfp batch, the original
-rows qualify **28/28 against Full MIR and 20/28 within 20% of C2MIR (and both
-gates)**. Single-run zero-duration Sumfp samples remain recorded and unqualified.
+rows qualify **28/28 against Full MIR and 20/28 against both targets**.
+Single-run zero-duration Sumfp samples remain recorded and unqualified.
 
-The 20 additions qualify **10/20 against Full MIR and 6/20 against both targets**,
-up from 7/20 and 5/20 in the expansion campaign. GCbench and Binarytrees now
-clear both targets; 12 added rows improve against the starting MVP. BENG NBody
-has a median within 10% of C2MIR, but its confidence bound does not qualify in
-this run. The requested performance milestone remains open: **38/48 beat Full
-MIR and 26/48 meet both targets**. These are execution-window timings, excluding
-startup and compilation, with one-sided 95% paired confidence gates.
+The 20 additions qualify **12/20 against Full MIR and 7/20 against both**, up
+from 10/20 and 6/20 in the preceding campaign. Fasta improves about **3.6×**;
+Fasta and Permute now beat Full MIR. The full result is **40/48 against Full
+MIR and 27/48 against both targets**. The requested performance milestone
+remains open. These are execution-window timings, excluding startup and
+compilation, using one-sided 95% paired confidence gates. A separate 200-sample
+Binarytrees confirmation establishes neither a regression nor a speedup.
 
-All **42 focused test groups** pass, including all 48 Lambda and C reference
-goldens, precise-root/poisoned-GC fixtures and MIR emission checks. The latest
-aggregate baseline and focused failure rechecks are recorded in the
-implementation notes. The compiler now retains proven record and private array
-domains, guards allocating vector bodies while rooting their owners, forwards
-precise `var` homes, and avoids redundant captures on fresh return-only owners
-(**D2.4.3, D5.3, S9.1.3v2, S9.3.1, S12.2.1v3**).
-See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-tuning-the-slower-expansion-rows).
+All **47 focused groups** and the required **8,647/8,647 baseline cases** pass.
+The compiler keeps nullable and literal numeric conversion native, branches
+from guarded float-array predicates, reads native string lanes, and caches
+closed scalar-record witnesses while retaining precise owners and checked
+fallbacks (**D2.4.3, D5.3, S3.4–S3.5, S7.9.3, S9.1.3v2**).
+See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-native-array-reads-and-closed-scalar-records).
 
 **Destination:** `lambda/runtime/mvp/`
 
@@ -400,16 +398,19 @@ original gates. Zero-resolution observations require a separate, matched batch
 before qualification. This changes the requested performance target, not a
 language or runtime ruling.
 
-- **Per-row milestone:** all 28 audited workloads meet the bound above with
-  matched execution windows, including allocation and GC. A geometric mean
-  cannot compensate for a failing row.
+- **Per-row milestone:** all 48 audited workloads (the original 28 and 20
+  additions) meet the C2MIR bound above with matched execution windows,
+  including allocation and GC. Each must also beat Full MIR: its one-sided
+  95% upper ratio bound must be below 1.00. A geometric mean cannot compensate
+  for a failing row.
 - **Per-row parity claim:** reserve “as fast as C2MIR” for a row whose measured
   uncertainty establishes no more than 10% overhead; overlapping error bars
   alone do not establish equivalence. The optimization target remains 1.00×.
-- **Preservation:** no confirmed regression above **5%** against the fresh
-  production MIR control on any admitted row. A noisy result is inconclusive,
-  not automatically a pass. Preserve gains when entering through the shared
-  runtime and when later features are added.
+- **Preservation:** the original 28 must show no statistically established
+  regression against the committed starting MVP; a two-sided 95% lower ratio
+  bound above 1.00 flags a regression. Keep a frozen Full MIR reference when
+  shared helpers change. A noisy result is inconclusive. Preserve gains when
+  entering through the shared runtime and when later features are added.
 - **Honest completion:** wrong results, unsupported cases, timeouts, missing
   measurements, or incomparable C ports keep the milestone incomplete. Do not
   silently remove them from the denominator or relax the target after tuning.
