@@ -437,8 +437,8 @@ void layout_broken_image_fallback_size(LayoutContext* lycon, ViewBlock* block,
     const char* fallback_text, float line_height, float* width, float* height);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
-void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
-                                         CssEnum* word_break = nullptr);
+void layout_resolve_inherited_text_wrap(LayoutContext* context, DomNode* node,
+                                         CssEnum* overflow_wrap, CssEnum* word_break = nullptr);
 // CSS Text §5.2: layout and standalone paint clients share Unicode letter units.
 inline bool is_typographic_letter_unit(uint32_t cp) {
     utf8proc_category_t cat = utf8proc_category(cp);
@@ -715,6 +715,7 @@ struct LayoutTextBreakPoint {
 };
 struct LayoutTextBreakPlan {
     LayoutTextBreakPoint* points = nullptr;
+    LayoutTextBreakPoint leading_space = {}; // collapsed separator, even when nowrap suppresses its opportunity
     size_t count = 0;
     float width = 0.0f;
 };

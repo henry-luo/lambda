@@ -1677,7 +1677,10 @@ struct IntrinsicTextBreakObserver {
 
     void record(size_t start, size_t end, float advance, float next_advance,
                 float first_adjustment, bool at_break) {
+        if (start == 0 && advance == 0.0f && next_advance > 0.0f)
+            plan->leading_space = {source_offsets[end], 0.0f, next_advance};
         if (at_break && !allows_wrap) return;
+        if (!at_break) plan->width = next_advance;
         LayoutTextBreakPoint* previous = &plan->points[plan->count - 1];
         // a new line has no kerning/autospace pair with the preceding fragment.
         if (previous->source_end == source_offsets[start]) previous->next_advance += first_adjustment;
@@ -1723,6 +1726,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     }
 
     float total_width = 0.0f;
+    float trailing_advance = 0.0f;
     float current_word = 0.0f;
     float packed_end = 0.0f;
     bool packed_content = false;
@@ -1766,6 +1770,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     if (i < trailing_space_start) record_segment(i + 1, true, 0.0f, 4.0f);
                 }
                 total_width += 4.0f;  // Space width estimate
+                if (i >= trailing_space_start) trailing_advance += 4.0f;
             } else {
                 append_advance(11.0f);  // use the same font fallback width.
                 if (layout_text_break_opportunity(ch, ch,
@@ -1776,7 +1781,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 }
             }
         }
-        record_segment(length, false);
+        record_segment(length, false, observer ? -trailing_advance : 0.0f);
 
         result.max_content = total_width;
         return result;
@@ -1839,6 +1844,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
             }
 
             total_width += kerning_adj + space_width;
+            if (i >= trailing_space_start) trailing_advance += kerning_adj + space_width;
 
             prev_codepoint = (uint32_t)ch;
             prev_is_zwj_base = false;
@@ -2064,7 +2070,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         }
     }
 
-    record_segment(length, false);
+    record_segment(length, false, observer ? -trailing_advance : 0.0f);
 
     // max-content disables wrapping, including line-break:anywhere, to retain whole-run shaping.
     result.max_content = break_all || break_anywhere || break_word
@@ -2683,7 +2689,7 @@ static LayoutTextIntrinsicLineOptions intrinsic_text_line_options(LayoutContext*
     options.white_space = get_white_space_value(source);
     options.text_wrap_mode = get_text_wrap_mode_value(owner ? static_cast<DomNode*>(owner) : source, lycon);
     DomNode* inheritance = owner ? static_cast<DomNode*>(owner) : source;
-    layout_resolve_inherited_text_wrap(inheritance, &options.overflow_wrap, &options.word_break);
+    layout_resolve_inherited_text_wrap(lycon, inheritance, &options.overflow_wrap, &options.word_break);
     options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
         &BlockProp::line_break, CSS_VALUE_AUTO, inheritance);
     options.processed_forced_breaks = processed_forced_breaks;
@@ -6742,7 +6748,6 @@ bool layout_measure_text_break_plan(LayoutContext* context, DomNode* source,
             options.overflow_wrap, options.word_break, options.line_break, nullptr, &observer);
         if (plan->points[plan->count - 1].source_end < length)
             plan->points[plan->count++] = {length, 0.0f, 0.0f};
-        plan->width = plan->points[plan->count - 1].advance;
     }
     strbuf_free(normalized);
     return supported;

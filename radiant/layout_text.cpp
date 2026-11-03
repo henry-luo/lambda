@@ -66,7 +66,7 @@ bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
         &BlockProp::line_break, CSS_VALUE_AUTO, owner);
     CssEnum overflow_wrap = CSS_VALUE_NORMAL;
     CssEnum word_break = CSS_VALUE_NORMAL;
-    layout_resolve_inherited_text_wrap(owner, &overflow_wrap, &word_break);
+    layout_resolve_inherited_text_wrap(lycon, owner, &overflow_wrap, &word_break);
     char seam[8];
     size_t boundary = str_utf8_encode(before, seam, sizeof(seam));
     size_t length = boundary + str_utf8_encode(after, seam + boundary, sizeof(seam) - boundary);
@@ -2115,8 +2115,10 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
         *measured_width = sizes.has_min_content_break ? sizes.first_segment_min : whole;
         float line_right = lycon->line.has_float_intrusion
             ? lycon->line.effective_right : lycon->line.right;
-        return lycon->line.advance_x + *measured_width > line_right + kTextLayoutSubpixelEpsilon
-            ? RDT_LINE_FILLED : RDT_NOT_SURE;
+        if (lycon->line.advance_x + *measured_width > line_right + kTextLayoutSubpixelEpsilon)
+            return RDT_LINE_FILLED;
+        // the first parallel opportunity ends this probe, including seams between nowrap children.
+        return sizes.has_min_content_break ? RDT_LINE_NOT_FILLED : RDT_NOT_SURE;
     }
     // lookahead reads the following inline's computed marker/font without committing flow state.
     LayoutViewScope view_scope(lycon);

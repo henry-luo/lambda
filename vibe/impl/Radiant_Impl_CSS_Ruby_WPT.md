@@ -1479,3 +1479,94 @@ multiple simple segments, reusing between-base group/boundary policy and the
 selected-line protocol. The finite next plan is retained in
 `temp/ruby-m15/next-fragment-plan.json`. Browser references, upstream WPT fixtures,
 thresholds and baseline floors remain unchanged.
+
+
+## M16: coordinated breaks across inline text runs
+
+P1: the failing `break-within-bases/basic` and `nowrap` documents contain several
+ordinary inline text runs in one base/reading pair. Ahem loads with the expected
+50px advances, ruling out the font/asset hypothesis. The base wraps before the
+reading is available, and whole-box placement subsequently moves completed
+lines. Extend M15's source-backed fragments across those inline sources before
+extending multiple Ruby segments; this follows the observed failures rather
+than the earlier tentative segment order.
+
+Keep ordinary break selection and source offsets in the shared text scanner.
+Compose its plans with the existing common-owner inline boundary policy, and
+flow only the selected source intervals through the existing Ruby level-child
+hook. Reuse selected-line bounds, alignment, column placement and line metrics.
+Clear retained source views once before rebuilding selected fragments; never
+reparent DOM nodes or concatenate copied text for layout. Scratch plans and
+borrowed scopes preserve **D4.5.1v4 / D4.1.4v5**. CSS Ruby §3.4.2 permits an
+interior split only when every parallel box permits it, including seams between
+nowrap child spans whose common owner permits wrapping.
+
+Acceptance: normal child spans with a cut inside a later source; nowrap child
+spans with coordinated seam breaks; three lines with wider readings; retained
+wide/narrow flow, original source parents/identities, byte intervals, glyph and
+range geometry; the original M15 punctuation case; and the imported basic/nowrap
+families. Verification budget: focused native controls and minimal browser
+captures in the edit loop, raw Ruby delta and relevant wrapping/whitespace/bidi
+neighbors, then one required Radiant gate on stable inputs plus lint/inventory.
+Multiple Ruby segments, mixed/atomic/decorated/generated content, conditional
+breaks and preserved-space protocols remain separate work; do not mask failures
+or claim the complete suite is supported.
+
+M16 implements composed opportunity plans for plain inline text leaves within
+one parallel box. The existing scanner supplies normalized-to-source offsets,
+leading separators and terminal advances; the common-owner boundary helper
+supplies seams. Intrinsic sizing and used fragment selection share that plan,
+so duplicate span-edge spaces collapse with the surviving source's font.
+Selected paths flow through the existing level-child hook; unselected sources
+stay absent from the current line. Retained views reset once before emission,
+and original DOM parents, text storage and byte intervals remain intact.
+Break elements still require the full-flow protocol: annotation `<br>` produces
+a separator that is absent from a plain text-leaf plan.
+
+Two shared causes also needed repair. Inherited `overflow-wrap` and `word-break`
+now resolve independently through the existing declaration-aware helper,
+including CSS-wide and substituted values. Ruby lookahead stops once its first
+parallel opportunity fits, rather than treating nowrap descendants as one
+unbroken sequence and probing into the following suffix. Tail fitting starts
+from the live Ruby container while selected descendant views are not yet built.
+
+Six focused checks pass, including the previous M15 cases and annotation break
+normalization. The complete text/query gate passes **480/480**. Independent
+Chromium captures match **504** row/source-rectangle coordinates for the new
+fixtures. Native controls also verify initial/retained flow, wide/narrow CSSOM
+changes, mixed source fonts, nowrap seams, glyph positions and character ranges.
+Evidence: `temp/ruby-m16/focused-5.log`, `browser-comparison.json`, and the native
+and browser `*-final.json` captures.
+
+The unchanged raw WPT comparison remains **37/212** full matches; no full match
+is lost. `nowrap` element matches improve **47.1% → 58.8%**. `basic` and
+`basic-ref` text matches decrease **5.6% → 0%**: the initial prefix now shares
+the correctly split base line, exposing the existing 25px first-line leading
+shift. In the ordinary `basic` paragraph all horizontal cuts match the browser,
+but its height is 150px versus 125px. Multi-column placement is also incomplete.
+These documents remain failed; the milestone does not claim whole-document
+conformance. Evidence: `temp/ruby-m16/{wpt-3.log,delta-3.json,basic-final.json}`.
+
+Next priority is the shared Ruby/line-spacing metric owner under CSS Ruby §3.6,
+with baseline and block-extents checked before extending multi-segment or
+multi-column fragmentation. The finite plan is
+`temp/ruby-m16/next-milestone.json`. References, upstream WPT documents,
+comparison thresholds and baseline floors remain unchanged. The goal stays
+active with 175 mismatches.
+
+M16 is qualified on base `c3405c2a3`. The required Radiant gate passes:
+**9077 passed / 304 partial / 0 failed / 2 skipped** of 9383 checks, including
+**480/480** text/query and **752/752** UI checks. Layout baselines retain
+**4974 full / 300 partial / 0 regressions**. Dimension lint, inventory check
+and whitespace checks pass; only inventory reference columns 14/15 change.
+Frozen production/test inputs remain unchanged through qualification.
+Evidence: `temp/ruby-m16/radiant.log`,
+`temp/ruby-m16/radiant-output/test_summary.json`, `source-inputs.json`, and
+`qualification-result.json` in the same task directory.
+
+The fresh module-boundary build links the strict DSOs, then rejects the same
+six pre-existing deferred imports recorded by M15 (140 current imports,
+165-entry baseline). No boundary allowlist changes are included. The unrelated
+input/PDF duplicate-symbol build limit from M15 was not rerun or changed.
+See `temp/ruby-m16/boundary.log` and `qualification-result.json`; neither
+ancillary gate is claimed as passing.

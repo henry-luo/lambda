@@ -503,6 +503,23 @@ protected:
         ASSERT_TRUE(visit_text_paint_glyphs(block, text, visit, &glyphs));
         EXPECT_EQ(glyphs.count, 1u);
     }
+    template <size_t Capacity>
+    void expect_text_paint_sources(DomElement* owner, DomText* text, DomElement* control_owner,
+                                  DomText* const* references, size_t reference_count,
+                                  size_t expected_count = SIZE_MAX) {
+        TestRadiantPaintGlyphs<Capacity> actual, expected;
+        ASSERT_TRUE(visit_text_paint_glyphs(owner, text, TestRadiantPaintGlyphs<Capacity>::collect, &actual));
+        for (size_t index = 0; index < reference_count; index++)
+            ASSERT_TRUE(visit_text_paint_glyphs(control_owner, references[index],
+                TestRadiantPaintGlyphs<Capacity>::collect, &expected));
+        ASSERT_EQ(actual.count, expected.count);
+        if (expected_count != SIZE_MAX) ASSERT_EQ(actual.count, expected_count);
+        for (size_t index = 0; index < actual.count; index++) {
+            EXPECT_EQ(actual.glyphs[index].codepoint, expected.glyphs[index].codepoint);
+            EXPECT_FLOAT_EQ(actual.glyphs[index].x, expected.glyphs[index].x);
+            EXPECT_FLOAT_EQ(actual.glyphs[index].y, expected.glyphs[index].y);
+        }
+    }
     template <size_t GlyphCount>
     void expect_text_flow_pair(DomElement* owner, DomText* text,
                               DomElement* control_owner, DomText* control) {
@@ -519,17 +536,8 @@ protected:
         }
         EXPECT_EQ(actual, nullptr);
         EXPECT_EQ(expected, nullptr);
-        TestRadiantPaintGlyphs<GlyphCount> glyphs[2];
-        ASSERT_TRUE(visit_text_paint_glyphs(owner, text, TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[0]));
-        ASSERT_TRUE(visit_text_paint_glyphs(control_owner, control,
-            TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[1]));
-        ASSERT_EQ(glyphs[0].count, GlyphCount);
-        ASSERT_EQ(glyphs[1].count, GlyphCount);
-        for (size_t index = 0; index < GlyphCount; index++) {
-            EXPECT_EQ(glyphs[0].glyphs[index].codepoint, glyphs[1].glyphs[index].codepoint);
-            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].x, glyphs[1].glyphs[index].x);
-            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].y, glyphs[1].glyphs[index].y);
-        }
+        DomText* references[] = {control};
+        expect_text_paint_sources<GlyphCount>(owner, text, control_owner, references, 1, GlyphCount);
     }
     DomText* first_text_leaf(DomNode* node) {
         return dom_range_edge_text(node, false);
@@ -15318,16 +15326,9 @@ TEST_F(RadiantTextQuery, RubyParallelTextFragmentsPreserveSourceAndMatchExplicit
                 EXPECT_EQ(rect->next->line_number, rect->line_number + 1);
                 EXPECT_EQ(rect->next->next, nullptr);
             } else EXPECT_EQ(rect->next, nullptr);
-            TestRadiantPaintGlyphs<16> actual, expected;
-            ASSERT_TRUE(visit_text_paint_glyphs(row, pair.source, TestRadiantPaintGlyphs<16>::collect, &actual));
-            ASSERT_TRUE(visit_text_paint_glyphs(control, first, TestRadiantPaintGlyphs<16>::collect, &expected));
-            ASSERT_TRUE(visit_text_paint_glyphs(control, last, TestRadiantPaintGlyphs<16>::collect, &expected));
-            ASSERT_EQ(actual.count, pair.count);
-            ASSERT_EQ(expected.count, pair.count);
+            DomText* references[] = {first, last};
+            expect_text_paint_sources<16>(row, pair.source, control, references, 2, pair.count);
             for (unsigned index = 0; index < pair.count; index++) {
-                EXPECT_EQ(actual.glyphs[index].codepoint, expected.glyphs[index].codepoint);
-                EXPECT_FLOAT_EQ(actual.glyphs[index].x, expected.glyphs[index].x);
-                EXPECT_FLOAT_EQ(actual.glyphs[index].y, expected.glyphs[index].y);
                 DomText* reference = index < pair.cut ? first : last;
                 TextRect* expected_rect = reference->rect;
                 ASSERT_NE(expected_rect, nullptr);
@@ -15384,8 +15385,7 @@ TEST_F(RadiantTextQuery, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSepara
                 DomText* source = first_text_leaf(find(annotation ? entry.reading : entry.group));
                 ASSERT_NE(source, nullptr);
                 TextRect* rect = source->rect;
-                TestRadiantPaintGlyphs<32> actual, expected;
-                ASSERT_TRUE(visit_text_paint_glyphs(row, source, TestRadiantPaintGlyphs<32>::collect, &actual));
+                DomText* references[3] = {};
                 for (size_t index = 0; index < 3; index++) {
                     DomElement* piece = find(entry.pieces[index]);
                     DomText* reference = first_text_leaf(annotation ? piece->last_child.get() : piece);
@@ -15402,17 +15402,212 @@ TEST_F(RadiantTextQuery, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSepara
                     EXPECT_FLOAT_EQ(rect->x, reference->rect->x);
                     EXPECT_FLOAT_EQ(rect->y, reference->rect->y);
                     EXPECT_FLOAT_EQ(rect->width, reference->rect->width);
-                    ASSERT_TRUE(visit_text_paint_glyphs(control, reference, TestRadiantPaintGlyphs<32>::collect, &expected));
+                    references[index] = reference;
                     rect = rect->next;
                 }
                 EXPECT_EQ(rect, nullptr);
-                ASSERT_EQ(actual.count, expected.count);
-                for (size_t index = 0; index < actual.count; index++) {
-                    EXPECT_EQ(actual.glyphs[index].codepoint, expected.glyphs[index].codepoint);
-                    EXPECT_FLOAT_EQ(actual.glyphs[index].x, expected.glyphs[index].x);
-                    EXPECT_FLOAT_EQ(actual.glyphs[index].y, expected.glyphs[index].y);
-                }
+                expect_text_paint_sources<32>(row, source, control, references, 3);
             }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyTextRunsFollowCommonOwnerWrappingAndRetainSources) {
+    ASSERT_NE(load("test/html/layout_ruby_text_runs.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Row { const char* ruby; const char* row; const char* control; float height; float maximum; const char* narrow_width; const char* wide_width; } rows[] = {
+        {"normal", "normal-row", "normal-control", 120.0f, 100.0f, "160px", "200px"},
+        {"keep", "keep-row", "keep-control", 120.0f, 100.0f, "160px", "200px"},
+        {"pieces", "pieces-row", "pieces-control", 180.0f, 160.0f, "70px", "200px"},
+        {"letters", "letters-row", "letters-control", 120.0f, 100.0f, "125px", "240px"}
+    };
+    struct Source { unsigned row; const char* id; const char* first; const char* last; const char* wide;
+        unsigned glyphs; float advance; DomText* text = nullptr; DomNode* parent = nullptr;
+        const unsigned char* data = nullptr; } sources[] = {
+        {0,"normal-ba","normal-ca",nullptr,nullptr,2,20.0f},
+        {0,"normal-bb","normal-cb1","normal-cb2",nullptr,3,20.0f},
+        {0,"normal-ra","normal-cra",nullptr,nullptr,4,10.0f},
+        {0,"normal-rb","normal-crb1","normal-crb2",nullptr,6,10.0f},
+        {1,"keep-ba","keep-ca",nullptr,nullptr,4,20.0f},
+        {1,"keep-bb","keep-cb",nullptr,nullptr,1,20.0f},
+        {1,"keep-ra","keep-cra",nullptr,nullptr,8,10.0f},
+        {1,"keep-rb","keep-crb",nullptr,nullptr,2,10.0f},
+        {2,"pieces-ba","pieces-ca",nullptr,"pieces-wa",2,20.0f},
+        {2,"pieces-bb","pieces-cb",nullptr,"pieces-wb",3,20.0f},
+        {2,"pieces-bc","pieces-cc",nullptr,"pieces-wc",3,20.0f},
+        {2,"pieces-ra","pieces-cra",nullptr,"pieces-wra",5,10.0f},
+        {2,"pieces-rb","pieces-crb",nullptr,"pieces-wrb",5,10.0f},
+        {2,"pieces-rc","pieces-crc",nullptr,"pieces-wrc",6,10.0f},
+        {3,"letters-ba","letters-ca",nullptr,nullptr,3,20.0f},
+        {3,"letters-bb","letters-cb",nullptr,nullptr,2,20.0f},
+        {3,"letters-ra","letters-cra",nullptr,nullptr,6,10.0f},
+        {3,"letters-rb","letters-crb",nullptr,nullptr,4,10.0f}
+    };
+    for (Source& source : sources) {
+        source.text = first_text_leaf(find(source.id));
+        ASSERT_NE(source.text, nullptr);
+        source.parent = source.text->parent;
+        source.data = source.text->text_data();
+    }
+    auto check = [&](bool narrow) {
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.ruby);
+            DomElement* row = find(entry.row);
+            DomElement* control = find(!narrow && strcmp(entry.ruby,"pieces")==0
+                ? "pieces-wide-control" : entry.control);
+            EXPECT_FLOAT_EQ(row->height, narrow ? entry.height : 60.0f);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            IntrinsicSizes widths = measure_physical_widths(find(entry.ruby));
+            EXPECT_FLOAT_EQ(widths.max_content, entry.maximum);
+            EXPECT_TRUE(widths.has_min_content_break);
+            EXPECT_TRUE(find(entry.ruby)->ext->has_ruby_parallel_fragments);
+        }
+        ASSERT_NE(radiant_document_ensure_state(document,"ruby-text-runs"),nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range,nullptr);
+        for (const Source& entry : sources) {
+            SCOPED_TRACE(entry.id);
+            DomText* source = first_text_leaf(find(entry.id));
+            EXPECT_EQ(source,entry.text);
+            EXPECT_EQ(source->parent.get(),entry.parent);
+            EXPECT_EQ(source->text_data(),entry.data);
+            DomElement* row = find(rows[entry.row].row);
+            DomElement* control = find(!narrow && entry.row == 2 ? "pieces-wide-control" : rows[entry.row].control);
+            DomText* references[] = {first_text_leaf(find(!narrow && entry.wide ? entry.wide : entry.first)),
+                entry.last ? first_text_leaf(find(entry.last)) : nullptr};
+            size_t count = references[1] ? 2 : 1;
+            expect_text_paint_sources<32>(row,source,control,references,count,entry.glyphs);
+            TextRect* rect = source->rect;
+            ASSERT_NE(rect,nullptr);
+            size_t bytes = 0;
+            float width = 0.0f;
+            for (size_t index = 0; index < count; index++) {
+                ASSERT_NE(references[index]->rect,nullptr);
+                TextRect* expected = references[index]->rect;
+                if (narrow) {
+                    ASSERT_NE(rect,nullptr);
+                    EXPECT_EQ(rect->start_index,bytes);
+                    EXPECT_EQ(rect->length,expected->length);
+                    EXPECT_FLOAT_EQ(rect->x,expected->x);
+                    EXPECT_FLOAT_EQ(rect->y,expected->y);
+                    EXPECT_FLOAT_EQ(rect->width,expected->width);
+                    rect = rect->next;
+                }
+                bytes += references[index]->length;
+                width += expected->width;
+            }
+            if (!narrow) {
+                EXPECT_EQ(rect->start_index,0);
+                EXPECT_EQ(rect->length,bytes);
+                EXPECT_FLOAT_EQ(rect->x,references[0]->rect->x);
+                EXPECT_FLOAT_EQ(rect->y,references[0]->rect->y);
+                EXPECT_FLOAT_EQ(rect->width,width);
+                rect = rect->next;
+            }
+            EXPECT_EQ(rect,nullptr);
+            // these equal-width pairs expose a cut inside a later DOM source in both text levels.
+            if (entry.row == 0) for (unsigned index = 0; index < entry.glyphs; index++) {
+                unsigned first_count = dom_text_utf16_length(references[0]);
+                unsigned part = index < first_count ? 0 : 1;
+                unsigned local = part ? index - first_count : index;
+                TextRect* expected = references[part]->rect;
+                expect_character_rect(range,source,index,{expected->x + local * entry.advance,
+                    expected->y,entry.advance,expected->height});
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false,true}) { layout_html_doc(&ui,document,retained); check(true); }
+    for (bool narrow : {false,true}) {
+        for (const Row& entry : rows) {
+            const char* width = narrow ? entry.narrow_width : entry.wide_width;
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.row),"width",width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.control),"width",width));
+            for (DomNode* child = find(entry.control)->first_child; child; child = child->next_sibling)
+                if (child->is_element() && child->tag() == MARKUP_NAME_BR)
+                    ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(),"display",narrow ? "inline" : "none"));
+        }
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("pieces-control"),"display",narrow ? "block" : "none"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("pieces-wide-control"),"display",narrow ? "none" : "block"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check(narrow);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyIntrinsicWrappingResolvesInheritedPropertiesIndependently) {
+    ASSERT_NE(load("test/html/layout_ruby_text_runs.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui,document,false);
+    DomElement* ruby = dom_find_element_by_id(document->root,"wrap-rules");
+    ASSERT_NE(ruby,nullptr);
+    struct Case { const char* declaration; bool breaks; } cases[] = {
+        {"normal",false}, {"inherit",true}, {"initial",false}, {"unset",true},
+        {"var(--run-break)",true}
+    };
+    ASSERT_TRUE(dom_cssom_set_inline_property(ruby,"--run-break","break-all"));
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.declaration);
+        ASSERT_TRUE(dom_cssom_set_inline_property(ruby,"word-break",entry.declaration));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        IntrinsicSizes sizes = measure_physical_widths(ruby);
+        EXPECT_FLOAT_EQ(sizes.max_content,100.0f);
+        EXPECT_FLOAT_EQ(sizes.min_content,entry.breaks ? 60.0f : 100.0f);
+        EXPECT_EQ(sizes.has_min_content_break,entry.breaks);
+        EXPECT_EQ(sizes.has_used_content_break,entry.breaks);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments) {
+    ASSERT_NE(load("test/html/layout_ruby_run_spaces.html"),nullptr);
+    process_document_font_faces(&ui,document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root,id); };
+    struct Case { const char* id; const char* control; const char* wide; size_t first,length;
+        unsigned glyphs; DomText* source = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr;
+    } cases[] = {
+        {"ba","ca","wa",2,3,2}, {"bb","cb","wb",1,4,2}, {"bc","cc","wc",0,3,2},
+        {"ra","cra","wra",1,2,1}, {"rb","crb","wrb",1,2,1}, {"rc","crc","wrc",1,2,1}
+    };
+    for (Case& entry : cases) {
+        entry.source = first_text_leaf(find(entry.id));
+        ASSERT_NE(entry.source,nullptr);
+        entry.parent = entry.source->parent;
+        entry.data = entry.source->text_data();
+    }
+    auto check = [&](bool narrow) {
+        DomElement* row = find("spaces-row");
+        DomElement* control = find(narrow ? "spaces-control" : "spaces-wide-control");
+        EXPECT_FLOAT_EQ(row->height,narrow ? 183.0f : 63.0f);
+        EXPECT_FLOAT_EQ(row->height,control->height);
+        EXPECT_FLOAT_EQ(measure_physical_widths(find("spaces")).max_content,190.0f);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomText* source = first_text_leaf(find(entry.id));
+            DomText* reference = first_text_leaf(find(narrow ? entry.control : entry.wide));
+            ASSERT_NE(source,nullptr);
+            ASSERT_NE(reference,nullptr);
+            EXPECT_EQ(source,entry.source);
+            EXPECT_EQ(source->parent.get(),entry.parent);
+            EXPECT_EQ(source->text_data(),entry.data);
+            ASSERT_NE(source->rect,nullptr);
+            EXPECT_EQ(source->rect->start_index,entry.first);
+            EXPECT_EQ(source->rect->length,entry.length);
+            EXPECT_EQ(source->rect->next,nullptr);
+            DomText* references[] = {reference};
+            expect_text_paint_sources<8>(row,source,control,references,1,entry.glyphs);
+        }
+    };
+    for (bool retained : {false,true}) { layout_html_doc(&ui,document,retained); check(true); }
+    for (const char* wrapping : {"wrap", "nowrap"}) {
+        // nowrap removes interior space opportunities, but sibling seams still use their common owner.
+        for (const Case& entry : cases)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "text-wrap", wrapping));
+        for (bool narrow : {false,true}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(find("spaces-row"),"width",narrow ? "75px" : "200px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(find("spaces-control"),"display",narrow ? "block" : "none"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(find("spaces-wide-control"),"display",narrow ? "none" : "block"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            check(narrow);
         }
     }
 }

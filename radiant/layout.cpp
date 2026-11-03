@@ -1942,27 +1942,16 @@ float layout_document_missing_glyph_advance(FontHandle* handle, uint32_t codepoi
         (raster_scale > 0.0f ? raster_scale : 1.0f);
 }
 
-void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
-                                        CssEnum* word_break) {
-    if (overflow_wrap) *overflow_wrap = CSS_VALUE_NORMAL;
-    if (word_break) *word_break = CSS_VALUE_NORMAL;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (!current->is_element()) continue;
-        DomElement* element = lam::dom_require_element(current);
-        if (!element->blk) continue;
-        if (word_break && *word_break == CSS_VALUE_NORMAL &&
-            element->block()->word_break != 0) {
-            *word_break = element->block()->word_break;
-        }
-        if (overflow_wrap && element->block()->overflow_wrap != 0) {
-            *overflow_wrap = element->block()->overflow_wrap;
-            return;
-        }
-        if (overflow_wrap && element->block()->word_break == CSS_VALUE_BREAK_WORD) {
-            *overflow_wrap = CSS_VALUE_ANYWHERE;
-            return;
-        }
-    }
+void layout_resolve_inherited_text_wrap(LayoutContext* context, DomNode* node,
+                                        CssEnum* overflow_wrap, CssEnum* word_break) {
+    // inherited properties resolve independently; an unrelated default field cannot stop the other lookup.
+    CssEnum word = get_inherited_text_enum(context, CSS_PROPERTY_WORD_BREAK,
+        &BlockProp::word_break, CSS_VALUE_NORMAL, node);
+    CssEnum overflow = get_inherited_text_enum(context, CSS_PROPERTY_OVERFLOW_WRAP,
+        &BlockProp::overflow_wrap, CSS_VALUE_NORMAL, node);
+    if (word == CSS_VALUE_BREAK_WORD) overflow = CSS_VALUE_ANYWHERE;
+    if (word_break) *word_break = word;
+    if (overflow_wrap) *overflow_wrap = overflow;
 }
 
 float layout_measure_utf8_text_width(FontHandle* handle, FontProp* style,
