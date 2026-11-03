@@ -1570,6 +1570,7 @@
         "lambda/runtime/lambda-physics.cpp",
         "lambda/core/physics_scene.cpp",
         "lambda/runtime/io_mail.cpp",
+        "lambda/runtime/io_websocket.cpp",
         "lambda/io/mcp*.cpp",
         "lambda/runtime/io_grep.cpp",
         "lambda/runtime/io_text_search.cpp"

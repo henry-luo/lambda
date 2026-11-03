@@ -1724,3 +1724,570 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
   --previous-mvp temp/lambda_mir_mvp/tune28e/start-release.exe \
   --runs 30 --warmups 2 --output temp/lambda_mir_mvp/repeated-constructor.json
 ```
+
+
+## Native fill and bitwise tree tuning — 2026-11-02
+
+### Why the preceding qualification count decreased
+
+Only Beng Mandelbrot changed qualification between the recursive and constructor
+campaigns. Its one-sided 95% upper MVP/Full ratio moved from **0.987782** to
+**1.000000**. The strict Full MIR gate requires `< 1`, so both the Full count
+and the combined count decreased by one. In the constructor campaign its median
+was still 12.858 ms against Full MIR's 13.2685 ms. The interleaved before/after
+95% interval was **[0.975724, 1.017497]**, including parity; that result does not
+establish a regression. It does show that the previous performance margin was
+too small to qualify reliably. The gate and its threshold remain unchanged.
+
+### Implementation
+
+Runtime types, array layouts and ownership semantics remain unchanged
+(**D2.4.1–D2.4.3**, **S9.1.2–S9.1.3**).
+
+- Proven singleton integer bindings now materialize their value directly,
+  including immutable module constants and locals whose complete write set
+  preserves that value. Variable flags and poison inputs retain their ordinary
+  behavior (**S4.1.2**).
+- Nested integer bitwise operations keep finite intermediate values in native
+  lanes and box once at the outer result. Every intermediate and shift count
+  is guarded. A miss replays the original checked tree; eligibility requires
+  pure leaves, preserving evaluation order, overflow and subsequent errors
+  (**S4.1.2**). The opcode selection helper is shared with Full MIR.
+- Self-tail calls can reuse their current frame when every array parameter is
+  forwarded unchanged and the existing recursive effect analysis proves it
+  read-only. Scalar arguments are evaluated before parameter replacement;
+  allocations retain the same precise root protocol (**D5.3.1–D5.3.4**).
+- Discarded conditional arms can reuse the existing closed-array-region guard.
+  This removes repeated checks within FFT's bit-reversal swaps even though its
+  surrounding loop also changes indices in a nested loop. Guard misses execute
+  the checked arm before any source effect has occurred; failed writes and
+  snapshots remain observable (**S7.1.1v3**, **S9.1.2**, **D8.2.6**).
+- A native-bit entry reuses the existing primitive fill kernel. MVP proves a
+  matching uncounted primitive-array certificate and scalar representation,
+  guards the count and integer poison values, and passes scalar bits directly.
+  The shared allocator, construction roots and certificate installation remain
+  in the runtime. Counted contracts and guard misses keep the existing checked
+  constructor (**D3.3.3v3**, **S9.1.3**, **D5.3.3**). The import remains
+  `MAY_GC` with conservative reentry metadata. A repeated NQueens profile
+  identified array construction and allocation as the principal helper costs.
+- Small constant integer fills passed to proven read-only, nonescaping
+  parameters use the existing `MarkBuilder` Input-owned representation. Each
+  payload is capped at 64 lanes. Only direct readers qualify, preventing a
+  forwarded boundary from replacing an Input-owned certificate with activation
+  metadata. Mutable or retained actuals, effectful arguments, counted contracts
+  and uncertain values keep runtime construction
+  (**D4.1.1v2–D4.1.3**, **S9.1.2–S9.1.3**).
+
+The first 100-sample report,
+[`tune28_native_fill_2026-11-02.json`](../../test/benchmark/lambda_mvp/tune28_native_fill_2026-11-02.json),
+was retained before the constant-fill changes. It qualified
+26/28 against Full MIR and 14/28 against both gates. NQueens improved over the
+previous MVP but its Full MIR upper bound was 1.017; Pnpoly and Beng Mandelbrot
+lost C2MIR qualification with upper bounds 1.125 and 1.117. No samples were
+dropped or substituted. The following campaign measures the additional code
+changes against the same pinned previous release.
+
+### Measured qualification
+
+[Final 100-sample report](../../test/benchmark/lambda_mvp/tune28_constant_fill_2026-11-02.json)
+uses two warmups, 100 measured samples per row and randomized interleaving of
+MVP, the pinned previous MVP, Full MIR and the independent C2MIR C ports.
+Timing is the scripts' self-reported execution window and the matched C kernel
+window; compilation is excluded. The original 28 Lambda/C/golden triples are
+unchanged. Full MIR uses the candidate executable, including the shared fill
+kernel refactoring.
+
+The candidate is SHA-256
+`6a1d5dd787c5da62a8c86af5aa2805b6e372373f6d690862f077540e8b35fb2c`,
+and the previous release is
+`be462999194811d7538b0ba07c50f50c9a258c9da61e3a36f8ce3d3b632a8d17`.
+The gates remain one-sided paired-bootstrap upper bounds: Full MIR `< 1`,
+C2MIR `<= 1.10`, with 10,000 resamples and seed 1101. Every sample is retained.
+
+| Benchmark | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR | Both |
+|---|---:|---:|---:|---:|---:|---:|---|
+| r7rs/fib | 0.5670 | 0.5765 | 1.1360 | 1.0359 | 0.540 | 0.595 | yes |
+| r7rs/sum | 0.0950 | 0.0960 | 0.2590 | 0.2561 | 0.429 | 0.434 | yes |
+| r7rs/sumfp | 0.0000 | 0.0000 | 0.0690 | 0.0681 | unresolved | unresolved | no |
+| awfy/mandelbrot | 22.2975 | 22.3490 | 27.3460 | 21.9336 | 0.836 | 1.035 | yes |
+| larceny/array1 | 0.1070 | 0.1095 | 1.3565 | 0.2859 | 0.083 | 0.392 | yes |
+| awfy/sieve | 0.0180 | 0.0170 | 0.0260 | 0.0120 | 0.680 | 1.505 | no |
+| beng/spectralnorm | 0.3200 | 0.3175 | 1.1620 | 0.3445 | 0.276 | 0.933 | yes |
+| awfy/nbody | 1.4215 | 1.3970 | 2.5825 | 1.4314 | 0.551 | 0.994 | yes |
+| r7rs/tak | 0.0830 | 0.0835 | 0.1290 | 0.1176 | 0.672 | 0.738 | yes |
+| r7rs/ack | 5.5275 | 5.5690 | 10.2040 | 11.9325 | 0.551 | 0.470 | yes |
+| larceny/quicksort | 0.2750 | 0.2745 | 0.5755 | 0.2145 | 0.487 | 1.305 | no |
+| kostya/matmul | 4.4665 | 4.4645 | 19.2915 | 5.8931 | 0.235 | 0.767 | yes |
+| kostya/collatz | 169.8510 | 171.6480 | 293.4985 | 224.9275 | 0.595 | 0.781 | yes |
+| r7rs/fibfp | 0.5510 | 0.5460 | 0.6420 | 1.0909 | 0.879 | 0.528 | yes |
+| r7rs/fft | 0.0500 | 0.0470 | 0.0740 | 0.0190 | 0.644 | 2.468 | no |
+| r7rs/nqueens | 0.7985 | 0.6660 | 0.7250 | 0.3365 | 0.944 | 2.012 | no |
+| awfy/bounce | 0.0530 | 0.0540 | 0.0570 | 0.0200 | 0.964 | 2.697 | no |
+| awfy/queens | 0.0285 | 0.0270 | 0.0650 | 0.0151 | 0.462 | 1.982 | no |
+| beng/fannkuch | 0.3075 | 0.2665 | 0.4000 | 0.1436 | 1.178 | 2.444 | no |
+| kostya/primes | 0.9545 | 1.1065 | 2.3600 | 1.7014 | 0.522 | 0.734 | yes |
+| kostya/levenshtein | 1.4140 | 1.4420 | 1.8050 | 0.7865 | 0.806 | 1.873 | no |
+| kostya/brainfuck | 51.3075 | 52.9835 | 81.2225 | 25.9844 | 0.662 | 2.073 | no |
+| larceny/paraffins | 0.0910 | 0.0910 | 0.1310 | 0.0391 | 0.777 | 2.586 | no |
+| larceny/pnpoly | 2.1295 | 2.0580 | 2.9550 | 1.9969 | 0.768 | 1.139 | no |
+| larceny/ray | 0.1200 | 0.1190 | 0.2060 | 0.1400 | 0.583 | 0.862 | yes |
+| beng/mandelbrot | 12.3855 | 11.4395 | 12.6455 | 11.2485 | 0.913 | 1.030 | yes |
+| kostya/json_gen | 2.5105 | 2.4940 | 4.7195 | 1.3419 | 0.540 | 1.902 | no |
+| larceny/divrec | 0.9085 | 0.9210 | 1.2565 | 5.4070 | 0.842 | 0.201 | yes |
+
+The original single-run windows qualify **26/28 against Full MIR, 15/28
+against C2MIR and 15/28 against both**. All 27 rows with resolved clocks have
+lower MVP medians than Full MIR, but that does not replace the confidence gate.
+NQueens now passes Full MIR: 0.666 ms against 0.725 ms, U95 **0.944**; its median
+improves **16.6%** against the paired previous MVP. Beng Mandelbrot also passes
+both gates, with upper bounds below parity against Full MIR and 1.030 against
+C2MIR.
+
+Two rows illustrate why medians alone are insufficient. Fannkuch's median is
+0.2665 ms against Full MIR's 0.4000 ms, but its broad interval gives a Full MIR
+upper bound of **1.178**. Pnpoly's median is 1.031 times C2MIR, but its upper
+bound is **1.139**. Neither is counted as qualified for that gate. The original
+Sumfp window still records zeros and remains unresolved in this table.
+
+The paired comparison with the previous MVP also records a remaining regression:
+Brainfuck's median rises **3.3%**, with a two-sided ratio interval of
+**[1.0235, 1.0469]**. Its generated `run_bf` remains 1,275 MIR instructions and
+5,936 native bytes in both pinned releases; that size check does not establish
+the cause or dismiss the measured slowdown. Sieve, FFT, NQueens and Beng
+Mandelbrot have before/after intervals wholly below parity. Other faster
+medians, including Fannkuch, are not claimed as established improvements.
+
+### Resolving Sumfp's clock limit
+
+The host reports a 1-microsecond `CLOCK_MONOTONIC` resolution. MVP's existing
+guarded exact-sum lowering finishes the original Sumfp invocation below that
+resolution. The single-run zeros remain in the original report and do not
+qualify; neither a denominator floor nor a fabricated duration is used.
+
+The runner now supports `--case r7rs/sumfp --sumfp-batch 10000`. It retains both
+original kernel bodies and generates matched mains under `temp/`: each calls
+the kernel 10,000 times, accumulates every returned value, and validates the
+total. The loop and accumulation are timed; result checking and reporting are
+outside the window. The original benchmark files and goldens remain unchanged.
+The [batch report](../../test/benchmark/lambda_mvp/tune28_sumfp_batch_2026-11-02.json)
+records both generated sources, hashes, every sample and the changed scope.
+
+With the same final executable, two warmups and 100 measured samples, the
+whole-batch medians are **0.011 ms MVP, 1,001.3975 ms Full MIR and 951.375 ms
+C2MIR**. All samples are positive; MVP's minimum is 0.010 ms. The one-sided
+upper ratios are **0.0000211 against Full MIR** and **0.0000221 against C2MIR**.
+The previous MVP also measures 0.011 ms: this resolves qualification of an
+existing optimization, rather than demonstrating a new speedup for this row.
+
+Combining the 27 clock-resolved original rows with this explicitly separate
+Sumfp batch gives **27/28 against Full MIR, 16/28 against C2MIR and 16/28
+against both**. The original-window counts remain **26/28, 15/28 and 15/28**.
+Fannkuch still fails the Full MIR confidence gate. Twelve rows still miss the
+C2MIR allowance: Sieve, Quicksort, FFT, NQueens, Bounce, Queens, Fannkuch,
+Levenshtein, Brainfuck, Paraffins, Pnpoly and JSON generation. The requested
+all-28 performance milestone remains open.
+
+### Validation and reproduction
+
+All **40 focused test groups** pass, including the 28 Lambda and C goldens,
+forced and seeded GC with freed-memory poisoning, and emission checks for the
+new lowering. Constructor tests cover counted contracts, poison values,
+read-only constant actuals, retained/mutated/forwarded actuals and collection
+while an Input-owned constant is live. Loop tests cover short arrays, snapshot
+preservation, checked partial writes and collecting tail calls.
+
+The required `make test-lambda-baseline` finishes **8,501/8,502**, including
+**279/279 MIR emission** and **350/350 forced-GC** tests. The sole failure is
+the previously recorded AUTO-tier
+`AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/proc_mir_mvp_roots` cold-float
+snapshot: its final line is `false`, expected `true`. It reproduces in isolation
+with the same mismatch as the preceding pass. The golden is unchanged. Logs
+are in `temp/lambda_mir_mvp/tune28f/baseline-final.log` and
+`temp/lambda_mir_mvp/tune28f/roots-isolated.log`. The measured release executable
+was restored after the debug baseline, and its SHA-256 rechecked.
+
+Full MIR also passes the constructor, conditional-array, recursive-array and
+flag fixtures in normal and forced-GC modes. The shift fixture exposes existing
+Full MIR poison/count edge failures; its output is identical with the pinned
+previous and final releases. MVP passes its unchanged expected semantics
+(**S4.1.2**). Full MIR is a performance comparison, while the golden and formal
+semantics remain the correctness authority.
+
+All original Lambda/C/golden hashes match the constructor campaign. The final
+compiler, shared helper, runner, timer and executable fingerprints were checked
+against the recorded report after measurement.
+
+```sh
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/tune28f/final-constant-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28f/final-constant-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28f/start-release.exe \
+  --runs 100 --warmups 2 --output temp/lambda_mir_mvp/recheck28.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28f/final-constant-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28f/start-release.exe \
+  --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/recheck_sumfp.json
+```
+
+## Small numeric payloads and fused string formatting — 2026-11-02
+
+### Implementation
+
+Small one-dimensional numeric arrays now keep their payload beside the existing
+`ArrayNum` header when both fit an existing GC object size class. This removes
+the second allocation and its construction root frame. Objects remain nonmoving
+(**D4.3.1–D4.3.2v2**); the header, lane representations, capacity semantics and
+runtime type model are unchanged. Larger and multidimensional arrays retain
+data-zone allocation. Growth copies the lanes into the ordinary data zone;
+views retain their base owner and COW snapshots still detach (**S9.1.2**).
+No collector or vendor code was changed.
+
+String recipes now carry proven integer-formatting inputs to the final join.
+Only direct `string(int)` conversions and exact transparent wrappers qualify;
+effectful functions retain their calls. The helper renders finite integers into
+native temporary bytes using the existing canonical renderer (**S4.1.2**), then
+uses the existing owned-string join. Poison values keep the canonical generic
+conversion. Generic conversions publish precise input and converted-string roots;
+the finite-only path needs no additional frame before the join's own allocating
+path (**D5.3.2–D5.3.3**). Argument expressions still evaluate once in source order.
+
+Adjacent literal fragments, including literals forwarded through recipe
+parameters, coalesce into one Input-owned constant (**D4.1.1v2**). The existing
+Full MIR literal recognizer was promoted into the shared AST module. JSON's
+outer object append now passes eight fragments instead of twenty-six, and its
+inner coordinate object passes five. Prefix ownership, alias freezing, Unicode
+bytes and snapshot behavior are unchanged (**S9.1.2**).
+
+The preliminary allocation-only 15-sample screen measured NQueens at 0.542 ms
+against the preceding MVP's 0.679 ms, with a before/after 95% interval of
+[0.773, 0.835]. Queens measured 0.023 ms against 0.026 ms. This screen guided the
+work; the full qualification below uses a separate 100-sample campaign.
+
+### Measured qualification
+
+[100-sample report](../../test/benchmark/lambda_mvp/tune28_small_arrays_strings_2026-11-02.json)
+uses two warmups and randomized interleaving of the candidate MVP, previous MVP,
+Full MIR and the independent C2MIR C ports. Timing remains the scripts' reported
+execution windows and matched C kernel windows; compilation is excluded. All 28
+Lambda/C/golden hashes match the preceding campaign. Every sample is retained.
+The gates remain one-sided 95% paired-bootstrap upper bounds, Full MIR `< 1`
+and C2MIR `<= 1.10`, with 10,000 resamples and seed 1101.
+
+Candidate SHA-256: `51457671ba22db43cf304f91ac5aeaa15115feed616fd86a39e71ed4b1042dd9`.
+
+Previous SHA-256: `6a1d5dd787c5da62a8c86af5aa2805b6e372373f6d690862f077540e8b35fb2c`.
+
+The shared checkout also received concurrent chat/WebSocket work after the
+previous release. Executables are pinned, and each report records source hashes,
+revision and working-tree state. Full MIR uses the same candidate executable.
+Before/after comparisons therefore compare these complete executable revisions;
+they are not an isolated build differing only in the tuning patch.
+
+| Benchmark | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms | U95 / C2MIR | C2MIR gate |
+|---|---:|---:|---:|---:|---:|---|
+| r7rs/fib | 0.5775 | 0.5830 | 1.1910 | 1.0565 | 0.564 | yes |
+| r7rs/sum | 0.0970 | 0.0975 | 0.2625 | 0.2700 | 0.369 | yes |
+| r7rs/sumfp | 0.0000 | 0.0000 | 0.0710 | 0.0735 | unresolved | no |
+| awfy/mandelbrot | 21.1025 | 21.2330 | 26.6990 | 21.3524 | 1.005 | yes |
+| larceny/array1 | 0.1080 | 0.1075 | 1.3610 | 0.2950 | 0.374 | yes |
+| awfy/sieve | 0.0170 | 0.0160 | 0.0240 | 0.0120 | 1.421 | no |
+| beng/spectralnorm | 0.3285 | 0.3235 | 1.2090 | 0.3615 | 0.920 | yes |
+| awfy/nbody | 1.5000 | 1.4310 | 2.6750 | 1.5045 | 1.003 | yes |
+| r7rs/tak | 0.0860 | 0.0850 | 0.1315 | 0.1195 | 0.728 | yes |
+| r7rs/ack | 5.5115 | 5.4995 | 10.2210 | 11.7130 | 0.475 | yes |
+| larceny/quicksort | 0.2805 | 0.2860 | 0.5945 | 0.2209 | 1.331 | no |
+| kostya/matmul | 4.6810 | 4.5925 | 20.0685 | 6.1906 | 0.761 | yes |
+| kostya/collatz | 177.3880 | 177.5860 | 302.2715 | 227.3075 | 0.787 | yes |
+| r7rs/fibfp | 0.5940 | 0.5880 | 0.6855 | 1.1356 | 0.537 | yes |
+| r7rs/fft | 0.0420 | 0.0425 | 0.0755 | 0.0199 | 2.258 | no |
+| r7rs/nqueens | 0.6855 | 0.5515 | 0.6015 | 0.3534 | 1.597 | no |
+| awfy/bounce | 0.0540 | 0.0530 | 0.0560 | 0.0210 | 2.647 | no |
+| awfy/queens | 0.0250 | 0.0230 | 0.0605 | 0.0151 | 1.586 | no |
+| beng/fannkuch | 0.2165 | 0.2200 | 0.2605 | 0.1411 | 1.800 | no |
+| kostya/primes | 0.9320 | 0.9260 | 2.1885 | 1.5151 | 0.636 | yes |
+| kostya/levenshtein | 1.4805 | 1.4640 | 1.8325 | 0.8065 | 1.861 | no |
+| kostya/brainfuck | 53.9940 | 53.8960 | 82.3610 | 26.7323 | 2.060 | no |
+| larceny/paraffins | 0.0920 | 0.0895 | 0.1310 | 0.0398 | 2.304 | no |
+| larceny/pnpoly | 1.8300 | 1.8215 | 2.3650 | 1.8191 | 1.017 | yes |
+| larceny/ray | 0.1230 | 0.1200 | 0.2090 | 0.1455 | 0.833 | yes |
+| beng/mandelbrot | 11.3570 | 11.4730 | 12.5825 | 11.1815 | 1.040 | yes |
+| kostya/json_gen | 2.5305 | 1.4290 | 4.7680 | 1.3660 | 1.070 | yes |
+| larceny/divrec | 0.9030 | 0.9065 | 1.2130 | 5.1165 | 0.182 | yes |
+
+The original windows qualify **27/28 against Full MIR and 17/28 against C2MIR
+and both gates**. Sumfp's zero-duration observations remain unresolved here.
+JSON generation improves **43.5%** against the interleaved previous MVP, with a
+before/after 95% interval of **[0.557, 0.577]**, and now passes the C2MIR gate
+with an upper ratio of **1.070**. NQueens improves **19.5%**
+(**[0.768, 0.834]**) and Queens improves **8.0%** (**[0.885, 0.960]**), but both
+remain outside the allowance.
+
+Pnpoly also qualifies in this campaign (**U95 1.017**), but its before/after
+interval **[0.975, 1.015]** includes parity. This is restored qualification,
+not evidence of a new code-driven speedup. Fannkuch qualifies against Full MIR
+with **U95 0.977**; its before/after interval **[0.982, 1.220]** likewise does
+not establish improvement. Brainfuck's before/after interval **[0.982, 1.007]**
+includes parity; this pass does not establish recovery of its earlier slowdown.
+
+### Sumfp batch and remaining work
+
+[Separate Sumfp batch report](../../test/benchmark/lambda_mvp/tune28_small_arrays_strings_sumfp_2026-11-02.json)
+repeats each unchanged kernel 10,000 times inside matched timer boundaries,
+consuming every result, with 100 samples and two warmups. The original
+zero-duration samples remain recorded and unqualified. The batch confirms the
+existing finite-reduction optimization rather than attributing a new gain to
+this pass.
+
+| Batch | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR |
+|---|---:|---:|---:|---:|---:|---:|
+| Sumfp ×10,000 | 0.0110 | 0.0110 | 767.6415 | 795.9965 | 0.00001485 | 0.00001479 |
+
+Combining the 27 resolved original windows with this explicitly separate batch
+qualifies **28/28 against Full MIR, 18/28 against C2MIR and 18/28 against both**.
+The requested all-28 C2MIR milestone remains open. The ten misses are Sieve,
+Quicksort, FFT, NQueens, Bounce, Queens, Fannkuch, Levenshtein, Brainfuck and
+Paraffins. Emitted-code inspection still finds poison/overflow arithmetic checks
+in Bounce and Levenshtein and per-iteration array/character guards in
+Levenshtein. These checks require stronger proofs before elimination; the
+measured C2MIR gap does not authorize weakening Lambda semantics (**S4.1.2**,
+**S7.1.1v3**, **S9.1.2–S9.1.3**).
+
+### Validation and reproduction
+
+All **40 focused MVP groups** pass, including every original benchmark golden,
+forced and seeded GC with freed-memory poisoning, and emission checks. Expanded
+string cases exercise integer endpoints, inf/nan, Unicode, empty and adjacent
+literals, snapshots, self-appends, effectful wrappers and argument order. Full
+MIR matches the expanded string golden in normal and forced-GC modes with both
+the previous and candidate releases.
+
+The native representation suite passes **47/47**. New tests cover all fourteen
+numeric lanes across collection and growth from inline payloads to data-zone
+storage, plus COW and a view that is the only root retaining its base. Both new
+cases also pass with collection forced at every allocation and freed-memory
+poisoning.
+
+The current shared-tree `make test-lambda-baseline` records **8,514/8,517**,
+including **279/279 MIR emission**, **350/350 forced-GC** and **849/849 JS MVP**
+tests. Its three failures were:
+
+- `Tiers/HotwireHttpTest.ClientAndServer/1`: 30-second timeout; all three
+  isolated reruns pass (13.974, 14.287 and 11.868 seconds).
+- `docx_docx_business_plans`: 60-second timeout. Separate-process reruns
+  pass at 53.473 and 29.514 seconds, with one intervening 60.007-second timeout.
+  A separate `test/interp/tier_sweep.py --jobs 3` was active in the shared
+  checkout during these checks. This remains timeout instability under load,
+  not a clean aggregate pass or a demonstrated tuning regression.
+- `proc_mir_mvp_roots`: the previously recorded AUTO-tier cold-float snapshot
+  mismatch, final `false` instead of `true`. Both pinned releases reproduce
+  identical output; the golden remains unchanged.
+
+No test limit, expected result or harness behavior was relaxed. Logs are under
+`temp/lambda_mir_mvp/tune28g/`: `focused5.log`, `item-repr2.log`,
+`item-repr2-gc.log`, `full-string-parity.log`, `baseline-final.log`,
+`hotwire-isolated.log`, `docx-isolated.log` and `roots-release-parity.log`.
+The measured executable remains pinned as `final-release.exe` there. The root
+`lambda.exe` is left at the baseline's debug build while the independent tier
+sweep uses it; performance commands below explicitly select the release pin.
+Source and executable fingerprints match the retained reports.
+
+```sh
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/tune28g/final-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28g/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28g/start-release.exe \
+  --runs 100 --warmups 2 --output temp/lambda_mir_mvp/recheck28.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28g/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28g/start-release.exe \
+  --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/recheck_sumfp.json
+```
+
+## Guarded strides, character reads and integer ranges — 2026-11-03
+
+### Implementation
+
+A closed ascending loop can now guard the first and final **visited** index of
+an affine access once, including a stride that does not divide the loop limit.
+The planner requires a finite counter and update, one unconditional terminal
+increment, stable key inputs, and a closed body. The generated entry checks a
+positive finite step, native writable/readable owners and both index endpoints.
+Guard misses enter the original checked loop before any source effects. This
+preserves short arrays, negative indices, snapshots and mutation errors
+(**S7.1.1v3**, **S9.1.2**, **D4.4.4v4**). The existing iteration planner and closed
+region emitter provide the shared eligibility and lowering; no workload names
+or benchmark constants participate in the optimization.
+
+Fused character comparisons can join this loop proof. ASCII and bounds checks
+run at entry, immutable invariant character reads load once, and comparisons of
+two proven present characters use their bytes directly. The checked sibling
+retains Unicode code-point and absence behavior, including NUL versus absence
+(**S7.1.1v3**, **S6.1.2v2**). The ASCII owner guard was extracted from the existing
+shared emitter, preserving Full MIR's instruction sequence.
+
+Integer comparisons now use the signed ordering of the existing NaN sentinel
+to retain only the necessary unordered check. A finite operand can eliminate
+that check for the appropriate comparison direction; equality needs one witness
+when both inputs are unknown. Branch demand emits that check and the ordered
+branch directly; value demand retains its boolean result. NaN, infinity and
+nullable behavior remain under **S4.2.1–S4.2.3**, **S6.1.2v2**.
+
+Range analysis can multiply finite enclosing loop trip bounds for an additive
+recurrence. It rejects counter rewrites, skipped increments, mutable borrows and
+other noncontracting writes to the accumulator. A subtraction at the start of a
+while body can contract a nonnegative interval when the unchanged loop predicate
+proves the difference nonnegative. These proofs remove checks only when the
+entire interval remains inside int53; saturation and poison retain the original
+checked arithmetic (**S4.1.1–S4.1.2**).
+
+Runtime types, container layouts, GC ownership and the default MIR optimization
+level remain unchanged. A separate 15-sample O2/O3 screen did not establish a
+broad advantage from changing optimizer settings.
+
+### Measurement contract
+
+The user's 2026-11-03 target is a **1.20×** upper ratio bound for **each of the
+28 rows**. The runner defaults to `--c2mir-allowance-percent 20`, records the
+allowance and its per-row gate, and retains the 10% and Full MIR diagnostics.
+Previously committed reports are unchanged. Timers remain self-reported
+execution windows with matched C-port boundaries, excluding compilation and
+process startup. This uses independent C ports through the standalone C2MIR
+reference tool; the removed Lambda C-text backend is not restored or used.
+
+The candidate is `temp/lambda_mir_mvp/tune28h/step10-release.exe`, SHA-256
+`c8ac3031b927e0f01973779f89acc1aa3d213549e1c6ef41ccf10300be0ff026`.
+The interleaved prior MVP is the previous pass's pinned release, SHA-256
+`51457671ba22db43cf304f91ac5aeaa15115feed616fd86a39e71ed4b1042dd9`.
+The 25-sample screens are diagnostic; qualification uses the complete campaign
+below, with 100 samples, two warmups and the existing one-sided 95% paired
+bootstrap (10,000 resamples, seed 1101).
+
+### Complete 28-row campaign
+
+[Retained 100-sample report](../../test/benchmark/lambda_mvp/tune28_guarded_ranges_2026-11-03.json).
+Medians are milliseconds; U95 is the one-sided 95% upper ratio bound.
+Each row keeps its original workload and timer boundary.
+
+| Benchmark | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR | ≤20% |
+|---|---:|---:|---:|---:|---:|:---:|
+| r7rs/fib | 0.5850 | 1.1620 | 1.0305 | 0.516 | 0.582 | yes |
+| r7rs/sum | 0.0980 | 0.2660 | 0.2659 | 0.375 | 0.378 | yes |
+| r7rs/sumfp | 0.0000 | 0.0725 | 0.0710 | unresolved | unresolved | unresolved |
+| awfy/mandelbrot | 22.2155 | 27.6485 | 21.9861 | 0.817 | 1.029 | yes |
+| larceny/array1 | 0.1050 | 1.3485 | 0.2820 | 0.079 | 0.376 | yes |
+| awfy/sieve | 0.0160 | 0.0240 | 0.0120 | 0.708 | 1.421 | no |
+| beng/spectralnorm | 0.3155 | 1.1725 | 0.3450 | 0.276 | 0.922 | yes |
+| awfy/nbody | 1.4285 | 2.5990 | 1.4525 | 0.572 | 1.026 | yes |
+| r7rs/tak | 0.0720 | 0.1300 | 0.1169 | 0.566 | 0.638 | yes |
+| r7rs/ack | 5.7015 | 10.6300 | 12.4686 | 0.543 | 0.463 | yes |
+| larceny/quicksort | 0.2705 | 0.5900 | 0.2190 | 0.481 | 1.303 | no |
+| kostya/matmul | 4.6230 | 19.7910 | 6.0305 | 0.238 | 0.778 | yes |
+| kostya/collatz | 173.2065 | 300.7425 | 223.6250 | 0.587 | 0.790 | yes |
+| r7rs/fibfp | 0.5515 | 0.6475 | 1.0876 | 0.874 | 0.522 | yes |
+| r7rs/fft | 0.0350 | 0.0720 | 0.0190 | 0.500 | 1.915 | no |
+| r7rs/nqueens | 0.5260 | 0.5665 | 0.3401 | 0.940 | 1.561 | no |
+| awfy/bounce | 0.0470 | 0.0540 | 0.0200 | 0.889 | 2.398 | no |
+| awfy/queens | 0.0220 | 0.0590 | 0.0159 | 0.386 | 1.453 | no |
+| beng/fannkuch | 0.2135 | 0.2620 | 0.1460 | 0.826 | 1.479 | no |
+| kostya/primes | 0.9740 | 2.2455 | 1.5972 | 0.448 | 0.629 | yes |
+| kostya/levenshtein | 0.8795 | 1.8650 | 0.8075 | 0.479 | 1.107 | yes |
+| kostya/brainfuck | 54.2765 | 78.8005 | 27.1310 | 0.697 | 2.018 | no |
+| larceny/paraffins | 0.0880 | 0.1290 | 0.0391 | 0.701 | 2.298 | no |
+| larceny/pnpoly | 1.7975 | 2.3865 | 1.8466 | 0.775 | 0.999 | yes |
+| larceny/ray | 0.1240 | 0.2080 | 0.1450 | 0.611 | 0.881 | yes |
+| beng/mandelbrot | 11.8830 | 13.2180 | 11.8511 | 0.905 | 1.008 | yes |
+| kostya/json_gen | 1.4215 | 4.7640 | 1.3816 | 0.304 | 1.051 | yes |
+| larceny/divrec | 0.9385 | 1.2235 | 5.1229 | 0.777 | 0.186 | yes |
+
+The original windows qualify **27/28 against Full MIR and 18/28 within 20%
+of C2MIR and both gates**. The retained 10% diagnostic qualifies **17/28**.
+Sumfp remains unresolved here because the original samples include zero.
+
+The interleaved before/after comparison establishes these improvements:
+
+| Benchmark | Faster than prior MVP | Before/after 95% interval |
+|---|---:|---:|
+| r7rs/tak | 13.3% | [0.857, 0.890] |
+| r7rs/fft | 18.6% | [0.795, 0.837] |
+| awfy/bounce | 10.5% | [0.855, 0.923] |
+| kostya/levenshtein | 40.9% | [0.583, 0.601] |
+
+Levenshtein newly qualifies at **1.089× C2MIR**, with **U95 1.107×**.
+It meets the requested 20% allowance, while narrowly missing the retained 10%
+diagnostic. Quicksort's before/after interval **[0.931, 1.036]** includes parity;
+its 2.2% lower median is not an established gain. Brainfuck's interval
+**[0.989, 1.009]** likewise includes parity. No resolved row's before/after
+95% interval lies wholly above 1.0 in this campaign.
+
+### Sumfp batch and remaining work
+
+[Separate matched Sumfp batch](../../test/benchmark/lambda_mvp/tune28_guarded_ranges_sumfp_2026-11-03.json)
+repeats each unchanged kernel 10,000 times, consuming every result inside the
+matched timer boundaries. It retains 100 samples and two warmups. This resolves
+the original row's clock limit and confirms its existing finite-reduction
+optimization; both MVP versions have the same median.
+
+| Batch | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms | U95 / Full | U95 / C2MIR |
+|---|---:|---:|---:|---:|---:|---:|
+| Sumfp ×10,000 | 0.0110 | 0.0110 | 739.2070 | 739.9825 | 0.00001513 | 0.00001507 |
+
+Combining the 27 resolved original windows with this explicitly separate batch
+qualifies **28/28 against Full MIR and 19/28 within 20% of C2MIR and both gates**.
+Re-evaluating the prior committed campaign at the same 20% allowance gives
+**18/28**. The retained 10% diagnostic remains **18/28** in both campaigns.
+The original zero-duration samples remain unqualified.
+
+The all-28 C2MIR target is **not met**. Nine misses remain: Sieve, Quicksort,
+FFT, NQueens, Bounce, Queens, Fannkuch, Brainfuck and Paraffins. FFT still has
+non-affine bit-reversal accesses outside the strided proof. Unknown array
+element ranges still require checked arithmetic in several integer kernels;
+scalar loop bounds do not prove those stored values finite (**S4.1.1–S4.1.2**).
+Allocation-heavy search also retains the normal runtime ownership costs
+(**S9.1.2**, **D4.3.1**, **D4.4.4v4**). Broader value-range and ownership proofs
+remain necessary before removing those checks or allocations.
+
+### Validation
+
+All **40 focused MVP groups** pass on the measured release, including the 28
+benchmark goldens, forced and seeded GC with freed-memory poisoning, and
+emission checks. Expanded cases cover nondividing strides, empty loops,
+changing limits, short arrays, negative indices, snapshots, invariant and
+varying character indices, Unicode, NUL versus absence, NaN on either side of
+every comparison, nested counts, contracting subtraction and overflow after
+counter resets.
+
+The final `make test-lambda-baseline` records **8,518/8,520**, including
+**279/279 MIR emission**, **350/350 forced-GC**, **849/849 JS MVP** and
+**47/47 item representation** tests. The two failures are:
+
+- `docx_docx_business_plans`: the existing 60-second timeout. All three
+  separate-process isolated reruns pass in **24.119, 24.216 and 24.114 seconds**.
+- `proc_mir_mvp_roots`: the known AUTO-tier cold-float snapshot mismatch,
+  final `false` instead of `true`. The prior and final release both reproduce
+  identical output. Its MVP-mode focused test passes.
+
+These reruns do not turn the aggregate result into a clean pass. No expected
+output, test selection or timeout was relaxed. Logs are under
+`temp/lambda_mir_mvp/tune28h/`: `focused10.log`, `baseline10.log`,
+`baseline10-details.log`, `docx-isolated10.log`, `start-release.exe.roots.txt`
+and `step10-release.exe.roots.txt`. The root `lambda.exe` remains the baseline's
+debug build; all timing explicitly selects the pinned release.
+
+```sh
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28h/start-release.exe \
+  --runs 100 --warmups 2 --c2mir-allowance-percent 20 \
+  --output temp/lambda_mir_mvp/recheck28.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28h/step10-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28h/start-release.exe \
+  --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
+  --c2mir-allowance-percent 20 --output temp/lambda_mir_mvp/recheck_sumfp.json
+```

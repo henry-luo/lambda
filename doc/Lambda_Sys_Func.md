@@ -1920,6 +1920,76 @@ pn find_docs() {
 
 In a directory, files are selected as `io.grep` selects them. A source that does not exist raises an error (E401). `io.text_search` is a procedure: its result depends on the file system. It runs on `lib/fts`, which reuses `lib/grep`'s walk and its literal search to skip files that hold none of the query's words (`vibe/Lambda_IO_Fulltext_Search.md`). Files are searched as plain text; extracting the text of HTML, Markdown or PDF is planned.
 
+#### lambda.io.websocket
+
+Task-owned WebSocket IO, imported as `import ws: lambda.io.websocket`
+(**D7.2.4v4**). These are procedures (**S12.1.1v3**); network waits park the
+calling task (**S13.1.2v2**) while other tasks and windows continue running.
+
+| Procedure | Returns | Description |
+|-----------|---------|-------------|
+| `ws.open(url, options?)` | connection | Connect to `ws://` or verified `wss://` and perform the HTTP Upgrade handshake |
+| `ws.send(connection, data)` | `null` | Write one text or binary message; `null` sends empty text |
+| `ws.receive(connection, timeout_ms?)` | `{type, data, code, was_clean}` | Wait for a complete message or peer close; timeout defaults to zero (unlimited) |
+| `ws.close(handle, code?, reason?)` | `null` | Close with status 1000 by default, or close a listener; repeated close is harmless |
+| `ws.listen(port, options?)` | listener | Listen on IPv4 loopback only; zero selects a free port, available as `listener.port` |
+| `ws.accept(listener, timeout_ms?)` | connection | Accept a native or permitted browser client and complete its Upgrade handshake |
+
+`open` options: `timeout_ms` (default 30000, range 1–3600000),
+`max_message_bytes` (default 1048576, range 1–16777216), `ca_file`
+(an optional certificate authority file), `protocols` (one subprotocol or an
+array of distinct HTTP tokens), and `origin` (optional Origin header).
+HTTP/HTTPS URL schemes are accepted as WS/WSS aliases; fragments are rejected.
+An offered subprotocol requires the server to select one of the offers.
+Read the selection as `connection.protocol` while the connection is open.
+WSS always verifies the certificate
+chain and hostname, using the host trust store unless `ca_file` is supplied.
+Credentials embedded in URLs are rejected. There is no insecure TLS option.
+
+`receive` returns `type: "text"`, `"binary"`, or `"close"`. `data` is the
+message/reason; `code` is zero for messages and the peer's close status for a
+close (1005 when no status was supplied). A timeout raises 406 and retains
+partial input for a subsequent receive. An abnormal disconnect or invalid
+frame raises 405 and closes the connection. One reader and one writer may run
+concurrently; another operation in the same direction fails explicitly.
+Send completion means bytes were written, not that an application persisted,
+delivered or read them. Application acknowledgments remain separate.
+
+Connections/listeners close when their acquiring task ends, matching the
+current `lambda.io.mail` lifetime; block-scoped resources (**S12.4.2**) are
+not implemented by this API. Explicit close finishes queued frame writes and
+waits for the peer's closing handshake, bounded to five seconds. If another
+task is receiving, that task completes the handshake and receives the close
+event. Close reasons must be valid UTF-8 of at most 123 bytes. Cancellation wakes waits and closes
+an interrupted connection. Buffers are bounded; text and close reasons are
+UTF-8 validated, client frames are randomly masked, fragmented messages are
+reassembled, and ping/pong is handled automatically.
+
+Listener options are `origins` (one exact Origin or an array), `protocols`
+(server preference order), and `max_message_bytes` (the same default/range as
+`open`, inherited by accepted connections for receiving and sending).
+By default requests carrying Origin are refused;
+allow a browser explicitly, for example
+`ws.listen(0, {origins: ["http://localhost:8080"], protocols: ["chat.v1"]})`.
+No-Origin native clients remain permitted. TLS listeners, general `serve`
+Upgrade routes, application credentials and compression/extensions remain
+outside this milestone. See `lambda demo chat` and
+[the chat plan](../vibe/impl/Lambda_Impl_Chat.md) for the application layer.
+
+Browser document realms also expose the [WHATWG `WebSocket` API](https://websockets.spec.whatwg.org/):
+`new WebSocket(url, protocols?)`, the four state constants, `url`, `readyState`,
+`bufferedAmount`, `protocol`, `extensions`, `binaryType`, `send`, `close`, and
+the open/message/error/close EventTarget events and handler properties.
+Binary messages use Blob by default or ArrayBuffer when selected; sending
+supports strings, Blob, ArrayBuffer and views with byte offsets. `close()`
+queues after earlier sends and uses an empty close body when no arguments
+are given. `CloseEvent` exposes readonly `wasClean`, `code`, and `reason`.
+The browser adapter uses the same transport and browser-profile cookies;
+native tasks perform IO, so a JavaScript entry never parks a host frame
+(**D7.4.2v2**). This is a document API, outside the core-global allowlist
+(**D7.3.1**). See the implementation plan for qualification and remaining
+Fetch-policy/standards coverage; this is not a claim of full WPT conformance.
+
 #### lambda.io.mail
 
 IMAP and POP3 sessions and SMTP sending, as a built-in module at `lambda.io.mail` (D7.2.4v4). Import it with an alias: `import mail: lambda.io.mail`. An unaliased import is refused, because its `open` and `send` would shadow the built-in ones; the fully qualified spelling `lambda.io.mail.open(…)` needs no import. All four functions are procedures and park the calling task. curl connects, secures and logs in; after login the runtime speaks IMAP itself, waiting on the event loop rather than a worker thread (`vibe/Lambda_Demo_Mail.md` §2.5, §5.3).

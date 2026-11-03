@@ -74,6 +74,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_string_forward.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_flags.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_fn_local.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -312,6 +314,12 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_int_lane_add_slow", body)
         self.assertIn("lambda_int_lane_sub_slow", body)
 
+    def test_readonly_array_tail(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_recursive_arrays.ls", "collecting_tail")
+        self.assertNotRegex(body, r"\tcall\tmvp_\d+_collecting_tail_dp")
+        self.assertRegex(body, r"\tcall\t(?:fn_fill|lambda_fill_for_contract)")
+        self.assertIn("lambda_type_check", body)
+
     def test_guarded_recursive_arrays(self):
         source = ROOT / "test/benchmark/awfy/queens2.ls"
         body = self.function_mir(source, "place_queen")
@@ -336,11 +344,45 @@ class LambdaMirMvpTests(unittest.TestCase):
             boundary = following[:following.index("\tbne\t")]
             self.assertEqual(boundary.count("lambda_type_check"), 0, name)
 
+    def test_native_constructor_lanes(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        for name in ("freshly", "float_values", "bool_values"):
+            body = self.function_mir(source, name)
+            native = body[:body.index("\tcall\tlambda_fill_primitive_bits")]
+            self.assertNotRegex(native, r"\tcall\t(?:int2it_lane|push_d|lambda_fill_for_contract)")
+            self.assertIn("lambda_fill_for_contract_int_lane_resolved", body)
+
+    def test_readonly_constant_constructor(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        body = self.function_mir(source, "constant_argument")
+        self.assertNotRegex(body, r"\tcall\t(?:lambda_fill_|fn_fill)")
+        for name in ("mutable_argument", "retained_argument", "forwarded_argument"):
+            body = self.function_mir(source, name)
+            self.assertIn("lambda_fill_primitive_bits", body)
+
     def test_adjacent_copy_loop(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_copy_loops.ls", "adjacent")
         native = body[:body.index("\tcall\tfn_index")]
         self.assertGreater(native.count("\tublt\t"), 0)
         self.assertEqual(native.count("\tcall\tlambda_array_set_checked_item"), 0)
+
+    def test_native_bitwise_tree(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_shift.ls", "packed")
+        # both native operations precede the first Item payload mask/boxing.
+        native = body[:body.index("\tand\t")]
+        self.assertIn("\tlsh\t", native)
+        self.assertIn("\tor\t", native)
+        self.assertIn("fn_bor_item", body)
+
+    def test_guarded_array_branch(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls", "conditional_swap")
+        native = body[:body.index("\tcall\tfn_index")]
+        self.assertRegex(native, r"\tdmov\td:\d*\(%")
+        self.assertIn("lambda_array_set_checked_item", body)
+
+    def test_singleton_integer_constants(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_flags.ls", "constants")
+        self.assertNotIn("mvp_module_scalar", body)
 
     def test_power_two_divmod(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls"
@@ -358,9 +400,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_single_use_string_constructor(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
-        # the 25-piece object contributes directly to its owner prefix.
-        self.assertRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 1, 26,")
-        self.assertNotRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 0, 25,")
+        # coalesced literal runs and integer lanes join directly into the owner.
+        self.assertRegex(body, r"\tcall\tfn_strcat_values_[^\n]+, 1, 8,")
+        self.assertNotRegex(body, r"\tcall\tfn_strcat_(?:many|values)_[^\n]+, 0, (?:7|25),")
+        self.assertNotRegex(body, r"\tcall\t(?:fn_string_p|mvp_\d+_json_num_)")
 
     def test_assignment_failure_names_binding(self):
         source = Path(self.scratch.name) / "assignment.ls"

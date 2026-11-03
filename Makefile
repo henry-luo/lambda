@@ -81,6 +81,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_zip_gtest \
 	test_lambda_gtest \
 	test_input_script_cache_gtest \
+	test_security_runtime_gtest \
 	test_lambda_parser_poc_gtest \
 	test_mir_gc_stress_gtest \
 	test_mir_ratchet_gtest \
@@ -1723,8 +1724,22 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
+# Independent RFC 6455 peers, including TLS and malformed input.
+.PHONY: test-websocket
+test-websocket: build
+	$(PYTHON) test/websocket/test_websocket.py
+	node test/websocket/test_browser_websocket.cjs
+
+.PHONY: test-chat-clients
+test-chat-clients: build
+	$(PYTHON) test/demo/chat/test_shared_clients.py
+	$(PYTHON) test/demo/chat/test_media.py
+
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@echo "Running WebSocket interoperability gate..."
+	@$(PYTHON) test/websocket/test_websocket.py
+	@node test/websocket/test_browser_websocket.cjs
 	@echo "Running Lambda concurrency runtime gate..."
 	@./test/test_lambda_concurrency_gtest.exe
 	@echo "Running extended Lambda runtime gate..."

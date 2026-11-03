@@ -226,9 +226,16 @@ Consequence for editors: CKEditor 5 or a Lexical shell hosted *inside* a shadow
 root is out of scope, as is any Shoelace/Material-Web toolbar. The same editors
 running in light DOM are in scope.
 
-### 3.2 No WebSocket, no Worker
+### 3.2 WebSocket and Worker
 
-- **`WebSocket`** — not supported (empty stub remains for feature detection). Live-socket apps are out of scope for the embedded browsing/rendering use case.
+- **`WebSocket`** — browser document realms now expose the WHATWG constructor,
+  state, EventTarget events, binary modes and asynchronous send/close queue.
+  The transport is shared with `lambda.io.websocket` (**D7.2.4v4**); IO runs
+  on native tasks outside the JS host frame (**D7.4.2v2**), and document
+  retirement cancels it (**D5.3.3**). Chromium/native interop and focused
+  browser API tests are in `test/websocket`. See
+  [the chat implementation plan](../impl/Lambda_Impl_Chat.md#6-websocket-web-interoperability-requirement-2026-11-02)
+  for the supported milestone and remaining conformance work.
 - **`Worker`** — not supported as a Web API and is absent from `window`, so feature detection selects a library's main-thread fallback rather than waiting on an inert pseudo-worker. Concurrency in Radiant follows the Lambda v3 model — pages as isolates, `start` tasks, mailboxes (`Radiant_Design_Concurrency.md` RC1–RC8) — not the Worker/postMessage-with-structured-clone model. A page needing background compute uses the Lambda surface, not `new Worker()`. *Open:* §2.7 may need a scoped exemption for `OffscreenCanvas.transferControlToOffscreen`, since worker-rendered canvas is common in the canvas-editor class — settle it before that track's phase 1.
 
 ### 3.3 IndexedDB — KIV
@@ -308,7 +315,7 @@ Practical notes: (a) new runners should clone the `test_wpt_selection_gtest.cpp`
 
 ## 5. Library compatibility ladder
 
-Beyond jQuery/Bootstrap, these pure-DOM libraries validate the surface — chosen because each stresses a *different* subsystem, and none require the §3 non-goals (no Shadow DOM/customElements, no Worker/WebSocket). Ordered by when they become viable.
+Beyond jQuery/Bootstrap, these pure-DOM libraries validate the surface — chosen because each stresses a *different* subsystem, and none require the §3 non-goals (no Shadow DOM/customElements or Worker). Ordered by when they become viable.
 
 ### 5.1 Near-term — implemented
 

@@ -12,6 +12,7 @@
 // model (auto-close at block end) is not implemented yet (ML3).
 
 #include "io_file_search.hpp"
+#include "io_resource.hpp"
 #include "concurrency.h"
 #include "lambda-number-runtime.hpp"
 #include "re2_wrapper.hpp"
@@ -519,21 +520,9 @@ static Item mail_transfer_error(const char* fn, const MailTransfer* t, const cha
 
 static char mail_session_brand;
 
-static Item mail_handle_get(void* data, Item key) { (void)data; (void)key; return ItemNull; }
-static void mail_handle_set(void* data, Item key, Item value) {
-    (void)data; (void)key; (void)value;
-    log_error("io.mail: sessions are immutable");
-}
-static int64_t mail_handle_count(void* data) { (void)data; return 0; }
-static SymbolKeyList* mail_handle_keys(void* data) { (void)data; return NULL; }
-static Item mail_handle_at(void* data, int64_t index) { (void)data; (void)index; return ItemNull; }
-// the owning task releases the session; the handle owns nothing
-static void mail_handle_destroy(void* data) { (void)data; }
-static void mail_handle_trace(void* data, gc_heap* gc) { (void)data; (void)gc; }
-
 static VMapVtable mail_handle_vtable = {
-    mail_handle_get, mail_handle_set, mail_handle_count, mail_handle_keys,
-    mail_handle_at, mail_handle_at, mail_handle_destroy, mail_handle_trace,
+    io_resource_get, io_resource_set, io_resource_count, io_resource_keys,
+    io_resource_at, io_resource_at, io_resource_destroy, io_resource_trace,
 };
 
 static MailSession* mail_session_of(Item item) {
@@ -1110,16 +1099,11 @@ static Item mail_publish(MailSession* s, const char* fn) {
         mail_session_free(s);
         return mail_error(ERR_INVALID_STATE, fn, "a mail session needs a running procedure");
     }
-    VMap* handle = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
+    VMap* handle = io_resource_handle_new(&mail_handle_vtable, &mail_session_brand, s);
     if (!handle) {
         mail_session_close(s);
         return mail_error(ERR_INTERNAL_ERROR, fn, "out of memory");
     }
-    handle->type_id = LMD_TYPE_VMAP;
-    handle->vtable = &mail_handle_vtable;
-    handle->host_type = &mail_session_brand;
-    handle->host_data = s;
-    handle->data = s;
     s->handle = (Item){.vmap = handle};
     heap_register_gc_root(&s->handle.item);
     s->handle_rooted = true;

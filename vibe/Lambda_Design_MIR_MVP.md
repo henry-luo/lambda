@@ -1,6 +1,6 @@
 # Lambda MIR MVP — typed execution on the existing runtime
 
-**Date:** 2026-11-02
+**Date:** 2026-11-03
 
 **Status:** experimental scalar/array compiler behind an explicit selector,
 with bounded inlining, guarded numeric loops, checked mutation and precise
@@ -8,21 +8,28 @@ with bounded inlining, guarded numeric loops, checked mutation and precise
 Coverage now extends to **28 rows**, including floating recursion, FFT,
 allocation-heavy search, dynamic arrays, character processing, numerical kernels
 and JSON generation. All 28 original goldens pass; allocation workloads also
-pass forced GC with freed-memory poisoning. The latest 30-run paired tuning
-campaign qualifies **25/28** against Full MIR, **16/28** against the C2MIR
-allowance, and **15/28** against both. The latest pass reuses typed-constructor
-admission, establishes fresh array storage witnesses, extends native copy loops
-to constant index offsets, and lowers guarded modular updates and power-of-two
-integer division/remainder (**S4.1.2**, **S9.1.2–S9.1.3**). Against the
-interleaved previous MVP, NQueens improves 33%, Brainfuck 20%, Queens 16% and
-Fannkuch 9%. NQueens still misses Full MIR; Beng Mandelbrot's confidence bound
-reaches parity, so its faster median does not qualify in this campaign. Sumfp
-remains below the original clock's resolution and unqualified pending longer
-matched timing. All 34 focused test groups pass; the required baseline is
-8,501/8,502 with the previously recorded AUTO-tier cold-float snapshot failure.
-The full 28-row performance milestone remains open.
-See the
-[implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
+pass forced GC with freed-memory poisoning. The latest 100-sample campaign
+qualifies **27/28 against Full MIR and 18/28 within the requested 20% of C2MIR**
+using the original execution windows. A separate matched 10,000-invocation
+Sumfp batch resolves that row's clock limit, bringing combined qualification to
+**28/28 against Full MIR and 19/28 within 20% of C2MIR (and both gates)**.
+The previous campaign qualifies 18/28 under the same 20% allowance; the
+retained 10% diagnostic remains 18/28. Original zero-duration samples remain
+recorded and unqualified. These are execution-window timings, excluding
+compilation and startup, with one-sided 95% paired confidence gates.
+
+The latest pass guards strided array and ASCII accesses outside closed loops,
+loads invariant characters once, strengthens finite integer recurrence bounds,
+and emits integer comparison branches directly (**S4.1.1–S4.1.2**,
+**S4.2.1–S4.2.3**, **S6.1.2v2**, **S7.1.1v3**, **D4.4.4v4**). Runtime types and
+data layouts remain unchanged. Against the interleaved previous MVP,
+Levenshtein improves **40.9%**, FFT **18.6%**, Tak **13.3%** and Bounce **10.5%**.
+Levenshtein newly qualifies at **1.089× C2MIR**, with a confidence upper bound
+of **1.107×**. Nine C2MIR gaps remain; the all-28 performance milestone is open.
+All **40 focused test groups** pass. The aggregate baseline records **8,518/8,520**;
+the DOCX timeout passes three isolated reruns, and the known AUTO-tier
+cold-float snapshot mismatch reproduces on both releases. See the
+[implementation, complete measurements and validation](impl/Lambda_Impl_MIR_MVP.md).
 
 **Destination:** `lambda/runtime/mvp/`
 
@@ -382,16 +389,20 @@ weak. Require successful exit and absence of failures as well. The existing
 runner's `ok` status alone is insufficient: [Developer Guide §7.4](../doc/dev/Developer_Guide.md#74-test-gotchas)
 states that it does not compare output with goldens.
 
-### 8.2 Proposed performance gates
+### 8.2 Performance gates
 
-These are targets to qualify, not promised results:
+The user revised the current target on 2026-11-03 to **every one of the 28
+covered rows within 20% of C2MIR or faster**. Qualification uses each row's
+one-sided 95% paired-bootstrap upper ratio bound, at most **1.20×**. The runner
+records `c2mir_allowance_percent` and `within_c2mir_allowance`; it also retains
+the 10% diagnostic and the Full MIR comparison. Historical reports keep their
+original gates. Zero-resolution observations require a separate, matched batch
+before qualification. This changes the requested performance target, not a
+language or runtime ruling.
 
-- **Near-C2MIR milestone:** upper 95% confidence bound for the geometric mean
-  of MVP/C2MIR execution ratios at most **1.10×**, and no admitted row's median
-  above **1.25×**, on the frozen, audited eight-row population with matched timer
-  boundaries. This includes workload allocation and GC; kernel-only results
-  cannot satisfy this gate. Report individual rows so a fast control cannot
-  hide a large miss.
+- **Per-row milestone:** all 28 audited workloads meet the bound above with
+  matched execution windows, including allocation and GC. A geometric mean
+  cannot compensate for a failing row.
 - **Per-row parity claim:** reserve “as fast as C2MIR” for a row whose measured
   uncertainty establishes no more than 10% overhead; overlapping error bars
   alone do not establish equivalence. The optimization target remains 1.00×.

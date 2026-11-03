@@ -1242,6 +1242,9 @@ extern "C"
 #endif
 bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count);
 
+struct TypeString;
+extern "C" TypeString* ast_string_literal_type(AstNode* node);
+
 // Like ast_unwrap_primary, but a primary that carries its value itself (a
 // literal: `expr` is NULL) is returned instead of NULL.
 static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {

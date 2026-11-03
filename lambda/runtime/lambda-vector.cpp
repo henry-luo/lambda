@@ -1867,6 +1867,12 @@ Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane) {
     case ELEM_BOOL: bits = it2b(value) ? 1 : 0; break;
     default: return ItemError;
     }
+    return lambda_fill_primitive_bits(count, bits, lane, NULL);
+}
+
+Item lambda_fill_primitive_bits(int64_t count, uint64_t bits, ArrayNumElemType lane,
+        ArrayRepCert* cert) {
+    // native callers prove the scalar lane; allocation and precise construction roots stay shared.
     ArrayNum* result = array_num_new_uninit(lane, count);
     if (!result || result->length != count) return ItemError;
     if (lane == ELEM_BOOL || bits == 0) {
@@ -1879,7 +1885,9 @@ Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane) {
         for (int64_t i = 0; i < count; i++)
             memcpy(slots + i * sizeof(bits), &bits, sizeof(bits));
     }
-    return {.array_num = result};
+    Item built = {.array_num = result};
+    if (cert) lambda_array_install_rep_cert(built, cert);
+    return built;
 }
 
 Item fn_fill(Item n_item, Item value) {

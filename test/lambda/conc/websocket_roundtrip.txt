@@ -1,0 +1,1 @@
+[[["text", true], ["binary", true], ["text", true]], [["text", "binary", "text"], "close", 1000]]

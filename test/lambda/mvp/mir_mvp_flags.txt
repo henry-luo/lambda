@@ -1,0 +1,9 @@
+0 1 1 1
+0 1 1 0 0
+7 1 nan
+condition 0 condition 1
+12
+11 50 50 0
+10 51
+30 11
+true false false true true

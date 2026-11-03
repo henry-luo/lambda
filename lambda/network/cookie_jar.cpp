@@ -594,7 +594,7 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     pthread_mutex_unlock(&jar->lock);
 }
 
-static char* cookie_jar_build_document_header(CookieJar* jar, const char* request_url) {
+static char* cookie_jar_build_header(CookieJar* jar, const char* request_url, bool http_only) {
     if (!jar || !request_url) return NULL;
 
     bool is_secure = str_istarts_with(request_url, strlen(request_url), "https:", 6);
@@ -627,7 +627,7 @@ static char* cookie_jar_build_document_header(CookieJar* jar, const char* reques
         if (e->expires > 0 && e->expires <= now) continue;
         // secure check
         if (e->secure && !is_secure) continue;
-        if (e->http_only) continue;
+        if (e->http_only && !http_only) continue;
         // domain match
         if (!cookie_domain_matches(req_host, e->domain)) continue;
         // path match
@@ -646,6 +646,10 @@ static char* cookie_jar_build_document_header(CookieJar* jar, const char* reques
 
     // build header
     char* header = (char*)mem_alloc(buf_size + 1, MEM_CAT_NETWORK);
+    if (!header) {
+        pthread_mutex_unlock(&jar->lock);
+        mem_free(req_host); mem_free(req_path); return NULL;
+    }
     char* p = header;
     int written = 0;
 
@@ -653,7 +657,7 @@ static char* cookie_jar_build_document_header(CookieJar* jar, const char* reques
         CookieEntry* e = jar->entries[i];
         if (e->expires > 0 && e->expires <= now) continue;
         if (e->secure && !is_secure) continue;
-        if (e->http_only) continue;
+        if (e->http_only && !http_only) continue;
         if (!cookie_domain_matches(req_host, e->domain)) continue;
         if (!path_matches(req_path, e->path)) continue;
 
@@ -680,7 +684,11 @@ static char* cookie_jar_build_document_header(CookieJar* jar, const char* reques
 }
 
 char* cookie_jar_build_document_cookie(CookieJar* jar, const char* request_url) {
-    return cookie_jar_build_document_header(jar, request_url);
+    return cookie_jar_build_header(jar, request_url, false);
+}
+
+char* cookie_jar_build_request_cookie(CookieJar* jar, const char* request_url) {
+    return cookie_jar_build_header(jar, request_url, true);
 }
 
 void cookie_jar_clear_expired(CookieJar* jar) {

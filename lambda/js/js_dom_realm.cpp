@@ -23,6 +23,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../dom/dom.h"
+#include "../dom/dom_websocket.h"
 #include "../dom/dom_core.h"
 #include "../dom/dom_engine.h"
 #include "../dom/dom_canvas.h"
@@ -1143,6 +1144,7 @@ extern "C" void dom_install_collection_globals(void) {
     }
     js_dom_install_interface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
+    js_websocket_install(global, _iface_proto(global, "EventTarget"));
     dom_publish_value_constructor(global, "BroadcastChannel",
         js_new_native_body_constructor(broadcast_call, broadcast_construct, 1), true);
     _link_iface_proto(global, "BroadcastChannel", "EventTarget");
