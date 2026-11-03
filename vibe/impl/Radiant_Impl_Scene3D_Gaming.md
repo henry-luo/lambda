@@ -6208,3 +6208,37 @@ ui-normal-status.json,ui-asan-status.json,qualification-status.json,
 qualification-*.log,qualified-source-hashes.json,lambda-carry-forward.json,
 document-checks.json,checkpoint.json}`. The earlier `unfinished.patch` is an
 archived starting point, superseded by this qualified implementation.
+
+### Remote master integration — qualified 2026-11-03
+
+**Integrated contract:** combine component tip `7168800e8` with published master
+`460cf22ea`, including its error-contract and Ruby layout changes. Retain the
+explicit bridge, output gate and approved microphone policy under
+**D7.5.3v2 / D7.5.4 / D7.5.9**. Formal Design is version 60.1.0 with a regenerated
+index. The capture/routing scope and remaining milestones above are unchanged.
+
+**Qualification:** the merged runtime passes 200 focused native audio/provider
+cases, with one opt-in device skip, and 30 imported replays across JS AST/MIR
+and Lambda interpreter/JIT/AUTO with forced/poisoned GC. After incorporating the
+four published Ruby commits, the fresh Radiant gate passes 9,163 cases, with
+305 configured partial cases, two skips and zero failures (9,470 total). All
+six imported capture-routing combinations pass again on that final build.
+Lambda/Input passes 8,707/8,707; the subsequent Ruby-only changes leave its
+runtime/package/parser sources unchanged. Strict module-boundary validation
+passes with 133 imports against baseline 165; dimension lint, formal-index and
+whitespace checks pass. All 75 integration file hashes remain stable through
+qualification before this documentation receipt.
+
+**Build limit:** the all-target baseline build exposed a duplicate PDF fixture
+reader; reusing `file_read_all` removes the conflicting symbol and all 33 PDF
+tests pass. The broader all-target build still stops at the existing standalone
+source-position fixture's missing GC-root/error-runtime linkage. Its fixture,
+project entry and affected runtime files match published master; no no-op
+rooting stubs or test suppressions were added. Required Lambda/Input and Radiant
+gates run independently and pass as recorded above.
+
+**Retention:** qualification logs, runners, source hashes, JSON reports and the
+earlier component evidence are archived outside the retiring worktree under
+`temp/scene3d-merge-20261103-7168800e8/{checks,reports,runners,evidence}`.
+No physical microphone or permission dialog was accessed. The broader Scene3D
+goal remains unfinished at the component boundaries recorded above.

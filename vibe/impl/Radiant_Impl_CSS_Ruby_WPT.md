@@ -13,7 +13,11 @@ and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
 source fragmentation remain open. Completed-line trailing spaces and bounded
 Ruby column reconciliation are qualified; hidden-annotation CSSOM exposure and
 float exclusion for internally split Ruby remain open. Whole unbroken Ruby
-float bands are qualified. The objective is not complete.
+float bands, relative-offset composition and block-axis annotation margin
+envelopes are qualified. Inline margin contributions and source border-box
+publication are also qualified. The objective is not complete.
+Semantic line-over/under mapping and internal block-start padding are qualified
+for ordinary Ruby across horizontal and both vertical writing modes.
 
 ## Objective and contracts
 
@@ -2355,3 +2359,284 @@ direct/inherited geometry agrees with Chromium, and current CSS Ruby §5.1
 aliases `none` to `spaces`; `auto` overhang amount remains UA-defined. No patch
 is made from that older-spec hypothesis. Evidence and next plan:
 `temp/ruby-m25/{overhang-none-comparison.json,next-milestone.json}`.
+
+## M26: relative offsets survive Ruby column and line placement
+
+P1, qualified. The three causal
+behaviors asserted by imported `position-relative.html` are checked separately
+from its test-report UI. Ruby and ordinary ancestor motion already work, but
+column/late annotation placement cancels the reading's own `left`/`top`. The
+relative-descendant walk also enters atomic local content, translating glyphs
+again. Fresh explicit-font controls and completed read-only debugger callbacks
+prove these owners; the first trace stops on an optimized-out variable and is
+excluded. Evidence: `temp/ruby-m26/{relative-comparison-before.json,
+relative-trace-2.log}`.
+
+[CSS Position §3.3](https://www.w3.org/TR/css-position-3/#relative-positioning)
+keeps relative movement separate from normal-flow sizing. Ruby now derives its
+column and annotation-level constraints from normal-flow rectangles while
+publishing the corresponding visual offsets. The existing applied inline-Y
+accumulator is generalized to a scoped offset pair, shared by Ruby and generic
+inline bounds. Ordinary ancestor offsets stay in the shared Ruby frame; only
+internal offsets are removed from constraints. The shared descendant walk stops
+at independent atomic frames.
+
+An atomic base exposes a second stage dependency: declared offsets can still be
+deferred, so they cannot be subtracted as though already applied. PositionProp
+records both applied components. Fresh inline/atomic placement resets them;
+repeated vertical alignment retains the already shifted X while rebuilding Y.
+The generic inline-bounds path reads those facts too, converting source-axis
+facts after vertical publication. Full flow results already copy PositionProp
+by value. Scalar measurement scopes now preserve both applied components beside
+the restored geometry (**D4.5.1v4 / D4.1.4v5**). No formal ruling changes.
+
+The strict regression covers root/ancestor/annotation accumulation, an atomic
+reading and a relatively positioned atomic base, unaffected following siblings,
+negative/reset offsets, original source identity, per-character Range and visible
+glyph positions through initial/retained CSSOM edits. Glyph captures use their
+documented local origin; document-coordinate assertions add the resolved text
+frame origin. A real percentage-inset trial changes the containing dimensions,
+then verifies restoration of the original position and column bounds.
+
+All five rows agree with Chromium on **432 element/source coordinates** across
+initial, accumulated and negative states, with 0px maximum delta. The qualified
+M25 build differs on 15 coordinates in the shifted state, up to 100px. All **154
+affected neighboring tests** pass after the scalar-snapshot completion, including
+the focused restoration regression. All **492 native text-query tests** also pass
+in the final aggregate.
+Evidence:
+`temp/ruby-m26/{browser-comparison-final.json,browser-comparison-qualified-before.json,
+neighbors-final.log,focused-relative-final.log}`.
+
+The raw Ruby suite remains **56/212 full matches**, with none gained or lost.
+`position-relative` improves from **66.7% to 100% text** and **33.3% to 50%
+elements**, with no other score changes. Its source container, Ruby, reading and
+all text rectangles now agree exactly. The remaining element mismatch is the
+browser's generated 642.67px report panel and its effect on document dimensions;
+no reporting shim or reference change conceals it. Optional default overhang
+in an earlier unequal-width control stays separate from the exact equal-width
+controls. Evidence: `temp/ruby-m26/{wpt-qualified-candidate.log,delta-qualified-candidate.json,
+original-remaining-difference.json}`.
+
+The required Radiant aggregate passes: **9,088 passed, 305 partial, 2 skipped,
+0 failed / 9,395 checks**, including **504 paged-media** and **752 UI automation**
+checks. Layout retains 4,973 full / 301 partial matches. Dimension lint and the
+421-name inventory check pass; only source/test reference columns change.
+Strict boundary DSOs link, but the checker rejects the same six recorded
+deferred imports as M25, with no new import or allowlist change. All eleven
+frozen source inputs and the qualified CLI hash remain unchanged after the
+gate. Evidence: `temp/ruby-m26/{source-inputs.json,radiant.log,
+qualification-result.json,boundary-comparison.json,lint-final.log}`.
+
+The goal remains active with 156 raw mismatches. The next finite milestone
+addresses block-axis annotation margins: explicit-font over/under controls
+show that an 11px separating margin is ignored while padding and borders agree
+with Chromium; repeated lines advance 30px instead of 50px. CSS Ruby §3.1.2
+requires margin-box level envelopes. Hidden-annotation CSSOM exposure stays
+deferred: Chromium's collapse probe retains layout effects contrary to §2.4,
+so its geometry alone cannot justify a repair. Diagnosis and acceptance cases:
+`temp/ruby-m26/{margin-comparison-before.json,margin-multiline-browser.json,
+next-milestone.json}`.
+
+## M27: block-axis margin envelopes for interlinear levels
+
+P1, qualified. Imported
+`ruby-annotation-with-margin` and `interlinear-block-margin-box` expose an
+ordinary reading/base separation defect. Explicit-font over/under controls
+reproduce an ignored 11px separating margin while padding/border controls
+agree. With 9px/11px outer margins, successive 20px base lines advance only
+30px instead of 50px. The qualified M26 binary differs from Chromium on 48
+coordinates in the strict fixture. Evidence:
+`temp/ruby-m26/{margin-comparison-before.json,margin-multiline-browser.json}`
+and `temp/ruby-m27/{focused-before.log,browser-comparison-before.json}`.
+
+[CSS Ruby §3.1.2](https://drafts.csswg.org/css-ruby-1/#interlinear-block) sizes
+base/annotation containers around their units' margin boxes. The shared
+normal-flow bounds adapter now includes block-axis margins for computed
+ruby-base/ruby-text roles, using the existing line-relative boundary-edge
+mapping. Column width and published source border boxes retain their existing
+owners; level stacking and line-leading contribution consume the corrected
+envelope. No tag exception, new storage, module API or formal ruling is added
+(**D4.5.1v4 / D4.1.4v5**, **D7.3.3–D7.3.4**).
+
+The strict regression checks two successive lines for over/under readings,
+plain and padding/border decorations, following atomic tails, source identity
+and first/last character rectangles. Initial, retained, zero-margin and changed
+margin states pass. Three browser states agree on all **588 element/source
+coordinates**, with 0px maximum delta. The first capture attempt used external
+normal-priority overrides that lost to the document stylesheet; recaptures
+explicitly give both engines the same override precedence. The native live
+CSSOM regression does not need that capture adapter. Evidence:
+`temp/ruby-m27/{focused-margin.log,browser-comparison.json,plan.json}`.
+
+All **182 affected neighboring tests** pass. The frozen raw suite reaches
+**57/212 full matches**, gaining `interlinear-block-margin-box` with no lost
+match. `ruby-annotation-with-margin` improves from 0% to 48.4% elements and
+44.4% text; no other partial score changes. Dimension lint and the 421-name
+inventory check pass, with only source/test reference columns changed. No
+module API/import changes require a new boundary audit; the recorded M26
+six-import checker limitation is not claimed resolved. Evidence:
+`temp/ruby-m27/{neighbors.log,wpt-final.log,delta-final.json,lint.log,
+inventory-check.log,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,089 passed, 305 partial, 2 skipped,
+0 failed / 9,396 checks**, including **493 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All four frozen source inputs and the qualified CLI hash remain
+unchanged after the gate. Evidence:
+`temp/ruby-m27/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 155 raw mismatches. The next finite milestone
+addresses inline-axis annotation margins. Fresh left/right/asymmetric controls
+show lost column width and reading offsets; 5px/15px margins contribute 80px
+instead of 100px to a minimum, and 90px instead of 110px to a maximum with a
+10px tail. A padding-only control already agrees with Chromium and can reuse
+the existing source-range/glyph comparison helper. Investigate both normalized
+intrinsic outer contributions and the conversion from column margin-box
+allocations to published border boxes before editing. Evidence and acceptance:
+`temp/ruby-m27/{inline-margin-comparison.json,inline-margin-intrinsic-comparison.json,
+inline-margin-control-comparison.json,next-milestone.json}`.
+
+## M28: inline margin contributions and source border-box publication
+
+P1, qualified. The
+remaining horizontal geometry in imported `ruby-annotation-with-margin` loses
+reading start/end margins from column sizing and placement. Fresh asymmetric
+controls also show 80px/90px parent min/max contributions where 100px/110px
+are required. Ordinary inline content in an anonymous base exposes the same
+owner. The qualified M27 binary differs on 40 of 396 initial element/source
+coordinates, up to 20px. Evidence: `temp/ruby-m28/{focused-before-base.log,
+browser-comparison-before.json}`.
+
+[CSS Ruby §3.1.1](https://drafts.csswg.org/css-ruby-1/#interlinear-inline) and
+[CSS Sizing §2.2](https://www.w3.org/TR/css-sizing-3/#intrinsic-contribution)
+require outer contributions. Ruby's normal-flow unit bounds now include inline
+margins, including ordinary inline sources inside anonymous units. A shared
+computed-role/line-relative adapter retains the existing special block-axis
+margins for ruby bases/readings. Column publication converts its allocated
+margin box back to a source border box, then applies the existing relative
+offset. Margins therefore affect constraints and flow advance without inflating
+the source border box or canceling its inset.
+
+Normalized intrinsic measurement now uses the ordinary inline parent's margin
+contribution calculation. That calculation is extracted into a shared layout
+helper rather than copied; existing segment-edge and length-resolution helpers
+retain their owners. Ordinary callers keep their existing policy for an
+unsegmented minimum that already consumed used margins. No new persistent
+state, source reparenting or formal ruling is added (**D4.5.1v4 / D4.1.4v5**);
+the helper remains inside the layout module (**D7.3.3–D7.3.4**).
+
+The strict regression covers left/right/asymmetric margins, padding/border
+controls, preferred min/max-content widths, a computed `ruby-text` span and
+an ordinary inline base. Initial/retained, zero and swapped margins preserve
+source identities, every character rectangle and visible glyph positions,
+using the existing source-pair comparison helper. All **183 affected neighbors**
+pass. Three browser states agree on **1,188 element/source coordinates**, with
+0px maximum delta. Initial test expectations incorrectly treated preferred
+min/max-content parent widths as unconstrained contributions; they now reflect
+the existing CSS Sizing preferred-size normalization, without an engine change
+for that contract. Evidence: `temp/ruby-m28/{focused-final.log,neighbors.log,
+browser-comparison-final.json}`.
+
+The frozen raw suite remains **57/212 full matches**, with none gained or lost.
+`ruby-annotation-with-margin` improves from 48.4% to **90.3% elements** and
+44.4% to **83.3% text**. `ruby-bidi-002-ref` also improves, with no other score
+change. Dimension lint and the 421-name inventory check pass; only source/test
+reference columns change. The shared declaration triggers a fresh boundary
+audit: strict DSOs link, while the checker rejects exactly the same six
+recorded deferred imports as M26, with no added import or allowlist change.
+Evidence: `temp/ruby-m28/{wpt-final.log,delta-final.json,lint.log,
+inventory-check.log,boundary-comparison.json,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,090 passed, 305 partial, 2 skipped,
+0 failed / 9,397 checks**, including **494 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All six frozen inputs and the qualified CLI hash remain unchanged
+after the gate. Evidence: `temp/ruby-m28/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 155 raw mismatches. All six horizontal readings
+in the original margin document now agree exactly. Its last three vertical-lr
+readings have matching sizes and inline positions, but lie on the opposite
+physical side of their bases. Fresh horizontal/vertical-rl/vertical-lr controls
+confirm that Ruby placement confuses semantic line-over/under with block-start/end;
+the ordinary inline formatter already has the required direction helper.
+The next milestone promotes and reuses that policy while tracing placement,
+line metrics and after-line alignment together. CSS Ruby §3.6 permits annotation
+overflow and requires sufficient spacing for equivalent repeated Ruby; a
+separate 41px/51px loose-line difference alone does not justify forcing
+Chromium's line-height choice. Evidence and bounded acceptance cases:
+`temp/ruby-m28/{original-remaining-difference.json,line-side-comparison.json,
+next-milestone.json}`.
+
+## M29: semantic Ruby sides use the line's source-axis mapping
+
+P1, qualified with the recorded BR/boundary limits below. The
+last three readings in imported `ruby-annotation-with-margin` have correct
+inline positions/sizes but appear on the wrong side in vertical-lr. Fresh
+horizontal/vertical-rl/vertical-lr controls reproduce the side reversal; the
+qualified M28 binary differs on 29 coordinates in the final initial fixture,
+up to 50px. Evidence: `temp/ruby-m29/{focused-before.log,
+browser-comparison-before.json}` and M28's original-case audit.
+
+[CSS Ruby §4.1](https://drafts.csswg.org/css-ruby-1/#rubypos) places annotations
+line-over/under, while [CSS Writing Modes §6.3](https://www.w3.org/TR/css-writing-modes-3/#line-directions)
+distinguishes those sides from block-start/end. The ordinary inline formatter's
+existing direction helper is promoted through the layout header and reused.
+Ruby alternation stays semantic; placement and extent measurement map that
+side into the owning flow's source block coordinates. Ascent/descent
+contributions retain their line-over convention. After-line placement uses
+the same mapping, rather than adding a final visual correction.
+
+Causal padding controls expose a second stage: M17's block-start-space adapter
+returned zero for every vertical context. Internal padding now uses the shared
+line-relative edge mapper, and the first line consumes that space from the
+corresponding semantic leading side. The existing external adjoining-margin
+protocol still uses physical Y; that separate vertical transfer remains open.
+No new persistent state or formal ruling is added (**D4.5.1v4 / D4.1.4v5**);
+the promoted helper stays inside the layout module (**D7.3.3–D7.3.4**).
+
+The regression covers ordinary and top/bottom/all margins in all three writing
+modes, three repeated Ruby lines, internal block-start padding, source identity
+and every reading character rectangle. Initial/retained and live under/over
+changes preserve physical side, separation and non-overlapping equivalent line
+envelopes. The padding assertions initially fail without the owning-stage fix
+and pass afterward without weakening expectations. All **230 affected neighbors**
+pass. Evidence: `temp/ruby-m29/{focused-padding-final.log,
+focused-padding-qualified-candidate.log,neighbors-final.log}`.
+
+Two full browser comparisons retain all **1,352 element/source coordinate**
+checks. Every remaining difference is one of **16 vertical BR rectangle
+coordinates**; annotation/base/flow/source-text geometry agrees within the
+existing 0.11px capture tolerance. Those BR failures remain in the artifact,
+and the raw comparator/references are unchanged. A separate 41px/51px
+loose-line example does not justify forcing Chromium's line-height policy:
+[CSS Ruby §3.6](https://drafts.csswg.org/css-ruby-1/#line-height) permits
+annotation overflow while requiring equivalent repeated Ruby not to overlap.
+Evidence: `temp/ruby-m29/browser-comparison-final.json` and M28's line-side probe.
+
+The frozen raw suite reaches **59/212 full matches**, gaining both
+`ruby-annotation-with-margin` and its reference, with no lost match or changed
+partial score. Dimension lint and the 421-name inventory check pass; only
+source/test reference columns change. Strict boundary DSOs link; the checker
+rejects the same six recorded imports as M28, with no added import or allowlist
+change. Evidence: `temp/ruby-m29/{wpt-final.log,delta-final.json,lint-final.log,
+inventory-check.log,boundary-comparison.json,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,091 passed, 305 partial, 2 skipped,
+0 failed / 9,398 checks**, including **495 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All seven frozen inputs and the qualified CLI hash remain unchanged
+after the gate. Evidence: `temp/ruby-m29/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 153 raw mismatches. The next milestone addresses
+the imported `pseudo-first-line` case. Fresh explicit-font controls check 192
+element/source coordinates; only the first reading box/text Y differs, with
+the reading staying over instead of inheriting first-line under positioning.
+Color-only, local Ruby position override, constant-under and later-line controls
+agree geometrically. CSS Pseudo §2.1.2–2.1.3 permits `ruby-position` and defines
+fragment-specific inherited values. Trace that inheritance at the source line
+and retain the effective value through metric and after-line phases; avoid
+coupling it to a dummy first-line font override or patching only final geometry.
+The existing font resolver correctly declines rules with no font properties.
+Evidence and bounded acceptance cases:
+`temp/ruby-m29/{first-line-comparison.json,next-milestone.json}`.

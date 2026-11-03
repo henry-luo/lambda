@@ -536,6 +536,8 @@ typedef struct LayoutIntrinsicMarginPair {
 LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
         LayoutContext* lycon, DomElement* element,
         LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
+void layout_intrinsic_add_inline_margins(LayoutContext* context, DomElement* element,
+    IntrinsicSizes* sizes, bool include_unsegmented_min = true);
 float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
     bool physical_left, bool include_margin = true);
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
@@ -5075,6 +5077,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback);
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 RdtLogicalPoint layout_relative_position_offset_in_flow(ViewBlock* block);
+RdtLogicalPoint layout_applied_inline_relative_offset(View* first, View* stop = nullptr);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -5519,6 +5522,7 @@ void layout_shift_view_children(View* view, float offset_x, float offset_y);
 void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y);
 void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+bool layout_line_over_is_block_end(ViewBlock* block);
 float layout_line_block_start_baseline(LayoutContext* lycon, float used_line_height = -1.0f);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,

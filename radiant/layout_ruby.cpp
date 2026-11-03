@@ -458,6 +458,7 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level, S
                 continue;
             }
             IntrinsicSizes sizes = calculate_node_intrinsic_widths(context, node);
+            if (node->is_element()) layout_intrinsic_add_inline_margins(context, node->as_element(), &sizes);
             bool atomic = node->is_element() && layout_intrinsic_element_is_atomic_inline(node->as_element());
             box->has_forced_break |= !atomic && (sizes.has_forced_break ||
                 layout_intrinsic_node_has_forced_break_at_edge(node, false) ||
@@ -632,11 +633,47 @@ static void ruby_refresh_inline_bounds(View* view, int) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
-static void ruby_publish_geometry(DomElement* element, float start, float width) {
+static RdtLogicalPoint ruby_relative_offset(View* view) {
+    View* scope = view ? view->parent.get() : nullptr;
+    while (scope && scope->view_type == RDT_VIEW_INLINE && ruby_node_role(scope) != CSS_VALUE_RUBY)
+        scope = scope->parent;
+    return layout_applied_inline_relative_offset(view, scope);
+}
+
+static BoxEdges ruby_unit_margin_edges(View* view) {
+    DomElement* element = view ? view->as_element() : nullptr;
+    if (!element) return {};
+    BoxEdges margin = layout_line_relative_box_edges(
+        layout_boundary_margin_edges(element->bound), layout_nearest_block_ancestor(view->parent_view()));
+    CssEnum role = ruby_node_role(view);
+    // ordinary inline content contributes inline margins inside its anonymous ruby unit.
+    if (role != CSS_VALUE_RUBY_BASE && role != CSS_VALUE_RUBY_TEXT) margin.top = margin.bottom = 0.0f;
+    return margin;
+}
+
+static Rect ruby_flow_bounds(View* view, Rect bounds) {
+    RdtLogicalPoint relative = ruby_relative_offset(view);
+    BoxEdges margin = ruby_unit_margin_edges(view);
+    // column constraints and level stacking use outer normal-flow bounds, not visual border boxes.
+    bounds.x -= relative.x + margin.left;
+    bounds.y -= relative.y + margin.top;
+    bounds.width += margin.left + margin.right;
+    bounds.height += margin.top + margin.bottom;
+    return bounds;
+}
+
+static void ruby_publish_geometry(DomElement* element, float start, float width,
+        bool column_allocation = false) {
     ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(element);
     if (!span) return;
     DomElementExt* ext = element->ensure_ext();
     if (!ext) return;
+    if (column_allocation) {
+        // an allocated column includes external margins; source CSSOM geometry excludes them.
+        BoxEdges margin = ruby_unit_margin_edges(span);
+        start += ruby_relative_offset(span).x + margin.left;
+        width = max(0.0f, width - margin.left - margin.right);
+    }
     ext->has_ruby_column_geometry = false;
     ruby_refresh_inline_bounds(span, 0);
     ext->ruby_column_start_offset = start - span->x;
@@ -682,12 +719,14 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
             if (ViewText* text = lam::view_as<RDT_VIEW_TEXT>(view)) {
                 for (TextRect* rect = text->rect; rect; rect = rect->next)
                     if (rect->line_number == box->fragment_line)
-                        ruby_include_bounds(&result, &found, {rect->x, rect->y, rect->width, rect->height});
+                        ruby_include_bounds(&result, &found, ruby_flow_bounds(text,
+                            {rect->x, rect->y, rect->width, rect->height}));
             } else if (leaf && view->is_element() &&
                     layout_intrinsic_element_is_atomic_inline(view->as_element()) &&
                     view->inline_line_number == box->fragment_line) {
                 // atomic boxes belong to the parent line; their descendants use an independent frame.
-                ruby_include_bounds(&result, &found, {view->x, view->y, view->width, view->height});
+                ruby_include_bounds(&result, &found, ruby_flow_bounds(view,
+                    {view->x, view->y, view->width, view->height}));
             }
         };
         ruby_walk_box(box, include, [](View*, int) {});
@@ -697,7 +736,9 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
         View* view = static_cast<View*>(box->nodes[index]);
         if (view->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(view) ||
             (view->view_type == RDT_VIEW_TEXT && view_is_collapsed_whitespace_text(view))) continue;
-        ruby_include_bounds(&result, &found, {view->x, view->y, view->width, view->height});
+        // column constraints use normal flow; relative offsets affect visual publication only.
+        ruby_include_bounds(&result, &found, ruby_flow_bounds(view,
+            {view->x, view->y, view->width, view->height}));
     }
     if (!found) return result;
     // CSS Ruby §3.1.2 includes nested containers in the block-axis envelope,
@@ -709,8 +750,9 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
         bool box_root = parent_role == CSS_VALUE_RUBY ||
             parent_role == CSS_VALUE_RUBY_BASE_CONTAINER || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER;
         if (role != CSS_VALUE_RUBY && !css_display_is_ruby_internal(role) && !box_root) return;
-        float bottom = max(result.y + result.height, view->y + view->height);
-        result.y = min(result.y, view->y);
+        Rect bounds = ruby_flow_bounds(view, {view->x, view->y, view->width, view->height});
+        float bottom = max(result.y + result.height, bounds.y + bounds.height);
+        result.y = min(result.y, bounds.y);
         result.height = bottom - result.y;
     };
     ruby_walk_box(box, include_nested, [](View*, int) {}, true);
@@ -807,7 +849,7 @@ static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
         adjust_text_bounds(text);
     };
     ruby_walk_box(box, align_view, ruby_refresh_inline_bounds);
-    if (box->element && !box->fragmented) ruby_publish_geometry(box->element, start, width);
+    if (box->element && !box->fragmented) ruby_publish_geometry(box->element, start, width, true);
 }
 
 static void ruby_measure_used_level(LayoutRubyLevel* level) {
@@ -837,7 +879,7 @@ static void ruby_place_level(LayoutRubySegment* segment, LayoutRubyLevel* level,
         ruby_align_box(box, level->element ? level->element : ruby, box_start, width);
     }
     if (level->element && (!level->first || !level->first->fragmented))
-        ruby_publish_geometry(level->element, start, segment->width);
+        ruby_publish_geometry(level->element, start, segment->width, true);
 }
 
 static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool contents_only = false) {
@@ -869,19 +911,22 @@ static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool conten
 template <typename Contribute>
 static void ruby_position_annotation_levels(ViewSpan* ruby, LayoutRubySegment* segment,
         Rect base_bounds, bool after_line, Contribute contribute) {
-    float over_edge = base_bounds.y, under_edge = base_bounds.y + base_bounds.height;
+    float before_edge = base_bounds.y, after_edge = base_bounds.y + base_bounds.height;
+    bool over_at_end = layout_line_over_is_block_end(layout_nearest_block_ancestor(ruby));
     bool previous_under = true;
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
         CssEnum position = css_prop_compute_cascaded_keyword(level->element ? level->element : ruby,
             CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE);
         bool under = position == CSS_VALUE_UNDER || (position == CSS_VALUE_ALTERNATE && !previous_under);
+        // CSS Writing Modes §6.3: semantic line-over can be the source block-end side.
+        bool block_after = under != over_at_end;
         Rect annotation = ruby_level_bounds(level);
-        float target = under ? under_edge : over_edge - annotation.height;
-        bool preserve_box = after_line && !under && ruby_has_text_box_trim_ancestor(ruby, TEXT_BOX_TRIM_START);
+        float target = block_after ? after_edge : before_edge - annotation.height;
+        bool preserve_box = after_line && !block_after && ruby_has_text_box_trim_ancestor(ruby, TEXT_BOX_TRIM_START);
         ruby_shift_level(level, target - annotation.y, preserve_box);
         annotation.y = target;
-        if (under) under_edge = target + annotation.height;
-        else over_edge = target;
+        if (block_after) after_edge = target + annotation.height;
+        else before_edge = target;
         previous_under = under;
         contribute(level, annotation, under);
     }
@@ -944,12 +989,14 @@ static void ruby_contribute_line_metrics(LayoutContext* context, const Linebox* 
         excess = over_excess + under_excess;
     }
     float over_leading = excess > 0.0f ? extra * over_excess / excess : 0.0f;
-    // existing block-start space can host annotation overflow without raising the base line.
-    if (context->block.is_first_line)
-        over_leading = max(0.0f, over_leading - context->block.annotation_start_space);
+    float under_leading = excess > 0.0f ? extra * under_excess / excess : 0.0f;
+    // block-start space hosts the corresponding semantic side of this line's baseline metrics.
+    if (context->block.is_first_line) {
+        float* leading = layout_line_over_is_block_end(context->block.flow_box) ? &under_leading : &over_leading;
+        *leading = max(0.0f, *leading - context->block.annotation_start_space);
+    }
     float before = base_baseline + over_leading;
-    float after = max(0.0f, base_line_height - base_baseline) +
-        (excess > 0.0f ? extra * under_excess / excess : 0.0f);
+    float after = max(0.0f, base_line_height - base_baseline) + under_leading;
     context->line.max_ascender = max(context->line.max_ascender, before);
     context->line.max_descender = max(context->line.max_descender, after);
     context->line.ruby_annotation_min_line_height = max(context->line.ruby_annotation_min_line_height, before + after);
@@ -959,13 +1006,17 @@ static void ruby_place_annotation_levels(LayoutContext* context, ViewSpan* ruby,
         Rect base, const Linebox* base_line, float baseline, float line_height) {
     float over = 0.0f, under = 0.0f;
     bool visible = false;
+    bool over_at_end = layout_line_over_is_block_end(context->block.flow_box);
     auto contribute = [&](LayoutRubyLevel* level, Rect annotation, bool is_under) {
         visible |= annotation.width > 0.0f || annotation.height > 0.0f;
-        if (ruby_has_text_box_trim_ancestor(ruby, is_under ? TEXT_BOX_TRIM_END : TEXT_BOX_TRIM_START) ||
+        bool block_after = is_under != over_at_end;
+        if (ruby_has_text_box_trim_ancestor(ruby, block_after ? TEXT_BOX_TRIM_END : TEXT_BOX_TRIM_START) ||
                 annotation.height <= 0.0f) return;
         float extent = max(annotation.height, level->line.max_atomic_inline_height);
-        if (is_under) under = max(under, annotation.y + extent - base.y - base.height);
-        else over = max(over, base.y - annotation.y + extent - annotation.height);
+        float distance = block_after ? annotation.y + extent - base.y - base.height
+            : base.y - annotation.y + extent - annotation.height;
+        if (is_under) under = max(under, distance);
+        else over = max(over, distance);
     };
     ruby_position_annotation_levels(ruby, segment, base, false, contribute);
     if (visible) ruby_contribute_line_metrics(context, base_line, &segment->base,

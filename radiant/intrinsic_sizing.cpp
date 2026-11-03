@@ -3353,6 +3353,20 @@ LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
     return result;
 }
 
+void layout_intrinsic_add_inline_margins(LayoutContext* context, DomElement* element,
+        IntrinsicSizes* sizes, bool include_unsegmented_min) {
+    if (!element || !sizes) return;
+    LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(context, element);
+    float margin_sum = margins.left + margins.right;
+    sizes->max_content += margin_sum;
+    // segmented inlines own edge placement; some legacy atomic minima already include used margins.
+    if (!layout_intrinsic_element_is_atomic_inline(element) && sizes->first_segment_min >= 0.0f) {
+        layout_intrinsic_add_min_segment_edges(sizes, margins.left, margins.right, element);
+    } else if (include_unsegmented_min || !margins.used_bound) {
+        sizes->min_content += margin_sum;
+    }
+}
+
 float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
                                    bool inline_start, bool include_margin) {
     if (!lycon || !element) return 0.0f;
@@ -5809,19 +5823,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
 
             // For inline elements, also add horizontal margins
-            // CSS Sizing 3 §4: Negative margins reduce the element's outer size contribution
+            // CSS Sizing 3 §2.2: negative margins reduce the element's outer size contribution.
             if (is_inline) {
-                LayoutIntrinsicMarginPair margins =
-                    layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
-                float margin_sum = margins.left + margins.right;
-                child_sizes.max_content += margin_sum;
-                if (!layout_intrinsic_element_is_atomic_inline(child_elem) &&
-                    child_sizes.first_segment_min >= 0.0f) {
-                    layout_intrinsic_add_min_segment_edges(
-                        &child_sizes, margins.left, margins.right, child_elem);
-                } else if (explicit_box_decoration_run_sizing || !margins.used_bound) {
-                    child_sizes.min_content += margin_sum;
-                }
+                layout_intrinsic_add_inline_margins(
+                    lycon, child_elem, &child_sizes, explicit_box_decoration_run_sizing);
             }
         }
 

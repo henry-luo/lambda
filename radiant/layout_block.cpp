@@ -6794,9 +6794,10 @@ static float layout_inline_content_measure(LayoutContext* lycon, ViewBlock* bloc
 }
 
 static float block_start_annotation_space(LayoutContext* context, ViewBlock* block) {
-    if (layout_block_inline_axis_is_vertical(block)) return 0.0f;
     BoxMetrics box = layout_box_metrics(block);
-    float space = max(box.padding.top, 0.0f);
+    float space = max(layout_line_relative_box_edges(box.padding, block).top, 0.0f);
+    // internal padding is axis-independent; the adjoining-margin protocol below uses physical Y.
+    if (layout_block_inline_axis_is_vertical(block)) return space;
     // independent contexts keep their external margins outside the internal annotation space.
     if (block_context_establishes_bfc(block) || box.border.top > 0.0f ||
             (block->scroller && block->scroll()->overflow_y != CSS_VALUE_VISIBLE) ||
@@ -10039,6 +10040,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_inline_atomic && !is_float_element) {
             // wrapping finalizes the old line; its bidi pass must not collect this pending item.
             block->inline_line_number = -1;
+            // assigning a fresh atomic frame discards offsets applied by an earlier content pass.
+            if (block->position)
+                block->position->inline_relative_x = block->position->inline_relative_y = 0.0f;
             if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(block));
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
             float inline_block_height = block->height;

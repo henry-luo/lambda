@@ -1432,19 +1432,16 @@ static void compute_span_content_bounds(ViewSpan* span, bool is_multi_line, Font
     auto get_child_relative_offset = [source_flow](View* c, float* offset_x, float* offset_y) {
         if (offset_x) *offset_x = 0.0f;
         if (offset_y) *offset_y = 0.0f;
-        if (!c) return;
-        if (ViewBlock* vb = lam::view_as_block(c)) {
-            if (source_flow) {
-                RdtLogicalPoint offset = layout_relative_position_offset_in_flow(vb);
-                if (offset_x) *offset_x = offset.x;
-                if (offset_y) *offset_y = offset.y;
-            } else {
-                layout_relative_position_offset(vb, offset_x, offset_y);
-            }
-        } else if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            layout_relative_position_offset(lam::unsafe_view_block_api_span(elem),
-                                            offset_x, offset_y);
+        if (!c || !c->is_element()) return;
+        // declared atomic insets can still be deferred when an ancestor first measures its bounds.
+        RdtLogicalPoint offset = layout_applied_inline_relative_offset(c, c->parent);
+        ViewBlock* flow = layout_nearest_block_ancestor(c->parent_view());
+        if (!source_flow && layout_block_inline_axis_is_vertical(flow)) {
+            // publication converts the retained source-axis displacement to physical coordinates.
+            offset = {layout_block_writing_mode(flow) == WM_VERTICAL_RL ? -offset.y : offset.y, offset.x};
         }
+        if (offset_x) *offset_x = offset.x;
+        if (offset_y) *offset_y = offset.y;
     };
 
     auto text_child_uses_slice_decoration = [](View* c) -> bool {
@@ -2354,7 +2351,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
-    if (span->position) span->position->inline_relative_y = 0.0f;
+    if (span->position) span->position->inline_relative_x = span->position->inline_relative_y = 0.0f;
     // CSS Position 3 §4.1: preserve the first inline box origin separately
     // because the visible DOM rectangle may start on a later line fragment.
     FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
