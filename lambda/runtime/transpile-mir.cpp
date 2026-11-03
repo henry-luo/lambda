@@ -9955,6 +9955,25 @@ static bool mir_assignment_has_native_int_lane(
 static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out, bool branch_truth = false);
 
+// S7.2.2: `last` belongs to the innermost enclosing subscript's container.
+// Scoped like the interpreter's InterpLastIndexGuard: transpiling a nested
+// subscript in the object (`a[1 to 3][last]`) must not leave its own container
+// behind for the outer key (LR07-36).
+struct MirLastIndexScope {
+    MirTranspiler* mt;
+    AstNode* saved;
+    MIR_reg_t saved_reg;
+    MirLastIndexScope(MirTranspiler* m, AstNode* object)
+            : mt(m), saved(m->last_index_object), saved_reg(m->last_index_item_reg) {
+        mt->last_index_object = object;
+        mt->last_index_item_reg = 0;
+    }
+    ~MirLastIndexScope() {
+        mt->last_index_object = saved;
+        mt->last_index_item_reg = saved_reg;
+    }
+};
+
 static MIR_reg_t mir_emit_cow_path_key(MirTranspiler* mt, AstNode* segment,
         bool is_member) {
     AstNode* key_node = ast_unwrap_primary(segment);
@@ -10096,11 +10115,7 @@ static MIR_reg_t emit_function_object(MirTranspiler* mt, AstFuncNode* function,
     return object;
 }
 
-// CW25: emit the spine detach for `f(var a.b[i])`. The root is detached and
-// republished first (same as a bare-ident borrow), then cow_path_borrow walks
-// the rest of the path detaching each link, and the callee receives the leaf --
-// already installed in its parent, so its in-place `var` writes reach the
-// caller's container with no post-call writeback.
+// prepare the rooted spine before a path writer; user calls also retain a home.
 static bool mir_cow_path_has_fixed_borrow_descriptor(MirTranspiler* mt,
         const AstCowPath* path) {
     if (!path || path->count < 1 || path->count > 3) return false;
@@ -10145,11 +10160,21 @@ static MIR_reg_t mir_emit_cow_typed_map_field_borrow(MirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
 }
 
+// a place borrow keeps evaluated keys and its caller-owned publication home.
+struct MirPlaceBorrow {
+    MirVarEntry* root;
+    int count;
+    int keys[AST_COW_PATH_MAX];
+    int home;
+    int original;
+    bool snapshot;
+};
+
 // `value_leaf` borrows a builtin mutator's place: a link holding no container
 // comes back as that value (cow_place_leaf*) for the mutator to reject, so no
 // borrow error returns from the enclosing function.
 static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
-        const AstCowPath* path, bool value_leaf) {
+        const AstCowPath* path, bool value_leaf, MirPlaceBorrow* saved = NULL) {
     // A direct `var` root is detached at its caller boundary before this
     // activation starts. Re-preparing that unmarked root for every nested
     // borrow only rechecks the same clear share bit; the child walker below
@@ -10159,23 +10184,40 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     if (!root->is_var_param || root->cow_marked) {
         (void)mir_prepare_cow_root(mt, root);
     }
-    if (!value_leaf) {
+    // T27-4: every descriptor travels as a rooted key span; building a heap
+    // path array per borrow made `push(a[i].xs, v)` allocate on every call
+    int key_roots[AST_COW_PATH_MAX];
+    int key_owner = root->root_slot;
+    for (int i = 0; i < path->count; i++) {
+        MirLastIndexScope last_scope(mt, path->root);
+        mt->last_index_item_reg = load_gc_root_slot(mt, key_owner, "key_owner");
+        key_roots[i] = create_gc_root_slot(mt,
+            mir_emit_cow_path_key(mt, path->segment[i], path->is_member[i]));
+        if (i + 1 < path->count) {
+            MIR_reg_t prefix = emit_call_2(mt, "cow_path_index", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                    load_gc_root_slot(mt, key_owner, "key_owner")),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                    load_gc_root_slot(mt, key_roots[i], "key_prefix")));
+            key_owner = create_gc_root_slot(mt, prefix);
+        }
+    }
+    if (saved) {
+        saved->root = root;
+        saved->count = path->count;
+        for (int i = 0; i < path->count; i++) saved->keys[i] = key_roots[i];
+    }
+    if (!value_leaf && (!saved || !saved->snapshot)) {
         MIR_reg_t typed_leaf = mir_emit_cow_typed_map_field_borrow(mt, root, path);
         if (typed_leaf) {
             emit_return_if_item_error(mt, typed_leaf);
             return typed_leaf;
         }
     }
-    // T27-4: every descriptor travels as a rooted key span; building a heap
-    // path array per borrow made `push(a[i].xs, v)` allocate on every call
-    int key_roots[AST_COW_PATH_MAX];
-    for (int i = 0; i < path->count; i++) {
-        key_roots[i] = create_gc_root_slot(mt,
-            mir_emit_cow_path_key(mt, path->segment[i], path->is_member[i]));
-    }
     MIR_reg_t span = mir_emit_keys_span(mt, key_roots, path->count);
     MIR_reg_t owner = load_gc_root_slot(mt, root->root_slot, "borrow_owner");
-    MIR_reg_t leaf = emit_call_3(mt, value_leaf ? "cow_place_leaf_keys" : "cow_path_borrow_keys",
+    MIR_reg_t leaf = emit_call_3(mt, value_leaf ? "cow_place_leaf_keys" : saved && saved->snapshot
+            ? "cow_path_borrow_home_keys" : "cow_path_borrow_keys",
         MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
         MIR_T_P, MIR_new_reg_op(mt->ctx, span),
@@ -10184,20 +10226,19 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     return leaf;
 }
 
-// CW25 / S9.2.2: a `var` argument that names a PLACE (`f(var m.rows[i])`)
-// borrows that place, not merely its root. Detach the whole spine and return
-// the rooted slot of the detached leaf, already installed in its parent, so
-// the callee's in-place writes land in the caller's container. Returns -1 when
-// the argument is a bare binding or no place of a COW-tracked root. Shared by
-// the direct and the dynamic (cross-image) call edges.
-static int mir_borrow_var_place_argument(MirTranspiler* mt, AstNode* arg) {
+// D4.4.7: transport an independently rooted home, never an interior field address.
+static int mir_borrow_var_place_argument(MirTranspiler* mt, AstNode* arg,
+        MirPlaceBorrow* saved, bool snapshot) {
     if (!arg || mir_direct_root_binding(mt, arg)) return -1;
     AstCowPath borrow_path = {};
     if (!ast_collect_cow_path(&borrow_path, arg) || borrow_path.count <= 0) return -1;
     MirVarEntry* place_root = mir_direct_root_binding(mt, borrow_path.root);
     if (!place_root || !mir_root_may_need_cow(place_root)) return -1;
-    MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root, &borrow_path, false);
-    return create_gc_root_slot(mt, leaf);
+    saved->snapshot = snapshot;
+    MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root, &borrow_path, false, saved);
+    saved->original = create_gc_root_slot(mt, leaf);
+    saved->home = create_gc_root_slot(mt, leaf);
+    return saved->home;
 }
 
 // T22-5b: a statically named nested `int` field can use the same one-shot
@@ -10385,7 +10426,7 @@ static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
     for (int i = 0; i < path->count; i++) {
         MIR_reg_t current = load_gc_root_slot(mt, current_root, "cow_parent");
         MIR_reg_t key = load_gc_root_slot(mt, key_roots[i], "cow_key");
-        MIR_reg_t child = emit_call_2(mt, "fn_index", MIR_T_I64,
+        MIR_reg_t child = emit_call_2(mt, "cow_path_index", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         int child_root = create_gc_root_slot(mt, child);
@@ -31548,25 +31589,6 @@ static MIR_reg_t emit_array_num_element_address(MirTranspiler* mt,
     return em_array_element_address(&mt->em, arr_ptr, idx_int, element_width);
 }
 
-// S7.2.2: `last` belongs to the innermost enclosing subscript's container.
-// Scoped like the interpreter's InterpLastIndexGuard: transpiling a nested
-// subscript in the object (`a[1 to 3][last]`) must not leave its own container
-// behind for the outer key (LR07-36).
-struct MirLastIndexScope {
-    MirTranspiler* mt;
-    AstNode* saved;
-    MIR_reg_t saved_reg;
-    MirLastIndexScope(MirTranspiler* m, AstNode* object)
-            : mt(m), saved(m->last_index_object), saved_reg(m->last_index_item_reg) {
-        mt->last_index_object = object;
-        mt->last_index_item_reg = 0;
-    }
-    ~MirLastIndexScope() {
-        mt->last_index_object = saved;
-        mt->last_index_item_reg = saved_reg;
-    }
-};
-
 // Does `last` in this key list belong to the enclosing subscript? A nested
 // subscript binds its own key's `last`, so only its object is searched.
 static void mir_scan_own_last(AstNode* child, AstNode* parent, void* ctx) {
@@ -32183,6 +32205,52 @@ static void mir_note_var_home(MirVarHome* homes, int* count, MirVarEntry* root,
     (*count)++;
 }
 
+static void mir_publish_place_borrows(MirTranspiler* mt,
+        const MirPlaceBorrow* places, int count) {
+    for (int i = 0; i < count; i++) {
+        const MirPlaceBorrow* place = &places[i];
+        if (!place->root) continue;
+        MirVarEntry* root = place->root;
+        MIR_label_t unchanged = new_label(mt);
+        if (!place->snapshot) {
+            MIR_reg_t before = load_gc_root_slot(mt, place->original, "place_before");
+            MIR_reg_t after = load_gc_root_slot_memory(mt, place->home, "place_after");
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                MIR_new_label_op(mt->ctx, unchanged), MIR_new_reg_op(mt->ctx, before),
+                MIR_new_reg_op(mt->ctx, after)));
+        }
+        MIR_reg_t keys = mir_emit_keys_span(mt, place->keys, place->count);
+        MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
+        MIR_reg_t value = load_gc_root_slot_memory(mt, place->home, "place_home");
+        MIR_reg_t updated = emit_call_5(mt, "cow_path_set_keys", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, keys),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, place->count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx,
+                root->is_var_param && !root->cow_marked && !place->snapshot));
+        emit_return_if_item_error(mt, updated);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, updated)));
+        update_gc_root_slot(mt, root);
+        mir_rebind_typed_array_layout(mt, root);
+        emit_label(mt, unchanged);
+    }
+}
+
+// publication may allocate; keep the call result alive across the path setters.
+static MIR_reg_t mir_finish_place_borrows(MirTranspiler* mt,
+        const MirPlaceBorrow* places, int count, MIR_reg_t result,
+        MIR_type_t mir_type, TypeId type_id, Type* contract = NULL) {
+    bool active = false;
+    for (int i = 0; i < count; i++) active |= places[i].root != NULL;
+    if (!active) return result;
+    int slot = should_gc_root_var(mir_type, type_id, contract)
+        ? create_gc_root_slot(mt, result, lambda_gc_value_class(mir_type, type_id, contract)) : -1;
+    mir_publish_place_borrows(mt, places, count);
+    return slot >= 0 ? load_gc_root_slot(mt, slot, "place_call_result") : result;
+}
+
 // Typed (S9.2.1 invariant) callee position: the callee can only rebind to
 // the declared type, so the reload can restore the binding's representation
 // exactly. Only a direct local binding qualifies (module and captured
@@ -32488,17 +32556,25 @@ static TypeParam* mir_dynamic_call_var_param(TypeFunc* signature, int position) 
 }
 
 // boxed Lambda edges share the same borrow preparation and final home transport.
-static int mir_prepare_boxed_var_argument(MirTranspiler* mt, TypeParam* parameter, AstNode* argument) {
+static int mir_prepare_boxed_var_argument(MirTranspiler* mt, TypeParam* parameter,
+        AstNode* argument, MirPlaceBorrow* place, const TypeFunc* signature) {
     if (!parameter || !parameter->is_var_param || !argument) return -1;
     MirVarEntry* root = mir_direct_root_binding(mt, argument);
     if (root && root->cow_marked && mir_root_may_need_cow(root))
         (void)mir_prepare_cow_root(mt, root);
-    return mir_borrow_var_place_argument(mt, argument);
+    return mir_borrow_var_place_argument(mt, argument, place,
+        ast_call_has_plain_container_parameter(signature));
 }
 
 static void mir_transport_boxed_var_argument(MirTranspiler* mt, int position, TypeParam* parameter,
-        AstNode* argument, MIR_reg_t value, MirVarHome* homes, int* count) {
+        AstNode* argument, MIR_reg_t value, MirVarHome* homes, int* count,
+        const MirPlaceBorrow* place) {
     if (!parameter || !parameter->is_var_param || !argument) return;
+    if (place && place->root) {
+        MIR_reg_t live = load_gc_root_slot(mt, place->home, "place_argument");
+        mir_emit_slot_home_transport(mt, position, place->home, live);
+        return;
+    }
     MirVarEntry* root = mir_direct_root_binding(mt, argument);
     Type* contract = parameter->contract_type ? parameter->contract_type : parameter->full_type;
     MirVarHomeKind kind = MIR_VAR_HOME_UNTYPED;
@@ -33684,6 +33760,7 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
     TypeFunc* dyn_var_signature = mir_dynamic_call_var_signature(call_node);
     MirVarHome dyn_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
     int dyn_home_count = 0;
+    MirPlaceBorrow dyn_places[LAMBDA_MAX_FUNCTION_ARGS] = {};
     int dyn_place_leaf_slots[LAMBDA_MAX_FUNCTION_ARGS];
     for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) dyn_place_leaf_slots[i] = -1;
     if (dyn_var_signature) {
@@ -33698,7 +33775,7 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
         for (int i = 0; position_arg && i < LAMBDA_MAX_FUNCTION_ARGS;
                 i++, position_arg = mir_call_next_argument(call_node, position_arg, injected)) {
             dyn_place_leaf_slots[i] = mir_prepare_boxed_var_argument(mt,
-                mir_dynamic_call_var_param(dyn_var_signature, i), position_arg);
+                mir_dynamic_call_var_param(dyn_var_signature, i), position_arg, &dyn_places[i], dyn_var_signature);
         }
     }
     auto emit_dyn_var_transports = [&](MIR_reg_t const* boxed_args, int count) {
@@ -33708,7 +33785,7 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
                 i++, position_arg = mir_call_next_argument(call_node, position_arg, injected)) {
             mir_transport_boxed_var_argument(mt, i,
                 mir_dynamic_call_var_param(dyn_var_signature, i), position_arg,
-                boxed_args[i], dyn_homes, &dyn_home_count);
+                boxed_args[i], dyn_homes, &dyn_home_count, &dyn_places[i]);
         }
     };
     // P1.4: the dynamic path remains C-mediated because a C prototype has no
@@ -33836,6 +33913,8 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
 
     // T21-3b: reload the transported `var` bindings (see the direct path).
     mir_emit_var_home_reload(mt, dyn_homes, dyn_home_count);
+    dyn_result = mir_finish_place_borrows(mt, dyn_places, LAMBDA_MAX_FUNCTION_ARGS,
+        dyn_result, MIR_T_I64, LMD_TYPE_ANY);
 
     // LR03-13: a call through a declared function-type contract crosses its
     // return where it is made, as T0's interp_check_contract_return does; the
@@ -35125,10 +35204,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 
             MirVarHome imported_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
             int imported_home_count = 0;
+            MirPlaceBorrow imported_places[LAMBDA_MAX_FUNCTION_ARGS] = {};
             int imported_place_slots[LAMBDA_MAX_FUNCTION_ARGS];
             TypeParam* imported_parameter = call_fn_type ? call_fn_type->param : nullptr;
             for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-                imported_place_slots[i] = mir_prepare_boxed_var_argument(mt, imported_parameter, resolved_args[i]);
+                imported_place_slots[i] = mir_prepare_boxed_var_argument(mt, imported_parameter, resolved_args[i], &imported_places[i], call_fn_type);
                 if (imported_parameter) imported_parameter = imported_parameter->next;
             }
 
@@ -35181,7 +35261,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             for (int i = 0; i < ai; i++) {
                 if (arg_root_slots[i] >= 0)
                     mir_transport_boxed_var_argument(mt, i, imported_parameter, resolved_args[i],
-                        arg_ops[i].u.reg, imported_homes, &imported_home_count);
+                        arg_ops[i].u.reg, imported_homes, &imported_home_count, &imported_places[i]);
                 if (imported_parameter) imported_parameter = imported_parameter->next;
             }
 
@@ -35270,6 +35350,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             }
 
             mir_emit_var_home_reload(mt, imported_homes, imported_home_count);
+            result = mir_finish_place_borrows(mt, imported_places,
+                LAMBDA_MAX_FUNCTION_ARGS, result, MIR_T_I64, LMD_TYPE_ANY);
 
             // Import calls return boxed Items. A typed string caller uses a
             // raw String* (for example, fn_len_s), so unbox text here just as
@@ -35916,6 +35998,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // own root slot after the call (the callee's epilogue may have
             // published a rebind/detach through the address).
             MirVarHome var_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
+            MirPlaceBorrow places[LAMBDA_MAX_FUNCTION_ARGS] = {};
             MirVarEntry* array_home_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
             bool array_home_args[LAMBDA_MAX_FUNCTION_ARGS] = {false};
             // typed non-array `var` positions (record, string, scalar lane):
@@ -35982,24 +36065,21 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 bool colour_checked = resolved_args[i] && i < 16 &&
                     (call_node->fn_colour_guard & (1u << i));
                 if (colour_checked) short_circuit_error = true;
-                // CW25 / S9.2.2: a `var` argument that names a PLACE
-                // (`f(var m.rows[i])`) borrows that place, not merely its root.
-                // Detach the whole spine here, before any arm evaluates the
-                // argument, and pass the detached leaf: it is already installed
-                // in its parent, so the callee's in-place `var` writes land in
-                // the caller's container. Without this the leaf stayed shared
-                // and the callee wrote through to whatever else observed it.
-                //
-                // This must precede the arms because several of them (contract
-                // boundaries, native lanes) re-evaluate the argument expression
-                // themselves and would each need the same treatment.
+                // prepare a place once; its home survives every argument and result ABI.
                 if (type_param && type_param->is_var_param) {
-                    int leaf_slot = mir_borrow_var_place_argument(mt, resolved_args[i]);
+                    int leaf_slot = mir_borrow_var_place_argument(mt, resolved_args[i], &places[i],
+                        ast_call_has_plain_container_parameter(call_fn_type));
                     if (leaf_slot >= 0) {
                         arg_root_slots[i] = leaf_slot;
                         MIR_reg_t leaf = load_gc_root_slot(mt, leaf_slot, "borrow_leaf");
+                        TypeId lane = native_call && call_nfi &&
+                                mir_native_func_param_uses_lane(call_nfi, i)
+                            ? mir_native_param_type(call_nfi, i) : LMD_TYPE_ANY;
+                        if (lane != LMD_TYPE_ANY) {
+                            leaf = emit_unbox_contract_lane(mt, leaf, lane, parameter_contract);
+                        }
                         arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
-                        arg_vars[i] = {MIR_T_I64, "arg", 0};
+                        arg_vars[i] = {type_to_mir(lane), "arg", 0};
                         if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
                         continue;
                     }
@@ -36684,6 +36764,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // Publish homes after argument evaluation, immediately before the
             // consuming call; later argument calls must not steal the cells.
             for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+                if (places[i].root) {
+                    MIR_reg_t value = load_gc_root_slot(mt, places[i].home, "place_argument");
+                    mir_emit_slot_home_transport(mt, i, places[i].home, value);
+                    continue;
+                }
                 if (array_home_args[i]) {
                     MIR_reg_t value = load_gc_root_slot(mt, arg_root_slots[i], "array_home");
                     if (mir_emit_var_home_transport(mt, i, array_home_roots[i], value, true)) {
@@ -36826,6 +36911,22 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 emit_label(mt, merged_done);
                 result = merged;
                 result_is_boxed = true;
+            }
+            bool has_place_borrow = false;
+            for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++)
+                has_place_borrow |= places[i].root != NULL;
+            if (has_place_borrow) {
+                // a publication helper is a second call: resolve a pending pair first.
+                if (direct_value.maybe_pending) {
+                    direct_value = em_materialize_pending_value(&mt->em,
+                        direct_value, MIR_PENDING_REASON_SECOND_PAIR);
+                    result = direct_value.reg;
+                    result_is_boxed = true;
+                }
+                result = mir_finish_place_borrows(mt, places, LAMBDA_MAX_FUNCTION_ARGS,
+                    result, result_is_boxed ? MIR_T_I64 : ret_type,
+                    result_is_boxed ? LMD_TYPE_ANY : call_nfi->return_type,
+                    native_return_contract);
             }
             if (scalar_home_id && result_is_boxed) {
                 // Preserve caller-home identity across copies and lane joins.
@@ -40899,6 +41000,25 @@ static MIR_reg_t mir_emit_checked_map_store(MirTranspiler* mt, MIR_reg_t owner,
 }
 
 
+// S9.2.2v2: a store receiver is a place, so numeric prefixes use internal
+// row borrows. An ordinary expression reads a row snapshot instead.
+static MIR_reg_t mir_store_owner(MirTranspiler* mt, AstNode* expression) {
+    AstNode* node = ast_unwrap_primary(expression);
+    if (!node || node->node_type != AST_NODE_INDEX_EXPR)
+        return transpile_box_item(mt, expression);
+    AstFieldNode* index = (AstFieldNode*)node;
+    if (!index->field || index->field->next)
+        return transpile_box_item(mt, expression);
+    int owner_slot = create_gc_root_slot(mt, mir_store_owner(mt, index->object));
+    MirLastIndexScope last_scope(mt, index->object);
+    mt->last_index_item_reg = load_gc_root_slot(mt, owner_slot, "store_owner");
+    MIR_reg_t key = transpile_box_item(mt, index->field);
+    MIR_reg_t owner = load_gc_root_slot(mt, owner_slot, "store_owner");
+    return emit_call_2(mt, "cow_path_index", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+}
+
 static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         AstNode* node) {
     if (!node) {
@@ -41183,7 +41303,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     MIR_new_reg_op(mt->ctx, val)));
                 slot++;
             }
-            MIR_reg_t obj_item = transpile_box_item(mt, ca->object);
+            MIR_reg_t obj_item = mir_store_owner(mt, ca->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
             MIR_reg_t boxed_val = transpile_box_item(mt, ca->value);
             if (typed_nd_root) {
@@ -41277,7 +41397,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                 }
             }
             if (invalid_static || route_member) {
-                MIR_reg_t owner = transpile_box_item(mt, ca->object);
+                MIR_reg_t owner = mir_store_owner(mt, ca->object);
                 MIR_reg_t key = transpile_box_item(mt, ca->key);
                 MIR_reg_t value = transpile_box_item(mt, ca->value);
                 MIR_reg_t write_result = emit_call_3(mt, mir_cow_site_import("member_set_cow", "member_set_cow_profiled"), MIR_T_I64,
@@ -41305,7 +41425,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     return mir_emit_cow_path_set(mt, cow_root, &cow_path,
                         ca->key, false, value);
                 }
-                MIR_reg_t arr_item = transpile_box_item(mt, ca->object);
+                MIR_reg_t arr_item = mir_store_owner(mt, ca->object);
                 MIR_reg_t key_item = transpile_box_item(mt, ca->key);
                 MIR_reg_t val_item = transpile_box_item(mt, ca->value);
                 // CW32v2: under mark-only binds a mask write's owner may be
@@ -41348,7 +41468,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         // element[i] = val → edit_elmt_replace_child(element, index, val)
         // ==================================================================
         if (mt->in_view_handler && mt->view_is_edit) {
-            MIR_reg_t obj = transpile_box_item(mt, ca->object);
+            MIR_reg_t obj = mir_store_owner(mt, ca->object);
             MirValue key_value = transpile_expr_value(mt, ca->key);
             TypeId idx_tid = mir_value_carrier_type(key_value);
             MIR_reg_t idx_int = is_integer_type_id(idx_tid)
@@ -41389,7 +41509,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             return mir_emit_marked_root_member_set(mt, cow_root, ca);
         }
 
-        MIR_reg_t obj = transpile_box_item(mt, ca->object);
+        MIR_reg_t obj = mir_store_owner(mt, ca->object);
         TypeId obj_tid = mir_expr_carrier_type(mt, ca->object);
         AstNode* direct_object = ast_unwrap_primary(ca->object);
         MirVarEntry* direct_object_var = direct_object &&
@@ -41711,7 +41831,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         if (mt->in_view_handler && mt->view_is_edit &&
             ca->key->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)ca->key;
-            MIR_reg_t obj = transpile_box_item(mt, ca->object);
+            MIR_reg_t obj = mir_store_owner(mt, ca->object);
             MIR_reg_t val_boxed = mir_box_slot_value(mt, ca->value);
             // load key string pointer
             MIR_reg_t key_ptr = emit_load_string_literal(mt, ident->name->chars);
@@ -42012,7 +42132,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     store_guard_value = mir_box_slot_value(mt, ca->value);
                     int value_root = create_gc_root_slot(mt, store_guard_value);
                     store_guard_value = load_gc_root_slot(mt, value_root, "sgrd_val");
-                    MIR_reg_t obj_item = transpile_box_item(mt, ca->object);
+                    MIR_reg_t obj_item = mir_store_owner(mt, ca->object);
                     // Same three-step establish-then-compare as the read: the
                     // receiver is not statically known to be a container here.
                     MIR_reg_t tag = new_reg(mt, "sgrd_tag", MIR_T_I64);
@@ -42069,7 +42189,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         }
 
         // Fallback: runtime fn_map_set
-        MIR_reg_t obj = transpile_box_item(mt, ca->object);
+        MIR_reg_t obj = mir_store_owner(mt, ca->object);
         // Key: if it's an ident, emit as string constant; otherwise box it
         MIR_reg_t key;
         if (ca->key->node_type == AST_NODE_IDENT) {

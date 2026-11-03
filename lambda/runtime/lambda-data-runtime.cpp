@@ -882,7 +882,7 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
 }
 
 // Unified ArrayNum getter — dispatches on elem_type
-Item array_num_get(ArrayNum *array, int64_t index) {
+Item array_num_get_borrowed(ArrayNum *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
@@ -902,6 +902,43 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     // a rank-one view steps by its stride: a row of a transposed matrix
     // reads every row-length-th element of the base
     return array_num_read_item(array, array_num_element_offset(array, index));
+}
+
+// S9.2.2: numeric row reads are values; only internal path borrows alias storage.
+Item array_num_get(ArrayNum* array, int64_t index) {
+    Item value = array_num_get_borrowed(array, index);
+    return get_type_id(value) == LMD_TYPE_ARRAY_NUM
+        ? array_num_snapshot(value.array_num) : value;
+}
+
+// preserve exact lanes and logical dimensions while materializing strided views.
+Item array_num_snapshot(ArrayNum* source) {
+    if (!source) return ItemNull;
+    RootFrame roots(2);
+    Rooted<ArrayNum*> src(roots, source);
+    Rooted<ArrayNum*> dst(roots, array_num_new(source->get_elem_type(), source->length));
+    if (!dst.get() || !array_num_copy_same_type_bytes(dst.get(), 0,
+            src.get(), 0, src.get()->length)) return ItemError;
+    dst.get()->rep_cert = src.get()->rep_cert;
+    if (src.get()->is_ndim && src.get()->extra && array_num_rank(src.get()) > 1) {
+        int rank = ((ArrayNumShape*)(uintptr_t)src.get()->extra)->ndim;
+        size_t bytes = sizeof(ArrayNumShape) + 2 * (size_t)rank * sizeof(int64_t);
+        ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(bytes);
+        if (!shape) return ItemError;
+        ArrayNumShape* original = (ArrayNumShape*)(uintptr_t)src.get()->extra;
+        shape->ndim = (uint8_t)rank;
+        shape->is_c_contig = 1;
+        shape->is_f_contig = rank == 1;
+        int64_t stride = 1;
+        for (int axis = rank - 1; axis >= 0; axis--) {
+            array_num_shape_dims(shape)[axis] = array_num_shape_dims(original)[axis];
+            array_num_shape_strides(shape)[axis] = stride;
+            stride *= array_num_shape_dims(shape)[axis];
+        }
+        dst.get()->is_ndim = 1;
+        dst.get()->extra = (int64_t)(uintptr_t)shape;
+    }
+    return {.array_num = dst.get()};
 }
 
 ArrayNum* array_int() {
@@ -1785,7 +1822,7 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
     TypeId tid = get_type_id(it);
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* a = it.array_num;
-        if (!a || a->is_view) return false;
+        if (!a || a->is_view || a->is_spreadable) return false;
         *etype_out = a->get_elem_type();
         *len_out = a->length;
         *is_arr_num = true;
@@ -1845,7 +1882,7 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
     int out_ndim;
     shape_stack[0] = arr->length;
 
-    if (first_is_arr_num && arr->items[0].array_num->is_ndim && arr->items[0].array_num->extra) {
+    if (first_is_arr_num && array_num_rank(arr->items[0].array_num) > 1) {
         ArrayNum* fa = arr->items[0].array_num;
         ArrayNumShape* fs = (ArrayNumShape*)(uintptr_t)fa->extra;
         // Keep one rank available for a subsequent parent promotion.
@@ -1877,6 +1914,8 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
             ArrayNumElemType e2; int64_t l2; bool an2;
             if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
             if (l2 != inner_len || e2 != etype) return NULL;
+            // equal leaf counts do not make a vector and a matrix the same shape.
+            if (an2 && array_num_rank(arr->items[i].array_num) != 1) return NULL;
         }
     }
 

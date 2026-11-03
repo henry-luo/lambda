@@ -364,6 +364,11 @@ arrays, maps, objects, elements, and VMaps as values at alias boundaries: a
 later write through one mutable binding detaches only the changed owner spine,
 leaving the retained value unchanged.
 
+Writable member/index places can be passed to `var` parameters, including
+scalar fields such as `increment(record.count)`. Rebinding the parameter
+updates that caller place, and writes made before a handled error remain
+visible. Ordinary copies stay snapshots (S9.1.3v3).
+
 ```lambda
 pn publish_first(var doc: element) {
     doc[0][0] = "published"

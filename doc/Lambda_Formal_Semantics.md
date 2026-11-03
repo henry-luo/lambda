@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 82.0.0 (2026-11-03)
+**Spec version:** 84.0.0 (2026-11-03)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1558,14 +1558,17 @@ Design_Procedural §4–§5]
 - **S9.1.2** Binding, assignment, and construction copy, observably, for
   every container kind. Implementation is COW; **sharing must be
   unobservable** — a verifiable property, not a convention.
-- **S9.1.3v2*** `var` parameters (`pn f(var a: T)`) are explicit inout
+- **S9.1.3v3*** `var` parameters (`pn f(var a: T)`) are explicit inout
   borrows; `fn` has no `var` parameters. Compile checks: arguments must be
   `var`; **exclusivity** (writer-vs-writer only: the same `var` or overlapping
   paths cannot feed two `var` params; plain params snapshot before any
   borrow's mutation begins, so readers need no check); `pn` methods require
   a `var` receiver; `var` parameters are **invariant** (S9.2.1). Nested `pn`
   capture of an enclosing `fn` local is the additional sharing permission
-  in S9.1.4v2; it does not authorize arbitrary mutable aliases.
+  in S9.1.4v2; it does not authorize arbitrary mutable aliases. Writable
+  member/index places, including scalar places, are valid inout arguments:
+  replacements and partial writes before an error reach the caller's place,
+  while ordinary copies remain snapshots. [USER 2026-11-03; CW33v2]
 - **S9.1.4v2*** **Capture permissions follow the callable's colour.** An
   `fn` closure captures immutable snapshots: neither rebinding a captured
   name nor writing through it is permitted. A **non-escaping nested `pn`**
@@ -1613,11 +1616,14 @@ Design_Procedural §4–§5]
   borrowed*: `int[] <: any[]` holds for `is`, reads, value params, and
   assignment (which copies — the covariant-array hole cannot arise); passing
   `var xs: int[]` to `pn f(var a: any[])` is a compile error. [C12]
-- **S9.2.2*** Read views are first-class values with snapshot semantics (a
+- **S9.2.2v2*** Read views are first-class values with snapshot semantics (a
   zero-copy slice observably behaves as a copy taken at creation).
   Write-through views are **borrows, never values** — legal only in
   `var`-param position, exclusivity-checked, non-escaping. Creating a
-  mutable borrow over shared storage un-shares first. [CW16]
+  mutable borrow over shared storage un-shares first. Ordinary numeric-row,
+  subview, reshape, transpose and ravel results are snapshot values at every
+  value boundary; none grants write-through access. The mutable-view migration
+  deferral is lifted. [CW16, CW32v3; USER 2026-11-03]
 - **S9.2.3*** Iterating a `var` container walks the entry-time value: the
   loop share-marks at the head, and the first in-body mutation copies — no
   iterator invalidation. The same rule covers pipes over `var` containers.
@@ -3191,6 +3197,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.12 | **Implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`; local-state body admission is now covered by `test/lambda/fn_local_colour_poly.ls` (2026-11-02). **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3 | **Fn-local control and M1 handler integration, 2026-11-03.** Functional fallthrough collects normal values; procedural normal results replace earlier results, including null. No-result declarations, assignments and statement loops leave the accumulator unchanged. M1 handlers contribute their ordinary success/recovery result under S7.6.1v9. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results), [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
+| S9.1.3v3, S9.2.2v2 | Place-home publication and numeric-row/view snapshots implemented 2026-11-03 on both tiers; baseline 8,718/8,718. Scalar/nullable/import/error/GC and AUTO-promotion regressions: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`; LR12-10/LR12-14 archived. Broader borrowing checks keep their existing status. |
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |

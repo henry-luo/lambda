@@ -7,7 +7,7 @@
       "expect_seq": [
         "call\tcow_path_set_packed_index",
         "bne\t",
-        "call\tfn_index"
+        "call\tcow_path_index"
       ]
     }
   ]

@@ -1,6 +1,6 @@
 // CW32v2/S9.1.2 on ArrayNum: binding aliases are O(1) mark-and-share; the
 // first write through EITHER handle detaches (one packed memcpy) and the other
-// keeps its snapshot. Mutable views keep write-through (open/todo). Unaliased
+// keeps its snapshot. View values snapshot too (S9.2.2v2). Unaliased
 // arrays keep fully raw lane stores.
 pn main() {
     // S9.1.2 on ArrayNum: binding copies; writer detaches, snapshot holds
@@ -27,11 +27,11 @@ pn main() {
     k[2] = 0
     print(h[2]); print(" "); print(k[2]); print(" (ruled 9 0)\n")
 
-    // subview write-through unchanged (mutable views open/todo)
+    // a subview value is independent of the source
     var m = [10, 20, 30, 40]
     var v = subview(m, 1, 3)
     v[0] = 999
-    print(m[1]); print(" (ruled 999: view writes through)\n")
+    print(m[1]); print(" (ruled 20: view value snapshots)\n")
 
     // unaliased hot loop: pure raw stores, correctness unchanged
     var s = [0, 0, 0, 0]

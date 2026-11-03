@@ -18,6 +18,17 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Place borrows, row snapshots and async requalification — 2026-11-03
+
+The user clarified **S9.1.3v3 / S9.2.2v2 / D4.4.7**. Rooted place homes now
+publish rebinds, COW detaches and scalar updates on both tiers; row/view values
+snapshot. [LR12-10](<Lambda_Issue_Ledger (fixed).md#lr12-10>) and
+[LR12-14](<Lambda_Issue_Ledger (fixed).md#lr12-14>) moved to the fixed ledger.
+[LR01-17](<Lambda_Issue_Ledger (fixed).md#lr01-17>) was already superseded by
+runtime-async: its concurrency/async sweep passed 210/210 tier/GC runs.
+The final Lambda/input baseline passed **8,718/8,718**.
+[Implementation and qualification](<impl/Lambda_Impl_Place_Borrow_Views (done).md>).
+
 ## Undefined-name follow-up — 2026-11-03
 
 The user adopted **S16.10.4**: an unresolved value name rejects compilation,
@@ -288,7 +299,7 @@ effect examples into a `pn` found [LR10-9](<Lambda_Issue_Ledger (fixed).md#lr10-
 top-level expression statements. Triaging the baseline gate against a clean control
 then found and fixed [LR01-16](<Lambda_Issue_Ledger (fixed).md#lr01-16>), an `auto`-tier satellite key-linking
 defect that made 17 baseline scripts and the MathLive gate timing-dependent, and
-filed [LR01-17](#lr01-17). P2 of the list fixes (sequence operations keep their
+filed [LR01-17](<Lambda_Issue_Ledger (fixed).md#lr01-17>). P2 of the list fixes (sequence operations keep their
 input's kind) filed [LR05-13](<Lambda_Issue_Ledger (fixed).md#lr05-13>): query results have no ruled kind.
 P5 (type families) closed [LR03-12](<Lambda_Issue_Ledger (fixed).md#lr03-12>), the last of the survey's
 list/array gaps.
@@ -322,7 +333,7 @@ Setup note: the checkout first needed `npm install`. `node_modules` still held C
 The "wrong value, no error" group was triaged against the rulings; each defect a ruling covers was fixed on both tiers, and the rest wait on a decision.
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
-- **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
+- **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), plus the residues above.
 - **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](<Lambda_Issue_Ledger (fixed).md#lr12-31>)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
 Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
@@ -495,15 +506,6 @@ construct a temporary `EvalContext`, hand it the retained `heap` / `name_pool` /
 (`:1825`, `:1939`). The ordering and the temporary-context trick are required
 and are not free to reorder.
 
-<a id="lr01-17"></a>**LR01-17 · The interpreter tier rejects task handles (E312) · OPEN (found 2026-09-22)**
-Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
-(`proc_async_partial_item_gc`, `proc_local_error_destructure_async`,
-`wide_scalar_across_await`) pass with `LAMBDA_EXEC_BACKEND=jit`. They fail with
-`LAMBDA_EXEC_BACKEND=interp` and under `auto`, which starts them in the interpreter.
-`conc/start_wait` reports `error[E312]: invalid task handle`. This is
-pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
-Either the interpreter must run S13 tasks, or `auto` must not admit a script
-that starts one.
 
 ---
 
@@ -1090,69 +1092,7 @@ The `is_view` / `is_ndim` guard
 usability cap: in-place removal on a strided or shared typed buffer requires an
 explicit copy.
 
-<a id="lr12-10"></a>**LR12-10 · A copy of a `var` parameter saw later writes through it · PARTIAL (fixed 2026-09-17 for homed parameters; place borrows open)**
-S9.1.2 / S9.1.3. `pn f(var b: Box) { var saved = b; b.cells[0].k = 8; ... }`
-left `saved.cells[0].k == 8` on both tiers (and on the Result46 binary): the
-callee's own copy observed the borrow's write. The same held for a root stored
-into a container, a copy returned after the write, a reassigned alias, a typed
-array, and a copy followed by a `var` re-borrow that writes. Three defects
-combined:
-1. An alias bind marked its source only when the source was `cow_owned`, and
-   a `var` parameter never is (T0 declaration bind,
-   `mir_expr_is_owned_binding_alias`). T0's plain reassignment `s = b` marked
-   nothing even for owned locals -- a T0-only divergence (`s = b; b.x = v`
-   showed `v` through `s`).
-2. Stores through a `var` parameter write the root in place (CW33: the
-   chain-root prologue leaves it unique), so a root shared *after* entry was
-   mutated under its other holder.
-3. T0 re-borrowed a `var` parameter without the prepare MIR's call site emits
-   for a `cow_marked` root.
 
-**Fix.** (1) both tiers mark an alias of a `var` parameter, and T0 reassignment
-marks like MIR's `cow_binding`. (2) `lambda_ast_note_var_root_sharing`
-(script finalize, shared by both tiers) decides per `var` parameter whether the
-body may share its root -- a bind, return, container element, or a call
-argument the callee can keep (a plain parameter whose root it retains, CW29
-bare scan `cow_param_root_retained`; a `var` parameter that itself may share,
-iterated to a fixpoint); comparisons and truth tests are reads -- and flags each
-store a sharing use may precede (`AstAssignNode::var_root_unshare`,
-flow-sensitive like MIR's `cow_marked`; an `if` arm that exits contributes
-nothing, a loop counts as a whole). A flagged store detaches a shared root and
-republishes the binding (`interp_read_store_owner`,
-`mir_emit_var_root_unshare`, also used by the T29-1 writing bind); the CW33
-epilogue publishes it, and such parameters are marked publishable so callers
-transport the home. (3) a T0 activation that marked a `var` parameter prepares
-it before re-borrowing (`InterpFrame::var_marked_mask`). Size cost: jetstream
-deltablue2 unchanged, awfy deltablue2 +4 instructions, splay2 +53 (its
-rotations really do share their roots). Regression
-`test/lambda/proc/var_param_snapshot.ls` (identical on interp, jit, auto and
-default; forced-GC clean). Two goldens pinned the defect and were corrected:
-`proc/interp_typed_var_param.txt` (`let keep = x` then writes through `x`) and
-`proc/cow_rmw_borrow.txt` (`shared_root`: `snap.xs[2]` is 0, not 3).
-
-**Residue (OPEN):** the detach is gated on a publish channel. A place borrow
-argument (`f(b.other)` into `var c: Cell`, CW25) transports no home on either
-tier, so `var s = c; c.k = 50` still shows 50 through `s`: detaching would lose
-the caller's write instead. Needs the place-borrow home of CW33 cost item 2
-(`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
-`temp/varparam_more.ls` (expected 550, prints 5050).
-
-*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](<Lambda_Issue_Ledger (fixed).md#lr12-32>), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
-
-<a id="lr12-14"></a>**LR12-14 · A row copy of a matrix aliases it both ways · OPEN**
-S9.1.2 / D4.4.6. Found while testing T29-5; present on the post-T29-3 binary,
-both tiers, for a loop-built and a packed matrix alike:
-```
-var m = [fill(3, 1), fill(3, 1), fill(3, 1)]
-var row = m[0]
-m[0][1] = 9      // row[1] reads 9
-row[2] = 4       // m[0][2] reads 4
-```
-The place-copy rule should mark `row` because its place is written while the
-copy is alive, but both writes are visible through the other name. Repro:
-`temp/t29/packed_probe.ls` (`row_copy_loop`, expected 9110, prints 9944).
-
-*Investigated 2026-09-25:* only a packed matrix leaks. `[fill(3, 1), …]` is promoted to a 2-D ArrayNum, and `m[0]` returns a mutable view onto its buffer (`make_leading_axis_view`, `is_mutable_view = 1`). The place-copy facts are right and both tiers mark the bind, but a view owns no storage: `clone_mutable_array_num` hands back the view itself, so the detach writes the base. A push-built matrix, a generic array of rows and a map of arrays are correct; `row_copy_loop`'s expected value is 9141, not 9110. The fix direction, copying a view into an owned array at a place-copy bind (S9.2.2), is the eager view-alias clone CW32v2 item 6 lists, but item 6 leaves mutable views OPEN/TODO by designer ruling, so it waits on that ruling. The other value boundaries (capture, push, parameter snapshot, call result, reassignment) leak the same view. Record: `temp/wv/LR12-14/`.
 
 <a id="lr12-24"></a>**LR12-24 · TE-15 defect containment — declaration and reassignment boundaries FIXED 2026-09-18; TE-17 I3 and the remaining origination classes FIXED 2026-09-27; residue OPEN**
 S7.1.3v2, S7.4.2, S7.4.3, TE-15, TE-18. Four entries were filed separately as

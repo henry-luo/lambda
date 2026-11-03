@@ -2822,6 +2822,8 @@ extern "C" {
     // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);
     Item array_num_get(ArrayNum *array, int64_t index);
+    Item array_num_get_borrowed(ArrayNum* array, int64_t index);
+    Item array_num_snapshot(ArrayNum* array);
     Item array_int_get(ArrayNum *array, int64_t index);
     Item array_int64_get(ArrayNum* array, int64_t index);
     Item array_float_get(ArrayNum* array, int64_t index);
@@ -3736,6 +3738,8 @@ extern "C" {
     Item lambda_array_scalar_snapshot(Item value, void* scratch, int64_t scratch_bytes);
     bool cow_profile_sites_enabled(void);
     Item cow_path_set_raw(Item owner, Item key, Item value);
+    Item cow_path_index(Item owner, Item key);
+    Item cow_path_set_keys(Item owner, Item value, const Item* keys, int count, bool inplace);
     int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
         Item key2, Item value);
     Item cow_path_set(Item owner, Item path, Item value);
@@ -3743,6 +3747,8 @@ extern "C" {
     Item cow_path_set_inplace(Item owner, Item path, Item value);
     // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
     Item cow_path_borrow(Item owner, Item path);
+    Item cow_path_borrow_home(Item owner, Item path);
+    Item cow_path_borrow_home_keys(Item owner, const Item* keys, int64_t count);
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,
         Item key0, Item key1, Item key2);

@@ -2078,15 +2078,29 @@ static Item interp_call_js_export(Function* function, const uint64_t* words,
     return scalar_storage_read(result, false);
 }
 
-// CW25 / S9.2.2: a mutable borrow of a PLACE (`root.path`, `root[i]`) detaches
-// the root binding and every link down to the leaf, reinstalling each
-// replacement in its parent, and yields the detached leaf -- already installed
-// where it belongs, so in-place writes through it reach the root and nothing
-// else. Returns false when `arg` is not a borrowable place (the caller keeps
-// its ordinary path); *leaf is ItemError on a failed detach. `value_leaf`
-// serves builtin mutators (cow_place_leaf).
+// `last` derives from the innermost subscript owner. The owner is a frame slot
+// so evaluating an arithmetic index cannot leave a movable container in a C++
+// local across fn_len's allocation-capable integer boxing path.
+class InterpLastIndexGuard {
+    InterpState* st_;
+    uint64_t* previous_;
+public:
+    InterpLastIndexGuard(InterpState* st, uint64_t* item)
+            : st_(st), previous_(st ? st->last_index_item : NULL) {
+        if (st_) st_->last_index_item = item;
+    }
+    ~InterpLastIndexGuard() {
+        if (st_) st_->last_index_item = previous_;
+    }
+    InterpLastIndexGuard(const InterpLastIndexGuard&) = delete;
+    InterpLastIndexGuard& operator=(const InterpLastIndexGuard&) = delete;
+};
+
+// prepare a rooted place descriptor for a builtin writer or an inout home.
+// user calls retain its keys and publish replacements after the callee returns.
 static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
-        bool value_leaf) {
+        bool value_leaf, Item* saved_path = NULL, NameEntry** saved_root = NULL,
+        bool snapshot_home = false) {
     AstCowPath place = {};
     if (!ast_collect_cow_path(&place, arg) || place.count == 0 || !place.root ||
             place.root->node_type != AST_NODE_IDENT) {
@@ -2110,7 +2124,10 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
     // the key count is static: size the rooted array once, not per push
     if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot.get().item,
             place.count)) return false;
+    Scratch key_owner(f);
+    key_owner.set(root_slot.get());
     for (int seg = 0; seg < place.count; seg++) {
+        InterpLastIndexGuard last_scope(f->st, key_owner.home());
         Scratch key_slot(f);
         key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
             place.is_member[seg]));
@@ -2121,10 +2138,15 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
         Array* keys = (Array*)(uintptr_t)path_slot.get().item;
         if (!keys) return false;
         array_push_verbatim(keys, key_slot.get());
+        if (seg + 1 < place.count)
+            key_owner.set(cow_path_index(key_owner.get(), key_slot.get()));
     }
+    if (saved_path) *saved_path = path_slot.get();
+    if (saved_root) *saved_root = root_entry;
     // a builtin mutator's place hands a non-container link back as its value
     *leaf = value_leaf ? cow_place_leaf(root_slot.get(), path_slot.get())
-                       : cow_path_borrow(root_slot.get(), path_slot.get());
+                       : snapshot_home ? cow_path_borrow_home(root_slot.get(), path_slot.get())
+                                    : cow_path_borrow(root_slot.get(), path_slot.get());
     return true;
 }
 
@@ -2596,19 +2618,29 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         (uint32_t)(dispatch_argc > 0 ? dispatch_argc : 1), !has_named_args);
     if (!arg_roots.valid()) return ItemError;
     uint64_t* words = arg_roots.words();
+    NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool has_borrows = ast_type_func_has_var_parameter(direct_signature);
+    if (has_borrows && !ast_direct_call_var_parameter_entries(node,
+            direct_signature, borrowed, borrow_args)) {
+        log_error("interp: unsupported direct `var` argument layout");
+        return ItemError;
+    }
     int i = 0;
     if (has_named_args) {
         AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
         for (i = 0; i < dispatch_argc; i++) {
-            words[i] = resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
+            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL :
+                resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
                 ITEM_MISSING_ARGUMENT;
             if (interp_frame_pending(f)) return ItemNull;
         }
     } else {
         if (injected) words[i++] = injected->item;
         for (AstNode* a = node->argument; a; a = a->next, i++) {
-            words[i] = eval_expr(f, a).item;
+            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL : eval_expr(f, a).item;
         }
     }
 
@@ -2639,28 +2671,39 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         }
         return interp_call_js_export(fn, words, dispatch_argc);
     }
-    if (ast_type_func_has_var_parameter(direct_signature)) {
-        NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed,
-                borrow_args)) {
-            log_error("interp: unsupported direct `var` argument layout");
-            return ItemError;
-        }
+    if (has_borrows) {
+        RootSpan place_values((size_t)dispatch_argc);
+        RootSpan place_paths((size_t)dispatch_argc);
+        NameEntry* place_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        bool snapshot_home = ast_call_has_plain_container_parameter(direct_signature);
+        if (!place_values.valid() || !place_paths.valid()) return ItemError;
+        // homes and evaluated keys belong to the caller, never movable field buffers.
+        auto publish_places = [&](Item result) {
+            Scratch result_root(f);
+            result_root.set(result);
+            for (int index = 0; index < dispatch_argc; index++) {
+                if (!place_roots[index] || (!snapshot_home &&
+                        place_values.words()[index] == words[index])) continue;
+                Item root = interp_read_binding(f, place_roots[index]);
+                Item updated = cow_path_set(root, place_paths.items()[index],
+                    place_values.items()[index]);
+                if (item_is_error(updated)) return updated;
+                interp_write_binding(f, place_roots[index], updated);
+            }
+            return result_root.get();
+        };
         for (int index = 0; index < dispatch_argc; index++) {
             NameEntry* entry = borrowed[index];
-            // CW25 / S9.2.2: `f(var m.rows[i])` borrows a PLACE. Detach the
-            // whole spine and pass the detached leaf; it is already installed
-            // in its parent, so the callee's in-place `var` writes reach the
-            // caller's container and need no writeback binding. Mirrors the
-            // MIR argument-loop hook so the tiers cannot diverge.
+            // the caller owns the home and evaluated keys across either execution tier.
             if (!entry && borrow_args[index]) {
                 Item leaf = ItemNull;
-                if (!interp_borrow_place_leaf(f, borrow_args[index], &leaf, false)) continue;
+                if (!interp_borrow_place_leaf(f, borrow_args[index], &leaf, false,
+                        &place_paths.items()[index], &place_roots[index], snapshot_home)) continue;
                 if (interp_frame_pending(f)) return ItemNull;
                 if (item_is_error(leaf)) return leaf;
                 words[index] = leaf.item;
+                place_values.items()[index] = leaf;
+                borrow_homes[index] = &place_values.words()[index];
                 continue;
             }
             if (!entry) continue;
@@ -2735,14 +2778,14 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                 transport->mir_var_homes[index] = NULL;
             }
             if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-            return interp_check_contract_return(f, node, result);
+            return interp_check_contract_return(f, node, publish_places(result));
         }
         Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
         // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
         // still holds; both observers must detach before a write
         if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-        return interp_check_contract_return(f, node, result);
+        return interp_check_contract_return(f, node, publish_places(result));
     }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
@@ -3307,24 +3350,6 @@ public:
     ~InterpErrorContextGuard() { st_->errors = entry_.prev; }
     InterpErrorContextGuard(const InterpErrorContextGuard&) = delete;
     InterpErrorContextGuard& operator=(const InterpErrorContextGuard&) = delete;
-};
-
-// `last` derives from the innermost subscript owner. The owner is a frame slot
-// so evaluating an arithmetic index cannot leave a movable container in a C++
-// local across fn_len's allocation-capable integer boxing path.
-class InterpLastIndexGuard {
-    InterpState* st_;
-    uint64_t* previous_;
-public:
-    InterpLastIndexGuard(InterpState* st, uint64_t* item)
-            : st_(st), previous_(st ? st->last_index_item : NULL) {
-        if (st_) st_->last_index_item = item;
-    }
-    ~InterpLastIndexGuard() {
-        if (st_) st_->last_index_item = previous_;
-    }
-    InterpLastIndexGuard(const InterpLastIndexGuard&) = delete;
-    InterpLastIndexGuard& operator=(const InterpLastIndexGuard&) = delete;
 };
 
 // A native fault abandons every C++ activation below this helper.  The

@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **272 anchored records**, preserving fixed, resolved,
+This archive contains **275 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -32,6 +32,27 @@ summary and implementation record are retained below. LR02-35 moved here on
 2026-11-03 after S16.10.4 was ruled and implemented.
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
+
+<a id="lr01-17"></a>**LR01-17 · The interpreter tier rejected task handles (S13.3.1v2, D8.1.1v18) · RESOLVED 2026-11-03 (found 2026-09-22)**
+
+**Resolution:** The October runtime-async implementation superseded this report. Requalification
+covered all 35 executable concurrency/async regressions on interp, AUTO and JIT,
+plain and forced/poisoned GC: **210/210 passed**, including the three procedural
+async fixtures named below. No new async ruling or tier fallback was introduced.
+[Qualification](<impl/Lambda_Impl_Place_Borrow_Views (done).md>).
+
+<details><summary>Original report and investigation (historical)</summary>
+
+Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
+(`proc_async_partial_item_gc`, `proc_local_error_destructure_async`,
+`wide_scalar_across_await`) pass with `LAMBDA_EXEC_BACKEND=jit`. They fail with
+`LAMBDA_EXEC_BACKEND=interp` and under `auto`, which starts them in the interpreter.
+`conc/start_wait` reports `error[E312]: invalid task handle`. This is
+pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
+Either the interpreter must run S13 tasks, or `auto` must not admit a script
+that starts one.
+
+</details>
 
 <a id="lr01-7"></a>**LR01-7 · Stateless REPL re-execution is O(n²) · FIXED 2026-10-06**
 The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
@@ -1863,6 +1884,97 @@ Four caps in one subsystem failed four ways, silent truncation among them. `SHAP
 
 
 ## 12. Procedural runtime (LR_12)
+
+<a id="lr12-14"></a>**LR12-14 · A matrix-row value aliased its source both ways · FIXED 2026-11-03 (S9.1.2, S9.2.2v2)**
+
+**Resolution:** Qualification: **8,718/8,718** Lambda/input baseline. Ordinary numeric-row reads materialize independent values. Public subview,
+reshape, transpose and ravel constructors use private source snapshots;
+internal path writers retain write-through row descriptors. Cloning a view
+materializes owned storage with exact lanes and dimensions. The user lifted
+CW32v2 item 6's deferral; constructor/capture/argument/return/reassignment
+boundaries and explicit row borrows pass across tiers and forced GC. The
+newly exposed vector/matrix packing mismatch is repaired as part of this fix.
+[Implementation and qualification](<impl/Lambda_Impl_Place_Borrow_Views (done).md>).
+
+<details><summary>Original report and investigation (historical)</summary>
+
+S9.1.2 / D4.4.6. Found while testing T29-5; present on the post-T29-3 binary,
+both tiers, for a loop-built and a packed matrix alike:
+```
+var m = [fill(3, 1), fill(3, 1), fill(3, 1)]
+var row = m[0]
+m[0][1] = 9      // row[1] reads 9
+row[2] = 4       // m[0][2] reads 4
+```
+The place-copy rule should mark `row` because its place is written while the
+copy is alive, but both writes are visible through the other name. Repro:
+`temp/t29/packed_probe.ls` (`row_copy_loop`, expected 9110, prints 9944).
+
+*Investigated 2026-09-25:* only a packed matrix leaks. `[fill(3, 1), …]` is promoted to a 2-D ArrayNum, and `m[0]` returns a mutable view onto its buffer (`make_leading_axis_view`, `is_mutable_view = 1`). The place-copy facts are right and both tiers mark the bind, but a view owns no storage: `clone_mutable_array_num` hands back the view itself, so the detach writes the base. A push-built matrix, a generic array of rows and a map of arrays are correct; `row_copy_loop`'s expected value is 9141, not 9110. The fix direction, copying a view into an owned array at a place-copy bind (S9.2.2), is the eager view-alias clone CW32v2 item 6 lists, but item 6 leaves mutable views OPEN/TODO by designer ruling, so it waits on that ruling. The other value boundaries (capture, push, parameter snapshot, call result, reassignment) leak the same view. Record: `temp/wv/LR12-14/`.
+
+</details>
+
+<a id="lr12-10"></a>**LR12-10 · Copies of var parameters and place borrows saw later writes · FIXED 2026-11-03 (S9.1.2, S9.1.3v3, D4.4.7)**
+
+**Resolution:** Qualification: **8,718/8,718** Lambda/input baseline. Place arguments now transport caller-owned precisely rooted Item homes and
+evaluated path keys. Both tiers publish scalar/container rebinds and COW
+replacements through the original place, including partial writes on errors.
+Plain ancestor arguments retain snapshots; unchanged unique leaves keep the
+existing in-place fast path. Packed scalar lanes, nullable records, imports,
+key evaluation, moving-data GC and AUTO promotion are covered. CW33v2 replaces
+the interior-pointer mechanism. [Implementation and qualification](<impl/Lambda_Impl_Place_Borrow_Views (done).md>).
+
+<details><summary>Original report and investigation (historical)</summary>
+
+S9.1.2 / S9.1.3. `pn f(var b: Box) { var saved = b; b.cells[0].k = 8; ... }`
+left `saved.cells[0].k == 8` on both tiers (and on the Result46 binary): the
+callee's own copy observed the borrow's write. The same held for a root stored
+into a container, a copy returned after the write, a reassigned alias, a typed
+array, and a copy followed by a `var` re-borrow that writes. Three defects
+combined:
+1. An alias bind marked its source only when the source was `cow_owned`, and
+   a `var` parameter never is (T0 declaration bind,
+   `mir_expr_is_owned_binding_alias`). T0's plain reassignment `s = b` marked
+   nothing even for owned locals -- a T0-only divergence (`s = b; b.x = v`
+   showed `v` through `s`).
+2. Stores through a `var` parameter write the root in place (CW33: the
+   chain-root prologue leaves it unique), so a root shared *after* entry was
+   mutated under its other holder.
+3. T0 re-borrowed a `var` parameter without the prepare MIR's call site emits
+   for a `cow_marked` root.
+
+**Fix.** (1) both tiers mark an alias of a `var` parameter, and T0 reassignment
+marks like MIR's `cow_binding`. (2) `lambda_ast_note_var_root_sharing`
+(script finalize, shared by both tiers) decides per `var` parameter whether the
+body may share its root -- a bind, return, container element, or a call
+argument the callee can keep (a plain parameter whose root it retains, CW29
+bare scan `cow_param_root_retained`; a `var` parameter that itself may share,
+iterated to a fixpoint); comparisons and truth tests are reads -- and flags each
+store a sharing use may precede (`AstAssignNode::var_root_unshare`,
+flow-sensitive like MIR's `cow_marked`; an `if` arm that exits contributes
+nothing, a loop counts as a whole). A flagged store detaches a shared root and
+republishes the binding (`interp_read_store_owner`,
+`mir_emit_var_root_unshare`, also used by the T29-1 writing bind); the CW33
+epilogue publishes it, and such parameters are marked publishable so callers
+transport the home. (3) a T0 activation that marked a `var` parameter prepares
+it before re-borrowing (`InterpFrame::var_marked_mask`). Size cost: jetstream
+deltablue2 unchanged, awfy deltablue2 +4 instructions, splay2 +53 (its
+rotations really do share their roots). Regression
+`test/lambda/proc/var_param_snapshot.ls` (identical on interp, jit, auto and
+default; forced-GC clean). Two goldens pinned the defect and were corrected:
+`proc/interp_typed_var_param.txt` (`let keep = x` then writes through `x`) and
+`proc/cow_rmw_borrow.txt` (`shared_root`: `snap.xs[2]` is 0, not 3).
+
+**Residue (OPEN):** the detach is gated on a publish channel. A place borrow
+argument (`f(b.other)` into `var c: Cell`, CW25) transports no home on either
+tier, so `var s = c; c.k = 50` still shows 50 through `s`: detaching would lose
+the caller's write instead. Needs the place-borrow home of CW33 cost item 2
+(`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
+`temp/varparam_more.ls` (expected 550, prints 5050).
+
+*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](<Lambda_Issue_Ledger (fixed).md#lr12-32>), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
+
+</details>
 
 <a id="lr12-43"></a>**LR12-43 · ASan live async startup reports stack-use-after-scope in fiber priming · FIXED 2026-10-29 (reproduced 2026-10-28)**
 

@@ -67,7 +67,7 @@ let big = reshape([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [3, 4])
 let r0 = big[0]
 let r1 = big[1]
 let r2 = big[2]
-is_view(r0)                                 // true
+is_view(r0)                                 // false: owned row snapshot
 shape(r0)                                   // [4]
 ndim(r0)                                    // 1
 sum(r0) + sum(r1) + sum(r2)                 // 10 + 26 + 42 = 78

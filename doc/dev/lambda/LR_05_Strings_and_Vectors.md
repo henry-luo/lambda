@@ -1,6 +1,6 @@
 # Lambda Runtime — Strings, Symbols & Vectors
 
-> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*; §4 flags and §7 view lifetime re-verified 2026-10-21
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*; §4 flags and §7 view lifetime re-verified 2026-10-21; §7 Lambda snapshots updated 2026-11-03
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers two value families that live "next to" the numeric tower: UTF-8 **strings and symbols** (their flexible-array layout, three-tier allocation, `is_ascii` fast indexing, utf8proc normalization, and casefold-then-`memcmp` comparison), and the **`ArrayNum`** numeric-array / vector machine (the union-aliased storage, the 15 element types, the auto-vectorized contiguous kernels, NumPy-style N-D broadcasting, mutable views, and the image-processing toolkit built on top).
 >
@@ -115,16 +115,28 @@ When either operand carries shape metadata, the routers dispatch to `vec_broadca
 
 ## 7. Mutable views
 
-A **view** is an `ArrayNum` that aliases another array's storage instead of owning it. Four language constructors build views — `fn_subview`, `fn_reshape`, `fn_transpose`, and `fn_ravel` — while JS/FFI paths use the same descriptor contract:
+A **view** is an `ArrayNum` descriptor over another array's storage. Under
+**S9.2.2v2**, the Lambda constructors `fn_subview`, `fn_reshape`,
+`fn_transpose` and `fn_ravel` first snapshot their source, then describe that
+private storage. Ordinary leading-axis row reads materialize the selected
+row; only internal path writers use `array_num_get_borrowed`. A cloned view
+also materializes owned storage. JS/FFI retain their shared-storage descriptor
+contract; Lambda's snapshot policy stays above that layer.
 
-- **The view aliases the base buffer.** `fn_subview` sets `view->data = base->data + start * elem_size` (`:2815`; `start * stride` elements for a strided rank-one source, whose stride the view keeps) — element 0 of the view is element `start` of the base; `reshape`/`transpose`/`ravel` keep `data = base->data` and re-describe it with new shape/strides. No element data is copied.
+The internal descriptor and lifetime rules are:
+
+- **The view aliases the base buffer.** `fn_subview` sets `view->data = base->data + start * elem_size` (`:2815`; `start * stride` elements for a strided rank-one source, whose stride the view keeps) — element 0 of the view is element `start` of the base; `reshape`/`transpose`/`ravel` keep `data = base->data` and re-describe it with new shape/strides. This descriptor construction does not itself copy elements; Lambda's source snapshot owns the independent bytes.
 - **Elements are addressed through the strides.** The element at C-order position `p` sits `array_num_element_offset(view, p)` elements from `data` (`lambda.hpp`): `p` itself when `array_num_is_dense` (an owned array, or an `is_c_contig` view), `Σ idxᵢ · strideᵢ` otherwise. Only `transpose` makes non-dense views — and every leading-axis row of one: row 0 of `transpose(m)` for a 2 × 3 `m` steps by 3. Each reader or writer that walks positions (`array_num_get`, `vector_get`, printing, `array_num_eq`, the concat/slice/reverse byte copies, `fn_array_set`) maps through it; the offset-taking primitives (`array_num_read_item`, `array_num_set_item`, `array_num_store_admitted`) bound an offset by `length`/`capacity` only for a dense array. Typed admission copies a non-dense view (an S9.2.2 snapshot) instead of certifying it in place.
 - **The view carries an explicit backing descriptor.** It sets `is_ndim`/`is_view` (and, where appropriate, `is_mutable_view`) and attaches an `ArrayNumShape`. `offset` is always in elements; `backing_kind` says whether bytes live in a GC-zone owner, stable borrowed external pointer, retained `ByteStorage`, or replaceable `ByteBufferHandle`. `base` is only the semantic GC-reachability edge, while `backing` is the non-GC storage owner/handle.
 - **Derived views inherit ownership, not just a raw pointer.** `array_num_init_derived_view` flattens the element offset and propagates handle/storage ownership. A retained-storage child takes its own reference; a handle-backed child follows the same handle and generation; a borrowed child retains the same stable-lifetime GC base.
 - **GC-zone views are rebased, not pinned.** A view over GC data does not stop compaction from moving its owner's buffer. Compaction calls `gc_rebind_array_num_gc_view` (`gc_heap.c`), which promotes the owner's data through `gc_compact_array_num_owned_data` and recomputes `view->data = base->data + offset × element size`; marking traces only `shape->base`. Handle-backed views re-resolve their data when the handle's generation changes (`array_num_resolve_data`), and retained-storage views hold a `ByteStorage` reference, so neither depends on an unrelated JS wrapper staying put. `array_num_new_external_view` is only for pointers guaranteed stable for the lifetime of its `gc_base`; replaceable pointers must use a handle. `array_num_new_storage_view` is the FFI/mmap/cross-isolate form when no mutable handle exists.
 - **Arena-backed arrays are rejected.** Every constructor checks `base->is_heap` first and refuses with a "copy() first" error otherwise (`fn_subview:2783`, `fn_reshape:2852`). Arena memory dies with its input arena, independently of the collector, so a view's `base` edge cannot keep it alive. (No `copy()` system function is registered yet; `ravel` copies instead of viewing.)
 
-`is_mutable_view` marks a view as writable *through* to its base — procedural in-place element assignment on the view updates the underlying base buffer. `reshape` additionally requires the source to be **C-contiguous** (`:2857`): an owned 1-D array qualifies, but an existing non-contiguous view must be materialized with `copy()` first.
+`is_mutable_view` permits internal writes through to a descriptor's backing.
+For an ordinary Lambda view value that backing is private: a write cannot
+change the source argument. A `var` place borrow uses a caller-rooted home
+and reinstalls replacements through its evaluated path (D4.4.7), including
+on an error result. `reshape` additionally requires the source to be **C-contiguous** (`:2857`): an owned 1-D array qualifies, but an existing non-contiguous view must be materialized with `copy()` first.
 
 ---
 
