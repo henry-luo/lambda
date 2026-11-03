@@ -1733,3 +1733,119 @@ mixed/atomic and preserved-space source protocols, and vertical/RTL Ruby flow
 remain open. The next finite investigation is retained in
 `temp/ruby-m18/next-milestone.json`. Browser references, upstream WPT documents,
 comparison thresholds and baseline floors remain unchanged.
+
+## M19: shared inline seams retain Unicode opportunities
+
+P1 prerequisite found while investigating multi-segment flow: the imported
+`ruby-line-breaking-001` puts seven source boxes on its second overflowing line,
+where current Chromium ends that line after `に、`. The same boundary mechanism
+is used by ordinary source spans. The text-node preflight recognizes only
+ID-to-ID adjacency, missing legal breaks after closing punctuation and at mixed
+Latin/ideographic seams. CSS Ruby §3.4.1 uses ordinary inline base boundaries;
+CSS Text §5/§5.5 requires Unicode opportunities across those source boundaries.
+
+Repair the shared preflight with the existing Unicode seam helper and common
+source-owner policy. Do not add Ruby/tag-specific packing or change source DOM,
+selected-view ownership (**D4.1.4v5 / D4.5.1v4**) or browser references.
+Multi-segment parallel placement remains the next independent flow protocol.
+
+Acceptance: the original punctuation document; split ordinary and base-only
+Ruby sources versus unsplit text; closing/opening punctuation and mixed Latin/
+ideographic seams; nowrap, keep-all and a nowrap common owner with normal
+children; initial/retained flow and wide/narrow mutations, source identities
+and glyph geometry. Budget: prove the focused native failure, shared wrapping/
+Ruby neighbors and live browser geometry, raw Ruby delta, then one stable
+required Radiant gate and lint/inventory. General parallel-segment wrapping
+and independent intrinsic-size disagreements remain open.
+
+The focused test fails before the seam repair: the split punctuation row uses
+240px instead of the unsplit control's 360px. Reusing the common-owner Unicode
+helper repairs all its source glyph positions. The original Ruby shape also
+contains an empty misparented reading: the existing contribution path adds its
+inherited leading despite having no annotation line. Reuse the existing empty
+strut classifier to exclude that absent annotation-line contribution, consistent
+with CSS Ruby §3.3. Keep nonempty and decorated annotation behavior unchanged.
+
+The original WPT additionally disables kerning. Its preflight incorrectly reads
+the kerning pair's previous codepoint, which is conditional on kerning and can
+be cleared by a font change. Read the existing unconditional text-character
+state instead; combined text publishes its outer edge there too. The focused
+fixture now disables kerning initially and mutates it with the row width, so
+the original trigger is covered. No new retained payload or scratch ownership
+is introduced.
+
+The 42 focused Ruby/wrapping/punctuation checks pass. The raw suite retains
+**53/212 full matches** and improves 12 partial documents, with no lost full
+match or partial-score decrease. `ruby-line-breaking-001` improves from
+33.3% to **100% text** and 23.5% to **88.2% elements**; its empty RTC/RT element
+boxes remain different from the browser, so this is not a whole-document pass.
+Dynamic insertion/removal cases also gain correct line contributions from the
+empty-strut classification. Evidence: `temp/ruby-m19/neighbors-2.log`,
+`wpt-1.log` and `delta-1.json`.
+
+The eight comparable fixture rows and their controls match **276** live-browser
+coordinates for row sizes and source text rectangles relative to their row.
+The common-owner control intentionally requires 60px while Chromium uses
+120px: CSS Text §5.5 assigns the seam's white-space to the nearest common
+ancestor, which is nowrap here. Keep this normative assertion and the browser
+capture separate; neither references nor tolerances change. Empty annotation
+element boxes are outside those source-coordinate checks. Chromium computes
+the misparented RT as inline at the parent's font size; HTML §15.3.4 specifies
+the RT ruby-text UA role, which remains the engine's computed role.
+Evidence: `temp/ruby-m19/browser-comparison.json`,
+`seams-{browser,native}-final.json`,
+[CSS Text §5.5](https://www.w3.org/TR/css-text-3/#line-break-details),
+and [HTML phrasing defaults](https://html.spec.whatwg.org/multipage/rendering.html#phrasing-content-3).
+
+The first aggregate exposes two new Text baseline regressions,
+`trailing-ideographic-space-013/014`: an emergency seam before U+3000 bypasses
+its required hanging placement. Share the existing line-end space policy
+between preflight and glyph overflow/accumulation, so CSS Text §4.1.3 hanging
+still precedes overflow-wrap. Add both emergency modes to the existing mixed
+hanging-space regression without altering those upstream documents or floors.
+The aggregate also has four UI child exits with code 137 and no machine result,
+while another worktree runs UI tests concurrently; their attribution remains
+pending isolated replay. Neither this failed aggregate nor that concurrency
+observation proves successful qualification.
+
+The corrected 013/014 documents fully match their unchanged references on both
+the saved M18 CLI and the new candidate. All 43 focused checks pass, including
+the added native full-width hanging character Range controls. The complete
+Text category returns to **894 full / 86 partial / 0 regressions**. The final
+review keeps preserved ASCII/native-whitespace handling separate from the
+shared ideographic-space predicate, preserving its existing policy.
+
+All four UI fixtures pass three isolated repetitions on each of the saved M18
+and corrected M19 binaries with four jobs. This does not attribute the earlier
+code-137 exits or turn the first aggregate green. Retain that aggregate and
+those controlled replays separately, and run the required aggregate again on
+the final frozen inputs after the hanging-space correction. Evidence:
+`temp/ruby-m19/space-probe.log`, `neighbors-4.log`, `text-probe-2.log`,
+`ui-{base,candidate}-{1,2,3}.{log,json,status}`, and `ui-control-inputs.json`.
+
+M19 is qualified on main-workspace base `52c1ff264`. The fresh required Radiant
+aggregate passes **9,079 passed / 305 partial / 0 failed / 2 skipped** of 9,386
+checks, including **483/483** native text/query and **752/752** UI checks.
+Layout baselines retain **4,973 full / 301 partial / 0 regressions**, including
+the corrected Text category. Final production/test hashes and the candidate
+CLI remain unchanged through this aggregate. Dimension lint, whitespace and
+inventory checks pass; the inventory retains 421 names/IDs and changes only
+reference columns 14/15. Final Ruby results retain **53 full / 159 mismatches**
+with 12 partial documents improved and no score regression.
+
+Evidence: `temp/ruby-m19/radiant-stable.log`,
+`radiant-stable-output/test_summary.json`, `source-inputs-final.json`,
+`neighbors-final.log`, `wpt-final.log`, `delta-final.json`,
+`space-probe-final.log`, `browser-comparison.json` and
+`qualification-result.json`. The earlier failed aggregate remains in
+`radiant.log` and `radiant-output/`; it is not the final qualification.
+No module API or ownership layout changes in M19, so boundary validation was
+not repeated. M18's six deferred-import violations and M15's unrelated
+input/PDF build limit remain documented; no fresh pass of either is claimed.
+
+The goal remains active. A fresh three-segment probe still shifts the long
+base's already-completed fragment and leaves its reading unsplit. The next
+flow milestone is anchored to that failure in
+`temp/ruby-m19/next-milestone.json`, reusing common emission and break-group
+policy. References, upstream documents, tolerances and baseline floors remain
+unchanged.

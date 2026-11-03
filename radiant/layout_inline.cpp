@@ -799,6 +799,8 @@ static void contribute_misparented_ruby_annotation_line_height(
         LayoutContext* lycon, ViewSpan* annotation,
         const Linebox* base_line_before_annotation) {
     if (!lycon || !annotation || !base_line_before_annotation) return;
+    // an empty strut has no annotation line whose inherited leading could enlarge the base line.
+    if (inline_child_is_empty_strut(static_cast<View*>(annotation))) return;
     float annotation_extent = max(annotation->height, annotation->content_height);
     if (annotation_extent <= 0.0f) return;
 

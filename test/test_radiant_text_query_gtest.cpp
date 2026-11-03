@@ -7329,6 +7329,60 @@ TEST_F(RadiantTextQuery, ClosingPunctuationRetainsAdjacentInlineContext) {
     }
 }
 
+TEST_F(RadiantTextQuery, CjkInlineSeamsUseTheSameBreaksAsContinuousText) {
+    ASSERT_NE(load("test/html/layout_cjk_inline_boundaries.html"), nullptr);
+    struct Row { const char* id; const char* group; } rows[] = {
+        {"punct", nullptr}, {"closed", nullptr}, {"opening", nullptr}, {"latin-before", nullptr},
+        {"latin-after", nullptr}, {"nowrap", nullptr}, {"keep", nullptr}, {"owner", nullptr},
+        {"ruby", "ruby-group"}
+    };
+    const size_t row_count = sizeof(rows) / sizeof(rows[0]);
+    struct Source { DomText* text; DomNode* root; DomNode* parent; const unsigned char* data; };
+    lam::ArrayList<Source> sources[row_count];
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    for (size_t index = 0; index < row_count; index++) {
+        DomElement* group = find(rows[index].group ? rows[index].group : rows[index].id);
+        ASSERT_NE(group, nullptr);
+        for (DomNode* child = group->first_child; child; child = child->next_sibling) {
+            DomText* text = first_text_leaf(child);
+            if (!text) continue;
+            ASSERT_TRUE(sources[index].append({text, child, text->parent, text->text_data()}));
+        }
+    }
+    auto check = [&]() {
+        for (size_t index = 0; index < row_count; index++) {
+            SCOPED_TRACE(rows[index].id);
+            DomElement* row = find(rows[index].id);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", rows[index].id);
+            DomElement* control = find(id);
+            ASSERT_NE(control, nullptr);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            DomText* references[16] = {};
+            size_t count = 0;
+            for (const Source& source : sources[index]) {
+                EXPECT_EQ(source.text, first_text_leaf(source.root));
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                ASSERT_LT(count, 16u);
+                references[count++] = source.text;
+            }
+            // an unsplit source is an independent control for all split-source glyph positions.
+            expect_text_paint_sources<32>(control, first_text_leaf(control), row, references, count);
+        }
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(); }
+    for (const char* width : {"80px", "10px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("page"), "font-kerning",
+            strcmp(width, "80px") == 0 ? "normal" : "none"));
+        for (const Row& row : rows) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(row.id), "width", width));
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", row.id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check();
+    }
+}
+
 TEST_F(RadiantTextQuery, BaseReplacementPreservesTheLoadersUrlCarrier) {
     Url* base = get_current_dir();
     ASSERT_NE(base, nullptr);
@@ -16862,6 +16916,7 @@ TEST_F(RadiantTextQuery, MixedSpaceStylesRetainTheirHangingPolicy) {
         {"alternating-prefix-visible", 100.0f, 50.0f}, {"alternating-prefix-conditional", 150.0f, 25.0f},
         {"pre-fixed-leading", 50.0f, 50.0f}, {"pre-fixed-suffix", 100.0f, 25.0f},
         {"pre-ideographic-leading", 50.0f, 50.0f}, {"pre-ideographic-suffix", 100.0f, 25.0f},
+        {"emergency-word-space", 50.0f, 25.0f}, {"emergency-anywhere-space", 50.0f, 25.0f},
     };
     for (const Case& entry : cases) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
@@ -16883,6 +16938,22 @@ TEST_F(RadiantTextQuery, MixedSpaceStylesRetainTheirHangingPolicy) {
         ASSERT_NE(text->rect, nullptr);
         EXPECT_FLOAT_EQ(text->rect->hanging_trim, entry.trim) << entry.id;
     }
+    ASSERT_NE(radiant_document_ensure_state(document, "hanging-emergency-space"), nullptr);
+    DomRange* range = dom_range_create(document->state);
+    ASSERT_NE(range, nullptr);
+    for (const char* id : {"emergency-word", "emergency-anywhere"}) {
+        DomElement* row = dom_find_element_by_id(document->root, id);
+        ASSERT_NE(row, nullptr);
+        EXPECT_FLOAT_EQ(row->height, 50.0f);
+        DomText* space = first_text_leaf(row->first_child->next_sibling);
+        ASSERT_NE(space, nullptr); ASSERT_NE(space->rect, nullptr);
+        EXPECT_EQ(space->rect->next, nullptr);
+        float y = 0.0f;
+        view_get_visual_bounds(row, nullptr, &y, nullptr, nullptr);
+        // normal ideographic space retains its full Range rectangle beyond the line's fitting edge.
+        expect_character_rect(range, space, 0, {50.0f, y, 25.0f, 25.0f});
+    }
+    dom_range_release(range);
 }
 
 TEST_F(RadiantTextQuery, RtlAtomicReorderingPreservesThePhysicalLineOrigin) {
