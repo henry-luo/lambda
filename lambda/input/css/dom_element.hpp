@@ -1139,6 +1139,9 @@ struct DomElement : DomNode {
         }
     }
     bool styles_resolved() const { return flag(ELMT_FLAG_STYLES_RESOLVED); }
+    bool display_resolved() const {
+        return display.outer != CSS_VALUE__UNDEF && !needs_style_recompute();
+    }
     void set_styles_resolved(bool value) {
         set_flag(ELMT_FLAG_STYLES_RESOLVED, value);
         // A reset discards the cascade that produced any cached contribution.

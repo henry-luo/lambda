@@ -94,7 +94,7 @@ static void bidi_walk_paragraph_source(DomNode* node, Visitor& visitor,
     }
     if (!node->is_element()) return;
     DomElement* element = node->as_element();
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     if (layout_display_is_none(display)) return;
     if (layout_element_is_abs_or_fixed(element) || layout_element_is_floated(element)) {
         visitor.out_of_flow(element);
@@ -300,7 +300,7 @@ struct BidiParagraphCollector {
     bool enter_inline(DomElement* element,CssEnum mode,InlineFrame* current) {
         if (layout_is_shadow_slot(element)) { valid = false; return false; }
         if (layout_ruby_annotation_outside_scope(element, scope)) return false;
-        if (resolve_display_value(element).outer != CSS_VALUE_CONTENTS && element->specified_style &&
+        if (layout_resolved_display(element).outer != CSS_VALUE_CONTENTS && element->specified_style &&
             style_tree_get_declaration(element->specified_style,CSS_PROPERTY_UNICODE_BIDI)) {
             mode = css_prop_compute_cascaded_keyword(element,CSS_PROPERTY_UNICODE_BIDI,CSS_VALUE_NORMAL);
         }

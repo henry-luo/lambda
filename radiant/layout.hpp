@@ -4033,6 +4033,12 @@ typedef struct LayoutContext {
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
     FontBox font;  // current font style
+    // glyphs in one text run share CSS orientation; expire on style/tree/pass changes.
+    lam::Up<DomNode> text_orientation_owner;
+    TextOrientationPolicy text_orientation_policy;
+    uint64_t text_orientation_style_epoch, text_orientation_mutation_epoch;
+    uint32_t text_orientation_generation, text_orientation_measurement_generation;
+    ViewType text_orientation_view_type;
     float root_font_size;
     lam::Up<FlexContainerLayout> flex_container; // integrated flex container layout
     lam::Up<GridContainerLayout> grid_container; // integrated grid container layout

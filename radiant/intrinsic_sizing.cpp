@@ -875,7 +875,7 @@ static IntrinsicHorizontalBoxEdges intrinsic_horizontal_box_edges(
         LayoutContext* lycon, DomElement* element, bool resolve_cyclic_padding) {
     IntrinsicHorizontalBoxEdges edges = {0.0f, 0.0f, 0.0f, 0.0f};
     if (!element) return edges;
-    if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+    if (layout_resolved_display(element).outer == CSS_VALUE_CONTENTS) {
         // CSS Display 3: a contents element has no principal box, so its
         // padding and border do not contribute to intrinsic sizing.
         return edges;
@@ -924,7 +924,7 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
                                            bool horizontal, float inline_base,
                                            bool inline_base_is_definite) {
     if (!element) return 0.0f;
-    if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+    if (layout_resolved_display(element).outer == CSS_VALUE_CONTENTS) {
         // CSS Display 3: box edges belong to generated boxes, not the boxless
         // element whose descendants participate in the parent formatting context.
         return 0.0f;
@@ -2457,7 +2457,7 @@ static bool is_inline_level_element(DomElement* element);
 static bool is_inline_level_element(DomElement* element) {
     if (!element) return false;
 
-    DisplayValue resolved_display = resolve_display_value((void*)element);
+    DisplayValue resolved_display = layout_resolved_display((void*)element);
     // anonymous table repair supplies a retained role, not an HTML default;
     // its absent tag ID must not classify a block table as a custom inline.
     if (element->is_table_fixup()) return layout_display_is_inline_level(resolved_display.outer);
@@ -2597,7 +2597,7 @@ static bool intrinsic_is_vertical_block_sequence(DomElement* element) {
         if (child->is_comment() || layout_intrinsic_node_is_collapsible_space_only(child)) continue;
         if (!child->is_element()) return false;
         DomElement* child_element = child->as_element();
-        DisplayValue display = resolve_display_value(child_element);
+        DisplayValue display = layout_resolved_display(child_element);
         if (layout_display_is_none(display) || layout_element_is_abs_or_fixed(child_element)) continue;
         if (layout_element_is_floated(child_element) ||
             (display.outer != CSS_VALUE_BLOCK && display.outer != CSS_VALUE_LIST_ITEM)) return false;
@@ -2905,7 +2905,7 @@ static bool intrinsic_list_item_has_table_ancestor(DomElement* element) {
     for (DomNode* ancestor = element ? element->parent : nullptr;
          ancestor; ancestor = ancestor->parent) {
         if (!ancestor->is_element()) continue;
-        DisplayValue display = resolve_display_value(ancestor);
+        DisplayValue display = layout_resolved_display(ancestor);
         // A list inside an existing table cell already sizes against that cell;
         // only content entering an anonymous cell from a row/group needs the
         // marker contribution at this level.
@@ -3040,7 +3040,7 @@ static void intrinsic_prepare_anonymous_table_children(LayoutContext* lycon,
         DomElement* element) {
     if (!lycon || !element || !element->first_child) return;
 
-    DisplayValue display = resolve_display_value((void*)element);
+    DisplayValue display = layout_resolved_display((void*)element);
     if (layout_display_is_table_structure(display.inner)) return;
 
     // CSS 2.1 §17.2.1 anonymous table wrappers affect intrinsic inline-size
@@ -3959,7 +3959,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     if (element->specified_style) {
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
-        (lam::unsafe_view_block_element_storage(element))->display = resolve_display_value((void*)element);
+        (lam::unsafe_view_block_element_storage(element))->display = layout_resolved_display((void*)element);
     }
 
     {
@@ -3989,7 +3989,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     bool is_inline_non_replaced = false;
     {
-        DisplayValue resolved_display = resolve_display_value((void*)element);
+        DisplayValue resolved_display = layout_resolved_display((void*)element);
         if (resolved_display.outer == CSS_VALUE_INLINE &&
             (resolved_display.inner == CSS_VALUE_FLOW || resolved_display.inner == CSS_VALUE_RUBY ||
              css_display_is_ruby_internal(resolved_display.inner))) {
@@ -4702,7 +4702,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // widths across all rows in that column.
 
             auto classify_table_cell = [](DomElement* cell_elem, bool* out_is_cell) -> int {
-                DisplayValue display = resolve_display_value((void*)cell_elem);
+                DisplayValue display = layout_resolved_display((void*)cell_elem);
                 bool is_cell = !layout_element_is_floated(cell_elem) &&
                     display.inner == CSS_VALUE_TABLE_CELL;
                 if (out_is_cell) *out_is_cell = is_cell;
@@ -4717,7 +4717,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             auto is_proper_table_child = [](DomElement* child_elem) -> bool {
                 if (!child_elem) return false;
-                DisplayValue child_display = resolve_display_value((void*)child_elem);
+                DisplayValue child_display = layout_resolved_display((void*)child_elem);
                 CssEnum inner = child_display.inner;
                 return inner == CSS_VALUE_TABLE_ROW ||
                        inner == CSS_VALUE_TABLE_ROW_GROUP ||
@@ -4734,7 +4734,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     return is_proper_table_child(child_elem);
                 }
                 if (anon_context == INTRINSIC_ANON_ROW_GROUP) {
-                    DisplayValue child_display = resolve_display_value((void*)child_elem);
+                    DisplayValue child_display = layout_resolved_display((void*)child_elem);
                     return child_display.inner == CSS_VALUE_TABLE_ROW;
                 }
                 return false;
@@ -4828,7 +4828,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     DomElement* item_elem = item->as_element();
                     if (should_skip_anonymous_row_child(item_elem, anon_context)) break;
 
-                    DisplayValue item_display = resolve_display_value((void*)item_elem);
+                    DisplayValue item_display = layout_resolved_display((void*)item_elem);
                     bool item_is_float = layout_element_is_floated(item_elem);
                     if (!item_is_float && item_display.inner == CSS_VALUE_TABLE_CELL) break;
                     if (layout_display_is_none(item_display) ||
@@ -4977,7 +4977,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                     if (!child->is_element()) continue;
                     DomElement* child_elem = child->as_element();
-                    DisplayValue child_display = resolve_display_value((void*)child_elem);
+                    DisplayValue child_display = layout_resolved_display((void*)child_elem);
                     bool is_row = (child_display.inner == CSS_VALUE_TABLE_ROW);
                     bool is_row_group = !is_row &&
                         layout_display_is_table_row_group(child_display.inner);
@@ -4991,7 +4991,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
                                 if (!row->is_element()) continue;
                                 DomElement* row_elem = row->as_element();
-                                DisplayValue row_display = resolve_display_value((void*)row_elem);
+                                DisplayValue row_display = layout_resolved_display((void*)row_elem);
                                 if (row_display.inner == CSS_VALUE_TABLE_ROW) {
                                     with_intrinsic_element_font(row_elem, [&]() {
                                         callback(row_elem, INTRINSIC_ANON_ROW_NONE);
@@ -5002,7 +5002,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             for (DomNode* item = child_elem->first_child; item; item = item->next_sibling) {
                                 if (!item->is_element()) continue;
                                 DomElement* item_elem = item->as_element();
-                                DisplayValue item_display = resolve_display_value((void*)item_elem);
+                                DisplayValue item_display = layout_resolved_display((void*)item_elem);
                                 if (item_display.inner != CSS_VALUE_TABLE_ROW) {
                                     group_has_anonymous_row_content = true;
                                     break;
@@ -5057,7 +5057,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 DomElement* parent = row_elem->parent && row_elem->parent->is_element()
                     ? row_elem->parent->as_element() : nullptr;
                 if (context == INTRINSIC_ANON_ROW_GROUP) groups[row_index] = row_elem;
-                else if (parent && layout_display_is_table_row_group(resolve_display_value(parent).inner))
+                else if (parent && layout_display_is_table_row_group(layout_resolved_display(parent).inner))
                     groups[row_index] = parent;
                 bool in_run = false, last_text = false;
                 for (DomNode* node = row_elem->first_child; node; node = node->next_sibling) {
@@ -5181,7 +5181,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (!child->is_element()) continue;
                 DomElement* child_elem = child->as_element();
                 NameId ctag = child_elem->tag();
-                DisplayValue child_display = resolve_display_value((void*)child_elem);
+                DisplayValue child_display = layout_resolved_display((void*)child_elem);
                 bool is_caption = (child_display.inner == CSS_VALUE_TABLE_CAPTION || ctag == MARKUP_NAME_CAPTION);
                 if (is_caption) {
                     IntrinsicSizes cap = measure_element_intrinsic_widths(lycon, child_elem);
@@ -5279,7 +5279,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     DomNode* intrinsic_children = replaced_intrinsic_set ? nullptr : element->first_child;
     if (!replaced_intrinsic_set) {
         intrinsic_materialize_pseudo_content(lycon, element);
-        if (resolve_display_value(element).inner == CSS_VALUE_RUBY) {
+        if (layout_resolved_display(element).inner == CSS_VALUE_RUBY) {
             // CSS Ruby §3.1.1: paired columns contribute once, shared with used layout.
             sizes = layout_ruby_intrinsic_sizes(lycon, element);
             intrinsic_children = nullptr;
@@ -5754,7 +5754,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ViewBlock* child_vb = lam::unsafe_view_block_element_storage(child_elem);
             // A style-only measurement can leave the cached display empty; query the
             // computed display instead of mistaking that placeholder for `none`.
-            if (layout_display_is_none(resolve_display_value(child_elem))) {
+            if (layout_display_is_none(layout_resolved_display(child_elem))) {
                 continue;
             }
 
@@ -6786,7 +6786,7 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
         return true;
     }
 
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     if (display.outer != CSS_VALUE_INLINE && display.outer != CSS_VALUE_CONTENTS) {
         return false;
     }
@@ -7025,14 +7025,14 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
             lycon->elmt = lam::up(child);
             // provisional inlines need their computed box role before CSS can
             // materialize block sizing properties; the measurement restores it.
-            ViewType role = layout_view_type_for_display(resolve_display_value(element),
+            ViewType role = layout_view_type_for_display(layout_resolved_display(element),
                 layout_intrinsic_element_is_atomic_inline(element));
             bool role_changed = element->view_type != role;
             element->view_type = role;
             if (role_changed || !element->styles_resolved() || element->needs_style_recompute() ||
                 element->measure_restyled())
                 dom_node_resolve_style(element, lycon);
-            if (layout_display_is_none(resolve_display_value(element)) ||
+            if (layout_display_is_none(layout_resolved_display(element)) ||
                 intrinsic_child_is_out_of_flow(element, atom)) continue;
             bool composed = false;
             DomNode* plain = element->first_child;

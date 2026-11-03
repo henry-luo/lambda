@@ -11,6 +11,7 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_engine.h"
 #include "../lib/memtrack.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/math_utils.h"
@@ -3120,6 +3121,11 @@ static DisplayValue resolve_display_value_raw(void* child,
         // anonymous table roles survive used-size invalidation; they have no
         // authored display declaration or HTML default to recompute.
         if (dom_elem->is_table_fixup()) return dom_elem->display;
+        // layout assigns an ancestor's role before measuring descendants;
+        // provisional font/size resolution must not recascade that role per glyph.
+        if (skip_flex_grid_child_check && dom_elem->display.outer != CSS_VALUE__UNDEF &&
+            (dom_elem->display_resolved() || dom_engine_layout_active(dom_elem->doc)))
+            return dom_elem->display;
         NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
         bool is_mathml = css_is_mathml_element(dom_elem);
 
@@ -3323,6 +3329,7 @@ DisplayValue resolve_display_value(void* child) {
 
     // CSS Ruby 1 §2.2 and CSS Display §2.7 transform computed display before
     // box generation, including descendants through non-atomic inline boxes.
+    if (!display_inlinified_by_ruby_ancestor(node)) return display;
     DomElement* element = node->as_element();
     CssEnum float_value = layout_specified_keyword(
         element, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
@@ -3334,7 +3341,21 @@ DisplayValue resolve_display_value(void* child) {
         position_value == CSS_VALUE_FIXED;
     if (out_of_flow) return display;
 
-    return display_inlinified_by_ruby_ancestor(node) ? inlinify_display(display) : display;
+    return inlinify_display(display);
+}
+
+DisplayValue layout_resolved_display(void* child) {
+    DomNode* node = static_cast<DomNode*>(child);
+    DomElement* element = node && node->is_element() ? node->as_element() : nullptr;
+    if (!element) return resolve_display_value(child);
+    if (dom_engine_layout_active(element->doc)) {
+        // layout reset invalidates this field; the first query publishes its role.
+        if (element->display.outer == CSS_VALUE__UNDEF)
+            element->display = resolve_display_value(child);
+        return element->display;
+    }
+    return element->display_resolved() && element->styles_resolved()
+        ? element->display : resolve_display_value(child);
 }
 
 static void resolve_current_font_size(LayoutContext* lycon) {

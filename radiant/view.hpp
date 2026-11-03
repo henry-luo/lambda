@@ -4390,6 +4390,8 @@ FilterFunction* resolve_filter_value(LayoutContext* context, CssPropertyCode pro
                                      const CssValue* value, Pool* target_pool);
 void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view);
 DisplayValue resolve_display_value(void* child);
+// layout consumes its resolved role; CSSOM still resolves computed display.
+DisplayValue layout_resolved_display(void* child);
 DisplayValue css_default_display_for_element(DomElement* element, DomNode* node);
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display);

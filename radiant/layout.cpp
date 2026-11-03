@@ -1225,7 +1225,7 @@ static bool layout_marker_has_list_item_trailing_space(LayoutContext* lycon,
     DomNode* node = static_cast<DomNode*>(lycon->line.last_text_view);
     while (node) {
         if (node->is_element()) {
-            DisplayValue display = resolve_display_value(node);
+            DisplayValue display = layout_resolved_display(node);
             if (display.list_item) {
                 return node != static_cast<DomNode*>(marker_owner);
             }
@@ -1249,7 +1249,7 @@ static bool is_block_level_element(DomNode* node) {
     if (!node || !node->is_element()) return false;
     // blockification of an out-of-flow box does not discard an inline separator.
     if (layout_element_is_out_of_flow(node->as_element())) return false;
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     return display.outer == CSS_VALUE_BLOCK ||
            display.outer == CSS_VALUE_LIST_ITEM ||
            display.outer == CSS_VALUE_TABLE ||
@@ -1324,7 +1324,7 @@ bool should_collapse_inter_element_whitespace(DomNode* text_node) {
 
 bool layout_is_inline_math_box(DomNode* node) {
     if (!node || !node->is_element()) return false;
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     return display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_MATH;
 }
 // Run-in box helper functions (CSS 2.1 Section 9.2.3)
@@ -1339,7 +1339,7 @@ static bool run_in_descendants_contain_block(DomNode* node) {
     DomElement* elem = node->as_element();
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (child->is_element()) {
-            DisplayValue child_display = resolve_display_value(child);
+            DisplayValue child_display = layout_resolved_display(child);
             if (child_display.outer == CSS_VALUE_BLOCK ||
                 child_display.outer == CSS_VALUE_LIST_ITEM ||
                 child_display.outer == CSS_VALUE_RUN_IN ||  // nested run-in counts as block
@@ -1410,7 +1410,7 @@ static bool run_in_should_merge_with_next(DomNode* run_in_node) {
     DomNode* next = get_next_element_sibling(run_in_node);
     if (!next) return false;
 
-    DisplayValue next_display = resolve_display_value(next);
+    DisplayValue next_display = layout_resolved_display(next);
 
     if (next_display.outer == CSS_VALUE_BLOCK &&
         (next_display.inner == CSS_VALUE_FLOW || next_display.inner == CSS_VALUE_FLOW_ROOT)) {
@@ -1592,7 +1592,7 @@ bool layout_display_contents_has_block_child(DomElement* element) {
         if (!child->is_element()) continue;
 
         DomElement* child_element = child->as_element();
-        DisplayValue child_display = resolve_display_value(child_element);
+        DisplayValue child_display = layout_resolved_display(child_element);
         if (layout_display_is_none(child_display) ||
             layout_element_is_abs_or_fixed(child_element)) {
             continue;
@@ -2079,7 +2079,7 @@ bool layout_text_combine_upright_applies(DomNode* text_node) {
     float limit = 2.0f;
     CssEnum mode = css_prop_compute_cascaded_text_combine(parent, &limit);
     if (mode != CSS_VALUE_ALL && mode != CSS_VALUE_DIGITS) return false;
-    DisplayValue display = resolve_display_value(parent);
+    DisplayValue display = layout_resolved_display(parent);
     if (display.outer != CSS_VALUE_INLINE && display.outer != CSS_VALUE_CONTENTS &&
             !layout_dom_text_has_non_whitespace(text_node->as_text()) &&
             layout_white_space_collapses(get_white_space_value(text_node))) {
@@ -2333,6 +2333,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         DomElement* dom_elem = node->as_element();
         // namespaced page traits enter the shared cascade as presentational hints.
         radiant_native_hints_declare(lycon, dom_elem);
+        if (dom_elem->display.outer == CSS_VALUE__UNDEF)
+            dom_elem->display = layout_resolved_display(dom_elem);
         if (dom_elem && (dom_elem->specified_style ||
                 radiant::css_resolved_style_cache_allowed(lycon, dom_elem))) {
             bool styles_current = dom_elem->styles_resolved() &&
@@ -2440,6 +2442,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
                     if (display_node ||
                         layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
+                        // CSS application computes the role before layout's used-value transformations.
                         DisplayValue resolved = resolve_display_value(dom_elem);
                         dom_elem->display = resolved;
                     }
@@ -3001,7 +3004,7 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     // position; block-contained markers use the line start, while inline
     // parents retain the inline insertion point used by their line box.
     bool inline_parent = elem->parent && elem->parent->is_element() &&
-        resolve_display_value(elem->parent).outer == CSS_VALUE_INLINE;
+        layout_resolved_display(elem->parent).outer == CSS_VALUE_INLINE;
     layout_set_view_geometry(marker,
         inline_parent ? lycon->line.advance_x : lycon->line.left,
         lycon->block.advance_y, 0.0f, 0.0f);
@@ -3550,7 +3553,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             return;
         }
         if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element()) {
-            CssEnum parent_role = resolve_display_value(span->parent).inner;
+            CssEnum parent_role = layout_resolved_display(span->parent).inner;
             // a shared annotation level must not realign a column already placed in its independent line.
             if ((parent_role == CSS_VALUE_RUBY || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER) &&
                     !layout_ruby_active_annotation(lycon, span)) return;
@@ -4662,7 +4665,7 @@ static void layout_empty_mathml_tree(LayoutContext* lycon, DomNode* node,
          child = child->next_sibling) {
         if (!child->is_element()) continue;
         if (layout_generated_pseudo(child->as_element(), nullptr, nullptr)) continue;
-        DisplayValue child_display = resolve_display_value(child);
+        DisplayValue child_display = layout_resolved_display(child);
         if (layout_display_is_none(child_display)) {
             child->as_element()->view_type = RDT_VIEW_NONE;
             child->as_element()->x = 0.0f;
@@ -5029,7 +5032,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             return;
         }
 
-        DisplayValue display = resolve_display_value(node);
+        DisplayValue display = layout_resolved_display(node);
         if (layout_empty_mathml_element(lycon, node, display)) {
             lycon->depth--;
             return;
@@ -5343,7 +5346,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
     // the root bypasses flow dispatch; refresh its display before UA defaults and the authored cascade.
-    html->display = resolve_display_value(elmt);
+    html->display = layout_resolved_display(elmt);
     // seed the root at the canvas origin until its own box constraints are resolved.
     html->x = html->y = 0.0f;
     html->width = lycon->block.content_width;
@@ -5391,7 +5394,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         if (body_element) {
             ViewBlock* body = lam::view_require_block(set_view(
                 lycon, RDT_VIEW_BLOCK, body_element));
-            body->display = resolve_display_value(body_element);
+            body->display = layout_resolved_display(body_element);
             layout_set_view_geometry(body, 0.0f, 0.0f, 0.0f, 0.0f);
             body->content_width = 0.0f;
             body->content_height = 0.0f;
@@ -5695,7 +5698,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         while (child) {
             if (child->is_element()) {
                 const char* tag_name = child->node_name();
-                DisplayValue child_display = resolve_display_value(child);
+                DisplayValue child_display = layout_resolved_display(child);
                 // page controls and running elements leave the page flow, and a
                 // hidden root child still assigns its named strings there
                 bool skipped = lycon->paged && paged_flow_skips_element(lycon, child->as_element());
@@ -5948,18 +5951,23 @@ int detect_html_version_lambda_css(DomDocument* doc) {
     return doc->html_version;
 }
 
-static bool reset_styles_resolved_visitor(DomNode* node, void*) {
+static bool reset_styles_resolved_visitor(DomNode* node, void* data) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        if (!layout_element_is_anonymous_table_fixup(elem)) elem->set_styles_resolved(false);
+        if (!layout_element_is_anonymous_table_fixup(elem)) {
+            if (!*(bool*)data) elem->set_styles_resolved(false);
+            // measurement-only contexts preserve the committed box roles.
+            if (dom_engine_layout_active(elem->doc))
+                elem->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
+        }
     }
     return true;
 }
 
-void reset_styles_resolved(DomDocument* doc) {
+static void reset_styles_resolved(DomDocument* doc, bool keep_resolved_styles) {
     if (!doc || !doc->root) return;
     view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                reset_styles_resolved_visitor, nullptr);
+                                reset_styles_resolved_visitor, &keep_resolved_styles);
 }
 
 static bool layout_count_dom_node_visitor(DomNode*, void* data) {
@@ -6020,11 +6028,9 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     clear_measurement_cache(doc->view_tree);
     advance_measurement_cache_generation(doc->view_tree);
 
-    if (!doc->skip_style_reset) {
-        // a full flow starts at computed CSS; incremental updates preserve
-        // clean sibling results and restore changed sizing inputs on demand.
-        reset_styles_resolved(doc);
-    }
+    // every flow recomputes roles once; incremental updates retain the other
+    // computed properties, including clean siblings of a moved subtree.
+    reset_styles_resolved(doc, doc->skip_style_reset);
 
     init_text_flow_logging();
 

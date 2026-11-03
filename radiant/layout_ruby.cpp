@@ -143,7 +143,7 @@ static int ruby_collect_nodes(RubyBuildContext* context, DomElement* element,
 }
 
 static CssEnum ruby_node_role(DomNode* node) {
-    return node && node->is_element() ? resolve_display_value(node).inner : CSS_VALUE_FLOW;
+    return node && node->is_element() ? layout_resolved_display(node).inner : CSS_VALUE_FLOW;
 }
 
 static bool ruby_node_in_flow(DomNode* node) {
@@ -1504,7 +1504,7 @@ static bool ruby_fragment_element_needs_full_flow(DomElement* element) {
     // break elements contribute non-text boundaries (or annotation separators) absent from a text-leaf plan.
     if (element->tag() == MARKUP_NAME_BR || element->tag() == MARKUP_NAME_WBR) return true;
     // fragment bounds descend ordinary inlines; independent formatting contexts remain whole units.
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     if (!layout_display_is_inline_level(display.outer) || display.inner == CSS_VALUE_RUBY ||
             layout_intrinsic_element_is_atomic_inline(element)) return true;
     // generated children are additional sources, beyond this direct-text fragment's plan.
@@ -2077,7 +2077,7 @@ View* layout_ruby_trim_trailing_space(LayoutContext* context, ViewText* text, Te
     for (DomNode* parent = text ? text->parent.get() : nullptr; parent; parent = parent->parent) {
         // annotation and atomic descendants own independent whitespace contexts.
         if (layout_ruby_annotation_node(parent) || parent->view_type != RDT_VIEW_INLINE) return nullptr;
-        if (resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
+        if (layout_resolved_display(parent).inner == CSS_VALUE_RUBY) {
             ruby = lam::view_require<RDT_VIEW_INLINE>(parent);
             break;
         }

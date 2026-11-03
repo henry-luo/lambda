@@ -66,12 +66,14 @@ DisplayValue css_inherit_display_value(DomElement* element, DisplayValue parent)
 
 const char* css_display_special_name(DisplayValue display) {
     if (display.legacy_box) return display.legacy_box == 2 ? "-webkit-inline-box" : "-webkit-box";
-    if (display.list_item && display.outer == CSS_VALUE_INLINE &&
+    // atomic inline layout normalizes inline flow-root to the inline-block role.
+    bool inline_outer = display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK;
+    if (display.list_item && inline_outer &&
         (display.inner == CSS_VALUE_FLOW || display.inner == CSS_VALUE_FLOW_ROOT)) {
         return display.inner == CSS_VALUE_FLOW_ROOT ? "inline flow-root list-item" : "inline list-item";
     }
     if (display.inner == CSS_VALUE_FLOW_ROOT) {
-        if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK) return "inline-block";
+        if (inline_outer) return "inline-block";
         return display.list_item ? "flow-root list-item" : "flow-root";
     }
     return nullptr;

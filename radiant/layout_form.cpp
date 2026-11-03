@@ -52,7 +52,7 @@ static void zero_form_child_box(DomElement* elem) {
 }
 
 static bool layout_select_child_is_hidden(DomElement* child) {
-    if (!child || resolve_display_value(child).outer == CSS_VALUE_NONE) {
+    if (!child || layout_resolved_display(child).outer == CSS_VALUE_NONE) {
         return true;
     }
     // CSS Display 3: display:none on an optgroup suppresses its option
@@ -61,7 +61,7 @@ static bool layout_select_child_is_hidden(DomElement* child) {
          ancestor = ancestor->parent) {
         DomElement* elem = ancestor->as_element();
         if (elem->tag() == MARKUP_NAME_OPTGROUP &&
-            resolve_display_value(elem).outer == CSS_VALUE_NONE) {
+            layout_resolved_display(elem).outer == CSS_VALUE_NONE) {
             return true;
         }
         if (elem->tag() == MARKUP_NAME_SELECT) break;

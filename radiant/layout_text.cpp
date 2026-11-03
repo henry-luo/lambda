@@ -999,7 +999,7 @@ static uint32_t inline_text_edge_in_scope(DomNode* node, bool backwards,
             }
         } else if (node->is_element()) {
             DomElement* elmt = node->as_element();
-            DisplayValue display = resolve_display_value(node);
+            DisplayValue display = layout_resolved_display(node);
             InlineOutOfFlowKind kind = inline_out_of_flow_kind(elmt);
             auto boundary = [&](uint32_t cp) {
                 if (source && mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) *source = node;
@@ -1009,7 +1009,7 @@ static uint32_t inline_text_edge_in_scope(DomNode* node, bool backwards,
             // but an atomic inline or forced break separates adjacent text.
             bool parallel_annotation = !annotation_scope &&
                 layout_ruby_annotation_node(node) && node->parent &&
-                resolve_display_value(node->parent).inner == CSS_VALUE_RUBY;
+                layout_resolved_display(node->parent).inner == CSS_VALUE_RUBY;
             if (display.outer == CSS_VALUE_NONE || kind.floated || kind.positioned ||
                 parallel_annotation) {
                 node = backwards ? node->prev_sibling : node->next_sibling;
@@ -1083,7 +1083,7 @@ uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
         // css ruby: an annotation owns a separate inline formatting context.
         if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
             layout_ruby_annotation_node(parent)) break;
-        CssEnum parent_display = resolve_display_value(parent).outer;
+        CssEnum parent_display = layout_resolved_display(parent).outer;
         if (parent_display != CSS_VALUE_INLINE &&
             !(mode != LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE &&
               parent_display == CSS_VALUE_CONTENTS)) break;
@@ -2106,7 +2106,7 @@ static bool inline_node_is_unbreakable_text(LayoutContext* lycon, DomNode* node)
     if (layout_element_is_out_of_flow(element)) return true;
     // empty break elements still terminate the unbroken sequence.
     if (element->tag() == MARKUP_NAME_BR || element->tag() == MARKUP_NAME_WBR) return false;
-    if (resolve_display_value(element).outer != CSS_VALUE_INLINE) return false;
+    if (layout_resolved_display(element).outer != CSS_VALUE_INLINE) return false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!inline_node_is_unbreakable_text(lycon, child)) return false;
     }
@@ -2125,7 +2125,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
                                    LineFillProbe* probe, float* measured_width) {
     *measured_width = 0.0f;
     if (!span || !span->is_element()) return RDT_NOT_SURE;
-    if (resolve_display_value(span).inner == CSS_VALUE_RUBY) {
+    if (layout_resolved_display(span).inner == CSS_VALUE_RUBY) {
         DomElement* ruby = span->as_element();
         IntrinsicSizes sizes = calculate_node_intrinsic_widths(lycon, span);
         LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(lycon, ruby);
@@ -2152,7 +2152,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
     }
     LayoutFontScope font_scope(lycon);
     if (element->font) setup_font(lycon->ui_context, &lycon->font, element->font);
-    bool has_box = resolve_display_value(span).outer != CSS_VALUE_CONTENTS;
+    bool has_box = layout_resolved_display(span).outer != CSS_VALUE_CONTENTS;
     float start_edge = has_box ? layout_intrinsic_inline_edge(lycon, element, true) : 0.0f;
     float end_edge = has_box ? layout_intrinsic_inline_edge(lycon, element, false) : 0.0f;
     float saved_advance_x = lycon->line.advance_x;
@@ -3331,7 +3331,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node,
                 lycon->line.advance_x = saved_advance_x;
                 return RDT_LINE_NOT_FILLED;
             }
-            CssEnum outer_display = resolve_display_value(node).outer;
+            CssEnum outer_display = layout_resolved_display(node).outer;
             if (outer_display == CSS_VALUE_BLOCK) {
                 lycon->line.advance_x = saved_advance_x;
                 return RDT_LINE_NOT_FILLED;
@@ -3363,10 +3363,10 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view,
     DomNode* node = view->next_sibling;
     DomNode* parent = view->parent;
     if (parent && parent->is_element() &&
-        resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
+        layout_resolved_display(parent).inner == CSS_VALUE_RUBY) {
         while (node && node->is_element() &&
                (layout_ruby_annotation_node(node) ||
-                resolve_display_value(node).outer == CSS_VALUE_NONE)) {
+                layout_resolved_display(node).outer == CSS_VALUE_NONE)) {
             node = node->next_sibling;
         }
     }
@@ -3877,7 +3877,7 @@ static bool collapsed_space_followed_by_fitting_atomic(
         return false;
     }
     DomElement* next = text_node->next_sibling->as_element();
-    DisplayValue display = resolve_display_value(next);
+    DisplayValue display = layout_resolved_display(next);
     bool inline_outer = display.outer == CSS_VALUE_INLINE ||
         display.outer == CSS_VALUE_INLINE_BLOCK;
     bool atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
