@@ -65,7 +65,7 @@ does not revise those contracts.
 | M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused/current aggregate gates pass with recorded profile limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, rotation/velocity curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; analytic GPU plane/sphere collision, bounded seeded CPU/GPU noise, color/opacity with per-emitter depth ordering, texture sheets, billboard presentation and bounded CPU/GPU ribbon trails and copied spawn commands implemented and qualified with the recorded limits; depth collision awaits M9; presets/effect/sub-emitter rules moved to M13 |
-| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits. USER ratified capture as D7.5.9; its macOS core acquisition, bounded reads, lifecycle and dry monitor profile is qualified below. Named capture routing and physical/release/integration qualification remain open; music/voice/occlusion policy and factories remain M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits. USER ratified capture as D7.5.9; its macOS core acquisition, bounded reads, lifecycle and dry/named bus monitor routing are qualified below. Other OS capture backends and physical/release/integration qualification remain open; music/voice/occlusion policy and factories remain M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
@@ -6140,7 +6140,7 @@ source/config/fixture hashes are unchanged after qualification.
 
 **Open behavior / next action:** this closes the selected macOS capture core,
 not the full M7 or Scene3D goal. No physical microphone or OS consent dialog was
-accessed. Named capture-bus routing is the next native M7 component. Other OS
+accessed. Named capture-bus routing follows in the qualified component below. Other OS
 backends, physical permission/hotplug and release/combined-scene qualification
 remain open, alongside the retained M1–M6 extensions, M8–M12 and deferred M13.
 
@@ -6148,3 +6148,63 @@ Evidence: `temp/scene3d-capture/{kernel-tests.log,capture-host-final.log,
 focused-audio.log,ui-normal-status.json,ui-asan-status.json,
 qualification-status.json,qualification-*.log,qualified-source-hashes.json,
 document-checks.json,info-probe.mm,checkpoint.json}`.
+
+### M7 named capture monitor routes — qualified 2026-11-03
+
+**Finite outcome:** add capture to the shared provider route/read table under
+**D7.5.9 / D7.5.4 / D4.5.2 / S4.9.1**. A pending/active explicitly acquired
+capture can pin a generation-checked named bus; live rewiring preserves both
+PCM readers. Input recording survives output/graph loss, while monitoring stops
+and exposes copied loss/route validity. Stop/revocation/denial/teardown release
+route references before the quota owner retires. Prepared export must reject
+live capture explicitly; it must never consume recording data or open input.
+
+**Acceptance/budget:** deterministic injected PCM through bus gain/mute/inserts,
+live and unmonitored rewiring, stale/foreign/terminal tickets and route-reference
+capacity, owner loss/recovery, network graph-edit/output activation fencing,
+copied snapshots and atomic export rejection. Reuse one capture backend fixture
+across native host/scene tests. Focused normal and ASan capture/provider cases,
+both imported JS backends with forced GC, then the required Radiant and module
+boundary gates at the stable boundary. Keep the qualified 8,647-case Lambda
+gate when core/package source is unchanged. Physical acquisition remains opt-in.
+
+**Delivered behavior:** capture now uses the shared provider route/read table;
+it pins a bus while acquisition is pending/active and monitoring is off or on.
+Live rewiring changes the existing voice destination at a buffer boundary,
+without restarting input or advancing/resetting either PCM reader. Named gain,
+mute and ordered delay produce independent numeric PCM controls while recording
+returns the original samples. Stale/foreign/session/expected/terminal/reference-
+quota rejection preserves the existing binding. Stop, pending denial, revocation
+and input loss release the route; callback targets remain alive through the
+producer close hook (**D4.5.2 / D5.3.3**).
+
+Graph-owner loss disables the monitor and copies `route_lost`/invalid route
+state while recording continues. Explicit rebind/default detach plus monitor
+enable recovers. Output loss also keeps recording and its valid named binding;
+monitor re-enable clears the copied loss. Dry capture inputs participate in the
+existing graph-edit activation fence, so a muted graph cannot bypass **D7.5.4**
+after host output activation is withdrawn. Route preparation never grants input
+or output. The shared export adapter explicitly rejects live-only capture
+snapshots before consuming input or retaining extra readers/output.
+
+**Qualification:** nine native capture-route cases include an imported procedural
+replay. The full focused capture/provider/audio set passes 155 cases normally
+and under supported ASan with forced/poisoned GC; leak detection is disabled.
+The injected imported replay passes JS AST/MIR × Lambda interpreter/JIT/AUTO
+(six normal runs), plus both JS backends under ASan. The required Radiant gate
+passes 9,144 cases, with 304 configured partial cases, two skips and zero
+failures (9,450 total). Strict module-boundary validation remains 133 imports
+against baseline 165; dimension lint and whitespace pass. All seven frozen
+source/fixture hashes match after qualification. Lambda engine/package/build
+source is unchanged from the qualified 8,647-case gate at `d4587e69d`.
+
+**Remaining scope:** named capture bus routing is complete for this profile.
+No physical microphone or permission dialog was accessed. Other OS backends,
+physical permission/hotplug, hardware timing, release/combined-scene work and
+the previously recorded broader Scene3D milestones remain outstanding.
+
+Evidence: `temp/scene3d-capture-routes/{normal-status.json,normal-*.log,
+ui-normal-status.json,ui-asan-status.json,qualification-status.json,
+qualification-*.log,qualified-source-hashes.json,lambda-carry-forward.json,
+document-checks.json,checkpoint.json}`. The earlier `unfinished.patch` is an
+archived starting point, superseded by this qualified implementation.

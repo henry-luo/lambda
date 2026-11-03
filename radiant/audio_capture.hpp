@@ -1,6 +1,7 @@
 #pragma once
 #include "audio_capture_pcm.hpp"
 struct DomDocument;
+struct AudioProviderInfo;
 enum AudioCapturePermission { AUDIO_CAPTURE_UNKNOWN, AUDIO_CAPTURE_PENDING, AUDIO_CAPTURE_ALLOWED,
     AUDIO_CAPTURE_DENIED, AUDIO_CAPTURE_UNAVAILABLE };
 // trusted embedding seam; callbacks/context remain host-owned until document teardown.
@@ -32,3 +33,7 @@ bool radiant_capture_monitor(DomDocument* document, uint64_t token, float gain);
 bool radiant_capture_stop(DomDocument* document, uint64_t token);
 bool radiant_capture_tick(DomDocument* document);
 bool radiant_capture_pending(DomDocument* document);
+bool radiant_capture_route(DomDocument* document, uint64_t token, AudioRouteId expected,
+    AudioRouteId route, const char** error);
+bool radiant_capture_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info);
+bool radiant_capture_graph_audible(DomDocument* document, AudioGraphId graph);

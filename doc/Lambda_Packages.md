@@ -3443,7 +3443,7 @@ second mixer or playback clock (**D7.5.3v2 / D4.5.2**).
 
 | Procedure | Request and behavior |
 |-----------|----------------------|
-| `audio_provider_read(node, request)` | `{session, provider, token}` reads a copied provider routing snapshot. `provider` is `midi`, `speech` or `video`; `token` identifies an existing provider in this document. |
+| `audio_provider_read(node, request)` | `{session, provider, token}` reads a copied provider routing snapshot. `provider` is `midi`, `speech`, `video` or `capture`; `token` identifies an existing provider in this document. |
 | `audio_provider_route(node, request)` | Adds `expected`, the provider's current route, plus `bus` and that bus's exact `identity` from `audio_snapshot`. Returns the new snapshot after atomic publication. Omit `bus` or pass null, with zero/omitted `identity`, to select the ordinary document dry route. |
 
 Snapshots contain `session`, `provider`, `token`, `route`, `route_valid`,
@@ -3639,8 +3639,31 @@ independent overflow. Output-device loss disables monitoring while recording
 continues; `monitor_lost` requires an explicit re-enable. Input-device loss,
 OS/host revocation, stop and document teardown join the producer before freeing
 queues (**D4.5.2 / D5.3.3**); unread native PCM is discarded. Source code keeps
-only copied records/binaries. Named capture-bus routing, hardware timing and
-physical permission/hotplug qualification remain outside this initial profile.
+only copied records/binaries. Hardware timing and physical permission/hotplug
+qualification remain outside this profile.
+
+An explicitly acquired pending/active capture also joins the shared scene
+provider seam with `provider: "capture"`. Use `audio_provider_route` with its
+capture `token`, current `expected` route, scene `session`, and a bus's exact
+`identity`; `audio_provider_read` copies the resulting route, validity and loss.
+The route applies to monitoring through the bus's gain/mute/solo, sends and
+ordered effects. It never changes raw recording PCM or advances either reader.
+Preparation while permission is pending opens no device. Positive monitoring,
+audible rewiring/default detachment, and bus edits affecting a positive monitor
+retain **D7.5.4**; a host input grant under **D7.5.9** cannot authorize output.
+
+The route remains pinned while monitoring is off, so removing a retained bus
+rejects until explicit detach, rebind or capture close. Graph-owner loss silences
+monitoring with `route_lost`, retains a queryable stale route, and leaves input
+recording active. Explicitly rebind/detach and re-enable monitoring to recover.
+Output-device loss similarly disables monitoring while keeping its valid bus
+binding and recording. Stop, input loss, denial, revocation and document teardown
+release the route reference before PCM/quota ownership retires. Stale, foreign,
+terminal and over-capacity route requests preserve the existing binding.
+Capture `position` reports the input sample timeline in seconds; exact frame
+counters remain available from `dom.audio_capture`. Live capture is explicitly
+rejected as a prepared offline-job provider; export never consumes recording
+data or implicitly acquires input (**D4.5.2 / D5.3.3 / S4.9.1**).
 
 ### Native CPU/GPU mesh particles
 

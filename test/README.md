@@ -343,7 +343,12 @@ run `node test/test_layout_reference_controls.js` to check the oracle contract.
 Microphone capture (**D7.5.9 / D7.5.4 / S4.9.1**) uses
 `NativeAudioCapture.*` in `test_audio_player_gtest` for bounded timestamped PCM,
 independent monitor/record queues and concurrent overrun accounting.
-`RadiantAudioCapture.*` in `test_radiant_text_query_gtest` injects a trusted native
+`Scene3dCaptureTest.*` in `test_scene3d_unit_gtest` checks named monitor gain,
+delay, live/unmonitored rewiring, exact copied PCM, retained/foreign/stale/quota
+tickets, owner/output loss, input revocation, activation fencing and atomic
+live-export rejection. Its imported `test/scene3d/capture-routes.html` case uses
+an injected backend and runs on both JS backends and all Lambda tiers with
+forced/poisoned GC. `RadiantAudioCapture.*` in `test_radiant_text_query_gtest` injects a trusted native
 backend for OS/document grant separation, pending denial/stop/teardown,
 revocation, input/output loss, quotas, exact wide counters and copied GC values.
 `test/ui/audio_capture.json` belongs to the baseline UI suite and imports the

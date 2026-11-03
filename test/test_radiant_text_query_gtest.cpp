@@ -18970,25 +18970,9 @@ protected:
     }
 };
 
-struct CaptureHostFixture {
-    AudioCapturePermission permission = AUDIO_CAPTURE_ALLOWED;
-    AudioCapturePcm* sink = nullptr;
-    unsigned requests = 0, opens = 0, closes = 0;
-    bool loss = false, fail_open = false;
-    static AudioCapturePermission permission_read(void* context, bool request) {
-        auto* host = (CaptureHostFixture*)context; if (request) host->requests++; return host->permission;
-    }
-    static void* open(void* context, AudioCapturePcm* sink) {
-        auto* host = (CaptureHostFixture*)context; host->opens++;
-        if (host->fail_open) return nullptr; host->sink = sink; return host;
-    }
-    static bool lost(void* context, void*) { return ((CaptureHostFixture*)context)->loss; }
-    static void close(void* context, void*) { auto* host = (CaptureHostFixture*)context; host->closes++; host->sink = nullptr; }
-    AudioCaptureBackend backend() { return {this, permission_read, open, lost, close}; }
-};
 class RadiantAudioCapture : public RadiantDecodedAudio {
 protected:
-    CaptureHostFixture host;
+    AudioFixtureCaptureBackend host;
     void prepare() {
         ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
         auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend));

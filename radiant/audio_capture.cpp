@@ -16,6 +16,9 @@ struct DocumentCapture : DomDocumentResourceData {
     uint64_t token, storage;
     AudioVoiceId voice;
     AudioSubmixId submix;
+    AudioRouteId route;
+    AudioRouteRef routing;
+    AudioVoiceLoss loss;
     AudioCapturePcmInfo final;
     CaptureState state;
     double start_ms;
@@ -24,9 +27,15 @@ struct DocumentCapture : DomDocumentResourceData {
 };
 static bool capture_active(DocumentCapture* capture) { return capture->state == CAPTURE_PENDING || capture->state == CAPTURE_ACTIVE; }
 static bool capture_work(DomDocumentResourceData* data) { return capture_active(static_cast<DocumentCapture*>(data)); }
+static void capture_monitor_retire(DocumentCapture* capture, AudioVoiceLoss loss = AUDIO_VOICE_OK) {
+    audio_voice_remove(capture->voice); capture->voice = 0; capture->monitor_gain = 0;
+    if (capture->pcm) audio_capture_pcm_monitor(capture->pcm, false, 0);
+    if (loss != AUDIO_VOICE_OK) { capture->loss = loss; capture->monitor_lost = true; }
+}
 static void capture_finish(DocumentCapture* capture, CaptureState state) {
     // exclude both native readers/producers before releasing either queue (D4.5.2 / D7.5.9).
-    audio_voice_remove(capture->voice); capture->voice = 0; capture->monitor_gain = 0;
+    capture_monitor_retire(capture);
+    audio_submix_release_route(capture->submix, capture->routing); capture->route = capture->routing = 0;
     if (capture->device) capture->backend.close(capture->backend.context, capture->device);
     capture->device = nullptr;
     if (capture->pcm) capture->final = audio_capture_pcm_info(capture->pcm);
@@ -73,7 +82,7 @@ bool radiant_capture_set_backend(DomDocument* document, const AudioCaptureBacken
 }
 uint64_t radiant_capture_open(DomDocument* document) {
     auto* capture = document_capture(document, true); if (!capture || capture_active(capture)) return 0;
-    capture_finish(capture, CAPTURE_IDLE); capture->final = {}; capture->monitor_lost = false; capture->start_ms = 0;
+    capture_finish(capture, CAPTURE_IDLE); capture->final = {}; capture->monitor_lost = false; capture->start_ms = 0; capture->loss = AUDIO_VOICE_OK;
     capture->token = audio_bus_identity(INT64_MAX); if (!capture->token) return 0;
     if (!capture->granted) capture->state = CAPTURE_DENIED;
     else {
@@ -94,9 +103,10 @@ bool radiant_capture_tick(DomDocument* document) {
     if (capture->state == CAPTURE_ACTIVE) {
         if (capture->backend.lost(capture->backend.context, capture->device)) capture_finish(capture, CAPTURE_LOST);
         else if (audio_capture_pcm_info(capture->pcm).faulted) capture_finish(capture, CAPTURE_ERROR);
-        else if (capture->voice && audio_voice_lost(capture->voice)) {
-            audio_voice_remove(capture->voice); capture->voice = 0; capture->monitor_gain = 0; capture->monitor_lost = true;
-            audio_capture_pcm_monitor(capture->pcm, false, 0);
+        else {
+            AudioVoiceLoss loss = capture->routing && !audio_submix_route_ref_valid(capture->submix, capture->routing)
+                ? AUDIO_VOICE_ROUTE_LOST : audio_voice_loss(capture->voice);
+            if (loss != AUDIO_VOICE_OK && (capture->voice || !capture->monitor_lost)) capture_monitor_retire(capture, loss);
         }
     }
     return capture_active(capture);
@@ -121,7 +131,7 @@ bool radiant_capture_monitor(DomDocument* document, uint64_t token, float gain) 
         (gain > 0 && !radiant_document_may_start_audio(document))) return false;
     if (gain > 0 && !capture->submix) capture->submix = radiant_document_submix(document);
     // reserve a parked reader, then admit output before changing the current monitor.
-    AudioVoiceId replacement = gain > 0 ? audio_voice_add(capture->submix, audio_capture_pcm_mix, capture->pcm, nullptr, 0, false) : 0;
+    AudioVoiceId replacement = gain > 0 ? audio_voice_add(capture->submix, audio_capture_pcm_mix, capture->pcm, nullptr, capture->route, false) : 0;
     if (gain > 0 && !replacement) return false;
     if (replacement) {
         if (!audio_submix_lock(capture->submix)) { audio_voice_remove(replacement); return false; }
@@ -133,10 +143,40 @@ bool radiant_capture_monitor(DomDocument* document, uint64_t token, float gain) 
         bool active = audio_voice_set_active_locked(replacement, true);
         audio_submix_unlock(capture->submix);
         if (!active) { audio_voice_remove(replacement); audio_capture_pcm_monitor(capture->pcm, false, 0); return false; }
-    } else { audio_voice_remove(capture->voice); audio_capture_pcm_monitor(capture->pcm, false, 0); }
-    capture->voice = replacement; capture->monitor_gain = gain; capture->monitor_lost = false; return true;
+    } else capture_monitor_retire(capture);
+    capture->voice = replacement; capture->monitor_gain = gain;
+    if (gain > 0) { capture->monitor_lost = false; capture->loss = AUDIO_VOICE_OK; }
+    return true;
 }
 bool radiant_capture_stop(DomDocument* document, uint64_t token) {
     auto* capture = document_capture(document); if (!capture || !token || capture->token != token) return false;
     capture_finish(capture, CAPTURE_STOPPED); return true;
+}
+bool radiant_capture_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error) {
+    const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    auto fail = [&](const char* message) { *error = message; return false; };
+    radiant_capture_tick(document); auto* capture = document_capture(document);
+    if (!capture || !token || capture->token != token || capture->route != expected)
+        return fail("capture route: missing provider or stale expected route");
+    if (route && !capture_active(capture)) return fail("capture route: acquisition is not pending or active");
+    if (route != capture->route && capture->voice && capture->monitor_gain > 0 && !radiant_document_may_start_audio(document))
+        return fail("capture route: audible rewire requires document activation");
+    if (!route && !capture->routing) return true;
+    auto mix = radiant_document_submix(document);
+    if (!audio_submix_bind_route(mix, &capture->routing, capture->voice, route))
+        return fail("capture route: stale/foreign route or reference quota exceeded");
+    // route publication only changes the monitor destination; neither PCM consumer is advanced/reset.
+    capture->submix = mix; capture->route = route; capture->loss = AUDIO_VOICE_OK; capture->monitor_lost = false; return true;
+}
+bool radiant_capture_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info) {
+    AudioCaptureInfo snapshot;
+    if (!info || !radiant_capture_info(document, token, &snapshot)) return false;
+    auto* capture = document_capture(document);
+    *info = {capture->route, capture->loss, snapshot.state, snapshot.pcm.next_frame / (double)AUDIO_BUS_RATE,
+        capture->monitor_gain, !capture->route || audio_submix_route_valid(capture->submix, capture->route)}; return true;
+}
+bool radiant_capture_graph_audible(DomDocument* document, AudioGraphId graph) {
+    radiant_capture_tick(document); auto* capture = document_capture(document);
+    return capture && radiant_audio_graph_input_audible(capture->submix, graph, capture->route,
+        capture->state == CAPTURE_ACTIVE && capture->voice, capture->monitor_gain);
 }

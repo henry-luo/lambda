@@ -1029,7 +1029,8 @@ teardown behavior (**D4.5.2 / D5.3.3**). Prepared MIDI/speech/video inputs now
 materialize finite independent PCM intervals before job publication, then reuse
 the same cue/render path. Live source disposal cannot change their output. See
 the [qualified provider-export profile](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-provider-export--qualified-2026-11-03).
-Named capture routing and combined scene-motion/release qualification remain open.
+Capture monitoring also joins named buses through the shared provider seam;
+combined scene-motion/release qualification remains open.
 
 ### 9.3 Microphone input
 
@@ -1044,7 +1045,9 @@ The macOS core now implements explicit `dom.audio_capture` acquisition,
 timestamped bounded copied reads, stop/revocation/loss/teardown and separate dry
 monitoring. The [public contract](../../doc/Lambda_Packages.md#explicit-microphone-capture)
 and [qualification receipt](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-explicit-microphone-capture--qualified-2026-11-03)
-record its limits. Named capture-bus routing, other OS backends and physical
+record its limits. Capture monitoring supports named bus/DSP routing without
+changing recorded input; see the [qualified routing profile](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-named-capture-monitor-routes--qualified-2026-11-03).
+Other OS backends and physical
 permission/hotplug/release qualification remain open; no physical microphone
 was accessed during the deterministic qualification.
 

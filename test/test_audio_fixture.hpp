@@ -1,5 +1,6 @@
 #pragma once
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_capture.hpp"
 #include "../radiant/speech.hpp"
 #include "../radiant/rdt_video.h"
 #include "../lib/file.h"
@@ -10,6 +11,29 @@
 #include <string.h>
 #include <stdlib.h>
 #include <uv.h>
+
+// a trusted injected backend keeps capture acceptance independent of OS consent and devices.
+struct AudioFixtureCaptureBackend {
+    AudioCapturePermission permission = AUDIO_CAPTURE_ALLOWED;
+    AudioCapturePcm* sink = nullptr;
+    unsigned requests = 0, opens = 0, closes = 0;
+    uint64_t closed_frame = 0;
+    bool loss = false, fail_open = false;
+    static AudioCapturePermission permission_read(void* context, bool request) {
+        auto* host = (AudioFixtureCaptureBackend*)context; if (request) host->requests++; return host->permission;
+    }
+    static void* open(void* context, AudioCapturePcm* sink) {
+        auto* host = (AudioFixtureCaptureBackend*)context; host->opens++;
+        if (host->fail_open) return nullptr; host->sink = sink; return host;
+    }
+    static bool lost(void* context, void*) { return ((AudioFixtureCaptureBackend*)context)->loss; }
+    static void close(void* context, void*) {
+        auto* host = (AudioFixtureCaptureBackend*)context;
+        // the callback target must remain alive until the producer's close hook has returned.
+        host->closed_frame = audio_capture_pcm_info(host->sink).next_frame; host->closes++; host->sink = nullptr;
+    }
+    AudioCaptureBackend backend() { return {this, permission_read, open, lost, close}; }
+};
 
 static inline bool audio_fixture_video_wait(RdtVideo* video, RdtVideoState target, unsigned timeout_ms) {
     uint64_t start = uv_hrtime();

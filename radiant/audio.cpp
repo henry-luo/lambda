@@ -164,13 +164,15 @@ const AudioProviderOps* radiant_audio_provider(const char* name) {
     static const AudioProviderOps providers[] = {
         {"midi", radiant_midi_route, radiant_midi_routing, radiant_midi_snapshot},
         {"speech", radiant_speech_route, radiant_speech_routing, radiant_speech_snapshot},
-        {"video", radiant_media_route, radiant_media_routing, radiant_media_snapshot}};
+        {"video", radiant_media_route, radiant_media_routing, radiant_media_snapshot},
+        {"capture", radiant_capture_route, radiant_capture_routing, nullptr}};
     for (const auto& provider : providers) if (name && !strcmp(name, provider.name)) return &provider;
     return nullptr;
 }
 uint64_t radiant_audio_provider_snapshot(DomDocument* doc, const AudioProviderOps* provider,
     uint64_t token, double position, uint32_t frames, const char** error) {
     const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    if (provider && !provider->snapshot) { *error = "audio render: live provider has no prepared snapshot"; return 0; }
     AudioProviderInfo info; size_t bytes = rdt_audio_pcm_storage_bytes(frames);
     if (!provider || !token || !isfinite(position) || position < 0 || !bytes || !provider->read(doc, token, &info)) {
         *error = "audio render: missing provider or invalid position/interval"; return 0;
@@ -414,7 +416,8 @@ bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
                 info.state == RDT_AUDIO_PLAYING || info.armed, info.gain)) return false;
         }
     }
-    return !radiant_speech_graph_audible(doc, graph) && !radiant_media_graph_audible(doc, graph);
+    return !radiant_speech_graph_audible(doc, graph) && !radiant_media_graph_audible(doc, graph) &&
+        !radiant_capture_graph_audible(doc, graph);
 }
 bool radiant_audio_graph_commit(DomDocument* doc, AudioGraphId graph, AudioGraph* prepared,
     const AudioPlayerRoute* routes, unsigned count, const char** error) {

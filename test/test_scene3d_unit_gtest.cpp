@@ -10897,6 +10897,164 @@ protected:
     }
 };
 
+class Scene3dCaptureTest : public Scene3dAudioTest {
+protected:
+    AudioFixtureCaptureBackend host;
+    uint64_t token = 0;
+    void acquire(bool pending = false) {
+        auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(&doc, &backend));
+        ASSERT_TRUE(radiant_capture_grant(&doc, true)); if (pending) host.permission = AUDIO_CAPTURE_PENDING;
+        token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    }
+    void input(uint64_t frame, unsigned count = 4) {
+        ASSERT_NE(host.sink, nullptr); ASSERT_LE(count, 64u); float samples[128];
+        for (unsigned i = 0; i < count; i++) { samples[i * 2] = .5f; samples[i * 2 + 1] = -.25f; }
+        ASSERT_EQ(audio_capture_pcm_write(host.sink, frame, samples, count), count);
+    }
+};
+TEST_F(Scene3dCaptureTest, NamedGainAndLiveRewirePreserveBothPcmReaders) {
+    auto* first = element("audio-bus", root); attr(first, "id", "mic"); attr(first, "gain", ".25"); attr(first, "smoothing", "0");
+    auto* second = element("audio-bus", root); attr(second, "id", "other"); attr(second, "gain", ".5"); attr(second, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    auto a = bus_identity(packet.get(), "mic"), b = bus_identity(packet.get(), "other"); ASSERT_NE(a, 0u); ASSERT_NE(b, 0u);
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", a))); input(0);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(4); pcm(.0625f, -.03125f, 4);
+    input(8); ASSERT_FALSE(item_is_error(provider_route("capture", token, "other", b, a))); pcm(.125f, -.0625f, 4);
+    float recorded[24]; uint64_t first_frame = UINT64_MAX;
+    ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 12, &first_frame), 12u); EXPECT_EQ(first_frame, 0u);
+    for (unsigned i = 0; i < 12; i++) { EXPECT_FLOAT_EQ(recorded[i * 2], .5f); EXPECT_FLOAT_EQ(recorded[i * 2 + 1], -.25f); }
+    attr(second, "mute", "true"); ASSERT_FALSE(item_is_error(read_audio())); input(12); pcm(0, 0, 4);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 0)); input(16);
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", a, b))); input(20);
+    ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 12, &first_frame), 12u); EXPECT_EQ(first_frame, 12u);
+    result.set(provider_read("capture", token)); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), a);
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(result.get(), "position").to_const()).asFloat(), 24.0 / AUDIO_BUS_RATE);
+    EXPECT_FLOAT_EQ(ItemReader(item_attr(result.get(), "gain").to_const()).asFloat(), 0);
+}
+TEST_F(Scene3dCaptureTest, NamedDelayProcessesOnlyMonitoringAndLeavesRecordedPcmUnchanged) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "gain", ".5"); attr(bus, "smoothing", "0");
+    auto* effect = element("audio-effect", bus); attr(effect, "type", "delay"); attr(effect, "seconds", ".001"); attr(effect, "wet", "1"); attr(effect, "feedback", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1));
+    const float impulse[] = {.5f,-.25f,0,0,0,0,0,0}; ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, impulse, 4), 4u);
+    float output[128]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 64));
+    for (unsigned i = 0; i < 64; i++) { EXPECT_FLOAT_EQ(output[i * 2], i == 48 ? .25f : 0); EXPECT_FLOAT_EQ(output[i * 2 + 1], i == 48 ? -.125f : 0); }
+    float recorded[8]; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 4, &first), 4u);
+    EXPECT_EQ(memcmp(recorded, impulse, sizeof(impulse)), 0);
+}
+TEST_F(Scene3dCaptureTest, RetainedCaptureRoutesFenceBusRemovalAndStopReleasesTheReference) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route)));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route, 1)));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route + 1, route)));
+    auto session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, nullptr, 0, route, session + 1)));
+    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(radiant_capture_stop(&doc, token)); EXPECT_FALSE(item_is_error(read_audio()));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "master", bus_identity(packet.get(), "master"))));
+    EXPECT_EQ(host.closes, 1u);
+}
+TEST_F(Scene3dCaptureTest, PendingDenialAndRevocationReleaseNamedReferencesWithoutImplicitAcquisition) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(true); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_DENIED; AudioProviderInfo info;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(info.route, 0u);
+    ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++; EXPECT_FALSE(item_is_error(read_audio()));
+    EXPECT_EQ(host.opens, 0u); host.permission = AUDIO_CAPTURE_ALLOWED; token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    packet.set(read_audio()); route = bus_identity(packet.get(), "master"); ASSERT_FALSE(item_is_error(provider_route("capture", token, "master", route)));
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0); ASSERT_TRUE(radiant_capture_grant(&doc, false));
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(info.route, 0u);
+    EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.closed_frame, 4u); EXPECT_EQ(host.sink, nullptr);
+    ASSERT_TRUE(radiant_capture_grant(&doc, true)); token = radiant_capture_open(&doc); ASSERT_NE(token, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "master", route))); host.loss = true;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(info.route, 0u); EXPECT_EQ(host.closes, 2u);
+}
+TEST_F(Scene3dCaptureTest, GraphLossStopsMonitoringWhileRecordingContinuesAndExplicitDetachmentRecovers) {
+    auto* shell = element("div"); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.mutation_epoch++;
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    acquire(); ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0);
+    ASSERT_TRUE(shell->remove_child(root)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    AudioProviderInfo info; ASSERT_TRUE(radiant_capture_routing(&doc, token, &info));
+    EXPECT_STREQ(info.state, "capturing"); EXPECT_EQ(info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_FALSE(info.route_valid); EXPECT_EQ(info.gain, 0);
+    EXPECT_FALSE(radiant_capture_monitor(&doc, token, 1)); EXPECT_EQ(host.closes, 0u); input(4);
+    float recorded[16]; uint64_t first = UINT64_MAX; ASSERT_EQ(radiant_capture_read(&doc, token, recorded, 8, &first), 8u); EXPECT_EQ(first, 0u);
+    const char* error = nullptr; ASSERT_TRUE(radiant_capture_route(&doc, token, route, 0, &error)) << error;
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(8); pcm(.25f, -.125f, 4);
+}
+TEST_F(Scene3dCaptureTest, UnactivatedNetworkInputCanRouteButCannotMonitorRewireOrUnmuteAudibleInput) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "mute", "true"); attr(bus, "smoothing", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic");
+    NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr); acquire();
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); EXPECT_FALSE(radiant_capture_monitor(&doc, token, 1));
+    radiant_audio_grant_activation(true); ASSERT_TRUE(radiant_capture_monitor(&doc, token, 1)); input(0); pcm(0, 0, 4);
+    radiant_audio_grant_activation(false); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, nullptr, 0, route)));
+    attr(bus, "mute", "false"); EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, 0)); EXPECT_FALSE(item_is_error(read_audio()));
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, nullptr, 0, route))); EXPECT_FALSE(radiant_capture_monitor(&doc, token, .5f));
+    radiant_audio_note_activation(&doc); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(4); pcm(.25f, -.125f, 4);
+}
+TEST_F(Scene3dCaptureTest, OutputLossRetainsTheNamedBindingAndInputWhileReenableRestoresTheBus) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "mic"); acquire();
+    ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route))); ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(0);
+    audio_bus_retire_output(); AudioProviderInfo info; ASSERT_TRUE(radiant_capture_routing(&doc, token, &info));
+    EXPECT_STREQ(info.state, "capturing"); EXPECT_EQ(info.route, route); EXPECT_TRUE(info.route_valid); EXPECT_EQ(info.loss, AUDIO_VOICE_DEVICE_LOST);
+    EXPECT_EQ(host.closes, 0u); input(4); float recorded[16]; uint64_t first = 0; EXPECT_EQ(radiant_capture_read(&doc, token, recorded, 8, &first), 8u);
+    ASSERT_TRUE(radiant_capture_monitor(&doc, token, .5f)); input(8); pcm(.0625f, -.03125f, 4);
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.loss, AUDIO_VOICE_OK);
+}
+TEST_F(Scene3dCaptureTest, ForeignAndFullRouteTablesRejectAtomicallyAndLiveExportNeverConsumesInput) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "mic"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    auto route = bus_identity(packet.get(), "mic"); acquire(); auto mix = radiant_document_submix(&doc); AudioRouteRef references[AUDIO_ROUTE_REFERENCES] = {};
+    for (auto& ref : references) ASSERT_TRUE(audio_submix_bind_route(mix, &ref, 0, route));
+    EXPECT_TRUE(item_is_error(provider_route("capture", token, "mic", route))); AudioProviderInfo info;
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.route, 0u);
+    audio_submix_release_route(mix, references[0]); references[0] = 0; ASSERT_FALSE(item_is_error(provider_route("capture", token, "mic", route)));
+    AudioSubmixId foreign = audio_submix_create(); ASSERT_NE(foreign, 0u); auto graph = audio_submix_graph_open(foreign);
+    AudioGraphConfig config = {}; config.count = 1; config.buses[0] = audio_graph_bus_default("master"); ASSERT_TRUE(audio_fixture_graph_publish(foreign, graph, config));
+    auto other = audio_submix_graph_route(foreign, graph, nullptr, "master"); const char* error = nullptr;
+    EXPECT_FALSE(radiant_capture_route(&doc, token, route, other, &error)); audio_submix_destroy(foreign);
+    size_t players = 0, bytes = 0, after = 0; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); input(0);
+    EXPECT_TRUE(item_is_error(render_provider_open("capture", token, 64)));
+    ASSERT_TRUE(radiant_audio_usage(&doc, &players, &after)); EXPECT_EQ(after, bytes); EXPECT_EQ(players, 1u);
+    float recorded[8]; uint64_t first = 0; EXPECT_EQ(radiant_capture_read(&doc, token, recorded, 4, &first), 4u);
+    ASSERT_TRUE(radiant_capture_routing(&doc, token, &info)); EXPECT_EQ(info.route, route); EXPECT_EQ(host.closes, 0u);
+    for (auto ref : references) audio_submix_release_route(mix, ref);
+    struct Peer { DomDocument* doc; ~Peer() { dom_document_destroy(doc); } } peer{dom_document_create(doc.input)};
+    ASSERT_NE(peer.doc, nullptr); dom_document_borrow_input_resources(peer.doc);
+    const auto* provider = radiant_audio_provider("capture"); ASSERT_NE(provider, nullptr);
+    EXPECT_FALSE(provider->read(peer.doc, token, &info)); EXPECT_FALSE(provider->route(peer.doc, token, 0, route, &error));
+    auto old = token; ASSERT_TRUE(radiant_capture_stop(&doc, token)); token = radiant_capture_open(&doc); ASSERT_NE(token, 0u); EXPECT_NE(token, old);
+    EXPECT_TRUE(item_is_error(provider_read("capture", old))); EXPECT_TRUE(item_is_error(provider_route("capture", old, "mic", route)));
+}
+TEST_F(Scene3dCaptureTest, ImportedProceduralRoutesPreserveExactTicketsAndCopiedPcm) {
+    ASSERT_NE(load_page("test/scene3d/capture-routes.html"), nullptr); pump_js(); ASSERT_NE(page, nullptr);
+    auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(page, &backend)); ASSERT_TRUE(radiant_capture_grant(page, true));
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('open')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.state==='capturing'&&typeof captureToken==='bigint'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('route')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&captureProvider.provider==='capture'&&captureProvider.token===captureToken&&captureProvider.route>0n&&captureProvider.route_valid&&captureProvider.gain===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('monitor')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.monitor_gain===0.5").to_const()).asBool());
+    input(0); // the injected backend belongs to the loaded document, not the fixture's synthetic scene.
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('route','other')"))); pump_js();
+    float output[8]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(page), output, 4));
+    for (unsigned i = 0; i < 4; i++) { EXPECT_FLOAT_EQ(output[i * 2], .125f); EXPECT_FLOAT_EQ(output[i * 2 + 1], -.0625f); }
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('read')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.frames===4&&capturePacket.first_frame===0n&&capturePacket.next_frame===4n&&new Uint8Array(capturePacket.data).length===32").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(run_js("new DataView(new Uint8Array(capturePacket.data).buffer).getFloat32(0,true)===0.5").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('export')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&captureExportRejected").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("captureRouteCall('stop')"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!captureBusy&&capturePacket.state==='stopped'").to_const()).asBool());
+    EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.closed_frame, 4u);
+}
+
 TEST_F(Scene3dAudioTest, SpatialAndStereoSourcesProduceKnownIndependentPcm) {
     auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
     pcm(0, .5f);
