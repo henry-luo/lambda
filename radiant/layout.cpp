@@ -3533,10 +3533,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // not be realigned against a later line box.
             return;
         }
-        if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element() &&
-            resolve_display_value(span->parent).inner == CSS_VALUE_RUBY &&
-            !layout_ruby_active_annotation(lycon, span)) {
-            return;
+        if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element()) {
+            CssEnum parent_role = resolve_display_value(span->parent).inner;
+            // a shared annotation level must not realign a column already placed in its independent line.
+            if ((parent_role == CSS_VALUE_RUBY || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER) &&
+                    !layout_ruby_active_annotation(lycon, span)) return;
         }
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,

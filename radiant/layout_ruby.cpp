@@ -64,6 +64,7 @@ struct LayoutRubySegment {
     LayoutRubyLevel* annotations;
     LayoutRubyLevel* last_annotation;
     LayoutRubySegment* next;
+    LayoutRubySegment* flow_source; // prepared columns retain their shared normalized level owner
     LayoutRubyColumn* columns;
     int column_count;
     int source_start;
@@ -91,6 +92,10 @@ template <typename Callback>
 static void ruby_for_each_level(LayoutRubySegment* segment, Callback visit) {
     visit(&segment->base);
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) visit(level);
+}
+
+static LayoutRubySegment* ruby_source_segment(LayoutRubySegment* segment) {
+    return segment->flow_source ? segment->flow_source : segment;
 }
 
 // line callbacks borrow only segments already committed by the active formatter.
@@ -476,9 +481,9 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level, S
     }
 }
 
-static LayoutRubyBox* ruby_box_in_column(LayoutRubyLevel* level, int column) {
+static LayoutRubyBox* ruby_box_in_column(LayoutRubyLevel* level, int column, bool single_span = false) {
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
-        if (!box->spanning && box->column == column) return box;
+        if ((!box->spanning || (single_span && box->span == 1)) && box->column == column) return box;
     }
     return nullptr;
 }
@@ -711,6 +716,12 @@ static Rect ruby_level_bounds(LayoutRubyLevel* level) {
     return result;
 }
 
+static bool ruby_level_has_visible_boxes(LayoutRubyLevel* level) {
+    for (LayoutRubyBox* box = level->first; box; box = box->next)
+        if (!box->hidden) return true;
+    return false;
+}
+
 static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
                            float start, float width) {
     float shift = start - box->natural_start;
@@ -813,6 +824,7 @@ static float ruby_column_range_width(LayoutRubySegment* segment, int first, int 
 
 static void ruby_place_level(LayoutRubySegment* segment, LayoutRubyLevel* level,
                               DomElement* ruby, float start) {
+    if (!ruby_level_has_visible_boxes(level)) return;
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
         if (box->hidden) continue;
         float box_start = start + ruby_column_range_width(segment, 0, box->column);
@@ -824,6 +836,8 @@ static void ruby_place_level(LayoutRubySegment* segment, LayoutRubyLevel* level,
 }
 
 static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool contents_only = false) {
+    // a collapsed unit cannot translate the shared container holding another column's visible readings.
+    if (!ruby_level_has_visible_boxes(level)) return;
     if (level->first && level->first->fragmented) {
         for (LayoutRubyBox* box = level->first; box; box = box->next)
             for (int index = 0; index < box->node_count; index++)
@@ -936,14 +950,8 @@ static void ruby_contribute_line_metrics(LayoutContext* context, const Linebox* 
     context->line.ruby_annotation_min_line_height = max(context->line.ruby_annotation_min_line_height, before + after);
 }
 
-static bool ruby_place_segment(LayoutContext* context, ViewSpan* ruby, LayoutRubySegment* segment,
-        float start, Rect empty_base, const Linebox* base_line, float baseline, float line_height) {
-    ruby_place_level(segment, &segment->base, ruby, start);
-    Rect base = ruby_level_bounds(&segment->base);
-    bool has_base = base.height > 0.0f;
-    if (!has_base) base = empty_base;
-    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
-        ruby_place_level(segment, level, ruby, start);
+static void ruby_place_annotation_levels(LayoutContext* context, ViewSpan* ruby, LayoutRubySegment* segment,
+        Rect base, const Linebox* base_line, float baseline, float line_height) {
     float over = 0.0f, under = 0.0f;
     bool visible = false;
     auto contribute = [&](LayoutRubyLevel* level, Rect annotation, bool is_under) {
@@ -957,6 +965,19 @@ static bool ruby_place_segment(LayoutContext* context, ViewSpan* ruby, LayoutRub
     ruby_position_annotation_levels(ruby, segment, base, false, contribute);
     if (visible) ruby_contribute_line_metrics(context, base_line, &segment->base,
         baseline, line_height, base, over, under);
+}
+
+static bool ruby_place_segment(LayoutContext* context, ViewSpan* ruby, LayoutRubySegment* segment,
+        float start, Rect empty_base, const Linebox* base_line, float baseline, float line_height,
+        bool finish_annotations = true) {
+    ruby_place_level(segment, &segment->base, ruby, start);
+    Rect base = ruby_level_bounds(&segment->base);
+    bool has_base = base.height > 0.0f;
+    if (!has_base) base = empty_base;
+    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
+        ruby_place_level(segment, level, ruby, start);
+    if (finish_annotations)
+        ruby_place_annotation_levels(context, ruby, segment, base, base_line, baseline, line_height);
     return has_base;
 }
 
@@ -1005,7 +1026,7 @@ bool layout_ruby_active_level_children(LayoutContext* context, ViewSpan* span) {
     }
     if (level->element != span) return false;
     for (int index = 0; index < level->node_count; index++) {
-        if (level->discarded[index]) layout_suppress_ignorable_container_text(level->nodes[index]);
+        if (level->discarded && level->discarded[index]) layout_suppress_ignorable_container_text(level->nodes[index]);
         else if (!level->nodes[index]->ruby_annotation_hidden) layout_flow_node(context, level->nodes[index]);
     }
     return true;
@@ -1088,6 +1109,17 @@ static void ruby_suppress_annotation_box(LayoutContext* context, LayoutRubyBox* 
     for (int index = 0; index < box->node_count; index++) box->nodes[index]->ruby_annotation_hidden = true;
 }
 
+static void ruby_finalize_annotation_line(LayoutContext* context, LayoutRubyLevel* level) {
+    // the independent level owns its baseline phase; an empty level creates no annotation line.
+    if (context->line.is_line_start || !context->line.start_view) return;
+    if (level->element) view_vertical_align(context, level->element);
+    else for (LayoutRubyBox* box = level->first; box; box = box->next) {
+        if (box->hidden) continue;
+        for (int index = 0; index < box->node_count; index++)
+            view_vertical_align(context, box->nodes[index]);
+    }
+}
+
 static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel* level,
                                           const Linebox* base_line, float column_width) {
     LayoutContextScope state(context);
@@ -1100,6 +1132,12 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     line_init(context, base_line->left, base_line->left + column_width);
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
         if (box->hidden) ruby_suppress_annotation_box(context, box);
+    }
+    if (!ruby_level_has_visible_boxes(level)) {
+        // CSS Ruby §2.4: a collapsed level emits no line, including through a shared level container.
+        level->line = context->line;
+        ruby_measure_used_level(level);
+        return;
     }
     if (level->first && level->first->fragmented && level->first->fragment)
         ruby_flow_fragment_level(context, level);
@@ -1114,35 +1152,30 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     // CSS Text §4.1.3 trims each parallel fragment's separator before ruby-align distributes its space.
     if (fragment && level->first->fragmented && fragment->last + 1 < fragment->plan.count)
         line_consume_trailing_collapsible_space(context, true, true, true);
-    // CSS Ruby §3.1 gives each annotation level its own inline baseline phase.
-    // the base line's later alignment deliberately skips these parallel boxes.
-    // an empty level has no line to finalize; alignment must not create one.
-    if (!context->line.is_line_start && context->line.start_view) {
-        if (level->element) view_vertical_align(context, level->element);
-        else for (LayoutRubyBox* box = level->first; box; box = box->next) {
-            if (box->hidden) continue;
-            for (int index = 0; index < box->node_count; index++)
-                view_vertical_align(context, box->nodes[index]);
-        }
-    }
+    ruby_finalize_annotation_line(context, level);
     level->line = context->line;
     ruby_measure_used_level(level);
 }
 
+static void ruby_select_segment_line(LayoutRubySegment* segment, int line_number) {
+    ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
+        for (LayoutRubyBox* box = level->first; box; box = box->next) {
+            box->fragmented = true;
+            box->fragment_line = line_number;
+        }
+    });
+}
+
 static void ruby_align_annotation_model(ViewSpan* ruby, LayoutRubyModel* model,
         Rect empty_base, int line_number, bool selected = false) {
-    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+    LayoutRubySegment* previous = nullptr;
+    for (LayoutRubySegment* unit = model->first; unit; unit = unit->next) {
+        LayoutRubySegment* segment = ruby_source_segment(unit);
+        if (segment == previous) continue;
+        previous = segment;
         if (selected && (!segment->placed || segment->line_number != line_number)) continue;
-        if (ruby->ext && ruby->ext->has_ruby_parallel_fragments) {
-            auto select = [&](LayoutRubyLevel* level) {
-                for (LayoutRubyBox* box = level->first; box; box = box->next) {
-                    box->fragmented = true;
-                    box->fragment_line = line_number;
-                }
-            };
-            select(&segment->base);
-            for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) select(level);
-        }
+        if (ruby->ext && ruby->ext->has_ruby_parallel_fragments)
+            ruby_select_segment_line(segment, line_number);
         bool on_line = false;
         for (LayoutRubyBox* box = segment->base.first; box; box = box->next) {
             for (int index = 0; index < box->node_count; index++)
@@ -1244,7 +1277,8 @@ static bool ruby_finish_segment_flow(LayoutContext* context, ViewSpan* ruby,
     float height = 0.0f;
     float baseline = line_baseline_position(context, &height);
     float overhang = source_fragments ? 0.0f : ruby_start_overhang(segment, preceding_space);
-    ruby_place_segment(context, ruby, segment, start - overhang, {}, &base_line, baseline, height);
+    ruby_place_segment(context, ruby, segment, start - overhang, {}, &base_line, baseline, height,
+        !(source_fragments && segment->flow_source));
     context->line.advance_x = start - overhang + segment->width;
     if (ruby->view_type == RDT_VIEW_INLINE)
         layout_inline_record_advance(context, ruby, start, context->line.advance_x);
@@ -1252,7 +1286,70 @@ static bool ruby_finish_segment_flow(LayoutContext* context, ViewSpan* ruby,
     if (!source_fragments) ruby_annotation_line_membership(segment, context->block.line_number);
     segment->placed = true;
     segment->line_number = context->block.line_number;
+    LayoutRubySegment* source = ruby_source_segment(segment);
+    source->placed = true;
+    source->line_number = context->block.line_number;
     return true;
+}
+
+static void ruby_merge_annotation_line(Linebox* target, const Linebox* source) {
+    // merge baseline/extent facts, not cursors or break opportunities belonging to individual columns.
+    float Linebox::* const extents[] = {&Linebox::max_ascender, &Linebox::max_descender,
+        &Linebox::max_css_baseline_ascender, &Linebox::max_inline_line_height,
+        &Linebox::max_atomic_inline_height, &Linebox::max_text_ascender, &Linebox::max_text_descender,
+        &Linebox::max_normal_line_height, &Linebox::c1_control_line_height,
+        &Linebox::max_top_bottom_height, &Linebox::max_top_height, &Linebox::max_bottom_height};
+    for (auto field : extents) target->*field = max(target->*field, source->*field);
+    bool Linebox::* const facts[] = {&Linebox::has_native_metrics, &Linebox::has_expanded_inline_lh,
+        &Linebox::has_baseline_shift, &Linebox::has_different_inline_font,
+        &Linebox::has_inline_font_size_difference, &Linebox::has_c1_control_text,
+        &Linebox::has_non_c1_text, &Linebox::has_direct_block_text};
+    for (auto field : facts) target->*field = target->*field || source->*field;
+    if (!target->start_view) target->start_view = source->start_view;
+    target->is_line_start = target->is_line_start && source->is_line_start;
+}
+
+static void ruby_finalize_flow_line(LayoutContext* context, ViewSpan* ruby, LayoutRubyModel* model) {
+    int line_number = context->block.line_number;
+    for (LayoutRubySegment* first = model->first; first;) {
+        LayoutRubySegment* segment = ruby_source_segment(first);
+        LayoutRubySegment* end = first->next;
+        while (end && ruby_source_segment(end) == segment) end = end->next;
+        if (first->flow_source && segment->placed && segment->line_number == line_number) {
+            ruby_select_segment_line(segment, line_number);
+            for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+                level->line = {};
+                level->line.is_line_start = true;
+            }
+            for (LayoutRubySegment* unit = first; unit != end; unit = unit->next) {
+                if (!unit->placed || unit->line_number != line_number) continue;
+                LayoutRubyLevel* level = segment->annotations;
+                for (LayoutRubyLevel* selected = unit->annotations; selected; selected = selected->next) {
+                    if (selected->line.start_view && !selected->line.is_line_start) {
+                        if (!level->line.start_view) level->line = selected->line;
+                        else ruby_merge_annotation_line(&level->line, &selected->line);
+                    }
+                    level = level->next;
+                }
+            }
+            for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+                if (!level->line.start_view) continue;
+                LayoutContextScope state(context);
+                RubyLevelScope selected(context, level);
+                context->line = level->line;
+                context->block.inline_box_metrics = nullptr;
+                ruby_finalize_annotation_line(context, level);
+                level->line = context->line;
+            }
+            // all columns now share one annotation IFC and one envelope for this selected line.
+            Linebox base_line = context->line;
+            float height = 0.0f;
+            float baseline = line_baseline_position(context, &height);
+            ruby_place_annotation_levels(context, ruby, segment, ruby_level_bounds(&segment->base),
+                &base_line, baseline, height);
+        }
+        first = end;
+    }
 }
 
 static void ruby_flow_unbroken_segments(LayoutContext* context, ViewSpan* ruby,
@@ -1441,6 +1538,59 @@ static bool ruby_prepare_text_level(LayoutContext* context, LayoutRubyLevel* lev
     return true;
 }
 
+static bool ruby_copy_column_flow_level(LayoutRubyLevel* source, LayoutRubyLevel* target,
+        int column, ScratchScope* scope) {
+    LayoutRubyBox* box = ruby_box_in_column(source, column, true);
+    if (!box || box->whitespace || box->span != 1) return false;
+    LayoutRubyBox* selected = scope->array_zero<LayoutRubyBox>(1);
+    if (!selected) return false;
+    *selected = *box;
+    selected->next = nullptr;
+    selected->column = 0;
+    selected->spanning = false;
+    *target = *source;
+    target->next = nullptr;
+    // hidden units still use the ordinary child walker; it must not replay other columns.
+    target->nodes = selected->nodes;
+    target->node_count = selected->node_count;
+    target->discarded = nullptr;
+    target->first = target->last = selected;
+    target->box_count = 1;
+    return true;
+}
+
+static bool ruby_prepare_column_flow_units(LayoutContext* context, LayoutRubyModel* source,
+        LayoutRubyModel* target, ScratchScope* scope) {
+    // units borrow normalized source ranges; splitting flow must not split DOM owners or spanning readings.
+    target->nodes = source->nodes;
+    target->node_count = source->node_count;
+    target->discarded = source->discarded;
+    RubyBuildContext build = {context, scope, target, false};
+    for (LayoutRubySegment* segment = source->first; segment; segment = segment->next) {
+        bool supported = true;
+        ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
+            for (LayoutRubyBox* box = level->first; box; box = box->next)
+                supported &= !box->whitespace && box->span == 1;
+        });
+        if (!supported) return false;
+        for (int column = 0; column < segment->column_count; column += 2) {
+            LayoutRubySegment* unit = ruby_append_segment(&build);
+            if (!unit) return false;
+            unit->source_start = segment->source_start;
+            unit->source_end = segment->source_end;
+            unit->flow_source = segment;
+            if (!ruby_copy_column_flow_level(&segment->base, &unit->base, column, scope)) return false;
+            for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+                LayoutRubyLevel* selected = ruby_append_annotation_level(&build, unit);
+                if (!selected || !ruby_copy_column_flow_level(level, selected, column, scope)) return false;
+            }
+            ruby_resolve_segment_columns(unit, scope, &target->failed);
+            if (target->failed) return false;
+        }
+    }
+    return true;
+}
+
 static float ruby_fragment_width(LayoutRubyTextFragment* fragment, size_t last) {
     float end = last + 1 == fragment->plan.count ? fragment->plan.width : fragment->plan.points[last].advance;
     return max(0.0f, end - fragment->plan.points[fragment->first].next_advance);
@@ -1504,6 +1654,14 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
     // replaying a source float/positioned child per fragment would corrupt its single placement.
     for (int index = 0; index < model->node_count; index++)
         if (!ruby_node_in_flow(model->nodes[index])) return false;
+    bool column_units = false;
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next)
+        column_units |= segment->column_count > 1;
+    LayoutRubyModel columns = {};
+    if (column_units) {
+        if (!ruby_prepare_column_flow_units(context, model, &columns, scope)) return false;
+        model = &columns;
+    }
     bool has_text_break = false;
     for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
         if (segment->column_count != 1 || segment->source_start < 0) return false;
@@ -1521,7 +1679,8 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
         segment->prefix_width = parallel_break ? prefix : segment->width;
         has_text_break |= parallel_break;
     }
-    if (!has_text_break) return false;
+    // indivisible columns can still wrap at their shared base-text seams.
+    if (!has_text_break && !column_units) return false;
     // all applicability checks precede source reset or emission, including indivisible neighbors.
     for (LayoutRubySegment* segment = model->first; segment; segment = segment->next)
         ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
@@ -1578,7 +1737,11 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
                 full = layout_following_inline_content_fits(context, ruby,
                     remaining + tail + layout_inline_end_edge(ruby));
             if (!full && (!segment->can_fragment_text || !ruby_select_fragment(segment, available, false))) {
-                if (!context->line.is_line_start && (base->emitted || boundary)) { line_break(context); continue; }
+                if (!context->line.is_line_start && (base->emitted || boundary)) {
+                    ruby_finalize_flow_line(context, ruby, model);
+                    line_break(context);
+                    continue;
+                }
                 // an indivisible parallel unit overflows together when no legal smaller piece fits.
                 if (!segment->can_fragment_text || !ruby_select_fragment(segment, right - left, true))
                     each_box([](LayoutRubyBox* box) { box->fragment->last = box->fragment->plan.count - 1; });
@@ -1592,7 +1755,10 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
                 if (!final) line_consume_trailing_collapsible_space(context, true, true, true);
             }
             if (!ruby_finish_segment_flow(context, ruby, model, segment, scope, start, true)) return true;
-            if (!final) line_break(context);
+            if (!final) {
+                ruby_finalize_flow_line(context, ruby, model);
+                line_break(context);
+            }
             each_box([](LayoutRubyBox* box) {
                 box->fragment->emitted = true;
                 box->fragment->first = box->fragment->last;
@@ -1602,6 +1768,7 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
         source = segment->source_end;
     }
     ruby_flow_sources(context, model, source, model->node_count);
+    ruby_finalize_flow_line(context, ruby, model);
     return true;
 }
 

@@ -2020,3 +2020,107 @@ rare empty-zero-font parent-anchor tail. The saved comparison and finite plan
 are in `temp/ruby-m21/intrinsic-embedding-saved-comparison.json` and
 `next-milestone.json`. References, upstream fixtures, comparison tolerances and
 baseline floors remain unchanged.
+
+## M22: paired flow across columns in a shared segment
+
+The planned intrinsic investigation confirms the saved 18px/34px discrepancy
+in current Chromium. Explicit-font controls isolate it to min-content sizing:
+at a fixed one-character width, Chromium wraps the same embedded base-only
+Ruby without overflow, exactly like native flow. Native retains the smaller
+minimum allowed by those opportunities; do not inflate widths to reproduce
+the browser's inconsistent intrinsic result. Evidence:
+`temp/ruby-m22/{intrinsic-original-browser,intrinsic-probe-browser,fixed-width-browser}.json`.
+
+P1 shared pairing defect: the coordinated source formatter rejects segments
+with multiple columns. Its fallback emits all base sources before annotation
+placement, allowing bases to wrap independently from their readings. Extend
+the existing formatter with scratch-owned per-column units, preserving the
+normalized model for intrinsic measurement and source parents/data under
+**D4.5.1v4 / D4.1.4v5**. CSS Ruby §3.4 requires paired levels to fragment
+together; §3.4.1 retains the base text's real seam opportunities.
+
+Acceptance: complete non-spanning columns with text breaks or indivisible
+readings, anonymous/explicit level containers, multiple annotation levels and
+ordinary neighbors; compare source paint and character Range geometry with
+independently segmented controls through initial/retained and wide/narrow
+reflow. Begin horizontal LTR text flow. Spanning/missing columns, generated or
+decorated sources, vertical/RTL and forced-break protocols remain separate.
+Budget: failing focused controls, existing Ruby/intrinsic/fragment neighbors,
+unchanged-reference raw Ruby delta, then one stable required Radiant gate and
+dimension lint/inventory. No module API/import change is planned.
+
+The formatter now prepares complete, non-spanning columns as scratch-owned
+flow units and uses its existing fragment-selection and placement loop. Each
+unit borrows only its own source range; source identities, parents and text
+remain intact. Shared annotation-container baseline alignment excludes already
+placed sibling columns. Fully collapsed units emit no line or placement and
+cannot translate the shared container of earlier visible readings (CSS Ruby
+§2.4). The trace isolates an unwanted 80px translation before the fix:
+`temp/ruby-m22/hidden-translation-stages.log`.
+
+Independent browser controls exposed a related selected-interval defect. The
+leading probe correctly chose 40px at x=40 in a 90px line, but wrapper pre-wrap
+and the text scanner's nowrap restart still made their own decisions. A selected
+`AA ` interval temporarily advanced 60px before its trailing separator was
+trimmed. Both paths now respect the existing IFC-scoped keep constraint, so the
+formatter's chosen interval stays together; independent atomic contexts retain
+their own wrapping. Evidence: `temp/ruby-m22/{leading-stages,emission-stages,kept-overflow-stages}.log`.
+Temporary trace logging was removed.
+
+All 100 Ruby/intrinsic/bidi/fragmentation neighbors pass. The regressions compare
+paint, every character Range, source ownership and min/max-content through
+initial/retained and wide/narrow flow, including multiple levels, collapsed
+readings and a fitting ordinary prefix. The supported independently segmented
+browser controls agree on all 86 checked coordinates, with 0px maximum delta
+under the harness's font policy. Chromium rejects `ruby-base`,
+`ruby-base-container` and `ruby-text-container`, so explicit-level role behavior
+is verified natively rather than claimed as a whole-fixture browser match.
+The unchanged-reference raw suite remains **55/212 full matches**, with no full
+or partial score changes.
+
+The first stable Radiant gate passed **9390 checks; 9083 passed, 305 partial,
+0 failed, 2 skipped**, including 487/487 native text/layout and 752/752 UI.
+Layout retains 4973 full / 301 partial and CSS Text 894 full / 86 partial, both
+with zero baseline regressions. However, an adversarial check added after that
+gate exposed a regression: breakable columns with 10px and 30px reading fonts
+no longer share their original annotation-level baseline. The smaller reading
+moves 4px; the qualified M21 binary and an equivalent unwrapped control retain
+the common baseline. That first qualification does not cover the correction.
+
+`RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalFonts` reproduced failures
+for unequal reading fonts and a crossed tall-base/tall-reading envelope. CSS Ruby
+§3.1 requires readings within one level to share an inline formatting context.
+Flow units now retain that original level and finalize its current-line baseline,
+stacking and contribution together. Existing baseline and placement stages are
+shared by ordinary and coordinated flow. Only the current line's fragment
+rectangles participate; a wrapped smaller reading cannot inherit the preceding
+line's larger font metrics. Line cursors and break opportunities remain owned by
+the selected columns. The source links stay scratch-owned under
+**D4.5.1v4 / D4.1.4v5**. Evidence: `temp/ruby-m22/{shared-baseline-reproducer.log,
+shared-baseline-breakable-before.json,shared-baseline-breakable-candidate.json,
+qualification-run1.json}`.
+
+The corrected wide and wrapped controls pass through retained reflow. Ordinary
+browser inline controls independently confirm all 24 relative baseline/font-box
+coordinates, with 0px maximum delta, without relying on unsupported Ruby display
+roles. Evidence: `temp/ruby-m22/{neighbors-helper-final.log,
+ordinary-baseline-comparison.json,browser-control-comparison-shared-final.json}`.
+
+The final stable required Radiant gate passes **9391 checks; 9084 passed,
+305 partial, 0 failed, 2 skipped**, including 488/488 native text/layout and
+752/752 UI. Layout retains 4973 full / 301 partial and CSS Text 894 full /
+86 partial, with zero baseline regressions. Dimension lint, diff and generated
+inventory checks pass; all 421 names/IDs remain, with changes only in reference
+columns 14–15. The seven frozen source/test inputs and CLI hash remain unchanged.
+The final raw Ruby run stays **55/212 full matches**, with no full or partial
+score changes relative to M21. Evidence:
+`temp/ruby-m22/{qualification-result.json,radiant-shared.log,delta-shared-final.json}`.
+
+M22's complete-column core is qualified. Mixed atomic/text composition is the
+next diagnostic milestone; its static applicability gap still needs a dynamic
+reproducer before implementation. Spanning/missing columns and vertical/RTL
+source fragmentation remain open. No module API/import or ownership placement
+changed, so the M21 boundary audit's six deferred imports remain recorded rather
+than rerun. The unrelated M15 input/PDF build limit was not rerun. The full goal
+remains active with 157 raw Ruby mismatches; references, upstream fixtures,
+comparison tolerances and baseline floors remain unchanged.

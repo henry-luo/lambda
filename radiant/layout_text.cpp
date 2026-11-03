@@ -5294,7 +5294,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // else cannot break and no float intrusion, continue the flow in current line
         }
         // CSS Text 3 §3/§5: white-space: nowrap prevents ALL line breaks within this
-        else if (!wrap_lines &&
+        // a selected interval may include its trimmed end separator; its formatter owns line selection.
+        else if (!wrap_lines && !layout_inline_flow_is_kept(lycon) &&
                  rect->x + rect->width +
                      ((text_node->next_sibling == nullptr && text_view->parent_view() &&
                        text_view->parent_view()->view_type == RDT_VIEW_INLINE)

@@ -555,6 +555,23 @@ protected:
         DomText* references[] = {control};
         expect_text_paint_sources<GlyphCount>(owner, text, control_owner, references, 1, GlyphCount);
     }
+    template <size_t Capacity>
+    void expect_text_source_pair(DomRange* range, DomElement* owner, DomText* text,
+                                 DomElement* control_owner, DomText* control) {
+        ASSERT_EQ(dom_text_utf16_length(text), dom_text_utf16_length(control));
+        DomText* references[] = {control};
+        expect_text_paint_sources<Capacity>(owner, text, control_owner, references, 1);
+        float x, y, control_x, control_y;
+        view_get_visual_bounds(owner, &x, &y, nullptr, nullptr);
+        view_get_visual_bounds(control_owner, &control_x, &control_y, nullptr, nullptr);
+        for (unsigned index = 0; index < dom_text_utf16_length(control); index++) {
+            SCOPED_TRACE(index);
+            Rect expected = {};
+            ASSERT_TRUE(character_rect(range, control, index, &expected));
+            expected.x += x - control_x; expected.y += y - control_y;
+            expect_character_rect(range, text, index, expected);
+        }
+    }
     DomText* first_text_leaf(DomNode* node) {
         return dom_range_edge_text(node, false);
     }
@@ -15881,9 +15898,6 @@ TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirec
             EXPECT_FLOAT_EQ(row->height, control->height);
             str_fmt(id, sizeof(id), "%s-ruby", entry.id);
             EXPECT_FLOAT_EQ(find(id)->width, 40.0f);
-            float x, y, control_x, control_y;
-            view_get_visual_bounds(row, &x, &y, nullptr, nullptr);
-            view_get_visual_bounds(control, &control_x, &control_y, nullptr, nullptr);
             for (size_t role = 0; role < 2; role++) {
                 SCOPED_TRACE(roles[role]);
                 const Source& source = entry.sources[role];
@@ -15894,15 +15908,7 @@ TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirec
                 str_fmt(id, sizeof(id), "%s-control-%s", entry.id, roles[role]);
                 DomText* reference = first_text_leaf(find(id));
                 ASSERT_NE(reference, nullptr);
-                DomText* references[] = {reference};
-                expect_text_paint_sources<8>(row, source.text, control, references, 1);
-                for (unsigned index = 0; index < dom_text_utf16_length(reference); index++) {
-                    SCOPED_TRACE(index);
-                    Rect expected = {};
-                    ASSERT_TRUE(character_rect(range, reference, index, &expected));
-                    expected.x += x - control_x; expected.y += y - control_y;
-                    expect_character_rect(range, source.text, index, expected);
-                }
+                expect_text_source_pair<8>(range, row, source.text, control, reference);
             }
         }
         // an annotation translation cannot change the independent box's zero-line-height text origin.
@@ -15975,6 +15981,160 @@ TEST_F(RadiantTextQuery, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndRese
         EXPECT_EQ(source->parent.get(), atomic);
         EXPECT_EQ(source->text_data(), data);
     }
+}
+
+TEST_F(RadiantTextQuery, RubyColumnsKeepPairedSourcesAcrossSharedLevelFragments) {
+    ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base-a", "base-b", "reading-a", "reading-b", "second-a", "second-b"};
+    struct Source { DomText* text; DomNode* parent; const unsigned char* data; };
+    struct Row { const char* id; size_t count; bool collapsed; Source sources[6]; } rows[] = {
+        {"columns", 4, false, {}}, {"levels", 6, false, {}}, {"neighbors", 4, false, {}},
+        {"whole", 4, false, {}}, {"collapsed", 6, true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < row.count; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* source = first_text_leaf(find(id));
+        ASSERT_NE(source, nullptr);
+        row.sources[role] = {source, source->parent, source->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-column-fragments"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            str_fmt(id, sizeof(id), "%s-ruby", entry.id);
+            IntrinsicSizes widths = measure_physical_widths(find(id));
+            str_fmt(id, sizeof(id), "%s-control-ruby", entry.id);
+            IntrinsicSizes control_widths = measure_physical_widths(find(id));
+            EXPECT_FLOAT_EQ(widths.min_content, control_widths.min_content);
+            EXPECT_FLOAT_EQ(widths.max_content, control_widths.max_content);
+            if (strcmp(entry.id, "neighbors") == 0) {
+                // the first paired prefix fits beside the ordinary text on the same line.
+                Rect prefix = {}, first_base = {};
+                ASSERT_TRUE(character_rect(range, first_text_leaf(row), 0, &prefix));
+                ASSERT_TRUE(character_rect(range, entry.sources[0].text, 0, &first_base));
+                EXPECT_FLOAT_EQ(first_base.y, prefix.y);
+            }
+            for (size_t role = 0; role < entry.count; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", entry.id, roles[role]);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(reference, nullptr);
+                if (entry.collapsed && role == 3) {
+                    EXPECT_EQ(source.text->rect, nullptr);
+                    EXPECT_EQ(reference->rect, nullptr);
+                    EXPECT_EQ(source.text->view_type, RDT_VIEW_NONE);
+                    EXPECT_EQ(reference->view_type, RDT_VIEW_NONE);
+                    continue;
+                }
+                expect_text_source_pair<16>(range, row, source.text, control, reference);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial");
+    }
+    for (bool wide : {true, false}) {
+        for (const Row& entry : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            const char* width = wide ? "240px" : strcmp(entry.id, "whole") == 0 ? "60px" : "90px";
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
+}
+
+TEST_F(RadiantTextQuery, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalFonts) {
+    ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base-a", "base-b", "reading-a", "reading-b"};
+    auto check = [&]() {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-shared-column-baselines"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const char* name : {"unequal", "cross", "descending"}) {
+            SCOPED_TRACE(name);
+            DomElement* row = find(name);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", name);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            for (const char* role : roles) {
+                SCOPED_TRACE(role);
+                str_fmt(id, sizeof(id), "%s-%s", name, role);
+                DomText* source = first_text_leaf(find(id));
+                str_fmt(id, sizeof(id), "%s-control-%s", name, role);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(source, nullptr);
+                ASSERT_NE(reference, nullptr);
+                expect_text_source_pair<16>(range, row, source, control, reference);
+            }
+            str_fmt(id, sizeof(id), "%s-reading-a", name);
+            DomText* first = first_text_leaf(find(id));
+            str_fmt(id, sizeof(id), "%s-reading-b", name);
+            DomText* second = first_text_leaf(find(id));
+            Rect first_rect = {}, second_rect = {};
+            ASSERT_TRUE(character_rect(range, first, 0, &first_rect));
+            ASSERT_TRUE(character_rect(range, second, 0, &second_rect));
+            // CSS Ruby §3.1: readings within one level share an inline-formatting baseline.
+            EXPECT_FLOAT_EQ(first_rect.y + first->font->ascender,
+                second_rect.y + second->font->ascender);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(); }
+    DomText* base = first_text_leaf(find("descending-base-b"));
+    DomText* first_reading = first_text_leaf(find("descending-reading-a"));
+    DomText* last_reading = first_text_leaf(find("descending-reading-b"));
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(first_reading, nullptr);
+    ASSERT_NE(last_reading, nullptr);
+    DomNode* parent = last_reading->parent;
+    const unsigned char* data = last_reading->text_data();
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("descending"), "width", "180px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    for (bool retained : {false, true}) {
+        if (retained) layout_html_doc(&ui, document, true);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-shared-wrapped-baseline"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        Rect large = {}, small = {}, tail_base = {}, tail_reading = {};
+        Rect control_base = {}, control_reading = {};
+        ASSERT_TRUE(character_rect(range, first_reading, 0, &large));
+        ASSERT_TRUE(character_rect(range, last_reading, 0, &small));
+        EXPECT_FLOAT_EQ(large.y + first_reading->font->ascender,
+            small.y + last_reading->font->ascender);
+        ASSERT_TRUE(character_rect(range, base, 3, &tail_base));
+        ASSERT_TRUE(character_rect(range, last_reading, 2, &tail_reading));
+        ASSERT_TRUE(character_rect(range, first_text_leaf(find("descending-tail-base")), 0, &control_base));
+        ASSERT_TRUE(character_rect(range, first_text_leaf(find("descending-tail-reading")), 0, &control_reading));
+        // the previous line's larger reading cannot set the next line's annotation baseline.
+        EXPECT_FLOAT_EQ(tail_reading.y - tail_base.y, control_reading.y - control_base.y);
+        EXPECT_FLOAT_EQ(find("descending")->height,
+            find("descending-control")->height + find("descending-tail-control")->height);
+        EXPECT_EQ(first_text_leaf(find("descending-reading-b")), last_reading);
+        EXPECT_EQ(last_reading->parent.get(), parent);
+        EXPECT_EQ(last_reading->text_data(), data);
+        dom_range_release(range);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("descending"), "width", "400px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    check();
 }
 
 TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {

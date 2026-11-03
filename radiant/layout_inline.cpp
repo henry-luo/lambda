@@ -2540,7 +2540,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS Ruby §3.4: a unit without a parallel opportunity fits as a complete unbroken run.
         span_is_unbreakable = !layout_ruby_intrinsic_sizes(lycon, span).has_used_content_break;
     }
-    if (span_is_unbreakable && child && !lycon->line.is_line_start &&
+    // a selected interval is placed by its formatter; child wrappers cannot break that interval again.
+    if (!layout_inline_flow_is_kept(lycon) && span_is_unbreakable && child && !lycon->line.is_line_start &&
         line_has_prior_flow_content(&lycon->line)) {
         float line_left = lycon->line.has_float_intrusion
             ? lycon->line.effective_left : lycon->line.left;
