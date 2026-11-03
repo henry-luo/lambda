@@ -913,7 +913,11 @@ static void ruby_contribute_line_metrics(LayoutContext* context, const Linebox* 
         under_excess = max(0.0f, bounds.height - baseline - max(0.0f, base_line_height - base_baseline));
         excess = over_excess + under_excess;
     }
-    float before = base_baseline + (excess > 0.0f ? extra * over_excess / excess : 0.0f);
+    float over_leading = excess > 0.0f ? extra * over_excess / excess : 0.0f;
+    // existing block-start space can host annotation overflow without raising the base line.
+    if (context->block.is_first_line)
+        over_leading = max(0.0f, over_leading - context->block.annotation_start_space);
+    float before = base_baseline + over_leading;
     float after = max(0.0f, base_line_height - base_baseline) +
         (excess > 0.0f ? extra * under_excess / excess : 0.0f);
     context->line.max_ascender = max(context->line.max_ascender, before);

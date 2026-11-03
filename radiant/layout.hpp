@@ -2469,6 +2469,7 @@ typedef struct BlockContext {
     float content_height;
     float advance_y;
     float inline_block_start; // initial surrogate block edge of this inline formatting context
+    float annotation_start_space; // available padding/adjoining margins above this formatting context
     float max_width;
     float max_height;
     float line_height;

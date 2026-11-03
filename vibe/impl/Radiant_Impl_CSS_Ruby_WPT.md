@@ -1570,3 +1570,88 @@ six pre-existing deferred imports recorded by M15 (140 current imports,
 input/PDF duplicate-symbol build limit from M15 was not rerun or changed.
 See `temp/ruby-m16/boundary.log` and `qualification-result.json`; neither
 ancillary gate is claimed as passing.
+
+## M17: Ruby annotations use available block-start space
+
+P1: after M16 fixes the horizontal cuts in `break-within-bases/basic`, the
+ordinary first paragraph is 150px tall versus Chromium's 125px; its first base
+line is shifted down by the 25px reading height. Trace `ruby_contribute_line_metrics`,
+generic baseline alignment and line advancement. CSS Ruby §3.6 separates
+ordinary base alignment from additional spacing needed to keep repeated Ruby
+lines apart, and permits annotations outside their line box. Preserve selected
+view/style ownership and stack/scratch lifetimes (**D4.5.1v4 / D4.1.4v5**).
+
+Acceptance: minimal Ahem over/under Ruby lines with preceding text, three-line
+spacing, plain neighboring lines, ample leading, and initial/retained/live
+line-height changes; compare baseline and block extents with independent browser
+captures. Recheck the original ordinary/indented WPT paragraphs. Multi-column
+fragmentation and multi-segment text splitting stay separate work. Budget:
+focused native/browser geometry during diagnosis, affected Ruby/line-height
+neighbors and raw Ruby delta, then one required Radiant gate on stable inputs
+and dimension lint/inventory. Do not encode first-line offsets or fixture guards.
+
+Minimal browser controls narrowed the cause to available block-start space,
+not fragmentation itself. With no margin/padding, an over-annotation reserves
+leading normally; a 20px top margin or padding can host the same 10px reading
+without raising its base. The original WPT's 50px collapsed paragraph margin
+similarly hosts its 25px reading. [Chromium's June 2026 annotation-space change](https://chromium.googlesource.com/external/github.com/web-platform-tests/wpt/+/4a010dd92dac7b0cf8220edde084718403b67a5a)
+confirms that policy; [CSS Ruby §3.6](https://drafts.csswg.org/css-ruby-1/#line-height) permits annotations to overflow line boxes.
+Carry the available space in the transient block context, initialized by block
+placement from padding and resolved adjoining margins. Borders and clipping
+bound access to outside margins. Consume the space only for the first formatted
+line's over-leading; retain the ordinary repeated-line metrics otherwise.
+Evidence: `temp/ruby-m17/spacing-browser-3.json`,
+`basic-browser-live.json`, and the failing `reproducer-before.log`.
+
+
+M17's horizontal block-start-space path is implemented. The regression covers
+ordinary over/under and ample-leading lines, coordinated source fragments,
+positive/negative collapsed margins, live line-height changes, nested adjoining
+margins, padding, border/overflow limits and independent inline-block/flow-root
+contexts. All **51** Ruby/leading/margin neighbors pass. Independent browser
+captures match **860** minimal-fixture coordinates. The ordinary and indented
+paragraphs of the original `basic` WPT match all **56** paragraph/text coordinates;
+its multi-column paragraph remains incorrect. Evidence:
+`temp/ruby-m17/neighbors-1.log`, `browser-comparison.json`,
+`basic-paragraph-comparison.json`, and `spacing-browser-4.json`.
+
+Raw WPT results improve **37 → 51/212** full matches, with **14** new matches
+and no full match lost. Both `nowrap` documents now fully match. `basic` improves
+to 78.9% element / 75% span / 72.2% text matches; `basic-ref` improves to
+83.3% / 75% / 72.2%. Three partial scores decrease: `block-ruby-005`,
+`pseudo-first-line` and `ruby-float-handling-001`. The latter captures still
+show unsupported annotation-float placement; the first-line case still places
+its reading above the first line despite the `::first-line` under-position rule.
+Do not treat those documents as passing. Evidence:
+`temp/ruby-m17/{wpt-2.log,delta-2.json,pseudo-after.json,floats-after.json}`.
+No browser reference, upstream WPT document, comparator threshold or baseline
+floor is changed. Vertical annotation-space transfer, block-end padding space,
+multi-column fragmentation and remaining conditional styling/float behavior
+remain partial. Required aggregate qualification is recorded below.
+
+
+M17 is qualified on base `0d8c749dc`. The required Radiant gate reports
+**9077 passed / 305 partial / 0 failed / 2 skipped** of 9384 checks, including
+**481/481** text/query and **752/752** UI checks. Layout baseline floors pass
+with **4973 full / 301 partial / 0 regressions**. One CSS Text case,
+`letter-spacing-212`, changes from full to partial: its saved reference expects
+30px Ruby lines while current Chromium and this implementation both use 20px
+lines after borrowing collapsed margin space. A focused predecessor comparison
+isolates that document; all **44** relevant current-browser element coordinates
+match. The saved reference remains unchanged. Evidence:
+`temp/ruby-m17/{text-ruby-delta.json,letter-spacing-browser-comparison.json}`.
+
+Dimension lint, inventory and whitespace checks pass. The 421-row inventory
+changes only reference columns 14/15. Frozen source/test inputs remain unchanged
+through qualification. The fresh strict module DSOs build, then boundary
+validation rejects the same six pre-existing deferred imports (140 current,
+165-entry baseline); no allowlist change is included. The unrelated input/PDF
+symbol build failure from M15 was not rerun or changed. Aggregate and boundary
+evidence: `temp/ruby-m17/radiant.log`,
+`temp/ruby-m17/radiant-output/test_summary.json`, `boundary.log`,
+`source-inputs.json`, and `qualification-result.json` in the same task directory.
+
+The goal remains active with **161 Ruby mismatches**. Next priority is paired
+Ruby projection through CSS columns, starting with the remaining middle
+paragraph of the original `basic` WPT. The source-line/annotation ownership
+findings and finite acceptance plan are in `temp/ruby-m17/next-milestone.json`.

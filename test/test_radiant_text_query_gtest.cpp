@@ -15104,6 +15104,81 @@ TEST_F(RadiantTextQuery, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHei
     }
 }
 
+TEST_F(RadiantTextQuery, RubyLeadingUsesAvailableBlockStartSpace) {
+    ASSERT_NE(load("test/html/layout_ruby_line_spacing.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; float height; float first, second, third; bool under; } cases[] = {
+        {"over", 90.0f, 10.0f, 40.0f, 70.0f, false},
+        {"under", 90.0f, 0.0f, 30.0f, 60.0f, true},
+        {"after-plain", 50.0f, -1.0f, 30.0f, -1.0f, false},
+        {"before-plain", 50.0f, 10.0f, -1.0f, -1.0f, false},
+        {"under-after-plain", 50.0f, -1.0f, 20.0f, -1.0f, true},
+        {"under-before-plain", 50.0f, 0.0f, -1.0f, -1.0f, true},
+        {"ample-over", 80.0f, 10.0f, 50.0f, -1.0f, false},
+        {"ample-under", 80.0f, 10.0f, 50.0f, -1.0f, true},
+        {"wrap-over", 60.0f, 10.0f, 40.0f, -1.0f, false},
+        {"wrap-under", 60.0f, 0.0f, 30.0f, -1.0f, true},
+        {"margin-over", 50.0f, 0.0f, 30.0f, -1.0f, false},
+        {"padding-over", 90.0f, 20.0f, 50.0f, -1.0f, false},
+        {"margin-under", 60.0f, 0.0f, 30.0f, -1.0f, true},
+        {"atomic-over", 60.0f, 10.0f, 40.0f, -1.0f, false},
+        {"root-over", 60.0f, 10.0f, 40.0f, -1.0f, false},
+        {"border-over", 62.0f, 12.0f, 42.0f, -1.0f, false},
+        {"clip-over", 60.0f, 10.0f, 40.0f, -1.0f, false},
+        {"nested-over", 50.0f, 0.0f, 30.0f, -1.0f, false},
+        {"nested-padding-over", 60.0f, 10.0f, 40.0f, -1.0f, false},
+        {"nested-clip-over", 50.0f, 0.0f, 30.0f, -1.0f, false}
+    };
+    auto check = [&](const Case& entry) {
+        SCOPED_TRACE(entry.id);
+        DomElement* row = find(entry.id);
+        ASSERT_NE(row, nullptr);
+        EXPECT_FLOAT_EQ(row->height, entry.height);
+        float row_y = 0.0f;
+        view_get_visual_bounds(row, nullptr, &row_y, nullptr, nullptr);
+        float positions[] = {entry.first, entry.second, entry.third};
+        for (unsigned index = 0; index < 3; index++) {
+            if (positions[index] < 0.0f) continue;
+            char id[80];
+            str_fmt(id, sizeof(id), "%s-%c", entry.id, 'a' + index);
+            DomElement* base = find(id);
+            str_fmt(id, sizeof(id), "%s-r%c", entry.id, 'a' + index);
+            DomElement* reading = find(id);
+            ASSERT_NE(base, nullptr);
+            ASSERT_NE(reading, nullptr);
+            float base_y = 0.0f, reading_y = 0.0f;
+            view_get_visual_bounds(base, nullptr, &base_y, nullptr, nullptr);
+            view_get_visual_bounds(reading, nullptr, &reading_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(base_y - row_y, positions[index]);
+            EXPECT_FLOAT_EQ(reading_y - row_y, positions[index] + (entry.under ? 20.0f : -10.0f));
+        }
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) check(entry);
+    }
+    for (const char* margin : {"0px", "5px", "20px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap-over"), "margin-top", margin));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float shift = strcmp(margin, "0px") == 0 ? 10.0f : strcmp(margin, "5px") == 0 ? 5.0f : 0.0f;
+        check({"wrap-over", 50.0f + shift, shift, 30.0f + shift, -1.0f, false});
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("ample-under"), "margin-bottom", "20px"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap-over"), "margin-top", "-15px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    check({"wrap-over", 55.0f, 5.0f, 35.0f, -1.0f, false});
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("ample-under"), "margin-bottom", "0px"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap-over"), "margin-top", "20px"));
+    for (const char* leading : {"40px", "20px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap-over"), "line-height", leading));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        bool ample = strcmp(leading, "40px") == 0;
+        check({"wrap-over", ample ? 80.0f : 50.0f, ample ? 10.0f : 0.0f,
+            ample ? 50.0f : 30.0f, -1.0f, false});
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFormattingContexts) {
     ASSERT_NE(load("test/html/layout_ruby_display_fixup.html"), nullptr);
     struct Case { const char* id; CssEnum outer; CssEnum inner; bool list_item; } cases[] = {
