@@ -11,10 +11,10 @@ import html: lambda.slide.html
 // the slide stage is the whole page: no player chrome, letterboxing or page margin
 let PAGE_CSS = "html, body { margin: 0; padding: 0; background: #ffffff; } .slide-stage { margin: 0; }"
 
-fn base_name(path) { let parts = split(path, "/"); parts[len(parts) - 1] }
-fn dir_part(path) => slice(path, 0, len(path) - len(base_name(path)))
-fn stem(file) => if (ends_with(lower(file), ".slides")) slice(file, 0, len(file) - len(".slides")) else file
-fn tail_line(text) {
+fn base_name(path) any^ { let parts = split(path, "/"); parts[len(parts) - 1] }
+fn dir_part(path) any^ => slice(path, 0, len(path) - len(base_name(path)))
+fn stem(file) any^ => if (ends_with(lower(file), ".slides")) slice(file, 0, len(file) - len(".slides")) else file
+fn tail_line(text) any^ {
     let lines = if (text == null) [] else [for (l in split(trim(string(text)), "\n") where trim(l) != "") l]
     if (len(lines) == 0) "" else lines[len(lines) - 1]
 }
@@ -24,7 +24,7 @@ fn tail_line(text) {
 pn run(program, args, what) bool^ {
     var failure = null
     var result = null
-    io.exec(program, args, {timeout_ms: 180000}) ^ { failure = ^ } ~ { result = ~ }
+    { let __error_outcome_1 = io.exec(program, args, {timeout_ms: 180000}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { result = ~ } } }
     if (failure is error) raise error(what ++ ": " ++ failure.message)
     if (result.timed_out) raise error(what ++ ": timed out")
     if (result.exit_code != 0) raise error(what ++ ": exit " ++ string(result.exit_code) ++ ": " ++ tail_line(result.stderr))

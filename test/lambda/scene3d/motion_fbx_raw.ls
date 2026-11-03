@@ -8,16 +8,16 @@ let raw75 = input(dir ++ "jump-7500.fbx")^
 let text = input(dir ++ "jump-ascii.fbx")^
 
 // ASCII spells embedded bytes as base64, which the JSON writer also produces
-fn plain(v) {
+fn plain(v) any^ {
     if (v is number) float(v)
     else if (v is array) [for (x in v) plain(x)]
     else if (v is binary) parse(format(v, 'json'), 'json') ^ { null }
     else v
 }
-fn tree(e) => [name(e), plain(e.props), [for (x in content(e)) tree(x)]];
-fn body(f) => [for (x in content(f) where name(x) != 'FBXHeaderExtension') tree(x)];
-fn records(f, tag) => [for (x in content(f) where name(x) == 'Objects') for (o in content(x) where name(o) == tag) o];
-fn version(f) => [for (x in content(f) where name(x) == 'FBXHeaderExtension') for (v in content(x) where name(v) == 'FBXVersion') v.props[0]][0];
+fn tree(e) any^ => [name(e), plain(e.props), [for (x in ((content(e)) ^ { [] })) tree(x)]];
+fn body(f) any^ => [for (x in ((content(f)) ^ { [] }) where ((name(x) != 'FBXHeaderExtension') ^ { false })) tree(x)];
+fn records(f, tag) any^ => [for (x in ((content(f)) ^ { [] }) where ((name(x) == 'Objects') ^ { false })) for (o in ((content(x)) ^ { [] }) where ((name(o) == tag) ^ { false })) o];
+fn version(f) any^ => [for (x in ((content(f)) ^ { [] }) where ((name(x) == 'FBXHeaderExtension') ^ { false })) for (v in ((content(x)) ^ { [] }) where ((name(v) == 'FBXVersion') ^ { false })) v.props[0]][0];
 
 "1 each file keeps its header";
 [for (f in [raw74, raw75, text]) [name(f), f.binary, f.version, version(f)]];
@@ -29,10 +29,10 @@ fn version(f) => [for (x in content(f) where name(x) == 'FBXHeaderExtension') fo
 let curve74 = records(raw74, 'AnimationCurve')[0]
 let curve_text = records(text, 'AnimationCurve')[0];
 [len(records(raw74, 'Model')), len(records(raw74, 'AnimationCurve')),
-    [for (m in records(raw74, 'Model')) m.props[1]][0 to 2],
-    [for (r in content(curve74)) name(r)]];
-[for (r in content(curve74)) type(r.props[0])];
-[for (r in content(curve_text)) type(r.props[0])];
+    [for (m in ((records(raw74, 'Model')) ^ { [] })) m.props[1]][0 to 2],
+    [for (r in ((content(curve74)) ^ { [] })) name(r)]];
+[for (r in ((content(curve74)) ^ { [] })) type(r.props[0])];
+[for (r in ((content(curve_text)) ^ { [] })) type(r.props[0])];
 [type(curve74.props[0]), type(curve_text.props[0]),
     type(content(curve74)[2].props[0][1]), type(content(curve74)[3].props[0][1]),
     type(content(curve_text)[3].props[0][1])];

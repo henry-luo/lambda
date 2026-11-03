@@ -3,8 +3,8 @@
 // Adapted from Larceny/Gambit benchmark suite
 // Expected: 78498 primes (well-known: pi(1000000) = 78498)
 
-pn sieve(limit: int) int {
-    var flags: bool[] = fill(limit + 1, true)
+fn sieve(limit: int) int^ {
+    var flags: bool[] = fill(limit + 1, true)^
     flags[0] = false
     flags[1] = false
     var i: int = 2
@@ -33,7 +33,7 @@ pn main() {
     var __t0 = clock()
     let result = sieve(1000000)
     var __t1 = clock()
-    if (result == 78498) {
+    if ((result == 78498)^) {
         print("primes: PASS\n")
     } else {
         print("primes: FAIL result=")

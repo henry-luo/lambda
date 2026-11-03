@@ -36,13 +36,13 @@ fn filter_and_count(arr) {
 filter_and_count([1, 2, 3, 4, 5, 6])
 
 // Test 5: Recursive function with let bindings containing for-expressions
-fn sum_positives_recursive(arr, idx: int, acc: int) {
+fn sum_positives_recursive(arr, idx: int, acc: int) any^ {
     if (idx >= len(arr)) acc
     else (let current = arr[idx],
           let new_acc = if (current > 0) acc + current else acc,
           sum_positives_recursive(arr, idx + 1, new_acc))
 }
-fn sum_positives(arr) {
+fn sum_positives(arr) any^ {
     sum_positives_recursive(arr, 0, 0)
 }
 sum_positives([1, -2, 3, -4, 5])

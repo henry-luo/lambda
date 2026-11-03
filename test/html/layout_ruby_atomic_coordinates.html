@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/40px Ahem; }
+.row { width:200px; }
+.rtl { direction:rtl; }
+ruby { ruby-align:center; }
+rt { font-size:50%; }
+.atomic { display:inline-block; line-height:normal; }
+.column { position:relative; display:inline-block; width:40px; height:20px; line-height:20px; text-align:center; }
+.control-base { display:inline-block; line-height:normal; }
+.control-reading { position:absolute; bottom:100%; left:0; right:0; width:max-content; margin-inline:auto; display:inline-block; font-size:10px; line-height:normal; text-align:start; }
+.zero-atomic { display:inline-block; width:40px; line-height:0; }
+</style><div id="result">
+<div class="row ltr" id="ltr-reading"><ruby id="ltr-reading-ruby"><span id="ltr-reading-base">WW</span><rt><span id="ltr-reading-reading" class="atomic">mm</span></rt></ruby></div>
+<div class="row ltr" id="ltr-reading-control"><span class="column"><span class="control-base" id="ltr-reading-control-base">WW</span><span class="control-reading" id="ltr-reading-control-reading">mm</span></span></div>
+<div class="row ltr" id="ltr-base"><ruby id="ltr-base-ruby"><span id="ltr-base-base" class="atomic">W</span><rt><span id="ltr-base-reading">mmmm</span></rt></ruby></div>
+<div class="row ltr" id="ltr-base-control"><span class="column"><span class="control-base" id="ltr-base-control-base">W</span><span class="control-reading" id="ltr-base-control-reading">mmmm</span></span></div>
+<div class="row ltr" id="ltr-both"><ruby id="ltr-both-ruby"><span id="ltr-both-base" class="atomic">WW</span><rt><span id="ltr-both-reading" class="atomic">mm</span></rt></ruby></div>
+<div class="row ltr" id="ltr-both-control"><span class="column"><span class="control-base" id="ltr-both-control-base">WW</span><span class="control-reading" id="ltr-both-control-reading">mm</span></span></div>
+<div class="row ltr" id="ltr-wide"><ruby id="ltr-wide-ruby"><span id="ltr-wide-base" class="atomic">W</span><rt><span id="ltr-wide-reading" class="atomic">mmmm</span></rt></ruby></div>
+<div class="row ltr" id="ltr-wide-control"><span class="column"><span class="control-base" id="ltr-wide-control-base">W</span><span class="control-reading" id="ltr-wide-control-reading">mmmm</span></span></div>
+<div class="row rtl" id="rtl-reading"><ruby id="rtl-reading-ruby"><span id="rtl-reading-base">WW</span><rt><span id="rtl-reading-reading" class="atomic">mm</span></rt></ruby></div>
+<div class="row rtl" id="rtl-reading-control"><span class="column"><span class="control-base" id="rtl-reading-control-base">WW</span><span class="control-reading" id="rtl-reading-control-reading">mm</span></span></div>
+<div class="row rtl" id="rtl-base"><ruby id="rtl-base-ruby"><span id="rtl-base-base" class="atomic">W</span><rt><span id="rtl-base-reading">mmmm</span></rt></ruby></div>
+<div class="row rtl" id="rtl-base-control"><span class="column"><span class="control-base" id="rtl-base-control-base">W</span><span class="control-reading" id="rtl-base-control-reading">mmmm</span></span></div>
+<div class="row rtl" id="rtl-both"><ruby id="rtl-both-ruby"><span id="rtl-both-base" class="atomic">WW</span><rt><span id="rtl-both-reading" class="atomic">mm</span></rt></ruby></div>
+<div class="row rtl" id="rtl-both-control"><span class="column"><span class="control-base" id="rtl-both-control-base">WW</span><span class="control-reading" id="rtl-both-control-reading">mm</span></span></div>
+<div class="row rtl" id="rtl-wide"><ruby id="rtl-wide-ruby"><span id="rtl-wide-base" class="atomic">W</span><rt><span id="rtl-wide-reading" class="atomic">mmmm</span></rt></ruby></div>
+<div class="row rtl" id="rtl-wide-control"><span class="column"><span class="control-base" id="rtl-wide-control-base">W</span><span class="control-reading" id="rtl-wide-control-reading">mmmm</span></span></div>
+<div class="row" id="zero-row"><ruby style="line-height:0"><span style="font-size:0"></span><rt style="font-size:100%"><span class="zero-atomic" id="zero-reading">XX</span></rt></ruby></div>
+<div class="row"><span class="zero-atomic" id="zero-control">XX</span></div>
+<div class="row"><ruby id="ua-ruby" style="line-height:100px">WW<rt id="ua-reading" style="font-size:20px"><span id="ua-atomic" style="display:inline-block">XX</span></rt></ruby></div>
+</div>

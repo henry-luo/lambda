@@ -15,7 +15,7 @@ let collections = <clay.flex direction:'vertical',align:"stretch",gap:18,
         <clay.checkable_tag id:"tag","Favorite">
         <clay.alert id:"alert",message:"Ready",closable:true>>;
 
-view clay_collection_example: <clay_collection_example> state last_action:"", requests:0 {
+view clay_collection_example: <clay_collection_example> () any^ state last_action:"", requests:0 {
     <div *[ui.render(collections)^,<output id:"last",last_action>,<output id:"requests",string(requests)>]>
 }
 on ui_change(action) {

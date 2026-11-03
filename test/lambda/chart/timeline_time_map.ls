@@ -34,7 +34,7 @@ let svg=timeline.render_svg(spec,{width:800,height:400});
  ["exact deep projection",mapping.fraction(deep,large+6)==0.5 and mapping.invert(deep,0.5)==large+6],
  ["weekly recurrence",len(week.hidden)==2 and week.size==10*86400000],
  ["daily recurrence clips",daily.size==18*3600000],
- ["monthly civil recurrence",any([for (span in monthly.hidden) span.from==dates.normalize("2024-02-29").value])],
+ ["monthly civil recurrence",any([for (span in ((monthly.hidden) ^ { [] })) span.from==dates.normalize("2024-02-29").value])],
  ["yearly leap clamp",yearly.hidden[0].from==dates.normalize("2025-02-28").value],
  ["DST civil recurrence",spring.hidden[0].to-spring.hidden[0].from==47*3600000],
  ["timezone inverse",dates.from_coordinate(dates.normalize("2024-03-10T07:00Z").value,zone).hour==3],

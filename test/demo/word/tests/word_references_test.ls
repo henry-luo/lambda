@@ -47,14 +47,14 @@ let active = edit_set_selection(bib,text_selection(pos(refs.entries(bib.doc)[0].
 let localized = model.execute(active,"references.editCitation",{locator:"24–26"})^
 contains(doc_text(refs.entries(localized.doc)[0].node),"24–26")
 refs.current(localized)==null
-contains([for (a in context.describe(active).actions) a.command],"ui.editCitation")
-not contains([for (a in context.describe(active).actions) a.command],"ui.link")
+contains([for (a in context.describe(active)^.actions) a.command],"ui.editCitation")
+not contains([for (a in context.describe(active)^.actions) a.command],"ui.link")
 let removed = model.execute(active,"references.removeCitation")^
 len(refs.entries(removed.doc))==0 and not contains(doc_text(refs.bibliographies(removed.doc)[0].node),"Lovelace")
 model.execute(removed,"edit.undo")^.doc==bib.doc
 let deleted = model.execute(removed,"references.deleteSource",{id:key})^
 len(refs.sources(deleted.doc))==0
-model.execute(bib,"references.deleteSource",{id:key}) ^ { true } ~ { false }
+match (model.execute(bib,"references.deleteSource",{id:key}) ^ { ^ }) { case error: true default: false }
 files.restore(files.archive(revised.doc,"Citations"))^.doc==revised.doc
 let reopened = files.import_html_document(files.html_document(revised.doc,"Citations")^)^
 refs.sources(reopened)==refs.sources(revised.doc)
@@ -78,12 +78,12 @@ not contains(files.html_document(unsafe.doc,"Escaped")^,"<script>")
 contains(files.html_document(model.execute(unsafe,"references.bibliography")^.doc,"Escaped")^,"&lt;script&gt;")
 let unicode = model.execute(base,"references.saveSource",{*:book,author:"李, 明",title:"共同創作",insert:true})^
 contains(doc_text(refs.entries(unicode.doc)[0].node),"李")
-model.execute(base,"references.saveSource",{*:book,title:""}) ^ { true } ~ { false }
-model.execute(base,"references.saveSource",{*:book,year:"bad"}) ^ { true } ~ { false }
-model.execute(base,"references.saveSource",{*:book,url:"javascript:alert(1)"}) ^ { true } ~ { false }
-model.execute(base,"references.saveSource",{*:book,accessed:"2026-13-40"}) ^ { true } ~ { false }
-model.execute(base,"references.saveSource",{*:book,accessed:"2026-02-30"}) ^ { true } ~ { false }
-model.execute(base,"references.insertCitation",{id:"missing"}) ^ { true } ~ { false }
-model.execute(base,"references.style",{style:"missing"}) ^ { true } ~ { false }
-model.execute(base,"references.bibliography") ^ { true } ~ { false }
-model.execute(base,"references.editCitation",{locator:"12"}) ^ { true } ~ { false }
+match (model.execute(base,"references.saveSource",{*:book,title:""}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.saveSource",{*:book,year:"bad"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.saveSource",{*:book,url:"javascript:alert(1)"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.saveSource",{*:book,accessed:"2026-13-40"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.saveSource",{*:book,accessed:"2026-02-30"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.insertCitation",{id:"missing"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.style",{style:"missing"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.bibliography") ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"references.editCitation",{locator:"12"}) ^ { ^ }) { case error: true default: false }

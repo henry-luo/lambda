@@ -17,17 +17,12 @@
 #include "../../lib/mem.h"
 #include "../lambda.h"
 #include "lambda-path.h"
-#include "../runtime/sysinfo.h"
+#include "../../lib/file.h"
+// The active C ABI mirrors DateTime as its packed word.
+extern DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
 
 #include <string.h>
 #include <stdlib.h>
-
-// Target API functions used by fn_exists() (defined in target.cpp, declarations in lambda.hpp)
-extern Target* item_to_target(uint64_t item, Url* cwd);
-extern bool target_exists(Target* target);
-extern void target_free(Target* target);
-
-#ifndef LAMBDA_PATH_RUNTIME_IMPLEMENTATION
 
 static PathPoolProvider path_pool_provider = NULL;
 
@@ -60,9 +55,6 @@ static Path ROOT_SENTINEL = {
     NULL,           // name
     NULL            // parent
 };
-
-// Predefined root scheme paths
-static Path* scheme_roots[PATH_SCHEME_COUNT] = { NULL };
 
 // Scheme names for string conversion
 static const char* scheme_names[PATH_SCHEME_COUNT] = {
@@ -108,46 +100,10 @@ static Path* path_alloc_op(Pool* pool, Path* base, LPathSegmentType type,
     return path;
 }
 
-/**
- * Initialize root scheme paths.
- * Call this once at runtime startup.
- */
-void path_init(void) {
-    if (scheme_roots[0] != NULL) {
-        return;  // already initialized
-    }
-
-    Pool* pool = path_get_pool();
-    if (!pool) {
-        log_error("path_init: no registered pool provider");
-        return;
-    }
-
-    for (int i = 0; i < PATH_SCHEME_COUNT; i++) {
-        Path* root = (Path*)pool_calloc(pool, sizeof(Path));
-        root->type_id = LMD_TYPE_PATH;
-        root->flags = 0;
-        root->name = scheme_names[i];  // static strings, no need to intern
-        root->parent = &ROOT_SENTINEL;
-        root->root_scheme = (uint8_t)i;
-        root->authority_kind = (i == PATH_SCHEME_FILE) ? PATH_AUTHORITY_LOCAL : PATH_AUTHORITY_NONE;
-        scheme_roots[i] = root;
-    }
-
-    log_debug("path_init: initialized %d scheme roots", PATH_SCHEME_COUNT);
-}
-
-/**
- * Reset path scheme roots so path_init() re-runs on next use.
- * Must be called between scripts in batch mode since scheme_roots are
- * allocated from the script's pool, which is destroyed between scripts.
- */
-void path_reset(void) {
-    for (int i = 0; i < PATH_SCHEME_COUNT; i++) {
-        scheme_roots[i] = NULL;
-    }
-    log_debug("path_reset: cleared %d scheme roots", PATH_SCHEME_COUNT);
-}
+// Compatibility lifecycle hooks: roots are now allocated in the requesting
+// pool, so another evaluator's teardown cannot invalidate them (D5.4.2).
+void path_init(void) {}
+void path_reset(void) {}
 
 /**
  * Get predefined root path for a scheme.
@@ -158,11 +114,7 @@ Path* path_get_root(PathScheme scheme) {
         return NULL;
     }
 
-    if (scheme_roots[0] == NULL) {
-        path_init();
-    }
-
-    return scheme_roots[scheme];
+    return path_new(path_get_pool(), scheme);
 }
 
 /**
@@ -747,431 +699,21 @@ bool path_has_wildcards(Path* path) {
 // Path to string conversion - updated for segment types
 // ============================================================================
 
-// ============================================================================
-// Path iteration support - lazy loading for directories and files
-// ============================================================================
-// This section requires runtime support (heap_calloc, fn_input1, etc.)
-// and is only compiled when not building standalone input library
-// Use PATH_NO_ITERATION to exclude this section (more specific than LAMBDA_STATIC)
-
-#endif // LAMBDA_PATH_RUNTIME_IMPLEMENTATION
-
-#ifdef LAMBDA_PATH_RUNTIME_IMPLEMENTATION
-extern Pool* path_get_pool(void);
-extern PathEnumerationResolver g_path_enumeration_resolver;
-#endif
-
-#ifndef PATH_NO_ITERATION
-// A query step anywhere, or a wildcard with further steps, is enumerated by
-// the runtime's force walk (S2.4.6, S2.4.7); a leaf wildcard stays here.
-static bool path_needs_runtime_enumeration(Path* path) {
-    for (Path* p = path; p && p->parent; p = p->parent) {
-        LPathSegmentType type = PATH_GET_SEG_TYPE(p);
-        if (type == LPATH_SEG_QUERY) return true;
-        if ((type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC) && p != path) return true;
+// A Path carries a captured metadata value; acquisition stays in the provider.
+bool path_apply_stat_metadata(Path* path, Pool* pool, const FileStat* fs) {
+    if (!path || !pool || !fs) return false;
+    PathMeta* meta = NULL;
+    if (fs->exists) {
+        meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
+        DateTime* modified = datetime_from_unix(pool, (int64_t)fs->modified);
+        if (!meta || !modified) return false;
+        meta->size = fs->size;
+        meta->modified = *modified;
+        if (fs->is_dir) meta->flags |= PATH_META_IS_DIR;
+        if (fs->is_symlink) meta->flags |= PATH_META_IS_LINK;
+        meta->mode = (fs->mode >> 6) & 0x07;
     }
-    return false;
-}
-
-
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/url.h"
-#include "../../lib/mem.h"
-
-// Extern declaration for datetime_from_unix (defined in datetime.c)
-// In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*
-extern uint64_t* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
-
-static void path_apply_stat_metadata(Path* path, Pool* pool, FileStat fs);
-
-/**
- * Check if the leaf segment of a path is a wildcard (* or **).
- */
-bool path_ends_with_wildcard(Path* path) {
-    if (!path) return false;
-    LPathSegmentType seg_type = PATH_GET_SEG_TYPE(path);
-    return seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC;
-}
-
-// PTH34: the force step resolves the LONGEST PREFIX that names a document
-// through its provider and navigates the rest in memory, so
-// `server.dir.file.node1` needs to know where the document stops and the
-// in-document navigation starts. Only a store can answer that, which is why
-// this lives beside the OS-path conversion rather than in the evaluator.
-//
-// Returns the deepest ancestor (`path` included) that exists in the store, or
-// NULL when no prefix does. A scheme with no cheap existence probe (http) has
-// PTH81: whether a wildcard-free path names an existing local directory, the
-// one domain a wildcard step enumerates without reading a file.
-bool path_is_directory(Path* path) {
-    if (!path) return false;
-    PathScheme scheme = path_get_scheme(path);
-    if (scheme != PATH_SCHEME_FILE && scheme != PATH_SCHEME_REL &&
-            scheme != PATH_SCHEME_PARENT && scheme != PATH_SCHEME_LOGICAL) {
-        return false;
-    }
-#ifdef LAMBDA_NO_FILE_IO
-    return false;
-#else
-    Pool* pool = path_get_pool();
-    if (!pool) return false;
-    StrBuf* buf = strbuf_new();
-    path_to_os_path(path_qualify_default(pool, path), buf);
-    FileStat fs = file_stat(buf->str);
-    strbuf_free(buf);
-    return fs.exists && fs.is_dir;
-#endif
-}
-
-// no prefix to find: the whole path is the document and the caller forces it.
-Path* path_longest_existing_prefix(Path* path) {
-    if (!path) return NULL;
-    PathScheme scheme = path_get_scheme(path);
-    if (scheme != PATH_SCHEME_FILE && scheme != PATH_SCHEME_REL &&
-            scheme != PATH_SCHEME_PARENT && scheme != PATH_SCHEME_LOGICAL) {
-        return NULL;
-    }
-    Pool* pool = path_get_pool();
-    if (!pool) return NULL;
-#ifndef LAMBDA_NO_FILE_IO
-    for (Path* probe = path; probe && !path_is_root(probe); probe = probe->parent) {
-        // A wildcard segment is a query, not a location; it can only be the
-        // whole reference, never a prefix the trailing steps navigate into.
-        if (path_ends_with_wildcard(probe)) return probe == path ? probe : NULL;
-        StrBuf* buf = strbuf_new();
-        path_to_os_path(path_qualify_default(pool, probe), buf);
-        FileStat fs = file_stat(buf->str);
-        strbuf_free(buf);
-        if (fs.exists) return probe;
-    }
-
-#endif
-    return NULL;
-}
-
-/**
- * Load path metadata via stat() without loading content.
- * Sets path->meta and PATH_FLAG_META_LOADED flag.
- */
-void path_load_metadata(Path* path) {
-    if (!path) return;
-    if (path->flags & PATH_FLAG_META_LOADED) return;  // already loaded
-    
-    Pool* pool = path_get_pool();
-    if (!pool) {
-        log_error("path_load_metadata: no registered pool provider");
-        return;
-    }
-    
-    StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path_qualify_default(pool, path), path_buf);
-    
-    FileStat fs = file_stat(path_buf->str);
-    path_apply_stat_metadata(path, pool, fs);
-    
-    path->flags |= PATH_FLAG_META_LOADED;
-    strbuf_free(path_buf);
-}
-
-// Forward declarations for path resolution
-static Item resolve_directory_children(Path* parent_path, const char* dir_path);
-static Item resolve_file_content(Path* path, const char* file_path);
-static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive);
-
-static void path_apply_stat_metadata(Path* path, Pool* pool, FileStat fs) {
-    if (!path || !pool || !fs.exists) return;
-    PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
-    if (!meta) return;
-    meta->size = fs.size;
-    meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
-    meta->flags = 0;
-    if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
-    if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
-    meta->mode = (fs.mode >> 6) & 0x07;
     path->meta = meta;
     path->flags |= PATH_FLAG_META_LOADED;
+    return true;
 }
-
-// Extern declaration for heap_strcpy (defined in lambda-mem.cpp)
-extern String* heap_strcpy(const char* src, int64_t len);
-
-/**
- * Resolve path content for iteration.
- * - For directories: returns List of child Path items (with metadata)
- * - For files: returns parsed file content (String, Map, etc.)
- * - For wildcards: expands glob pattern to list of paths
- * - Caches result in path->result
- *
- * Returns:
- * - ITEM_NULL if path doesn't exist (ENOENT)
- * - ITEM_ERROR if path exists but can't be accessed
- * - Content Item on success
- */
-Item path_resolve_for_iteration(Path* path) {
-    if (!path) return ITEM_NULL;
-
-    // dry-run mode: return empty list for filesystem iteration
-    if (lambda_dry_run_enabled()) {
-        log_debug("dry-run: fabricated path_resolve_for_iteration()");
-        return ITEM_NULL;
-    }
-    
-    // sys.* values can expire independently; the sysinfo cache owns their TTL.
-    PathScheme scheme = path_get_scheme(path);
-    if (scheme == PATH_SCHEME_SYS) {
-#ifdef LAMBDA_NO_SYSINFO
-        log_error("path-profile: sys information provider is excluded");
-        return ITEM_ERROR;
-#else
-        Item result = sysinfo_resolve_path(path);
-        // Path formatting reads this result after the force operation returns.
-        if (result != ITEM_NULL && result != ITEM_ERROR) path->result = result;
-        else path->result = 0;
-        return result;
-#endif
-    }
-
-    // Already resolved?
-    if (path->result != 0) {
-        return path->result;
-    }
-    if (g_path_enumeration_resolver && path_needs_runtime_enumeration(path)) {
-        Item matches = g_path_enumeration_resolver(path);
-        if (matches != ITEM_ERROR) path->result = matches;
-        return matches;
-    }
-    
-#ifdef LAMBDA_NO_FILE_IO
-    log_error("path-profile: external path providers are excluded");
-    return ITEM_ERROR;
-#else
-    // Handle wildcards specially
-    if (path_ends_with_wildcard(path)) {
-        Path* parent = path->parent;
-        if (!parent) {
-            log_error("path_resolve_for_iteration: wildcard has no parent");
-            return ITEM_ERROR;
-        }
-        
-        StrBuf* path_buf = strbuf_new();
-        path_to_os_path(path_qualify_default(path_get_pool(), parent), path_buf);
-        
-        bool recursive = PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
-        Item result = expand_wildcard(parent, path_buf->str, recursive);
-        
-        strbuf_free(path_buf);
-        path->result = result;
-        return result;
-    }
-    
-    // Convert path to OS path string
-    StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path_qualify_default(path_get_pool(), path), path_buf);
-    const char* os_path = path_buf->str;
-    
-    // Check if directory or file
-    FileStat fs = file_stat(os_path);
-    if (!fs.exists) {
-        strbuf_free(path_buf);
-        log_debug("path_resolve_for_iteration: path does not exist: %s", os_path);
-        return ITEM_NULL;
-    }
-    
-    Item result;
-    if (fs.is_dir) {
-        // Directory: list children as Path items
-        result = resolve_directory_children(path, os_path);
-    } else {
-        // File: load and parse content
-        result = resolve_file_content(path, os_path);
-    }
-    
-    strbuf_free(path_buf);
-    
-    // Cache the result (even if null/error, to avoid re-trying)
-    path->result = result;
-    return result;
-#endif
-}
-
-/**
- * List directory children as Path items.
- * Each child is a new Path extending the parent.
- * File metadata (size, modified, mode) is loaded, but not file content.
- * Returns empty list [] for empty directories.
- */
-static Item resolve_directory_children(Path* parent_path, const char* dir_path) {
-    ArrayList* entries = dir_list(dir_path);
-    if (!entries) {
-        log_debug("resolve_directory_children: directory does not exist or not accessible: %s", dir_path);
-        return ITEM_NULL;
-    }
-    
-    Pool* pool = path_get_pool();
-    if (!pool) {
-        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
-        arraylist_free(entries);
-        log_error("resolve_directory_children: no registered pool provider");
-        return ITEM_ERROR;
-    }
-    
-    // Create result list (will be empty for empty directories)
-    List* children = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
-    children->type_id = LMD_TYPE_ARRAY;
-    
-    for (int i = 0; i < entries->length; i++) {
-        DirEntry* entry = (DirEntry*)entries->data[i];
-        
-        // Create child path extending parent
-        Path* child_path = path_extend(pool, parent_path, entry->name);
-        if (!child_path) {
-            dir_entry_free(entry);
-            continue;
-        }
-        
-        // Load metadata for the child (but NOT content)
-        char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->name);
-        
-        FileStat fs = file_stat(full_path);
-        path_apply_stat_metadata(child_path, pool, fs);
-        
-        // Add child path to the array (cast Path* to uint64_t since Item is
-        // uint64_t in C); a listing is a sequence, so the verbatim append
-        array_push_verbatim((Array*)children, (Item)(uint64_t)child_path);
-        dir_entry_free(entry);
-    }
-    
-    arraylist_free(entries);
-    return (Item)(uint64_t)children;
-}
-
-// External declaration for input system
-extern Item fn_input1(Item url);
-
-/**
- * Load and parse file content.
- * Auto-detects content type from extension/MIME.
- * Returns parsed structure (String, Map, Element, etc.)
- */
-static Item resolve_file_content(Path* path, const char* file_path) {
-    // Build file:// URL string for input system (percent-encodes, cross-platform)
-    char* file_url = url_from_local_path(file_path);
-    if (!file_url) return ITEM_ERROR;
-    String* url_str = heap_strcpy(file_url, strlen(file_url));
-    mem_free(file_url);
-
-    // Use existing input system to load and parse
-    return fn_input1(s2it(url_str));
-}
-
-/**
- * Expand wildcard pattern to list of matching paths.
- * For * : matches files/dirs in the directory
- * For **: recursively matches all files/dirs
- */
-static void expand_wildcard_recursive(Path* base, const char* dir_path,
-                                       bool recursive, List* matches);
-
-static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive) {
-    if (!path_get_pool()) {
-        log_error("expand_wildcard: no registered pool provider");
-        return ITEM_ERROR;
-    }
-    
-    // Create result list
-    List* matches = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
-    matches->type_id = LMD_TYPE_ARRAY;
-    
-    // S8.2.5/PTH81: `**` is the closure of `*`, zero steps included, so the
-    // base heads its own enumeration
-    if (recursive) array_push_verbatim((Array*)matches, (Item)(uint64_t)base_path);
-    expand_wildcard_recursive(base_path, dir_path, recursive, matches);
-    
-    return (Item)(uint64_t)matches;
-}
-
-static void expand_wildcard_recursive(Path* base, const char* dir_path,
-                                       bool recursive, List* matches) {
-    ArrayList* entries = dir_list(dir_path);
-    if (!entries) return;
-    
-    Pool* pool = path_get_pool();
-    if (!pool) {
-        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
-        arraylist_free(entries);
-        return;
-    }
-    
-    for (int i = 0; i < entries->length; i++) {
-        DirEntry* entry = (DirEntry*)entries->data[i];
-        
-        char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->name);
-        
-        FileStat fs = file_stat(full_path);
-        if (!fs.exists) {
-            dir_entry_free(entry);
-            continue;
-        }
-        
-        // Create child path
-        Path* child = path_extend(pool, base, entry->name);
-        if (!child) {
-            dir_entry_free(entry);
-            continue;
-        }
-        
-        path_apply_stat_metadata(child, pool, fs);
-        
-        // Add to matches (cast Path* to uint64_t since Item is uint64_t in C);
-        // the matches are a sequence, so the verbatim append
-        array_push_verbatim((Array*)matches, (Item)(uint64_t)child);
-        
-        // Recurse into subdirectories for ** at any depth (PTH81). A symlinked
-        // directory is listed but not entered, as globstar does, so a link
-        // back to an ancestor cannot recurse forever.
-        if (recursive && fs.is_dir && !fs.is_symlink) {
-            expand_wildcard_recursive(child, full_path, true, matches);
-        }
-
-        dir_entry_free(entry);
-    }
-    
-    arraylist_free(entries);
-}
-
-// ============================================================================
-// fn_exists() - Check if path exists using unified Target API
-// ============================================================================
-
-/**
- * Check if a path exists (file or directory).
- * Uses unified Target API for consistent path handling.
- * Accepts: String, Symbol, or Path items.
- * Returns: Bool (BOOL_TRUE/BOOL_FALSE) for direct use in C conditions
- */
-Bool fn_exists(Item path_item) {
-    if (lambda_dry_run_enabled()) {
-        log_debug("dry-run: fabricated exists() call");
-        return BOOL_FALSE;
-    }
-    log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
-    
-    // Use unified Target API
-    Target* target = item_to_target(path_item, NULL);
-    if (!target) {
-        log_debug("fn_exists: failed to convert item to target");
-        return BOOL_FALSE;
-    }
-    
-    bool exists = target_exists(target);
-    log_debug("fn_exists: target exists=%d", exists);
-    
-    target_free(target);
-    return exists ? BOOL_TRUE : BOOL_FALSE;
-}
-
-#endif // PATH_NO_ITERATION

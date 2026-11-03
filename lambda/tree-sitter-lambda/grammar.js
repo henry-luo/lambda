@@ -285,10 +285,10 @@ function fn_expr_declaration($, name) {
 }
 
 // A return contract: alternatives joined by `|`, `&` or `!`, then an optional
-// `^` error arm (`T^` any error, `T^E` a named one).
+// broad `^` shorthand. Particular errors use ordinary unions (S7.4.2v3).
 const return_contract = pattern => $ => prec.right(seq(
   field('ok', pattern($)),
-  optional(seq('^', optional(field('error', pattern($))))),
+  optional($._type_caret),
 ));
 const return_alternatives = atom => $ => prec.left(seq(
   field('type', atom($)),
@@ -343,6 +343,9 @@ module.exports = grammar({
     // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
     $._member_dot,
     $._postfix_caret,
+    $._handler_caret,
+    $._handler_lbrace,
+    $._handler_rbrace,
     // A new statement starts here: emitted only before a start-only token,
     // which is disjoint from every guarded operator above.
     $._stmt_boundary,
@@ -360,6 +363,7 @@ module.exports = grammar({
     // S11.1.5v2: zero-width, in front of a signature's return type, which must
     // start on the `)` line; a name opening the next line gets no token at all.
     $._fn_return,
+    $._type_caret,
     // tight force fragments and complete type patterns need adjacency guards.
     $._force_fragment_start,
     $._force_end,
@@ -561,6 +565,7 @@ module.exports = grammar({
       $.unary_expr,
       $.not_expr,
       $.binary_expr,
+      $.fallback_expr,
       $.raise_expr,
     ),
 
@@ -753,6 +758,7 @@ module.exports = grammar({
       $.unary_expr,
       $.not_expr,
       alias($.element_binary_expr, $.binary_expr),
+      alias($.element_fallback_expr, $.fallback_expr),
       alias($.element_if_expr, $.if_expr),
       alias($.element_for_expr, $.for_expr),
       $.while_expr,
@@ -782,6 +788,7 @@ module.exports = grammar({
       $.address_of_expr,
       $.not_expr,
       $.binary_expr,
+      $.fallback_expr,
       $.if_expr,
       $.while_expr,
       $.match_expr,
@@ -855,12 +862,26 @@ module.exports = grammar({
       field('propagate', alias($._postfix_caret, '^')),
     )),
 
+    // S7.6.2v5/S7.6.9: one recovery body, with an optional named selector.
+    // The scanner distinguishes a handler caret before a brace/name from
+    // propagation, so GLR cannot split the handler into unrelated statements.
     handler_expr: $ => prec.left(100, seq(
-      field('operand', $.primary_expr),
-      // The handler brace must open on the same line as its `^` (§3.6); a
-      // line-start `{` is always a new map or block expression.
-      alias($._postfix_caret, '^'), '{', field('body', $.content), '}',
-      optional(seq('~', '{', field('value', $.content), '}')),
+      field('operand', $.primary_expr), alias($._handler_caret, '^'),
+      optional(field('filter', $._handler_selector)),
+      alias($._handler_lbrace, '{'), field('body', $.content),
+      alias($._handler_rbrace, '}'),
+    )),
+    _handler_selector: $ => choice(
+      $.identifier, alias($._base_type_kw, $.base_type),
+      seq($.identifier, repeat1(seq('.', $.identifier))),
+    ),
+    fallback_expr: $ => prec.left('logical_or', seq(
+      field('operand', $._expr), 'or^', alias($._handler_lbrace, '{'),
+      field('body', $.content), alias($._handler_rbrace, '}'),
+    )),
+    element_fallback_expr: $ => prec.left('logical_or', seq(
+      field('operand', $._element_expr), 'or^', alias($._handler_lbrace, '{'),
+      field('body', $.content), alias($._handler_rbrace, '}'),
     )),
 
     index_expr: $ => prec.right(100, seq(
@@ -1450,10 +1471,9 @@ module.exports = grammar({
       seq(choice($.unary_type, $.binary_type), $._type_end),
       seq($.fn_type, $._fn_type_end),
     ),
-    // S7.4.2: outside a return, ^ admits the ordinary error value.
+    // S7.4.2v3: ^ admits any ordinary error in every type position.
     value_error_type: $ => prec.right(seq(
-      field('ok', $._type_pattern), '^',
-      optional(field('error', $.primary_type)),
+      field('ok', $._type_pattern), $._type_caret,
     )),
 
     // A type binder is a parameter-boundary construct. Its base is a complete

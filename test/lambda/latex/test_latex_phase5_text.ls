@@ -15,7 +15,7 @@ fn run(src) {
 }
 
 fn has(text, part) => index_of(text, part) != null
-fn count(text, part) => len(split(text, part)) - 1
+fn count(text, part) any^ => len(split(text, part)) - 1
 
 // ---- xspace: a space unless punctuation, a group or a space follows ----
 let spaced = run(doc("\\usepackage{xspace}\\newcommand\\eg{e.g.\\xspace}\\newcommand\\TT{TT\\xspace}",

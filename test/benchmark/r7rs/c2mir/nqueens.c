@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of r7rs/nqueens2.ls.
  *
  * Same algorithm as the .ls and nqueens2.js: the Scheme candidate-list search,
@@ -75,7 +76,10 @@ static int nqueens(int n) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int result = nqueens(8);
+    BENCH_KERNEL_END();
     printf(result == 92 ? "nqueens: PASS\n" : "nqueens: FAIL result=%d\n", result);
+    BENCH_KERNEL_REPORT();
     return result != 92;
 }

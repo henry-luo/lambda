@@ -3,7 +3,7 @@ import model: ~~.mod_model
 let jpeg = input("test/demo/scene3d/assets/stone.jpg",'binary')^
 let raw = load(jpeg)^
 let orientations = [b'\x0100',b'\x0200',b'\x0300',b'\x0400',b'\x0500',b'\x0600',b'\x0700',b'\x0800']
-fn tagged(bytes,tag) => slice(bytes,0,2) ++
+fn tagged(bytes,tag) any^ => slice(bytes,0,2) ++
     b'\xFFE1002245786966000049492A000800000001001201030001000000' ++
     tag ++ b'\x000000000000' ++ slice(bytes,2)
 shape(raw) == [128,128,4]

@@ -3,9 +3,9 @@ import c: .common
 import theme: .theme
 import metrics: lambda.chart.text
 
-fn child(node, tag) => c.child(node,tag,c.DGM)
-fn children(node, tag = null) => c.children(node,tag,c.DGM)
-fn attr(node, key, fallback = null) => c.get(node.attrs,"#" ++ key,fallback)
+fn child(node, tag) any^ => c.child(node,tag,c.DGM)
+fn children(node, tag = null) any^ => c.children(node,tag,c.DGM)
+fn attr(node, key, fallback = null) any^ => c.get(node.attrs,"#" ++ key,fallback)
 fn unsupported(message) any^ => raise c.fail("unsupported","SmartArt: " ++ message)
 fn numeric(value, fallback) float^ {
     let parsed = if (value == null) fallback else float(value) ^ {null};
@@ -35,7 +35,7 @@ fn select(graph, ids, source, index = 0) array^ {
         let step = numeric(c.get(steps,index,"1"),1)^
         let point_type = c.get(types,index,"all")
         let available = [for (id in axis(graph,ids,axes[index])^
-            where point_type == "all" or graph.points[id].kind == point_type) id];
+            where ((point_type == "all" or graph.points[id].kind == point_type) ^ { false })) id];
         if (start < 0 or step < 1 or count < 0 or int(start) != start or int(step) != step or int(count) != count)
             unsupported("Unsupported iterator bounds")^
         else select(graph,[for (i,id in available where i >= start and (i-start) % step == 0 and
@@ -49,27 +49,27 @@ fn effective(nodes, variables) array^ => [for (node in nodes)
             attr(test,"op") != "equ" or variables[attr(test,"arg")] == null]);
         if (invalid) unsupported("Unsupported layout condition")^
         else {
-            let chosen = c.first([for (test in conditions where variables[attr(test,"arg")] == attr(test,"val")) test])
+            let chosen = c.first([for (test in conditions where ((variables[attr(test,"arg")] == attr(test,"val")) ^ { false })) test])
             let branch = if (chosen == null) child(node,"else") else chosen;
             *effective(children(branch),variables)^
         }
     }]
 fn build_many(nodes, ids, variables, graph, depth) array^ {
-    let unknown = [for (source in nodes where not contains(
-        ["layoutNode","forEach","alg","shape","presOf","constrLst","ruleLst","varLst"],source.tag)) source.tag];
+    let unknown = [for (source in nodes where ((not contains(
+        ["layoutNode","forEach","alg","shape","presOf","constrLst","ruleLst","varLst"],source.tag)) ^ { false })) source.tag];
     if (len(unknown) > 0) unsupported("Unsupported layout instruction " ++ unknown[0])^
-    else [for (source in nodes where contains(["layoutNode","forEach"],source.tag))
+    else [for (source in nodes where ((contains(["layoutNode","forEach"],source.tag)) ^ { false }))
         if (source.tag == "layoutNode") build(source,ids,variables,graph,depth+1)^
         else *[for (id in select(graph,ids,source)^) *build_many(children(source),[id],variables,graph,depth+1)^]]
 }
 fn build(source, ids, inherited, graph, depth) map^ {
-    let variables = {*:inherited,*:map([for (node in children(child(source,"varLst")))
+    let variables = {*:inherited,*:map([for (node in ((children(child(source,"varLst"))) ^ { [] }))
         (node.tag,attr(node,"val",if (node.tag == "dir") "norm" else "0"))])}
     let nodes = effective(children(source),variables)^
     let algorithm = c.first([for (node in nodes where node.tag == "alg") node])
     let shape = child(source,"shape")
     let kind = attr(algorithm,"type")
-    let invalid_constraints = any([for (rule in children(child(source,"constrLst")))
+    let invalid_constraints = any([for (rule in ((children(child(source,"constrLst"))) ^ { [] }))
         if (attr(rule,"for") == null or attr(rule,"for") == "self")
             not contains(["lMarg","rMarg","tMarg","bMarg"],attr(rule,"type"))
         else not contains(["ch","des"],attr(rule,"for")) or attr(rule,"forName") == null or
@@ -87,24 +87,24 @@ fn build(source, ids, inherited, graph, depth) map^ {
             children:nested,count:count,shape:attr(shape,"type"),name:attr(source,"name","")}
     }
 }
-fn rules(node, box) => [for (rule in children(child(node.source,"constrLst"))) {source:rule,owner:node.source,box:box}]
-fn applicable(rule, parent, name) => attr(rule.source,"forName","") == name and
+fn rules(node, box) => [for (rule in ((children(child(node.source,"constrLst"))) ^ { [] })) {source:rule,owner:node.source,box:box}]
+fn applicable(rule, parent, name) any^ => attr(rule.source,"forName","") == name and
     (attr(rule.source,"for") == "des" or attr(rule.source,"for") == "ch" and rule.owner == parent.source)
 fn rule_value(rule, all_rules) float^ {
     let value = attr(rule.source,"val")
     let reference = attr(rule.source,"refForName")
     let kind = attr(rule.source,"refType")
-    let referred = c.first([for (candidate in all_rules where attr(candidate.source,"forName") == reference and
-        attr(candidate.source,"type") == kind and attr(candidate.source,"val") != null) candidate]);
+    let referred = c.first([for (candidate in all_rules where ((attr(candidate.source,"forName") == reference and
+        attr(candidate.source,"type") == kind and attr(candidate.source,"val") != null) ^ { false })) candidate]);
     if (value != null) numeric(value,0)^
     else if (reference != null and referred != null) numeric(attr(referred.source,"val"),0)^*numeric(attr(rule.source,"fact"),1)^
     else if (contains(["w","h"],kind)) rule.box[kind]*numeric(attr(rule.source,"fact"),1)^
     else unsupported("Unsupported constraint reference")^
 }
-fn values(node, parent, all_rules) map^ => map([for (rule in all_rules where applicable(rule,parent,node.name) and
-    contains(["w","h","l","t","primFontSz"],attr(rule.source,"type")))
+fn values(node, parent, all_rules) map^ => map([for (rule in all_rules where ((applicable(rule,parent,node.name) and
+    contains(["w","h","l","t","primFontSz"],attr(rule.source,"type"))) ^ { false }))
     (attr(rule.source,"type"),rule_value(rule,all_rules)^)])
-fn style_node(root, label) => c.first([for (node in children(root,"styleLbl") where attr(node,"name") == label) node])
+fn style_node(root, label) any^ => c.first([for (node in ((children(root,"styleLbl")) ^ { [] }) where ((attr(node,"name") == label) ^ { false })) node])
 fn color_list(node, key, colors) any^ {
     let palette = child(node,key)
     let entries = c.children(palette,null,c.A);
@@ -131,8 +131,8 @@ fn shape_style(node, context) map^ {
         foreground:c.get({value:foreground},"value","#000000"),
         font:c.get(context.theme.fonts,c.attr(font,"idx",""),"Arial")}
 }
-fn text_insets(node, font_size) map^ => map([for (rule in children(child(node.source,"constrLst")),
-    let kind = attr(rule,"type") where contains(["lMarg","rMarg","tMarg","bMarg"],kind))
+fn text_insets(node, font_size) map^ => map([for (rule in ((children(child(node.source,"constrLst"))) ^ { [] }),
+    let kind = attr(rule,"type") where ((contains(["lMarg","rMarg","tMarg","bMarg"],kind)) ^ { false }))
     (kind,if (attr(rule,"val") != null) numeric(attr(rule,"val"),0)^*4.0/3.0
         else if (attr(rule,"refType") == "primFontSz") font_size*numeric(attr(rule,"fact"),1)^
         else unsupported("Unsupported text margin reference")^)])
@@ -194,12 +194,12 @@ fn paint(node, box, context, inherited = []) map^ {
     }
 }
 fn render_layout(data, layout, colors, style, theme, width, height) map^ {
-    let points = [for (node in children(child(data,"ptLst"),"pt")
-        where attr(node,"type") == null or contains(["node","doc","asst"],attr(node,"type")))
-        {id:attr(node,"modelId"),kind:attr(node,"type","node"),lines:[for (p in c.descendants(child(node,"t"),"p",c.A),
-            let value = c.drawing_text(p) where value != "") value]}]
-    let edges = sort([for (edge in children(child(data,"cxnLst"),"cxn")
-        where attr(edge,"type") == null or attr(edge,"type") == "parOf")
+    let points = [for (node in ((children(child(data,"ptLst"),"pt")) ^ { [] })
+        where ((attr(node,"type") == null or contains(["node","doc","asst"],attr(node,"type"))) ^ { false }))
+        {id:attr(node,"modelId"),kind:attr(node,"type","node"),lines:[for (p in ((c.descendants(child(node,"t"),"p",c.A)) ^ { [] }),
+            let value = c.drawing_text(p) where ((value != "") ^ { false })) value]}]
+    let edges = sort([for (edge in ((children(child(data,"cxnLst"),"cxn")) ^ { [] })
+        where ((attr(edge,"type") == null or attr(edge,"type") == "parOf") ^ { false }))
         {from:attr(edge,"srcId"),to:attr(edge,"destId"),order:numeric(attr(edge,"srcOrd"),0)^}],{by:(edge)=>edge.order})
     let roots = [for (point in points where point.kind == "doc") point.id]
     let ids = [for (point in points) point.id]
@@ -217,8 +217,8 @@ fn render_layout(data, layout, colors, style, theme, width, height) map^ {
         let tree = build(root,roots,{dir:"norm"},graph,0)^
         let image = paint(tree,{x:0.0,y:0.0,w:width,h:height,font:16.0},
             {graph:graph,colors:colors,style:style,theme:theme})^
-        let missing = [for (point in points where len(point.lines) > 0 and point.kind != "doc" and
-            (not contains(image.ids,point.id) or not contains(reachable,point.id))) point.id];
+        let missing = [for (point in points where ((len(point.lines) > 0 and point.kind != "doc" and
+            (not contains(image.ids,point.id) or not contains(reachable,point.id))) ^ { false })) point.id];
         if (len(missing) > 0) unsupported("Layout does not display every saved text node")^
         else {svg:<svg xmlns:"http://www.w3.org/2000/svg",width:string(width),height:string(height),
             viewBox:("0 0 " ++ string(width) ++ " " ++ string(height)),*image.elements>}

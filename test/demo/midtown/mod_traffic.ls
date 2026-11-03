@@ -34,14 +34,14 @@ fn turn_sign(d, d2) => if (d2 == (d + 1) % 4) 1 else if (d2 == (d + 3) % 4) -1 e
 pub fn turn_length(turn) => if (turn == 0) 2.0 * city.EDGE else (city.EDGE - turn * city.LANE) * u.PI / 2.0
 
 // the next direction out of junction (i, j) for a car travelling d; straight is twice as likely
-pub fn choose(i, j, d, k) {
+pub fn choose(i, j, d, k) any^ {
     let options = [for (d2 in [d, d, (d + 1) % 4, (d + 3) % 4], let f = city.DIRS[d2]
-        where on_grid(i + int(f[0]), j + int(f[1]))) d2];
-    options[rng.below(k, len(options))]
+        where on_grid(i + int(f[0]), j + int(f[1]))^) d2];
+    options[rng.below(k, len(options))^]
 }
 
 // position and heading along the current run or turn
-pub fn pose(a) {
+pub fn pose(a) any^ {
     let b = node(a.i, a.j), f = city.DIRS[a.d]
     let r = [0.0 - f[1], f[0]]
     let h = city.heading_of_dir(a.d);
@@ -63,7 +63,7 @@ pub fn pose(a) {
 
 // every block run that has a junction at both ends, as a spawn site
 let RUNS = [for (i in 0 to city.N, j in 0 to city.N, d in 0 to 3, let f = city.DIRS[d]
-    where on_grid(i - int(f[0]), j - int(f[1]))) {i: i, j: j, d: d}]
+    where on_grid(i - int(f[0]), j - int(f[1]))^) {i: i, j: j, d: d}]
 pub fn spawn(fleet = 16) {
     let picks = rng.sample(rng.derive(KEY, "spawn"), RUNS, fleet);
     [for (n, run in picks, let k = rng.derive(KEY, ["car", n]), let kind = ROSTER[n % len(ROSTER)])
@@ -107,7 +107,7 @@ fn target_speed(a, others, t) {
     min([a.cruise, stop_v, corner, leader_limit(a, others)])
 }
 // advance along the path, carrying leftover distance into the next phase
-fn advance(a, distance) {
+fn advance(a, distance) any^ {
     let length = if (a.phase == "run") RUN else turn_length(turn_sign(a.d, a.next))
     let s = a.s + distance;
     if (s < length) {*: a, s: s}
@@ -136,8 +136,8 @@ pub fn step(agents, player, t, dt, hits = []) {
 // the lane run nearest a free-driving car, as an agent record: Reset puts the car there and
 // Auto drive steers it from there. The run must start at a junction on the grid.
 pub fn nearest_run(x, z, heading, speed = 0.0) {
-    let d = reduce([0, 1, 2, 3], (best, k) =>
-        if (abs(u.wrap(heading - city.heading_of_dir(k))) < abs(u.wrap(heading - city.heading_of_dir(best)))) k else best)
+    let d = reduce([0, 1, 2, 3], (best, k) any^ =>
+        if (abs(u.wrap(heading - city.heading_of_dir(k))^) < abs(u.wrap(heading - city.heading_of_dir(best))^)) k else best)
     let f = city.DIRS[d]
     let along_x = abs(f[0]) > 0.5
     let toward = if (along_x) f[0] else f[1]

@@ -1,7 +1,7 @@
 import c: .common
 import paths: .transitions
 
-fn cell(x,y,w,h,p,direction) {
+fn cell(x,y,w,h,p,direction) any^ {
     let horizontal = direction in ['left','right']
     let reverse = direction in ['right','bottom'];
     paths.rect_path(x+(if (horizontal and reverse) w*(1.0-p) else 0.0),
@@ -9,7 +9,7 @@ fn cell(x,y,w,h,p,direction) {
         w*(if (horizontal) p else 1.0),h*(if (horizontal) 1.0 else p))
 }
 // reuse the transition path builder; cell order is fixed for reproducible samples.
-pub fn reveal(kind,progress,width,height,direction) {
+pub fn reveal(kind,progress,width,height,direction) any^ {
     let p = max(0.0,min(1.0,progress))
     let horizontal = direction in ['left','right'];
     if (p >= 1.0) "none"

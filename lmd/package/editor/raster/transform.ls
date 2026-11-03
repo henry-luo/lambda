@@ -6,25 +6,25 @@ import geometry: lambda.editor.draw.geometry
 import canvas: .canvas
 pub let identity = affine.identity
 pub let handles = canvas.handles
-pub fn matrix(node) => model.value(node.transform,identity)
-fn supported(node) => (name(node) == 'layer' and not model.adjustment(node)) or (name(node) == 'stack' and
-    not any([for (child in content(node)) name(child) in ['mask','effect','style']]) and
-    all([for (child in content(node) where model.composition(child)) supported(child)]))
-pub fn available(st) => target(st) ^ { false } ~ { true }
+pub fn matrix(node) any^ => model.value(node.transform,identity)
+fn supported(node) any^ => (name(node) == 'layer' and not model.adjustment(node)) or (name(node) == 'stack' and
+    not any([for (child in ((content(node)) ^ { [] })) name(child) in ['mask','effect','style']]) and
+    all([for (child in ((content(node)) ^ { [] }) where ((model.composition(child)) ^ { false })) supported(child)]))
+pub fn available(st) => match (target(st) ^ { ^ }) { case error: false default: true }
 pub fn target(st) any^ {
     let rows = model.unlocked_roots(st)^;
     if (not all([for (row in rows) supported(row.node)]))
         raise error("Raster: transforms require layers without backdrop adjustments or group masks, effects or styles")
     else {rows:rows,node:if (len(rows)==1) rows[0].node else img.stack([for (row in rows) row.node])}
 }
-fn around_at(node,center,linear) {
+fn around_at(node,center,linear) any^ {
     let p = model.position(node)
     let cx = center.x-p[0]
     let cy = center.y-p[1];
     affine.multiply([1,0,0,1,cx,cy],affine.multiply(linear,
         affine.multiply([1,0,0,1,-cx,-cy],matrix(node))))
 }
-pub fn around(node,angle,sx,sy) {
+pub fn around(node,angle,sx,sy) any^ {
     let box = model.bounds(node)
     let rad = angle*math.pi/180
     let c = math.cos(rad)
@@ -54,7 +54,7 @@ pub fn command_matrix(node,command) any^ {
 // stacks have document-space children; conjugation retains each leaf's integral placement.
 fn changed(node,delta) any^ {
     if (delta == identity) node
-    else if (name(node) == 'stack') img.with_children(node,[for (child in content(node))
+    else if (name(node) == 'stack') img.with_children(node,[for (child in ((content(node)) ^ { [] }))
         if (model.composition(child)) changed(child,delta)^ else child])^
     else {
         let p = model.position(node)
@@ -70,7 +70,7 @@ pub fn run_command(st,command) any^ {
     let m = command_matrix(geometry,command)^;
     if (absolute and (len(selected.rows)!=1 or name(selected.node) != 'layer'))
         raise error("Raster: absolute matrix/reset requires one leaf; use relative transforms or undo for groups")
-    else {*:st,doc:reduce([st.doc,*selected.rows],(image,row) => model.replace(image,row.id,
+    else {*:st,doc:reduce([st.doc,*selected.rows],(image,row) any^ => model.replace(image,row.id,
         if (absolute) (if (m == identity and row.node.transform == null) row.node
             else img.with_properties(row.node,{transform:if (m == identity) null else m})^)
         else changed(row.node,m)^)^)}

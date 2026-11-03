@@ -3,6 +3,21 @@
 #include "../radiant/view.hpp"
 #include "../radiant/render.hpp"
 
+struct TestRadiantPaintGlyph { uint32_t codepoint; float x, y; };
+
+template <size_t Capacity>
+struct TestRadiantPaintGlyphs {
+    TestRadiantPaintGlyph glyphs[Capacity];
+    size_t count = 0;
+
+    static bool collect(void* pointer, uint32_t codepoint, FontHandle*, float x, float y, float) {
+        TestRadiantPaintGlyphs* capture = (TestRadiantPaintGlyphs*)pointer;
+        if (capture->count == Capacity) return false;
+        capture->glyphs[capture->count++] = {codepoint, x, y};
+        return true;
+    }
+};
+
 inline DisplayItem test_radiant_command(const DisplayList* list, int ordinal) {
     DisplayListCursor cursor(list);
     while (cursor.next()) if (ordinal-- == 0) return *cursor.item;

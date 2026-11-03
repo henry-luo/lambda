@@ -5724,8 +5724,12 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
 
 static bool dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
                                          View* focused) {
-    const char* clip = clipboard_get_text();
-    if (!clip || !*clip) return false;
+    const char* source = clipboard_get_text();
+    if (!source || !*source) return false;
+    // paste listeners can refresh/replace the clipboard store; own the bytes
+    // across their dispatch before the default insertion uses them.
+    char* clip = mem_strdup(source, MEM_CAT_LAYOUT);
+    if (!clip) return false;
 
     evcon->paste_text = clip;
     dispatch_lambda_handler(evcon, focused, "paste");
@@ -5738,6 +5742,7 @@ static bool dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
                                      clip, (uint32_t)strlen(clip));
         }
     }
+    mem_free(clip);
     evcon->need_repaint = true;
     return true;
 }
@@ -13514,7 +13519,20 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     unsigned char* data = text->text_data();
     unsigned char* current = data + rect->start_index;
     int current_offset = rect->start_index;
-    float x = rect->x;
+    // CSS Ruby ranges retain alignment padding at the first/last boundary.
+    if (rect->ruby_alignment_advance > 0.0f) {
+        int first, length;
+        // suppressed separator bytes share the visible end's allocated column edge.
+        text_rect_painted_source_range(rect, &first, &length);
+        // soft wraps keep separators in exports, but consumed bytes cannot take Ruby's end padding.
+        if (rect->collapsed_space_advance != 0.0f) {
+            int consumed = text_rect_trailing_collapsible_bytes(text, rect);
+            length = max(0, length - max(0, consumed - rect->trailing_whitespace_bytes));
+        }
+        if (byte_offset <= first) return rect->x;
+        if (byte_offset >= first + length) return rect->x + rect->width;
+    }
+    float x = rect->x + rect->ruby_alignment_offset;
     bool has_space = false;
     TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end && current_offset < byte_offset) {
@@ -13544,7 +13562,7 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
         return rect ? rect->start_index : 0;
     }
     EventTextRun run = event_text_run(text, rect);
-    float x = block_x + rect->x;
+    float x = block_x + rect->x + rect->ruby_alignment_offset;
     if (run.is_pdf && run.pdf_width > 0.0f) {
         float natural_width = pdf_text_run_visible_natural_width(
             font, rect, run.pdf_copy_space);

@@ -34,7 +34,7 @@ pn main() {
     print([optional_int(null), optional_int(7), optional_int("bad") is error]); print("\n")
     print([optional_float(null), optional_float(7) is float, literal_int(2) is error]); print("\n")
     let cells: Cell[] = [{value: 1}, {value: 2}]
-    let reversed: Cell[] = reverse_cells(cells)
+    let reversed: Cell[] = reverse_cells(cells)^
     print([reversed[0].value, reversed[1].value, cells[0].value]); print("\n")
     print(reverse_nullable([1.0, null, 2.0])); print("\n")
 }

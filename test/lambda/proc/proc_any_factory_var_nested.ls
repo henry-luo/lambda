@@ -26,9 +26,9 @@ pn state_add_outer(var holder, value) {
 
 pn main() {
     var holder = state_new()
-    state_add_outer(holder, 7)
+    state_add_outer(holder, 7)^
     var prior = holder
-    state_add(holder, 8)
+    state_add(holder, 8)^
     print(prior.count)
     print(" ")
     print(prior.sparse.slots[0])

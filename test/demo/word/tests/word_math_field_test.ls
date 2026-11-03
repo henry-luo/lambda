@@ -5,7 +5,7 @@ let eq = field.parse_field("a^2+b^2=c^2\\pm\\frac{a}{b}")^
 field.source(eq.row) == "a^{2}+b^{2}=c^{2}\\pm \\frac{a}{b}"
 field.source(field.parse_field("\\sqrt[3]{x}+\\left(\\alpha\\right)\\text{ if }x_1^{n}")^.row) == "\\sqrt[3]{x}+\\left(\\alpha \\right)\\text{ if }x_{1}^{n}"
 field.source(field.parse_field("\\begin{pmatrix}a&b\\end{pmatrix}+1")^.row) == "\\begin{pmatrix}a&b\\end{pmatrix}+1"
-field.parse_field("\\frac{a}{") ^ { true } ~ { false }
+match (field.parse_field("\\frac{a}{") ^ { ^ }) { case error: true default: false }
 
 // The caret token parses into a slot; no slot exists between a base and its script.
 let at_two = field.parse_field("a^{\\lambdacaret 2}")^
@@ -25,7 +25,7 @@ field.move(frac.row,{path:[],index:1},"right") == null
 field.move(frac.row,{path:[0,1],index:1},"home") == {path:[],index:0}
 
 // Typing: ^ and _ open scripts, / lifts the operand into a numerator, \name resolves on space.
-let typed = (src,keys) => reduce([field.parse_field(src)^,*split(keys,"")],(s,ch)=>field.type_text(s.row,s.caret,ch))
+let typed = (src,keys) any^ => reduce([field.parse_field(src)^,*split(keys,"")],(s,ch)any^ =>field.type_text(s.row,s.caret,ch))
 field.source(typed("","x^2").row) == "x^{2}"
 field.source(typed("","x_1^2").row) == "x_{1}^{2}"
 let half = typed("","a/2")

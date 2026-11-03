@@ -4,7 +4,7 @@
 // Traces 100x100 grid of rays against 4 spheres
 // Expected: counts pixels that hit at least one sphere
 
-pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
+fn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     // Ray-sphere intersection test
     // Ray: origin (ox,oy,oz) + t * direction (dx,dy,dz)
     // Sphere: center (cx,cy,cz), radius r
@@ -29,7 +29,7 @@ pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     return -1.0
 }
 
-pn benchmark() {
+fn benchmark() any^ {
     // 4 spheres
     var sx = [0.0, -2.0, 2.0, 0.0]
     var sy = [0.0, 0.0, 0.0, 2.0]
@@ -65,12 +65,12 @@ pn benchmark() {
                 var si = 0
                 while (si < num_spheres) {
                     var t = sphere_intersect(0.0, 0.0, 0.0, dx, dy, dz, sx[si], sy[si], sz[si], sr[si])
-                    if (t > 0.0 and t < min_t) {
+                    if ((t > 0.0 and t < min_t)^) {
                         min_t = t
                     }
                     si = si + 1
                 }
-                if (min_t < 999999.0) {
+                if ((min_t < 999999.0)^) {
                     hits = hits + 1
                 }
                 px = px + 1
@@ -88,7 +88,7 @@ pn main() {
     var __t1 = clock()
     print("ray: hits=" ++ result ++ "\n")
     // The exact hit count depends on geometry; just verify it's reasonable
-    if (result > 0 and result < 10000) {
+    if ((result > 0 and result < 10000)^) {
         print("ray: PASS\n")
     } else {
         print("ray: FAIL\n")

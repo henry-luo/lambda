@@ -47,14 +47,14 @@ pub fn num(v, fallback) any {
 }
 
 // Coordinates are written with at most two decimals.
-pub fn fmt(v) => string(round(v * 100) / 100)
+pub fn fmt(v) any^ => string(round(v * 100) / 100)
 
 pub fn box(x, y, w, h) => {x: x, y: y, w: w, h: h}
 
 fn numbers_in(s) => [for (p in split(replace(string(s), ",", " "), " ") where p != "") num(p, 0.0)]
 
 // The drawing's user space: its viewBox, else its width and height.
-pub fn view_box(doc) {
+pub fn view_box(doc) any^ {
   let parts = if (attr_get(doc, 'viewBox') == null) [] else numbers_in(attr_get(doc, 'viewBox'))
   if (len(parts) == 4) box(parts[0], parts[1], parts[2], parts[3])
   else box(0.0, 0.0, num(attr_get(doc, 'width'), 300.0), num(attr_get(doc, 'height'), 150.0))
@@ -69,13 +69,13 @@ fn has(s, part) bool => contains(s, part) ^ { false }
 let object_tags = ['rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'text',
                    'image', 'use', 'g', 'a', 'switch', 'foreignObject']
 
-pub fn is_object(n) => (is_node(n) and member(object_tags, n.tag)) or false
+pub fn is_object(n) any^ => (is_node(n) and member(object_tags, n.tag)) or false
 
-fn attr_num(n, key) => num(attr_get(n, key), 0.0)
+fn attr_num(n, key) any^ => num(attr_get(n, key), 0.0)
 
 // The box an untransformed shape's own attributes define, or null when its
 // geometry is not one the tools can resize.
-fn geometry_box(n) {
+fn geometry_box(n) any^ {
   let tag = n.tag
   if (not is_node(n) or attr_get(n, 'transform') != null) null
   else if (tag == 'rect' or tag == 'image' or tag == 'foreignObject')
@@ -90,7 +90,7 @@ fn geometry_box(n) {
   else null
 }
 
-pub fn resizable(n) => geometry_box(n) != null
+pub fn resizable(n) any^ => geometry_box(n) != null
 
 // The frame to draw for an object: its own geometry when the tools know it,
 // else the rendered box the surface measured.
@@ -103,9 +103,9 @@ pub fn frame_box(n, measured) any {
 // Transactions
 // ---------------------------------------------------------------------------
 
-fn apply_steps(tx, steps, i) => if (i >= len(steps)) tx else apply_steps(tx_step(tx, steps[i]), steps, i + 1)
+fn apply_steps(tx, steps, i) any^ => if (i >= len(steps)) tx else apply_steps(tx_step(tx, steps[i]), steps, i + 1)
 
-fn tx_of(doc, steps) => if (len(steps) == 0) null else apply_steps(tx_begin(doc, null), steps, 0)
+fn tx_of(doc, steps) any^ => if (len(steps) == 0) null else apply_steps(tx_begin(doc, null), steps, 0)
 
 // Move: an untransformed shape with plain coordinates moves by its own
 // attributes; anything else by a translate in its parent's user space,
@@ -118,20 +118,20 @@ fn coord_pairs(n) {
   else []
 }
 
-fn plain_number(v) => v == null or num(v, null) != null
+fn plain_number(v) any^ => v == null or num(v, null) != null
 
 // a text's own x/y do not move spans that position themselves
-fn positioned_spans(n) =>
+fn positioned_spans(n) any^ =>
   any([for (c in n.content) is_node(c) and (attr_get(c, 'x') != null or attr_get(c, 'y') != null or positioned_spans(c))]) or false
 
-fn moves_by_coords(n) {
+fn moves_by_coords(n) any^ {
   let pairs = coord_pairs(n)
   len(pairs) > 0 and attr_get(n, 'transform') == null and
     (all([for (p in pairs) for (a in p) plain_number(attr_get(n, a))]) or false) and
     not (n.tag == 'text' and positioned_spans(n))
 }
 
-fn translated(t, dx, dy) {
+fn translated(t, dx, dy) any^ {
   let s = if (t == null) "" else trim(string(t))
   let end_at = index_of(s, ")")
   if (s == "") "translate(" ++ fmt(dx) ++ "," ++ fmt(dy) ++ ")"
@@ -145,7 +145,7 @@ fn translated(t, dx, dy) {
   else "translate(" ++ fmt(dx) ++ "," ++ fmt(dy) ++ ") " ++ s
 }
 
-fn move_steps(n, path, dx, dy) {
+fn move_steps(n, path, dx, dy) any^ {
   if (moves_by_coords(n))
     [for (p in coord_pairs(n))
        for (s in [step_set_attr(path, p[0], fmt(attr_num(n, p[0]) + dx)),
@@ -153,12 +153,12 @@ fn move_steps(n, path, dx, dy) {
   else [step_set_attr(path, 'transform', translated(attr_get(n, 'transform'), dx, dy))]
 }
 
-pub fn move_tx(doc, indices, dx, dy) =>
+pub fn move_tx(doc, indices, dx, dy) any^ =>
   if (dx == 0.0 and dy == 0.0) null
-  else tx_of(doc, [for (i in indices) for (s in move_steps(doc.content[i], [i], dx, dy)) s])
+  else tx_of(doc, [for (i in indices) for (s in ((move_steps(doc.content[i], [i], dx, dy)) ^ { [] })) s])
 
 // Resize: a handle ("nw", "n", ..., "w") moves the edges it names.
-pub fn resized_box(b, handle, dx, dy) {
+pub fn resized_box(b, handle, dx, dy) any^ {
   let h = string(handle)
   let left = b.x + (if (has(h, "w")) dx else 0.0)
   let right = b.x + b.w + (if (has(h, "e")) dx else 0.0)
@@ -170,7 +170,7 @@ pub fn resized_box(b, handle, dx, dy) {
 fn scale_to(v, from_start, from_size, to_start, to_size) =>
   if (from_size == 0.0) v + (to_start - from_start) else to_start + (v - from_start) * to_size / from_size
 
-fn resize_steps(n, path, b) {
+fn resize_steps(n, path, b) any^ {
   let tag = n.tag
   let old = geometry_box(n)
   if (old == null) []
@@ -189,18 +189,18 @@ fn resize_steps(n, path, b) {
         step_set_attr(path, 'width', fmt(b.w)), step_set_attr(path, 'height', fmt(b.h))]
 }
 
-pub fn resize_tx(doc, index, b) => tx_of(doc, resize_steps(doc.content[index], [index], b))
+pub fn resize_tx(doc, index, b) any^ => tx_of(doc, resize_steps(doc.content[index], [index], b))
 
 // Ids: new objects and copies take ids no element of the drawing has.
-fn own_id(n) => if (is_node(n) and attr_get(n, 'id') != null) [string(attr_get(n, 'id'))] else []
-fn ids_in(n) => if (not is_node(n)) [] else [*own_id(n), *[for (c in n.content) for (i in ids_in(c)) i]]
+fn own_id(n) any^ => if (is_node(n) and attr_get(n, 'id') != null) [string(attr_get(n, 'id'))] else []
+fn ids_in(n) => if (not is_node(n)) [] else [*own_id(n), *[for (c in n.content) for (i in ((ids_in(c)) ^ { [] })) i]]
 
-fn fresh_id(taken, base, k) {
+fn fresh_id(taken, base, k) any^ {
   let candidate = base ++ "-" ++ string(k)
   if (member(taken, candidate)) fresh_id(taken, base, k + 1) else candidate
 }
 
-pub fn insert_tx(doc, n) => tx_of(doc, [step_replace([], len(doc.content), len(doc.content), [n])])
+pub fn insert_tx(doc, n) any^ => tx_of(doc, [step_replace([], len(doc.content), len(doc.content), [n])])
 
 fn paint(style, filled) =>
   [{name: 'fill', value: if (filled) style.fill else "none"}, {name: 'stroke', value: style.stroke},
@@ -208,7 +208,7 @@ fn paint(style, filled) =>
 
 // A shape drawn from press point `a` to release point `b`; a click without
 // a drag places a default-sized shape.
-pub fn new_shape(doc, tool, a, b, style) {
+pub fn new_shape(doc, tool, a, b, style) any^ {
   let tag = if (tool == 'rect') 'rect' else if (tool == 'ellipse') 'ellipse' else 'line'
   let id = fresh_id(ids_in(doc), string(tag), 1)
   let clicked = abs(b.x - a.x) < 2.0 and abs(b.y - a.y) < 2.0
@@ -231,13 +231,13 @@ pub fn new_text(doc, p, words, style) =>
                       {name: 'x', value: fmt(p.x)}, {name: 'y', value: fmt(p.y)},
                       {name: 'font-size', value: "20"}, {name: 'fill', value: style.stroke}], [text(words)])
 
-pub fn delete_tx(doc, indices) =>
-  tx_of(doc, [for (i in (sort(indices, 'desc') or [])) step_replace([], i, i + 1, [])])
+pub fn delete_tx(doc, indices) any^ =>
+  tx_of(doc, [for (i in (((sort(indices, 'desc') or [])) ^ { [] })) step_replace([], i, i + 1, [])])
 
 // Duplicate: a copy's ids are fresh and every reference inside the copy
 // (`url(#id)`, `#id` hrefs) follows them, so it never draws the original's
 // gradient or clip twice under one id.
-fn remap_value(v, pairs, i) {
+fn remap_value(v, pairs, i) any^ {
   if (i >= len(pairs)) v
   else {
     let old_ref = "#" ++ pairs[i][0]
@@ -252,7 +252,7 @@ fn remap_id(id, pairs) {
   if (len(found) > 0) found[0] else id
 }
 
-fn remap_node(n, pairs) {
+fn remap_node(n, pairs) any^ {
   if (not is_node(n)) n
   else node_attrs(n.tag,
     [for (a in n.attrs)
@@ -265,12 +265,12 @@ fn copy_pairs(ids, taken, i, acc) {
   else copy_pairs(ids, taken, i + 1, [*acc, [ids[i], fresh_id([*taken, *[for (p in acc) p[1]]], ids[i], 2)]])
 }
 
-fn offset_copy(doc, n) {
+fn offset_copy(doc, n) any^ {
   let copy = remap_node(n, copy_pairs(ids_in(n), ids_in(doc), 0, []))
   apply_steps(tx_begin(copy, null), move_steps(copy, [], 10.0, 10.0), 0).doc_after
 }
 
-fn duplicate_at(tx, indices, k, j) {
+fn duplicate_at(tx, indices, k, j) any^ {
   if (j >= len(indices)) tx
   else {
     let i = indices[j] + k
@@ -280,7 +280,7 @@ fn duplicate_at(tx, indices, k, j) {
 }
 
 // The transaction and the copies' indices (each lands right above its original).
-pub fn duplicate_tx(doc, indices) {
+pub fn duplicate_tx(doc, indices) any^ {
   let ordered = sort(indices) or []
   if (len(ordered) == 0) null
   else {tx: duplicate_at(tx_begin(doc, null), ordered, 0, 0),
@@ -289,9 +289,9 @@ pub fn duplicate_tx(doc, indices) {
 
 // Paint order: to the front is the root's last child; to the back is before
 // the first drawn object, so <defs> and metadata keep leading the file.
-fn first_object(content, i) => if (i >= len(content) or is_object(content[i])) i else first_object(content, i + 1)
+fn first_object(content, i) any^ => if (i >= len(content) or is_object(content[i])) i else first_object(content, i + 1)
 
-pub fn order_tx(doc, index, to_front) {
+pub fn order_tx(doc, index, to_front) any^ {
   let n = doc.content[index]
   let removed = tx_step(tx_begin(doc, null), step_replace([], index, index + 1, []))
   let at = if (to_front) len(removed.doc_after.content) else first_object(removed.doc_after.content, 0)
@@ -302,31 +302,31 @@ pub fn order_tx(doc, index, to_front) {
 // overrides the presentation attribute; otherwise the attribute is set.
 fn declarations(style) => [for (d in split(string(style), ";") where trim(d) != "") trim(d)]
 
-fn declared_name(d) {
+fn declared_name(d) any^ {
   let colon = index_of(d, ":")
   trim(if (colon == null) d else slice(d, 0, colon))
 }
 
-fn declared_value(d) {
+fn declared_value(d) any^ {
   let colon = index_of(d, ":")
   if (colon == null) "" else trim(slice(d, colon + 1, len(d)))
 }
 
-fn style_value(style, prop) {
-  let found = if (style == null) [] else [for (d in declarations(style) where declared_name(d) == prop) declared_value(d)]
+fn style_value(style, prop) any^ {
+  let found = if (style == null) [] else [for (d in declarations(style) where ((declared_name(d) == prop) ^ { false })) declared_value(d)]
   if (len(found) > 0) found[0] else null
 }
 
 // The paint an object shows for `prop` (a name string), or "".
-pub fn paint_value(n, prop) {
+pub fn paint_value(n, prop) any^ {
   let styled = style_value(attr_get(n, 'style'), prop)
-  let attr = [for (a in n.attrs where string(a.name) == prop) string(a.value)]
+  let attr = [for (a in n.attrs where ((string(a.name) == prop) ^ { false })) string(a.value)]
   if (styled != null) styled else if (len(attr) > 0) attr[0] else ""
 }
 
-fn restyled_declaration(d, changes) {
+fn restyled_declaration(d, changes) any^ {
   let prop = declared_name(d)
-  let found = [for (c in changes where c[0] == prop) c[1]]
+  let found = [for (c in changes where ((c[0] == prop) ^ { false })) c[1]]
   if (len(found) > 0) prop ++ ":" ++ found[0] else d
 }
 
@@ -336,20 +336,20 @@ fn restyled(style, changes) => join([for (d in declarations(style)) restyled_dec
 fn paint_steps(n, path, changes) {
   let style = attr_get(n, 'style')
   let wanted = [for (c in changes where c[1] != "") c]
-  let in_style = [for (c in wanted where style_value(style, c[0]) != null) c]
-  let as_attr = [for (c in wanted where style_value(style, c[0]) == null) c];
+  let in_style = [for (c in wanted where ((style_value(style, c[0]) != null) ^ { false })) c]
+  let as_attr = [for (c in wanted where ((style_value(style, c[0]) == null) ^ { false })) c];
   [*(if (len(in_style) == 0) [] else [step_set_attr(path, 'style', restyled(style, in_style))]),
    *[for (c in as_attr) step_set_attr(path, symbol(c[0]), c[1])]]
 }
 
-pub fn paint_tx(doc, indices, changes) =>
-  tx_of(doc, [for (i in indices) for (s in paint_steps(doc.content[i], [i], changes)) s])
+pub fn paint_tx(doc, indices, changes) any^ =>
+  tx_of(doc, [for (i in indices) for (s in ((paint_steps(doc.content[i], [i], changes)) ^ { [] })) s])
 
 // Text: a text object holding one run can be retyped as a whole.
-pub fn text_editable(n) => (is_node(n) and n.tag == 'text' and len(n.content) <= 1 and
+pub fn text_editable(n) any^ => (is_node(n) and n.tag == 'text' and len(n.content) <= 1 and
                             (all([for (c in n.content) is_text(c)]) or false)) or false
 
-pub fn retext_tx(doc, index, words) =>
+pub fn retext_tx(doc, index, words) any^ =>
   tx_of(doc, [step_replace([index], 0, len(doc.content[index].content), [text(words)])])
 
 // ---------------------------------------------------------------------------
@@ -358,20 +358,20 @@ pub fn retext_tx(doc, index, words) =>
 
 // Scripts stay inactive data; another namespace's metadata (sodipodi:,
 // inkscape:) has no rendering.
-fn projected(n) => not is_node(n) or not (n.tag == 'script' or has(string(n.tag), ":"))
+fn projected(n) any^ => not is_node(n) or not (n.tag == 'script' or has(string(n.tag), ":"))
 
-fn is_handler(a) => starts_with(string(a.name), "on")
+fn is_handler(a) any^ => starts_with(string(a.name), "on")
 
-fn projected_attrs(n, path) {
-  let own = [for (a in n.attrs where not is_handler(a)) a]
+fn projected_attrs(n, path) any^ {
+  let own = [for (a in n.attrs where ((not is_handler(a)) ^ { false })) a]
   if (len(path) == 1 and is_object(n)) [*own, {name: 'data-edit-path', value: string(path[0])}] else own
 }
 
 // The canvas shows the drawing's user space at the session zoom; the saved
 // size and viewBox are untouched.
 fn canvas_attrs(doc, vb, zoom) =>
-  [*[for (a in doc.attrs where not (a.name == 'width' or a.name == 'height' or a.name == 'viewBox' or
-                                    a.name == 'class' or a.name == 'style' or is_handler(a))) a],
+  [*[for (a in doc.attrs where ((not (a.name == 'width' or a.name == 'height' or a.name == 'viewBox' or
+                                    a.name == 'class' or a.name == 'style' or is_handler(a))) ^ { false })) a],
    {name: 'class', value: "edit-canvas"}, {name: 'width', value: fmt(vb.w * zoom)},
    {name: 'height', value: fmt(vb.h * zoom)},
    {name: 'viewBox', value: fmt(vb.x) ++ " " ++ fmt(vb.y) ++ " " ++ fmt(vb.w) ++ " " ++ fmt(vb.h)}]
@@ -381,12 +381,12 @@ let handle_names = ["nw", "n", "ne", "e", "se", "s", "sw", "w"]
 fn handle_x(b, h) => if (has(h, "w")) b.x else if (has(h, "e")) b.x + b.w else b.x + b.w / 2.0
 fn handle_y(b, h) => if (has(h, "n")) b.y else if (has(h, "s")) b.y + b.h else b.y + b.h / 2.0
 
-fn frame_xml(b, zoom) =>
+fn frame_xml(b, zoom) any^ =>
   "<rect class=\"edit-frame\" x=\"" ++ fmt(b.x) ++ "\" y=\"" ++ fmt(b.y) ++ "\" width=\"" ++ fmt(b.w) ++
   "\" height=\"" ++ fmt(b.h) ++ "\" fill=\"none\" stroke=\"#0969da\" stroke-width=\"" ++ fmt(1.5 / zoom) ++
   "\" stroke-dasharray=\"" ++ fmt(4.0 / zoom) ++ " " ++ fmt(3.0 / zoom) ++ "\"/>"
 
-fn handle_xml(b, h, zoom) {
+fn handle_xml(b, h, zoom) any^ {
   let s = 8.0 / zoom
   "<rect class=\"edit-handle\" data-edit-handle=\"" ++ h ++ "\" x=\"" ++ fmt(handle_x(b, h) - s / 2.0) ++
   "\" y=\"" ++ fmt(handle_y(b, h) - s / 2.0) ++ "\" width=\"" ++ fmt(s) ++ "\" height=\"" ++ fmt(s) ++
@@ -401,15 +401,15 @@ fn overlay_xml(doc, ds) {
   "<g class=\"edit-overlay\">" ++ join(frames, "") ++ join(handles, "") ++ "</g>"
 }
 
-pub fn projection_xml(doc, ds) {
+pub fn projection_xml(doc, ds) any^ {
   let kids = [for (i, child of doc.content) {child: child, path: [i]}]
   "<svg" ++ sv.attrs_xml(canvas_attrs(doc, view_box(doc), ds.zoom)) ++ ">" ++
-    join([for (k in kids where projected(k.child)) sv.node_xml(k.child, k.path, 1, projected_attrs, projected)], "") ++
+    join([for (k in kids where ((projected(k.child)) ^ { false })) sv.node_xml(k.child, k.path, 1, projected_attrs, projected)], "") ++
     overlay_xml(doc, ds) ++ "</svg>"
 }
 
-fn canvas_of(parsed) {
-  let found = if (parsed == null) [] else [for (c in content(parsed) where type(c) == element) c]
+fn canvas_of(parsed) any^ {
+  let found = if (parsed == null) [] else [for (c in ((content(parsed)) ^ { [] }) where type(c) == element) c]
   if (len(found) > 0) found[0] else null
 }
 

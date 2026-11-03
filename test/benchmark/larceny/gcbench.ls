@@ -3,14 +3,14 @@
 // Adapted from Larceny/Gambit gcbench (Hans Boehm's GC benchmark)
 // Creates trees of depth 4..14 (stretch to 15), checks node counts
 
-pn make_tree(depth) {
+fn make_tree(depth) {
     if (depth == 0) {
         return {left: null, right: null}
     }
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-pn check_tree(node) {
+fn check_tree(node) any^ {
     if (node.left == null) {
         return 1
     }
@@ -23,7 +23,7 @@ pn populate(depth, node) {
     }
     node.left = {left: null, right: null}
     node.right = {left: null, right: null}
-    populate(depth - 1, node.left)
+    populate(depth - 1, node.left)^
     populate(depth - 1, node.right)
     return 0
 }

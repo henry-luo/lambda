@@ -50,7 +50,7 @@ fn graphic(entry,role="tile") => <span class:if (raster(entry)) "file-graphic th
     (if (entry.kind == "Image" and entry.extension == "svg" and entry.readonly != true) <img class:"vector-thumbnail",src:entry.path,alt:"">
     else (file_icon(entry)));
     (if (raster(entry)) <canvas class:"thumbnail-canvas",width:"1",height:"1",'aria-hidden':"true"> else null)>
-fn file_rows(st,prefix="file-",column=-1) {
+fn file_rows(st,prefix="file-",column=-1) any^ {
     let rows = model.visible(st)
     let window = model.window(st);
     if (len(rows)==0) <div class:"empty",(icon("search"));<h2 if (trim(st.query)!="") "No matching files" else "This folder is empty">
@@ -58,7 +58,7 @@ fn file_rows(st,prefix="file-",column=-1) {
     else <div class:"listing-window",'data-total':string(len(rows)),
         <div class:"listing-spacer",'aria-hidden':"true",style:"height:" ++ string(window.before) ++ "px">;
         <div class:(if (st.mode == "icons") "icon-grid" else if (st.mode == "columns") "column-rows" else "file-list") ++ " listing-rows",
-        *[for (offset,e in slice(rows,window.first,window.last)) <button id:prefix ++ string(window.first+offset),class:"file",type:"button",role:"option",tabindex:"-1",
+        *[for (offset,e in ((slice(rows,window.first,window.last)) ^ { [] })) <button id:prefix ++ string(window.first+offset),class:"file",type:"button",role:"option",tabindex:"-1",
             *:(if (column>=0) {'data-column':string(column),'data-trail':string(column<len(st.columns)-1 and contains(st.selected,e.path))} else {}),
             'data-path':e.path,'data-name':e.name,'data-dir':string(e.dir),'data-readonly':string(e.readonly == true),draggable:string(e.readonly != true),
             'aria-selected':string(contains(st.selected,e.path)),'data-focused':string(e.path == st.focus),title:e.name,
@@ -69,19 +69,19 @@ fn file_rows(st,prefix="file-",column=-1) {
             (if (st.mode == "columns" and model.browsable(e)) <span class:"folder-chevron",'aria-hidden':"true","›"> else null)>]>;
         <div class:"listing-spacer",'aria-hidden':"true",style:"height:" ++ string(window.after) ++ "px">>
 }
-pub fn column_files(st,index) => file_rows(model.column(st,index),"file-" ++ string(index) ++ "-",index)
+pub fn column_files(st,index) any^ => file_rows(model.column(st,index),"file-" ++ string(index) ++ "-",index)
 pub fn column(st,index) => <section id:"column-" ++ string(index),class:"file-column",'data-folder':st.columns[index].path,'data-column':string(index),
     'aria-label':model.basename(st.columns[index].path),'data-readonly':string(model.read_only(model.column(st,index))),
     <h2 class:"column-heading",title:st.columns[index].path,model.basename(st.columns[index].path)>;
     <div id:"column-files-" ++ string(index),class:"column-list",role:"group",'aria-label':st.columns[index].path,
         column_files(st,index)>>
-pub fn files(st) => if (st.mode == "columns") <div class:"columns",*[for (i,c in st.columns) column(st,i)]> else file_rows(st)
-pub fn breadcrumb(st,destination=false) => <nav 'aria-label':if (destination) "Destination folder path" else "Folder path",class:"crumbs",
-    *[for (i,c in model.crumbs(st.path)) <span
+pub fn files(st) any^ => if (st.mode == "columns") <div class:"columns",*[for (i,c in st.columns) column(st,i)]> else file_rows(st)
+pub fn breadcrumb(st,destination=false) any^ => <nav 'aria-label':if (destination) "Destination folder path" else "Folder path",class:"crumbs",
+    *[for (i,c in ((model.crumbs(st.path)) ^ { [] })) <span
         (if (i>0) <span class:"crumb-separator","›"> else null);
         <button type:"button",*:(if (destination) {'data-destination':c.path} else
             {'data-location':c.path,'data-readonly':string(model.location_readonly(st,c.path))}),title:c.path,c.name>>]>
-pub fn destination_folders(picker) => if (picker == null) <div class:"destination-empty","Enter a folder path and choose Browse.">
+pub fn destination_folders(picker) any^ => if (picker == null) <div class:"destination-empty","Enter a folder path and choose Browse.">
     else if (len(picker.entries)==0) <div class:"destination-empty","This folder has no subfolders.">
     else [for (entry in picker.entries) <button type:"button",class:"destination-folder",'data-destination':entry.path,
         title:if (entry.blocked) "An item cannot be moved into itself or its contents." else entry.path,
@@ -96,7 +96,7 @@ pub fn menu(st) => [for (action,caption in {open:"Open",look:"Quick Look",rename
         class:if (action == 'delete') "menu-item danger-text" else "menu-item",
         *:(if ((contains(['open','look','move','delete'],action) and len(st.selected)==0) or
             (action == 'rename' and len(st.selected)!=1)) {disabled:""} else {}),caption>]
-pub fn preview(st,large=false) {
+pub fn preview(st,large=false) any^ {
     let e = model.preview_entry(st)
     let data = st.preview_data;
     if (e == null) <div class:"preview-empty",(icon("preview"));<h3 "A closer look"><p "Select a file to see its preview and details.">>

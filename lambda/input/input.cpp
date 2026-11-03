@@ -19,6 +19,7 @@
 #include "../../lib/file.h"
 #include "../../lib/str.h"
 #include "../io/resource_policy.h"
+#include "../io/security_io.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hash.h"
 #include <limits.h>
@@ -2053,12 +2054,12 @@ extern "C" Input* input_from_source_with_options(const char* source,
 }
 
 static Input* ime_input_from_local_path(const char* pathname, Url* abs_url,
-        String* type, String* flavor, NamePool* name_parent) {
+        String* type, String* flavor, NamePool* name_parent, const SecurityIOClient* io = nullptr) {
     constexpr size_t resource_limit = 64ULL << 20;
     char* source = nullptr;
     size_t length = 0;
-    if (!file_read_all_limit(pathname, MEM_CAT_INPUT_OTHER, resource_limit,
-                             &source, &length)) return nullptr;
+    if (!security_io_read_bytes(io, pathname, false, resource_limit,
+            MEM_CAT_INPUT_OTHER, &source, &length, nullptr)) return nullptr;
     Input* input = input_from_source_n_with_name_parent(source, length, abs_url,
         type, flavor, name_parent, nullptr);
     mem_free(source);
@@ -2618,25 +2619,29 @@ extern "C" Input* input_from_source_with_options(const char* source,
 
 // preserve the byte count for length-aware parsers, including HTML and PDF.
 static Input* input_from_local_path(const char* pathname, Url* abs_url,
-        String* type, String* flavor, NamePool* name_parent = NULL) {
+        String* type, String* flavor, NamePool* name_parent = NULL,
+        const SecurityIOClient* io = nullptr) {
     size_t src_len = 0;
     char* source = nullptr;
     // Acquire exact bytes once; ZIP detection must never depend on strlen().
     ZipLimits limits = input_zip_limits ? *input_zip_limits : zip_default_limits();
-    if (!file_read_all_limit(pathname, MEM_CAT_INPUT_OTHER, limits.archive_bytes, &source, &src_len)) {
+    if (!security_io_read_bytes(io, pathname, false, limits.archive_bytes,
+            MEM_CAT_INPUT_OTHER, &source, &src_len, nullptr)) {
         log_debug("INPUT_CAPTURE_FAILED: %s", pathname ? pathname : "null");
         return nullptr;
     }
 
+    InputParseOptions options = {};
+    options.io = io;
     Input* input = input_from_source_n_with_name_parent(source, src_len,
-        abs_url, type, flavor, name_parent);
+        abs_url, type, flavor, name_parent, io ? &options : nullptr);
 #ifndef LAMBDA_NO_GRAPH_INPUT
     const bool explicit_structurizr = flavor &&
         (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
     const bool detected_structurizr = !flavor &&
         input_detect_structurizr_flavor(pathname, source, src_len) != NULL;
     if (input && (explicit_structurizr || detected_structurizr)) {
-        resolve_graph_structurizr_local_includes(input, pathname);
+        resolve_graph_structurizr_local_includes(input, pathname, io);
     }
 #endif
     mem_free(source);
@@ -2907,6 +2912,41 @@ Input* input_from_target_with_name_parent(Target* target, String* type,
     return input_from_target_impl(target, type, flavor, name_parent);
 }
 #endif // LAMBDA_IME_RESOURCE_IO
+
+Input* input_from_target_with_io(Target* target, String* type, String* flavor,
+        NamePool* name_parent, const SecurityIOClient* io) {
+    if (!io) return input_from_target_with_name_parent(target, type, flavor, name_parent);
+    // D7.5.5: classify only through the broker, before directory, database,
+    // system-info or network dispatch can inspect an ambient resource.
+    if (!target || target->scheme != TARGET_SCHEME_FILE) return nullptr;
+    StrBuf* path = (StrBuf*)target_to_local_path(target, nullptr);
+    if (!path) return nullptr;
+    int32_t kind;
+    Input* input = nullptr;
+    if (security_io_input_kind(io, path->str, &kind, nullptr)) {
+#ifndef LAMBDA_IME_RESOURCE_IO
+        if (kind == SECURITY_OBJECT_DIRECTORY)
+            input = input_from_directory_with_io(path->str, target->original, name_parent, io);
+        else {
+#else
+        if (kind == SECURITY_OBJECT_FILE) {
+#endif
+            char* address = url_from_local_path(path->str);
+            Url* url = address ? url_parse(address) : nullptr;
+            mem_free(address);
+            if (url) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+                input = ime_input_from_local_path(path->str, url, type, flavor, name_parent, io);
+#else
+                input = input_from_local_path(path->str, url, type, flavor, name_parent, io);
+#endif
+                if (!input) url_destroy(url);
+            }
+        }
+    }
+    strbuf_free(path);
+    return input;
+}
 
 static void input_pool_cleanup(void* arg);
 

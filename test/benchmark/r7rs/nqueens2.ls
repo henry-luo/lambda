@@ -2,22 +2,22 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn ok(row: int, dist: int, placed: int[], placed_len: int) int {
+fn ok(row: int, dist: int, placed: int[], placed_len: int) int^ {
     if (dist > placed_len) {
         return 1
     }
     var idx: int = placed_len - dist
     var p: int = placed[idx]
-    if (p == row + dist) {
+    if ((p == row + dist)^) {
         return 0
     }
-    if (p == row - dist) {
+    if ((p == row - dist)^) {
         return 0
     }
     return ok(row, dist + 1, placed, placed_len)
 }
 
-pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: int[], placed_len: int) int {
+pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: int[], placed_len: int) int^ {
     if (cand_len == 0) {
         if (rest_len == 0) {
             return 1
@@ -27,8 +27,8 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     var row: int = candidates[0]
     var count: int = 0
 
-    if (ok(row, 1, placed, placed_len) == 1) {
-        var new_cands:int[] = fill(cand_len - 1 + rest_len, 0)
+    if ((ok(row, 1, placed, placed_len) == 1)^) {
+        var new_cands:int[] = fill(cand_len - 1 + rest_len, 0)^
         var ni: int = 0
         var ci: int = 1
         while (ci < cand_len) {
@@ -46,7 +46,7 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
         count = count + solve(new_cands, ni, fill(1, 0), 0, placed, placed_len + 1)
     }
 
-    var new_rest:int[] = fill(rest_len + 1, 0)
+    var new_rest:int[] = fill(rest_len + 1, 0)^
     var ri2: int = 0
     while (ri2 < rest_len) {
         new_rest[ri2] = rest[ri2]
@@ -54,7 +54,7 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     }
     new_rest[rest_len] = row
 
-    var new_cands2:int[] = fill(cand_len - 1, 0)
+    var new_cands2:int[] = fill(cand_len - 1, 0)^
     var ci2: int = 1
     var ni2: int = 0
     while (ci2 < cand_len) {
@@ -67,20 +67,20 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     return count
 }
 
-pn nqueens(n: int) int {
-    var candidates:int[] = fill(n, 0)
+pn nqueens(n: int) int^ {
+    var candidates:int[] = fill(n, 0)^
     var i: int = 0
     while (i < n) {
         candidates[i] = i + 1
         i = i + 1
     }
-    var placed:int[] = fill(n, 0)
-    var empty:int[] = fill(1, 0)
+    var placed:int[] = fill(n, 0)^
+    var empty:int[] = fill(1, 0)^
     return solve(candidates, n, empty, 0, placed, 0)
 }
 
-pn benchmark() int {
-    var result: int = nqueens(8)
+pn benchmark() int^ {
+    var result: int = nqueens(8)^
     return result
 }
 
@@ -88,7 +88,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 92) {
+    if ((result == 92)^) {
         print("nqueens: PASS\n")
     } else {
         print("nqueens: FAIL result=")

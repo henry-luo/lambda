@@ -4,11 +4,11 @@ type Numbers = int[]
 pn repeated(count: int, first: bool) {
     var early_len: int = -1
     if (first) {
-        var early: Numbers = fill(count, 7)
-        early_len = len(early)
+        var early: Numbers = fill(count, 7)^
+        early_len = len(early)^
     }
-    var a: int[] = fill(count, 2)
-    var b: Numbers = fill(count, 3)
+    var a: int[] = fill(count, 2)^
+    var b: Numbers = fill(count, 3)^
     return [early_len, a, b]
 }
 
@@ -16,8 +16,8 @@ pn looped(count: int) {
     var latest: int[] = []
     var i: int = 0
     while (i < count) {
-        var a: Numbers = fill(i, 4)
-        var b: int[] = fill(i, 5)
+        var a: Numbers = fill(i, 4)^
+        var b: int[] = fill(i, 5)^
         latest = b
         i = i + 1
     }
@@ -25,12 +25,12 @@ pn looped(count: int) {
 }
 
 pn other_lanes(count: int) {
-    var a: float[] = fill(count, 1.5)
-    var b: bool[] = fill(count, true)
+    var a: float[] = fill(count, 1.5)^
+    var b: bool[] = fill(count, true)^
     return [a, b]
 }
 
-pn mismatched(count: int, value) int[] { return fill(count, value) }
+pn mismatched(count: int, value) int[]^ { return fill(count, value) }
 
 pn main() {
     print([repeated(3, false), repeated(2, true), repeated(0, true)])

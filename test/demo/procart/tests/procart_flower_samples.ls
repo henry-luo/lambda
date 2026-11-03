@@ -11,7 +11,7 @@ let ids = ["lupin","bluecrown","rosette","lotus"];
     let grown = B.generate(2026,id,5,25)^,let bare = solids.pieces(p,false,false),
     [p == B.generate(2026,id,4,25)^, p != B.generate(2027,id,4,25)^,
      len(grown.solids) > len(p.solids), p.solids != B.generate(2026,id,4,40)^.solids,
-     all([for (part in p.solids) all([for (v in solids.matrix(part)) v-v == 0.0]) and min(part.scale) > 0.0]),
+     all([for (part in p.solids) all([for (v in ((solids.matrix(part)) ^ { [] })) v-v == 0.0]) and min(part.scale) > 0.0]),
      len([for (part in bare where part.role == "flower" or part.role == "leaf") part]) == 0,
      scene.validate(three.viewport(p,true,true))^])];
 

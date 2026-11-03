@@ -32,6 +32,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
+| `chat` | `chat/chat.ls` | [Chat](chat/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
 | `music` | `music/music.ls` | [Music](music/README.md) |
 | `soundflow` | `soundflow/soundflow.ls` | [Soundflow](soundflow/README.md) |

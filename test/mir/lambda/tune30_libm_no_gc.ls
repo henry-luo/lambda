@@ -3,11 +3,12 @@
 // point: the caller neither spills its roots before it nor reloads its
 // container layouts after it. nbody paid 25 instructions per inner iteration
 // for exactly this before the metadata landed.
-pn tune30_norms(v: float[], n: int) float {
+pn tune30_norms(v: float[], n: int) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < n) {
-        total = total + math.sqrt(v[i]) + math.sin(v[i])
+        let _admitted_total_10: float = total + math.sqrt(v[i]) + math.sin(v[i])
+        total = _admitted_total_10^
         i = i + 1
     }
     return total

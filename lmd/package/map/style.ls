@@ -1,7 +1,7 @@
 import models: .model
 
 // normalize the supported Style Specification v8 subset into the one native element model.
-pub fn from_style(style, options = {}) {
+pub fn from_style(style, options = {}) any^ {
     if (not (style is map) or style.version != 8 or not (style.sources is map) or not (style.layers is array))
         error("map: style requires version 8, a sources map and a layers array")
     else if (style.sprite != null or style.glyphs != null or style.terrain != null or style.sky != null)

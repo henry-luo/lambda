@@ -27,7 +27,7 @@ pub fn radio(props = {}, child = null) element^ => component('radio',props,child
 pub fn switch(props = {}) element^ => component('switch',props)^
 
 view native_controls: <control.input> | <control.text_area> | <control.select> |
-    <control.checkbox> | <control.radio> | <control.switch> {
+    <control.checkbox> | <control.radio> | <control.switch> () any^ {
     control.present(component(c.kind(~),c.props(~),content(~))^,"control")
 }
 on input(evt) { control.edited(~,evt,"control") }

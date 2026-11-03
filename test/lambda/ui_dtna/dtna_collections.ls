@@ -5,7 +5,7 @@ let rows = [{n:3},{n:1},{n:2}];
 [collection.move(items,'a',"ArrowRight"),collection.move(items,'a',"ArrowLeft"),
     collection.move(items,'c',"Home"),collection.move(items,'a',"End"),
     collection.page_count(93,10),collection.page_rows([1,2,3,4,5],2,2)^,
-    [for (row in collection.order_rows(rows,'n','asc')) row.n],
+    [for (row in ((collection.order_rows(rows,'n','asc')) ^ { [] })) row.n],
     ((ui.tabs({items:items}) ^ { null }) or null) == null,
     ((ui.tabs({id:"dup",items:[{key:1},{key:"1"}]}) ^ { null }) or null) == null,
     ((ui.pagination({page_size:0}) ^ { null }) or null) == null,

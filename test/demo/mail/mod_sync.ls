@@ -64,22 +64,22 @@ pn login_options(account, server, service, client) map^ {
 // A logged-in session with the account's mailboxes, or null once the reason
 // is reported. The mailbox list is cached for the next offline start.
 pn connect(account, service, client, dir, notify) {
-    say(account, notify, {type: "status", state: "connecting", text: null})
+    say(account, notify, {type: "status", state: "connecting", text: null})^
     var options = null
     var failure = null
-    login_options(account, account.imap, service, client) ^ { failure = ^ } ~ { options = ~ }
+    { let __error_outcome_1 = login_options(account, account.imap, service, client) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { options = ~ } } }
     if (failure is error) {
-        say(account, notify, {type: "status", state: "failed", text: failure.message})
+        say(account, notify, {type: "status", state: "failed", text: failure.message})^
         return null
     }
     var session = null
-    wire.open(prov.imap_url(account.imap), options) ^ { failure = ^ } ~ { session = ~ }
+    { let __error_outcome_2 = wire.open(prov.imap_url(account.imap), options) ^ { ^ }; if (__error_outcome_2 is error) { failure = __error_outcome_2 } else match __error_outcome_2 { case any { session = ~ } } }
     var caps = []
-    if (session != null) { sync.capabilities(session) ^ { failure = ^ } ~ { caps = ~ } }
+    if (session != null) { { let __error_outcome_3 = sync.capabilities(session) ^ { ^ }; if (__error_outcome_3 is error) { failure = __error_outcome_3 } else match __error_outcome_3 { case any { caps = ~ } } } }
     var boxes = []
-    if (session != null and not (failure is error)) { sync.mailboxes(session) ^ { failure = ^ } ~ { boxes = ~ } }
+    if (session != null and not (failure is error)) { { let __error_outcome_4 = sync.mailboxes(session) ^ { ^ }; if (__error_outcome_4 is error) { failure = __error_outcome_4 } else match __error_outcome_4 { case any { boxes = ~ } } } }
     if (failure is error) {
-        say(account, notify, {type: "status", state: "failed", text: failure.message})
+        say(account, notify, {type: "status", state: "failed", text: failure.message})^
         return null
     }
     // cached for the next offline start; a failure only costs that
@@ -91,15 +91,15 @@ pn connect(account, service, client, dir, notify) {
 // Brings one mailbox's index up to date and reports it; the connection on
 // success (now with that mailbox selected), else null.
 pn refresh(c, account, dir, path, notify) {
-    say(account, notify, {type: "status", state: "syncing", text: null})
+    say(account, notify, {type: "status", state: "syncing", text: null})^
     var index = null
     var failure = null
-    sync.sync_mailbox(c.session, dir, model.box_id(path), path, c.gmail) ^ { failure = ^ } ~ { index = ~ }
+    { let __error_outcome_5 = sync.sync_mailbox(c.session, dir, model.box_id(path), path, c.gmail) ^ { ^ }; if (__error_outcome_5 is error) { failure = __error_outcome_5 } else match __error_outcome_5 { case any { index = ~ } } }
     if (failure is error) {
-        say(account, notify, {type: "status", state: "failed", text: failure.message})
+        say(account, notify, {type: "status", state: "failed", text: failure.message})^
         return null
     }
-    say(account, notify, {type: "index", path: path, entries: index.entries})
+    say(account, notify, {type: "index", path: path, entries: index.entries})^
     say(account, notify, {type: "status", state: "online", text: null})
     return {*: c, selected: path}
 }
@@ -109,9 +109,9 @@ pn download(c, account, dir, path, e, notify) {
     var failure = null
     if (c.selected != path) { wire.command(c.session, "SELECT", [path]) ^ { failure = ^ } }
     var file = null
-    if (not (failure is error)) { sync.fetch_message(c.session, dir, e) ^ { failure = ^ } ~ { file = ~ } }
+    if (not (failure is error)) { { let __error_outcome_6 = sync.fetch_message(c.session, dir, e) ^ { ^ }; if (__error_outcome_6 is error) { failure = __error_outcome_6 } else match __error_outcome_6 { case any { file = ~ } } } }
     if (failure is error) {
-        say(account, notify, {type: "failed", text: "Cannot download the message: " ++ failure.message})
+        say(account, notify, {type: "failed", text: "Cannot download the message: " ++ failure.message})^
         return null
     }
     say(account, notify, {type: "message", path: path, uid: e.uid, file: file})
@@ -124,7 +124,7 @@ pn smtp_send(account, service, client, m, notify) {
     var failure = null
     var options = null
     if (account.smtp == null) { failure = error("This account has no outgoing (SMTP) server.") }
-    if (account.smtp != null) { login_options(account, account.smtp, service, client) ^ { failure = ^ } ~ { options = ~ } }
+    if (account.smtp != null) { { let __error_outcome_7 = login_options(account, account.smtp, service, client) ^ { ^ }; if (__error_outcome_7 is error) { failure = __error_outcome_7 } else match __error_outcome_7 { case any { options = ~ } } } }
     if (not (failure is error)) {
         wire.send(prov.smtp_url(account.smtp), {*: options, from: account.email, to: m.recipients}, m.text) ^ { failure = ^ }
     }
@@ -136,7 +136,7 @@ pn create_mailbox(c, account, dir, path, notify) {
     var failure = null
     var boxes = null
     wire.command(c.session, "CREATE", [path]) ^ { failure = ^ }
-    if (not (failure is error)) { sync.mailboxes(c.session) ^ { failure = ^ } ~ { boxes = ~ } }
+    if (not (failure is error)) { { let __error_outcome_8 = sync.mailboxes(c.session) ^ { ^ }; if (__error_outcome_8 is error) { failure = __error_outcome_8 } else match __error_outcome_8 { case any { boxes = ~ } } } }
     if (failure is error) {
         say(account, notify, {type: "failed", text: "Cannot create the mailbox: " ++ failure.message})
     } else {
@@ -150,24 +150,24 @@ pn serve_imap(account, service, client, dir, notify) null^ {
     var shown = null
     var running = true
     while (running) {
-        if (c == null) {
+        if ((c == null)^) {
             c = connect(account, service, client, dir, notify)
-            if (c != null and shown != null) { c = refresh(c, account, dir, shown, notify) }
+            if ((c != null and shown != null)^) { c = refresh(c, account, dir, shown, notify) }
         }
         let m = receive()^
         if (m.op == 'select') {
             shown = m.path
-            if (c != null) { c = refresh(c, account, dir, shown, notify) }
+            if ((c != null)^) { c = refresh(c, account, dir, shown, notify) }
         } else if (m.op == 'fetch') {
-            if (c == null) { say(account, notify, {type: "failed", text: "The account is offline."}) }
-            if (c != null) { c = download(c, account, dir, m.path, m.entry, notify) }
-        } else if ((m.op == 'refresh' or m.op == 'tick') and c != null and shown != null) {
+            if ((c == null)^) { say(account, notify, {type: "failed", text: "The account is offline."})^ }
+            if ((c != null)^) { c = download(c, account, dir, m.path, m.entry, notify) }
+        } else if (((m.op == 'refresh' or m.op == 'tick') and c != null and shown != null)^) {
             c = refresh(c, account, dir, shown, notify)
         } else if (m.op == 'create') {
-            if (c == null) { say(account, notify, {type: "failed", text: "The account is offline."}) }
-            else { create_mailbox(c, account, dir, m.path, notify) }
+            if ((c == null)^) { say(account, notify, {type: "failed", text: "The account is offline."})^ }
+            else { create_mailbox(c, account, dir, m.path, notify)^ }
         } else if (m.op == 'send') {
-            smtp_send(account, service, client, m, notify)
+            smtp_send(account, service, client, m, notify)^
         } else if (m.op == 'stop') {
             running = false
         }
@@ -184,12 +184,12 @@ pn pop3_round(account, service, client, dir) map^ {
 }
 
 pn pop3_refresh(account, service, client, dir, notify) {
-    say(account, notify, {type: "status", state: "syncing", text: null})
-    let outcome: map | error = wait(start(pop3_round, [account, service, client, dir]))
+    say(account, notify, {type: "status", state: "syncing", text: null})^
+    let outcome: map^ = wait(start(pop3_round, [account, service, client, dir]))
     if (outcome is error) {
         say(account, notify, {type: "status", state: "failed", text: outcome.message})
     } else {
-        say(account, notify, {type: "index", path: pop3.INBOX, entries: outcome.entries})
+        say(account, notify, {type: "index", path: pop3.INBOX, entries: outcome.entries})^
         say(account, notify, {type: "status", state: "online", text: null})
     }
 }
@@ -197,23 +197,25 @@ pn pop3_refresh(account, service, client, dir, notify) {
 // A POP3 account's local Inbox: every message is on disk once synced, so
 // there is nothing to fetch on demand.
 pn serve_pop3(account, service, client, dir, notify) null^ {
-    say(account, notify, {type: "mailboxes", boxes: pop3.mailboxes()})
-    pop3_refresh(account, service, client, dir, notify)
+    say(account, notify, {type: "mailboxes", boxes: pop3.mailboxes()})^
+    pop3_refresh(account, service, client, dir, notify)^
     var running = true
     while (running) {
         let m = receive()^
         if (m.op == 'select' or m.op == 'refresh' or m.op == 'tick') {
-            pop3_refresh(account, service, client, dir, notify)
+            pop3_refresh(account, service, client, dir, notify)^
         } else if (m.op == 'seen') {
-            var index = null
-            pop3.mark_seen(dir, m.uid, true) ^ { say(account, notify, {type: "failed", text: "Cannot save the read state."}) } ~ { index = ~ }
-            if (index != null) { say(account, notify, {type: "index", path: pop3.INBOX, entries: index.entries}) }
+            let index = (pop3.mark_seen(dir, m.uid, true) ^ {
+                say(account, notify, {type: "failed", text: "Cannot save the read state."})^
+                null
+            })^
+            if (index != null) { say(account, notify, {type: "index", path: pop3.INBOX, entries: index.entries})^ }
         } else if (m.op == 'fetch') {
-            say(account, notify, {type: "failed", text: "The message file is missing from the store."})
+            say(account, notify, {type: "failed", text: "The message file is missing from the store."})^
         } else if (m.op == 'send') {
-            smtp_send(account, service, client, m, notify)
+            smtp_send(account, service, client, m, notify)^
         } else if (m.op == 'create') {
-            say(account, notify, {type: "failed", text: "A POP3 account has only its Inbox."})
+            say(account, notify, {type: "failed", text: "A POP3 account has only its Inbox."})^
         } else if (m.op == 'stop') {
             running = false
         }
@@ -234,7 +236,7 @@ pn demo_request(account, dir, m, notify) null^ {
     else if (m.op == 'move') { reported(account, notify, demo.move(dir, m.path, m.uid, m.to)^ or []) }
     else if (m.op == 'erase') { reported(account, notify, [demo.erase(dir, m.path, m.uid)^]) }
     else if (m.op == 'create') {
-        say(account, notify, {type: "mailboxes", boxes: demo.create_mailbox(dir, m.path)^})
+        say(account, notify, {type: "mailboxes", boxes: demo.create_mailbox(dir, m.path)^})^
         reported(account, notify, [demo.load(dir, m.path)])
     } else if (m.op == 'send' or m.op == 'save_draft') {
         // sent mail is filed in Sent, a draft in Drafts (replacing the one it was opened from)
@@ -243,9 +245,9 @@ pn demo_request(account, dir, m, notify) null^ {
         let arrived = if (sending and m.to_self) demo.file_into(dir, "INBOX", m.text, [])^ else null
         let left = if (m.replaces != null) demo.erase(dir, m.replaces.path, m.replaces.uid)^ else null
         reported(account, notify, [filed, arrived, left])
-        say(account, notify, {type: if (sending) "sent" else "draft_saved"})
+        say(account, notify, {type: if (sending) "sent" else "draft_saved"})^
     } else if (m.op == 'fetch') {
-        say(account, notify, {type: "failed", text: "The message file is missing from the demo mailbox."})
+        say(account, notify, {type: "failed", text: "The message file is missing from the demo mailbox."})^
     }
     null
 }
@@ -254,18 +256,18 @@ pn demo_request(account, dir, m, notify) null^ {
 // gets all its unread counts at once. Get Mail delivers the next arrival.
 pn serve_demo(account, dir, notify) null^ {
     if (not demo.is_seeded(dir)) {
-        say(account, notify, {type: "status", state: "syncing", text: "Preparing the demo mailbox…"})
+        say(account, notify, {type: "status", state: "syncing", text: "Preparing the demo mailbox…"})^
         demo.seed(dir)^
     }
     let boxes = demo.mailboxes(dir)
-    say(account, notify, {type: "mailboxes", boxes: boxes})
+    say(account, notify, {type: "mailboxes", boxes: boxes})^
     reported(account, notify, [for (b in boxes) demo.load(dir, b.path)])
-    say(account, notify, {type: "status", state: "online", text: null})
+    say(account, notify, {type: "status", state: "online", text: null})^
     var running = true
     while (running) {
         let m = receive()^
         if (m.op == 'stop') { running = false }
-        if (m.op != 'stop') { demo_request(account, dir, m, notify) ^ { say(account, notify, {type: "failed", text: "The demo mailbox: " ++ ^.message}) } }
+        if (m.op != 'stop') { (demo_request(account, dir, m, notify) ^ { say(account, notify, {type: "failed", text: "The demo mailbox: " ++ ^.message}) })^ }
     }
     null
 }
@@ -280,7 +282,7 @@ pub pn run(account, root, service, password, client, notify) null^ {
     if (password != null) {
         var stored = true
         secret.set(service, account.id, password) ^ { stored = false }
-        if (not stored) { say(account, notify, {type: "status", state: "failed", text: "Cannot save the password."}) }
+        if (not stored) { say(account, notify, {type: "status", state: "failed", text: "Cannot save the password."})^ }
     }
     let tick = start(ticker, [self()])
     if (model.is_demo(account)) { serve_demo(account, dir, notify)^ }

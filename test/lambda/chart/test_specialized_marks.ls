@@ -2,9 +2,9 @@ import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 import svg: lambda.chart.svg
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn tags(node, tag) => elements(node) |: name(~) == tag
-fn classes(node, class_name) => elements(node) |: ~.class == class_name
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(node, tag) any^ => elements(node) |: name(~) == tag
+fn classes(node, class_name) any^ => elements(node) |: ~.class == class_name
 let base = {width: 200, height: 100, padding: 0, encoding: {
     x: {field: "x", dtype: "quantitative", axis: null, scale: {domain: [0, 10], nice: false}},
     y: {field: "y", dtype: "quantitative", axis: null, scale: {domain: [0, 10], nice: false}}}};

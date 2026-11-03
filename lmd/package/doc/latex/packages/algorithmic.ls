@@ -68,11 +68,11 @@ fn keyword_of(node) {
 
 // The lines of an algorithmic environment: {node, desc, items, depth, number,
 // shown, label}. [n] numbers every line and shows every n-th number.
-pub fn lines(el) {
+pub fn lines(el) any^ {
     let opened = util.leading_option(el)
     let flat = util.flatten_paragraphs(opened.children)
     let every = if (opened.option == null) 0 else (int(trim(opened.option)) ^ { 0 })
-    let starts = [for (i, node in flat where keyword_of(node) != null) i]
+    let starts = [for (i, node in flat where ((keyword_of(node) != null) ^ { false })) i]
     let raw = [for (k, start in starts,
         let stop = if (k + 1 < len(starts)) starts[k + 1] else len(flat))
         {node: flat[start], desc: keyword_of(flat[start]),
@@ -80,7 +80,7 @@ pub fn lines(el) {
     number_lines(raw, 0, 0, 0, every, [])
 }
 
-fn number_lines(raw, i, depth, count, every, acc) {
+fn number_lines(raw, i, depth, count, every, acc) any^ {
     if (i >= len(raw)) acc
     else {
         let line = raw[i]
@@ -89,11 +89,11 @@ fn number_lines(raw, i, depth, count, every, acc) {
         let next_depth = if (role == "open" or role == "middle") own_depth + 1 else own_depth
         let numbered = role != "unnumbered"
         let next_count = if (numbered) count + 1 else count
-        let labels = [for (node in line.rest where node is element and string(name(node)) == "label")
+        let labels = [for (node in line.rest where ((node is element and string(name(node)) == "label") ^ { false }))
             trim(util.text_of(node))]
         number_lines(raw, i + 1, next_depth, next_count, every, acc ++ [{
             node: line.node, desc: line.desc, depth: own_depth,
-            items: [for (node in line.rest where not (node is element and string(name(node)) == "label")) node],
+            items: [for (node in line.rest where ((not (node is element and string(name(node)) == "label")) ^ { false })) node],
             number: if (numbered) next_count else null,
             shown: if (numbered and every > 0 and next_count % every == 0) next_count else null,
             label: if (len(labels) == 0) null else labels[0]}])

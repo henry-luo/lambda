@@ -3,11 +3,11 @@
 import tikz: lambda.doc.tikz.tikz
 import latex: lambda.doc.latex.latex
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn option_text(node) => [for (child in node
-    where child is element and string(name(child)) == "option")
+fn option_text(node) any^ => [for (child in node
+    where ((child is element and string(name(child)) == "option") ^ { false }))
     if (child.value == "") child.key else child.key ++ "=" ++ child.value]
 
 fn failure(source) => tikz.render(source) ^ { ^.message }
@@ -26,8 +26,8 @@ let styled = parse("\\begin{tikzpicture}[box/.style={draw=#1, thick}, box/.defau
     "\\node[box=red] (g) at (2,2) {G};" ++
     "\\end{tikzpicture}", {type: "tikz"})^[0]
 let styled_nodes = [for (child in styled, nested in
-    if (child is element and string(name(child)) == "scope") children_named(child, "node")
-    else if (child is element and string(name(child)) == "node") [child] else []) nested]
+    ((if (child is element and string(name(child)) == "scope") children_named(child, "node")
+    else if (child is element and string(name(child)) == "node") [child] else []) ^ { [] })) nested]
 
 let pic_source = "\\begin{tikzpicture}" ++
     "\\tikzset{seg/.pic={\\draw[#1] (0,0) -- (1,0);\\draw[#1] (1,0) -- (1,1);}}" ++
@@ -47,7 +47,7 @@ let document = latex.render_to_html(parse("\\documentclass{article}\\usepackage{
 [for (node in styled_nodes) node.id ++ ": " ++ string(option_text(node))];
 [for (pic in pics) string(pic.x) ++ "," ++ string(pic.y) ++ " " ++ pic.name ++ " arg=" ++
     (if (pic.argument == null) "none" else pic.argument) ++ " paths=" ++
-    string([for (path in children_named(pic, "path")) path.options_source])];
+    string([for (path in ((children_named(pic, "path")) ^ { [] })) path.options_source])];
 // The picture spans (0,0)-(4,3) cm; a pic body is translated to its `at` point.
 [contains(pic_drawn, "M61.7953 61.7953 L99.5906 61.7953\" fill=\"none\" stroke=\"red\""),
     contains(pic_drawn, "M99.5906 61.7953 L99.5906 24\" fill=\"none\" stroke=\"red\""),

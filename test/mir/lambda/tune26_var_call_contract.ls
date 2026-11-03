@@ -5,7 +5,7 @@ pn tune26_var_call_boundary(var values: float[]) any {
     values[0] = values[0] + 1.0
 }
 
-pn tune26_var_call_contract(var values: float[]) float {
+pn tune26_var_call_contract(var values: float[]) float^ {
     tune26_var_call_boundary(values)
     return values[0] + values[1]
 }

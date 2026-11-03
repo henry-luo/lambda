@@ -4,7 +4,7 @@ import ant: lambda.ui.dtna
 import bold: lambda.ui.bold
 import wired: lambda.ui.wired
 
-view <control_fixture> state text:"seed", notes:"note", choice:10, enabled:false, radio:"a",
+view <control_fixture> () any^ state text:"seed", notes:"note", choice:10, enabled:false, radio:"a",
     requests:0, accepted:true, value_type:"", compositions:0 {
     <body <style "body{font-family:Arial;padding:20px}input,textarea,select,button{margin:6px} .row{margin:10px}">
         <div class:"row", apply(<control.input id:"field",value:text,on_change:"text">)

@@ -11,7 +11,7 @@ pub fn empty(profile) map =>
 pub fn data(user) map => {format:user.format,format_version:user.format_version,
     profile:user.profile,next_seq:user.next_seq,entries:user.entries}
 
-fn bucket(reading) string {
+fn bucket(reading) string^ {
     let parts = split(reading,"'");
     string(len(parts)) ++ ":" ++ parts[0][0]
 }
@@ -19,7 +19,7 @@ fn bucket(reading) string {
 fn indexed(user) map {
     let sorted = sort(user.entries,(entry)=>[-entry[3],-entry[2],entry[0],entry[1]])
     let keys = unique([for (entry in sorted) bucket(entry[1])]);
-    {*:user,index:map([for (key in keys) (key,[for (entry in sorted where bucket(entry[1]) == key) entry])])}
+    {*:user,index:map([for (key in keys) (key,[for (entry in sorted where ((bucket(entry[1]) == key) ^ { false })) entry])])}
 }
 
 pub fn validate(user,table,profile = null) map^ {
@@ -61,7 +61,7 @@ pub fn learn(user,selections) map^ {
     }
 }
 
-fn scan(user,paths,opts,path_at,entry_at,inspected,items) map {
+fn scan(user,paths,opts,path_at,entry_at,inspected,items) map^ {
     if (path_at == len(paths)) {items:items,truncated:false}
     else {
         let q = lookup.query(paths[path_at])
@@ -81,11 +81,11 @@ fn scan(user,paths,opts,path_at,entry_at,inspected,items) map {
 pub fn promote(user,paths,base,opts) map^ {
     let matches = scan(user,paths,opts,0,0,0,[])
     let weights = map([for (item in base.items) (item.text ++ "\t" ++ item.reading,item.weight)])
-    let ordered = sort([for (item in matches.items) {*:item,
+    let ordered = sort([for (item in ((((((matches.items) ^ { [] })))))) {*:item,
         weight:c.get(weights,item.text ++ "\t" ++ item.reading,0)}],
         (item)=>[-item.last_seq,-item.count,-item.coverage,rank.quality(string(item.match)),-item.weight,item.order])
     let combined = rank.distinct([*ordered,*base.items]);
-    {items:[for (item in take(combined,opts.max_candidates)) {text:item.text,reading:item.reading,
+    {items:[for (item in ((take(combined,opts.max_candidates)) ^ { [] })) {text:item.text,reading:item.reading,
         consumed:item.consumed,coverage:item.coverage,match:item.match,weight:item.weight}],
         truncated:base.truncated or matches.truncated or len(combined) > opts.max_candidates,scanned:base.scanned}
 }

@@ -1,0 +1,16 @@
+<!doctype html><meta charset='utf-8'><style>
+@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+body{margin:0;font:20px/20px Ahem} .row{display:flow-root;width:240px;height:100px}
+.a{float:left;width:50px;height:20px}.b{float:left;clear:left;width:100px;height:50px}
+rt{font-size:10px}.prefix{display:inline-block;width:30px}.tall{display:inline-block;width:40px;height:30px}
+#counter-after::before{content:counter(mark)}
+</style><div id='result'><div id='under' class='row' style=''><div class='a' id='under-first'></div><div class='b' id='under-second'></div><ruby id='under-ruby' style='ruby-position:under'>ab<rt id='under-reading'>xxxx</rt></ruby></div>
+<div id='over' class='row' style=''><div class='a' id='over-first'></div><div class='b' id='over-second'></div><ruby id='over-ruby' style='ruby-position:over'>ab<rt id='over-reading'>xxxx</rt></ruby></div>
+<div id='tall' class='row' style=''><div class='a' id='tall-first'></div><div class='b' id='tall-second'></div><span id='tall-control' class='tall'></span></div>
+<div id='prefix' class='row' style=''><div class='a' id='prefix-first'></div><div class='b' id='prefix-second'></div><span class='prefix' id='prefix-control'>X</span><ruby id='prefix-ruby' style='ruby-position:under'>ab<rt id='prefix-reading'>xxxx</rt></ruby></div>
+<div id='wrap' class='row' style='width:180px'><div class='a' id='wrap-first'></div><div class='b' id='wrap-second'></div><span class='prefix' id='wrap-control'>X</span><ruby id='wrap-ruby' style='ruby-position:under'>ab<rt id='wrap-reading'>xxxx</rt></ruby><ruby id='wrap-next-ruby' style='ruby-position:under'>ab<rt id='wrap-next-reading'>xxxx</rt></ruby></div><div id='nested' class='row'><div class='a' id='nested-first'></div><div class='b' id='nested-second'></div><span id='nested-wrapper'><span class='prefix' id='nested-control'>X</span><span><ruby id='nested-ruby' style='ruby-position:under'>ab<rt id='nested-reading'>xxxx</rt></ruby></span></span></div>
+<div id='push' class='row' style='width:120px'><div class='a' id='push-first'></div><div class='b' id='push-second'></div><ruby id='push-ruby' style='ruby-position:under'>ab<rt id='push-reading'>xxxx</rt></ruby></div>
+<div id='counter' class='row' style='counter-reset:mark'><div class='a' id='counter-first'></div><div class='b' id='counter-second'></div><ruby id='counter-ruby' style='ruby-position:under'><span id='counter-base' style='counter-increment:mark'>ab</span><rt id='counter-reading'>xxxx</rt></ruby><span id='counter-after'></span></div>
+
+<div id='single-wrap' class='row' style='width:160px'><div class='a' id='single-wrap-first'></div><div class='b' id='single-wrap-second'></div><span class='prefix' id='single-wrap-control'>X</span><ruby id='single-wrap-ruby' style='ruby-position:under;white-space:nowrap'>ab<rt id='single-wrap-reading'>xxxx</rt></ruby></div>
+</div>

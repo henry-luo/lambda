@@ -2,4 +2,5 @@
 // admitted one at a range-typed parameter and returned it.
 fn dyn(v) => v
 fn f(x: 1 to 5) { x }
-"bound: " ++ string(f(dyn(1 to 5)))
+let admitted = f(dyn(1 to 5))
+admitted

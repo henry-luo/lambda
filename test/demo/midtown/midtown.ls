@@ -14,7 +14,7 @@ import present: .mod_present
 
 let PROFILE = sys.proc.self.env.MIDTOWN_PROFILE# == "1"
 // MIDTOWN_SPAWN=x,z,heading starts the car elsewhere, for replays of a particular corner of the city
-fn spawn_at(text) => (let parts = [for (p in split(text or "", ",")) float(p) ^ { null }],
+fn spawn_at(text) => (let parts = [for (p in split(text or "", ",") ^ { [] }) float(p) ^ { null }],
     if (len(parts) == 3 and all([for (p in parts) p is number])) {x: parts[0], z: parts[1], heading: parts[2]} else present.START)
 let START = present.initial(spawn_at(sys.proc.self.env.MIDTOWN_SPAWN#))
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "midtown")
@@ -53,11 +53,11 @@ pn command(owner, st, act) {
     if (act == "look") {
         let look = sc.next_look(st.look)
         let lights = look != "day"
-        present.apply_edits(st, sc.look_edits(look, lights))
+        present.apply_edits(st, sc.look_edits(look, lights))^
         return {*: st, look: look, lights: lights, toast: sc.LOOKS[look].label, toast_until: st.t + 1.5}
     }
     if (act == "lights") {
-        present.apply_edits(st, sc.lights_edits(not st.lights))
+        present.apply_edits(st, sc.lights_edits(not st.lights))^
         return {*: st, lights: not st.lights, toast: if (st.lights) "Headlights off" else "Headlights on", toast_until: st.t + 1.5}
     }
     if (act == "camera") {
@@ -76,11 +76,11 @@ pn command(owner, st, act) {
     if (act == "reset") { return {*: present.reset_car(st), toast: "Back on the road", toast_until: st.t + 1.5} }
     if (act == "pause") {
         if (st.paused) {
-            runtime.play(h.scene)
+            runtime.play(h.scene)^
             dom.set_attribute(owner, "data-paused", "false")
             return {*: st, paused: false, last: null, token: dom.request_frame(owner, "drive_frame")}
         }
-        runtime.pause(h.scene)
+        runtime.pause(h.scene)^
         dom.set_attribute(owner, "data-paused", "true")
         if (st.token > 0) dom.cancel_frame(owner, st.token)
         return {*: st, paused: true, token: 0, keys: present.NO_KEYS, touch: present.NO_KEYS}
@@ -103,37 +103,37 @@ pn pressed_states(owner, st) {
 
 view <drive_session> state st: START { ~.rendered }
 on drive_activate(evt) {
-    if (evt.event_phase != 2 or st.handles != null) { return 'pass' }
+    if ((evt.event_phase != 2 or st.handles != null)^) { return 'pass' }
     let owner = evt.target
     let bound = {*: st, handles: present.bind(owner)}
     st = frame(owner, bound, evt.time_stamp)
     return 'handled'
 }
 on drive_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != st.token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != st.token)^) { return 'pass' }
     st = frame(evt.target, {*: st, token: 0}, evt.time_stamp)
     return 'handled'
 }
 on click(evt) {
     let button = dom.closest(evt.target, "[data-act]")
-    if (button == null or st.handles == null) { return 'pass' }
+    if ((button == null or st.handles == null)^) { return 'pass' }
     let owner = owner_of(evt)
     st = command(owner, st, dom.get_attribute(button, "data-act"))
     pressed_states(owner, st)
     // keys keep driving the car after a button click
-    if (st.started) dom.focus_set(st.handles.scene, false)
+    if ((st.started)^) dom.focus_set(st.handles.scene, false)^
     return 'handled'
 }
 on keydown(evt) {
-    if (st.handles == null or evt.metaKey or evt.ctrlKey or evt.altKey) { return 'pass' }
+    if ((st.handles == null or evt.metaKey or evt.ctrlKey or evt.altKey)^) { return 'pass' }
     let owner = owner_of(evt)
     let key = evt.key
     let held = present.key_of(key)
-    if (held != null) {
+    if ((held != null)^) {
         // a driving key takes the wheel back from Auto drive
         let manual = if (st.auto != null and held != "back" and held != "brake") {*: st, auto: null, toast: "You have the wheel", toast_until: st.t + 1.5} else st
         st = {*: manual, keys: present.set_key(manual.keys, held, true)}
-        if (manual.auto == null and st.started) pressed_states(owner, st)
+        if ((manual.auto == null and st.started)^) pressed_states(owner, st)^
         return 'prevent-default'
     }
     let lower_key = lower(key)
@@ -141,19 +141,19 @@ on keydown(evt) {
         else if (lower_key == "n") "look" else if (lower_key == "l" or lower_key == "z") "lights" else if (lower_key == "v") "camera"
         else if (lower_key == "m") "courier" else if (lower_key == "o") "auto" else if (lower_key == "r") "reset"
         else if (lower_key == "h") "help" else null
-    if (act == null or evt.repeat) { return if (act == null) 'pass' else 'prevent-default' }
+    if ((act == null or evt.repeat)^) { return if (act == null) 'pass' else 'prevent-default' }
     st = command(owner, st, act)
     pressed_states(owner, st)
     return 'prevent-default'
 }
 on keyup(evt) {
     let held = present.key_of(evt.key)
-    if (held == null) { return 'pass' }
+    if ((held == null)^) { return 'pass' }
     st = {*: st, keys: present.set_key(st.keys, held, false)}
     return 'prevent-default'
 }
 on pointerdown(evt) {
-    if (st.handles == null or evt.button != 0) { return 'pass' }
+    if ((st.handles == null or evt.button != 0)^) { return 'pass' }
     let pedal = dom.closest(evt.target, "[data-hold]")
     if (pedal != null) {
         dom.set_pointer_capture(pedal, evt.pointerId)
@@ -163,19 +163,19 @@ on pointerdown(evt) {
         return 'prevent-default'
     }
     if (dom.closest(evt.target, "scene3d") == null) { return 'pass' }
-    dom.focus_set(st.handles.scene, false)
+    dom.focus_set(st.handles.scene, false)^
     dom.set_pointer_capture(st.handles.scene, evt.pointerId)
     st = {*: st, drag: {pedal: null, x: evt.clientX, y: evt.clientY}}
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (st.drag == null or st.drag.pedal != null) { return 'pass' }
+    if ((st.drag == null or st.drag.pedal != null)^) { return 'pass' }
     st = {*: st, camera: cam.drag(st.camera, (evt.clientX - st.drag.x) * 0.006, (evt.clientY - st.drag.y) * 0.003),
         drag: {*: st.drag, x: evt.clientX, y: evt.clientY}}
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     dom.release_pointer_capture(evt.target, evt.pointerId)
     st = {*: st, touch: if (st.drag.pedal != null) present.set_key(st.touch, st.drag.pedal, false) else st.touch, drag: null}
     return 'prevent-default'
@@ -187,9 +187,9 @@ on pointercancel(evt) {
 // props the car scatters
 on physicscontactstart(evt) {
     let d = evt.detail
-    if (d == null or st.handles == null) { return 'pass' }
+    if ((d == null or st.handles == null)^) { return 'pass' }
     let other = if (d.body_a == "player") d.body_b else if (d.body_b == "player") d.body_a else null
-    if (other == null or not starts_with(other, "prop-") or contains(st.smashed, other)) { return 'pass' }
+    if (other == null or not starts_with(other, "prop-")^ or contains(st.smashed, other)^) { return 'pass' }
     let smashed = [*st.smashed, other]
     st = {*: st, smashed: smashed, toast: string(len(smashed)) ++ " props scattered", toast_until: st.t + 1.4}
     return 'handled'
@@ -199,7 +199,7 @@ on blur(evt) {
     return 'pass'
 }
 on closerequest(evt) {
-    if (st.token > 0 and st.handles != null) dom.cancel_frame(st.handles.owner, st.token)
+    if ((st.token > 0 and st.handles != null)^) dom.cancel_frame(st.handles.owner, st.token)^
     st = {*: st, token: 0, paused: true}
     return 'pass'
 }

@@ -14,7 +14,7 @@ fn swap(left: Context, right: Context, remaining: int) Result {
     if (remaining <= 0) result("s", left.column * 10 + right.column)
     else swap(right, left, remaining - 1)
 }
-fn chain(ctx: Context, remaining: int) Result {
+fn chain(ctx: Context, remaining: int) Result^ {
     if (remaining <= 0) result("", ctx.column)
     else {
         let child = step(ctx)

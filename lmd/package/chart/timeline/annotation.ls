@@ -14,7 +14,7 @@ fn interval(value, anchor, scale, path) {
     if (failure is error) failure else {start:earliest,end:latest,label:raw.label}
 }
 
-pub fn uncertainty(value, start, end, kind, scale) {
+pub fn uncertainty(value, start, end, kind, scale) any^ {
     if (value==null) null else if (not (value is map)) c.fail("event.uncertainty","expected uncertainty bounds")
     else if (kind=="point") {
         let bounds=interval(value,start,scale,"event.uncertainty");

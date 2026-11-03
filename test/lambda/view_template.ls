@@ -42,5 +42,5 @@ apply(7)
 99 |> apply()
 
 // Test 8: User function doesn't conflict with sys apply
-fn my_apply(f, x) => f(x)
+fn my_apply(f, x) any^ => f(x)
 my_apply((x) => x * 10, 5)

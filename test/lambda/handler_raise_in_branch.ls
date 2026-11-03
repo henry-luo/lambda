@@ -16,7 +16,7 @@ fn in_block(x) any^ {
 }
 fn two_arms(x) any^ =>
   if (x == 99) 0
-  else checked(x) ^ { raise error("two: " ++ ^.message) } ~ { ~ * 10 }
+  else { let __error_outcome_1 = checked(x) ^ { ^ }; if (__error_outcome_1 is error) { raise error("two: " ++ __error_outcome_1.message) } else match __error_outcome_1 { case any { ~ * 10 } } }
 
 "normal path:";
 [(in_else(1) ^ { "error: " ++ ^.message }), (in_then(2) ^ { "error: " ++ ^.message }), (in_block(3) ^ { "error: " ++ ^.message }), (two_arms(4) ^ { "error: " ++ ^.message })];

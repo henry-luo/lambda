@@ -18,8 +18,8 @@ let recipe=t.layout({*:raw,parts:{card_body:{render:(item,fallback)=><div style:
 let viewport=radiant.measure_html("<html><body style='margin:0'><div style='width:50vw;height:25vh'></div></body></html>",600,400);
 [
  ["rich content controls height",height(measured,"long")>height(measured,"short")+30],
- ["authored dimensions",all([for (item in fixed.events) item.bounds.right-item.bounds.left==180 and item.bounds.bottom-item.bounds.top==75])],
- ["size constraints",all([for (item in bounded.events) item.bounds.right-item.bounds.left==160 and item.bounds.bottom-item.bounds.top<=90])],
+ ["authored dimensions",all([for (item in ((fixed.events) ^ { [] })) item.bounds.right-item.bounds.left==180 and item.bounds.bottom-item.bounds.top==75])],
+ ["size constraints",all([for (item in ((bounded.events) ^ { [] })) item.bounds.right-item.bounds.left==160 and item.bounds.bottom-item.bounds.top<=90])],
  ["read more measured",height(expanded,"long")>height(collapsed,"long")],
  ["font changes measured",height(large,"short")>height(measured,"short")],
  ["custom body measured",height(recipe,"short")>190],

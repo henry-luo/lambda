@@ -12,14 +12,14 @@ type Node = {left: Node?, right: Node?}
 // a local first (`var n: Node = {...}; return n`) disqualifies the function, drops
 // the caller's `_region` argument, and downgrades map_with_region_tl to the generic
 // heap map_with — ~1.6x on allocation-bound code.
-pn make_tree(depth: int) Node {
+fn make_tree(depth: int) Node {
     if (depth == 0) {
         return {left: null, right: null}
     }
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-pn check(node: Node) int {
+fn check(node: Node) int^ {
     if (node.left == null) {
         return 1
     }

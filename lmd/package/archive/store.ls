@@ -11,10 +11,10 @@ pub pn ensure(root) null^ {
     null
 }
 
-fn strip_dashes(s) => if (starts_with(s, "-")) strip_dashes(slice(s, 1))
+fn strip_dashes(s) any^ => if (starts_with(s, "-")) strip_dashes(slice(s, 1))
     else if (ends_with(s, "-")) strip_dashes(slice(s, 0, len(s) - 1)) else s
 // a folder-safe slug of a title or host: ascii letters and digits, dashes between
-pub fn slug(text) {
+pub fn slug(text) any^ {
     let s = strip_dashes(replace(lower(trim(string(text or ""))), \((!(("a" to "z") | ("0" to "9")))+), "-"))
     let cut = strip_dashes(slice(s, 0, 60));
     if (cut == "") "page" else cut
@@ -27,12 +27,12 @@ pub pn stamp() map {
 }
 
 fn taken(root, id) => exists(root ++ "/snapshots/" ++ id) or exists(root ++ "/.staging/" ++ id)
-fn free_id(root, base, i) {
+fn free_id(root, base, i) any^ {
     let candidate = if (i == 1) base else base ++ "-" ++ string(i);
     if (taken(root, candidate)) free_id(root, base, i + 1) else candidate
 }
 // `base` or the first numbered variant no folder holds yet
-pub fn unique_id(root, base) => free_id(root, base, 1)
+pub fn unique_id(root, base) any^ => free_id(root, base, 1)
 
 // a new staging folder named after `name`, numbered when another job holds
 // that name: jobs started in the same second must not share one, and a folder
@@ -99,8 +99,8 @@ pub pn unpack(zip_path, dir) null^ {
 
 // snapshot.zip from the members: top-level files and the assets/ folder
 pub pn pack(dir, members, zip_name) int^ {
-    let top = [for (m in members where index_of(m.name, "/") == null) <fs name: m.name, kind: 'file', (m.data or "")>]
-    let assets = [for (m in members where starts_with(m.name, "assets/")) <fs name: slice(m.name, 7), kind: 'file', (m.data or "")>]
+    let top = [for (m in members where (index_of(m.name, "/") == null)^) <fs name: m.name, kind: 'file', (m.data or "")>]
+    let assets = [for (m in members where ((starts_with(m.name, "assets/")) ^ { false })) <fs name: slice(m.name, 7), kind: 'file', (m.data or "")>]
     let folders = if (len(assets) == 0) [] else [<fs name: "assets", kind: 'dir', *assets>]
     let tree = <fs kind: 'dir', *[*top, *folders]>;
     output(tree, dir ++ "/" ++ zip_name, {format: 'zip', deterministic: true})^

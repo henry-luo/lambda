@@ -4,19 +4,19 @@
 pub let THUMB_SIZE = 512
 let DIGITS = "0123456789abcdef"
 
-fn hex2(v) {
+fn hex2(v) any^ {
     let n = int(round(v * 255.0))
     slice(DIGITS, int(floor(n / 16)), int(floor(n / 16)) + 1) ++ slice(DIGITS, n % 16, n % 16 + 1)
 }
 
 // as_float first: axis reductions over ubyte arrays wrap modulo 256 (issue LR05-16)
-pub fn colour(pixels) {
+pub fn colour(pixels) any^ {
     let c = avg(avg(as_float(pixels), 0), 0)
     "#" ++ hex2(c[0]) ++ hex2(c[1]) ++ hex2(c[2])
 }
 
 // corpus directory from PHOTO_ALBUM_DIR (relative to cwd), else the demo's own directory
-pub fn directory(fallback) {
+pub fn directory(fallback) any^ {
     let env = sys.proc.self.env.PHOTO_ALBUM_DIR#
     let dir = if (env is string and env != "") env else fallback
     if (ends_with(dir, "/")) dir else dir ++ "/"

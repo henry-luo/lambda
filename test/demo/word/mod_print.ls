@@ -42,7 +42,7 @@ pub fn composed(values) => scale(values)!=1.0 or values.per_sheet!="1" or values
 
 // A section ends only at an explicit page break; the PDF paginates long sections. Measure each top-level block at the
 // printed width and start a new page before the first block that would cross the writing area, so previews never cut a line.
-fn breaks(blocks,height,start=0,i=0,starts=[0]) {
+fn breaks(blocks,height,start=0,i=0,starts=[0]) any^ {
     if (i>=len(blocks)) starts
     else {
         let b = blocks[i];
@@ -80,7 +80,7 @@ pub fn page_numbers(values,count) {
     else if (values.pages=="even") [for (n in 1 to count where n%2==0) n]
     else if (values.pages!="custom") [for (n in 1 to count) n]
     else {
-        let parts = [for (part in split(values.range,",") where trim(part)!="") split(trim(part),"-")]
+        let parts = [for (part in ((split(values.range,",")) ^ { [] }) where trim(part)!="") split(trim(part),"-")]
         let spans = [for (p in parts) [int(trim(p[0])) ^ { null },int(trim(p[len(p)-1])) ^ { null }]]
         if (len(spans)==0 or any([for (p in parts) len(p)>2]) or
             not all([for (s in spans) s[0] is int and s[1] is int and 1<=s[0] and s[0]<=s[1] and s[1]<=count])) null
@@ -93,7 +93,7 @@ pub fn layout(doc,values) {
     let p = page.settings(doc)
     let g = page.geometry(doc)
     let per = int(values.per_sheet)
-    let grid = [for (x in grids where x.n==per) x][0]
+    let grid = [for (x in grids where ((x.n==per) ^ { false })) x][0]
     let turned = per==2 or per==6
     let width = if (turned) g.height else g.width
     let height = if (turned) g.width else g.height
@@ -112,6 +112,6 @@ pub fn sheets(doc,values,starts) array^ {
     else if (len(numbers)==0) []
     else {
         let chosen = [for (n in numbers) {number:n,entry:all[n-1]}];
-        [for (k in 0 to int(ceil(len(chosen)/per))-1) slice(chosen,k*per,min(len(chosen),(k+1)*per))]
+        [for (k in ((0 to int(ceil(len(chosen)/per))-1) ^ { [] })) slice(chosen,k*per,min(len(chosen),(k+1)*per))]
     }
 }

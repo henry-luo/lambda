@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of awfy/bounce2.ls. */
 extern int printf(const char *, ...);
 
@@ -9,6 +10,7 @@ static int next_random(int *seed) {
 static int abs_int(int value) { return value < 0 ? -value : value; }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int bx[100], by[100], bxv[100], byv[100];
     int seed = 74755;
     int bounces = 0;
@@ -27,6 +29,8 @@ int main(void) {
         if (by[i] < 0) { by[i] = 0; byv[i] = abs_int(byv[i]); bounced = 1; }
         bounces += bounced;
     }
+    BENCH_KERNEL_END();
     printf(bounces == 1331 ? "Bounce: PASS\n" : "Bounce: FAIL result=%d\n", bounces);
+    BENCH_KERNEL_REPORT();
     return bounces != 1331;
 }

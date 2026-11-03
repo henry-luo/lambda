@@ -9,8 +9,8 @@
 // must contain BOTH -- the native integer fast arm AND the single double
 // compare behind the band guard.
 
-pn count_positive() int {
-    var counts: int[] = fill(4, 0)
+pn count_positive() int^ {
+    var counts: int[] = fill(4, 0)^
     counts[0] = 3
     counts[1] = 0 - 2
     counts[2] = 7

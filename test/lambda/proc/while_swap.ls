@@ -69,10 +69,10 @@ pn test_bubble_sort() {
 
 // Test 5: GCD with modular swap (Euclidean algorithm)
 pn test_gcd() {
-    var x: int = 48
-    var y: int = 18
-    var temp: int = 0
-    while (y > 0) {
+    var x: int^ = 48
+    var y: int^ = 18
+    var temp: int^ = 0
+    while ((y > 0)^) {
         temp = y
         y = int(x % y)
         x = temp
@@ -82,10 +82,10 @@ pn test_gcd() {
 
 // Test 6: Collatz sequence step count
 pn test_collatz() {
-    var val: int = 27
+    var val: int^ = 27
     var steps: int = 0
-    while (val > 1) {
-        if (val % 2 == 0) {
+    while ((val > 1)^) {
+        if ((val % 2 == 0)^) {
             val = int(val div 2)
         } else {
             val = val * 3 + 1

@@ -13,7 +13,7 @@ pn tune26_var_param_proof(var flags: bool[], n: int) int {
 }
 
 pn main() {
-    var flags: bool[] = fill(6, true)
+    var flags: bool[] = fill(6, true)^
     let snapshot = flags
     print(tune26_var_param_proof(flags, 6)); print(" ")
     print(snapshot[0]); print(" ")

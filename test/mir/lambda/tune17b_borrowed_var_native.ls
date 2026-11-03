@@ -17,7 +17,7 @@ pn main() {
     var v: int[] = [1, 2]
     var i: int = 0
     while (i < 3) {
-        tune17b_step(s, v, 2)
+        tune17b_step(s, v, 2)^
         i = i + 1
     }
     print(s.n)

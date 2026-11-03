@@ -72,7 +72,7 @@ pn main() {
     print("\n")
 
     // a missing source is an error
-    var missing: any | error = io.grep("test/input/grep_tree/nope.txt", "x")
+    var missing: any^ = io.grep("test/input/grep_tree/nope.txt", "x")
     print("T19:", missing is error)
     print("\n")
 
@@ -105,7 +105,7 @@ pn main() {
     print("\n")
 
     // files and count both say what a result is: asking for both is an error
-    var both: any | error = io.grep("test/input/grep_tree/notes.txt", "TODO", {files: true, count: true})
+    var both: any^ = io.grep("test/input/grep_tree/notes.txt", "TODO", {files: true, count: true})
     print("T27:", both is error)
     print("\n")
 }

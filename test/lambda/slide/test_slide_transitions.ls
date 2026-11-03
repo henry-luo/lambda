@@ -8,8 +8,8 @@ import ui_model: ~~.~~.demo.slides.mod_transitions
 fn deck(kind,variant=null,direction='left') => <presentation width:400.0,height:240.0,
     <slide id:"before",background:"#ff0000">
     <slide id:"after",background:"#0000ff",transition:kind,transition_variant:variant,direction:direction,transition_duration:1000.0>>
-fn plan(kind,variant=null,direction='left') => slide.compile(deck(kind,variant,direction))^
-fn sample(kind,variant=null,direction='left',elapsed=500.0) => fx.sample(plan(kind,variant,direction),{slide:1,phase:'transition',time_ms:elapsed})
+fn plan(kind,variant=null,direction='left') any^ => slide.compile(deck(kind,variant,direction))^
+fn sample(kind,variant=null,direction='left',elapsed=500.0) any^ => fx.sample(plan(kind,variant,direction),{slide:1,phase:'transition',time_ms:elapsed})
 let wipe = sample('wipe')
 let reveal = sample('reveal')
 let split = sample('split','in')
@@ -25,7 +25,7 @@ let timed_plan = slide.compile(<presentation
         <cue start:'entry',<effect target:"text",kind:'fade-in',duration:100.0>>>
     <slide id:"b",advance_after:300.0,transition:'wipe',transition_duration:100.0>
     <slide id:"c">>)^
-fn command(st,key,at) => slide.reduce(timed_plan,st,{command:key,time_ms:at})^
+fn command(st,key,at) any^ => slide.reduce(timed_plan,st,{command:key,time_ms:at})^
 let active = command(slide.initial_state(timed_plan),"activate",0.0)
 let built = command(active,"frame",100.0)
 let paused = command(built,"pause",150.0)
@@ -68,10 +68,10 @@ let instant_start = slide.reduce(instant,slide.initial_state(instant),{command:"
         slide.initial_state(timed_plan,{start_slide:1}).slide == 1,
         composed.plan.slides[0].advance_after == 150.0 and len(composed_preview.slides[1].objects) == 2],
     media:[media.data_uri_bytes(media.data_uri(b'01FF',"audio/wav")^)^ == b'01FF',
-        media.data_uri_bytes("data:audio/wav,plain") ^ {true} ~ {false}],
-    invalid:[slide.compile(deck('bad')) ^ {true} ~ {false},slide.compile(deck('split','circle')) ^ {true} ~ {false},
-        slide.compile(<presentation <slide advance_after: -1.0>>) ^ {true} ~ {false},
-        slide.compile(<presentation <slide advance_on_click:"false">>) ^ {true} ~ {false},
-        slide.compile(<presentation <slide transition_sound:{src:"",name:"Bad"}>>) ^ {true} ~ {false},
-        ui_model.property(chosen,"duration","nan") ^ {true} ~ {false},ui_model.property(chosen,"after","-2") ^ {true} ~ {false}]
+        match (media.data_uri_bytes("data:audio/wav,plain") ^ { ^ }) { case error: true default: false }],
+    invalid:[match (slide.compile(deck('bad')) ^ { ^ }) { case error: true default: false },match (slide.compile(deck('split','circle')) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide advance_after: -1.0>>) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide advance_on_click:"false">>) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide transition_sound:{src:"",name:"Bad"}>>) ^ { ^ }) { case error: true default: false },
+        match (ui_model.property(chosen,"duration","nan") ^ { ^ }) { case error: true default: false },match (ui_model.property(chosen,"after","-2") ^ { ^ }) { case error: true default: false }]
 }

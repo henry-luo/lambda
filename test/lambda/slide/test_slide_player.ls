@@ -11,7 +11,7 @@ let deck = <presentation
     >
 >
 let plan = slide.compile(deck)^
-fn command(ps, cmd, ms) => slide.reduce(plan, ps, {command: cmd, time_ms: ms})^
+fn command(ps, cmd, ms) any^ => slide.reduce(plan, ps, {command: cmd, time_ms: ms})^
 let initial = slide.initial_state(plan)
 let running = command(initial, 'play', 0.0)
 let late = command(running, 'frame', 150.0)

@@ -41,17 +41,17 @@ pn run(root,scope,seq,request) {
     var failure = null
     var report = null
     output({units:request},path,'mark') ^ { failure = ^ }
-    if (failure==null) {
+    if ((failure==null)^) {
         var process_result = null
-        io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
-            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { failure = ^ } ~ { process_result = ~ }
-        if (failure==null and (process_result.exit_code!=0 or process_result.timed_out or process_result.truncated)) {
+        { let __error_outcome_1 = io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
+            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { process_result = ~ } } }
+        if ((failure==null and (process_result.exit_code!=0 or process_result.timed_out or process_result.truncated))^) {
             failure = error("Spelling check could not finish.")
         }
-        if (failure==null) {
-            utf8.decode(process_result.stdout) ^ { failure = ^ } ~ {
-                parse(~,'json') ^ { failure = ^ } ~ { report = ~ }
-            }
+        if ((failure==null)^) {
+            { let __error_outcome_2 = utf8.decode(process_result.stdout) ^ { ^ }; if (__error_outcome_2 is error) { failure = __error_outcome_2 } else match __error_outcome_2 { case any {
+                { let __error_outcome_3 = parse(~,'json') ^ { ^ }; if (__error_outcome_3 is error) { failure = __error_outcome_3 } else match __error_outcome_3 { case any { report = ~ } } }
+            } } }
         }
     }
     // io.exec kills and joins its process on cancellation before removing its private request.
@@ -80,7 +80,7 @@ pn source_rects(host,issue) {
 }
 
 // The compiled slide canvas has no editor source map; retain DOM text leaves as the geometry anchors.
-fn canvas_pieces(node,skip,language="en") {
+fn canvas_pieces(node,skip,language="en") any^ {
     let kind = dom.node_type(node)
     if (kind==3) [{node:node,text:dom.node_value(node)}]
     else if (kind!=1) []
@@ -100,7 +100,7 @@ fn canvas_pieces(node,skip,language="en") {
         }
     }
 }
-fn canvas_text(host,skip) => join([for (piece in canvas_pieces(host,skip)) piece.text],"")
+fn canvas_text(host,skip) => join([for (piece in ((canvas_pieces(host,skip)) ^ { [] })) piece.text],"")
 pn canvas_snapshot(host,skip) {
     let pieces = canvas_pieces(host,skip)
     var offset = 0
@@ -129,7 +129,7 @@ pn measured(root,scope,source,report,skip) {
     let clip = dom.bounding_box(clip_host)
     if (clip==null) { return [] }
     let snapshot = if (scope=="slides-canvas") canvas_snapshot(host,skip) else null
-    if (snapshot!=null and snapshot.text!=source) { return [] }
+    if ((snapshot!=null and snapshot.text!=source)^) { return [] }
     var found = []
     for (issue in report.issues) {
         let rects = if (snapshot!=null) canvas_rects(host,snapshot,issue)
@@ -145,7 +145,7 @@ pn measured(root,scope,source,report,skip) {
     }
     return found
 }
-fn wave(width) => "M0 2 " ++ join([for (i in 0 to int(ceil(width/8))+1) {
+fn wave(width) any^ => "M0 2 " ++ join([for (i in ((0 to int(ceil(width/8))+1) ^ { [] })) {
     let x = i*8;
     "Q" ++ string(x+2) ++ " 0 " ++ string(x+4) ++ " 2 Q" ++
         string(x+6) ++ " 4 " ++ string(x+8) ++ " 2"
@@ -177,7 +177,7 @@ on spelling_update(evt) {
         let previous_task = task
         job = job+1
         task = null
-        if (previous_task!=null) cancel(previous_task)
+        if ((previous_task!=null)^) cancel(previous_task)
     }
     if (source==null or detail.opened==true or detail.document==null) {
         // an old document's pending frame must not block the replacement's first paint.
@@ -194,19 +194,19 @@ on spelling_update(evt) {
     remaining = len(incremental.pending(units))
     if (source==null) { report = null; marks = [] }
     else if (frame==null) { frame = dom.request_frame(evt.target,"spelling_reposition_ready") }
-    if (not paused and source!=null and remaining>0 and task==null) {
+    if ((not paused and source!=null and remaining>0 and task==null)^) {
         job = job+1
         task = launch(dom.root_node(evt.target),~.scope,job,units,if (first_check) 0 else 350)
     }
     return 'handled'
 }
 on spelling_due(evt) {
-    if (evt.event_phase!=2 or paused or not current(job,evt.detail)) { return 'pass' }
+    if ((evt.event_phase!=2 or paused or not current(job,evt.detail))^) { return 'pass' }
     task = launch(dom.root_node(evt.target),~.scope,job,units)
     return 'handled'
 }
 on spelling_result(evt) {
-    if (evt.event_phase!=2 or paused or not current(job,evt.detail)) { return 'pass' }
+    if ((evt.event_phase!=2 or paused or not current(job,evt.detail))^) { return 'pass' }
     failure = evt.detail.error
     task = null
     if (evt.detail.report!=null) {
@@ -216,7 +216,7 @@ on spelling_result(evt) {
         last_paragraphs = len(evt.detail.report.units)
         last_checked = evt.detail.report.checked
         if (frame==null) { frame = dom.request_frame(evt.target,"spelling_reposition_ready") }
-        if (remaining>0) {
+        if ((remaining>0)^) {
             job = job+1
             task = launch(dom.root_node(evt.target),~.scope,job,units)
         }

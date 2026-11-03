@@ -63,6 +63,19 @@ protected:
 };
 
 // Test basic root scheme creation
+TEST_F(PathTest, RootsBelongToTheRequestingPoolWithoutGlobalReset) {
+    Path* first = path_get_root(PATH_SCHEME_TEMP);
+    ASSERT_NE(first, nullptr);
+    Pool* other = pool_create(); ASSERT_NE(other, nullptr);
+    path_test_pool = other;
+    Path* second = path_get_root(PATH_SCHEME_TEMP);
+    EXPECT_NE(second, nullptr); EXPECT_NE(second, first);
+    if (second) EXPECT_EQ(path_get_scheme(second), PATH_SCHEME_TEMP);
+    path_test_pool = pool;
+    pool_destroy(other);
+    EXPECT_EQ(path_get_scheme(first), PATH_SCHEME_TEMP);
+}
+
 TEST_F(PathTest, RootSchemeCreation) {
     Path* file_root = path_get_root(PATH_SCHEME_FILE);
     ASSERT_NE(file_root, nullptr);

@@ -2,6 +2,7 @@
 
 #include "async.h"
 #include "runtime-state.h"
+#include "security_context.h"
 #ifndef LAMBDA_NO_JUBE
 #include "../jube/jube_registry.h"
 #endif
@@ -13,8 +14,8 @@ static void rdb_host_close_row(void* user) {
 }
 
 static int rdb_host_authorize(const char* driver, const RdbTarget* targets, int count) {
-    // the JA16 policy model (realm/permission gates) is still undesigned
-    // (Jube ADR open item 8); every target is logged for audit meanwhile
+    // D7.5.2: no database service exists in the initial confined profile.
+    if (lambda_current_security_io()) return RDB_ERROR;
     for (int i = 0; i < count; i++) {
         const RdbTarget* t = &targets[i];
         if (t->kind == RDB_PEER_TCP) {

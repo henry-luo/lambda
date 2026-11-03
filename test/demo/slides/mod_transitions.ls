@@ -5,9 +5,9 @@ import fx: lambda.slide.transitions
 import html: lambda.slide.html
 
 pub let sounds = [{id:"none",label:"No Sound"},{id:"chime",label:"Chime"},{id:"click",label:"Click"},{id:"whoosh",label:"Whoosh"},{id:"custom",label:"Other Audio…"}]
-pub fn kind(st) => if (m.scene(st).source.transition == null) 'none' else m.scene(st).transition
-pub fn descriptor(st) => fx.descriptor(kind(st))
-pub fn sound_kind(st) => if (m.scene(st).transition_sound == null) "none"
+pub fn kind(st) any^ => if (m.scene(st).source.transition == null) 'none' else m.scene(st).transition
+pub fn descriptor(st) any^ => fx.descriptor(kind(st))
+pub fn sound_kind(st) any^ => if (m.scene(st).transition_sound == null) "none"
     else c.value([for (sound in sounds where sound.label == m.scene(st).transition_sound.name) sound.id][0],"custom")
 pub fn fields(st) => {*:map([for (key in fx.attributes) (key,m.scene(st).source[key])]),
     transition:kind(st),transition_duration:m.scene(st).transition_duration,direction:m.scene(st).direction,
@@ -36,10 +36,10 @@ pub fn property(st,key,value) any^ {
 pub fn sound(st,value) any^ => m.slide_properties(st,{transition_sound:value})^
 pub fn apply_all(st) any^ {
     let settings = fields(st);
-    m.commit_doc(st,m.with_slides(st.doc,[for (scene in m.scenes(st.doc)) <slide *:map(scene),*:settings,*content(scene)>]))^
+    m.commit_doc(st,m.with_slides(st.doc,[for (scene in ((m.scenes(st.doc)) ^ { [] })) <slide *:map(scene),*:settings,*content(scene)>]))^
 }
 pub fn preview(st) => <presentation *:map(st.doc),autostart:false,master:false,
-    *[for (child in content(st.doc) where name(child) != 'slide') child];
+    *[for (child in ((content(st.doc)) ^ { [] }) where ((name(child) != 'slide') ^ { false })) child];
     <slide id:"transition-before",background:html.layer_background(st.plan,if (st.index == 0) m.scene(st) else st.plan.slides[st.index-1]),
         *:if (st.index == 0) {} else {theme:st.plan.slides[st.index-1].source.theme},
         *if (st.index == 0) [] else c.objects(st.plan.slides[st.index-1].source)>

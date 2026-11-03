@@ -1,0 +1,12 @@
+true true true true false
+8 null null
+null -3 true
+null null
+-0 3 true
+3
+null
+3 false
+3 5
+9 5
+true true true
+7 5

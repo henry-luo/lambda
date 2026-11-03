@@ -33,7 +33,7 @@ on click() {
     emit("increment_parent",{})
 }
 on render(evt) {
-    if (evt.event_phase==2) dom.set_attribute(evt.target,"data-observed-revision",string(~.revision))
+    if (evt.event_phase==2) dom.set_attribute(evt.target,"data-observed-revision",string(~.revision)^)
     return 'pass'
 }
 let fixed_child = <nested_child id:"fixed-increment",revision:0>

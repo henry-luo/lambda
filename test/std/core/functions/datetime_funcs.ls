@@ -21,22 +21,22 @@ pn main() {
 
     // ===== today() returns date =====
     show(today() is date)
-    show(today().year >= 2025)
+    show(today().year >= 2025)^
 
     // ===== Member access on constructed =====
     let d = date(2025, 4, 26)
-    show(d.year)
-    show(d.month)
-    show(d.day)
+    show(d.year)^
+    show(d.month)^
+    show(d.day)^
 
     let t = time(10, 30, 45)
-    show(t.hour)
-    show(t.minute)
-    show(t.second)
+    show(t.hour)^
+    show(t.minute)^
+    show(t.second)^
 
     // ===== format =====
-    show(t'2025-04-26T10:30:45'.format("YYYY-MM-DD"))
-    show(t'2025-04-26T10:30:45'.format("HH:mm:ss"))
+    show(t'2025-04-26T10:30:45'.format("YYYY-MM-DD"))^
+    show(t'2025-04-26T10:30:45'.format("HH:mm:ss"))^
 
     // ===== Comparison operations =====
     show(date(2025, 1, 1) < date(2025, 12, 31))

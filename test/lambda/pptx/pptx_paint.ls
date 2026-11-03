@@ -2,7 +2,7 @@ import pptx: lambda.doc.pptx
 import slide: lambda.slide
 import theme: lambda.doc.docx.theme
 import c: lambda.doc.docx.common
-fn toned(rgb,tones) => theme.drawing_color(c.xml_node(<solidFill xmlns:c.A,<srgbClr val:rgb,*tones>>),{},null,true)
+fn toned(rgb,tones) any^ => theme.drawing_color(c.xml_node(<solidFill xmlns:c.A,<srgbClr val:rgb,*tones>>),{},null,true)
 let result = pptx.convert("test/input/pptx/paint.pptx",{unsupported:"error"})^
 let objects = slide.compile(result.document)^.slides[0].objects
 let frame = content(content(objects[0].source)[0])[0]

@@ -5,8 +5,8 @@ import util: .util
 
 pub let namespace = "http://www.w3.org/1998/Math/MathML"
 
-fn key(raw) => util.command_name(raw)
-fn value(n) => string(n.value or n.text or util.text_of(n))
+fn key(raw) any^ => util.command_name(raw)
+fn value(n) any^ => string(n.value or n.text or util.text_of(n))
 fn require(ok, message) bool^ => if (ok) true else raise error("mathml: " ++ message)
 
 // S8.2.2v6: accept resolved names and legacy constructed XML with declarations.
@@ -18,7 +18,7 @@ pub fn bindings(n, inherited) => reduce([inherited, *[for (k,v in n)
 pub fn local_name(n) => (let parts = split(string(name(n)), ":"), parts[len(parts)-1])
 fn prefix(n) => (let parts = split(string(name(n)), ":"), if (len(parts)>1) parts[0] else "")
 
-pub fn is_mathml(n) => n is element and local_name(n) == "math" and
+pub fn is_mathml(n) any^ => n is element and local_name(n) == "math" and
     (name(n) == symbol("math",namespace) or bindings(n,{})[prefix(n)] == namespace)
 
 pub fn parse_mathml(source) element^ {
@@ -44,7 +44,7 @@ pub fn to_mathml(ast, options = null) element^ {
             "expected a math AST")^
         let display_mode=if (options.display!=null) options.display else is_mathml(ast) and ast.display=="block"
         let context = {variant:"auto", style:if (display_mode) "display" else "text"}
-        let body = if (is_mathml(ast)) <mrow for (child in content(ast)) child>
+        let body = if (is_mathml(ast)) <mrow for (child in ((content(ast)) ^ { [] })) child>
             else if (ast is element and name(ast) == 'math') row(util.content_items(ast),context)^
             else node(ast,context)^;
         <math *:if (is_mathml(ast)) ast else {},xmlns:namespace, display:if (display_mode) "block" else "inline",
@@ -75,7 +75,7 @@ fn row(items,c,i=0) element^ {
             let child = styled_context(c,command)^
             let tail = row(items,child,i+1)^;
             if (child.style != c.style) wrap_style(tail,child.style) else tail
-        } else <mrow node(n,c)^; for (child in content(row(items,c,i+1)^)) child>
+        } else <mrow node(n,c)^; for (child in ((content(row(items,c,i+1)^)) ^ { [] })) child>
     }
 }
 
@@ -91,12 +91,12 @@ fn token(text,c,kind="mi") {
 }
 
 let operator_chars="+-−=<>≤≥≠≈±∓×÷⋅∈∉∪∩()[]{}|,;:!/"
-fn characters(text,c) => if (len(text)>0 and text!="." and all([for (ch in split(text,"")) contains("0123456789.",ch)]))
+fn characters(text,c) => if (len(text)>0 and text!="." and all([for (ch in ((split(text,"")) ^ { [] })) contains("0123456789.",ch)]))
     token(text,c,"mn")
     // S2.6.1v2: TeX letters are separate array-carried tokens; ASCII words stay whole.
-    else if (len(text)>1 and all([for (ch in split(text,""))
+    else if (len(text)>1 and all([for (ch in ((split(text,"")) ^ { [] }))
         not contains(operator_chars++"0123456789. \n\r\t",ch)])) token(text,c)
-    else <mrow for (ch in split(text,"") where not contains([" ","\n","\t","\r"],ch))
+    else <mrow for (ch in ((split(text,"")) ^ { [] }) where ((not contains([" ","\n","\t","\r"],ch)) ^ { false }))
         if (contains("0123456789",ch)) token(ch,c,"mn")
         else if (contains(operator_chars,ch)) token(if (ch=="-") "−" else ch,c,"mo")
         else token(ch,c)>
@@ -114,7 +114,7 @@ fn command(n,c) element^ {
     else token(glyph_text,c)
 }
 
-fn fence(raw) => (let spelling=key(raw), if (spelling == "." or spelling == "") null
+fn fence(raw) any^ => (let spelling=key(raw), if (spelling == "." or spelling == "") null
     else <mo stretchy:"true", sym.lookup_symbol(spelling) or raw>)
 
 fn scripts(n,c) element^ {
@@ -125,7 +125,7 @@ fn scripts(n,c) element^ {
     let limits = n.modifier == "limits" or n.modifier == "displaylimits" or (n.modifier != "nolimits" and
         base is element and name(base) == 'mo' and
         base.movablelimits == "true")
-    let operator = if (limits) <mo *:base, movablelimits:if (n.modifier=="limits") "false" else "true",for (child in content(base)) child> else base;
+    let operator = if (limits) <mo *:base, movablelimits:if (n.modifier=="limits") "false" else "true",for (child in ((content(base)) ^ { [] })) child> else base;
     if (limits and sub != null and sup != null) <munderover operator; sub; sup>
     else if (limits and sub != null) <munder operator; sub>
     else if (limits and sup != null) <mover operator; sup>

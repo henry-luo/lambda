@@ -7,9 +7,9 @@ pub fn dimensions(image, recipe) {
     let dims=shape(image);
     if (recipe.turns%2==0) dims else [dims[1],dims[0],4]
 }
-pub fn evaluate(image, recipe, compare=false, uncropped=false) =>
+pub fn evaluate(image, recipe, compare=false, uncropped=false) any^ =>
     image_process(image,options(recipe,compare,uncropped))
-pub fn proxy(image, edge=1280) {
+pub fn proxy(image, edge=1280) any^ {
     let dims=shape(image)
     let scale=min(1.0,edge/max(dims[0],dims[1]));
     if (scale==1) image else image_process(image,{output_height:max(1,int(round(dims[0]*scale))),

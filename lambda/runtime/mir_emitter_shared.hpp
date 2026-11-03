@@ -45,6 +45,8 @@ struct VarEntry {
     // enter through this edge rather than re-resolving a name (D8.2.4).
     NameEntry* binding;
     MIR_reg_t reg;
+    // Lambda confined captures use one GC-owned home; JS retains its own env ABI.
+    MIR_reg_t lambda_shared_home;
     MIR_reg_t method_field_present; // optional receiver fields retain absence across read-only calls
     int root_slot;
     int gc_home_id;
@@ -1251,6 +1253,36 @@ static inline void em_branch_int53_outside(MirEmitter* em, MIR_reg_t value, MIR_
         MIR_new_reg_op(em->ctx, shifted), MIR_new_int_op(em->ctx, 2 * INT53_MAX)));
 }
 
+static inline MIR_reg_t em_int_lane_abs(MirEmitter* em, MIR_reg_t operand) {
+    MIR_reg_t result = em_new_reg(em, "int_abs", MIR_T_I64);
+    MIR_label_t done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, operand)));
+    // positive null/inf pass through; negation maps -inf to inf and preserves nan.
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BGE, MIR_new_label_op(em->ctx, done),
+        MIR_new_reg_op(em->ctx, operand), MIR_new_int_op(em->ctx, 0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_NEG,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, operand)));
+    em_emit_label(em, done);
+    return result;
+}
+
+// callers materialize fallback operands before branching; this guard never collects.
+static inline MIR_reg_t em_guard_finite_int(MirEmitter* em, MirValue input, MIR_label_t miss) {
+    MIR_reg_t lane = input.reg;
+    if (input.rep != VALUE_REP_INT_LANE) {
+        assert(input.rep == VALUE_REP_ITEM);
+        MIR_reg_t tag = em_new_reg(em, "int_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+            MIR_new_reg_op(em->ctx, input.reg), MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, miss),
+            MIR_new_reg_op(em->ctx, tag), MIR_new_int_op(em->ctx, LMD_TYPE_INT)));
+        lane = em_unbox_finite_int_item(em, input.reg);
+    }
+    em_branch_int53_outside(em, lane, miss);
+    return lane;
+}
+
 // Frontends own the proof that admits a scalar operation. The numeric
 // table deliberately carries no coercion or nullability policy: Lambda's
 // nullable lanes and JavaScript's Number semantics remain frontend-local.
@@ -1490,6 +1522,15 @@ static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) 
 }
 
 typedef MIR_reg_t (*MirF64UnboxColdCall)(void* owner, MIR_reg_t item);
+
+// The nullable float lane reserves one NaN payload; ordinary NaNs remain numbers.
+static inline MIR_reg_t em_float_lane_null_test(MirEmitter* em, MIR_reg_t value) {
+    MIR_reg_t bits = em_emit_double_bits(em, value);
+    MIR_reg_t result = em_new_reg(em, "flnull", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ, MIR_new_reg_op(em->ctx, result),
+        MIR_new_reg_op(em->ctx, bits), MIR_new_int_op(em->ctx, (int64_t)FLOAT_LANE_NULL_BITS)));
+    return result;
+}
 
 // The two zero sentinels and out-of-band Float homes share one physical Item
 // decoder. The unsigned payload check admits only the exact sentinel words;
@@ -5176,6 +5217,44 @@ static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
     MIR_type_t types[1] = {a1t};
     MIR_op_t ops[1] = {a1};
     return em_call_with_args(em, fn_name, ret_type, 1, types, ops, include_signature);
+}
+
+// double -> int lane. Non-integral values are a narrowing question owned by the
+// boundary machinery; this is the representation move only, so it defers every
+// non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
+// for those on some targets.
+static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
+        bool floor_before, bool include_signature) {
+    MIR_reg_t result = em_new_reg(em, "double_int_lane", MIR_T_I64);
+    MIR_reg_t lower = em_new_reg(em, "double_int_lower", MIR_T_I64);
+    MIR_reg_t upper = em_new_reg(em, "double_int_upper", MIR_T_I64);
+    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    // ordered comparisons reject NaN too; D2I must never see poison or an
+    // out-of-band value. Nonnegative truncation also implements floor (S4.2).
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DGE,
+        MIR_new_reg_op(em->ctx, lower), MIR_new_reg_op(em->ctx, d_reg),
+        MIR_new_double_op(em->ctx, floor_before ? 0.0 : (double)INT53_MIN)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, lower)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DLE,
+        MIR_new_reg_op(em->ctx, upper), MIR_new_reg_op(em->ctx, d_reg),
+        MIR_new_double_op(em->ctx, (double)INT53_MAX)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, upper)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_D2I,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, d_reg)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, slow);
+    if (floor_before) {
+        d_reg = em_call_1(em, "floor", MIR_T_D, MIR_T_D,
+            MIR_new_reg_op(em->ctx, d_reg), include_signature);
+    }
+    MIR_reg_t fallback = em_call_1(em, "lambda_double_to_int_lane_c",
+        MIR_T_I64, MIR_T_D, MIR_new_reg_op(em->ctx, d_reg), include_signature);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, fallback)));
+    em_emit_label(em, done);
+    return result;
 }
 
 // JC23: BSTART changes MIR's inline-allocation lowering, so source-invocation

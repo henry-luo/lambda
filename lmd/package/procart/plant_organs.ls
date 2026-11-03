@@ -22,10 +22,10 @@ pub fn normalize(raw={}) map^ {
  p
 }
 // merge small ellipsoids once per organ mesh, rather than instancing every scale or drupelet.
-fn ellipsoid(buffer,position,scale) map => {*:buffer,
- positions:[for (i in 0 to (len(buffer.positions) div 3-1)) *(slice(buffer.positions,i*3,i*3+3)*scale+position)],
- normals:[for (i in 0 to (len(buffer.normals) div 3-1)) *v.unit(slice(buffer.normals,i*3,i*3+3)/scale)]}
-fn fruit_buffer(kind) map {
+fn ellipsoid(buffer,position,scale) map^ => {*:buffer,
+ positions:[for (i in ((0 to (len(buffer.positions) div 3-1)) ^ { [] })) *(slice(buffer.positions,i*3,i*3+3)*scale+position)],
+ normals:[for (i in ((0 to (len(buffer.normals) div 3-1)) ^ { [] })) *v.unit(slice(buffer.normals,i*3,i*3+3)/scale)]}
+fn fruit_buffer(kind) map^ {
  let sphere=shapes.sphere(6,10)
  if (kind=="cone" or kind=="raspberry") {
   let cone=kind=="cone";
@@ -38,7 +38,7 @@ fn fruit_buffer(kind) map {
  else sphere
 }
 fn geometry(id,buffer:map) element^ => s.geometry(buffer.positions,{id:id,normals:buffer.normals,uvs:buffer.uvs,indices:buffer.indices})
-fn piece(id,shape,position,scale,paint,role,organ,rotation=[0.0,0.0,0.0]) map =>
+fn piece(id,shape,position,scale,paint,role,organ,rotation=[0.0,0.0,0.0]) map^ =>
  {id:id,geometry:shape,shape:shape,matrix:t.matrix(position,rotation,scale)^,color:paint,role:role,organ:organ,opacity:1.0,kind:"tree"}
 fn flowers(id,position,p,phase) array {
  let size=p.flower_size
@@ -64,7 +64,7 @@ pub fn decorate(model,k:u64,parameters={}) map^ {
  let branches=model.skeleton.branches
  let skeleton=c.require(branches is array and len(branches)>0,"plant organs need a branch skeleton")^
  let parents=branches |> ~.parent
- let terminal=[for (b in branches where not contains(parents,b.id)) b]
+ let terminal=[for (b in branches where ((not contains(parents,b.id)) ^ { false })) b]
  let budget=c.require(len(terminal)*p.count<=256,"plant organ attachment budget exceeded")^
  let anchors=[for (b in terminal,i in 0 to (p.count-1),let id=b.id++"/reproductive-"++string(i),
   let key=rng.derive(k,id),let at=plant.sample(b,0.4+0.5*(float(i)+0.5)/float(p.count)),

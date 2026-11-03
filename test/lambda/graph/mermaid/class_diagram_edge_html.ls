@@ -8,10 +8,10 @@ let html = transform.to_html(source)
 let geometry = layout.from_velmts(html, model.element_children(html), null)
 
 {
-  html: [for (child in model.element_children(html) where model.tag(child) == "edge")
+  html: [for (child in ((model.element_children(html)) ^ { [] }) where ((model.tag(child) == "edge") ^ { false }))
     [child["data-edge-id"], child["data-from"], child["data-to"],
       child["data-marker-start"], child["data-marker-end"]]],
-  nodes: [for (node in geometry.nodes) node.id],
-  layout: [for (edge in geometry.edges) [edge.from, edge.to]],
-  placements: [for (place in geometry.placements) [place.index, place.x, place.y]]
+  nodes: [for (node in ((geometry.nodes) ^ { [] })) node.id],
+  layout: [for (edge in ((geometry.edges) ^ { [] })) [edge.from, edge.to]],
+  placements: [for (place in ((geometry.placements) ^ { [] })) [place.index, place.x, place.y]]
 }

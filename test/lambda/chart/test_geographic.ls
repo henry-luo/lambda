@@ -5,8 +5,8 @@ import geometry: lambda.chart.geometry
 import geo: lambda.chart.geo
 import util: lambda.chart.util
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
 let square = {type: "Polygon", coordinates: [[[-30, -20], [30, -20], [30, 20], [-30, 20], [-30, -20]]]};
 let hole = [[-10, -10], [-10, 10], [10, 10], [10, -10], [-10, -10]];
@@ -42,7 +42,7 @@ let back = chart.render_spec({*:base, data: {type: "Polygon", coordinates: [[[12
     encoding: {}, mark: {kind: "geoshape", projection: "orthographic"}});
 let concave = [[-30, -20], [30, -20], [30, 20], [0, 0], [-30, 20], [-30, -20]];
 let triangles = geometry.triangulate(concave);
-let mesh = [for (triangle in geometry.triangulate(square.coordinates[0])) for (piece in projection.triangle(triangle, ortho)) piece];
+let mesh = [for (triangle in ((geometry.triangulate(square.coordinates[0])) ^ { [] })) for (piece in ((projection.triangle(triangle, ortho)) ^ { [] })) piece];
 let checks = {
     eq_center: projection.project([0, 0], eq) == [180.0, 90.0],
     eq_corner: projection.project([-180, 90], eq) == [0.0, 0.0],
@@ -61,7 +61,7 @@ let checks = {
     polygon_hole: len(classes(hole_svg, "geo-shape")) == 1 and classes(hole_svg, "geo-shape")[0]['fill-rule'] == "nonzero" and
         len(split(classes(hole_svg, "geo-shape")[0].d, " Z")) == 3,
     boundary_stroke: len(classes(hole_svg, "geo-outline")) == 1 and classes(hole_svg, "geo-shape")[0].stroke == "none",
-    five_projections: len([for (image in shapes where image is element and len(classes(image, "geo-shape")) > 0) true]) == 5,
+    five_projections: len([for (image in shapes where ((image is element and len(classes(image, "geo-shape")) > 0) ^ { false })) true]) == 5,
     visible_points: len(classes(points, "geo-point")) == 1 and near(classes(points, "geo-point")[0].r, math.sqrt(25.0 / util.PI)),
     collections: len(classes(lines, "geo-point")) == 2 and len(classes(lines, "geo-line")) == 2 and len(classes(lines, "geo-shape")) == 2,
     longitude_wrap: near(projection.project([170, 0], projection.configure(360, 180, {type: "equirectangular", center: [-170, 0]}))[0], 160.0),

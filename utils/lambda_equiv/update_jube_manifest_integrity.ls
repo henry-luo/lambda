@@ -15,9 +15,9 @@ pn ascii_json(source: string) {
     while (i < len(source)) {
         let ch = slice(source, i, i + 1)
         let code = ord(ch)
-        if (code < 128) {
+        if ((code < 128)^) {
             escaped = escaped ++ ch
-        } else if (code <= 65535) {
+        } else if ((code <= 65535)^) {
             escaped = escaped ++ "\\u" ++ hex4(code)
         } else {
             let pair = code - 65536

@@ -3,4 +3,4 @@
 // 2 there while the interpreter rejected it.
 let k = 2
 let m: 1 = k
-"bound: " ++ string(m)
+"bound: " ++ string(m^)

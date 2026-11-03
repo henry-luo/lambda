@@ -32,7 +32,7 @@ fn moment(film, b) {
 // notes stop just before the end so nothing rings past the performance
 fn note(seconds, at, dur, ch, key, v) => [on(at, ch, key, v), off(min(at + dur, seconds - 0.05), ch, key)]
 
-fn beat_events(film, b, seconds) {
+fn beat_events(film, b, seconds) any^ {
     let m = moment(film, b)
     let beat = F.BEAT_MS / 1000.0
     let t = b * beat
@@ -41,28 +41,28 @@ fn beat_events(film, b, seconds) {
     let tones = m.chord[1];
     [
         // pad and bass on the bar; the credits and the title hold whole bars
-        *(if (m.pos == 0) [for (key in tones) for (e in note(seconds, t, 4.0 * beat - 0.02, PAD, key, vel(54, b + key))) e] else []),
+        *(if (m.pos == 0) [for (key in tones) for (e in ((note(seconds, t, 4.0 * beat - 0.02, PAD, key, vel(54, b + key))) ^ { [] })) e] else []),
         *(if (m.pos == 0 or (m.pos == 2 and kind != "credits" and kind != "title")) note(seconds, t, 2.0 * beat - 0.05, BASS, m.chord[0], vel(70, b)) else []),
         // piano arpeggio in eighths; held chords in the credits
-        *(if (kind == "credits") (if (m.pos == 0) [for (key in tones) for (e in note(seconds, t, 3.8, PIANO, key + 12, vel(56, b + key))) e] else [])
-          else [for (i in [0, 1]) for (e in note(seconds, t + half * float(i), half * 1.6, PIANO,
-              [tones[0], tones[1], tones[2], tones[1]][(b * 2 + i) % 4] + 12, vel(if (i == 0) 66 else 54, b * 2 + i))) e]),
+        *(if (kind == "credits") (if (m.pos == 0) [for (key in tones) for (e in ((note(seconds, t, 3.8, PIANO, key + 12, vel(56, b + key))) ^ { [] })) e] else [])
+          else [for (i in [0, 1]) for (e in ((note(seconds, t + half * float(i), half * 1.6, PIANO,
+              [tones[0], tones[1], tones[2], tones[1]][(b * 2 + i) % 4] + 12, vel(if (i == 0) 66 else 54, b * 2 + i))) ^ { [] })) e]),
         // a bell phrase over the title
         *(if (kind == "title" and b % 2 == 0) note(seconds, t, 1.2, BELL, [79, 76, 74][int(floor(b / 2)) % 3], vel(60, b)) else []),
         // a soft cymbal on each chapter card, a kick on the bar once the story is under way
         *(if (kind == "chapter" and b == m.shot.start_beat) note(seconds, t, 2.0, DRUMS, CRASH, vel(52, b)) else []),
         *(if (kind == "quick" or (m.pos == 0 and m.chapter > 0 and kind != "credits" and kind != "chapter")) note(seconds, t, 0.2, DRUMS, KICK, vel(78, b)) else []),
-        *(if (kind == "quick") [for (i in [0, 1]) for (e in note(seconds, t + half * float(i), 0.1, DRUMS, HAT, vel(if (i == 0) 58 else 44, b + i))) e] else [])
+        *(if (kind == "quick") [for (i in [0, 1]) for (e in ((note(seconds, t + half * float(i), 0.1, DRUMS, HAT, vel(if (i == 0) 58 else 44, b + i))) ^ { [] })) e] else [])
     ]
 }
 
 // the soundtrack as a performance map for dom.midi_open; it lasts exactly as long as the film
-pub fn performance(film) map {
+pub fn performance(film) map^ {
     let seconds = film.duration_ms / 1000.0
     let init = [*[for (s in setup) program(0.0, s.ch, s.program)], *[for (s in setup) cc(0.0, s.ch, 7, s.volume)],
         *[for (s in setup) cc(0.0, s.ch, 10, s.pan)]]
     // the closing tonic rings under the end of the credits
     let tail = (let t = seconds - 4.0, [*[for (key in [48, 60, 64, 67, 72]) for (e in [on(t, PAD, key, 50), off(seconds - 0.05, PAD, key)]) e]])
-    let body = [for (b in 0 to film.beats - 1, e in beat_events(film, b, seconds)) e]
+    let body = [for (b in 0 to film.beats - 1, e in ((beat_events(film, b, seconds)) ^ { [] })) e]
     performance_of([*init, *body, *tail, *[for (s in setup) cc(seconds - 0.02, s.ch, 123, 0)]], seconds)
 }

@@ -18,10 +18,10 @@ pub let EXT_OF_TYPE = {'text/css': "css", 'image/png': "png", 'image/jpeg': "jpg
     'application/epub+zip': "epub", 'text/plain': "txt", 'application/json': "json"}
 let FONT_EXT = ["woff", "woff2", "ttf", "otf", "eot"]
 
-pub fn media_type(ct) => if (ct == null) null else lower(trim(split(ct, ";")[0]))
-fn words(s) => [for (w in split(lower(s or ""), \("\s"+)) where w != "") w]
+pub fn media_type(ct) any^ => if (ct == null) null else lower(trim(split(ct, ";")[0]))
+fn words(s) => [for (w in ((split(lower(s or ""), \("\s"+))) ^ { [] }) where w != "") w]
 
-fn link_kind(e) {
+fn link_kind(e) any^ {
     let rel = words(n.attr(e, "rel"))
     let as = lower(n.attr(e, "as") or "")
     if (n.attr(e, "href") == null) null
@@ -31,24 +31,24 @@ fn link_kind(e) {
         (if (as == "style") "stylesheet" else if (as == "font") "font" else "image")
     else null
 }
-fn refs_of(e) {
+fn refs_of(e) any^ {
     let tag = e.tag
     let own = if (tag == "link") (let k = link_kind(e), if (k == null) [] else [{ref: n.attr(e, "href"), kind: k}])
         else if (tag == "img") [*(if (n.attr(e, "src") == null) [] else [{ref: n.attr(e, "src"), kind: "image"}]),
-            *[for (u in n.srcset_urls(n.attr(e, "srcset"))) {ref: u, kind: "image"}]]
-        else if (tag == "source") [for (u in n.srcset_urls(n.attr(e, "srcset"))) {ref: u, kind: "image"}]
+            *[for (u in ((n.srcset_urls(n.attr(e, "srcset"))) ^ { [] })) {ref: u, kind: "image"}]]
+        else if (tag == "source") [for (u in ((n.srcset_urls(n.attr(e, "srcset"))) ^ { [] })) {ref: u, kind: "image"}]
         else if (tag == "video" and n.attr(e, "poster") != null) [{ref: n.attr(e, "poster"), kind: "image"}]
-        else if (tag == "style") [for (u in rewrite.css_refs(e.text)) {ref: u, kind: "image"}]
+        else if (tag == "style") [for (u in ((rewrite.css_refs(e.text)) ^ { [] })) {ref: u, kind: "image"}]
         else []
-    let inline = [for (u in rewrite.css_refs(n.attr(e, "style"))) {ref: u, kind: "image"}];
+    let inline = [for (u in ((rewrite.css_refs(n.attr(e, "style"))) ^ { [] })) {ref: u, kind: "image"}];
     [*own, *inline]
 }
 // every resource reference of the document, as written, in document order
-pub fn refs(html) => [for (e in n.all_elements(html)) for (r in refs_of(e)) r]
+pub fn refs(html) => [for (e in n.all_elements(html)) for (r in ((refs_of(e)) ^ { [] })) r]
 
 // document.baseURI: the first <base href> resolved against the final URL
-pub fn base_of(html, url) {
-    let bases = [for (b in n.find_all(html, ["base"]), let href = n.attr(b, "href") where href != null) href];
+pub fn base_of(html, url) any^ {
+    let bases = [for (b in n.find_all(html, ["base"]), let href = n.attr(b, "href") where ((href != null) ^ { false })) href];
     if (len(bases) == 0) url else rewrite.resolve(url, bases[0])
 }
 pub fn title_of(html) {
@@ -56,32 +56,32 @@ pub fn title_of(html) {
     if (t == null) null else (let s = trim(t.text), if (s == "") null else s)
 }
 
-fn strip(s) => if (starts_with(s, "-") or starts_with(s, ".")) strip(slice(s, 1))
+fn strip(s) any^ => if (starts_with(s, "-") or starts_with(s, ".")) strip(slice(s, 1))
     else if (ends_with(s, "-") or ends_with(s, ".")) strip(slice(s, 0, len(s) - 1)) else s
-fn slug_name(s) {
+fn slug_name(s) any^ {
     let t = strip(replace(lower(s), \((!(("a" to "z") | ("0" to "9") | "." | "_" | "-"))+), "-"));
     if (t == "") "asset" else slice(t, 0, 80)
 }
-fn extension(name) {
+fn extension(name) any^ {
     let dot = last_index_of(name, ".");
     if (dot == null or dot == len(name) - 1) null else slice(name, dot + 1)
 }
 // the extension of a URL's last segment, else the one its content type implies
-pub fn file_ext(url, content_type) => (let tail = last_segment_of(url), extension(slug_name(tail)) or EXT_OF_TYPE[content_type])
-fn last_segment_of(url) => (let path = split(split(url, "?")[0], "#")[0], let segs = split(path, "/"), segs[len(segs) - 1])
+pub fn file_ext(url, content_type) any^ => (let tail = last_segment_of(url), extension(slug_name(tail)) or EXT_OF_TYPE[content_type])
+fn last_segment_of(url) any^ => (let path = split(split(url, "?")[0], "#")[0], let segs = split(path, "/"), segs[len(segs) - 1])
 // a member name from the URL's last segment, with an extension from the content type when it has none
-pub fn file_name(url, content_type) {
+pub fn file_name(url, content_type) any^ {
     let tail = last_segment_of(url)
     let base = slug_name(if (tail == "") "index" else tail)
     let ext = EXT_OF_TYPE[content_type];
     if (extension(base) != null or ext == null) base else base ++ "." ++ ext
 }
-pub fn unique_name(name, taken, i) {
+pub fn unique_name(name, taken, i) any^ {
     let candidate = if (i == 1) name else (let dot = last_index_of(name, "."),
         if (dot == null) name ++ "-" ++ string(i) else slice(name, 0, dot) ++ "-" ++ string(i) ++ slice(name, dot));
     if (candidate in taken) unique_name(name, taken, i + 1) else candidate
 }
-fn css_kind(ref) {
+fn css_kind(ref) any^ {
     let ext = extension(split(split(ref, "?")[0], "#")[0]);
     if (ext == "css") "stylesheet" else if (ext in FONT_EXT) "font" else "image"
 }
@@ -105,7 +105,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
     // the queue holds absolute URLs, each once; stylesheets add theirs as they arrive
     var queue = []
     var seen = {}
-    for (ref in refs(html)) {
+    for (ref in ((refs(html)) ^ { [] })) {
         if (not rewrite.skipped(ref.ref)) {
             let abs = rewrite.resolve(base, ref.ref)
             if (seen[abs] == null) {
@@ -119,10 +119,10 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
     var total = 0
     var count = 0
     var skipped = []
-    while (len(queue) > 0) {
+    while ((len(queue) > 0)^) {
         let batch = take(queue, per_batch)
         queue = drop(queue, per_batch)
-        say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count + len(batch) + len(queue), rate: null})
+        say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count + len(batch) + len(queue), rate: null})^
         // a few downloads at a time, each a child task joined here
         let handles = [for (item in batch) start(fetch_asset, [item.url, settings, max_asset])]
         let results = [for (h in handles) wait(h)^]
@@ -150,7 +150,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
                     content_type: response.headers.'content-type', bytes: response.bytes, etag: response.headers.etag,
                     last_modified: response.headers.'last-modified', integrity: null, status: "ok"}]
                 if (item.kind == "stylesheet" and item.depth < CSS_DEPTH and response.body is string) {
-                    for (ref in rewrite.css_refs(response.body)) {
+                    for (ref in ((rewrite.css_refs(response.body)) ^ { [] })) {
                         if (not rewrite.skipped(ref)) {
                             let abs = rewrite.resolve(response.url, ref)
                             if (seen[abs] == null) {
@@ -162,7 +162,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
                 }
             }
         }
-        if (len(queue) > 0 and remote and settings.per_host_delay_ms > 0) sleep(int(settings.per_host_delay_ms))^
+        if ((len(queue) > 0 and remote and settings.per_host_delay_ms > 0)^) sleep(int(settings.per_host_delay_ms))^
     }
     // stylesheets are rewritten in place once every member has its name
     let table = rewrite.lookup(entries)
@@ -172,7 +172,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
             output(rewrite.css(text, e.final_url or e.url, table, ""), staging ++ "/assets/" ++ e.path)^
         }
     }
-    say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count, rate: null});
+    say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count, rate: null})^;
     {url: p.url, final_url: r.url, status: r.status, content_type: r.headers.'content-type', source: source,
      doc: root, html: html, base: base, manifest: entries, skipped: skipped, assets_bytes: total, assets_count: count}
 }

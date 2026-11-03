@@ -9,6 +9,10 @@
 #include "../radiant/scene3d/scene3d_animation.hpp"
 #include "../radiant/scene3d/scene3d_source.hpp"
 #include "../radiant/scene3d/scene3d_physics.hpp"
+#include "../radiant/audio.hpp"
+#include "../radiant/audio_render.hpp"
+#include "../lib/endian.h"
+#include "test_audio_fixture.hpp"
 #include "../lib/physics/physics_math.h"
 #include "../lib/math_utils.h"
 #include "../lib/procgen/rng.h"
@@ -30,6 +34,7 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_events.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
@@ -59,6 +64,7 @@
 #include "../lib/font/font_internal.h"
 #include <time.h>
 #include <float.h>
+static unsigned srgb_byte(float linear);
 
 TEST(Css3dProjection, RepeatedTextureMatchesExpandedImageAcrossViewerClipping) {
     const uint32_t tile_pixels[] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0x80808080};
@@ -1932,6 +1938,7 @@ protected:
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
     }
+    enum ParticleHistoryProfile { PARTICLE_HISTORY_ANALYTIC, PARTICLE_HISTORY_NOISE, PARTICLE_HISTORY_VELOCITY };
     DomElement *particle_emitter(const char *id = "sparks", const char *shape = "point", DomElement *parent = nullptr) {
         auto *emitter = mesh("plane", "#ff0000", "basic", parent, "particle-emitter");
         attr(emitter, "id", id);
@@ -1946,12 +1953,756 @@ protected:
         attr(emitter, "size", ".25");
         return emitter;
     }
-    DomElement *particle_rotation_curve(DomElement *emitter, const char *times = "0 .2 .8 1",
-                                        const char *values = "0 0 0 2 -4 6 -4 2 -6 0 0 0") {
-        auto *curve = element("particle-rotation-curve", emitter);
+    void check_particle_spawn_bridge(bool gpu);
+    void check_particle_spawn_maximum(bool gpu);
+    struct ParticleSpawnTestRequest {
+        DomElement *emitter;
+        unsigned count, depth;
+        Scene3dVec position, velocity;
+        bool positioned;
+    };
+    Item particle_spawn_batch(const ParticleSpawnTestRequest *values, unsigned count, uint64_t sequence = 0,
+                              uint64_t tick = 0, const Scene3dRuntimeStats *envelope = nullptr) {
+        if (!scene3d_prepare_animations(root)) return ItemError;
+        Scene3dRuntimeStats current; if (!scene3d_runtime_stats(scene3d_runtime(root), &current)) return ItemError;
+        const auto &clock = envelope ? *envelope : current;
+        RootedValueBuilder batch(RootedValueBuilder::DATA_MAP), request(RootedValueBuilder::DATA_MAP), commands(true);
+        batch.put("session", box_uint64_value(clock.session)); batch.put("generation", box_uint64_value(clock.generation));
+        batch.put("service_generation", box_uint64_value(clock.service_generations[SCENE3D_TICK_PARTICLES]));
+        batch.put("sequence", box_uint64_value(sequence ? sequence : current.command_sequence + 1));
+        batch.put("tick", box_uint64_value(tick ? tick : current.ticks + 1));
+        for (unsigned i = 0; i < count; i++) {
+            Scene3dEmitterView view;
+            if (!scene3d_particles_view(scene3d_particles(root), values[i].emitter, &view)) return ItemError;
+            RootedValueBuilder command(RootedValueBuilder::DATA_MAP);
+            command.put("op", Item{.item=s2it(heap_create_name("spawn"))});
+            command.put("emitter", Item{.item=s2it(heap_create_name(scene3d_text(values[i].emitter,"id")))});
+            command.put("identity", box_uint64_value(view.identity));
+            command.put("count", Item{.item=i2it(values[i].count)}); command.put("depth", Item{.item=i2it(values[i].depth)});
+            if (values[i].positioned) command.put("position", navigation_point_value({values[i].position.x,values[i].position.y,values[i].position.z},3));
+            command.put("velocity", navigation_point_value({values[i].velocity.x,values[i].velocity.y,values[i].velocity.z},3));
+            commands.append(command.value.get());
+        }
+        batch.put("commands", commands.value.get()); request.put("batch",batch.value.get());
+        request.put("operation", Item{.item=s2it(heap_create_name("particle_commands"))});
+        return scene3d_control(root,request.value.get());
+    }
+    void check_particle_spawn_space(bool gpu, bool world) {
+        particle_clock(); auto *parent = element("group",root);
+        attr(parent,"position","10 20 0"); attr(parent,"scale","2 1 1"); attr(parent,"rotation","0 0 1.5707963267948966");
+        auto *emitter=particle_emitter("children","point",parent); attr(emitter,"backend",gpu?"gpu":"cpu");
+        attr(emitter,"space",world?"world":"local"); attr(emitter,"emitting","false"); attr(emitter,"velocity","1 0 0");
+        ParticleSpawnTestRequest requests[]={{emitter,2,3,{3,4,0},{3,0,0},true}};
+        ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,1))); auto *runtime=scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime,1)); Scene3dParticleSample sample;
+        auto *owner=scene3d_particles(root); ASSERT_TRUE(scene3d_particles_sample(owner,emitter,0,&sample));
+        EXPECT_NEAR(sample.position.x,3,3e-6); EXPECT_NEAR(sample.position.y,4,3e-6); EXPECT_EQ(sample.depth,3u);
+        EXPECT_NEAR(sample.velocity.x,world?3:4,3e-6); EXPECT_NEAR(sample.velocity.y,world?2:0,3e-6);
+        attr(parent,"position","100 200 0"); ASSERT_NE(scene3d_prepare_animations(root),nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(runtime,1)); scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner,emitter,0,&sample));
+        EXPECT_NEAR(sample.position.x,world?3.3:3.4,3e-6); EXPECT_NEAR(sample.position.y,world?4.2:4,3e-6);
+    }
+    DomElement *particle_curve(DomElement *emitter, const char *tag, const char *times, const char *values) {
+        auto *curve = element(tag, emitter);
         attr(curve, "times", times);
         attr(curve, "values", values);
         return curve;
+    }
+    void check_particle_trail_bridge(bool gpu);
+    void check_particle_trail_checkpoint(bool stateful);
+    void check_particle_trail_admits_bounded_history_without_changing_heads(bool gpu);
+    void check_particle_trail_renders_history_and_clips_its_time_window(bool gpu);
+    void check_particle_trail_edits_retain_heads_and_reset_only_changed_sample_counts(bool gpu);
+    void check_particle_trail_rejected_peer_cannot_publish_candidate_history(bool gpu);
+    void check_particle_trail_drops_recycle_and_expiry_respect_physical_ownership(bool gpu);
+    void check_particle_trail_samples_curved_gravity_motion_and_variable_steps(bool gpu);
+    void check_particle_trail_padded_and_maximum_storage_reject_scene_point_overflow(bool gpu);
+    void check_particle_trail_fade_uses_sample_ages_and_keeps_the_head_color(bool gpu);
+    void check_particle_trail_atlas_and_color_curves_use_committed_head_style(bool gpu);
+    void check_particle_trail_retains_historical_centers_outside_the_head_frustum(bool gpu);
+    void check_particle_trail_maximum_live_storage_renders_and_recovers_last_physical_slot(bool gpu);
+    void check_particle_trail_second_texture_row_uses_physical_slots_and_transparent_order(bool gpu);
+    DomElement *particle_trail(DomElement *emitter, const char *segments = "8", const char *width = ".25") {
+        auto *trail = element("particle-trail", emitter);
+        attr(trail, "segments", segments); attr(trail, "width", width); attr(trail, "fade", "false");
+        return trail;
+    }
+    void check_particle_trail_space(bool world, bool gpu = false) {
+        particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+        auto *parent = element("group", root); attr(parent, "position", "-.5 0 0"); attr(parent, "scale", "2 1 1");
+        auto *emitter = particle_emitter("trail", "point", parent); attr(emitter, "space", world ? "world" : "local");
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "velocity", "1 0 0"); particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+        auto *trail = particle_trail(emitter, "8", ".125"); attr(trail, "lifetime", "1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr);
+        pixel(image, 64, 64, 255, 0, 0); EXPECT_EQ(color_span(image, 3, 64, true), world ? 4u : 8u);
+        attr(parent, "position", ".5 0 0"); image = snapshot(); ASSERT_NE(image, nullptr);
+        pixel(image, 64, 64, world ? 255 : 0, 0, 0, world ? 255 : 0);
+        pixel(image, 96, 64, world ? 0 : 255, 0, 0, world ? 0 : 255);
+        Scene3dParticleTrailPoint points[64]; unsigned count;
+        ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), emitter, 0, points, &count));
+        ASSERT_EQ(count, 6u); EXPECT_NEAR(points[0].position.x, .5, 1e-6);
+        EXPECT_NEAR(points[5].position.x, world ? -.5 : 0, 1e-6);
+    }
+    DomElement *particle_rotation_curve(DomElement *emitter, const char *times = "0 .2 .8 1",
+                                        const char *values = "0 0 0 2 -4 6 -4 2 -6 0 0 0") {
+        return particle_curve(emitter, "particle-rotation-curve", times, values);
+    }
+    void check_particle_billboard_facing(bool gpu, bool perspective = false) {
+        particle_clock();
+        if (!perspective) { attr(camera, "type", "orthographic"); attr(camera, "view_height", "4"); }
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "presentation", "billboard"); attr(emitter, "size", "1");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(color_span(image, 3, 64), perspective ? 32u : 64u);
+        EXPECT_EQ(color_span(image, 3, 64, true), perspective ? 8u : 16u);
+        uint8_t original[128 * 128 * 4]; memcpy(original, image->pixels, sizeof(original));
+        auto *owner = scene3d_particles(root); Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        attr(camera, "position", "4 0 0"); image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(memcmp(original, image->pixels, sizeof(original)), 0);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.sequence, before.sequence); EXPECT_EQ(after.gpu_readbacks, 0u);
+        scene3d_context_lost(root); image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(memcmp(original, image->pixels, sizeof(original)), 0);
+    }
+    DomElement *billboard_scaled_camera() {
+        attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+        EXPECT_TRUE(camera->remove_attribute("target")); doc.mutation_epoch++;
+        auto *parent = element("group", root); attr(parent, "scale", "2 1 1");
+        EXPECT_TRUE(root->remove_child(camera)); EXPECT_TRUE(parent->append_child(camera)); doc.mutation_epoch++;
+        return parent;
+    }
+    void check_particle_billboard_affine_camera(bool gpu) {
+        auto *camera_parent = billboard_scaled_camera(); particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "presentation", "billboard"); attr(emitter, "size", "1");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr);
+        // camera parents contribute eye/up; the existing look-at view normalizes their scale.
+        EXPECT_EQ(color_span(image, 3, 64), 64u); EXPECT_EQ(color_span(image, 3, 64, true), 16u);
+        uint8_t original[128 * 128 * 4]; memcpy(original, image->pixels, sizeof(original));
+        attr(camera_parent, "rotation", "0 0 1.5707963267948966");
+        image = snapshot(); ASSERT_NE(image, nullptr); EXPECT_EQ(memcmp(original, image->pixels, sizeof(original)), 0);
+    }
+    void check_particle_billboard_roll_scale(bool gpu, bool world) {
+        particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+        auto *parent = element("group", root); attr(parent, "scale", "-2 1 1"); attr(parent, "rotation", "0 .4 1.2");
+        auto *emitter = particle_emitter("rolled", "point", parent); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", world ? "world" : "local"); attr(emitter, "presentation", "billboard"); attr(emitter, "size", ".5");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        particle_rotation_curve(emitter, "0 1", "1 .7 1.5707963267948966 1 .7 1.5707963267948966");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(color_span(image, 3, 64), 8u); EXPECT_EQ(color_span(image, 3, 64, true), 64u);
+        attr(parent, "scale", "4 3 2"); attr(parent, "rotation", ".3 1 .5");
+        image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(color_span(image, 3, 64), world ? 8u : 24u);
+        EXPECT_EQ(color_span(image, 3, 64, true), world ? 64u : 128u);
+        auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+        EXPECT_TRUE(view.billboard); EXPECT_NEAR(view.time, .1, 1e-12);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.rotation.x, 1, 1e-6); EXPECT_NEAR(sample.rotation.y, .7, 1e-6);
+        EXPECT_NEAR(sample.rotation.z, acos(-1.) * .5, 1e-6);
+        scene3d_context_lost(root); image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(color_span(image, 3, 64), world ? 8u : 24u);
+    }
+    void check_particle_billboard_frustum(bool gpu) {
+        particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "presentation", "billboard"); attr(emitter, "position", "2.4 0 0");
+        attr(emitter, "scale", ".1 2 1"); attr(emitter, "size", "1");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        particle_rotation_curve(emitter, "0 1", "0 0 1.5707963267948966 0 0 1.5707963267948966");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr); pixel(image, 126, 64, 255, 0, 0);
+        uint8_t original[128 * 128 * 4]; memcpy(original, image->pixels, sizeof(original));
+        attr(root, "frustum-culling", "false"); image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(memcmp(original, image->pixels, sizeof(original)), 0);
+    }
+    void check_particle_billboard_switch(bool gpu) {
+        particle_clock(); attr(camera, "position", "4 0 0");
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "size", "1");
+        attr(emitter, "velocity", "1 0 0");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+        pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+        auto *owner = scene3d_particles(root); Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        attr(emitter, "presentation", "billboard"); pixel(snapshot(), 64, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_TRUE(after.billboard); EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.sequence, before.sequence);
+        EXPECT_EQ(after.gpu_readbacks, 0u);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .1, 1e-6); EXPECT_NEAR(sample.velocity.x, 1, 1e-6);
+        attr(emitter, "presentation", "mesh"); pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+        attr(emitter, "presentation", "billboard"); ASSERT_NE(snapshot(), nullptr);
+        ASSERT_TRUE(scene3d_seek(root, 3)); scene3d_context_lost(root); pixel(snapshot(), 64, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.age, .2, 1e-12); EXPECT_EQ(sample.sequence, 0u); EXPECT_NEAR(sample.position.x, .2, 1e-6);
+    }
+    void check_particle_billboard_last_row(bool gpu) {
+        particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4"); attr(camera, "position", "4 0 0");
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "presentation", "billboard"); attr(emitter, "capacity", "130"); attr(emitter, "burst", "0");
+        attr(emitter, "rate", "10"); attr(emitter, "lifetime", "20"); attr(emitter, "size", "1");
+        attr(emitter->first_child->as_element(), "size", "2 .5 1");
+        auto *sheet = particle_sheet_assets(emitter).sheet; attr(sheet, "first", "3"); attr(sheet, "count", "1"); attr(sheet, "fps", "0");
+        particle_rotation_curve(emitter, "0 1", "0 0 1.5707963267948966 0 0 1.5707963267948966");
+        particle_curve(emitter, "particle-opacity-curve", "0 .001 1", "1 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 130));
+        auto *image = snapshot(); ASSERT_NE(image, nullptr); pixel(image, 64, 64, 255, 255, 255);
+        EXPECT_EQ(color_span(image, 3, 64), 16u); EXPECT_EQ(color_span(image, 3, 64, true), 64u);
+        auto *owner = scene3d_particles(root); Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.count, 130u); EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample));
+        EXPECT_EQ(sample.sequence, 129u); EXPECT_EQ(sample.frame, 3u); EXPECT_NEAR(sample.age, 0, 1e-10);
+        scene3d_context_lost(root); pixel(snapshot(), 64, 64, 255, 255, 255);
+    }
+    void check_particle_velocity_drag(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "velocity", "2 1 0"); attr(emitter, "gravity", "0 -3 0"); attr(emitter, "drag", "2");
+        particle_curve(emitter, "particle-velocity-curve", "0 1", "1 -2 .5 1 -2 .5");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root); auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 6));
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        double decay = exp(-1.), travel = (1 - decay) / 2, acceleration = (.5 - travel) / 2;
+        EXPECT_NEAR(sample.position.x, 2 * travel + .5, 3e-6);
+        EXPECT_NEAR(sample.position.y, travel - 3 * acceleration - 1, 3e-6);
+        EXPECT_NEAR(sample.position.z, .25, 3e-6);
+        EXPECT_NEAR(sample.velocity.x, 2 * decay + 1, 3e-6);
+        EXPECT_NEAR(sample.velocity.y, decay - 3 * travel - 2, 3e-6);
+        EXPECT_NEAR(sample.velocity.z, .5, 3e-6);
+        scene3d_context_lost(root);
+        Scene3dParticleSample recovered; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_NEAR(recovered.position.x, sample.position.x, 3e-6);
+        EXPECT_NEAR(recovered.velocity.y, sample.velocity.y, 3e-6);
+    }
+    void check_particle_velocity_edits(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "velocity", "1 0 0");
+        auto *curve = particle_curve(emitter, "particle-velocity-curve", "0 .2 .6 1", "0 0 0 2 0 0 -2 0 0 0 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root); auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 7));
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, 1.25, 3e-6); EXPECT_NEAR(sample.velocity.x, 2, 3e-6);
+        attr(curve, "values", "3 0 0 3 0 0 3 0 0 3 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, 1.25, 3e-6); EXPECT_NEAR(sample.velocity.x, 2, 3e-6);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, 1.65, 3e-6); EXPECT_NEAR(sample.velocity.x, 4, 3e-6);
+        ASSERT_TRUE(emitter->remove_child(curve)); doc.mutation_epoch++;
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, 1.75, 3e-6); EXPECT_NEAR(sample.velocity.x, 1, 3e-6);
+        ASSERT_TRUE(scene3d_seek(root, 9));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .8, 3e-6); EXPECT_NEAR(sample.velocity.x, 1, 3e-6);
+        EXPECT_EQ(sample.sequence, 0u);
+    }
+    void check_particle_velocity_world(bool gpu, bool world) {
+        particle_clock();
+        auto *parent = element("group", root); attr(parent, "position", ".5 -.25 0");
+        attr(parent, "scale", "2 1 1"); attr(parent, "rotation", "0 0 1.5707963267948966");
+        auto *emitter = particle_emitter("transport", "point", parent);
+        attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "space", world ? "world" : "local");
+        attr(emitter, "velocity", "1 0 0");
+        particle_curve(emitter, "particle-velocity-curve", "0 1", "1 0 0 1 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+        auto *owner = scene3d_particles(root); Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, 1, 3e-6); EXPECT_NEAR(sample.position.y, world ? .75 : 0, 3e-6);
+        EXPECT_NEAR(sample.velocity.x, world ? 1 : 2, 3e-6); EXPECT_NEAR(sample.velocity.y, world ? 2 : 0, 3e-6);
+        attr(parent, "position", "100 0 0"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, world ? 1.1 : 1.2, 3e-6);
+        EXPECT_NEAR(sample.position.y, world ? .95 : 0, 3e-6);
+    }
+    void check_particle_velocity_pixels(bool gpu) {
+        particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        particle_curve(emitter, "particle-velocity-curve", "0 1", "2 0 0 2 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); pixel(snapshot(), 64, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 5));
+        pixel(snapshot(), 64, 64, 0, 0, 0, 0); pixel(snapshot(), 80, 64, 255, 0, 0);
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u); EXPECT_LE(view.lo.x, 1); EXPECT_GE(view.hi.x, 1);
+        scene3d_context_lost(root); pixel(snapshot(), 80, 64, 255, 0, 0);
+    }
+    void check_particle_velocity_roundoff(bool negative, ParticleHistoryProfile profile = PARTICLE_HISTORY_VELOCITY) {
+        DomElement *emitter;
+        if (profile == PARTICLE_HISTORY_ANALYTIC) emitter = particle_analytic_stage();
+        else { particle_clock(); emitter = particle_emitter(); attr(emitter, "backend", "gpu"); }
+        attr(emitter, "lifetime", "1000");
+        if (profile == PARTICLE_HISTORY_VELOCITY)
+            particle_curve(emitter, "particle-velocity-curve", "0 1", negative ? "-1 0 0 -1 0 0" : "1 0 0 1 0 0");
+        else {
+            attr(emitter, "velocity", profile == PARTICLE_HISTORY_NOISE ? "1 0 0" : "765432.125 0 0");
+            if (profile == PARTICLE_HISTORY_NOISE) particle_noise(emitter, "1e-30 0 0", "0");
+        }
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), SCENE3D_PARTICLE_HISTORY_LIMIT));
+        auto *owner = scene3d_particles(root); Scene3dEmitterView view; Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_GT(fabs(sample.position.x), 400);
+        EXPECT_LE(view.lo.x, sample.position.x); EXPECT_GE(view.hi.x, sample.position.x);
+        scene3d_context_lost(root); Scene3dParticleSample recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.position.x, sample.position.x);
+    }
+    DomElement *particle_sheet(DomElement *emitter, const char *mode = "lifetime") {
+        auto *sheet = element("particle-sheet", emitter);
+        attr(sheet, "columns", "2"); attr(sheet, "rows", "2"); attr(sheet, "mode", mode);
+        return sheet;
+    }
+    struct ParticleSheetAssets { DomElement *sheet, *texture, *material; };
+    ParticleSheetAssets particle_sheet_assets(DomElement *emitter, const char *mode = "fps",
+                                              const char *file = "test/scene3d/assets/fidelity/colors.png") {
+        auto *material = emitter->last_child->as_element(); attr(material, "color", "#ffffff");
+        auto *texture = map_texture("atlas", file); attr(material, "texture", "atlas");
+        return {particle_sheet(emitter, mode), texture, material};
+    }
+    struct ParticleShadowStage { DomElement *emitter, *geometry, *material; };
+    ParticleShadowStage particle_shadow_stage(bool gpu, const char *size = ".8 .15 .1") {
+        particle_clock(); mesh("plane", "#ff0000", "lambert");
+        auto *sun = element("light", root); attr(sun, "type", "directional");
+        attr(sun, "position", "3 0 3"); attr(sun, "cast-shadow", "true");
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "size", "1"); attr(emitter, "position", ".75 0 .75");
+        auto *geometry = emitter->first_child->as_element(); attr(geometry, "type", "box"); attr(geometry, "size", size);
+        return {emitter, geometry, emitter->last_child->as_element()};
+    }
+    void check_particle_billboard_shadow(bool gpu) {
+        auto stage = particle_shadow_stage(gpu); attr(stage.geometry, "type", "plane"); attr(stage.geometry, "size", ".8 .4 1");
+        attr(stage.emitter, "presentation", "billboard"); attr(stage.material, "side", "double");
+        attr(stage.material, "alpha-mode", "mask"); attr(stage.material, "alpha-cutoff", ".5");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 59, 64, 0, 0, 0);
+        attr(stage.emitter, "cast-shadow", "false"); pixel(snapshot(), 59, 64, 218, 0, 0);
+        attr(stage.emitter, "cast-shadow", "true"); ASSERT_NE(snapshot(), nullptr);
+        Scene3dStats before, after; ASSERT_TRUE(scene3d_stats(root, &before));
+        attr(camera, "position", "1 0 4"); auto *image = snapshot(); ASSERT_NE(image, nullptr);
+        ASSERT_TRUE(scene3d_stats(root, &after)); EXPECT_EQ(after.shadow_passes, before.shadow_passes + 1);
+        uint8_t current[128 * 128 * 4]; memcpy(current, image->pixels, sizeof(current));
+        ASSERT_NE(snapshot(), nullptr); Scene3dStats repeated; ASSERT_TRUE(scene3d_stats(root, &repeated));
+        EXPECT_EQ(repeated.shadow_passes, after.shadow_passes);
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), stage.emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u); EXPECT_NEAR(view.time, .1, 1e-12);
+        scene3d_context_lost(root); image = snapshot(); ASSERT_NE(image, nullptr);
+        EXPECT_EQ(memcmp(current, image->pixels, sizeof(current)), 0);
+    }
+    void check_particle_sheet_pixels(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        auto assets = particle_sheet_assets(emitter); attr(assets.sheet, "fps", "10");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        auto *image = snapshot(); pixel(image, 64, 64, 255, 0, 0);
+        unsigned span = color_span(image, 3, 64);
+        const unsigned expected[][3] = {{0, 255, 0}, {0, 0, 255}, {255, 255, 255}, {255, 0, 0}};
+        for (unsigned frame = 0; frame < 4; frame++) {
+            ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+            image = snapshot(); pixel(image, 64, 64, expected[frame][0], expected[frame][1], expected[frame][2]);
+            EXPECT_EQ(color_span(image, 3, 64), span);
+        }
+        scene3d_context_lost(root); pixel(snapshot(), 64, 64, 255, 0, 0);
+    }
+    void check_particle_sheet_numeric(bool gpu) {
+        particle_clock();
+        DomElement *emitters[4], *sheets[4];
+        const char *names[] = {"lifetime", "fps", "range", "random"};
+        for (unsigned i = 0; i < 4; i++) {
+            auto *emitter = emitters[i] = particle_emitter(names[i]); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+            auto *sheet = sheets[i] = particle_sheet(emitter, i ? "fps" : "lifetime");
+            if (i) attr(sheet, "fps", i == 3 ? "0" : "7");
+            if (i == 2) { attr(sheet, "first", "1"); attr(sheet, "count", "2"); attr(sheet, "loop", "false"); }
+            if (i == 3) { attr(sheet, "random-start", "true"); attr(emitter, "burst", "8"); }
+        }
+        attr(emitters[0], "velocity", "1 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root); auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 6));
+        const unsigned expected[] = {1, 3, 2};
+        Scene3dParticleSample sample;
+        for (unsigned i = 0; i < 3; i++) {
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitters[i], 0, &sample)); EXPECT_EQ(sample.frame, expected[i]);
+        }
+        const unsigned seeded[] = {0, 0, 2, 3, 1, 3, 1, 1}; // seed UINT64_MAX, keyed channel 9
+        for (unsigned i = 0; i < 8; i++) {
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitters[3], i, &sample)); EXPECT_EQ(sample.frame, seeded[i]);
+        }
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 5));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 0, &sample)); EXPECT_EQ(sample.frame, 2u);
+        Scene3dEmitterView before, after; ASSERT_TRUE(scene3d_particles_view(owner, emitters[0], &before));
+        attr(sheets[0], "cycles", "2"); attr(sheets[0], "columns", "4"); attr(sheets[0], "rows", "1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitters[0], &after));
+        EXPECT_EQ(after.sheet_columns, 2u); EXPECT_EQ(after.gpu_readbacks, before.gpu_readbacks);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 0, &sample));
+        EXPECT_EQ(sample.frame, 0u); EXPECT_NEAR(sample.position.x, 1.1, 2e-6);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitters[0], &after)); EXPECT_EQ(after.sheet_columns, 4u);
+        if (!gpu) EXPECT_EQ(after.matrices[0].v[3], 0); // packing must not mutate the native affine matrix
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 0, &sample)); EXPECT_EQ(sample.frame, 0u);
+        ASSERT_TRUE(scene3d_seek(root, 6));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 0, &sample));
+        EXPECT_EQ(sample.frame, 2u); EXPECT_NEAR(sample.position.x, .5, 2e-6);
+    }
+    void check_particle_sheet_rows(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "capacity", "130"); attr(emitter, "burst", "130");
+        auto *sheet = particle_sheet_assets(emitter, "lifetime").sheet; attr(sheet, "columns", "256"); attr(sheet, "rows", "256");
+        attr(sheet, "first", "65535"); attr(sheet, "count", "1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, 255, 255, 255);
+        auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample)); EXPECT_EQ(sample.frame, 65535u);
+        scene3d_context_lost(root); pixel(snapshot(), 64, 64, 255, 255, 255);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample)); EXPECT_EQ(sample.frame, 65535u);
+    }
+    void check_particle_sheet_shadow(bool gpu) {
+        auto stage = particle_shadow_stage(gpu); auto *emitter = stage.emitter;
+        attr(stage.material, "alpha-mode", "mask"); attr(stage.material, "alpha-cutoff", ".6");
+        auto *sheet = particle_sheet_assets(emitter, "fps", "test/scene3d/assets/fidelity/layers.png").sheet; attr(sheet, "count", "2"); attr(sheet, "loop", "false");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); pixel(snapshot(), 59, 64, 218, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); pixel(snapshot(), 59, 64, 0, 0, 0);
+        scene3d_context_lost(root); pixel(snapshot(), 59, 64, 0, 0, 0);
+        attr(sheet, "first", "2"); attr(sheet, "count", "1"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); pixel(snapshot(), 59, 64, 218, 0, 0);
+    }
+    void check_particle_sheet_world(bool gpu) {
+        particle_clock();
+        auto *parent = element("group", root); attr(parent, "position", ".5 0 0");
+        attr(parent, "scale", "2 1 1"); attr(parent, "rotation", "0 0 1.5707963267948966");
+        auto *emitter = particle_emitter("world-sheet", "point", parent);
+        attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "space", "world");
+        particle_sheet_assets(emitter);
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2)); pixel(snapshot(), 72, 64, 0, 255, 0);
+        attr(parent, "position", "100 0 0"); pixel(snapshot(), 72, 64, 0, 255, 0);
+        scene3d_context_lost(root); pixel(snapshot(), 72, 64, 0, 255, 0);
+    }
+    void check_particle_sheet_uv(bool gpu, bool inset, bool billboard = false) {
+        particle_clock();
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "size", ".5");
+        if (billboard) { attr(emitter, "presentation", "billboard"); attr(camera, "position", "4 0 0"); }
+        auto assets = particle_sheet_assets(emitter); auto *texture = assets.texture; auto *sheet = assets.sheet; attr(sheet, "fps", "0");
+        if (inset) {
+            attr(texture, "min-filter", "9729"); attr(texture, "mag-filter", "9729");
+        } else {
+            buffer_quad("basic", emitter);
+            auto *geometry = emitter->first_child->as_element();
+            attr(geometry, "uvs", ".5 .5 .5 .5 .5 .5 .5 .5");
+            // UV1 deliberately crosses a cell edge; ordinary image wrapping remains shared.
+            attr(geometry, "uvs1", "1.5 .5 1.5 .5 1.5 .5 1.5 .5"); attr(texture, "uv-set", "1");
+        }
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        if (inset) {
+            auto *image = snapshot(); ASSERT_NE(image, nullptr);
+            EXPECT_GT(((const uint8_t *)image->pixels)[64 * image->pitch + 70 * 4 + 1], 30);
+            attr(sheet, "inset", ".4999");
+        } else {
+            pixel(snapshot(), 64, 64, 0, 255, 0);
+            attr(texture, "uv-transform", "0 0 .5 0 0 .5");
+        }
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), inset ? 70 : 64, 64, 255, 0, 0);
+        scene3d_context_lost(root); pixel(snapshot(), inset ? 70 : 64, 64, 255, 0, 0);
+    }
+    void check_particle_color_opacity(bool gpu) {
+        particle_clock();
+        attr(root, "background", "#000000");
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter->last_child->as_element(), "color", "#ffffff");
+        particle_curve(emitter, "particle-color-curve", "0 1", "1 0 0 0 0 1");
+        particle_curve(emitter, "particle-opacity-curve", "0 1", ".5 .5");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        // source-over is linear; the native display target encodes sRGB.
+        pixel(snapshot(), 64, 64, srgb_byte(.5f), 0, 0);
+        Scene3dStats stats; ASSERT_TRUE(scene3d_stats(root, &stats));
+        EXPECT_EQ(stats.shader_programs, 0u); EXPECT_EQ(stats.shader_links, 0u);
+    }
+    void check_particle_color_values(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "velocity", "1 0 0");
+        auto *color = particle_curve(emitter, "particle-color-curve", "0 .25 1", "1 0 0 0 1 0 0 0 1");
+        auto *opacity = particle_curve(emitter, "particle-opacity-curve", "0 .5 1", "1 .5 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 6));
+        auto *owner = scene3d_particles(root);
+        Scene3dEmitterView before, edited;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        EXPECT_EQ(before.gpu_readbacks, 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_FLOAT_EQ(sample.color[0], 0); EXPECT_FLOAT_EQ(sample.color[1], 1);
+        EXPECT_FLOAT_EQ(sample.color[2], 0); EXPECT_FLOAT_EQ(sample.color[3], .75);
+        EXPECT_NEAR(sample.position.x, .5, 1e-6);
+        attr(color, "values", "0 0 1 0 0 1 0 0 1"); attr(opacity, "values", ".25 .25 .25");
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &edited));
+        EXPECT_EQ(edited.time, before.time); EXPECT_EQ(edited.sequence, before.sequence);
+        EXPECT_EQ(edited.gpu_readbacks, before.gpu_readbacks); // curve edits need no motion checkpoint
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_FLOAT_EQ(sample.color[1], 1); // an admitted curve waits for its next fixed tick
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_FLOAT_EQ(sample.color[1], 0); EXPECT_FLOAT_EQ(sample.color[2], 1);
+        EXPECT_FLOAT_EQ(sample.color[3], .25); EXPECT_NEAR(sample.position.x, .6, 1e-6);
+        ASSERT_TRUE(scene3d_seek(root, 6));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_FLOAT_EQ(sample.color[2], 1); EXPECT_FLOAT_EQ(sample.color[3], .25);
+        EXPECT_EQ(sample.sequence, 0u); EXPECT_NEAR(sample.age, .5, 1e-12);
+    }
+    void check_particle_color_order(bool gpu, unsigned capacity = 8, bool sheet = false, bool billboard = false) {
+        particle_clock();
+        attr(root, "background", "#000000");
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        if (billboard) attr(emitter, "presentation", "billboard");
+        char text[32]; snprintf(text, sizeof(text), "%u", capacity); attr(emitter, "capacity", text);
+        attr(emitter, "burst", "0"); attr(emitter, "rate", "10"); attr(emitter, "lifetime", "1");
+        attr(emitter, "velocity", "0 0 2"); attr(emitter, "size", ".5");
+        auto *material = emitter->last_child->as_element();
+        attr(material, "color", "#ffffff"); attr(material, "side", "double");
+        if (sheet) {
+            particle_sheet_assets(emitter);
+        } else
+            particle_curve(emitter, "particle-color-curve", "0 .1 1", "1 0 0 0 0 1 0 0 1");
+        particle_curve(emitter, "particle-opacity-curve", "0 1", ".5 .5");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+        // the older colored particle is nearer than the newborn red particle.
+        pixel(snapshot(), 64, 64, srgb_byte(.25f), sheet ? srgb_byte(.5f) : 0, sheet ? 0 : srgb_byte(.5f));
+        Scene3dStats first, repeated;
+        ASSERT_TRUE(scene3d_stats(root, &first)); EXPECT_GT(first.particle_sort_passes, 0u);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        ASSERT_NE(snapshot(), nullptr); ASSERT_TRUE(scene3d_stats(root, &repeated));
+        EXPECT_EQ(repeated.particle_sort_passes, first.particle_sort_passes);
+        attr(camera, "position", "0 0 -4");
+        pixel(snapshot(), 64, 64, srgb_byte(.5f), sheet ? srgb_byte(.25f) : 0, sheet ? 0 : srgb_byte(.25f));
+        scene3d_context_lost(root);
+        pixel(snapshot(), 64, 64, srgb_byte(.5f), sheet ? srgb_byte(.25f) : 0, sheet ? 0 : srgb_byte(.25f));
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+    }
+    void check_particle_maximum_storage(bool gpu, bool sheet = false, bool velocity = false, bool billboard = false) {
+    particle_clock(); attr(root, "background", "#000000");
+    auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    if (billboard) attr(emitter, "presentation", "billboard");
+    attr(emitter, "capacity", "16384"); attr(emitter, "burst", "0"); attr(emitter, "rate", "40960");
+    attr(emitter, "size", ".00001");
+    particle_curve(emitter, "particle-color-curve", "0 1", "1 .5 .25 1 .5 .25");
+    particle_curve(emitter, "particle-opacity-curve", "0 1", ".5 .5");
+    if (velocity) particle_curve(emitter, "particle-velocity-curve", "0 1", ".25 0 0 .25 0 0");
+    if (sheet) {
+        auto *control = particle_sheet(emitter); attr(control, "columns", "256"); attr(control, "rows", "256");
+        attr(control, "first", "65535"); attr(control, "count", "1");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *runtime = scene3d_runtime(root); ASSERT_TRUE(scene3d_runtime_step(runtime, 4));
+    ASSERT_NE(snapshot(), nullptr);
+    Scene3dStats before, after; ASSERT_TRUE(scene3d_stats(root, &before));
+    EXPECT_EQ(before.particle_sort_passes, 106u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1)); ASSERT_NE(snapshot(), nullptr);
+    ASSERT_TRUE(scene3d_stats(root, &after));
+    EXPECT_EQ(after.particle_sort_passes - before.particle_sort_passes, 106u);
+    EXPECT_EQ(after.graphics.resources, before.graphics.resources);
+    EXPECT_EQ(after.graphics.allocated_bytes, before.graphics.allocated_bytes);
+    auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.live, SCENE3D_INSTANCE_LIMIT); EXPECT_EQ(view.gpu_readbacks, 0u);
+    Scene3dParticleSample sample;
+    scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, SCENE3D_INSTANCE_LIMIT - 1, &sample));
+    EXPECT_EQ(sample.sequence, SCENE3D_INSTANCE_LIMIT - 1);
+    EXPECT_EQ(sample.frame, sheet ? 65535u : 0u);
+    EXPECT_NEAR(sample.velocity.x, velocity ? .25 : 0, 3e-6);
+    const float expected[] = {1, .5, .25, .5};
+    for (unsigned c = 0; c < 4; c++) EXPECT_FLOAT_EQ(sample.color[c], expected[c]);
+    }
+    void check_particle_color_material(bool gpu, const char *mode, const char *cutoff, bool drawn) {
+        particle_clock(); attr(root, "background", "#000000");
+        auto *emitter = particle_emitter(); attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        auto *material = emitter->last_child->as_element(); attr(material, "alpha-mode", mode);
+        if (cutoff) attr(material, "alpha-cutoff", cutoff);
+        particle_curve(emitter, "particle-opacity-curve", "0 1", ".5 .5");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, drawn ? 255 : 0, 0, 0);
+        Scene3dStats stats; ASSERT_TRUE(scene3d_stats(root, &stats)); EXPECT_EQ(stats.particle_sort_passes, 0u);
+    }
+    DomElement *particle_noise(DomElement *emitter, const char *strength = "2 4 8", const char *frequency = "2") {
+        auto *noise = element("particle-noise", emitter);
+        attr(noise, "strength", strength);
+        attr(noise, "frequency", frequency);
+        return noise;
+    }
+    void check_particle_noise_constant(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "velocity", "1 2 3");
+        attr(emitter, "gravity", "0 -10 0");
+        attr(emitter, "drag", "2");
+        particle_noise(emitter, "2 4 8", "0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+        Scene3dEmitterView view;
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        // frozen seed UINT64_MAX / sequence 0 / interval 0 / axis channels 9..11.
+        const double acceleration[] = {.7168843746185303, -8.30605936050415, -7.489660263061523};
+        double decay = exp(-.4), travel = (1 - decay) / 2, gravity_travel = (.2 - travel) / 2;
+        const float position[] = {sample.position.x, sample.position.y, sample.position.z};
+        const float velocity[] = {sample.velocity.x, sample.velocity.y, sample.velocity.z};
+        for (unsigned c = 0; c < 3; c++) {
+            EXPECT_NEAR(position[c], (c + 1) * travel + acceleration[c] * gravity_travel, 2e-6);
+            EXPECT_NEAR(velocity[c], (c + 1) * decay + acceleration[c] * travel, 2e-6);
+        }
+    }
+    void check_particle_noise_temporal(bool gpu, bool world) {
+        particle_clock();
+        auto *frame = element("group", root);
+        attr(frame, "position", ".5 -.25 .125");
+        attr(frame, "rotation", "0 0 1.5707963267948966");
+        attr(frame, "scale", "2 3 1");
+        auto *emitter = particle_emitter("noise", "point", frame);
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", world ? "world" : "local");
+        attr(emitter, "burst", "2");
+        auto *noise = particle_noise(emitter);
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+        auto *owner = scene3d_particles(root);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+        attr(frame, "position", "100 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 4));
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        // independently frozen keyed endpoints integrated at ages 0,.1,.2,.3,.4.
+        const double positions[][3] = {{.05446336758613586, .06427674428939815, -.7337132643127442},
+                                       {.03423255895614624, -.18979718461990358, -.4633358212280274}};
+        const double velocities[][3] = {{.09457447528839108, -.2601305484771731, -2.2246028900146486},
+                                        {.02410502433776851, -.5215282917022704, -1.7782043457031254}};
+        const double offset[] = {world ? .5 : 0, world ? -.25 : 0, world ? .125 : 0};
+        Scene3dParticleSample samples[2];
+        ASSERT_TRUE(scene3d_particles_samples(owner, emitter, 0, 2, samples));
+        for (unsigned i = 0; i < 2; i++) {
+            const auto &sample = samples[i];
+            EXPECT_EQ(sample.sequence, i);
+            EXPECT_NEAR(sample.position.x, positions[i][0] + offset[0], 3e-6);
+            EXPECT_NEAR(sample.position.y, positions[i][1] + offset[1], 3e-6);
+            EXPECT_NEAR(sample.position.z, positions[i][2] + offset[2], 3e-6);
+            EXPECT_NEAR(sample.velocity.x, velocities[i][0], 3e-6);
+            EXPECT_NEAR(sample.velocity.y, velocities[i][1], 3e-6);
+            EXPECT_NEAR(sample.velocity.z, velocities[i][2], 3e-6);
+            EXPECT_GE(sample.position.x, view.lo.x); EXPECT_LE(sample.position.x, view.hi.x);
+            EXPECT_GE(sample.position.y, view.lo.y); EXPECT_LE(sample.position.y, view.hi.y);
+            EXPECT_GE(sample.position.z, view.lo.z); EXPECT_LE(sample.position.z, view.hi.z);
+        }
+        scene3d_context_lost(root);
+        Scene3dParticleSample recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_NEAR(recovered.position.z, samples[0].position.z, 3e-6);
+        attr(noise, "strength", "0 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.position.z, samples[0].position.z);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_NEAR(recovered.position.z, samples[0].position.z + .1 * samples[0].velocity.z, 3e-6);
+        ASSERT_TRUE(scene3d_seek(root, 7));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_EQ(recovered.sequence, 0u);
+        EXPECT_FLOAT_EQ(recovered.position.x, world ? 100 : 0);
+        EXPECT_FLOAT_EQ(recovered.position.z, 0);
+    }
+    void check_particle_noise_pixels(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        particle_noise(emitter, "60 0 0", "0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+        pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+        pixel(snapshot(), 80, 64, 255, 0, 0);
+        scene3d_context_lost(root);
+        pixel(snapshot(), 80, 64, 255, 0, 0);
+    }
+    void check_particle_noise_insertion(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu"); attr(emitter, "velocity", "1 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+        auto *noise = particle_noise(emitter, "2 0 0", "0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .2, 2e-6);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .30358442187309265, 2e-6);
+        EXPECT_NEAR(sample.velocity.x, 1.071688437461853, 2e-6);
+        ASSERT_TRUE(emitter->remove_child(noise)); doc.mutation_epoch++;
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .410753265619278, 2e-6);
+        EXPECT_EQ(sample.sequence, 0u);
     }
     void check_particle_rotation_samples(bool gpu, bool world) {
         particle_clock();
@@ -2027,22 +2778,27 @@ protected:
         EXPECT_NEAR(recovered.age, .6, 1e-12);
         EXPECT_NEAR(recovered.position.x, world ? 100 : 0, 1e-6);
     }
-    void check_particle_rotation_rows(bool gpu) {
+    void check_particle_rotation_rows(bool gpu, bool velocity = false) {
         particle_clock();
         auto *emitter = particle_emitter();
         attr(emitter, "backend", gpu ? "gpu" : "cpu");
         attr(emitter, "capacity", "130");
         attr(emitter, "burst", "130");
         auto *curve = element("particle-rotation-curve", emitter);
-        auto *times = strbuf_new(), *values = strbuf_new();
+        auto *times = strbuf_new(), *values = strbuf_new(), *colors = strbuf_new(), *opacity = strbuf_new();
         ASSERT_NE(times, nullptr);
-        ASSERT_NE(values, nullptr);
+        ASSERT_NE(values, nullptr); ASSERT_NE(colors, nullptr); ASSERT_NE(opacity, nullptr);
         for (unsigned i = 0; i < 16; i++) {
             strbuf_append_format(times, "%.9g ", (double)i / 15);
             strbuf_append_format(values, "%g %g %g ", (double)i, -2.0 * i, 3.0 * i);
+            strbuf_append_str(colors, ".2 .4 .6 "); strbuf_append_str(opacity, ".5 ");
         }
         attr(curve, "times", times->str);
         attr(curve, "values", values->str);
+        particle_curve(emitter, "particle-color-curve", times->str, colors->str);
+        particle_curve(emitter, "particle-opacity-curve", times->str, opacity->str);
+        if (velocity) particle_curve(emitter, "particle-velocity-curve", times->str, values->str);
+        strbuf_free(colors); strbuf_free(opacity);
         strbuf_free(times);
         strbuf_free(values);
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
@@ -2051,13 +2807,19 @@ protected:
         Scene3dEmitterView view;
         ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
         EXPECT_EQ(view.gpu_readbacks, 0u);
-        EXPECT_EQ(view.gpu_bytes, gpu ? 65536u : 0u);
+        EXPECT_EQ(view.gpu_bytes, gpu ? 256u * SCENE3D_PARTICLE_GPU_SLOT_BYTES : 0u);
         Scene3dParticleSample sample;
         ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample));
         EXPECT_EQ(sample.sequence, 129u);
         EXPECT_NEAR(sample.rotation.x, 7.5, 2e-5);
         EXPECT_NEAR(sample.rotation.y, -15, 2e-5);
+        if (velocity) {
+            EXPECT_NEAR(sample.velocity.x, 7.5, 3e-5);
+            EXPECT_NEAR(sample.position.x, 3.375, 3e-5);
+        }
         EXPECT_NEAR(sample.rotation.z, 22.5, 2e-5);
+        const float expected[] = {.2f, .4f, .6f, .5f};
+        for (unsigned c = 0; c < 4; c++) EXPECT_NEAR(sample.color[c], expected[c], 1e-6);
         scene3d_context_lost(root);
         ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample));
         EXPECT_NEAR(sample.rotation.z, 22.5, 2e-5);
@@ -2088,30 +2850,24 @@ protected:
         EXPECT_FALSE(view.rotating);
         pixel(snapshot(), 67, 65, 0, 0, 0, 0);
     }
-    void check_particle_rotation_shadows(bool gpu) {
-        particle_clock();
-        mesh("plane", "#ff0000", "lambert");
-        auto *sun = element("light", root);
-        attr(sun, "type", "directional");
-        attr(sun, "position", "3 0 3");
-        attr(sun, "cast-shadow", "true");
-        auto *emitter = particle_emitter();
-        attr(emitter, "backend", gpu ? "gpu" : "cpu");
-        attr(emitter, "size", "1");
-        attr(emitter, "position", ".75 0 .75");
-        auto *geometry = emitter->first_child->as_element();
-        attr(geometry, "type", "box");
-        attr(geometry, "size", ".8 .15 .1");
-        particle_rotation_curve(emitter, "0 .05 1", "0 0 0 0 0 1.5707963267948966 0 0 1.5707963267948966");
+    void check_particle_rotation_shadows(bool gpu, bool opacity = false) {
+        auto stage = particle_shadow_stage(gpu);
+        auto *emitter = stage.emitter, *geometry = stage.geometry;
+        if (opacity) {
+            attr(geometry->next_sibling->as_element(), "alpha-mode", "mask");
+            attr(geometry->next_sibling->as_element(), "alpha-cutoff", ".6");
+            particle_curve(emitter, "particle-opacity-curve", "0 .05 1", "1 0 0");
+        } else
+            particle_rotation_curve(emitter, "0 .05 1", "0 0 0 0 0 1.5707963267948966 0 0 1.5707963267948966");
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
         pixel(snapshot(), 59, 64, 0, 0, 0);
         pixel(snapshot(), 64, 59, 218, 0, 0);
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
         pixel(snapshot(), 59, 64, 218, 0, 0);
-        pixel(snapshot(), 64, 59, 0, 0, 0);
+        pixel(snapshot(), 64, 59, opacity ? 218 : 0, 0, 0);
         scene3d_context_lost(root);
-        pixel(snapshot(), 64, 59, 0, 0, 0);
+        pixel(snapshot(), 64, 59, opacity ? 218 : 0, 0, 0);
     }
     void check_particle_rotation_bridge(bool gpu) {
         ASSERT_NE(load_page("test/scene3d/particles-cpu.html"), nullptr);
@@ -2358,7 +3114,7 @@ protected:
         ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
         EXPECT_EQ(view.live, 2u);
         EXPECT_TRUE(view.world);
-        EXPECT_EQ(view.gpu_bytes, gpu ? 2048u : 0u);
+        EXPECT_EQ(view.gpu_bytes, gpu ? 8u * SCENE3D_PARTICLE_GPU_SLOT_BYTES : 0u);
         EXPECT_EQ(view.gpu_readbacks, 0u);
         Scene3dParticleSample samples[2];
         ASSERT_TRUE(scene3d_particles_samples(owner, emitter, 0, 2, samples));
@@ -2471,6 +3227,43 @@ protected:
     struct ParticleCollisionStage {
         DomElement *emitter, *collision, *body, *collider;
     };
+    void check_particle_velocity_collision(bool gpu, bool slide) {
+        const char *response = slide ? "slide" : "bounce";
+        auto *emitter = gpu ? particle_analytic_stage("plane", response) : particle_collision_stage(response).emitter;
+        attr(emitter, "velocity", "0 0 0");
+        if (slide) attr(emitter, "drag", "2");
+        particle_curve(emitter, "particle-velocity-curve", "0 1", "1 -20 0 1 -20 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root); auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u); EXPECT_EQ(view.collisions, gpu ? 0u : 1u);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .1, 3e-6); EXPECT_NEAR(sample.position.y, slide ? -.949 : .101, 3e-5);
+        EXPECT_NEAR(sample.velocity.x, 1, 3e-6); EXPECT_NEAR(sample.velocity.y, slide ? 0 : 20, 3e-5);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1)); scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.y, slide ? -.949 : 2.101, 3e-5);
+        EXPECT_NEAR(sample.velocity.y, slide ? 0 : 20, 3e-5);
+    }
+    DomElement *particle_analytic_stage(const char *shape = "plane", const char *response = "bounce",
+                                       DomElement **configuration = nullptr) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", "gpu");
+        attr(emitter, "velocity", "0 -20 0");
+        auto *collision = element("particle-collision", emitter);
+        attr(collision, "profile", "analytic");
+        attr(collision, "response", response);
+        attr(collision, "radius", ".05");
+        attr(collision, "restitution", "1");
+        auto *volume = element(!strcmp(shape, "plane") ? "particle-plane" : "particle-sphere", collision);
+        attr(volume, "offset", "-1");
+        attr(volume, "center", "0 -2 0");
+        attr(volume, "radius", "1");
+        if (configuration) *configuration = collision;
+        return emitter;
+    }
     ParticleCollisionStage particle_collision_stage(const char *response = "bounce") {
         particle_clock();
         auto *floor = element("rigid-body", root);
@@ -2496,6 +3289,113 @@ protected:
         attr(config, "timestep", timestep);
         attr(config, "state", "paused");
         return config;
+    }
+    void check_particle_noise_collision(bool gpu, bool velocity = false) {
+        auto *emitter = gpu ? particle_analytic_stage() : particle_collision_stage().emitter;
+        particle_noise(emitter, "2 0 0", "0");
+        if (velocity) particle_curve(emitter, "particle-velocity-curve", "0 1", "1 0 0 1 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+        auto *owner = scene3d_particles(root);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        EXPECT_EQ(view.collisions, gpu ? 0u : 1u);
+        Scene3dParticleSample sample, recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_GT(sample.position.x, 0);
+        EXPECT_NEAR(sample.velocity.x, (velocity ? 1 : 0) + .07168843746185303, 2e-6);
+        EXPECT_GT(sample.velocity.y, 19.9);
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_NEAR(recovered.position.x, sample.position.x, 2e-6);
+        EXPECT_NEAR(recovered.velocity.x, sample.velocity.x, 2e-6);
+    }
+    void particle_variable_ticks(Scene3dRuntime *runtime) {
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    ASSERT_TRUE(scene3d_runtime_configure(runtime, .07, 8));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    ASSERT_TRUE(scene3d_runtime_configure(runtime, .13, 8));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    }
+    void check_particle_variable_profile(bool velocity) {
+    particle_clock();
+    DomElement *emitters[2];
+    for (unsigned i = 0; i < 2; i++) {
+        auto *emitter = emitters[i] = particle_emitter(i ? "gpu" : "cpu");
+        attr(emitter, "backend", i ? "gpu" : "cpu");
+        attr(emitter, "capacity", "256"); attr(emitter, "burst", "256");
+        attr(emitter, "seed", "18446744073709551614");
+        attr(emitter, "drag", ".25"); attr(emitter, "gravity", "-1 -2 -3");
+        if (velocity) particle_curve(emitter, "particle-velocity-curve", "0 .2 .6 1", "1 2 3 -2 -4 -6 4 8 12 0 0 0");
+        else particle_noise(emitter, "2 4 8", "1024");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *runtime = scene3d_runtime(root);
+    particle_variable_ticks(runtime);
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitters[1], &view));
+    EXPECT_EQ(view.gpu_readbacks, 0u);
+    Scene3dParticleSample cpu, gpu, recovered;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 255, &cpu));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 255, &gpu));
+    EXPECT_EQ(cpu.sequence, 255u); EXPECT_EQ(gpu.sequence, cpu.sequence);
+    EXPECT_NEAR(gpu.position.x, cpu.position.x, 2e-4);
+    EXPECT_NEAR(gpu.position.y, cpu.position.y, 2e-4);
+    EXPECT_NEAR(gpu.position.z, cpu.position.z, 2e-4);
+    EXPECT_NEAR(gpu.velocity.x, cpu.velocity.x, 2e-4);
+    EXPECT_NEAR(gpu.velocity.y, cpu.velocity.y, 2e-4);
+    EXPECT_NEAR(gpu.velocity.z, cpu.velocity.z, 2e-4);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 255, &recovered));
+    EXPECT_NEAR(recovered.position.x, gpu.position.x, 2e-4);
+    EXPECT_NEAR(recovered.position.y, gpu.position.y, 2e-4);
+    EXPECT_NEAR(recovered.position.z, gpu.position.z, 2e-4);
+    }
+    void check_particle_gpu_history(bool recycle, ParticleHistoryProfile profile) {
+        DomElement *emitter;
+        bool driven = profile != PARTICLE_HISTORY_ANALYTIC;
+        if (driven) {
+            particle_clock();
+            emitter = particle_emitter();
+            attr(emitter, "backend", "gpu");
+            if (profile == PARTICLE_HISTORY_NOISE) particle_noise(emitter);
+            else particle_curve(emitter, "particle-velocity-curve", "0 1", "1 0 0 1 0 0");
+        } else
+            emitter = particle_analytic_stage();
+        attr(emitter, "velocity", recycle && !driven ? "0 -20 0" : "0 0 0");
+        attr(emitter, "lifetime", recycle ? (driven ? ".3" : ".2") : "1000");
+        if (recycle) {
+            attr(emitter, "rate", driven ? "5" : "10"); attr(emitter, "capacity", "1");
+            attr(emitter, "overflow", "recycle-oldest");
+        }
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), SCENE3D_PARTICLE_HISTORY_LIMIT + (recycle ? (driven ? 3 : 4) : 0)));
+        Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        EXPECT_EQ(before.gpu_readbacks, 0u);
+        if (!recycle) {
+            EXPECT_EQ(before.gpu_history_ticks, SCENE3D_PARTICLE_HISTORY_LIMIT);
+            EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+            ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+            EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+            EXPECT_EQ(after.gpu_readbacks, 0u);
+            ASSERT_NE(scene3d_particles_diagnostic(owner), nullptr);
+            EXPECT_NE(strstr(scene3d_particles_diagnostic(owner), "4096"), nullptr);
+        } else {
+            EXPECT_LE(before.gpu_history_ticks, driven ? 3u : 2u);
+            Scene3dParticleSample sample, recovered;
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+            scene3d_context_lost(root);
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+            EXPECT_EQ(recovered.sequence, sample.sequence);
+            EXPECT_NEAR(recovered.position.x, sample.position.x, 2e-5);
+            EXPECT_NEAR(recovered.position.y, sample.position.y, 2e-5);
+            EXPECT_NEAR(recovered.position.z, sample.position.z, 2e-5);
+            EXPECT_NEAR(recovered.velocity.y, sample.velocity.y, 2e-5);
+        }
     }
     DomElement* runtime_stage(bool playing,const char* substeps="8",bool animate=true,DomElement** configuration=nullptr) {
         auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
@@ -2527,8 +3427,9 @@ protected:
         auto* control=element("ragdoll",root);attr(control,"id","person");attr(control,"bones","base tip");attr(control,"mode","animated");attr(control,"recovery-duration",".2");
         return {control,base,tip,config,clip,track};
     }
-    DomElement* buffer_quad(const char* material="basic") {
-        DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
+    DomElement* buffer_quad(const char* material="basic", DomElement* source=nullptr) {
+        DomElement* result=source?source:mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
+        attr(geometry,"type","buffer");
         attr(geometry,"positions","-1 -1 0 1 -1 0 1 1 0 -1 1 0");attr(geometry,"indices","0 1 2 0 2 3");
         attr(geometry,"normals","0 0 1 0 0 1 0 0 1 0 0 1");return result;
     }
@@ -2576,7 +3477,7 @@ protected:
            !runtime_context_bind_retained(runtime,runtime_get_eval_context(runtime))||!radiant_bind_document_script_host(&ui,page)) return ItemError;
         RootFrame roots(1);Rooted<Item> code(roots,make_string_item(source));return js_builtin_eval(code.get());
     }
-    void check_particle_overflow(bool gpu) {
+    void check_particle_overflow(bool gpu, bool sheet = false) {
         particle_clock();
         auto *dropped = particle_emitter("drop", "box");
         auto *recycled = particle_emitter("recycle", "box");
@@ -2587,6 +3488,7 @@ protected:
             attr(emitter, "burst", "0");
             attr(emitter, "rate", "30");
             attr(emitter, "lifetime", ".15");
+            if (sheet) { auto *sheet_control = particle_sheet(emitter, "fps"); attr(sheet_control, "random-start", "true"); }
         }
         attr(recycled, "overflow", "recycle-oldest");
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
@@ -2613,8 +3515,13 @@ protected:
         EXPECT_FLOAT_EQ(small.position.x, large.position.x);
         EXPECT_FLOAT_EQ(small.position.y, large.position.y);
         EXPECT_FLOAT_EQ(small.position.z, large.position.z);
+        EXPECT_EQ(small.frame, large.frame);
     }
-    void check_particle_template(bool gpu, bool world = false, bool surface = false, bool rotation = false) {
+    enum ParticleTemplateFeature { TEMPLATE_WORLD = 1, TEMPLATE_SURFACE = 2, TEMPLATE_ROTATION = 4,
+                                   TEMPLATE_NOISE = 8, TEMPLATE_COLOR = 16, TEMPLATE_SHEET = 32, TEMPLATE_VELOCITY = 64, TEMPLATE_BILLBOARD = 128, TEMPLATE_TRAIL = 256 };
+    void check_particle_template(bool gpu, unsigned features = 0) {
+        bool world = features & TEMPLATE_WORLD, surface = features & TEMPLATE_SURFACE;
+        bool rotation = features & TEMPLATE_ROTATION, noise = features & TEMPLATE_NOISE;
         particle_clock();
         if (surface)
             particle_surface_geometry();
@@ -2624,6 +3531,16 @@ protected:
         attr(emitter, "velocity", "1 0 0");
         if (rotation)
             particle_rotation_curve(emitter);
+        if (noise)
+            particle_noise(emitter);
+        if (features & TEMPLATE_SHEET) particle_sheet(emitter, "fps");
+        if (features & TEMPLATE_TRAIL) particle_trail(emitter);
+        if (features & TEMPLATE_BILLBOARD) attr(emitter, "presentation", "billboard");
+        if (features & TEMPLATE_VELOCITY) particle_curve(emitter, "particle-velocity-curve", "0 1", "1 0 0 1 0 0");
+        if (features & TEMPLATE_COLOR) {
+            particle_curve(emitter, "particle-color-curve", "0 1", "1 0 0 0 1 0");
+            particle_curve(emitter, "particle-opacity-curve", "0 1", "1 0");
+        }
         ASSERT_NE(snapshot(), nullptr);
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
         auto *owner = scene3d_particles(root);
@@ -2636,6 +3553,9 @@ protected:
         EXPECT_FALSE(scene3d_particles_adopt(owner, replay));
         scene3d_particles_destroy(replay);
         ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        Scene3dParticleSample sample_before;
+        if (features & (TEMPLATE_COLOR | TEMPLATE_SHEET | TEMPLATE_VELOCITY))
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample_before));
         auto *previous = root;
         create_scene_root();
         particle_clock();
@@ -2647,6 +3567,16 @@ protected:
         attr(emitter, "velocity", "1 0 0");
         if (rotation)
             particle_rotation_curve(emitter);
+        if (noise)
+            particle_noise(emitter);
+        if (features & TEMPLATE_SHEET) particle_sheet(emitter, "fps");
+        if (features & TEMPLATE_TRAIL) particle_trail(emitter);
+        if (features & TEMPLATE_BILLBOARD) attr(emitter, "presentation", "billboard");
+        if (features & TEMPLATE_VELOCITY) particle_curve(emitter, "particle-velocity-curve", "0 1", "1 0 0 1 0 0");
+        if (features & TEMPLATE_COLOR) {
+            particle_curve(emitter, "particle-color-curve", "0 1", "1 0 0 0 1 0");
+            particle_curve(emitter, "particle-opacity-curve", "0 1", "1 0");
+        }
         scene3d_follow_rebuild(&doc, previous, root);
         doc.root = lam::up(root);
         mutated();
@@ -2657,6 +3587,27 @@ protected:
         EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
         EXPECT_EQ(after.time, before.time);
         EXPECT_EQ(after.sequence, before.sequence);
+        EXPECT_EQ(after.identity, before.identity);
+        if (features & TEMPLATE_BILLBOARD) EXPECT_TRUE(after.billboard);
+        if (features & TEMPLATE_TRAIL) {
+            EXPECT_EQ(after.trail.points, before.trail.points); EXPECT_EQ(after.trail.head, before.trail.head);
+            EXPECT_EQ(after.trail.samples, before.trail.samples);
+        }
+        if (features & TEMPLATE_SHEET) {
+            Scene3dParticleSample sample;
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+            EXPECT_EQ(sample.frame, 3u); EXPECT_EQ(sample.frame, sample_before.frame);
+        }
+        if (features & TEMPLATE_VELOCITY) {
+            Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+            EXPECT_FLOAT_EQ(sample.position.x, sample_before.position.x);
+            EXPECT_FLOAT_EQ(sample.velocity.x, sample_before.velocity.x);
+        }
+        if (features & TEMPLATE_COLOR) {
+            Scene3dParticleSample sample;
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+            for (unsigned c = 0; c < 4; c++) EXPECT_FLOAT_EQ(sample.color[c], sample_before.color[c]);
+        }
         if (rotation) {
             Scene3dParticleSample sample;
             ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
@@ -2696,6 +3647,59 @@ protected:
             pump_js();
             EXPECT_TRUE(ItemReader(run_js(command.check).to_const()).asBool());
         }
+    }
+    void check_particle_color_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleColor('gpu');particleRequest('capabilities')"
+                 : "configureParticleColor('cpu');particleRequest('capabilities')",
+             "particleResult.particles_color_curves===true&&particleResult.particles_opacity_curves===true&&particleResult.particles_depth_ordering===true"},
+            {"particleRequest('step',2)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].live===2n&&"
+                "Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6&&particleResult.emitters[0].samples[0].color[3]===.5"},
+            {"particleResult.emitters[0].samples[0].color[2]=999;particleRequest('read')",
+             "Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6"},
+            {"particleRequest('seek',.2)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].live===2n&&"
+                "Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6&&particleResult.emitters[0].samples[1].color[0]===1"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+    }
+    void check_particle_velocity_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleVelocity('gpu');particleRequest('capabilities')"
+                 : "configureParticleVelocity('cpu');particleRequest('capabilities')", "particleResult.particles_velocity_curves===true"},
+            {"particleRequest('step',3)", "particleResult.tick===3&&particleResult.faulted===false"},
+            {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[0]-.24)<1e-5&&Math.abs(particleResult.emitters[0].samples[0].velocity[0]-1.8)<1e-5"},
+            {"particleResult.emitters[0].samples[0].velocity[0]=999;particleRequest('read')",
+             "Math.abs(particleResult.emitters[0].samples[0].velocity[0]-1.8)<1e-5"},
+            {"particleRequest('seek',.4)", "particleResult.tick===4"},
+            {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[0]-.42)<1e-5&&Math.abs(particleResult.emitters[0].samples[0].velocity[0]-2.2)<1e-5"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+    }
+    void check_particle_billboard_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleBillboard('gpu');particleRequest('capabilities')" : "configureParticleBillboard('cpu');particleRequest('capabilities')",
+             "particleResult.particles_billboards===true"},
+            {"particleRequest('step',2)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].presentation==='billboard'&&Math.abs(particleResult.emitters[0].samples[0].age-.1)<1e-8"},
+            {"particleResult.emitters[0].presentation='mesh';document.getElementById('main').setAttribute('position','4 0 0');particleRequest('read')",
+             "particleResult.emitters[0].presentation==='billboard'&&Math.abs(particleResult.emitters[0].samples[0].age-.1)<1e-8"},
+            {"document.getElementById('sparks').setAttribute('presentation','mesh');particleRequest('read')",
+             "particleResult.emitters[0].presentation==='mesh'&&Math.abs(particleResult.emitters[0].samples[0].age-.1)<1e-8"},
+            {"document.getElementById('sparks').setAttribute('presentation','billboard');particleRequest('seek',.3)", "particleResult.tick===3"},
+            {"particleRequest('read')", "particleResult.emitters[0].presentation==='billboard'&&Math.abs(particleResult.emitters[0].samples[0].age-.2)<1e-8&&particleResult.emitters[0].samples[0].position[0]===0"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+    }
+    void check_particle_sheet_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleSheet('gpu');particleRequest('capabilities')"
+                 : "configureParticleSheet('cpu');particleRequest('capabilities')", "particleResult.particles_texture_sheet===true"},
+            {"particleRequest('step',3)", "particleResult.tick===3"},
+            {"particleRequest('read')", "particleResult.emitters[0].samples[0].frame===2&&particleResult.emitters[0].sheet_grid[0]===2&&particleResult.emitters[0].sheet_grid[1]===2"},
+            {"particleResult.emitters[0].samples[0].frame=999;particleResult.emitters[0].sheet_grid[0]=99;particleRequest('read')",
+             "particleResult.emitters[0].samples[0].frame===2&&particleResult.emitters[0].sheet_grid[0]===2"},
+            {"particleRequest('seek',.4)", "particleResult.tick===4"},
+            {"particleRequest('read')", "particleResult.emitters[0].samples[0].frame===3"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
     }
     void check_particle_surface_bridge(bool gpu) {
         ParticleBridgeCommand commands[] = {
@@ -2787,20 +3791,8 @@ protected:
                 .asBool());
     }
     void check_particle_gpu_shadows(bool world) {
-        particle_clock();
-        mesh("plane", "#ff0000", "lambert");
-        auto *sun = element("light", root);
-        attr(sun, "type", "directional");
-        attr(sun, "position", "3 0 3");
-        attr(sun, "cast-shadow", "true");
-        auto *caster = particle_emitter();
-        attr(caster, "backend", "gpu");
-        attr(caster, "space", world ? "world" : "local");
-        attr(caster, "size", "1");
-        attr(caster, "position", ".75 0 .75");
-        attr(caster, "velocity", "0 4 0");
-        attr(caster->first_child->as_element(), "type", "box");
-        attr(caster->first_child->as_element(), "size", ".3 .3 .3");
+        auto *caster = particle_shadow_stage(true, ".3 .3 .3").emitter;
+        attr(caster, "space", world ? "world" : "local"); attr(caster, "velocity", "0 4 0");
         ASSERT_NE(scene3d_prepare_animations(root), nullptr);
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
         pixel(snapshot(), 64, 64, 0, 0, 0);
@@ -2954,6 +3946,1074 @@ TEST_F(Scene3dTest, ParticlesOverflowKeepsSpawnKeysIndependentOfDroppedAndRecycl
     check_particle_overflow(false);
 }
 TEST_F(Scene3dTest, ParticlesGpuOverflowKeepsIndependentDeviceSlots) { check_particle_overflow(true); }
+
+TEST_F(Scene3dTest, ParticlesCpuNoiseConstantAccelerationUsesTheSharedDragIntegral) {
+    check_particle_noise_constant(false);
+}
+TEST_F(Scene3dTest, ParticlesCpuColorOpacityCurvesReachRenderer) { check_particle_color_opacity(false); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsFaceRotatedCamerasWithoutAdvancingMotion) { check_particle_billboard_facing(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsFaceRotatedCamerasWithoutAdvancingMotion) { check_particle_billboard_facing(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsFacePerspectiveCamerasWithoutAdvancingMotion) { check_particle_billboard_facing(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsFacePerspectiveCamerasWithoutAdvancingMotion) { check_particle_billboard_facing(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsKeepWorldDimensionsWithScaledCameraParents) { check_particle_billboard_affine_camera(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsKeepWorldDimensionsWithScaledCameraParents) { check_particle_billboard_affine_camera(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsKeepLocalRollAndUnsignedAffineScale) { check_particle_billboard_roll_scale(false, false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsKeepLocalRollAndUnsignedAffineScale) { check_particle_billboard_roll_scale(true, false); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsKeepFrozenWorldRollAndUnsignedAffineScale) { check_particle_billboard_roll_scale(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsKeepFrozenWorldRollAndUnsignedAffineScale) { check_particle_billboard_roll_scale(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsRemainVisibleAcrossRolledNonuniformFrustumEdges) { check_particle_billboard_frustum(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsRemainVisibleAcrossRolledNonuniformFrustumEdges) { check_particle_billboard_frustum(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsSwitchPausedPresentationAndReplayWithoutRestartingMotion) { check_particle_billboard_switch(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsSwitchPausedPresentationAndReplayWithoutRestartingMotion) { check_particle_billboard_switch(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsInvalidateMaskedShadowsWhenTheCameraChanges) { check_particle_billboard_shadow(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsInvalidateMaskedShadowsWhenTheCameraChanges) { check_particle_billboard_shadow(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsPreserveUv1AndMaterialAtlasTransforms) { check_particle_sheet_uv(false, false, true); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsPreserveUv1AndMaterialAtlasTransforms) { check_particle_sheet_uv(true, false, true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsPreserveAtlasOpacityAndDepthOrder) { check_particle_color_order(false, 8, true, true); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsPreserveAtlasOpacityAndDepthOrder) { check_particle_color_order(true, 131, true, true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsKeepMaximumStorageAndAtlasFrames) { check_particle_maximum_storage(false, true, false, true); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsKeepMaximumStorageAndAtlasFrames) { check_particle_maximum_storage(true, true, false, true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsDrawOnlyTheRolledAtlasParticleInTheSecondRow) { check_particle_billboard_last_row(false); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsDrawOnlyTheRolledAtlasParticleInTheSecondRow) { check_particle_billboard_last_row(true); }
+TEST_F(Scene3dTest, ParticlesCpuBillboardsFollowEquivalentRolledTemplates) { check_particle_template(false, TEMPLATE_BILLBOARD | TEMPLATE_ROTATION | TEMPLATE_SHEET); }
+TEST_F(Scene3dTest, ParticlesGpuBillboardsFollowEquivalentWorldTemplates) { check_particle_template(true, TEMPLATE_BILLBOARD | TEMPLATE_WORLD | TEMPLATE_ROTATION | TEMPLATE_SHEET); }
+TEST_F(Scene3dTest, ParticlesBridgeBillboardCpuCopiesPresentationAcrossCameraChangesAndReplay) { check_particle_billboard_bridge(false); }
+TEST_F(Scene3dTest, ParticlesBridgeBillboardGpuCopiesPresentationAcrossCameraChangesAndReplay) { check_particle_billboard_bridge(true); }
+TEST_F(Scene3dTest, ParticlesBillboardAdmissionRejectsUnknownPresentationAndNonplanarGeometry) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "presentation", "billboard");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    auto *owner = scene3d_particles(root); auto generation = scene3d_particles_generation(owner);
+    const char *bad[] = {"sprite", "camera", "none", "5", ""};
+    for (const char *value : bad) {
+        attr(emitter, "presentation", value); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    }
+    attr(emitter, "presentation", "billboard"); auto *geometry = emitter->first_child->as_element(); attr(geometry, "type", "box");
+    EXPECT_EQ(scene3d_snapshot(root, &ui, 128, 128, 1), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "XY plane"), nullptr);
+    attr(geometry, "type", "plane"); pixel(snapshot(), 64, 64, 255, 0, 0);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_NEAR(view.time, .1, 1e-12); EXPECT_EQ(view.sequence, 1u);
+}
+TEST_F(Scene3dTest, SpritesKeepWorldDimensionsWithScaledCameraParents) {
+    billboard_scaled_camera(); auto *marker = drawable("sprite", "0 0 0", "#ff0000");
+    attr(marker, "size-mode", "world"); attr(marker, "size", "2 .5");
+    auto *image = snapshot(); ASSERT_NE(image, nullptr);
+    EXPECT_EQ(color_span(image, 3, 64), 64u); EXPECT_EQ(color_span(image, 3, 64, true), 16u);
+}
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsIntegrateAlongsideGravityAndDrag) { check_particle_velocity_drag(false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsIntegrateAlongsideGravityAndDrag) { check_particle_velocity_drag(true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityKeysEditsRemovalAndReplayRetainDynamicMotion) { check_particle_velocity_edits(false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityKeysEditsRemovalAndReplayRetainDynamicMotion) { check_particle_velocity_edits(true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsUseLocalSimulationAxes) { check_particle_velocity_world(false, false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsUseLocalSimulationAxes) { check_particle_velocity_world(true, false); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsUseWorldSimulationAxes) { check_particle_velocity_world(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsUseWorldSimulationAxes) { check_particle_velocity_world(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsReachVisibleMeshesAndBounds) { check_particle_velocity_pixels(false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsReachVisibleMeshesAndBounds) { check_particle_velocity_pixels(true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityPositiveLongRunRoundoffStaysInsideMotionBounds) { check_particle_velocity_roundoff(false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityNegativeLongRunRoundoffStaysInsideMotionBounds) { check_particle_velocity_roundoff(true); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseLongRunRoundoffStaysInsideMotionBounds) { check_particle_velocity_roundoff(false, PARTICLE_HISTORY_NOISE); }
+TEST_F(Scene3dTest, ParticlesGpuAnalyticLongRunRoundoffStaysInsideMotionBounds) { check_particle_velocity_roundoff(false, PARTICLE_HISTORY_ANALYTIC); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsRetainBounceImpulses) { check_particle_velocity_collision(false, false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsRetainBounceImpulses) { check_particle_velocity_collision(true, false); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsRetainSlideImpulses) { check_particle_velocity_collision(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsRetainSlideImpulses) { check_particle_velocity_collision(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsCombineWithNoiseAndCollision) { check_particle_noise_collision(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsCombineWithNoiseAndCollision) { check_particle_noise_collision(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocitySixteenKeysReachSecondStorageRow) { check_particle_rotation_rows(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocitySixteenKeysReachSecondStorageRow) { check_particle_rotation_rows(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsRetainMaximumStorage) { check_particle_maximum_storage(false, false, true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsRetainMaximumStorage) { check_particle_maximum_storage(true, false, true); }
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsFollowEquivalentTemplates) { check_particle_template(false, TEMPLATE_VELOCITY); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityOffsetsFollowEquivalentTemplates) { check_particle_template(true, TEMPLATE_WORLD | TEMPLATE_VELOCITY); }
+TEST_F(Scene3dTest, ParticlesBridgeVelocityCpuCopiesCombinedMotionAcrossReplay) { check_particle_velocity_bridge(false); }
+TEST_F(Scene3dTest, ParticlesBridgeVelocityGpuCopiesCombinedMotionAcrossReplay) { check_particle_velocity_bridge(true); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityHistoryExhaustionPreservesCommittedMotion) { check_particle_gpu_history(false, PARTICLE_HISTORY_VELOCITY); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityReusedSlotsPruneHistoryAndRecoverCurrentBirths) { check_particle_gpu_history(true, PARTICLE_HISTORY_VELOCITY); }
+void Scene3dTest::check_particle_spawn_bridge(bool gpu) {
+    ParticleBridgeCommand commands[] = {
+        {gpu ? "configureParticleSpawns('gpu');queueParticleSpawns([{op:'spawn',emitter:'sparks',count:3,depth:2,position:[3,0,0],velocity:[2,0,0]}],2)"
+             : "configureParticleSpawns('cpu');queueParticleSpawns([{op:'spawn',emitter:'sparks',count:3,depth:2,position:[3,0,0],velocity:[2,0,0]}],2)",
+         "particleResult.pending_commands===1n&&particleResult.tick===0"},
+        {"particleBatch.commands[0].count=999;particleBatch.commands[0].position[0]=999;particleRequest('step',1)", "particleResult.tick===1"},
+        {"particleRequest('read')", "particleResult.emitters[0].live===0n"},
+        {"particleRequest('step',1)", "particleResult.tick===2"},
+        {"particleRequest('read')", "particleResult.emitters[0].live===3n&&particleResult.emitters[0].samples[0].depth===2n&&Math.abs(particleResult.emitters[0].samples[0].position[0]-3)<1e-6"},
+        {"particleRequest('step',1)", "particleResult.tick===3"},
+        {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[0]-3.3)<1e-6"}
+    };
+    check_particle_commands(commands, sizeof(commands) / sizeof(*commands));
+}
+TEST_F(Scene3dTest, ParticlesSpawnCommandsQueueCopiedRequestsBeforeBirthAtTheSelectedTick) { check_particle_spawn_bridge(false); }
+TEST_F(Scene3dTest, ParticlesGpuSpawnCommandsQueueCopiedRequestsBeforeBirthAtTheSelectedTick) { check_particle_spawn_bridge(true); }
+
+
+
+
+
+
+
+
+
+TEST_F(Scene3dTest, ParticlesGpuTrailAdmitsDeviceHistoryWithoutOrdinaryReadbacks) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "velocity", "1 0 0"); particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6)); auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); ASSERT_EQ(count, 4u);
+    for (unsigned i = 0; i < count; i++) {
+        EXPECT_NEAR(points[i].position.x, .5 - .1 * i, 2e-6); EXPECT_NEAR(points[i].age, .1 * i, 2e-6);
+    }
+}
+void Scene3dTest::check_particle_trail_admits_bounded_history_without_changing_heads(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter();
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    attr(emitter, "velocity", "1 0 0");
+    particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .5, 1e-6); EXPECT_DOUBLE_EQ(sample.age, .5);
+    Scene3dParticleTrailPoint points[64]; unsigned count = 0;
+    ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), emitter, 0, points, &count));
+    ASSERT_EQ(count, 4u);
+    for (unsigned i = 0; i < count; i++) {
+        EXPECT_NEAR(points[i].position.x, .5 - .1 * i, 1e-6);
+        EXPECT_NEAR(points[i].age, .1 * i, 1e-6);
+    }
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_seek(root, 6));
+    ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), emitter, 0, points, &count));
+    ASSERT_EQ(count, 4u); EXPECT_NEAR(points[3].position.x, .2, 1e-6);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailAdmitsBoundedHistoryWithoutChangingHeads) { check_particle_trail_admits_bounded_history_without_changing_heads(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailAdmitsBoundedHistoryWithoutChangingHeads) { check_particle_trail_admits_bounded_history_without_changing_heads(true); }
+
+void Scene3dTest::check_particle_trail_renders_history_and_clips_its_time_window(bool gpu) {
+    particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+    auto *emitter = particle_emitter(); attr(emitter, "velocity", "2 0 0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+    auto *trail = particle_trail(emitter); attr(trail, "lifetime", ".25");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    auto *image = snapshot(); ASSERT_NE(image, nullptr);
+    pixel(image, 88, 64, 255, 0, 0); pixel(image, 72, 64, 0, 0, 0, 0);
+    pixel(image, 88, 58, 0, 0, 0, 0);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_EQ(view.count, 0u); EXPECT_EQ(view.live, 1u); EXPECT_EQ(view.trail.samples, 9u);
+    EXPECT_EQ(view.gpu_readbacks, 0u);
+    attr(trail, "lifetime", "1"); image = snapshot(); ASSERT_NE(image, nullptr);
+    pixel(image, 72, 64, 255, 0, 0);
+    scene3d_context_lost(root); pixel(snapshot(), 72, 64, 255, 0, 0);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailRendersHistoryAndClipsItsTimeWindow) { check_particle_trail_renders_history_and_clips_its_time_window(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailRendersHistoryAndClipsItsTimeWindow) { check_particle_trail_renders_history_and_clips_its_time_window(true); }
+
+void Scene3dTest::check_particle_trail_edits_retain_heads_and_reset_only_changed_sample_counts(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "velocity", "1 0 0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    auto *trail = particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 6)); auto *owner = scene3d_particles(root);
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a));
+    attr(trail, "width", "1"); attr(trail, "lifetime", ".1"); attr(trail, "fade", "true");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b));
+    ASSERT_EQ(a, b); EXPECT_EQ(memcmp(before, after, a * sizeof(*before)), 0);
+    attr(trail, "segments", "7"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); EXPECT_EQ(b, 0u);
+    Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .5, 1e-6); EXPECT_DOUBLE_EQ(sample.age, .5); EXPECT_EQ(sample.sequence, 0u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(b, 1u);
+    EXPECT_NEAR(after[0].position.x, .6, 1e-6);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailEditsRetainHeadsAndResetOnlyChangedSampleCounts) { check_particle_trail_edits_retain_heads_and_reset_only_changed_sample_counts(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailEditsRetainHeadsAndResetOnlyChangedSampleCounts) { check_particle_trail_edits_retain_heads_and_reset_only_changed_sample_counts(true); }
+void Scene3dTest::check_particle_trail_rejected_peer_cannot_publish_candidate_history(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "velocity", "1 0 0"); particle_trail(emitter);
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    auto *peer = particle_emitter("peer"); attr(peer, "backend", "gpu");
+    attr(peer, "velocity", "3e38 0 0"); attr(peer, "gravity", "3e38 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 2)); auto *owner = scene3d_particles(root);
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a));
+    auto generation = scene3d_particles_generation(owner);
+    EXPECT_FALSE(scene3d_runtime_step(runtime, 1)); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b));
+    ASSERT_EQ(a, b); EXPECT_EQ(memcmp(before, after, a * sizeof(*before)), 0);
+    attr(peer, "gravity", "0 0 0"); attr(peer, "velocity", "0 0 0"); attr(peer, "seed", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    // particle phase failures fault the clock; seek repairs it through the coordinated replay path.
+    ASSERT_TRUE(scene3d_seek(root, 2)); ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(b, 3u);
+    EXPECT_NEAR(after[0].position.x, .2, 1e-6); EXPECT_NEAR(after[2].age, .2, 1e-6);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailRejectedPeerCannotPublishCandidateHistory) { check_particle_trail_rejected_peer_cannot_publish_candidate_history(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailRejectedPeerCannotPublishCandidateHistory) { check_particle_trail_rejected_peer_cannot_publish_candidate_history(true); }
+void Scene3dTest::check_particle_trail_drops_recycle_and_expiry_respect_physical_ownership(bool gpu) {
+    particle_clock(); DomElement *emitters[2];
+    for (unsigned i = 0; i < 2; i++) {
+        auto *emitter = emitters[i] = particle_emitter(i ? "recycle" : "drop");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "capacity", "1"); attr(emitter, "burst", "0"); attr(emitter, "rate", "10");
+        attr(emitter, "lifetime", ".35"); attr(emitter, "velocity", "1 0 0");
+        attr(emitter, "overflow", i ? "recycle-oldest" : "drop-new"); particle_trail(emitter);
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 4)); auto *owner = scene3d_particles(root);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    for (unsigned i = 0; i < 2; i++) {
+        ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitters[i], 0, points, &count));
+        EXPECT_EQ(count, i ? 1u : 4u); EXPECT_NEAR(points[0].position.x, i ? 0 : .3, 1e-6);
+    }
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitters[0], 0, points, &count));
+    ASSERT_EQ(count, 1u); EXPECT_FLOAT_EQ(points[0].position.x, 0);
+    for (auto *emitter : emitters) attr(emitter, "emitting", "false");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(runtime, 4));
+    for (auto *emitter : emitters) EXPECT_FALSE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count));
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailDropsRecycleAndExpiryRespectPhysicalOwnership) { check_particle_trail_drops_recycle_and_expiry_respect_physical_ownership(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailDropsRecycleAndExpiryRespectPhysicalOwnership) { check_particle_trail_drops_recycle_and_expiry_respect_physical_ownership(true); }
+void Scene3dTest::check_particle_trail_samples_curved_gravity_motion_and_variable_steps(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "velocity", "1 2 0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    attr(emitter, "gravity", "0 -4 0"); particle_trail(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 4));
+    ASSERT_TRUE(scene3d_runtime_configure(runtime, .2, 1)); ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), emitter, 0, points, &count));
+    ASSERT_EQ(count, 5u); const double times[] = {.5,.3,.2,.1,0};
+    for (unsigned i = 0; i < count; i++) {
+        EXPECT_NEAR(points[i].position.x, times[i], 1e-6);
+        EXPECT_NEAR(points[i].position.y, 2 * times[i] - 2 * times[i] * times[i], 1e-6);
+        EXPECT_NEAR(points[i].age, .5 - times[i], 1e-6);
+    }
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailSamplesCurvedGravityMotionAndVariableSteps) { check_particle_trail_samples_curved_gravity_motion_and_variable_steps(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailSamplesCurvedGravityMotionAndVariableSteps) { check_particle_trail_samples_curved_gravity_motion_and_variable_steps(true); }
+TEST_F(Scene3dTest, ParticlesCpuTrailAdmissionRejectsInvalidDescriptionsWithoutPublishing) {
+    particle_clock(); auto *emitter = particle_emitter(); auto *trail = particle_trail(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *owner = scene3d_particles(root);
+    auto generation = scene3d_particles_generation(owner);
+    const char *fields[] = {"segments", "segments", "segments", "segments", "width", "width", "lifetime", "lifetime", "fade"};
+    const char *values[] = {"0", "64", "1.5", "nan", "0", "1000001", "-1", "1e-99", "maybe"};
+    for (unsigned i = 0; i < 9; i++) {
+        SCOPED_TRACE(values[i]); attr(trail, fields[i], values[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+        attr(trail, fields[i], !strcmp(fields[i], "segments") ? "8" : !strcmp(fields[i], "fade") ? "false" : ".5");
+    }
+    attr(emitter, "backend", "gpu"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    attr(emitter, "backend", "cpu"); particle_trail(emitter); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+}
+void Scene3dTest::check_particle_trail_padded_and_maximum_storage_reject_scene_point_overflow(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "capacity", "16384");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    auto *trail = particle_trail(emitter, "63");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.trail.records * view.trail.samples, 1048576u);
+    auto *peer = particle_emitter("peer"); attr(peer, "capacity", "129"); particle_trail(peer, "1");
+    auto generation = scene3d_particles_generation(owner);
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    attr(trail, "segments", "62"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, peer, &view)); EXPECT_EQ(view.trail.records, 192u);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); EXPECT_EQ(count, 1u);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailPaddedAndMaximumStorageRejectScenePointOverflow) { check_particle_trail_padded_and_maximum_storage_reject_scene_point_overflow(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailPaddedAndMaximumStorageRejectScenePointOverflow) { check_particle_trail_padded_and_maximum_storage_reject_scene_point_overflow(true); }
+
+TEST_F(Scene3dTest, ParticlesGpuTrailLocalCentersAndWidthsFollowTheCurrentEmitterFrame) { check_particle_trail_space(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuTrailWorldCentersAndWidthsSurviveEmitterMovement) { check_particle_trail_space(true, true); }
+TEST_F(Scene3dTest, ParticlesGpuTrailFollowsEquivalentWorldTemplatesAndCommittedStyle) { check_particle_template(true, TEMPLATE_TRAIL | TEMPLATE_WORLD | TEMPLATE_COLOR | TEMPLATE_SHEET | TEMPLATE_VELOCITY); }
+TEST_F(Scene3dTest, ParticlesCpuTrailLocalCentersAndWidthsFollowTheCurrentEmitterFrame) { check_particle_trail_space(false); }
+TEST_F(Scene3dTest, ParticlesCpuTrailWorldCentersAndWidthsSurviveEmitterMovement) { check_particle_trail_space(true); }
+TEST_F(Scene3dTest, ParticlesCpuTrailFollowsEquivalentWorldTemplatesAndCommittedStyle) { check_particle_template(false, TEMPLATE_TRAIL | TEMPLATE_WORLD | TEMPLATE_COLOR | TEMPLATE_SHEET | TEMPLATE_VELOCITY); }
+void Scene3dTest::check_particle_trail_fade_uses_sample_ages_and_keeps_the_head_color(bool gpu) {
+    particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+    attr(root, "background", "#000000"); auto *emitter = particle_emitter(); attr(emitter, "velocity", "2 0 0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+    auto *trail = particle_trail(emitter); attr(trail, "fade", "true"); attr(trail, "lifetime", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    auto *image = snapshot(); ASSERT_NE(image, nullptr);
+    // sample at x=.5: relative age .25, linear red .75, then display sRGB conversion.
+    pixel(image, 80, 64, 225, 0, 0, 255, 4);
+    attr(trail, "fade", "false"); pixel(snapshot(), 80, 64, 255, 0, 0);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailFadeUsesSampleAgesAndKeepsTheHeadColor) { check_particle_trail_fade_uses_sample_ages_and_keeps_the_head_color(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailFadeUsesSampleAgesAndKeepsTheHeadColor) { check_particle_trail_fade_uses_sample_ages_and_keeps_the_head_color(true); }
+void Scene3dTest::check_particle_trail_atlas_and_color_curves_use_committed_head_style(bool gpu) {
+    particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+    auto *emitter = particle_emitter(); auto assets = particle_sheet_assets(emitter);
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    attr(assets.sheet, "fps", "0"); attr(assets.sheet, "first", "3"); attr(assets.sheet, "count", "1");
+    attr(assets.material, "uv-set", "1"); attr(emitter, "velocity", "2 0 0");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+    auto *color = particle_curve(emitter, "particle-color-curve", "0 1", "0 0 1 0 0 1"); particle_trail(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    pixel(snapshot(), 80, 64, 0, 0, 255);
+    attr(color, "values", "0 1 0 0 1 0"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    pixel(snapshot(), 80, 64, 0, 0, 255);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); pixel(snapshot(), 80, 64, 0, 255, 0);
+    scene3d_context_lost(root); pixel(snapshot(), 80, 64, 0, 255, 0);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailAtlasAndColorCurvesUseCommittedHeadStyle) { check_particle_trail_atlas_and_color_curves_use_committed_head_style(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailAtlasAndColorCurvesUseCommittedHeadStyle) { check_particle_trail_atlas_and_color_curves_use_committed_head_style(true); }
+void Scene3dTest::check_particle_trail_retains_historical_centers_outside_the_head_frustum(bool gpu) {
+    particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+    auto *emitter = particle_emitter(); attr(emitter, "velocity", "10 0 0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0"); auto *trail = particle_trail(emitter);
+    attr(trail, "lifetime", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    pixel(snapshot(), 96, 64, 255, 0, 0);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_LE(view.trail.lo.x, 0); EXPECT_GE(view.trail.hi.x, 5);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailRetainsHistoricalCentersOutsideTheHeadFrustum) { check_particle_trail_retains_historical_centers_outside_the_head_frustum(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailRetainsHistoricalCentersOutsideTheHeadFrustum) { check_particle_trail_retains_historical_centers_outside_the_head_frustum(true); }
+void Scene3dTest::check_particle_trail_maximum_live_storage_renders_and_recovers_last_physical_slot(bool gpu) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "capacity", "16384");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    attr(emitter, "burst", "0"); attr(emitter, "rate", "40960"); particle_trail(emitter, "63");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 4));
+    auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.live, 16384u);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 16383, points, &count)); EXPECT_EQ(count, 1u);
+    ASSERT_NE(snapshot(), nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailMaximumLiveStorageRendersAndRecoversLastPhysicalSlot) { check_particle_trail_maximum_live_storage_renders_and_recovers_last_physical_slot(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailMaximumLiveStorageRendersAndRecoversLastPhysicalSlot) { check_particle_trail_maximum_live_storage_renders_and_recovers_last_physical_slot(true); }
+void Scene3dTest::check_particle_trail_second_texture_row_uses_physical_slots_and_transparent_order(bool gpu) {
+    particle_clock(); attr(camera, "type", "orthographic"); attr(camera, "view_height", "4");
+    auto *emitter = particle_emitter(); attr(emitter, "capacity", "130"); attr(emitter, "burst", "0");
+    attr(emitter, "backend", gpu ? "gpu" : "cpu");
+    attr(emitter, "rate", "10"); attr(emitter, "lifetime", "20"); attr(emitter, "velocity", "1 0 0");
+    particle_curve(emitter, "particle-size-curve", "0 1", "0 0");
+    particle_curve(emitter, "particle-opacity-curve", "0 .005 .01 1", "1 1 0 0"); particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 131));
+    auto *image = snapshot(); ASSERT_NE(image, nullptr); pixel(image, 66, 64, 255, 0, 0);
+    Scene3dStats stats; ASSERT_TRUE(scene3d_stats(root, &stats)); EXPECT_GT(stats.particle_sort_passes, 0u);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), emitter, 129, points, &count));
+    ASSERT_EQ(count, 2u); EXPECT_NEAR(points[0].position.x, .1, 1e-6); EXPECT_NEAR(points[1].position.x, 0, 1e-6);
+    scene3d_context_lost(root); pixel(snapshot(), 66, 64, 255, 0, 0);
+}
+TEST_F(Scene3dTest, ParticlesCpuTrailSecondTextureRowUsesPhysicalSlotsAndTransparentOrder) { check_particle_trail_second_texture_row_uses_physical_slots_and_transparent_order(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailSecondTextureRowUsesPhysicalSlotsAndTransparentOrder) { check_particle_trail_second_texture_row_uses_physical_slots_and_transparent_order(true); }
+TEST_F(Scene3dTest, ParticlesCpuTrailFollowsCollisionResolvedPositions) {
+    auto stage = particle_collision_stage("bounce"); particle_trail(stage.emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(scene3d_particles(root), stage.emitter, 0, points, &count));
+    ASSERT_EQ(count, 3u); EXPECT_NEAR(points[0].position.y, 2.101, 3e-5);
+    EXPECT_NEAR(points[1].position.y, .101, 3e-5); EXPECT_NEAR(points[2].position.y, 0, 1e-6);
+}
+void Scene3dTest::check_particle_trail_bridge(bool gpu) {
+    ASSERT_NE(load_page("test/scene3d/particles-cpu.html"), nullptr);
+    ASSERT_FALSE(item_is_error(run_js(gpu ? "configureParticleTrail('gpu');particleRequest('step',6)" : "configureParticleTrail('cpu');particleRequest('step',6)"))); pump_js();
+    ASSERT_FALSE(item_is_error(run_js("readParticleTrail()"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("particleTrail.samples.length===4&&Math.abs(particleTrail.samples[0].position[0]-.5)<1e-6&&Math.abs(particleTrail.samples[3].age-.3)<1e-6").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("particleTrail.samples[0].position[0]=999;particleTrail.samples.length=0;readParticleTrail()"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("particleTrail.samples.length===4&&Math.abs(particleTrail.samples[0].position[0]-.5)<1e-6").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("particleRequest('seek',.6)"))); pump_js();
+    ASSERT_FALSE(item_is_error(run_js("readParticleTrail()"))); pump_js();
+    EXPECT_TRUE(ItemReader(run_js("particleTrail.sequence===0n&&particleTrail.segments===3n&&Math.abs(particleTrail.samples[0].position[0]-.5)<1e-6").to_const()).asBool());
+}
+TEST_F(Scene3dTest, ParticlesBridgeCpuTrailCopiesBoundedHistoryAcrossReplay) { check_particle_trail_bridge(false); }
+TEST_F(Scene3dTest, ParticlesBridgeGpuTrailCopiesBoundedHistoryAcrossReplay) { check_particle_trail_bridge(true); }
+
+TEST_F(Scene3dTest, ParticlesGpuTrailAnalyticalHistoryStaysBoundedBeyondTheMotionJournalLimit) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "lifetime", "1000"); attr(emitter, "velocity", "1 0 0"); particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, SCENE3D_PARTICLE_HISTORY_LIMIT + 12));
+    auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+    EXPECT_EQ(view.gpu_history_ticks, 4u); EXPECT_EQ(view.trail.points, nullptr); EXPECT_EQ(view.trail.styles, nullptr);
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a)); ASSERT_EQ(a, 4u);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    for (unsigned i = 0; i < a; i++) {
+        EXPECT_NEAR(before[i].position.x, 410.7 - .1 * i, 4e-5);
+        EXPECT_NEAR(after[i].position.x, before[i].position.x, 4e-5);
+        EXPECT_NEAR(after[i].age, before[i].age, 1e-6);
+    }
+}
+void Scene3dTest::check_particle_trail_checkpoint(bool stateful) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "velocity", "1 0 0"); auto *trail = particle_trail(emitter);
+    if (stateful) particle_noise(emitter, "1e-30 0 0", "0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 5)); auto *owner = scene3d_particles(root);
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a)); ASSERT_EQ(a, 5u);
+    attr(emitter, "gravity", "0 2 0"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    EXPECT_EQ(memcmp(before, after, a * sizeof(*before)), 0);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a));
+    ASSERT_EQ(a, 7u); EXPECT_NEAR(before[0].position.x, .6, 2e-6); EXPECT_NEAR(before[0].position.y, .04, 2e-6);
+    EXPECT_NEAR(before[2].position.y, 0, 1e-6);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    for (unsigned i = 0; i < a; i++) {
+        EXPECT_NEAR(after[i].position.x, before[i].position.x, 2e-6);
+        EXPECT_NEAR(after[i].position.y, before[i].position.y, 2e-6); EXPECT_NEAR(after[i].age, before[i].age, 1e-6);
+    }
+    attr(trail, "segments", "3"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); EXPECT_EQ(b, 0u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); EXPECT_EQ(b, 1u);
+    EXPECT_NEAR(after[0].position.y, .09, 2e-6);
+}
+TEST_F(Scene3dTest, ParticlesGpuTrailMotionCheckpointsRetainAnchoredPastAndReconstructFutureSamples) { check_particle_trail_checkpoint(false); }
+TEST_F(Scene3dTest, ParticlesGpuTrailStatefulMotionCheckpointsRetainPastAndReconstructFuture) { check_particle_trail_checkpoint(true); }
+TEST_F(Scene3dTest, ParticlesGpuTrailStatefulNoiseUsesTheActualTickPartitionAcrossRecovery) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "lifetime", "1000"); particle_noise(emitter); particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 4)); ASSERT_TRUE(scene3d_runtime_configure(runtime, .125, 1));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 5)); auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.gpu_readbacks, 0u); EXPECT_EQ(view.gpu_history_ticks, 9u);
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a)); ASSERT_EQ(a, 4u);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    for (unsigned i = 0; i < a; i++) {
+        EXPECT_NEAR(after[i].position.x, before[i].position.x, 2e-5);
+        EXPECT_NEAR(after[i].position.y, before[i].position.y, 2e-5);
+        EXPECT_NEAR(after[i].position.z, before[i].position.z, 2e-5); EXPECT_NEAR(after[i].age, i * .125, 1e-6);
+    }
+}
+TEST_F(Scene3dTest, ParticlesGpuTrailFollowsAnalyticCollisionResolvedDevicePositions) {
+    auto *emitter = particle_analytic_stage(); particle_trail(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a)); ASSERT_EQ(a, 3u);
+    EXPECT_NEAR(before[0].position.y, 2.101, 3e-5); EXPECT_NEAR(before[1].position.y, .101, 3e-5);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    for (unsigned i = 0; i < a; i++) EXPECT_NEAR(after[i].position.y, before[i].position.y, 3e-5);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuTrailMaximumRingMatchesCpuAcrossUnequalTextureRowsAndRecovery) {
+    particle_clock(); DomElement *emitters[2];
+    for (unsigned i = 0; i < 2; i++) {
+        auto *emitter = emitters[i] = particle_emitter(i ? "device" : "reference", "box");
+        attr(emitter, "backend", i ? "gpu" : "cpu"); attr(emitter, "capacity", "65");
+        attr(emitter, "burst", "65"); attr(emitter, "lifetime", "100"); attr(emitter, "velocity", "1 2 -3");
+        attr(emitter, "gravity", "0 -4 0"); particle_trail(emitter, "63");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 130));
+    auto *owner = scene3d_particles(root); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitters[1], &view)); EXPECT_EQ(view.gpu_readbacks, 0u);
+    EXPECT_EQ(view.trail.columns, 64u); EXPECT_EQ(view.trail.rows, 2u); EXPECT_EQ(view.gpu_history_ticks, 64u);
+    for (unsigned index : {0u,63u,64u}) {
+        Scene3dParticleTrailPoint cpu[64], gpu[64], recovered[64]; unsigned a, b, c;
+        ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitters[0], index, cpu, &a));
+        ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitters[1], index, gpu, &b)); ASSERT_EQ(a, 64u); ASSERT_EQ(a, b);
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitters[1], index, recovered, &c)); ASSERT_EQ(c, a);
+        for (unsigned j = 0; j < a; j++) {
+            EXPECT_NEAR(gpu[j].position.x, cpu[j].position.x, 3e-5);
+            EXPECT_NEAR(gpu[j].position.y, cpu[j].position.y, .0003);
+            EXPECT_NEAR(gpu[j].position.z, cpu[j].position.z, 8e-5);
+            EXPECT_NEAR(recovered[j].position.y, gpu[j].position.y, .0003);
+            EXPECT_NEAR(recovered[j].age, gpu[j].age, 2e-6);
+        }
+    }
+}
+TEST_F(Scene3dTest, ParticlesGpuTrailStatefulHistoryExhaustionPreservesCommittedPointsAndRecovers) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "lifetime", "1000"); attr(emitter, "velocity", "1 0 0");
+    particle_noise(emitter, "1e-30 0 0", "0"); particle_trail(emitter, "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, SCENE3D_PARTICLE_HISTORY_LIMIT));
+    auto *owner = scene3d_particles(root); Scene3dParticleTrailPoint before[64], after[64]; unsigned a, b;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, before, &a)); ASSERT_EQ(a, 4u);
+    auto generation = scene3d_particles_generation(owner);
+    EXPECT_FALSE(scene3d_runtime_step(runtime, 1)); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    EXPECT_EQ(memcmp(before, after, a * sizeof(*before)), 0);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, after, &b)); ASSERT_EQ(a, b);
+    for (unsigned i = 0; i < a; i++) { EXPECT_FLOAT_EQ(before[i].position.x, after[i].position.x); EXPECT_FLOAT_EQ(before[i].age, after[i].age); }
+}
+TEST_F(Scene3dTest, ParticlesGpuTrailAttachesAndRemovesFromLiveMotionWithoutResettingHeads) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    attr(emitter, "velocity", "1 0 0"); particle_noise(emitter, "1e-30 0 0", "0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 4)); auto *owner = scene3d_particles(root);
+    auto *trail = particle_trail(emitter, "3"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); EXPECT_EQ(count, 0u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 4));
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); ASSERT_EQ(count, 4u);
+    EXPECT_NEAR(points[0].position.x, .7, 2e-6); EXPECT_NEAR(points[3].position.x, .4, 2e-6);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count)); EXPECT_EQ(count, 4u);
+    ASSERT_TRUE(emitter->remove_child(trail)); doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); scene3d_context_lost(root);
+    Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .7, 2e-6); EXPECT_EQ(sample.sequence, 0u);
+    EXPECT_FALSE(scene3d_particles_trail_samples(owner, emitter, 0, points, &count));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1)); ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .8, 2e-6);
+}
+
+TEST_F(Scene3dTest, ParticlesVelocityAdmissionRejectsMalformedAndDuplicateCurves) {
+    particle_clock(); auto *emitter = particle_emitter();
+    auto *curve = particle_curve(emitter, "particle-velocity-curve", "0 1", "1 2 3 -1 -2 -3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root); auto generation = scene3d_particles_generation(owner);
+    const char *invalid[] = {"1 2", "nan 0 0 0 0 0", "1000001 0 0 0 0 0", "-1000001 0 0 0 0 0"};
+    for (const char *values : invalid) {
+        SCOPED_TRACE(values); attr(curve, "values", values);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    }
+    attr(curve, "values", "1 2 3 -1 -2 -3"); attr(curve, "times", "0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(curve, "times", "0 1");
+    particle_curve(emitter, "particle-velocity-curve", "0 1", "0 0 0 0 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr); EXPECT_EQ(scene3d_particles_generation(owner), generation);
+}
+TEST_F(Scene3dTest, ParticlesCpuVelocityOffsetsPreserveLegacySubFloatLifetimes) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "lifetime", "1e-300");
+    particle_curve(emitter, "particle-velocity-curve", "0 1", "1 2 3 -1 -2 -3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    EXPECT_FLOAT_EQ(sample.velocity.x, 1); EXPECT_FLOAT_EQ(sample.velocity.y, 2); EXPECT_FLOAT_EQ(sample.velocity.z, 3);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1)); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view)); EXPECT_EQ(view.live, 0u);
+}
+TEST_F(Scene3dTest, ParticlesGpuVelocityChangingOffsetsStayInsideReflectedMotionBounds) {
+    auto *emitter = particle_analytic_stage(); attr(emitter, "velocity", "0 0 0");
+    particle_curve(emitter, "particle-velocity-curve", "0 .2 .6 1", "10 -20 0 -10 20 0 20 -20 0 -20 20 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root); Scene3dParticleSample sample;
+    for (unsigned i = 0; i < 16; i++) {
+        Scene3dEmitterView before, after; ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after)); EXPECT_EQ(after.gpu_readbacks, before.gpu_readbacks);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_LE(after.lo.x, sample.position.x); EXPECT_GE(after.hi.x, sample.position.x);
+        EXPECT_LE(after.lo.y, sample.position.y); EXPECT_GE(after.hi.y, sample.position.y);
+    }
+    scene3d_context_lost(root); Scene3dParticleSample recovered;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+    EXPECT_NEAR(recovered.position.x, sample.position.x, 3e-5);
+    EXPECT_NEAR(recovered.position.y, sample.position.y, 3e-5);
+    EXPECT_NEAR(recovered.velocity.y, sample.velocity.y, 3e-5);
+}
+TEST_F(Scene3dTest, ParticlesGpuVelocityRejectedPeerStagesKeepCommittedCurvesAndDynamicMotion) {
+    particle_clock(); auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    auto *curve = particle_curve(emitter, "particle-velocity-curve", "0 1", "0 0 0 4 0 0");
+    auto *peer = particle_emitter("peer"); attr(peer, "backend", "gpu");
+    attr(peer, "velocity", "3e38 0 0"); attr(peer, "gravity", "3e38 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+    auto *owner = scene3d_particles(root); Scene3dEmitterView before, after;
+    attr(curve, "values", "4 0 0 4 0 0"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    EXPECT_FALSE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(before.time, after.time); EXPECT_EQ(before.gpu_history_ticks, after.gpu_history_ticks);
+    EXPECT_EQ(after.gpu_readbacks, before.gpu_readbacks);
+    scene3d_context_lost(root); Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, 0, 3e-6); EXPECT_NEAR(sample.velocity.x, .2, 3e-6);
+}
+TEST_F(Scene3dTest, ParticlesCpuSheetFramesReachTheAtlasRenderer) { check_particle_sheet_pixels(false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetFramesReachTheAtlasRenderer) { check_particle_sheet_pixels(true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetModesKeysEditsAndReplayPreserveMotion) { check_particle_sheet_numeric(false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetModesKeysEditsAndReplayPreserveMotion) { check_particle_sheet_numeric(true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetMaximumCellSurvivesSecondRowAndRecovery) { check_particle_sheet_rows(false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetMaximumCellSurvivesSecondRowAndRecovery) { check_particle_sheet_rows(true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetFrameChangesInvalidateMaskedShadows) { check_particle_sheet_shadow(false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetFrameChangesInvalidateMaskedShadows) { check_particle_sheet_shadow(true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetWorldFramesKeepTheirAffineBirths) { check_particle_sheet_world(false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetWorldFramesKeepTheirAffineBirths) { check_particle_sheet_world(true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetFramesFollowTransparentDepthOrder) { check_particle_color_order(false, 8, true); }
+TEST_F(Scene3dTest, ParticlesGpuSheetFramesFollowTransparentDepthOrder) { check_particle_color_order(true, 131, true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetKeysRemainIndependentOfDroppedStorage) { check_particle_overflow(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuSheetKeysRemainIndependentOfDroppedStorage) { check_particle_overflow(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetFramesFollowEquivalentTemplates) { check_particle_template(false, TEMPLATE_SHEET); }
+TEST_F(Scene3dTest, ParticlesGpuSheetFramesFollowEquivalentTemplates) { check_particle_template(true, TEMPLATE_WORLD | TEMPLATE_SHEET); }
+TEST_F(Scene3dTest, ParticlesCpuSheetUsesUv1AndMapsAfterMaterialTransforms) { check_particle_sheet_uv(false, false); }
+TEST_F(Scene3dTest, ParticlesGpuSheetUsesUv1AndMapsAfterMaterialTransforms) { check_particle_sheet_uv(true, false); }
+TEST_F(Scene3dTest, ParticlesCpuSheetInsetControlsLinearFilteringBleed) { check_particle_sheet_uv(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuSheetInsetControlsLinearFilteringBleed) { check_particle_sheet_uv(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuSheetMaximumCapacityRetainsFrameStorage) { check_particle_maximum_storage(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuSheetMaximumCapacityRetainsFrameStorage) { check_particle_maximum_storage(true, true); }
+TEST_F(Scene3dTest, ParticlesBridgeSheetCpuCopiesFrameAndGridAcrossReplay) { check_particle_sheet_bridge(false); }
+TEST_F(Scene3dTest, ParticlesBridgeSheetGpuCopiesFrameAndGridAcrossReplay) { check_particle_sheet_bridge(true); }
+TEST_F(Scene3dTest, ParticlesSheetAdmissionRejectsRangesModesAndRetainedLifetimeOverflow) {
+    particle_clock();
+    auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu"); attr(emitter, "lifetime", "1000000");
+    auto *sheet = particle_sheet(emitter, "fps");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    auto *owner = scene3d_particles(root); Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    const char *keys[] = {"columns", "rows", "columns", "first", "count", "count", "fps", "mode", "inset", "inset", "random-start"};
+    const char *bad[] = {"0", "257", "1.5", "4", "0", "5", "-1", "pingpong", ".5", "nan", "maybe"};
+    const char *valid[] = {"2", "2", "2", "0", "4", "4", "10", "fps", "0", "0", "false"};
+    for (unsigned i = 0; i < 11; i++) {
+        attr(sheet, keys[i], bad[i]); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+        EXPECT_EQ(after.gpu_readbacks, 0u); attr(sheet, keys[i], valid[i]);
+    }
+    attr(sheet, "cycles", "1"); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(sheet->remove_attribute("cycles")); doc.mutation_epoch++;
+    auto *duplicate = particle_sheet(emitter); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.mutation_epoch++;
+    attr(emitter, "lifetime", "1"); attr(sheet, "fps", "1024");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr); // old births still own the long lifetime
+    attr(sheet, "fps", "10"); ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after)); EXPECT_EQ(after.gpu_readbacks, 0u);
+    ASSERT_TRUE(emitter->remove_child(sheet)); doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after)); EXPECT_EQ(after.sheet_columns, 1u);
+}
+TEST_F(Scene3dTest, ParticlesCpuSheetPhaseAdmissionPreservesLegacySubFloatLifetimes) {
+    particle_clock();
+    auto *emitter = particle_emitter(); attr(emitter, "lifetime", "1e-300");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample)); EXPECT_EQ(sample.frame, 0u);
+    particle_sheet(emitter);
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr); // advancing lifetime frames require a positive float phase domain
+}
+TEST_F(Scene3dTest, ParticlesGpuColorOpacityCurvesReachRenderer) { check_particle_color_opacity(true); }
+TEST_F(Scene3dTest, ParticlesCpuColorValuesRetainMotionAcrossEditsRecoveryAndSeek) { check_particle_color_values(false); }
+TEST_F(Scene3dTest, ParticlesGpuColorValuesRetainMotionAcrossEditsRecoveryAndSeek) { check_particle_color_values(true); }
+TEST_F(Scene3dTest, ParticlesCpuColorAlphaSortsByDepthAcrossCameraChangesAndRecovery) { check_particle_color_order(false); }
+TEST_F(Scene3dTest, ParticlesGpuColorAlphaSortsByDepthAcrossCameraChangesAndRecovery) { check_particle_color_order(true); }
+TEST_F(Scene3dTest, ParticlesCpuColorAlphaOrderingPadsIncompleteRows) { check_particle_color_order(false, 131); }
+TEST_F(Scene3dTest, ParticlesGpuColorAlphaOrderingPadsIncompleteRows) { check_particle_color_order(true, 131); }
+TEST_F(Scene3dTest, ParticlesCpuColorOpaqueMaterialIgnoresCurveAlpha) { check_particle_color_material(false, "opaque", nullptr, true); }
+TEST_F(Scene3dTest, ParticlesGpuColorOpaqueMaterialIgnoresCurveAlpha) { check_particle_color_material(true, "opaque", nullptr, true); }
+TEST_F(Scene3dTest, ParticlesCpuColorMaskMaterialDiscardsLowCurveAlpha) { check_particle_color_material(false, "mask", ".6", false); }
+TEST_F(Scene3dTest, ParticlesGpuColorMaskMaterialDiscardsLowCurveAlpha) { check_particle_color_material(true, "mask", ".6", false); }
+TEST_F(Scene3dTest, ParticlesCpuColorMaskMaterialKeepsHighCurveAlphaOpaque) { check_particle_color_material(false, "mask", ".4", true); }
+TEST_F(Scene3dTest, ParticlesGpuColorMaskMaterialKeepsHighCurveAlphaOpaque) { check_particle_color_material(true, "mask", ".4", true); }
+TEST_F(Scene3dTest, ParticlesCpuColorOpacityFollowsEquivalentTemplates) { check_particle_template(false, TEMPLATE_COLOR); }
+TEST_F(Scene3dTest, ParticlesGpuColorOpacityFollowsEquivalentTemplates) { check_particle_template(true, TEMPLATE_WORLD | TEMPLATE_COLOR); }
+TEST_F(Scene3dTest, ParticlesCpuColorAlphaChangesInvalidateMaskedShadowCoverage) { check_particle_rotation_shadows(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuColorAlphaChangesInvalidateMaskedShadowCoverage) { check_particle_rotation_shadows(true, true); }
+TEST_F(Scene3dTest, ParticlesBridgeColorCpuCopiesRgbaAcrossReplay) { check_particle_color_bridge(false); }
+TEST_F(Scene3dTest, ParticlesBridgeColorGpuCopiesRgbaAcrossReplay) { check_particle_color_bridge(true); }
+TEST_F(Scene3dTest, ParticlesColorAdmissionKeepsLiveStateOnMalformedDuplicateOrOutOfRangeCurves) {
+    particle_clock();
+    auto *emitter = particle_emitter(); attr(emitter, "backend", "gpu");
+    auto *color = particle_curve(emitter, "particle-color-curve", "0 1", "1 0 0 0 0 1");
+    auto *opacity = particle_curve(emitter, "particle-opacity-curve", "0 1", "1 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    const char *bad[] = {"-1 0 0 0 0 1", "1.1 0 0 0 0 1", "1 0 0", "nan 0 0 0 0 1"};
+    for (const char *value : bad) {
+        attr(color, "values", value);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.sequence, before.sequence);
+        EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id); EXPECT_EQ(after.gpu_readbacks, 0u);
+    }
+    attr(color, "values", "1 0 0 0 0 1"); attr(opacity, "values", "1 -.1");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(opacity, "values", "1 1.1"); EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(opacity, "values", "1 0");
+    auto *duplicate = particle_curve(emitter, "particle-opacity-curve", "0 1", "1 1");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(emitter->remove_child(duplicate)); doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.gpu_readbacks, 0u); EXPECT_EQ(after.time, before.time);
+}
+TEST_F(Scene3dTest, ParticlesGpuColorMaximumCapacitySortsAndRecoversWithinRetainedStorage) { check_particle_maximum_storage(true); }
+
+TEST_F(Scene3dTest, ParticlesGpuNoiseConstantAccelerationUsesTheSharedDragIntegral) {
+    check_particle_noise_constant(true);
+}
+TEST_F(Scene3dTest, ParticlesCpuNoiseTemporalKeysEditsRecoveryAndSeekPreserveLocalMotion) {
+    check_particle_noise_temporal(false, false);
+}
+TEST_F(Scene3dTest, ParticlesGpuNoiseTemporalKeysEditsRecoveryAndSeekPreserveLocalMotion) {
+    check_particle_noise_temporal(true, false);
+}
+TEST_F(Scene3dTest, ParticlesCpuNoiseWorldAccelerationIgnoresLaterEmitterMovement) {
+    check_particle_noise_temporal(false, true);
+}
+TEST_F(Scene3dTest, ParticlesGpuNoiseWorldAccelerationIgnoresLaterEmitterMovement) {
+    check_particle_noise_temporal(true, true);
+}
+TEST_F(Scene3dTest, ParticlesCpuNoiseMovesVisibleInstancesAndRecovers) { check_particle_noise_pixels(false); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseMovesVisibleInstancesAndRecovers) { check_particle_noise_pixels(true); }
+TEST_F(Scene3dTest, ParticlesCpuNoiseFollowsEquivalentTemplates) {
+    check_particle_template(false, TEMPLATE_NOISE);
+}
+TEST_F(Scene3dTest, ParticlesGpuNoiseFollowsEquivalentTemplates) {
+    check_particle_template(true, TEMPLATE_NOISE);
+}
+TEST_F(Scene3dTest, ParticlesCpuNoiseContinuesThroughSceneCollisionResponse) { check_particle_noise_collision(false); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseContinuesThroughAnalyticCollisionResponse) { check_particle_noise_collision(true); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseHistoryExhaustionKeepsTheLastCompleteDeviceState) {
+    check_particle_gpu_history(false, PARTICLE_HISTORY_NOISE);
+}
+TEST_F(Scene3dTest, ParticlesGpuNoiseRecycledSlotsPruneHistoryAndRecoverCurrentMotion) {
+    check_particle_gpu_history(true, PARTICLE_HISTORY_NOISE);
+}
+TEST_F(Scene3dTest, ParticlesCpuNoiseInsertionAndRemovalKeepExistingMotionContinuous) { check_particle_noise_insertion(false); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseInsertionAndRemovalKeepExistingMotionContinuous) { check_particle_noise_insertion(true); }
+TEST_F(Scene3dTest, ParticlesGpuNoiseLastRowMatchesCpuAcrossVariableTickRecovery) { check_particle_variable_profile(false); }
+TEST_F(Scene3dTest, ParticlesGpuVelocityLastRowMatchesCpuAcrossVariableTickRecovery) { check_particle_variable_profile(true); }
+
+TEST_F(Scene3dTest, ParticlesBridgeNoiseCopiesSeededSamplesAcrossReplay) {
+    ParticleBridgeCommand commands[] = {
+        {"configureParticleNoise();particleRequest('capabilities')", "particleResult.particles_noise===true"},
+        {"particleRequest('step',6)", "particleResult.tick===6&&particleResult.faulted===false"},
+        {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[2]+.7337132643127442)<3e-6"},
+        {"particleResult.emitters[0].samples[0].position[2]=999;particleRequest('read')",
+         "Math.abs(particleResult.emitters[0].samples[0].position[2]+.7337132643127442)<3e-6"},
+        {"particleRequest('seek',.6)", "particleResult.tick===6"},
+        {"particleRequest('read')", "particleResult.emitters[0].gpu_history_ticks===6n&&"
+                                   "Math.abs(particleResult.emitters[0].samples[0].position[2]+.7337132643127442)<3e-6"}};
+    check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+}
+
+TEST_F(Scene3dTest, ParticlesNoiseAdmissionRejectsMalformedAndRetainedLifetimeDomainsAtomically) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "backend", "gpu");
+    attr(emitter, "lifetime", "1000");
+    auto *noise = particle_noise(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    const char *keys[] = {"strength", "strength", "strength", "frequency", "frequency", "frequency"};
+    const char *bad[] = {"-1 0 0", "1000001 0 0", "1 2", "-1", "1025", "nan"};
+    for (unsigned i = 0; i < 6; i++) {
+        attr(noise, keys[i], bad[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr) << bad[i];
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+        EXPECT_EQ(after.gpu_readbacks, 0u);
+        attr(noise, keys[i], !strcmp(keys[i], "frequency") ? "2" : "2 4 8");
+    }
+    auto *duplicate = particle_noise(emitter);
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(emitter->remove_child(duplicate));
+    doc.mutation_epoch++;
+    attr(emitter, "lifetime", "1"); attr(noise, "frequency", "1024");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr); // old lifetime still exceeds the lattice domain
+    attr(noise, "frequency", "2");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(emitter->remove_child(noise));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.live, before.live); EXPECT_EQ(after.sequence, before.sequence);
+    EXPECT_EQ(after.gpu_history_ticks, 0u);
+}
+
+TEST_F(Scene3dTest, DocumentListenerRetirementReleasesOnlyItsOwnNativePins) {
+    auto *loaded = load_page("test/scene3d/particles-cpu.html");
+    ASSERT_NE(loaded, nullptr);
+    ASSERT_FALSE(item_is_error(run_js(
+        "globalThis.listenerPeer=document.implementation.createHTMLDocument('peer');"
+        "globalThis.listenerHits=0;globalThis.pinListener=()=>listenerHits++;"
+        "document.body.addEventListener('retire-pin',pinListener);"
+        "listenerPeer.body.addEventListener('retire-pin',pinListener)")));
+    auto *body = radiant_document_body_element(loaded);
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(dom_node_pin_count(loaded, dom_node_ref(body), DOM_NODE_PIN_EVENT_QUEUE), 1u);
+    dom_events_release_document(loaded);
+    EXPECT_EQ(dom_node_pin_count(loaded, dom_node_ref(body), DOM_NODE_PIN_EVENT_QUEUE), 0u);
+    EXPECT_TRUE(dom_event_type_has_js_listeners("retire-pin"));
+    EXPECT_TRUE(ItemReader(run_js(
+        "document.body.dispatchEvent(new Event('retire-pin'));"
+        "listenerPeer.body.dispatchEvent(new Event('retire-pin'));listenerHits===1").to_const()).asBool());
+    dom_events_release_document(loaded);
+    EXPECT_EQ(dom_node_pin_count(loaded, dom_node_ref(body), DOM_NODE_PIN_EVENT_QUEUE), 0u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticSweepsPlanesAndSpheresWithoutTickReadback) {
+    auto *plane = particle_analytic_stage();
+    auto *sphere = particle_emitter("sphere");
+    attr(sphere, "backend", "gpu");
+    attr(sphere, "velocity", "0 -20 0");
+    auto *collision = element("particle-collision", sphere);
+    attr(collision, "profile", "analytic"); attr(collision, "radius", ".05"); attr(collision, "restitution", "1");
+    auto *volume = element("particle-sphere", collision); attr(volume, "center", "0 -2 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    for (auto *emitter : {plane, sphere}) {
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.y, .101, 2e-5);
+        EXPECT_NEAR(sample.velocity.y, 20, 2e-5);
+        EXPECT_EQ(sample.collision_status, 0u);
+    }
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticSlideFrictionAndGravityKeepTheContactOutsideThePlane) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "slide", &collision);
+    attr(emitter, "velocity", "2 -20 0"); attr(collision, "friction", ".25");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .17375, 2e-5);
+    EXPECT_NEAR(sample.position.y, -.949, 2e-5);
+    EXPECT_NEAR(sample.velocity.x, 1.5, 2e-5);
+    EXPECT_NEAR(sample.velocity.y, 0, 2e-5);
+    attr(emitter, "gravity", "0 -10 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 4));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_GE(sample.position.y, -.95001);
+    EXPECT_EQ(sample.collision_status, 0u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticRepeatedImpactsStopAtTheDeclaredBudget) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "bounce", &collision);
+    attr(emitter, "velocity", "0 -100 0"); attr(collision, "max-impacts", "8");
+    auto *ceiling = element("particle-plane", collision);
+    attr(ceiling, "normal", "0 -1 0"); attr(ceiling, "offset", "-1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .505, 2e-4); EXPECT_NEAR(sample.velocity.y, 100, 1e-5);
+    attr(collision, "max-impacts", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_seek(root, 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -.949, 2e-5);
+    EXPECT_EQ(sample.velocity.y, 0); EXPECT_EQ(sample.collision_status, 1u);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -.949, 2e-5); EXPECT_EQ(sample.collision_status, 1u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticInitialOverlapsHaveAnObservableStoppedState) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "bounce", &collision);
+    attr(collision->first_child->as_element(), "offset", ".1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    EXPECT_EQ(sample.position.y, 0); EXPECT_EQ(sample.velocity.y, 0); EXPECT_EQ(sample.collision_status, 2u);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    EXPECT_EQ(sample.position.y, 0); EXPECT_EQ(sample.collision_status, 2u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticRecoveryReplaysDeviceMotionAndCompatibleEditsCheckpointIt) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "bounce", &collision);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 8));
+    auto *owner = scene3d_particles(root);
+    Scene3dParticleSample before, after;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &before));
+    Scene3dEmitterView initial, recovered;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &initial));
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &recovered));
+    EXPECT_EQ(recovered.gpu_readbacks, initial.gpu_readbacks);
+    EXPECT_EQ(recovered.gpu_recoveries, initial.gpu_recoveries + 1);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &after));
+    EXPECT_NEAR(after.position.y, before.position.y, 2e-5);
+    EXPECT_NEAR(after.velocity.y, before.velocity.y, 2e-5);
+    attr(collision->first_child->as_element(), "offset", "-2");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &after));
+    EXPECT_NEAR(after.position.y, before.position.y, 2e-5);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &after));
+    EXPECT_NEAR(after.position.y, before.position.y + 2, 3e-5);
+    ASSERT_TRUE(scene3d_seek(root, 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &after));
+    EXPECT_NEAR(after.position.y, -1.899, 3e-5);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticAdmissionRejectsBadVolumesWithoutReplacingPlayback) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "bounce", &collision);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    const char *fields[] = {"profile", "radius", "response", "events", "max-impacts", "initial-overlap"};
+    const char *invalid[] = {"scene", "0", "kill", "true", "17", "project"};
+    const char *valid[] = {"analytic", ".05", "bounce", "false", "4", "stop"};
+    for (unsigned i = 0; i < 6; i++) {
+        attr(collision, fields[i], invalid[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+        attr(collision, fields[i], valid[i]);
+    }
+    attr(collision->first_child->as_element(), "normal", "0 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(collision->first_child->as_element(), "normal", "0 2 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticWorldSphereReflectsAnObliqueImpactAndKeepsFrozenBirths) {
+    auto *emitter = particle_analytic_stage("sphere");
+    attr(emitter, "space", "world"); attr(emitter, "position", ".63 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    attr(emitter, "position", "100 100 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleSample sample;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    // the 3:4:5 contact normal is (.6,.8); reflection adds (19.2,25.6) to the incoming velocity.
+    EXPECT_NEAR(sample.position.x, 1.437, 2e-4); EXPECT_NEAR(sample.position.y, -.924, 2e-4);
+    EXPECT_NEAR(sample.velocity.x, 19.2, 2e-4); EXPECT_NEAR(sample.velocity.y, 5.6, 2e-4);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_LE(view.lo.x, sample.position.x); EXPECT_GE(view.hi.x, sample.position.x);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, 1.437, 2e-4);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticRecoveryRetainsTheActualVariableTickPartition) {
+    auto *emitter = particle_analytic_stage();
+    attr(emitter, "drag", "2"); attr(emitter, "gravity", "1 -3 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *runtime = scene3d_runtime(root);
+    particle_variable_ticks(runtime);
+    auto *owner = scene3d_particles(root);
+    Scene3dParticleSample before, after;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &before));
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &after));
+    EXPECT_NEAR(before.position.x, after.position.x, 2e-5);
+    EXPECT_NEAR(before.position.y, after.position.y, 2e-5);
+    EXPECT_NEAR(before.velocity.y, after.velocity.y, 2e-5);
+    EXPECT_EQ(before.collision_status, after.collision_status);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticHistoryExhaustionKeepsTheLastCompleteDeviceState) { check_particle_gpu_history(false, PARTICLE_HISTORY_ANALYTIC); }
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticReusedSlotsPruneExpiredHistoryAndRecoverTheCurrentBirth) { check_particle_gpu_history(true, PARTICLE_HISTORY_ANALYTIC); }
+
+TEST_F(Scene3dTest, ParticlesBridgeAnalyticCopiesDeviceCollisionStateAcrossReplay) {
+    ParticleBridgeCommand commands[] = {
+        {"configureParticleAnalytic();particleRequest('capabilities')", "particleResult.particles_gpu_analytic_collision===true"},
+        {"particleRequest('step',2)", "particleResult.tick===2&&particleResult.faulted===false"},
+        {"particleRequest('read')", "Math.abs(particleResult.emitters[0].samples[0].position[1]-.101)<2e-5&&"
+                                   "particleResult.emitters[0].samples[0].velocity[1]===20&&"
+                                   "particleResult.emitters[0].samples[0].collision_status==='running'"},
+        {"particleResult.emitters[0].samples[0].position[1]=999;particleRequest('read')",
+         "Math.abs(particleResult.emitters[0].samples[0].position[1]-.101)<2e-5"},
+        {"particleRequest('seek',.2)", "particleResult.tick===2"},
+        {"particleRequest('read')", "particleResult.emitters[0].gpu_history_ticks===2n&&"
+                                   "Math.abs(particleResult.emitters[0].samples[0].position[1]-.101)<2e-5"}};
+    check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticRejectedPeerStagesRestoreVisibleBirthFramesAndHistory) {
+    auto *emitter = particle_analytic_stage();
+    attr(emitter, "space", "world"); attr(emitter, "velocity", "0 0 0");
+    attr(emitter, "rate", "10"); attr(emitter, "capacity", "1"); attr(emitter, "overflow", "recycle-oldest");
+    auto *sheet = particle_sheet(emitter, "fps"); attr(sheet, "fps", "0");
+    auto *color = particle_curve(emitter, "particle-color-curve", "0 1", "1 0 0 1 0 0");
+    auto *peer = particle_emitter("peer");
+    attr(peer, "backend", "gpu"); attr(peer, "velocity", "3e38 0 0"); attr(peer, "gravity", "3e38 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    pixel(snapshot(), 70, 64, 0, 0, 0, 0);
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    attr(emitter, "scale", "4 4 4"); attr(color, "values", "0 0 1 0 0 1");
+    attr(sheet, "columns", "4"); attr(sheet, "rows", "1"); attr(sheet, "first", "3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.time, before.time); EXPECT_EQ(after.gpu_history_ticks, before.gpu_history_ticks);
+    EXPECT_EQ(after.sheet_columns, 2u);
+    pixel(snapshot(), 70, 64, 0, 0, 0, 0);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample)); EXPECT_FLOAT_EQ(sample.color[0], 1); EXPECT_EQ(sample.frame, 0u);
+    scene3d_context_lost(root);
+    pixel(snapshot(), 70, 64, 0, 0, 0, 0);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample)); EXPECT_FLOAT_EQ(sample.color[0], 1); EXPECT_EQ(sample.frame, 0u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuAnalyticMaximumSlotsAndVolumesRecoverTheLastDeviceRow) {
+    DomElement *collision;
+    auto *emitter = particle_analytic_stage("plane", "bounce", &collision);
+    attr(emitter, "capacity", "16384"); attr(emitter, "burst", "0"); attr(emitter, "rate", "40960");
+    attr(collision, "max-impacts", "16");
+    for (unsigned i = 1; i < SCENE3D_PARTICLE_ANALYTIC_LIMIT; i++) {
+        auto *plane = element("particle-plane", collision); attr(plane, "offset", "-100");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 4));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.live, SCENE3D_INSTANCE_LIMIT); EXPECT_EQ(view.gpu_readbacks, 0u);
+    Scene3dParticleSample before[4], after[4];
+    ASSERT_TRUE(scene3d_particles_samples(owner, emitter, SCENE3D_INSTANCE_LIMIT - 4, 4, before));
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_samples(owner, emitter, SCENE3D_INSTANCE_LIMIT - 4, 4, after));
+    for (unsigned i = 0; i < 4; i++) {
+        EXPECT_EQ(before[i].sequence, after[i].sequence); EXPECT_EQ(after[i].position.y, 0);
+        EXPECT_EQ(after[i].velocity.y, -20); EXPECT_EQ(after[i].collision_status, 0u);
+    }
+    auto *excess = element("particle-plane", collision); attr(excess, "offset", "-100");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view)); EXPECT_EQ(view.live, SCENE3D_INSTANCE_LIMIT);
+}
 
 TEST_F(Scene3dTest, ParticlesRejectWholeEmitterStepsBeforePublishingCapacityOrSpawnOverflow) {
     particle_clock();
@@ -3191,10 +5251,10 @@ TEST_F(Scene3dTest, ParticlesGpuRotationCurvesComposeInsideAffineWorldBirths) {
     check_particle_rotation_samples(true, true);
 }
 TEST_F(Scene3dTest, ParticlesCpuRotationCurvesFollowEquivalentTemplates) {
-    check_particle_template(false, false, false, true);
+    check_particle_template(false, TEMPLATE_ROTATION);
 }
 TEST_F(Scene3dTest, ParticlesGpuRotationCurvesFollowEquivalentTemplates) {
-    check_particle_template(true, true, false, true);
+    check_particle_template(true, TEMPLATE_WORLD | TEMPLATE_ROTATION);
 }
 TEST_F(Scene3dTest, ParticlesRotationCurveAdmissionKeepsLiveBuffersOnMalformedOrDuplicateKeys) {
     particle_clock();
@@ -3736,8 +5796,8 @@ TEST_F(Scene3dTest, ParticlesCpuWorldMotionEditsKeepContinuityAndSpaceChangesRes
 TEST_F(Scene3dTest, ParticlesGpuWorldMotionEditsKeepContinuityAndSpaceChangesRestart) {
     check_particle_world_motion_edits(true);
 }
-TEST_F(Scene3dTest, ParticlesCpuWorldFramesFollowEquivalentTemplates) { check_particle_template(false, true); }
-TEST_F(Scene3dTest, ParticlesGpuWorldFramesFollowEquivalentTemplates) { check_particle_template(true, true); }
+TEST_F(Scene3dTest, ParticlesCpuWorldFramesFollowEquivalentTemplates) { check_particle_template(false, TEMPLATE_WORLD); }
+TEST_F(Scene3dTest, ParticlesGpuWorldFramesFollowEquivalentTemplates) { check_particle_template(true, TEMPLATE_WORLD); }
 
 TEST_F(Scene3dTest, ParticlesCpuWorldCollisionIgnoresLaterEmitterMovement) {
     auto stage = particle_collision_stage();
@@ -3994,7 +6054,7 @@ TEST_F(Scene3dTest, ParticlesGpuSurfaceMaximumTableUsesAllFaceSearchBitsAndWindi
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
     EXPECT_EQ(view.surface_triangles, 4096u);
     EXPECT_EQ(view.surface_versions, 1u);
-    EXPECT_EQ(view.gpu_bytes, 2097152u + 64u * 256u);
+    EXPECT_EQ(view.gpu_bytes, 2097152u + 64u * SCENE3D_PARTICLE_GPU_SLOT_BYTES);
 }
 
 TEST_F(Scene3dTest, ParticlesSurfaceIntakeSharesPrimitiveAndNonindexedGeometryWithDegenerateFiltering) {
@@ -4034,8 +6094,8 @@ TEST_F(Scene3dTest, ParticlesBridgeSurfaceGpuRetainsCopiedGeometryVersionsAcross
     check_particle_surface_bridge(true);
 }
 
-TEST_F(Scene3dTest, ParticlesCpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(false, false, true); }
-TEST_F(Scene3dTest, ParticlesGpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(true, false, true); }
+TEST_F(Scene3dTest, ParticlesCpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(false, TEMPLATE_SURFACE); }
+TEST_F(Scene3dTest, ParticlesGpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(true, TEMPLATE_SURFACE); }
 
 TEST_F(Scene3dTest, ParticlesGpuSurfaceToPointEditsRetainOldRecipesUntilExpiry) {
     particle_clock();
@@ -4072,7 +6132,7 @@ TEST_F(Scene3dTest, ParticlesGpuSurfaceToPointEditsRetainOldRecipesUntilExpiry) 
     ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &point));
     EXPECT_FLOAT_EQ(point.position.x, 0);
     ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
-    EXPECT_EQ(view.gpu_bytes, 8u * 256u);
+    EXPECT_EQ(view.gpu_bytes, 8u * SCENE3D_PARTICLE_GPU_SLOT_BYTES);
 }
 
 TEST_F(Scene3dTest, ParticlesGpuNativeDescriptionAdmitsAndDrawsWithoutCpuMatrices) {
@@ -8735,6 +10795,935 @@ class Scene3dAgentTest : public Scene3dTest {
         pool_destroy(source_pool);
     }
 };
+
+TEST_F(Scene3dAgentTest, AudioReadExposesSceneOwnedNativeStateBeforeAnyClipPlays) {
+    RootedValueBuilder request(RootedValueBuilder::DATA_MAP);
+    request.put("operation", Item{.item=s2it(heap_create_name("audio_read"))});
+    RootFrame roots(1); Rooted<Item> result(roots, scene3d_control(root, request.value.get()));
+    ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "sources").to_const()).asArray().length(), 0);
+}
+
+class Scene3dAudioTest : public Scene3dAgentTest {
+    bool previous_offline;
+    AudioFixtureSpeechEngine speech_engine;
+protected:
+    void SetUp() override {
+        Scene3dAgentTest::SetUp(); previous_offline = audio_bus_offline(); audio_bus_set_offline(true);
+        attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1");
+    }
+    void TearDown() override { Scene3dAgentTest::TearDown(); audio_bus_set_offline(previous_offline); }
+    void fake_speech() { ASSERT_TRUE(speech_engine.use_fake()); }
+    DomElement* speaker(const char* id = "speaker", DomElement* parent = nullptr) {
+        auto* source = element("audio-source", parent ? parent : root);
+        attr(source, "id", id); attr(source, "clip", "tone"); attr(source, "position", "1 0 0");
+        attr(source, "loop", "true"); attr(source, "smoothing", "0"); return source;
+    }
+    Item read_audio() { return agent_command(R"({"operation":"audio_read"})"); }
+    struct AudioRow {
+        Item value;
+        ItemReader get(const char* key) const { return ItemReader(item_attr(value, key).to_const()); }
+    };
+    AudioRow source_row(Item packet, unsigned index = 0) { return {ItemReader(item_attr(packet, "sources").to_const()).asArray().get(index).item()}; }
+    Item call_audio(const char* operation, Item payload) {
+        RootedValueBuilder request(RootedValueBuilder::DATA_MAP); request.put("payload", payload);
+        request.put("operation", Item{.item=s2it(heap_create_name(operation))});
+        return scene3d_control(root, request.value.get());
+    }
+    void ticket(RootedValueBuilder* payload, uint64_t session = 0) {
+        Scene3dRuntimeStats clock = {}; scene3d_runtime_stats(scene3d_runtime(root), &clock);
+        payload->put("session", box_uint64_value(session ? session : clock.session));
+    }
+    Item upload(uint64_t expected = 0, int16_t sample = 16384, const char* id = "tone", bool malformed = false) {
+        if (!scene3d_prepare_animations(root)) return ItemError;
+        unsigned char bytes[44 + 256 * 4]; size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, 256, sample, sample);
+        RootedValueBuilder payload(RootedValueBuilder::DATA_MAP); ticket(&payload);
+        payload.put("id", Item{.item=s2it(heap_create_name(id))}); payload.put("expected", box_uint64_value(expected));
+        payload.put("bytes", Item{.item=x2it(heap_binary_from_bytes((const char*)bytes, malformed ? 12 : length))});
+        Item result = call_audio("audio_clip", payload.value.get()); memset(bytes, 0, sizeof(bytes)); return result;
+    }
+    Item transport(const char* action, const char* id = "speaker", uint64_t identity = 0, uint64_t session = 0) {
+        RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+        if (!identity && !item_is_error(packet.get())) {
+            auto rows = ItemReader(item_attr(packet.get(), "sources").to_const()).asArray();
+            for (int64_t i = 0; i < rows.length(); i++) if (!strcmp(AudioRow{rows.get(i).item()}.get("id").asString()->chars, id))
+                scene3d_counter(AudioRow{rows.get(i).item()}.get("identity"), &identity);
+        }
+        RootedValueBuilder payload(RootedValueBuilder::DATA_MAP); ticket(&payload, session);
+        payload.put("source", Item{.item=s2it(heap_create_name(id))}); payload.put("identity", box_uint64_value(identity));
+        payload.put("action", Item{.item=s2it(heap_create_name(action))}); return call_audio("audio_command", payload.value.get());
+    }
+    void pcm(float left, float right, unsigned frames = 8) {
+        float samples[64 * 2]; ASSERT_LE(frames, 64u);
+        ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), samples, frames));
+        for (unsigned i = 0; i < frames; i++) { EXPECT_NEAR(samples[i * 2], left, 2e-6); EXPECT_NEAR(samples[i * 2 + 1], right, 2e-6); }
+    }
+    Item cue(Item packet, const char* op, uint64_t frame, unsigned index = 0, const char* late = nullptr,
+             double seconds = -1, uint64_t identity = 0, uint64_t clip = 0) {
+        RootedValueBuilder event(RootedValueBuilder::DATA_MAP); auto row = source_row(packet, index);
+        event.put("source", row.get("id").item()); event.put("identity", identity ? box_uint64_value(identity) : row.get("identity").item());
+        event.put("op", Item{.item=s2it(heap_create_name(op))});
+        if (!strcmp(op, "play")) {
+            Item asset = ItemReader(item_attr(packet, "clips").to_const()).asArray().get(0).item();
+            event.put("clip_identity", clip ? box_uint64_value(clip) : item_attr(asset, "identity"));
+        }
+        if (seconds >= 0) {
+            event.put("clock", Item{.item=s2it(heap_create_name("scene"))}); event.put("seconds", push_d(seconds));
+        } else event.put("frame", box_uint64_value(frame));
+        if (late) event.put("late", Item{.item=s2it(heap_create_name(late))});
+        return event.value.get();
+    }
+    Item schedule(Item events, uint64_t sequence = 1, uint64_t epoch = 1) {
+        RootedValueBuilder payload(RootedValueBuilder::DATA_MAP); ticket(&payload);
+        payload.put("epoch", box_uint64_value(epoch)); payload.put("sequence", box_uint64_value(sequence)); payload.put("events", events);
+        return call_audio("audio_schedule", payload.value.get());
+    }
+    Item queue(Item packet, const char* op, uint64_t frame, uint64_t sequence = 1, uint64_t epoch = 1,
+               const char* late = nullptr, double seconds = -1) {
+        RootedValueBuilder events(true); events.append(cue(packet, op, frame, 0, late, seconds)); return schedule(events.value.get(), sequence, epoch);
+    }
+    AudioRow cue_row(Item packet, const char* key, unsigned index = 0) {
+        return {ItemReader(item_attr(packet, key).to_const()).asArray().get(index).item()};
+    }
+    unsigned cue_count(Item packet, const char* key) { return (unsigned)ItemReader(item_attr(packet, key).to_const()).asArray().length(); }
+    uint64_t bus_identity(Item packet, const char* name) {
+        auto buses = ItemReader(item_attr(packet, "buses").to_const()).asArray();
+        for (int64_t i = 0; i < buses.length(); i++) {
+            auto row = AudioRow{buses.get(i).item()};
+            if (!strcmp(row.get("id").asString()->chars, name)) return row.get("identity").asUInt64();
+        }
+        return 0;
+    }
+    Item provider_read(const char* provider, uint64_t token) {
+        RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request);
+        request.put("provider", Item{.item=s2it(heap_create_name(provider))}); request.put("token", box_uint64_value(token));
+        return call_audio("audio_provider_read", request.value.get());
+    }
+    Item provider_route(const char* provider, uint64_t token, const char* bus, uint64_t identity, uint64_t expected = 0, uint64_t session = 0) {
+        RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request, session);
+        request.put("provider", Item{.item=s2it(heap_create_name(provider))}); request.put("token", box_uint64_value(token));
+        request.put("bus", bus ? Item{.item=s2it(heap_create_name(bus))} : ItemNull); request.put("identity", box_uint64_value(identity));
+        request.put("expected", box_uint64_value(expected)); return call_audio("audio_provider_route", request.value.get());
+    }
+    Item render_open(Item packet, uint64_t frames = 64, uint64_t start = 17) {
+        RootedValueBuilder events(true), request(RootedValueBuilder::DATA_MAP); events.append(cue(packet, "play", start));
+        ticket(&request); request.put("frames", box_uint64_value(frames)); request.put("events", events.value.get());
+        return call_audio("audio_render_open", request.value.get());
+    }
+    Item render_command(const char* operation, uint64_t id, uint64_t frames = 64, uint64_t offset = 0, const char* format = nullptr) {
+        RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request); request.put("job", box_uint64_value(id));
+        request.put("frames", box_uint64_value(frames)); request.put("offset", box_uint64_value(offset));
+        if (format) request.put("format", Item{.item=s2it(heap_create_name(format))});
+        return call_audio(operation, request.value.get());
+    }
+    uint64_t render_id(Item packet) { return ItemReader(item_attr(packet, "job").to_const()).asUInt64(); }
+    float render_sample(Item packet, unsigned frame, unsigned channel = 1) {
+        Item bytes = item_attr(packet, "data"); uint32_t bits = read_le32((const uint8_t*)binary_data(bytes.get_binary()) + (frame * 2 + channel) * 4);
+        float value; memcpy(&value, &bits, sizeof(value)); return value;
+    }
+};
+
+TEST_F(Scene3dAudioTest, SpatialAndStereoSourcesProduceKnownIndependentPcm) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
+    pcm(0, .5f);
+    attr(source, "position", "0 0 -2"); ASSERT_FALSE(item_is_error(read_audio())); pcm(.25f * sqrtf(.5f), .25f * sqrtf(.5f));
+    attr(source, "spatial", "none"); ASSERT_FALSE(item_is_error(read_audio())); pcm(.5f, .5f);
+    attr(source, "spatial", "2d"); attr(source, "position", "-1 0 100"); ASSERT_FALSE(item_is_error(read_audio())); pcm(.5f, 0);
+    auto* peer = speaker("peer"); attr(peer, "position", "1 0 0"); ASSERT_FALSE(item_is_error(transport("play", "peer")));
+    pcm(.5f, .5f); ASSERT_FALSE(item_is_error(transport("pause", "peer"))); pcm(.5f, 0);
+}
+TEST_F(Scene3dAudioTest, NamedBusGainControlsSourcePcmUnderTheDocumentSubmix) {
+    auto* source = speaker(); attr(source, "bus", "effects");
+    auto* bus = element("audio-bus", root); attr(bus, "id", "effects"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .125f);
+}
+TEST_F(Scene3dAudioTest, MidiProvidersJoinNamedBusesWithoutBypassingTheirMuteThroughLegacyReverb) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "music"); attr(bus, "mute", "true"); attr(bus, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); ASSERT_FALSE(item_is_error(packet.get()));
+    uint64_t token = audio_fixture_midi(root, .2); ASSERT_NE(token, 0u);
+    RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request); request.put("provider", Item{.item=s2it(heap_create_name("midi"))});
+    request.put("token", box_uint64_value(token)); request.put("expected", box_uint64_value(0)); request.put("bus", Item{.item=s2it(heap_create_name("music"))});
+    request.put("identity", cue_row(packet.get(), "buses", 1).get("identity").item());
+    result.set(call_audio("audio_provider_route", request.value.get())); ASSERT_FALSE(item_is_error(result.get()));
+    ASSERT_TRUE(radiant_midi_command(&doc, token, "play", 0)); float output[4096 * 2];
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 4096)); for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
+}
+TEST_F(Scene3dAudioTest, MidiNamedGainAndLiveRewiringMatchAnIndependentDefaultTransport) {
+    auto* first = element("audio-bus", root); attr(first, "id", "music"); attr(first, "gain", ".25"); attr(first, "smoothing", "0");
+    auto* second = element("audio-bus", root); attr(second, "id", "other"); attr(second, "gain", ".5"); attr(second, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); ASSERT_FALSE(item_is_error(packet.get()));
+    uint64_t music = bus_identity(packet.get(), "music"), other = bus_identity(packet.get(), "other");
+    uint64_t reference = audio_fixture_midi(root, .2), target = audio_fixture_midi(root, .2); ASSERT_NE(reference, 0u); ASSERT_NE(target, 0u);
+    ASSERT_TRUE(radiant_midi_command(&doc, reference, "reverb", 0)); ASSERT_TRUE(radiant_midi_command(&doc, target, "reverb", 0));
+    ASSERT_TRUE(radiant_midi_command(&doc, reference, "play", 0)); float control[1024 * 2], output[512 * 2];
+    auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, control, 1024)); ASSERT_TRUE(radiant_midi_command(&doc, reference, "pause", 0));
+    ASSERT_FALSE(item_is_error(provider_route("midi", target, "music", music))); ASSERT_TRUE(radiant_midi_command(&doc, target, "play", 0));
+    ASSERT_TRUE(audio_submix_render(mix, output, 512)); double energy = 0;
+    for (unsigned i = 0; i < 1024; i++) { EXPECT_NEAR(output[i], control[i] * .25f, 1e-6); energy += output[i] * output[i]; } EXPECT_GT(energy, 1e-8);
+    MidiSnapshot before, after; ASSERT_TRUE(radiant_midi_info(&doc, target, &before));
+    ASSERT_FALSE(item_is_error(provider_route("midi", target, "other", other, music))); ASSERT_TRUE(radiant_midi_info(&doc, target, &after));
+    EXPECT_DOUBLE_EQ(before.position, after.position); ASSERT_TRUE(audio_submix_render(mix, output, 512));
+    for (unsigned i = 0; i < 1024; i++) EXPECT_NEAR(output[i], control[1024 + i] * .5f, 1e-6);
+    ASSERT_TRUE(radiant_midi_command(&doc, target, "pause", 0)); result.set(provider_read("midi", target)); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), other);
+    ASSERT_FALSE(item_is_error(provider_route("midi", target, nullptr, 0, other))); ASSERT_TRUE(radiant_midi_command(&doc, target, "stop", 0));
+    ASSERT_TRUE(radiant_midi_command(&doc, target, "play", 0)); ASSERT_TRUE(audio_submix_render(mix, output, 512));
+    for (unsigned i = 0; i < 1024; i++) EXPECT_NEAR(output[i], control[i], 1e-6);
+}
+TEST_F(Scene3dAudioTest, PausedProviderReferencesRejectBusRemovalBeforeLiveSourceParametersChange) {
+    auto* source = speaker(); auto* bus = element("audio-bus", root); attr(bus, "id", "music"); attr(bus, "smoothing", "0");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); RootFrame roots(2);
+    Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); uint64_t route = bus_identity(packet.get(), "music"), token = audio_fixture_midi(root, .2); ASSERT_NE(token, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("midi", token, "music", route))); attr(source, "gain", ".25"); ASSERT_TRUE(root->remove_child(bus)); doc.mutation_epoch++;
+    EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f); ASSERT_FALSE(item_is_error(provider_route("midi", token, nullptr, 0, route)));
+    result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); pcm(0, .125f); EXPECT_EQ(bus_identity(result.get(), "music"), 0u);
+    EXPECT_TRUE(item_is_error(provider_route("midi", token, "master", route)));
+}
+TEST_F(Scene3dAudioTest, ProviderTicketsRejectStaleKindsSourcesRoutesSessionsAndExpectedValues) {
+    auto* bus = element("audio-bus", root); attr(bus, "id", "music"); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    uint64_t route = bus_identity(packet.get(), "music"), token = audio_fixture_midi(root); ASSERT_NE(token, 0u);
+    EXPECT_TRUE(item_is_error(provider_route("other", token, "music", route))); EXPECT_TRUE(item_is_error(provider_route("midi", UINT64_MAX, "music", route)));
+    EXPECT_TRUE(item_is_error(provider_route("midi", token, "music", route + 1))); EXPECT_TRUE(item_is_error(provider_route("midi", token, "music", route, 1)));
+    uint64_t session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64(); EXPECT_TRUE(item_is_error(provider_route("midi", token, "music", route, 0, session + 1)));
+    ASSERT_FALSE(item_is_error(provider_route("midi", token, "music", route))); EXPECT_TRUE(item_is_error(provider_route("midi", token, nullptr, 0, 0)));
+    result.set(provider_read("midi", token)); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), route);
+}
+TEST_F(Scene3dAudioTest, SpeechPendingRoutesPauseAndLiveRewiringMatchIndependentPcm) {
+    fake_speech(); auto* bus = element("audio-bus", root); attr(bus, "id", "speech"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
+    auto* other_bus = element("audio-bus", root); attr(other_bus, "id", "other"); attr(other_bus, "gain", ".5"); attr(other_bus, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); auto route = bus_identity(packet.get(), "speech"), other = bus_identity(packet.get(), "other");
+    auto reference = audio_fixture_speech(root); ASSERT_NE(reference, 0u); ASSERT_TRUE(radiant_speech_tick(&doc)); auto mix = radiant_document_submix(&doc);
+    float control[2048 * 2], first[512 * 2], second[512 * 2]; ASSERT_TRUE(audio_submix_render(mix, control, 2048));
+    ASSERT_TRUE(radiant_speech_command(&doc, reference, "cancel")); EXPECT_FALSE(radiant_speech_tick(&doc));
+    auto target = audio_fixture_speech(root, "go", 1, radiant_audio_clock(&doc) + .01); ASSERT_NE(target, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("speech", target, "speech", route))); ASSERT_TRUE(radiant_speech_tick(&doc));
+    ASSERT_TRUE(audio_submix_render(mix, first, 512)); for (unsigned i = 0; i < 512; i++) for (unsigned channel = 0; channel < 2; channel++)
+        EXPECT_NEAR(first[i * 2 + channel], i < 480 ? 0 : control[(i - 480) * 2 + channel] * .25f, 1e-6);
+    ASSERT_TRUE(radiant_speech_tick(&doc)); ASSERT_TRUE(radiant_speech_command(&doc, target, "pause")); SpeechInfo before, after;
+    ASSERT_TRUE(radiant_speech_info(&doc, target, &before)); ASSERT_FALSE(item_is_error(provider_route("speech", target, "other", other, route)));
+    ASSERT_TRUE(audio_submix_render(mix, first, 512)); for (float value : first) EXPECT_FLOAT_EQ(value, 0);
+    ASSERT_TRUE(radiant_speech_info(&doc, target, &after)); EXPECT_DOUBLE_EQ(before.position, after.position);
+    ASSERT_TRUE(radiant_speech_command(&doc, target, "resume")); ASSERT_TRUE(audio_submix_render(mix, second, 512));
+    for (unsigned i = 0; i < 1024; i++) EXPECT_NEAR(second[i], control[32 * 2 + i] * .5f, 1e-6);
+}
+TEST_F(Scene3dAudioTest, SpeechQueueKeepsSeparateNamedRoutesWhenTheSharedVoiceAdvances) {
+    fake_speech(); auto* bus = element("audio-bus", root); attr(bus, "id", "muted"); attr(bus, "mute", "true"); attr(bus, "smoothing", "0");
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); auto route = bus_identity(packet.get(), "muted");
+    auto first = audio_fixture_speech(root), second = audio_fixture_speech(root); ASSERT_NE(first, 0u); ASSERT_NE(second, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("speech", first, "muted", route))); ASSERT_TRUE(radiant_speech_tick(&doc));
+    float output[1024 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 1024)); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    ASSERT_TRUE(radiant_speech_command(&doc, first, "cancel")); ASSERT_TRUE(radiant_speech_tick(&doc)); ASSERT_TRUE(audio_submix_render(mix, output, 1024));
+    double energy = 0; for (float v : output) energy += v * v; EXPECT_GT(energy, 1e-6); result.set(provider_read("speech", second));
+    ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(ItemReader(item_attr(result.get(), "route").to_const()).asUInt64(), 0u);
+}
+TEST_F(Scene3dAudioTest, GraphOwnerRemovalFailsActiveSpeechAndUnvoicedMidiWithoutReplayingEither) {
+    fake_speech(); auto* shell = element("div"); auto* owner = element("span", shell); ASSERT_TRUE(shell->append_child(root)); doc.root = lam::up(shell); doc.mutation_epoch++;
+    auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    auto route = bus_identity(packet.get(), "providers"), midi = audio_fixture_midi(owner, .2), speech = audio_fixture_speech(owner), queued = audio_fixture_speech(owner);
+    ASSERT_NE(midi, 0u); ASSERT_NE(speech, 0u); ASSERT_NE(queued, 0u); ASSERT_TRUE(radiant_speech_command(&doc, queued, "pause"));
+    ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); ASSERT_FALSE(item_is_error(provider_route("speech", speech, "providers", route)));
+    ASSERT_FALSE(item_is_error(provider_route("speech", queued, "providers", route)));
+    ASSERT_TRUE(radiant_speech_tick(&doc)); float output[64 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 64));
+    ASSERT_TRUE(shell->remove_child(root)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0); EXPECT_FALSE(radiant_speech_tick(&doc));
+    AudioProviderInfo midi_info, speech_info; ASSERT_TRUE(radiant_midi_routing(&doc, midi, &midi_info)); ASSERT_TRUE(radiant_speech_routing(&doc, speech, &speech_info));
+    EXPECT_STREQ(midi_info.state, "error"); EXPECT_STREQ(speech_info.state, "error"); EXPECT_EQ(midi_info.loss, AUDIO_VOICE_ROUTE_LOST); EXPECT_EQ(speech_info.loss, AUDIO_VOICE_ROUTE_LOST);
+    EXPECT_FALSE(midi_info.route_valid); EXPECT_FALSE(speech_info.route_valid); ASSERT_TRUE(audio_submix_render(mix, output, 64)); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    ASSERT_TRUE(radiant_speech_routing(&doc, queued, &speech_info)); EXPECT_STREQ(speech_info.state, "error"); EXPECT_EQ(speech_info.loss, AUDIO_VOICE_ROUTE_LOST);
+    EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0)); EXPECT_FALSE(radiant_speech_command(&doc, speech, "resume"));
+}
+TEST_F(Scene3dAudioTest, UnactivatedNetworkProvidersCanPrepareRoutesAndPlayMutedButCannotBecomeAudible) {
+    fake_speech(); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    auto route = bus_identity(packet.get(), "providers"), midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0));
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "volume", 0)); ASSERT_TRUE(radiant_midi_command(&doc, midi, "play", 0));
+    EXPECT_EQ(audio_fixture_speech(root), 0u); auto speech = audio_fixture_speech(root, "go", 0); ASSERT_NE(speech, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("speech", speech, "providers", route))); ASSERT_TRUE(radiant_speech_tick(&doc));
+    float output[512 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 512)); for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
+    EXPECT_FALSE(radiant_midi_command(&doc, midi, "volume", 1)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
+    radiant_audio_note_activation(&doc); EXPECT_TRUE(radiant_midi_command(&doc, midi, "volume", 1));
+    url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, AudibleDefaultDetachmentAndSpeechResumeRequireActivationAfterOriginChanges) {
+    fake_speech(); auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); attr(bus, "mute", "true");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); auto route = bus_identity(packet.get(), "providers");
+    auto midi = audio_fixture_midi(root, .2), speech = audio_fixture_speech(root); ASSERT_NE(midi, 0u); ASSERT_NE(speech, 0u);
+    ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); ASSERT_FALSE(item_is_error(provider_route("speech", speech, "providers", route)));
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "play", 0)); ASSERT_TRUE(radiant_speech_tick(&doc));
+    float output[512 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 512)); ASSERT_TRUE(radiant_speech_tick(&doc));
+    Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    EXPECT_TRUE(item_is_error(provider_route("midi", midi, nullptr, 0, route))); EXPECT_TRUE(item_is_error(provider_route("speech", speech, nullptr, 0, route)));
+    // editing the shared bus must preserve the same audible gate as explicit provider rewiring.
+    attr(bus, "mute", "false"); EXPECT_TRUE(item_is_error(read_audio())); attr(bus, "mute", "true");
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "pause", 0));
+    attr(bus, "mute", "false"); EXPECT_TRUE(item_is_error(read_audio()));
+    ASSERT_TRUE(radiant_speech_command(&doc, speech, "pause")); EXPECT_FALSE(item_is_error(read_audio())); attr(bus, "mute", "true");
+    ASSERT_FALSE(item_is_error(provider_route("midi", midi, nullptr, 0, route))); ASSERT_FALSE(item_is_error(provider_route("speech", speech, nullptr, 0, route)));
+    EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0)); EXPECT_FALSE(radiant_speech_command(&doc, speech, "resume"));
+    radiant_audio_note_activation(&doc); EXPECT_TRUE(radiant_midi_command(&doc, midi, "play", 0)); EXPECT_TRUE(radiant_speech_command(&doc, speech, "resume"));
+    url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, QueuedPlayStartsAtTheRequestedDocumentSample) {
+    speaker(); ASSERT_FALSE(item_is_error(upload()));
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    RootedValueBuilder event(RootedValueBuilder::DATA_MAP), events(true), payload(RootedValueBuilder::DATA_MAP);
+    event.put("source", Item{.item=s2it(heap_create_name("speaker"))});
+    event.put("identity", source_row(packet.get()).get("identity").item());
+    event.put("clip_identity", item_attr(ItemReader(item_attr(packet.get(), "clips").to_const()).asArray().get(0).item(), "identity"));
+    event.put("op", Item{.item=s2it(heap_create_name("play"))}); event.put("frame", box_uint64_value(17));
+    events.append(event.value.get()); ticket(&payload); payload.put("epoch", box_uint64_value(1));
+    payload.put("sequence", box_uint64_value(1)); payload.put("events", events.value.get());
+    ASSERT_FALSE(item_is_error(call_audio("audio_schedule", payload.value.get())));
+    float output[64 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 64));
+    for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(output[i * 2 + 1], i < 17 ? 0 : .5, 1e-6);
+}
+TEST_F(Scene3dAudioTest, OutputFreeRenderJobsProduceExactCuePcmWithoutAdvancingLiveAudio) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(3);
+    Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    RootedValueBuilder events(true), request(RootedValueBuilder::DATA_MAP); events.append(cue(packet.get(), "play", 17));
+    events.append(cue(packet.get(), "stop", 64));
+    ticket(&request); request.put("frames", box_uint64_value(64)); request.put("events", events.value.get());
+    job.set(call_audio("audio_render_open", request.value.get())); ASSERT_FALSE(item_is_error(job.get()));
+    RootedValueBuilder step(RootedValueBuilder::DATA_MAP); ticket(&step); step.put("job", item_attr(job.get(), "job")); step.put("frames", box_uint64_value(64));
+    job.set(call_audio("audio_render_step", step.value.get())); ASSERT_FALSE(item_is_error(job.get()));
+    EXPECT_EQ(cue_count(job.get(), "history"), 2u); EXPECT_EQ(cue_row(job.get(), "history", 1).get("actual").asUInt64(), 64u);
+    output.set(call_audio("audio_render_read", step.value.get())); ASSERT_FALSE(item_is_error(output.get()));
+    Item bytes = item_attr(output.get(), "data"); ASSERT_EQ(get_type_id(bytes), LMD_TYPE_BINARY); ASSERT_EQ(bytes.get_binary()->len, 64u * 8);
+    for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(render_sample(output.get(), i), i < 17 ? 0 : .5, 1e-6);
+    EXPECT_EQ(radiant_audio_frame(&doc), 0u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+}
+TEST_F(Scene3dAudioTest, NetworkRenderJobsRunWithOnlineOutputButNeverJoinOrActivateTheDevice) {
+    audio_bus_set_offline(false); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    speaker(); ASSERT_FALSE(item_is_error(upload())); EXPECT_TRUE(item_is_error(transport("play")));
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(job.get())); uint64_t id = render_id(job.get()); float silence[64 * 2]; audio_bus_mix(silence, 64);
+    for (float value : silence) EXPECT_FLOAT_EQ(value, 0); EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+    job.set(render_command("audio_render_snapshot", id)); EXPECT_EQ(ItemReader(item_attr(job.get(), "rendered").to_const()).asUInt64(), 0u);
+    job.set(render_command("audio_render_step", id)); ASSERT_FALSE(item_is_error(job.get()));
+    EXPECT_STREQ(ItemReader(item_attr(job.get(), "state").to_const()).asString()->chars, "complete");
+    output.set(render_command("audio_render_read", id)); ASSERT_FALSE(item_is_error(output.get()));
+    EXPECT_FLOAT_EQ(render_sample(output.get(), 17), .5f); EXPECT_FALSE(radiant_audio_frames_pending(&doc)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
+    EXPECT_TRUE(item_is_error(transport("play"))); url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, RenderPlanRetainsCopiedAssetsSpatialParametersGraphAndResultsAcrossLiveReset) {
+    auto* source = speaker(); attr(source, "bus", "effects"); auto* bus = element("audio-bus", root); attr(bus, "id", "effects");
+    attr(bus, "gain", ".25"); attr(bus, "smoothing", "0"); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(4);
+    Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull), replacement(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(job.get())); uint64_t id = render_id(job.get()), clip = cue_row(packet.get(), "clips").get("identity").asUInt64();
+    attr(source, "position", "-1 0 0"); attr(source, "gain", ".25"); attr(bus, "gain", ".75"); replacement.set(upload(clip, 8192));
+    ASSERT_FALSE(item_is_error(replacement.get())); ASSERT_TRUE(scene3d_seek(root, 0)); job.set(render_command("audio_render_step", id));
+    ASSERT_FALSE(item_is_error(job.get())); output.set(render_command("audio_render_read", id)); ASSERT_FALSE(item_is_error(output.get()));
+    for (unsigned i = 0; i < 64; i++) { EXPECT_NEAR(render_sample(output.get(), i, 0), 0, 1e-7); EXPECT_FLOAT_EQ(render_sample(output.get(), i), i < 17 ? 0 : .125f); }
+    ASSERT_FALSE(item_is_error(render_command("audio_render_close", id))); EXPECT_FLOAT_EQ(render_sample(output.get(), 17), .125f);
+    EXPECT_TRUE(item_is_error(render_command("audio_render_snapshot", id)));
+}
+TEST_F(Scene3dAudioTest, RenderDspTailsArePartitionIndependentAndFloatWavRoundTripsThroughTheDecoder) {
+    auto* source = speaker(); attr(source, "loop", "false"); attr(source, "bus", "effects");
+    auto* bus = element("audio-bus", root); attr(bus, "id", "effects"); attr(bus, "smoothing", "0");
+    auto* effect = element("audio-effect", bus); attr(effect, "type", "delay"); attr(effect, "seconds", ".001"); attr(effect, "wet", "1"); attr(effect, "feedback", "0");
+    ASSERT_FALSE(item_is_error(upload())); RootFrame roots(5); Rooted<Item> packet(roots, read_audio()), one(roots, render_open(packet.get(), 352)),
+        many(roots, render_open(packet.get(), 352)), first(roots, ItemNull), second(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(one.get())); ASSERT_FALSE(item_is_error(many.get())); auto a = render_id(one.get()), b = render_id(many.get());
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", a, 352))); unsigned parts[] = {7, 13, 31, 64, 237};
+    for (unsigned count : parts) ASSERT_FALSE(item_is_error(render_command("audio_render_step", b, count)));
+    first.set(render_command("audio_render_read", a, 352)); second.set(render_command("audio_render_read", b, 352));
+    ASSERT_FALSE(item_is_error(first.get())); ASSERT_FALSE(item_is_error(second.get()));
+    EXPECT_EQ(memcmp(binary_data(item_attr(first.get(), "data").get_binary()), binary_data(item_attr(second.get(), "data").get_binary()), 352 * 8), 0);
+    for (unsigned i = 0; i < 352; i++) EXPECT_FLOAT_EQ(render_sample(first.get(), i), i >= 65 && i < 321 ? .5f : 0);
+    one.set(render_command("audio_render_read", a, 0, 0, "wav_header")); ASSERT_FALSE(item_is_error(one.get()));
+    unsigned char wav[AUDIO_RENDER_WAV_HEADER + 352 * 8]; Item header = item_attr(one.get(), "data"); ASSERT_EQ(header.get_binary()->len, AUDIO_RENDER_WAV_HEADER);
+    memcpy(wav, binary_data(header.get_binary()), AUDIO_RENDER_WAV_HEADER); memcpy(wav + AUDIO_RENDER_WAV_HEADER, binary_data(item_attr(first.get(), "data").get_binary()), 352 * 8);
+    EXPECT_EQ(read_le16(wav + 20), 3u); EXPECT_EQ(read_le32(wav + 46), 352u);
+    RdtAudio* decoded = rdt_audio_open_bytes(wav, sizeof(wav)); ASSERT_NE(decoded, nullptr); ASSERT_TRUE(rdt_audio_play(decoded, 1));
+    float samples[352 * 2] = {}; rdt_audio_mix(decoded, samples, 352, 0); rdt_audio_destroy(decoded);
+    for (unsigned i = 0; i < 352; i++) EXPECT_FLOAT_EQ(samples[i * 2 + 1], render_sample(first.get(), i));
+    size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+}
+TEST_F(Scene3dAudioTest, RenderReaderQuotaRejectsAnEntirePeerJobAndCancelReleasesOwnedStorage) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), cancelled(roots, ItemNull);
+    RootedValueBuilder events(true), request(RootedValueBuilder::DATA_MAP); for (unsigned i = 0; i < 64; i++) events.append(cue(packet.get(), "play", 17 + i));
+    ticket(&request); request.put("frames", box_uint64_value(100)); request.put("events", events.value.get());
+    job.set(call_audio("audio_render_open", request.value.get())); ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get());
+    size_t players, bytes, after; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 66u);
+    EXPECT_TRUE(item_is_error(call_audio("audio_render_open", request.value.get()))); ASSERT_TRUE(radiant_audio_usage(&doc, &players, &after));
+    EXPECT_EQ(players, 66u); EXPECT_EQ(after, bytes); job.set(render_command("audio_render_snapshot", id)); EXPECT_EQ(cue_count(job.get(), "pending"), 64u);
+    cancelled.set(render_command("audio_render_cancel", id)); ASSERT_FALSE(item_is_error(cancelled.get()));
+    EXPECT_STREQ(ItemReader(item_attr(cancelled.get(), "state").to_const()).asString()->chars, "cancelled");
+    EXPECT_EQ(ItemReader(item_attr(cancelled.get(), "bytes").to_const()).asUInt64(), 0u); EXPECT_EQ(cue_count(cancelled.get(), "history"), 64u);
+    ASSERT_TRUE(radiant_audio_usage(&doc, &players, &after)); EXPECT_EQ(players, 1u); EXPECT_TRUE(item_is_error(render_command("audio_render_read", id)));
+    ASSERT_FALSE(item_is_error(render_command("audio_render_close", id))); EXPECT_TRUE(item_is_error(render_command("audio_render_snapshot", id)));
+    job.set(render_open(packet.get())); ASSERT_FALSE(item_is_error(job.get())); EXPECT_NE(render_id(job.get()), id);
+}
+TEST_F(Scene3dAudioTest, RenderJobAndOutputReservationsHaveFiniteDocumentLimits) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull); uint64_t ids[4];
+    for (auto& id : ids) { job.set(render_open(packet.get())); ASSERT_FALSE(item_is_error(job.get())); id = render_id(job.get()); }
+    EXPECT_TRUE(item_is_error(render_open(packet.get()))); for (auto id : ids) ASSERT_FALSE(item_is_error(render_command("audio_render_close", id)));
+    EXPECT_TRUE(item_is_error(render_open(packet.get(), AUDIO_RENDER_BYTES / 8 + 1)));
+    for (unsigned i = 0; i < 2; i++) { job.set(render_open(packet.get(), AUDIO_RENDER_BYTES / 8)); ASSERT_FALSE(item_is_error(job.get())); ids[i] = render_id(job.get()); }
+    EXPECT_TRUE(item_is_error(render_open(packet.get()))); ASSERT_FALSE(item_is_error(render_command("audio_render_cancel", ids[0])));
+    ASSERT_FALSE(item_is_error(render_open(packet.get())));
+}
+TEST_F(Scene3dAudioTest, AdmittedRenderJobsSurviveInvalidLiveEditsButRetireWithTheirScene) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get()));
+    ASSERT_FALSE(item_is_error(job.get())); uint64_t id = render_id(job.get()), session = ItemReader(item_attr(job.get(), "session").to_const()).asUInt64();
+    attr(source, "spatial", "invalid"); EXPECT_TRUE(item_is_error(read_audio()));
+    job.set(render_command("audio_render_step", id)); ASSERT_FALSE(item_is_error(job.get())); EXPECT_FALSE(item_is_error(render_command("audio_render_read", id)));
+    doc.root = nullptr; radiant_audio_tick(&doc, 0); AudioRenderSnapshot native; EXPECT_FALSE(audio_render_snapshot(&doc, session, id, &native));
+    size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u);
+}
+TEST_F(Scene3dAudioTest, OfflineAuthoredGainAndRoutingEditsDoNotPublishToAnUnactivatedLivePlayer) {
+    Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    auto* source = speaker(); attr(source, "gain", "0"); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    attr(source, "gain", "1"); attr(source, "position", "-1 0 0"); auto* bus = element("audio-bus", root);
+    attr(bus, "id", "master"); attr(bus, "gain", ".5"); attr(bus, "smoothing", "0");
+    job.set(render_open(packet.get())); ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get()); pcm(0, 0);
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", id))); output.set(render_command("audio_render_read", id)); ASSERT_FALSE(item_is_error(output.get()));
+    EXPECT_FLOAT_EQ(render_sample(output.get(), 17, 0), .25f); EXPECT_NEAR(render_sample(output.get(), 17), 0, 1e-7);
+    EXPECT_TRUE(item_is_error(read_audio())); EXPECT_FALSE(radiant_document_may_start_audio(&doc)); pcm(0, 0);
+    url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, LiveDeviceMixAndRetirementLeaveExplicitRenderClocksAndReadersUntouched) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); RootFrame roots(3);
+    Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull); ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get());
+    float live[8 * 2]; audio_bus_mix(live, 8); EXPECT_NEAR(live[1], .5f, 1e-6); EXPECT_EQ(radiant_audio_frame(&doc), 8u);
+    job.set(render_command("audio_render_step", id, 8)); ASSERT_FALSE(item_is_error(job.get())); audio_bus_retire_output();
+    job.set(render_command("audio_render_step", id, 56)); ASSERT_FALSE(item_is_error(job.get())); output.set(render_command("audio_render_read", id));
+    ASSERT_FALSE(item_is_error(output.get())); for (unsigned i = 0; i < 64; i++) EXPECT_FLOAT_EQ(render_sample(output.get(), i), i < 17 ? 0 : .5f);
+    EXPECT_EQ(radiant_audio_frame(&doc), 8u); EXPECT_STREQ(ItemReader(item_attr(job.get(), "state").to_const()).asString()->chars, "complete");
+}
+TEST_F(Scene3dAudioTest, RenderSceneDeadlinesAndOptInPitchUseThePrivateVirtualScale) {
+    auto* source = speaker(); attr(source, "loop", "false"); attr(source, "pitch_follow", "true"); ASSERT_FALSE(item_is_error(upload()));
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"time_scale","value":0.5})"))); ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"pause"})")));
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    RootedValueBuilder events(true), request(RootedValueBuilder::DATA_MAP); events.append(cue(packet.get(), "play", 0, 0, nullptr, .001));
+    ticket(&request); request.put("frames", box_uint64_value(192)); request.put("events", events.value.get()); request.put("time_scale", push_d(2));
+    job.set(call_audio("audio_render_open", request.value.get())); ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get());
+    job.set(render_command("audio_render_step", id, 192)); ASSERT_FALSE(item_is_error(job.get()));
+    EXPECT_EQ(cue_row(job.get(), "history").get("actual").asUInt64(), 24u); output.set(render_command("audio_render_read", id, 192));
+    ASSERT_FALSE(item_is_error(output.get())); for (unsigned i = 0; i < 192; i++) EXPECT_FLOAT_EQ(render_sample(output.get(), i), i >= 24 && i < 152 ? .5f : 0);
+    EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+}
+TEST_F(Scene3dAudioTest, RenderCountsRejectFractionalNegativeOversizedAndUnavailableRanges) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get()));
+    ASSERT_FALSE(item_is_error(job.get())); auto id = render_id(job.get());
+    for (double count : {-1., .5, 4097.}) {
+        RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request); request.put("job", box_uint64_value(id)); request.put("frames", push_d(count));
+        EXPECT_TRUE(item_is_error(call_audio("audio_render_step", request.value.get())));
+    }
+    EXPECT_TRUE(item_is_error(render_command("audio_render_read", id))); EXPECT_TRUE(item_is_error(render_command("audio_render_step", id, 0)));
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 32))); EXPECT_TRUE(item_is_error(render_command("audio_render_read", id, 33)));
+    EXPECT_TRUE(item_is_error(render_command("audio_render_read", id, 1, UINT64_MAX))); ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 32)));
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", id))); job.set(render_command("audio_render_snapshot", id));
+    EXPECT_EQ(cue_count(job.get(), "history"), 1u); EXPECT_EQ(ItemReader(item_attr(job.get(), "rendered").to_const()).asUInt64(), 64u);
+}
+TEST_F(Scene3dAudioTest, QueuedTransportUsesExactDeadlinesAcrossCallbackPartitionsAndReclaimsReaders) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    RootedValueBuilder events(true); const char* ops[] = {"play", "pause", "resume", "stop"}; uint64_t frames[] = {17, 29, 43, 59};
+    for (unsigned i = 0; i < 4; i++) events.append(cue(packet.get(), ops[i], frames[i]));
+    result.set(schedule(events.value.get())); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 4u);
+    float output[80 * 2]; unsigned partitions[] = {7, 13, 31, 29}, offset = 0;
+    for (unsigned count : partitions) { ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output + offset * 2, count)); offset += count; }
+    for (unsigned i = 0; i < 80; i++) EXPECT_NEAR(output[i * 2 + 1], (i >= 17 && i < 29) || (i >= 43 && i < 59) ? .5 : 0, 1e-6);
+    result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
+    ASSERT_EQ(cue_count(result.get(), "cue_history"), 4u);
+    for (unsigned i = 0; i < 4; i++) { auto row = cue_row(result.get(), "cue_history", i); uint64_t actual = 0;
+        EXPECT_STREQ(row.get("status").asString()->chars, "applied"); ASSERT_TRUE(scene3d_counter(row.get("actual"), &actual)); EXPECT_EQ(actual, frames[i]); }
+    EXPECT_STREQ(source_row(result.get()).get("state").asString()->chars, "ready");
+    EXPECT_EQ(source_row(result.get()).get("cursor").asFloat(), 0); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 2);
+}
+TEST_F(Scene3dAudioTest, IdenticalBatchRetriesKeepTheirIdsAndNeverRestartCompletedPlayback) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    RootedValueBuilder events(true); events.append(cue(packet.get(), "play", 17));
+    result.set(schedule(events.value.get())); ASSERT_FALSE(item_is_error(result.get())); pcm(0, 0, 16); pcm(0, 0, 1); pcm(0, .5f, 32);
+    result.set(schedule(events.value.get())); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_EQ(cue_count(result.get(), "cue_history"), 1u);
+    EXPECT_NEAR(source_row(result.get()).get("cursor").asFloat(), 32.0 / AUDIO_BUS_RATE, 1e-10);
+    EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 18))); EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 17, 2)));
+    result.set(schedule(events.value.get())); EXPECT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_history"), 1u);
+}
+TEST_F(Scene3dAudioTest, LatePoliciesRejectDropOrDeliverAtTheNextDocumentSample) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    pcm(0, 0, 32); EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 17)));
+    result.set(queue(packet.get(), "play", 17, 1, 1, "drop")); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_STREQ(cue_row(result.get(), "cue_history").get("status").asString()->chars, "dropped_late"); pcm(0, 0);
+    result.set(queue(packet.get(), "play", 17, 2, 1, "now")); ASSERT_FALSE(item_is_error(result.get())); pcm(0, .5f);
+    result.set(read_audio()); auto row = cue_row(result.get(), "cue_history", 1); EXPECT_EQ(row.get("actual").asUInt64(), 40);
+}
+TEST_F(Scene3dAudioTest, InvalidQueuePeersAndStaleIdentitiesRejectBeforeReaderAdmission) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    RootedValueBuilder events(true); events.append(cue(packet.get(), "play", 100));
+    uint64_t identity; ASSERT_TRUE(scene3d_counter(source_row(packet.get()).get("identity"), &identity));
+    events.append(cue(packet.get(), "play", 200, 0, nullptr, -1, identity + 1)); EXPECT_TRUE(item_is_error(schedule(events.value.get())));
+    RootedValueBuilder stale(true); stale.append(cue(packet.get(), "play", 100, 0, nullptr, -1, 0, UINT64_MAX)); EXPECT_TRUE(item_is_error(schedule(stale.value.get())));
+    EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 100, 1, 2))); EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 100, 2)));
+    result.set(read_audio()); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 1); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+}
+TEST_F(Scene3dAudioTest, QueuedClipsRetainTheirOriginalPcmAcrossAssetReplacementDropAndRetry) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    uint64_t identity; ASSERT_TRUE(scene3d_counter(cue_row(packet.get(), "clips").get("identity"), &identity));
+    RootedValueBuilder events(true); events.append(cue(packet.get(), "play", 17)); ASSERT_FALSE(item_is_error(schedule(events.value.get())));
+    result.set(upload(identity, 8192)); ASSERT_FALSE(item_is_error(result.get()));
+    RootedValueBuilder drop(RootedValueBuilder::DATA_MAP); ticket(&drop); drop.put("id", Item{.item=s2it(heap_create_name("tone"))});
+    drop.put("identity", cue_row(result.get(), "clips").get("identity").item()); ASSERT_FALSE(item_is_error(call_audio("audio_clip_drop", drop.value.get())));
+    float output[64 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 64));
+    for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(output[i * 2 + 1], i < 17 ? 0 : .5, 1e-6);
+    result.set(schedule(events.value.get())); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(source_row(result.get()).get("playing_clip").asUInt64(), identity); EXPECT_EQ(cue_count(result.get(), "clips"), 0u);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 1);
+}
+TEST_F(Scene3dAudioTest, ArmedSourcesUseLatestSpatialGainAndPitchAtTheirDeadline) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17))); attr(source, "position", "-1 0 0"); attr(source, "gain", ".25"); attr(source, "pitch", "2");
+    result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_TRUE(source_row(result.get()).get("armed").asBool());
+    float output[32 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 32));
+    for (unsigned i = 0; i < 32; i++) { EXPECT_NEAR(output[i * 2], i < 17 ? 0 : .125, 1e-6); EXPECT_NEAR(output[i * 2 + 1], 0, 1e-6); }
+    result.set(read_audio()); EXPECT_NEAR(source_row(result.get()).get("cursor").asFloat(), 30.0 / AUDIO_BUS_RATE, 1e-10);
+}
+TEST_F(Scene3dAudioTest, SceneClockCuesHoldOnPauseRemapOnScaleAndLeavePitchOptIn) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"pause"})")));
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    result.set(queue(packet.get(), "play", 0, 1, 1, nullptr, .01)); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_TRUE(cue_row(result.get(), "cue_pending").get("held").asBool()); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    pcm(0, 0, 32); ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"time_scale","value":2})")));
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"play"})"))); result.set(read_audio());
+    EXPECT_FALSE(cue_row(result.get(), "cue_pending").get("held").asBool()); EXPECT_FLOAT_EQ(source_row(result.get()).get("pitch").asFloat(), 1);
+    float output[256 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 256));
+    for (unsigned i = 0; i < 256; i++) EXPECT_NEAR(output[i * 2 + 1], i < 240 ? 0 : .5, 1e-6);
+    attr(source, "pitch_follow", "true"); result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_FLOAT_EQ(source_row(result.get()).get("pitch").asFloat(), 2);
+}
+TEST_F(Scene3dAudioTest, SceneOnlyPendingCuesWakeTheExistingCoordinatorAndStepCanReleaseAHeldCue) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    result.set(queue(packet.get(), "play", 0, 1, 1, nullptr, .05)); ASSERT_FALSE(item_is_error(result.get()));
+    Scene3dRuntimeStats stats; ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &stats)); EXPECT_EQ(stats.active_services, 0u);
+    ASSERT_TRUE(scene3d_runtime_advance(scene3d_runtime(root), .025)); EXPECT_NEAR(scene3d_runtime_sampled_time(scene3d_runtime(root)), .025, 1e-10);
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"pause"})"))); result.set(read_audio()); EXPECT_TRUE(cue_row(result.get(), "cue_pending").get("held").asBool());
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"step","ticks":3})"))); pcm(0, .5f);
+    result.set(read_audio()); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_STREQ(cue_row(result.get(), "cue_history").get("status").asString()->chars, "applied");
+}
+TEST_F(Scene3dAudioTest, QueueResetCancelsOldEpochAndManualTransportCannotLeaveFutureStartsBehind) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100))); ASSERT_FALSE(item_is_error(transport("pause"))); pcm(0, 0);
+    result.set(read_audio()); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 2))); ASSERT_TRUE(scene3d_seek(root, 0));
+    result.set(read_audio()); EXPECT_EQ(ItemReader(item_attr(result.get(), "cue_epoch").to_const()).asUInt64(), 2);
+    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 100, 3)));
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 1, 2))); ASSERT_FALSE(item_is_error(transport("stop"))); pcm(0, 0);
+}
+TEST_F(Scene3dAudioTest, QueueCapacityRejectsOverflowAndCancellationReleasesPreparedReadersDespiteInvalidEdits) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    RootedValueBuilder events(true); for (unsigned i = 0; i < 32; i++) events.append(cue(packet.get(), "play", 100 + i));
+    ASSERT_FALSE(item_is_error(schedule(events.value.get()))); ASSERT_FALSE(item_is_error(schedule(events.value.get(), 2)));
+    EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 200, 3))); result.set(read_audio());
+    ASSERT_EQ(cue_count(result.get(), "cue_pending"), 64u); EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 66u);
+    attr(source, "spatial", "invalid"); RootedValueBuilder cancel(RootedValueBuilder::DATA_MAP); ticket(&cancel); cancel.put("epoch", box_uint64_value(1));
+    result.set(call_audio("audio_cues_cancel", cancel.value.get())); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_EQ(cue_count(result.get(), "cue_history"), 64u);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 2u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    attr(source, "spatial", "3d"); ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17, 3)));
+}
+TEST_F(Scene3dAudioTest, DeviceLossAndRemovedSourcesCancelFutureCuesAndDoNotReplayThem) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100))); audio_bus_retire_output(); result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u); EXPECT_STREQ(cue_row(result.get(), "cue_history").get("status").asString()->chars, "device_lost");
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 2u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 100, 2))); ASSERT_TRUE(root->remove_child(source)); doc.mutation_epoch++;
+    result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 1u); pcm(0, 0);
+    doc.root = nullptr; radiant_audio_tick(&doc, 0); size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u);
+}
+TEST_F(Scene3dAudioTest, PendingCuesKeepIdentityAcrossTemplateReplacementAndGraphicsLoss) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17))); auto* previous = root; create_scene_root();
+    attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); speaker();
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; result.set(read_audio());
+    ASSERT_FALSE(item_is_error(result.get())); ASSERT_EQ(cue_count(result.get(), "cue_pending"), 1u);
+    ASSERT_NE(snapshot(), nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr);
+    float output[32 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), output, 32));
+    for (unsigned i = 0; i < 32; i++) EXPECT_NEAR(output[i * 2 + 1], i < 17 ? 0 : .5, 1e-6);
+    result.set(read_audio()); EXPECT_EQ(cue_row(result.get(), "cue_history").get("id").asUInt64(), 1u);
+}
+TEST_F(Scene3dAudioTest, ArmedMutedNetworkSourcesCannotAcquirePositiveGainBeforeActivation) {
+    Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull);
+    EXPECT_TRUE(item_is_error(queue(packet.get(), "play", 17))); attr(source, "gain", "0"); packet.set(read_audio());
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17))); attr(source, "gain", "1"); EXPECT_TRUE(item_is_error(read_audio()));
+    pcm(0, 0, 32); radiant_audio_note_activation(&doc); result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); pcm(0, .5f);
+    url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, FailedPeerVoiceReservationRollsBackEveryPreparedReaderAndKeepsExistingVoices) {
+    speaker(); speaker("peer"); ASSERT_FALSE(item_is_error(upload()));
+    unsigned char bytes[44 + 8 * 4]; size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, 8, 0, 0);
+    uint64_t asset = radiant_audio_open(&doc, bytes, length); ASSERT_NE(asset, 0u); auto parameters = rdt_audio_default_parameters(); parameters.loop = true;
+    uint64_t voices[95]; for (auto& voice : voices) { voice = radiant_audio_source_start(&doc, asset, 0, &parameters, 0); ASSERT_NE(voice, 0u); }
+    RootFrame roots(2); Rooted<Item> packet(roots, read_audio()), result(roots, ItemNull); RootedValueBuilder events(true);
+    events.append(cue(packet.get(), "play", 100)); events.append(cue(packet.get(), "play", 100, 1)); EXPECT_TRUE(item_is_error(schedule(events.value.get())));
+    result.set(read_audio()); ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(cue_count(result.get(), "cue_pending"), 0u);
+    EXPECT_EQ(ItemReader(item_attr(result.get(), "document_players").to_const()).asUInt64(), 97u); pcm(0, 0);
+    ASSERT_FALSE(item_is_error(queue(packet.get(), "play", 17))); EXPECT_STREQ(radiant_audio_state(&doc, voices[94]), "playing");
+}
+TEST_F(Scene3dAudioTest, InvalidBusPeersRejectSourceParametersAndRoutesBeforePublication) {
+    auto* source = speaker(); attr(source, "bus", "effects");
+    auto* effects = element("audio-bus", root); attr(effects, "id", "effects"); attr(effects, "smoothing", "0");
+    auto* master = element("audio-bus", root); attr(master, "id", "master"); attr(master, "smoothing", "0");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+    attr(source, "gain", ".25"); attr(effects, "gain", ".25");
+    auto* cycle = element("audio-send", master); attr(cycle, "bus", "effects");
+    EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
+    ASSERT_TRUE(master->remove_child(cycle)); doc.mutation_epoch++; attr(source, "bus", "missing");
+    EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
+    attr(source, "bus", "effects"); ASSERT_FALSE(item_is_error(read_audio())); pcm(0, .03125f);
+}
+TEST_F(Scene3dAudioTest, NamedBusSendsAndSoloPreserveIndependentSourceTransport) {
+    auto* source = speaker(); attr(source, "bus", "effects");
+    auto* effects = element("audio-bus", root); attr(effects, "id", "effects"); attr(effects, "smoothing", "0"); attr(effects, "solo", "true");
+    auto* send = element("audio-send", effects); attr(send, "bus", "return"); attr(send, "gain", ".5");
+    auto* returned = element("audio-bus", root); attr(returned, "id", "return"); attr(returned, "gain", ".5"); attr(returned, "smoothing", "0");
+    auto* peer = speaker("peer"); attr(peer, "position", "-1 0 0");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); ASSERT_FALSE(item_is_error(transport("play", "peer")));
+    pcm(0, .625f); attr(effects, "mute", "true"); radiant_audio_tick(&doc, 0); pcm(0, 0);
+    attr(effects, "mute", "false"); attr(effects, "solo", "false"); ASSERT_FALSE(item_is_error(read_audio())); pcm(.5f, .625f);
+    ASSERT_FALSE(item_is_error(transport("pause", "peer"))); pcm(0, .625f);
+}
+TEST_F(Scene3dAudioTest, DspTailKeepsDocumentFramesPendingAfterAnEndedSourceAndStopsOnReset) {
+    auto* source = speaker(); attr(source, "bus", "effects"); attr(source, "loop", "false");
+    auto* bus = element("audio-bus", root); attr(bus, "id", "effects"); attr(bus, "smoothing", "0");
+    auto* delay = element("audio-effect", bus); attr(delay, "type", "delay"); attr(delay, "seconds", ".001"); attr(delay, "feedback", "0"); attr(delay, "wet", "1");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
+    float samples[256 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), samples, 256));
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "ended"); EXPECT_TRUE(radiant_audio_frames_pending(&doc));
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), samples, 64));
+    for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(samples[i * 2 + 1], i < 48 ? .5 : 0, 1e-6);
+    EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+    ASSERT_FALSE(item_is_error(transport("play"))); ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), samples, 256));
+    EXPECT_TRUE(radiant_audio_frames_pending(&doc)); ASSERT_TRUE(scene3d_seek(root, 0)); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
+}
+TEST_F(Scene3dAudioTest, NamedRoutingPreservesIdentityAndGainAcrossTemplateAndContextRecovery) {
+    auto configure = [&]() {
+        auto* source = speaker(); attr(source, "bus", "effects"); auto* bus = element("audio-bus", root);
+        attr(bus, "id", "effects"); attr(bus, "gain", ".25"); attr(bus, "smoothing", "0");
+    };
+    configure(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> before(roots, transport("play")), after(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(before.get())); pcm(0, .125f);
+    auto* previous = root; create_scene_root(); attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); configure();
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; after.set(read_audio()); ASSERT_FALSE(item_is_error(after.get()));
+    auto before_bus = ItemReader(item_attr(before.get(), "buses").to_const()).asArray().get(1).item();
+    auto after_bus = ItemReader(item_attr(after.get(), "buses").to_const()).asArray().get(1).item();
+    EXPECT_EQ(item_attr(before_bus, "identity").get_uint64(), item_attr(after_bus, "identity").get_uint64());
+    EXPECT_EQ(source_row(before.get()).get("identity").asUInt64(), source_row(after.get()).get("identity").asUInt64());
+    ASSERT_NE(snapshot(), nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr); pcm(0, .125f);
+}
+TEST_F(Scene3dAudioTest, DistanceConesAndListenerOrientationUseWorldPoses) {
+    auto* source = speaker(); attr(source, "position", "0 0 -2"); attr(source, "distance_model", "none");
+    attr(source, "cone_inner", ".2"); attr(source, "cone_outer", "1"); attr(source, "cone_gain", ".25");
+    ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(.125f * sqrtf(.5f), .125f * sqrtf(.5f));
+    attr(source, "rotation", "0 3.141592653589793 0"); ASSERT_FALSE(item_is_error(read_audio())); pcm(.5f * sqrtf(.5f), .5f * sqrtf(.5f));
+    attr(source, "position", "1 0 0"); attr(source, "cone_gain", "1"); attr(camera, "target", "0 0 1");
+    ASSERT_FALSE(item_is_error(read_audio())); pcm(.5f, 0);
+    auto* listener = element("audio-listener", root); attr(listener, "id", "ear");
+    attr(root, "audio_listener", "ear"); ASSERT_FALSE(item_is_error(read_audio())); pcm(0, .5f);
+    attr(source, "distance_model", "linear"); attr(source, "ref_distance", "1"); attr(source, "max_distance", "3");
+    attr(source, "position", "2 0 0"); ASSERT_FALSE(item_is_error(read_audio())); pcm(0, .25f);
+}
+TEST_F(Scene3dAudioTest, DopplerUsesConfiguredWorldUnitsAndClampsRadialSpeeds) {
+    auto* source = speaker(); attr(source, "velocity", "-10 0 0");
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 343.0 / 333, 1e-6);
+    attr(camera, "audio_velocity", "10 0 0"); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 353.0 / 333, 1e-6);
+    attr(root, "audio_speed_of_sound", "100"); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 110.0 / 90, 1e-6);
+    attr(source, "velocity", "-1000000 0 0"); packet.set(read_audio()); EXPECT_DOUBLE_EQ(source_row(packet.get()).get("pitch").asFloat(), 8);
+    attr(source, "doppler", "false"); packet.set(read_audio()); EXPECT_DOUBLE_EQ(source_row(packet.get()).get("pitch").asFloat(), 1);
+}
+TEST_F(Scene3dAudioTest, FractionalAnimationSamplesAndRepeatedReadsRetainVelocity) {
+    speaker(); auto* config = element("physics", root); attr(config, "timestep", ".01");
+    auto* track = layer_track("moving", "speaker.position", "1 0 0 11 0 0"); attr(track->parent->as_element(), "autoplay", "true");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr); auto* clock = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(clock, .006)); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    ASSERT_FALSE(item_is_error(packet.get())); EXPECT_NEAR(item_attr(packet.get(), "scene_time").get_double(), .006, 1e-12);
+    auto source = source_row(packet.get()); EXPECT_NEAR(source.get("position").asArray().get(0).asFloat(), 1.06, 1e-6);
+    EXPECT_NEAR(source.get("velocity").asArray().get(0).asFloat(), 10, 2e-5);
+    EXPECT_NEAR(source.get("pitch").asFloat(), 343.0 / 353, 1e-6);
+    uint64_t sequence; ASSERT_TRUE(scene3d_counter(ItemReader(item_attr(packet.get(), "sample_sequence").to_const()), &sequence));
+    packet.set(read_audio()); EXPECT_EQ(item_attr(packet.get(), "sample_sequence").get_uint64(), sequence);
+    ASSERT_TRUE(scene3d_runtime_advance(clock, .004)); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("velocity").asArray().get(0).asFloat(), 10, 5e-5);
+    ASSERT_FALSE(item_is_error(transport("teleport"))); ASSERT_TRUE(scene3d_runtime_advance(clock, .01)); packet.set(read_audio());
+    EXPECT_DOUBLE_EQ(source_row(packet.get()).get("pitch").asFloat(), 1);
+    ASSERT_TRUE(scene3d_runtime_advance(clock, .01)); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 343.0 / 353, 1e-6);
+}
+TEST_F(Scene3dAudioTest, ReplacementClipsKeepPlayingSamplesAndAccountForSharedOwners) {
+    speaker(); RootFrame roots(2); Rooted<Item> first(roots, upload()), packet(roots, ItemNull); ASSERT_FALSE(item_is_error(first.get()));
+    auto clips = ItemReader(item_attr(first.get(), "clips").to_const()).asArray(); uint64_t old;
+    ASSERT_TRUE(scene3d_counter(AudioRow{clips.get(0).item()}.get("identity"), &old));
+    ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+    packet.set(read_audio()); size_t shared_bytes = (size_t)item_attr(packet.get(), "document_bytes").get_uint64();
+    ASSERT_FALSE(item_is_error(upload(old, 8192))); pcm(0, .5f);
+    EXPECT_TRUE(item_is_error(upload(old, 0))); packet.set(read_audio());
+    EXPECT_GT(item_attr(packet.get(), "document_bytes").get_uint64(), shared_bytes);
+    ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .25f);
+    packet.set(read_audio()); EXPECT_EQ(item_attr(packet.get(), "document_bytes").get_uint64(), shared_bytes);
+    uint64_t current; ASSERT_TRUE(scene3d_counter(AudioRow{ItemReader(item_attr(packet.get(), "clips").to_const()).asArray().get(0).item()}.get("identity"), &current));
+    EXPECT_TRUE(item_is_error(upload(current, 0, "tone", true))); pcm(0, .25f);
+}
+TEST_F(Scene3dAudioTest, TransportPreservesCursorRejectsStaleTicketsAndReleasesOnSeek) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> packet(roots, transport("play")), paused(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(packet.get())); pcm(0, .5f, 16); paused.set(transport("pause")); ASSERT_FALSE(item_is_error(paused.get()));
+    pcm(0, 0); double position = source_row(paused.get()).get("cursor").asFloat();
+    packet.set(read_audio()); EXPECT_DOUBLE_EQ(source_row(packet.get()).get("cursor").asFloat(), position);
+    EXPECT_TRUE(item_is_error(transport("play", "speaker", UINT64_MAX))); EXPECT_TRUE(item_is_error(transport("play", "speaker", 0, UINT64_MAX)));
+    ASSERT_FALSE(item_is_error(transport("resume"))); pcm(0, .5f, 8); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("cursor").asFloat(), position + 8.0 / AUDIO_BUS_RATE, 1e-12);
+    ASSERT_TRUE(scene3d_seek(root, 0)); packet.set(read_audio()); EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "ready");
+    EXPECT_EQ(item_attr(packet.get(), "document_players").get_uint64(), 1u); pcm(0, 0);
+    ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+}
+TEST_F(Scene3dAudioTest, InvalidDescriptionsPreserveOldAudioAndStillAllowStop) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+    RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); uint64_t identity, session;
+    ASSERT_TRUE(scene3d_counter(source_row(packet.get()).get("identity"), &identity));
+    ASSERT_TRUE(scene3d_counter(ItemReader(item_attr(packet.get(), "session").to_const()), &session));
+    attr(source, "gain", "-1"); EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
+    RootedValueBuilder payload(RootedValueBuilder::DATA_MAP); ticket(&payload, session);
+    payload.put("source", Item{.item=s2it(heap_create_name("speaker"))}); payload.put("identity", box_uint64_value(identity));
+    payload.put("action", Item{.item=s2it(heap_create_name("stop"))}); ASSERT_FALSE(item_is_error(call_audio("audio_command", payload.value.get()))); pcm(0, 0);
+    attr(source, "gain", "1"); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+}
+TEST_F(Scene3dAudioTest, DeviceRetirementAndDetachedSourcesReleaseNativeReaders) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+    audio_bus_retire_output(); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
+    EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "error");
+    ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, .5f);
+    ASSERT_TRUE(root->remove_child(source)); doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 1u); pcm(0, 0);
+    doc.root = nullptr; radiant_audio_tick(&doc, 0); ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u);
+}
+TEST_F(Scene3dAudioTest, PhysicsVelocityUnitsSurviveTimestepsAndPresentationDensity) {
+    auto* settings = element("physics", root); attr(settings, "timestep", ".01"); attr(settings, "gravity", "0 0 0"); attr(settings, "state", "playing");
+    auto* body = element("rigid-body", root); attr(body, "id", "body"); attr(body, "type", "kinematic-velocity"); attr(body, "linear-velocity", "10 0 0");
+    auto* shape = element("collider", body); attr(shape, "id", "shape"); attr(shape, "shape", "sphere");
+    speaker("speaker", body); RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    auto* clock = scene3d_runtime(root);
+    for (unsigned i = 0; i < 4; i++) {
+        ASSERT_TRUE(scene3d_runtime_advance(clock, .01)); packet.set(read_audio());
+        EXPECT_NEAR(source_row(packet.get()).get("velocity").asArray().get(0).asFloat(), 10, 3e-5);
+        EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 343.0 / 353, 1e-6);
+        ASSERT_TRUE(scene3d_runtime_advance(clock, 0)); packet.set(read_audio());
+        EXPECT_NEAR(source_row(packet.get()).get("velocity").asArray().get(0).asFloat(), 10, 3e-5);
+    }
+    attr(settings, "timestep", ".02"); packet.set(read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    ASSERT_TRUE(scene3d_runtime_advance(clock, .04)); packet.set(read_audio());
+    EXPECT_NEAR(source_row(packet.get()).get("velocity").asArray().get(0).asFloat(), 10, 3e-5);
+    EXPECT_NEAR(source_row(packet.get()).get("pitch").asFloat(), 343.0 / 353, 1e-6);
+}
+TEST_F(Scene3dAudioTest, TemplateAndGraphicsRecoveryPreserveCursorsAndNativeIdentities) {
+    speaker(); ASSERT_FALSE(item_is_error(upload())); RootFrame roots(2); Rooted<Item> before(roots, transport("play")), after(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(before.get())); pcm(0, .5f, 16); before.set(read_audio());
+    auto* previous = root; create_scene_root(); attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1"); speaker();
+    scene3d_follow_rebuild(&doc, previous, root); doc.root = lam::up(root); doc.mutation_epoch++; after.set(read_audio());
+    ASSERT_FALSE(item_is_error(after.get()));
+    EXPECT_EQ(item_attr(before.get(), "session").get_uint64(), item_attr(after.get(), "session").get_uint64());
+    EXPECT_EQ(source_row(before.get()).get("identity").asUInt64(), source_row(after.get()).get("identity").asUInt64());
+    EXPECT_DOUBLE_EQ(source_row(before.get()).get("cursor").asFloat(), source_row(after.get()).get("cursor").asFloat());
+    pcm(0, .5f); ASSERT_NE(snapshot(), nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(), nullptr); pcm(0, .5f);
+    after.set(read_audio()); EXPECT_STREQ(source_row(after.get()).get("state").asString()->chars, "playing");
+}
+TEST_F(Scene3dAudioTest, NativeClipAndSourceCapsRejectOverflowWithoutDiscardingOwnedAudio) {
+    auto* source = speaker(); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play")));
+    for (unsigned i = 1; i < 16; i++) { char id[32]; snprintf(id, sizeof(id), "clip%u", i); ASSERT_FALSE(item_is_error(upload(0, 8192, id))); }
+    EXPECT_TRUE(item_is_error(upload(0, 0, "overflow"))); pcm(0, .5f);
+    for (unsigned i = 1; i < 32; i++) { char id[32]; snprintf(id, sizeof(id), "source%u", i); speaker(id); }
+    ASSERT_FALSE(item_is_error(read_audio())); auto* overflow = speaker("overflow"); EXPECT_TRUE(item_is_error(read_audio())); pcm(0, .5f);
+    ASSERT_TRUE(root->remove_child(overflow)); doc.mutation_epoch++; ASSERT_FALSE(item_is_error(read_audio()));
+    attr(source, "id", "renamed"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio()); ASSERT_FALSE(item_is_error(packet.get()));
+    EXPECT_STREQ(source_row(packet.get()).get("state").asString()->chars, "ready"); pcm(0, 0);
+}
+TEST_F(Scene3dAudioTest, NetworkActivationUsesAuthoredGainEvenForDistantSources) {
+    Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    auto* source = speaker(); attr(source, "distance_model", "linear"); attr(source, "max_distance", "3"); attr(source, "position", "1000 0 0");
+    attr(source, "gain", "0"); ASSERT_FALSE(item_is_error(upload())); ASSERT_FALSE(item_is_error(transport("play"))); pcm(0, 0);
+    attr(source, "gain", "1"); EXPECT_TRUE(item_is_error(read_audio())); pcm(0, 0);
+    radiant_audio_note_activation(&doc); attr(source, "position", "1 0 0"); ASSERT_FALSE(item_is_error(read_audio())); pcm(0, .5f);
+    ASSERT_FALSE(item_is_error(transport("pause"))); ASSERT_FALSE(item_is_error(transport("resume"))); pcm(0, .5f);
+    url_destroy(doc.url); doc.url = lam::own(local);
+}
+TEST_F(Scene3dAudioTest, DroppingMasterClipKeepsActiveSourceUntilItsExplicitStop) {
+    speaker(); RootFrame roots(1); Rooted<Item> packet(roots, upload()); ASSERT_FALSE(item_is_error(packet.get()));
+    uint64_t identity; ASSERT_TRUE(scene3d_counter(AudioRow{ItemReader(item_attr(packet.get(), "clips").to_const()).asArray().get(0).item()}.get("identity"), &identity));
+    ASSERT_FALSE(item_is_error(transport("play"))); RootedValueBuilder payload(RootedValueBuilder::DATA_MAP); ticket(&payload);
+    payload.put("id", Item{.item=s2it(heap_create_name("tone"))}); payload.put("identity", box_uint64_value(identity));
+    packet.set(call_audio("audio_clip_drop", payload.value.get())); ASSERT_FALSE(item_is_error(packet.get()));
+    EXPECT_FALSE(source_row(packet.get()).get("available").asBool()); pcm(0, .5f);
+    EXPECT_TRUE(item_is_error(transport("play"))); ASSERT_FALSE(item_is_error(transport("stop"))); pcm(0, 0);
+    size_t players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, 0u); EXPECT_EQ(bytes, 0u);
+}
+
+void Scene3dTest::check_particle_spawn_maximum(bool gpu) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"backend",gpu?"gpu":"cpu");
+    attr(emitter,"emitting","false"); attr(emitter,"capacity","16384"); particle_trail(emitter,"63");
+    particle_curve(emitter,"particle-size-curve","0 1","0 0");
+    ParticleSpawnTestRequest request={emitter,4096,8,{},{},false};
+    for (unsigned i=0;i<4;i++) {
+        ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1)));
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1));
+    }
+    auto *owner=scene3d_particles(root); Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner,emitter,&view));
+    EXPECT_EQ(view.live,16384u); EXPECT_EQ(view.gpu_readbacks,0u);
+    ASSERT_NE(snapshot(),nullptr); scene3d_context_lost(root); ASSERT_NE(snapshot(),nullptr);
+    Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner,emitter,16383,&sample));
+    EXPECT_EQ(sample.depth,8u); EXPECT_EQ(sample.sequence,16383u);
+    Scene3dParticleTrailPoint points[64]; unsigned count;
+    ASSERT_TRUE(scene3d_particles_trail_samples(owner,emitter,16383,points,&count)); EXPECT_EQ(count,1u);
+}
+TEST_F(Scene3dAgentTest, ParticlesCpuSpawnCommandsReachMaximumStorageWithTrailsAndGraphicsRecovery) { check_particle_spawn_maximum(false); }
+TEST_F(Scene3dAgentTest, ParticlesGpuSpawnCommandsReachMaximumStorageWithTrailsAndGraphicsRecovery) { check_particle_spawn_maximum(true); }
+
+TEST_F(Scene3dAgentTest, ParticlesCpuSpawnCommandsUseLocalOriginsAndAddedVelocity) { check_particle_spawn_space(false,false); }
+
+TEST_F(Scene3dAgentTest, ParticlesGpuSpawnCommandsUseLocalOriginsAndAddedVelocity) { check_particle_spawn_space(true,false); }
+
+TEST_F(Scene3dAgentTest, ParticlesCpuSpawnCommandsUseWorldOriginsAndAddedVelocity) { check_particle_spawn_space(false,true); }
+
+TEST_F(Scene3dAgentTest, ParticlesGpuSpawnCommandsUseWorldOriginsAndAddedVelocity) { check_particle_spawn_space(true,true); }
+
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsRejectCombinedAuthoredAndExplicitTickWorkAtomically) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"capacity","16384"); attr(emitter,"burst","4090");
+    ParticleSpawnTestRequest request={emitter,7,0,{},{},false};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1))); auto *runtime=scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,1)); Scene3dRuntimeStats clock;
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&clock)); EXPECT_EQ(clock.commands_rejected,1u); EXPECT_FALSE(clock.last_command_applied);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view));
+    EXPECT_EQ(view.live,4090u); EXPECT_EQ(view.sequence,4090u);
+    request.count=6; ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1)));
+    ASSERT_TRUE(scene3d_runtime_step(runtime,1)); ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view));
+    EXPECT_EQ(view.live,4096u); EXPECT_EQ(view.sequence,4096u);
+}
+
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsPreservePerRequestOrderAndCapacityPolicies) {
+    particle_clock(); DomElement *emitters[2];
+    for (unsigned i=0;i<2;i++) {
+        emitters[i]=particle_emitter(i?"recycle":"drop"); attr(emitters[i],"capacity","2"); attr(emitters[i],"emitting","false");
+        attr(emitters[i],"overflow",i?"recycle-oldest":"drop-new");
+    }
+    ParticleSpawnTestRequest requests[]={{emitters[0],2,1,{1,0,0},{},true},{emitters[0],2,2,{2,0,0},{},true},
+        {emitters[1],2,1,{1,0,0},{},true},{emitters[1],2,2,{2,0,0},{},true}};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,4))); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1));
+    auto *owner=scene3d_particles(root);
+    for (unsigned i=0;i<2;i++) {
+        Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(owner,emitters[i],&view)); EXPECT_EQ(view.sequence,4u);
+        EXPECT_EQ(view.live,2u); EXPECT_EQ(i?view.recycled:view.dropped,2u);
+        Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner,emitters[i],0,&sample));
+        EXPECT_EQ(sample.sequence,i?2u:0u); EXPECT_EQ(sample.depth,i?2u:1u); EXPECT_FLOAT_EQ(sample.position.x,i?2.f:1.f);
+    }
+}
+
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsValidateDepthCountAndBatchAtomicityBeforeSubmission) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false");
+    ParticleSpawnTestRequest requests[]={{emitter,1,0,{},{},false},{emitter,1,9,{},{},false}};
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2))); Scene3dRuntimeStats clock;
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root),&clock)); EXPECT_EQ(clock.pending_commands,0u); EXPECT_EQ(clock.command_sequence,0u);
+    requests[1].depth=8; requests[1].count=0; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].count=4096; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].count=1; requests[1].velocity={INFINITY,0,0}; EXPECT_TRUE(item_is_error(particle_spawn_batch(requests,2)));
+    requests[1].velocity={}; ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,2)));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1)); Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root),emitter,1,&sample)); EXPECT_EQ(sample.depth,8u);
+}
+
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsClearQueuedRequestsOnSourceEditsAndAuthoredReplay) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false");
+    ParticleSpawnTestRequest request={emitter,2,1,{},{},false};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1))); auto *runtime=scene3d_runtime(root);
+    Scene3dRuntimeStats stale; ASSERT_TRUE(scene3d_runtime_stats(runtime,&stale));
+    attr(emitter,"gravity","0 1 0"); ASSERT_NE(scene3d_prepare_animations(root),nullptr);
+    Scene3dRuntimeStats after; ASSERT_TRUE(scene3d_runtime_stats(runtime,&after)); EXPECT_EQ(after.pending_commands,0u); EXPECT_EQ(after.commands_rejected,1u);
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,2,2,&stale)));
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1))); ASSERT_TRUE(scene3d_runtime_step(runtime,1));
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,2u);
+    auto identity=view.identity; ASSERT_TRUE(scene3d_seek(root,1));
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,0u); EXPECT_EQ(view.identity,identity);
+}
+
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsWakeAnOtherwiseIdleAutomaticClockWithoutUnpausingIt) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false");
+    ASSERT_NE(scene3d_prepare_animations(root),nullptr);
+    ASSERT_TRUE(scene3d_runtime_pause(scene3d_runtime(root),true));
+    ParticleSpawnTestRequest request={emitter,1,1,{},{},false};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,0,2))); auto *runtime=scene3d_runtime(root);
+    Scene3dRuntimeStats clock; ASSERT_TRUE(scene3d_runtime_stats(runtime,&clock)); EXPECT_TRUE(clock.paused);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.2)); ASSERT_TRUE(scene3d_runtime_stats(runtime,&clock)); EXPECT_EQ(clock.ticks,0u);
+    ASSERT_TRUE(scene3d_runtime_pause(runtime,false)); ASSERT_TRUE(scene3d_runtime_advance(runtime,.1));
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,0u);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.1));
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,1u);
+}
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsShareTicketOrderingStaleAndQueueCapacityRules) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false");
+    ParticleSpawnTestRequest request={emitter,1,0,{1,0,0},{},true};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,1,2)));
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,1,3)));
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,2,100001)));
+    auto *runtime=scene3d_runtime(root); Scene3dRuntimeStats foreign; ASSERT_TRUE(scene3d_runtime_stats(runtime,&foreign)); foreign.session++;
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,2,3,&foreign)));
+    request.position.x=2; ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,2,1)));
+    ASSERT_TRUE(scene3d_runtime_step(runtime,2)); auto *owner=scene3d_particles(root); Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner,emitter,0,&sample)); EXPECT_FLOAT_EQ(sample.position.x,2);
+    ASSERT_TRUE(scene3d_particles_sample(owner,emitter,1,&sample)); EXPECT_FLOAT_EQ(sample.position.x,1);
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,3,2)));
+    for (unsigned i=0;i<SCENE3D_COMMAND_BATCH_LIMIT;i++) ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,0,4+i)));
+    EXPECT_TRUE(item_is_error(particle_spawn_batch(&request,1,0,100)));
+}
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsBoundDueRecordsAcrossBatchesAndKeepAcceptedRequests) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false"); attr(emitter,"capacity","256");
+    ParticleSpawnTestRequest requests[128]; for (auto &request:requests) request={emitter,1,0,{},{},false};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,64))); ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,64)));
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(requests,1))); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1));
+    Scene3dRuntimeStats clock; ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root),&clock));
+    EXPECT_EQ(clock.commands_applied,2u); EXPECT_EQ(clock.commands_rejected,1u);
+    Scene3dEmitterView view; ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,128u);
+}
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsKeepBirthsAndTrailsUnpublishedWhenAPeerFails) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false"); particle_trail(emitter);
+    auto *peer=particle_emitter("peer"); attr(peer,"backend","gpu"); attr(peer,"velocity","3e38 0 0"); attr(peer,"gravity","3e38 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root),nullptr); auto *runtime=scene3d_runtime(root); ASSERT_TRUE(scene3d_runtime_step(runtime,2));
+    ParticleSpawnTestRequest request={emitter,3,2,{},{},false}; ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1)));
+    EXPECT_FALSE(scene3d_runtime_step(runtime,1)); Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,0u); EXPECT_EQ(view.sequence,0u);
+    RootFrame roots(1); Rooted<Item> packet(roots,scene3d_particles_snapshot(scene3d_particles(root)));
+    EXPECT_EQ(ItemReader(item_attr(packet.get(),"pending_spawn_count").to_const()).asUInt64(),3u);
+    Scene3dRuntimeStats clock; ASSERT_TRUE(scene3d_runtime_stats(runtime,&clock)); EXPECT_TRUE(clock.faulted); EXPECT_TRUE(clock.last_command_applied);
+    ASSERT_TRUE(scene3d_seek(root,2)); packet.set(scene3d_particles_snapshot(scene3d_particles(root)));
+    EXPECT_EQ(ItemReader(item_attr(packet.get(),"pending_spawn_count").to_const()).asUInt64(),0u);
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root),emitter,&view)); EXPECT_EQ(view.live,0u);
+}
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsPreserveQueuedIdentityAcrossEquivalentTemplatesAndGraphicsLoss) {
+    particle_clock(); auto *emitter=particle_emitter(); attr(emitter,"emitting","false"); attr(emitter,"backend","gpu");
+    ParticleSpawnTestRequest request={emitter,2,4,{.5f,0,0},{1,0,0},true};
+    ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1,0,2))); auto *owner=scene3d_particles(root);
+    Scene3dEmitterView before,after; ASSERT_TRUE(scene3d_particles_view(owner,emitter,&before));
+    auto *previous=root; create_scene_root(); particle_clock(); emitter=particle_emitter(); attr(emitter,"emitting","false"); attr(emitter,"backend","gpu");
+    scene3d_follow_rebuild(&doc,previous,root); doc.root=lam::up(root); doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root),nullptr); ASSERT_EQ(scene3d_particles(root),owner);
+    ASSERT_TRUE(scene3d_particles_view(owner,emitter,&after)); EXPECT_EQ(before.identity,after.identity);
+    scene3d_context_lost(root); ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),2));
+    ASSERT_TRUE(scene3d_particles_view(owner,emitter,&after)); EXPECT_EQ(after.live,2u);
+    Scene3dParticleSample sample; ASSERT_TRUE(scene3d_particles_sample(owner,emitter,0,&sample)); EXPECT_EQ(sample.depth,4u); EXPECT_NEAR(sample.position.x,.5,2e-6);
+}
+TEST_F(Scene3dAgentTest, ParticlesSpawnCommandsPropagateDepthIntoCopiedCpuContactBatches) {
+    auto stage=particle_collision_stage("kill"); attr(stage.emitter,"emitting","false");
+    ParticleSpawnTestRequest request={stage.emitter,1,5,{},{},false}; ASSERT_FALSE(item_is_error(particle_spawn_batch(&request,1)));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),2));
+    RootFrame roots(1); Rooted<Item> packet(roots,agent_command(R"({"operation":"particle_events_read"})")); ASSERT_FALSE(item_is_error(packet.get()));
+    auto emitter=item_attr(packet.get(),"emitters").array->items[0]; auto event=item_attr(emitter,"events").array->items[0];
+    EXPECT_EQ(ItemReader(item_attr(event,"depth").to_const()).asUInt64(),5u);
+}
 
 TEST_F(Scene3dAgentTest, ParticlesCpuSceneCollisionCopiesContactBatchesAndAcknowledgesOnlyAValidPrefix) {
     auto stage = particle_collision_stage("kill");

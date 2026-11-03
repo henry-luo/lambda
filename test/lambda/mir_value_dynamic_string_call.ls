@@ -2,4 +2,4 @@
 fn echo(value: string) string { value }
 
 let indirect = echo
-len(indirect("descriptor"))
+len(indirect("descriptor"))^

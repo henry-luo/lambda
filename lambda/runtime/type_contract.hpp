@@ -115,6 +115,8 @@ ValueRep lambda_canonical_rep(Type* contract);
 // compiler entry points; callers with a full contract must use the overload
 // above (D2.4.1–D2.4.2).
 ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
+// canonical kind only; returns NULL when the dispatch key has no such type.
+Type* lambda_canonical_type_for_id(TypeId type_id);
 
 // Compare a runtime map shape with a concrete map contract. The exact result
 // is reserved for the explicit compiler certificate; dynamic shapes never
@@ -136,6 +138,9 @@ bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expecte
 // Value-set inclusion for first-class type values. Unlike boundary
 // compatibility, this relation never relies on a value conversion.
 bool lambda_type_contract_is_subtype(Type* candidate, Type* expected);
+// S11.4.6v3: plain T retains an existing diagnostic; particular error arms
+// require their own admission. Shared by checked runtime and MIR boundaries.
+bool lambda_boundary_preserves_error(Type* expected);
 // S5.5.2: `==` on type values, which compares normalized forms (literals by
 // value, `|` and `&` as sets of arms), and the hash that agrees with it (S5.6.2).
 bool lambda_type_repr_equal(Type* left, Type* right);
@@ -182,6 +187,10 @@ bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id);
 // lambda_type_accepts_error / lambda_type_accepts_null live in the core
 // header (lambda-data.hpp) beside the storage resolver they feed.
 bool lambda_type_has_proven_error(Type* type);
+// S7.4.2v3: particular ordinary-error outcomes come only from the full contract.
+Type* lambda_type_error_outcomes(Pool* pool, Type* type);
+void lambda_function_set_outcome_contract(Pool* pool, TypeFunc* function,
+    Type* contract, bool is_explicit);
 // S5.1.5: deep comparison can visit error-bearing children; unknowns keep an Item ABI.
 bool lambda_type_comparison_may_error(Type* type, bool deep, bool include_unknown);
 // Native-lane projection of lambda_lane_storage_desc_for: false for contracts
@@ -201,6 +210,9 @@ Type* lambda_type_nullable_normalized(Pool* pool, Type* type);
 bool lambda_type_may_hold_list(Type* type);
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right);
 Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);
+// S11.4.6v4: project normal admission without erasing invocation-dependent refs.
+// Unlike the static set projection, a composite result requires its owning pool.
+Type* lambda_type_normal_admission_contract(Pool* pool, Type* type);
 
 // Render a semantic contract for source and runtime diagnostics. Extended
 // Type values use LMD_TYPE_TYPE as an internal carrier, so callers must not

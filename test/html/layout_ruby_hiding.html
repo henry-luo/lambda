@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/100px Ahem; }
+rt { font-size: 10px; }
+.large { font-size: 40px; }
+.base-level { display: ruby-base-container; }
+.base { display: ruby-base; }
+.text-level { display: ruby-text-container; font-size: 40px; }
+</style>
+<div id="result">
+<div><ruby id="identical">XX<rt class="large" id="identical-annotation">XX</rt>Y<rt id="next-reading">abc</rt></ruby></div>
+<div><ruby id="nested-hidden"><span>X</span>X<rt class="large"><span>X</span>X</rt></ruby></div>
+<div><ruby id="collapsed">XX<rt class="large" id="collapsed-annotation" style="visibility:collapse"><span style="visibility:visible">abcd</span></rt>Y<rt id="collapsed-next">abc</rt></ruby></div>
+<div><ruby id="invisible">XX<rt class="large" id="invisible-annotation" style="visibility:hidden">abcd</rt>Y<rt>abc</rt></ruby></div>
+<div><ruby id="different-space">X X<rt class="large">X  X</rt></ruby></div>
+<div><ruby id="equal-space">X X<rt class="large">X X</rt></ruby></div>
+<div><ruby id="transformed">ab<rt class="large" style="text-transform:lowercase">AB</rt></ruby></div>
+<div><ruby id="spanning-hidden"><span class="base-level"><span class="base">X</span><span class="base">Y</span></span><span class="text-level" id="spanning-level">XY</span></ruby></div>
+<div style="line-height:0"><ruby id="empty-hidden"><span style="display:inline-block;width:10px;height:50px"></span><rt><span style="display:inline-block;width:10px;height:50px"></span></rt></ruby></div>
+</div>

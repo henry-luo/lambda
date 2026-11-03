@@ -17,7 +17,7 @@ let paused=t.update(sought.state,{type:"pause"},{spec:raw,now:0});
 let reordered={*:raw,source:{revision:"r2"},slideshow:{duration:2000},events:[raw.events[2],raw.events[0],raw.events[1]]};
 let retained_playhead=t.update(paused.state,{type:"source_update",spec:reordered},{spec:raw,now:5000});
 let removed_playhead=t.update(paused.state,{type:"source_update",spec:{*:replacement,slideshow:{duration:2000}}},{spec:raw,now:5000});
-let controlled={*:(map([for (key,value in replacement where string(key)!="default_value") (key,value)])),value:{active_id:"a",selected_ids:[]}};
+let controlled={*:(map([for (key,value in replacement where ((string(key)!="default_value") ^ { false })) (key,value)])),value:{active_id:"a",selected_ids:[]}};
 let held=t.update(initial,{type:"source_update",spec:controlled},{spec:raw,now:0});
 let axis_raw={id:"axis-source",view:"axis",scales:[{kind:"numeric",unit:"year"}],
     window:{from:0,to:40},events:[{id:"a",at:10},{id:"b",at:20}],default_value:{active_id:"b"}};

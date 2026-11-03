@@ -82,7 +82,7 @@ pn main() {
 
     // a packed numeric array takes the O(1) representation path, a generic
     // array of the same values takes the element walk; both must agree
-    var packed: int[] = fill(3, 7)
+    var packed: int[] = fill(3, 7)^
     print((packed is IntSeq))
     print(" ")
     print(([7, 7, 7] is IntSeq))

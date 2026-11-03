@@ -39,17 +39,17 @@ pub pn run(lib, url, options = null) map^ {
     // since (by another handler, say) is no longer a duplicate
     let existing = store.duplicate(store.current(lib.root)^, p.normalized)
     let policy = string(p.settings.on_duplicate)
-    if (existing != null and policy == "skip") { return existing }
+    if ((existing != null and policy == "skip")^) { return existing }
     let stamp = store.stamp()
     let staging = store.stage(lib.root, stamp.prefix ++ "-" ++ store.slug(p.parts.host or ""))^
     var record = null
     var failure = null
-    build(lib, url, o, p, stamp, staging) ^ { failure = ^ } ~ { record = ~ }
+    { let __error_outcome_1 = build(lib, url, o, p, stamp, staging) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { record = ~ } } }
     if (failure is error) {
         store.discard(staging)^
         raise failure
     }
-    if (existing != null and policy == "replace") io.delete(lib.root ++ "/snapshots/" ++ existing.id) ^ { null }
+    if ((existing != null and policy == "replace")^) io.delete(lib.root ++ "/snapshots/" ++ existing.id) ^ { null }
     store.update_index(lib.root, record, if (existing != null and policy == "replace") [existing.id] else [])^
     record
 }
@@ -92,7 +92,7 @@ pn build(lib, url, o, p, stamp, staging) map^ {
     let title_hint = if (as_page) (page.title_of(capture.html) or p.parts.host or url) else got.info.title
     let derived = workers.derive(staging, {url: url, final_url: r.url, archived: stamp.iso, title_hint: title_hint,
         kind: kind, meta: null, outputs: outputs, pdf: settings.pdf}, settings, notify)^
-    notify_through(o.progress, o.tag, {type: "progress", stage: "pack", received: 0, total: null, rate: null})
+    notify_through(o.progress, o.tag, {type: "progress", stage: "pack", received: 0, total: null, rate: null})^
     let zip_bytes = store.pack(staging, store.staged_members(staging, resources)^, "snapshot.zip")^
     store.tidy(staging)^
     let m = derived.meta or {title: title_hint}

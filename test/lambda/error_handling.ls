@@ -17,7 +17,7 @@ may_fail(0)^
 // 2. Function with explicit error type T^E
 // ============================================
 
-fn divide(a, b) float^error {
+fn divide(a, b) float^ {
     if (b == 0) raise error("division by zero")
     else a / b
 }

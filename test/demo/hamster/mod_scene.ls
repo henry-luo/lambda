@@ -5,33 +5,33 @@ import cage: .mod_cage
 import sim: .mod_sim
 import items: .mod_items
 
-fn material(color,opacity=1.0) => s.material('lambert',{color:color,opacity:opacity,side:'double'})
+fn material(color,opacity=1.0) any^ => s.material('lambert',{color:color,opacity:opacity,side:'double'})
 fn solid(shape,position,scale,color,options={},opacity=1.0) => <mesh geometry:shape,position:position,scale:scale,*:options,material(color,opacity)>
 fn box(position,size,color,options={}) => solid("cube",position,size,color,options)
 fn oval(position,scale,color,options={}) => solid("round",position,scale,color,options)
 fn ring(position,scale,color,options={}) => solid("ring",position,scale,color,options)
 
-fn torus() {
+fn torus() any^ {
     let positions = [for (j in 0 to 32,let a = j*math.pi/16) for (i in 0 to 8,let b = i*math.pi/4)
         *[(1+0.065*cos(b))*cos(a),(1+0.065*cos(b))*sin(a),0.065*sin(b)]]
     let normals = [for (j in 0 to 32,let a = j*math.pi/16) for (i in 0 to 8,let b = i*math.pi/4)
         *[cos(b)*cos(a),cos(b)*sin(a),sin(b)]];
     s.geometry(positions,{id:"ring",normals:normals,indices:g.grid_indices(32,8)})
 }
-fn tube(curved=false) {
+fn tube(curved=false) any^ {
     let positions = [for (j in 0 to 12,let along = j/12.0,let angle = math.pi/2+along*math.pi/2)
         for (i in 0 to 12,let arc = i*math.pi/12)
         *(if (curved) [1.3+(1.3+0.65*cos(arc))*cos(angle),0.05+0.65*sin(arc),-1.3+(1.3+0.65*cos(arc))*sin(angle)]
             else [-1.3+along*2.6,0.05+0.65*sin(arc),0.65*cos(arc)])];
     s.geometry(positions,{id:if (curved) "bend-shell" else "tunnel-shell",indices:g.grid_indices(12,12)})
 }
-fn doorway() {
+fn doorway() any^ {
     let positions = [for (i in 0 to 15,let a = math.pi*i/16,let b = math.pi*(i+1)/16,
         let x = 0.5*cos(a),let y = 0.5+0.5*sin(a),let xx = 0.5*cos(b),let yy = 0.5+0.5*sin(b))
         *[x,y,0.0,xx,yy,0.0,x,1.2,0.0,xx,yy,0.0,xx,1.2,0.0,x,1.2,0.0]];
     s.geometry(positions,{id:"door-arch"})
 }
-fn wall(side,is_open,color,transparent) {
+fn wall(side,is_open,color,transparent) any^ {
     let parts = if (is_open) [
         box([-0.88,0.6,0.0],[0.76,1.2,0.06],color),box([0.88,0.6,0.0],[0.76,1.2,0.06],color),
         solid("door-arch",[0.0,0.0,0.0],[1.0,1.0,1.0],color)]
@@ -71,7 +71,7 @@ fn ramp() => [
     box([0.0,1.2,0.0],[3.61,0.09,1.35],"#c4a57a",{rotation:[0.0,0.0,math.atan2(2.5,2.6)]}),
     for (i in 0 to 11,let x = -1.2+i*0.218) box([x,(x+1.3)*2.5/2.6+0.05,0.0],[0.045,0.05,1.25],"#a38862"),
     for (z in [-0.68,0.68]) box([0.0,1.45,z],[3.61,0.45,0.04],"#e1c7a2",{rotation:[0.0,0.0,math.atan2(2.5,2.6)]})]
-fn furnishing(kind,m,st) {
+fn furnishing(kind,m,st) any^ {
     let children = if (kind == "hideout") nest() else if (kind == "bowl") bowl(st.food) else if (kind == "bottle") bottle(st.water)
     else if (kind == "wheel") wheel(m.id,if (st.spins[m.id] == null) 0.0 else st.spins[m.id])
     else if (kind == "sand") [oval([0.0,0.1,0.0],[0.95,0.12,0.9],"#b59773"),oval([0.0,0.16,0.0],[0.86,0.08,0.8],"#e5d2a3")]
@@ -83,7 +83,7 @@ fn furnishing(kind,m,st) {
         if (i%2 == 0) "#b29368" else "#d2b583",{rotation:[0.0,0.3+i*0.5,0.0]})];
     s.group([*children],{id:m.id ++ "-item-" ++ kind,'data-item':kind})
 }
-pub fn module_tree(modules,m,st) {
+pub fn module_tree(modules,m,st) any^ {
     let color = cage.entry(m.kind).color
     let special = contains(["tunnel","bend","ramp"],m.kind)
     let structure = if (m.kind == "ramp") ramp()
@@ -96,7 +96,7 @@ pub fn module_tree(modules,m,st) {
         // low front rails keep the cutaway readable without covering the residents.
         if (not special) for (z in [-1.25,1.25]) box([0.0,0.12,z],[2.5,0.12,0.035],"#bca27d"),
         *structure,
-        for (kind in items.contents(m)) furnishing(kind,m,st),
+        for (kind in ((items.contents(m)) ^ { [] })) furnishing(kind,m,st),
         if (m.level>0) for (x in [-1.15,1.15]) for (z in [-1.15,1.15])
             box([x,-cage.floor_height/2,z],[0.1,cage.floor_height,0.1],"#baa58b")
     ],{id:m.id,'data-kind':m.kind,'data-items':format(items.contents(m),'json'),'data-cell':string(m.x) ++ "," ++ string(m.z) ++ "," ++ string(m.level),
@@ -104,7 +104,7 @@ pub fn module_tree(modules,m,st) {
 }
 pub fn limb_position(i,phase=0.0,active=false) => [if (i<2) -0.32 else 0.25,
     -0.255+(if (active) 0.045*sin(phase+i*math.pi) else 0.0),if (i%2 == 0) -0.22 else 0.22]
-fn limb(h,i) => s.group([
+fn limb(h,i) any^ => s.group([
     oval([-0.035,0.12,0.0],[if (i<2) 0.14 else 0.085,0.16,0.085],sim.coats[h.coat]),
     oval([0.02,0.035,0.0],[0.065,0.08,0.065],"#e2baa7"),
     oval([0.055,0.0,0.0],[if (i<2) 0.14 else 0.105,0.045,0.085],"#dba79c"),
@@ -112,7 +112,7 @@ fn limb(h,i) => s.group([
         oval([if (i<2) 0.16 else 0.13,0.005,toe*0.04],[0.045,0.025,0.023],"#e6b9ab"),
         oval([if (i<2) 0.193 else 0.163,0.006,toe*0.04],[0.02,0.012,0.013],"#f5e9d7")]
 ],{id:h.id ++ "-paw-" ++ string(i),'data-part':"leg",position:limb_position(i)})
-pub fn hamster(h,modules) {
+pub fn hamster(h,modules) any^ {
     let fur = sim.coats[h.coat];
     s.group([
         oval([-0.12,0.02,0.0],[0.48,0.32,0.3],fur,{'data-part':"torso"}),
@@ -154,7 +154,7 @@ pub fn hamster(h,modules) {
         ],{'data-part':"tail"})
     ],{id:h.id,position:sim.position(modules,h),scale:[sim.size(h),sim.size(h),sim.size(h)],'data-activity':h.activity,'data-coat':string(h.coat)})
 }
-pub fn viewport(st) => s.scene([
+pub fn viewport(st) any^ => s.scene([
     s.camera({id:"cage-camera",position:st.camera.position,target:st.camera.target,fov:st.camera.fov}),
     s.light('ambient',{color:"#fff2dc",intensity:0.52}),
     s.light('directional',{position:[-8.0,15.0,8.0],color:"#fff8e2",intensity:0.72}),

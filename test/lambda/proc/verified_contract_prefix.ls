@@ -7,7 +7,7 @@ type Derived : Named { label: string }
 fn read_point(p: Point) => p.x + len(p.label)
 fn identity(v) => v
 fn read_named(p: Named) => p.x
-fn admit_node(v: any) Node => v
+fn admit_node(v: any) Node^ => v
 
 pn main() {
     var p: Point = identity({extra: "kept", label: "abc", x: 4})

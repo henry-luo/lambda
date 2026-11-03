@@ -76,7 +76,7 @@ pub fn handle_request(ctx, path, method) {
 // method: HTTP method (e.g. "post")
 // body: parsed request body
 // returns: {valid: bool, errors: [...]}
-pub fn check_request(ctx, path, method, body) =>
+pub fn check_request(ctx, path, method, body) any^ =>
     openapi.validate_request(ctx.spec, path, method, body)
 
 // Validate a response body before sending it.
@@ -87,7 +87,7 @@ pub fn check_request(ctx, path, method, body) =>
 // status: status code string (e.g. "200")
 // body: response body
 // returns: {valid: bool, errors: [...]}
-pub fn check_response(ctx, path, method, status, body) =>
+pub fn check_response(ctx, path, method, status, body) any^ =>
     openapi.validate_response(ctx.spec, path, method, status, body)
 
 // Validate request parameters.
@@ -97,7 +97,7 @@ pub fn check_response(ctx, path, method, status, body) =>
 // method: HTTP method
 // params: map of parameter name -> value
 // returns: {valid: bool, errors: [...]}
-pub fn check_params(ctx, path, method, params) =>
+pub fn check_params(ctx, path, method, params) any^ =>
     openapi.validate_params(ctx.spec, path, method, params)
 
 // Build a 400 error response from validation errors.

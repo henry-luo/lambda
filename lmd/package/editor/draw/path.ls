@@ -4,7 +4,7 @@ pub fn points(segments) {
     let compiled = motion.compile(segments,"draw.path") ^ { null };
     [for (p in compiled.rows) {x:p.x,y:p.y}]
 }
-pub fn svg(segments) {
+pub fn svg(segments) any^ {
     let first = segments[0];
     "M " ++ string(first[0]) ++ " " ++ string(first[1]) ++ join([for (s in segments)
         if (len(s)==4) " L " ++ string(s[2]) ++ " " ++ string(s[3])

@@ -12,8 +12,8 @@ import math: lambda.doc.math.math
 
 let ast = parse("\\frac{a}{b}", 'math')^
 ast
-format(ast, {type: 'math', flavor: 'ascii'})
-math.render_inline(ast)
+format(ast, {type: 'math', flavor: 'ascii'})^
+math.render_inline(ast)^
 ```
 
 ```bash
@@ -72,7 +72,7 @@ let spec = {
         y: {field: "units", type: "quantitative"}
     }
 }
-chart.render_spec(vega.convert(spec))
+chart.render_spec(vega.convert(spec))^
 ```
 
 The chart is an ordinary element value, so the script prints it:

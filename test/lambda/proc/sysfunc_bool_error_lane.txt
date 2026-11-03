@@ -5,5 +5,5 @@
 [error, error, true, true, true]
 [true, true, true, true, true, false, true]
 [true, false, false, true, true]
-[true, true, false, true, "handled", "handled"]
+[true, true, false, true, "handled", "handled", [true, true, true, true, true, false, true, false]]
 

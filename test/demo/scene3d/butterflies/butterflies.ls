@@ -16,18 +16,18 @@ let HOUR = 3600.0   // the flight clip; the simulation restarts when it loops
 let WING_CELLS = [12.0, 8.0]
 
 // one wing grid, 12 × 8 cells hinged on the body axis, so the wings can bend
-fn wing_grid() element {
+fn wing_grid() element^ {
     let sx = int(WING_CELLS[0]), sy = int(WING_CELLS[1]);
-    s.geometry([for (j in 0 to sy) for (i in 0 to sx) *[i * 1.0 / sx - 0.5, j * 1.0 / sy - 0.5, 0.0]], {id: "wing-grid",
-        uvs: [for (j in 0 to sy) for (i in 0 to sx) *[i * 1.0 / sx, j * 1.0 / sy]],
-        normals: [for (j in 0 to sy) for (i in 0 to sx) *[0.0, 0.0, 1.0]],
-        indices: [for (j in 0 to (sy - 1)) for (i in 0 to (sx - 1)) (let a = j * (sx + 1) + i, *[a, a + 1, a + sx + 2, a, a + sx + 2, a + sx + 1])]})
+    s.geometry([for (j in ((0 to sy) ^ { [] })) for (i in ((0 to sx) ^ { [] })) *[i * 1.0 / sx - 0.5, j * 1.0 / sy - 0.5, 0.0]], {id: "wing-grid",
+        uvs: [for (j in ((0 to sy) ^ { [] })) for (i in ((0 to sx) ^ { [] })) *[i * 1.0 / sx, j * 1.0 / sy]],
+        normals: [for (j in ((0 to sy) ^ { [] })) for (i in ((0 to sx) ^ { [] })) *[0.0, 0.0, 1.0]],
+        indices: [for (j in ((0 to (sy - 1)) ^ { [] })) for (i in ((0 to (sx - 1)) ^ { [] })) (let a = j * (sx + 1) + i, *[a, a + 1, a + sx + 2, a, a + sx + 2, a + sx + 1])]})
 }
-fn flight(paths, from = 0.0) element => s.clip("flight", [for (path in paths) s.track(path, [0.0, HOUR], [from, from + HOUR])],
+fn flight(paths, from = 0.0) element^ => s.clip("flight", [for (path in paths) s.track(path, [0.0, HOUR], [from, from + HOUR])],
     {duration: HOUR, autoplay: true})
 
 // the swarm: the simulation moves every butterfly; the material places, bends and paints them
-fn swarm() element => s.scene([
+fn swarm() element^ => s.scene([
     s.camera({id: "main", fov: 45.0, near: 1.0, far: 200.0, position: [0.0, 0.0, 60.0]}),
     s.resources([ATLAS, wing_grid()]),
     s.simulation("swarm", SWARM, SWARM, [s.variable("position", glsl.POSITION_STEP), s.variable("velocity", glsl.VELOCITY_STEP)],
@@ -58,7 +58,7 @@ let PRESETS = [
     {species: 11, flex: 1.25, curl: 3.2, lag: 1.4, beat: 2.0, amplitude: 1.4}
 ]
 
-fn solo(i, card) element => s.scene([
+fn solo(i, card) element^ => s.scene([
     s.camera({id: "main", fov: 40.0, position: [0.0, 0.0, 1.9]}),
     s.resources([ATLAS, wing_grid()]),
     <mesh geometry: "wing-grid",
@@ -100,7 +100,7 @@ view <studio> state cards: PRESETS {
 }
 on input(evt) {
     let parts = split(string(dom.get_attribute(evt.target, "id")), "-")
-    if (len(parts) != 3 or parts[0] != "card") { return 'pass' }
+    if ((len(parts) != 3 or parts[0] != "card")^) { return 'pass' }
     let index = int(parts[1])
     let value = float(dom.get_state(evt.target, "value"))
     cards = [for (i, card in cards) if (i == index) tuned(card, parts[2], value) else card]

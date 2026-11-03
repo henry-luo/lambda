@@ -26,21 +26,21 @@ pub let schema = {}
 // Import: parsed XML -> editor model
 // ---------------------------------------------------------------------------
 
-fn model_child(c, scope) {
+fn model_child(c, scope) any^ {
   if (type(c) == string) text(c)
   else if (type(c) == element) model_node(c,scope)
   else text(string(c))
 }
 
 // One element: tag, attributes in source order, children.
-pub fn model_node(el, inherited = {}) {
+pub fn model_node(el, inherited = {}) any^ {
   let scope = xml_names.bindings(el,inherited);
   node_attrs(xml_names.lexical_name(name(el),scope),
     [for (k, v at map(el)) {name:xml_names.lexical_name(k,scope,true),value:v}],
-    [for (c in content(el)) model_child(c,scope)])
+    [for (c in ((content(el)) ^ { [] })) model_child(c,scope)])
 }
 
-fn after_markup(source, i, close) {
+fn after_markup(source, i, close) any^ {
   let at = index_of(slice(source, i, len(source)), close)
   if (at == null) len(source) else i + at + len(close)
 }
@@ -56,7 +56,7 @@ fn after_doctype(source, i, depth) {
 
 // Where the root element's start tag begins: after the XML declaration,
 // processing instructions, comments, and DOCTYPE of the prologue.
-fn root_start(source, i) {
+fn root_start(source, i) any^ {
   let lt = index_of(slice(source, i, len(source)), "<")
   if (lt == null) null
   else {
@@ -70,7 +70,7 @@ fn root_start(source, i) {
 }
 
 // The text after the root's end tag (a self-closing root has none to find).
-fn epilogue_of(source, root_tag) {
+fn epilogue_of(source, root_tag) any^ {
   let close = "</" ++ string(root_tag)
   let at = last_index_of(source, close)
   if (at == null) ""
@@ -80,14 +80,14 @@ fn epilogue_of(source, root_tag) {
   }
 }
 
-fn root_element(parsed) {
-  let found = [for (c in content(parsed) where type(c) == element and
-                  (string(name(c)) == "svg" or ends_with(string(name(c)), ":svg"))) c]
+fn root_element(parsed) any^ {
+  let found = [for (c in ((content(parsed)) ^ { [] }) where ((((((type(c) == element and
+                  (string(name(c)) == "svg" or ends_with(string(name(c)), ":svg"))) ^ { false })))))) c]
   if (len(found) > 0) found[0] else null
 }
 
 // the envelope uses the authored QName even when several aliases resolve equally.
-fn authored_tag(source, start, end) => if (end>=len(source) or contains(" \n\r\t/>",source[end]))
+fn authored_tag(source, start, end) any^ => if (end>=len(source) or contains(" \n\r\t/>",source[end]))
   slice(source,start,end) else authored_tag(source,start,end+1)
 
 // Parse SVG source into the drawing model and the source text around it.
@@ -116,7 +116,7 @@ fn has_text_child(n) => any([for (c in n.content) is_text(c)]) or false
 // holding text is written inline, since its white space is significant.
 // `attrs_of(n, path)` chooses the attributes written and `keep(n)` the
 // children (export writes the model's own; the surface projection filters).
-pub fn node_xml(n, path, depth, attrs_of, keep) {
+pub fn node_xml(n, path, depth, attrs_of, keep) any^ {
   if (is_text(n)) escape_text(n.text)
   else if (not is_node(n)) ""
   else if (n.tag == '!--') "<!--" ++ node_plain_text(n) ++ "-->"
@@ -124,7 +124,7 @@ pub fn node_xml(n, path, depth, attrs_of, keep) {
   else {
     let start_tag = "<" ++ string(n.tag) ++ attrs_xml(attrs_of(n, path))
     let kids = [for (i, child of n.content) {child: child, path: [*path, i]}]
-    let shown = [for (k in kids where keep(k.child)) k]
+    let shown = [for (k in kids where ((((((keep(k.child)) ^ { false })))))) k]
     let end_tag = "</" ++ string(n.tag) ++ ">"
     if (len(shown) == 0) start_tag ++ "/>"
     else if (has_text_child(n))
@@ -139,7 +139,7 @@ fn own_attrs(n, path) => n.attrs
 fn keep_all(n) => true
 
 // Serialize the drawing with the source text around its root.
-pub fn export_text(doc, envelope) =>
+pub fn export_text(doc, envelope) any^ =>
   envelope.prologue ++ node_xml(doc, [], 0, own_attrs, keep_all) ++ envelope.epilogue
 
 // ---------------------------------------------------------------------------
@@ -148,17 +148,17 @@ pub fn export_text(doc, envelope) =>
 
 // Attribute values compare as text (a tool may write a number), and how text
 // is cut into leaves carries no meaning.
-fn norm_node(n) {
+fn norm_node(n) any^ {
   if (is_text(n)) n
   else if (not is_node(n)) n
   else node_attrs(n.tag, [for (a in n.attrs where a.value != null) {name: a.name, value: string(a.value)}],
-                  [for (c in merge_leaves(n.content)) norm_node(c)])
+                  [for (c in ((merge_leaves(n.content)) ^ { [] })) norm_node(c)])
 }
 
 pub fn normal_form(doc) any => norm_node(doc)
 
 // null when the drawing survives export and re-import, else what would change.
-pub fn check_roundtrip(doc, envelope) {
+pub fn check_roundtrip(doc, envelope) any^ {
   let back = import_text(export_text(doc, envelope)) ^ { null }
   if (back == null) "the saved SVG could not be read back"
   else if (back.envelope != envelope) "the text around the drawing would change"

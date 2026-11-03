@@ -5,11 +5,11 @@ pn tune13_first(values: int[]) int {
     return values[0]
 }
 
-pn tune13_stable_call(values: int[]) int {
+pn tune13_stable_call(values: int[]) int^ {
     return tune13_first(values)
 }
 
-pn tune13_widened_call(values: any[]) int {
+pn tune13_widened_call(values: any[]) int^ {
     return tune13_first(values)
 }
 

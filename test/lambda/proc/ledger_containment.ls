@@ -1,16 +1,17 @@
-// LR12-24: S7.7.2-S7.7.6 keep deferred failures at their declaring boundary.
+// S7.7.2v2/S7.7.4v2: local outcomes continue; field stores retain containment.
 fn checked(x: int) int => x + 1
 pn arguments(x) {
-    let direct: any | error = checked(x)
+    let direct: any^ = checked(x)
     let invoke = checked
-    let dynamic: any | error = invoke(x)
+    let dynamic: any^ = invoke(x)
     print([direct is error, dynamic is error, checked(2)])
     print("\n")
 }
 pn nested_declaration(x) {
     if (true) {
         let n: int = x
-        print("unreachable declaration")
+        print(["declaration continued", n is error])
+        print("\n")
     }
     print("declaration after")
     print("\n")
@@ -19,7 +20,8 @@ pn nested_assignment(x) {
     if (true) {
         var n: int = 1
         n = x
-        print("unreachable assignment")
+        print(["assignment continued", n is error])
+        print("\n")
     }
     print("assignment after")
     print("\n")
@@ -28,12 +30,13 @@ pn multiple_bindings(x) {
     if (true) {
         var a: int = 1, b: int = 2
         b = x
-        print("unreachable second binding")
+        print(["second binding continued", b is error])
+        print("\n")
     }
     print("second binding after")
     print("\n")
 }
-// A nested declaration still skips locally when the procedure is inlined.
+// A bound error returns only through the explicit return, even when inlined.
 pn inline_nested(a: int[], i: int) {
     if (true) { let n: int = a[i]; return n }
     return 7
@@ -42,7 +45,8 @@ pn inline_store(var a: int[], i: int) { a[0] = a[i] }
 pn outer_assignment(x) {
     var n: int = 1
     if (true) { n = x }
-    print("unreachable outer assignment")
+    print(["outer assignment continued", n is error])
+    print("\n")
 }
 fn batch(xs) => [for (x in xs) { let n: int = x; n + 1 }]
 fn block_value(x) {
@@ -81,19 +85,21 @@ pn record_field_result(x) {
     print("\n")
 }
 pn null_argument(xs: int[], i: int) {
-    let result: any | error = checked(xs[i])
+    let result: any^ = checked(xs[i])
     print([result is error, "null argument after"])
     print("\n")
 }
 pn child() {
     sleep(100)^
-    print("unreachable child")
+    print("child completed")
+    print("\n")
 }
 pn scoped_failure(x) {
     if (true) {
         start(child, [])
         let n: int = x
-        print("unreachable task scope")
+        print(["task scope continued", n is error])
+        print("\n")
     }
     print("task after")
     print("\n")

@@ -17,36 +17,36 @@ pub fn flatten(items, parent = null, ancestors = []) array^ {
 pub fn visible(rows, expanded) => [for (row in rows where all([for (key in row.ancestors) contains(expanded,key)])) row]
 fn children(rows, key) => [for (row in rows where row.parent == key) row]
 fn checkable(row) => not row.disabled and row.item.disable_checkbox != true
-fn check_state(rows, row, keys, strict) {
-    let eligible = [for (child in children(rows,row.key) where checkable(child)) child]
+fn check_state(rows, row, keys, strict) any^ {
+    let eligible = [for (child in ((children(rows,row.key)) ^ { [] }) where ((checkable(child)) ^ { false })) child]
     let states = if (strict or not checkable(row)) [] else [for (child in eligible) check_state(rows,child,keys,false)];
     if (len(states) == 0) (if (contains(keys,row.key)) "true" else "false")
     else if (all([for (status in states) status == "true"])) "true"
     else if (any([for (status in states) status != "false"])) "mixed"
     else "false"
 }
-fn conducted(rows, key) {
+fn conducted(rows, key) any^ {
     let matches = [for (row in rows where row.key == key) row]
     let row = matches[0];
     if (row == null or not checkable(row)) []
-    else [key,*[for (child in children(rows,key)) for (candidate in conducted(rows,child.key)) candidate]]
+    else [key,*[for (child in children(rows,key)) for (candidate in ((conducted(rows,child.key)) ^ { [] })) candidate]]
 }
 fn checked_result(rows, keys, strict) {
     let states = [for (row in rows) {key:row.key,state:check_state(rows,row,keys,strict)}];
     {checked_keys:[for (row in states where row.state == "true") row.key],
      half_checked_keys:[for (row in states where row.state == "mixed") row.key]}
 }
-pub fn checks(rows, keys, strict = false) {
-    let expanded = if (strict) keys else unique([*keys,*[for (key in keys) for (candidate in conducted(rows,key)) candidate]]);
+pub fn checks(rows, keys, strict = false) any^ {
+    let expanded = if (strict) keys else unique([*keys,*[for (key in keys) for (candidate in ((conducted(rows,key)) ^ { [] })) candidate]]);
     checked_result(rows,expanded,strict)
 }
-pub fn toggle_check(rows, keys, key, strict = false) {
+pub fn toggle_check(rows, keys, key, strict = false) any^ {
     let current = checks(rows,keys,strict)
     let row = [for (entry in rows where entry.key == key) entry][0]
     let affected = if (strict) [key] else conducted(rows,key)
     let next = collection.set_keys(current.checked_keys,affected,not contains(current.checked_keys,key))
     // remove stale parent keys before recalculating conduction from their children.
-    let raw = if (strict) next else [for (entry in next where not contains(row.ancestors,entry)) entry];
+    let raw = if (strict) next else [for (entry in next where ((not contains(row.ancestors,entry)) ^ { false })) entry];
     if (row == null or not checkable(row)) current else checked_result(rows,raw,strict)
 }
 pub fn tree(props) element^ {
@@ -61,7 +61,7 @@ pub fn tree(props) element^ {
         raise c.fail("tree","single selection allows at most one key")
     else node
 }
-fn keys(node, name, current) => c.option(c.props(node),name ++ "_keys",current)
+fn keys(node, name, current) any^ => c.option(c.props(node),name ++ "_keys",current)
 fn transition(node, rows, expanded, selected, checked, key, action) {
     let next_expanded = if (action == 'expand') collection.toggle(expanded,key) else expanded
     let next_selected = if (action == 'select') (if (c.props(node).multiple) collection.toggle(selected,key) else [key]) else selected
@@ -75,14 +75,14 @@ pn focus_key(node, evt, rows, key) {
     let found = [for (index,row in rows where row.key == key) index];
     if (len(found) == 1) interaction.focus(node,evt,"[data-dtna-tree-node='" ++ string(found[0]) ++ "']") else false
 }
-view dtna_tree: <dtna.tree> state expanded:c.option(c.props(~),"default_expanded_keys",[]),
-    selected:c.option(c.props(~),"default_selected_keys",[]),checked:c.option(c.props(~),"default_checked_keys",[]),focused:null {
+view dtna_tree: <dtna.tree> () any^ state expanded:(c.option(c.props(~),"default_expanded_keys",[]) ^ { [] }),
+    selected:(c.option(c.props(~),"default_selected_keys",[]) ^ { [] }),checked:(c.option(c.props(~),"default_checked_keys",[]) ^ { [] }),focused:null {
     let rows = flatten(c.props(~).items)^
     let opened = keys(~,"expanded",expanded)
     let chosen = keys(~,"selected",selected)
     let checked_model = checks(rows,keys(~,"checked",checked),c.props(~).check_strictly == true)
     let shown = visible(rows,opened)
-    let tab_key = if (any([for (row in collection.enabled(shown)) row.key == focused])) focused else collection.enabled(shown)[0].key;
+    let tab_key = if (any([for (row in ((collection.enabled(shown)) ^ { [] })) row.key == focused])) focused else collection.enabled(shown)[0].key;
     <div *:c.attrs(c.props(~)),class:c.classes('tree',c.props(~)),style:c.props(~).style,role:"tree",
         ["aria-label"]:c.props(~).label,["aria-multiselectable"]:c.aria(c.props(~).multiple),
         *[for (index,row in rows where any([for (entry in shown) entry.key == row.key]))
@@ -103,26 +103,26 @@ view dtna_tree: <dtna.tree> state expanded:c.option(c.props(~),"default_expanded
 }
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
-    if (target == null or c.props(~).disabled) { return 'pass' }
+    if ((target == null or c.props(~).disabled)^) { return 'pass' }
     let rows = flatten(c.props(~).items)^
     let row = rows[(int(dom.get_attribute(target,"data-dtna-tree-node")) ^ { null }) or 0]
     if (row.disabled) { return 'pass' }
     let action = if (dom.closest(evt.target,"[data-dtna-tree-expand]") != null) 'expand'
         else if (c.props(~).checkable and dom.closest(evt.target,"[data-dtna-tree-check]") != null) 'check' else 'select'
-    if (action == 'select' and dom.closest(evt.target,"input,textarea,select,button,a") != null) { return 'pass' }
-    if (action == 'check' and not checkable(row)) { return 'pass' }
+    if ((action == 'select' and dom.closest(evt.target,"input,textarea,select,button,a") != null)^) { return 'pass' }
+    if ((action == 'check' and not checkable(row))^) { return 'pass' }
     let next = transition(~,rows,keys(~,"expanded",expanded),keys(~,"selected",selected),keys(~,"checked",checked),row.key,action)
     expanded = next.expanded
     selected = next.selected
     checked = next.checked
     focused = row.key
     dom.focus_set(target,false)
-    emit("ui_change",c.action(~,action,next.value))
+    emit("ui_change",c.action(~,action,next.value)^)
     'pass'
 }
 on keydown(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
-    if (target == null or c.props(~).disabled or dom.closest(evt.target,"input,textarea,select,button") != null) { return 'pass' }
+    if ((target == null or c.props(~).disabled or dom.closest(evt.target,"input,textarea,select,button") != null)^) { return 'pass' }
     let rows = flatten(c.props(~).items)^
     let row = rows[(int(dom.get_attribute(target,"data-dtna-tree-node")) ^ { null }) or 0]
     if (row.disabled) { return 'pass' }
@@ -130,25 +130,25 @@ on keydown(evt) {
     let shown = visible(rows,opened)
     let action = if (evt.key == "Enter") 'select' else if (evt.key == " ") (if (c.props(~).checkable) 'check' else 'select')
         else if (row.branch and ((evt.key == "ArrowRight" and not contains(opened,row.key)) or (evt.key == "ArrowLeft" and contains(opened,row.key)))) 'expand' else null
-    if (action != null) {
-        if (action == 'check' and not checkable(row)) { return 'pass' }
+    if ((action != null)^) {
+        if ((action == 'check' and not checkable(row))^) { return 'pass' }
         let next = transition(~,rows,opened,keys(~,"selected",selected),keys(~,"checked",checked),row.key,action)
         expanded = next.expanded
         selected = next.selected
         checked = next.checked
-        emit("ui_change",c.action(~,action,next.value))
+        emit("ui_change",c.action(~,action,next.value)^)
     } else {
         let enabled = collection.enabled(shown)
         let here = [for (index,entry in enabled where entry.key == row.key) index][0]
-        let candidates = [for (offset in 1 to len(enabled),let entry = enabled[(here+offset) % len(enabled)]
-            where starts_with(lower(c.text(entry.item.label)),lower(evt.key))) entry.key]
+        let candidates = [for (offset in 1 to len(enabled)^,let entry = enabled[(here+offset) % len(enabled)]
+            where starts_with(lower(c.text(entry.item.label)),lower(evt.key))^) entry.key]
         let next_key = if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) collection.move(shown,row.key,evt.key)
             else if (evt.key == "ArrowLeft") row.parent
             else if (evt.key == "ArrowRight" and row.branch) collection.enabled(children(rows,row.key))[0].key
             else if (len(evt.key) == 1 and evt.key != " ") candidates[0] else null
-        if (next_key == null or not any([for (entry in collection.enabled(shown)) entry.key == next_key])) { return 'pass' }
+        if ((next_key == null or not any([for (entry in ((collection.enabled(shown)) ^ { [] })) entry.key == next_key]))^) { return 'pass' }
         focused = next_key
-        focus_key(~,evt,rows,next_key)
+        focus_key(~,evt,rows,next_key)^
     }
     'prevent-default'
 }

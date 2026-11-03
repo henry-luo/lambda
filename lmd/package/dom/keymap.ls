@@ -25,7 +25,7 @@ fn deletion(k, alt, ctrl, meta) {
 // Compared case-insensitively: the engine names a letter key by what it would
 // type, so Cmd+Shift+Z arrives as "Z" and Cmd+Z as "z". Matching only the
 // lowercase form silently loses every shifted accelerator, redo among them.
-pub fn intent_for(key, shift, alt, ctrl, meta) {
+pub fn intent_for(key, shift, alt, ctrl, meta) any^ {
     let cmd = primary(ctrl, meta);
     let k = lower(key);
     if (cmd and k == "z") { if (shift) "historyRedo" else "historyUndo" }
@@ -52,7 +52,7 @@ pub pn resolve(body, evt) {
 // Clipboard and selection accelerators are ordinary cancelable keydown
 // defaults. The package chooses the command; native only executes it against
 // the live selection/editing surface and accesses the platform clipboard.
-fn shortcut_name(evt) {
+fn shortcut_name(evt) any^ {
     let command_name = intent_for(evt.key, evt.shiftKey, evt.altKey,
                                   evt.ctrlKey, evt.metaKey);
     if (command_name == "insertFromPaste" or command_name == "deleteByCut" or

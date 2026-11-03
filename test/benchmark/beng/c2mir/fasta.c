@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of beng/fasta.ls. */
 extern int printf(const char *, ...);
 extern int putchar(int);
@@ -39,6 +40,7 @@ static void random_fasta(const char *id, const char *description, const char *le
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     static const char iub[] = "acgtBDHKMNRSVWY";
     static const double iub_probabilities[15] = {.27,.12,.12,.27,.02,.02,.02,.02,.02,.02,.02,.02,.02,.02,.02};
     static const char hs[] = "acgt";
@@ -48,5 +50,7 @@ int main(void) {
     random_fasta("THREE", "Homo sapiens frequency", hs, hs_probabilities, 4, 5000);
     // preserve the benchmark fixture's trailing line after timing is stripped.
     putchar('\n');
+    BENCH_KERNEL_END();
+    BENCH_KERNEL_REPORT();
     return 0;
 }

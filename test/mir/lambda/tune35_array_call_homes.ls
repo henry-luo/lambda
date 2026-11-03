@@ -1,5 +1,5 @@
 // D5.3, S9.1.3: reused roots stay precise; later argument calls capture the old value.
-pn consume(values: float[], count: int, bias: float) float {
+pn consume(values: float[], count: int, bias: float) float^ {
     let scratch = [for (i in 1 to 30) [i, i + 1]]
     var total: float = bias + float(len(scratch))
     var i: int = 0
@@ -12,7 +12,7 @@ pn replace_values(var values: float[]) float {
     return 1.0
 }
 
-pn defaulted(values: float[], count: int, bias: float = 2.0) float {
+pn defaulted(values: float[], count: int, bias: float = 2.0) float^ {
     return consume(values, count, bias)
 }
 

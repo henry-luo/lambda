@@ -23,12 +23,12 @@ let LOOKALIKES = {envelope: "✉", 'envelope-open': "✉", phone: "☎", 'phone-
 
 // an icon's name: \faIcon{map-marker}, or the command's own (\faMapMarker), with
 // the capitals of its words as hyphens
-pub fn icon_name(command, argument) {
+pub fn icon_name(command, argument) any^ {
     if (command == "faIcon" or command == "faIconFA") trim(argument or "")
     else kebab(slice(command, len(PREFIX), len(command)), 0, "")
 }
 
-fn kebab(text, i, acc) {
+fn kebab(text, i, acc) any^ {
     if (i >= len(text)) acc
     else {
         let ch = slice(text, i, i + 1)

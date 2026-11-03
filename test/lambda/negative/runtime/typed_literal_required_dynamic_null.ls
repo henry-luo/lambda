@@ -6,6 +6,5 @@ pn nothing() any { return null }
 
 pn main() {
     var c: Cell = {k: nothing(), name: "x"}
-    print("bound: ")
-    print(c.k)
+    c
 }

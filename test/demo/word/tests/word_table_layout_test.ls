@@ -13,17 +13,17 @@ let table = node_attrs('table',[{name:'id',value:"original"}],[
     row(["Name","Value","Total"],true),row(["Zebra","20","3"]),row(["Apple","10","4"]),row(["Pear","30",""])])
 let doc = node('doc',[node('p',[text("Before")]),table,table,node('p',[text("After")])])
 let base = edit_set_selection(model.open_editor(doc),text_selection(pos([1,1,1,0],0),pos([1,1,1,0],0)))
-fn choose(ed,r,c) {
+fn choose(ed,r,c) any^ {
     let e = grid.at(tables.entries(ed),r,c)
     edit_set_selection(ed,node_selection(e.path))
 }
-fn css(ed,path,key) => model.css_get(attrs_get(node_at(ed.doc,path).attrs,'style'),key)
-fn at(ed,r,c) => grid.at(tables.entries(ed),r,c)
+fn css(ed,path,key) any^ => model.css_get(attrs_get(node_at(ed.doc,path).attrs,'style'),key)
+fn at(ed,r,c) any^ => grid.at(tables.entries(ed),r,c)
 fn run(ed,id,p={}) map^ => model.execute(ed,"table." ++ id,p)^
 let region = edit_set_selection(base,tables.selection(base,"cell",[1,1,1],[1,2,2]))
 let merged = run(region,"mergeCells")^
 len(tables.entries(merged))==9 and at(merged,1,1).end_row==3 and at(merged,1,1).end_col==3;
-doc_text(at(merged,1,1).node)=="203104" and len([for (n in at(merged,1,1).node.content where n.tag=='br') n])==3;
+doc_text(at(merged,1,1).node)=="203104" and len([for (n in at(merged,1,1)^.node.content where n.tag=='br') n])==3;
 merged.doc.content[0]==doc.content[0] and merged.doc.content[2]==table and merged.doc.content[3]==doc.content[3];
 len(merged.history.undo)==1 and model.execute(merged,"edit.undo")^.doc==doc;
 model.execute(model.execute(merged,"edit.undo")^,"edit.redo")^.doc==merged.doc;
@@ -70,14 +70,14 @@ tables.projected_selection(entire,text_selection(pos([1,0,0,0],0),pos([1,0,0,0],
 not tables.projected_selection(entire,text_selection(pos([1,0,0,0],1),pos([1,0,0,0],1)));
 not tables.projected_selection(base,base.selection);
 let columns = run(entire,"distributeColumns",{widths:[60,120,90]})^
-all([for (e in tables.entries(columns)) css(columns,e.path,"width")=="90pt"]);
+all([for (e in tables.entries(columns)^) css(columns,e.path,"width")=="90pt"]);
 let heights = run(entire,"distributeRows",{heights:[18,24,30,36]})^
 all([for (r in 0 to 3) css(heights,[1,r],"height")=="27pt"]);
 let fixed = run(columns,"autoFit",{mode:"fixed",widths:[50,70,90]})^
 css(fixed,[1],"table-layout")=="fixed" and css(fixed,[1,1,1],"width")=="70pt";
 css(fixed,[1],"width")=="210pt";
 let fit = run(fixed,"autoFit",{mode:"contents"})^
-css(fit,[1],"width")=="auto" and all([for (e in tables.entries(fit)) css(fit,e.path,"width")==null]);
+css(fit,[1],"width")=="auto" and all([for (e in tables.entries(fit)^) css(fit,e.path,"width")==null]);
 css(run(fit,"autoFit",{mode:"window"})^,[1],"width")=="100%";
 let positioned = run(base,"properties",{table_width:80,alignment:"center",indent:0})^
 css(positioned,[1],"width")=="80%" and css(positioned,[1],"margin-left")=="auto" and css(positioned,[1],"margin-right")=="auto";
@@ -107,13 +107,13 @@ let exported = files.html_document(merged.doc,"Layout")^
 contains(exported,"rowspan=\"2\"") and contains(exported,"colspan=\"2\"");
 let imported = files.import_html_document(exported)^
 len(grid.entries(imported,[1]))==9 and doc_text(grid.at(grid.entries(imported,[1]),1,1).node)=="203104";
-run(base,"mergeCells") ^ { true } ~ { false };
-run(base,"splitCells",{rows:0,columns:2}) ^ { true } ~ { false };
-run(base,"cellSize",{axis:"width",value: -1}) ^ { true } ~ { false };
-run(base,"cellMargins",{top:2,right:4,bottom:6,left:100}) ^ { true } ~ { false };
-run(merged,"sort",{column:1,type:"text",descending:false,header:true}) ^ { true } ~ { false };
-run(base,"repeatHeader",{enabled:true}) ^ { true } ~ { false };
-run(choose(base,3,2),"formula",{expression:"SUM(A1:C4)",decimals:"general"}) ^ { true } ~ { false }
+match (run(base,"mergeCells") ^ { ^ }) { case error: true default: false };
+match (run(base,"splitCells",{rows:0,columns:2}) ^ { ^ }) { case error: true default: false };
+match (run(base,"cellSize",{axis:"width",value: -1}) ^ { ^ }) { case error: true default: false };
+match (run(base,"cellMargins",{top:2,right:4,bottom:6,left:100}) ^ { ^ }) { case error: true default: false };
+match (run(merged,"sort",{column:1,type:"text",descending:false,header:true}) ^ { ^ }) { case error: true default: false };
+match (run(base,"repeatHeader",{enabled:true}) ^ { ^ }) { case error: true default: false };
+match (run(choose(base,3,2),"formula",{expression:"SUM(A1:C4)",decimals:"general"}) ^ { ^ }) { case error: true default: false }
 
 let numeric_header = run(repeated,"sort",{column:2,type:"number",descending:false,header:false})^
 doc_text(at(numeric_header,0,0).node)=="Name" and doc_text(at(numeric_header,1,0).node)=="Apple"

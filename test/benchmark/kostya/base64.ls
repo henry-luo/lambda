@@ -12,7 +12,7 @@ let TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
              "0","1","2","3","4","5","6","7","8","9","+","/"]
 
 // Encode using integer array of byte values
-pn b64_encode(bytes, num_bytes) {
+fn b64_encode(bytes, num_bytes) {
     var result = ""
     var i = 0
     while (i + 2 < num_bytes) {
@@ -39,7 +39,7 @@ pn b64_encode(bytes, num_bytes) {
     return result
 }
 
-pn b64_decode_len(encoded) {
+fn b64_decode_len(encoded) {
     var slen = len(encoded)
     var n = shr(slen, 2) * 3
     if (slen >= 1 and encoded[slen - 1] == "=") {
@@ -70,7 +70,7 @@ pn main() {
 
     let enc_len = len(encoded)
     print("base64: encoded_len=" ++ enc_len ++ " decoded_len=" ++ decoded_len ++ "\n")
-    if (decoded_len == num_bytes) {
+    if ((decoded_len == num_bytes)^) {
         print("base64: PASS\n")
     } else {
         print("base64: FAIL\n")

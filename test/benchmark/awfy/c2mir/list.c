@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of awfy/list2.ls. */
 extern int printf(const char *, ...);
 extern void *malloc(unsigned long);
@@ -30,8 +31,11 @@ static Node *tail_list(Node *x, Node *y, Node *z) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     Node *result = tail_list(make_list(15), make_list(10), make_list(6));
     int length = list_length(result);
+    BENCH_KERNEL_END();
     printf(length == 10 ? "List: PASS\n" : "List: FAIL result=%d\n", length);
+    BENCH_KERNEL_REPORT();
     return length != 10;
 }

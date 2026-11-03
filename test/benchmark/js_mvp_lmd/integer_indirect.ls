@@ -1,5 +1,5 @@
 // Unannotated port of the same indirect call and accumulation workload.
-pn increment(x) { return x + 1 }
+fn increment(x) { return x + 1 }
 pn work() {
     let callback = increment
     var sum = 0

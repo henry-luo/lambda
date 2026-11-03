@@ -5,7 +5,7 @@ on click(evt) {
     let command = dom.get_attribute(evt.target, "id")
     let owner = dom.closest(evt.target, "#channel")
     if (owner == null) { return 'pass' }
-    if (not contains(["apply", "recascade", "clear"], command)) { return 'pass' }
+    if ((not contains(["apply", "recascade", "clear"], command))^) { return 'pass' }
     let box = dom.get_element_by_id(owner, "box")
     let paint = dom.get_element_by_id(owner, "paint")
     if (command == "apply") {

@@ -42,7 +42,7 @@ pn command(owner,st,action) any^ {
     if (action == "top") { return {*:st,follow:false,camera:camera.prepare({position:[0.0,25.0,0.0],target:[0.0,0.0,0.0],up:[0.0,0.0,-1.0],fov:40.0})} }
     if (action == "follow") {
         let h = model.pet(st,st.pet_selected)
-        if (h == null) { return st }
+        if ((h == null)^) { return st }
         let target = sim.position(st.modules,h)
         return {*:st,follow:not st.follow,camera:if (st.follow) model.camera_state(st)
             else camera.prepare({position:camera.add(target,[2.0,1.35,1.8]),target:target,fov:36.0})}
@@ -56,7 +56,7 @@ pn command(owner,st,action) any^ {
     }
     if (action == "open" or action == "save") {
         let path = trim(dom.get_state(scene_dom.node(owner,"cage-file"),"value"))
-        if (path == "" or not ends_with(lower(path),".json")) raise error("Hamster: choose a .json cage file.")
+        if ((path == "" or not ends_with(lower(path),".json"))^) raise error("Hamster: choose a .json cage file.")
         if (action == "open") { return model.restore(st,input(path,'json')^)^ }
         io.mkdir("temp") ^ { null }
         output(model.archive(st),path,{format:'json',atomic:true})^
@@ -66,7 +66,7 @@ pn command(owner,st,action) any^ {
 }
 pn dispatch(owner,st,action) {
     var next = st
-    command(owner,st,action) ^ { next = {*:st,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_1 = command(owner,st,action) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:st,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     return publish(owner,st,next)
 }
 view <hamster_session> state session:model.initial() { ~.rendered }
@@ -107,18 +107,18 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let drag = session.drag
     let dx = evt.clientX-drag.x
     let dy = evt.clientY-drag.y
-    if (drag.moved or abs(dx)+abs(dy)>4) {
+    if ((drag.moved or abs(dx)+abs(dy)>4)^) {
         session = {*:session,drag:{*:drag,moved:true},camera:camera.control(drag.camera,{type:"orbit",yaw:0-dx*0.006,pitch:0-dy*0.006})}
-        present.camera_sync(owner_of(evt),session)
+        present.camera_sync(owner_of(evt),session)^
     }
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let owner = owner_of(evt)
     let drag = session.drag
     dom.release_pointer_capture(scene_dom.node(owner,"cage-scene"),evt.pointerId)
@@ -151,16 +151,16 @@ on keydown(evt) {
     return 'prevent-default'
 }
 on hamster_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.token or not session.playing) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.token or not session.playing)^) { return 'pass' }
     let dt = if (session.last_ms == null) 0.0 else min(0.1,max(0.0,(evt.time_stamp-session.last_ms)/1000.0))*session.speed
     let previous = session
     session = {*:sim.advance(session,dt),last_ms:evt.time_stamp,token:dom.request_frame(evt.target,"hamster_frame")}
     present.animate(evt.target,session)
-    if (int(session.elapsed*2) != int(previous.elapsed*2)) present.life(evt.target,session)
+    if ((int(session.elapsed*2) != int(previous.elapsed*2))^) present.life(evt.target,session)^
     return 'handled'
 }
 on closerequest(evt) {
-    if (session.token>0) dom.cancel_frame(owner_of(evt),session.token)
+    if ((session.token>0)^) dom.cancel_frame(owner_of(evt),session.token)^
     session = {*:session,token:0,playing:false,drag:null}
     return 'pass'
 }

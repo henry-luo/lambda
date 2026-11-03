@@ -6,7 +6,7 @@ import style: .bib_style
 import registry: .registry
 import csl: ~~.citeproc.adapter
 
-pub fn is_citation_command(tag) => model.is_citation(tag) or tag == "nocite"
+pub fn is_citation_command(tag) any^ => model.is_citation(tag) or tag == "nocite"
 
 pub fn prepare(ast, base_uri, opts, language) {
     if (opts == null) {entries: [], context: null, diagnostics: []}
@@ -16,9 +16,9 @@ pub fn prepare(ast, base_uri, opts, language) {
             option_valid: registry.bib_profile_valid(opts)}
         let prepared = model.prepare(ast, loaded.entries, settings)
         // Invalid print options cannot provide a citation destination.
-        let context = {*:prepared, prints: [for (record in prepared.prints)
+        let context = {*:prepared, prints: [for (record in ((prepared.prints) ^ { [] }))
             {*:record, valid: len(registry.bib_print_issues(record.node)) == 0}]}
-        let language_issues = [for (entry in loaded.entries
+        let language_issues = [for (entry in ((loaded.entries) ^ { [] })
             where entry.fields.langid != null and
                 not (style.supported_language(entry.fields.langid) ^ { false }))
             {*:util.diagnostic("unsupported-bib-language", "biblatex", entry.fields.langid,
@@ -35,7 +35,7 @@ fn valid_profile(settings) => (style.supported_style(settings.citestyle) ^ { fal
     (style.supported_language(settings.language) ^ { false }) and
     settings.backend == "biber" and settings.option_valid
 
-fn link(context, request, entry, label) {
+fn link(context, request, entry, label) any^ {
     if (entry == null) util.unsupported_element("biblatex",
         "Unresolved citation", request.offset)
     else {
@@ -45,7 +45,7 @@ fn link(context, request, entry, label) {
     }
 }
 
-fn linked_one(context, request, key, form) {
+fn linked_one(context, request, key, form) any^ {
     let entry = model.labelled_entry(context, request.section, key)
     if (entry == null) link(context, request, null, "?")
     else if (form == "fullcite")
@@ -83,7 +83,7 @@ fn compact_form(form) => form == "cite" or form == "parencite" or
     form == "autocite" or form == "footcite" or form == "cites" or
     form == "parencites" or form == "autocites"
 
-fn citation_number(context, request, key) {
+fn citation_number(context, request, key) any^ {
     let entry = model.labelled_entry(context, request.section, key)
     if (entry == null) 999999 else entry.number
 }
@@ -95,14 +95,14 @@ fn unique_keys(keys, index, seen) {
         else seen ++ [keys[index]])
 }
 
-fn run_end(keys, context, request, index) {
+fn run_end(keys, context, request, index) any^ {
     if (index + 1 >= len(keys) or
         citation_number(context, request, keys[index + 1]) !=
             citation_number(context, request, keys[index]) + 1) index + 1
     else run_end(keys, context, request, index + 1)
 }
 
-fn numeric_runs(keys, context, request, index, runs) {
+fn numeric_runs(keys, context, request, index, runs) any^ {
     if (index >= len(keys)) runs
     else {
         let finish = run_end(keys, context, request, index)
@@ -112,10 +112,10 @@ fn numeric_runs(keys, context, request, index, runs) {
     }
 }
 
-fn compact_numeric_keys(context, request, keys) {
+fn compact_numeric_keys(context, request, keys) any^ {
     let known = [for (key in unique_keys(keys, 0, [])
-        where model.labelled_entry(context, request.section, key) != null) key]
-    let ordered = sort(known, (key) => citation_number(context, request, key))
+        where ((model.labelled_entry(context, request.section, key) != null) ^ { false })) key]
+    let ordered = sort(known, (key) any^ => citation_number(context, request, key))
     let runs = numeric_runs(ordered, context, request, 0, []);
     <span class: "latex-citation-keys",
         for (i, run in runs) {
@@ -124,12 +124,12 @@ fn compact_numeric_keys(context, request, keys) {
             if (run.length == 2) { ", " linked_one(context, request, run.final, "cite") }
             else if (run.length >= 3) { "–" linked_one(context, request, run.final, "cite") }
         }
-        for (key in keys where model.labelled_entry(context, request.section, key) == null)
+        for (key in keys where ((model.labelled_entry(context, request.section, key) == null) ^ { false }))
             linked_one(context, request, key, "cite")
     >
 }
 
-fn compact_year_link(context, request, entry, prior) {
+fn compact_year_link(context, request, entry, prior) any^ {
     let base = style.year_text(entry, context.settings.language)
     let display = if (prior != null and
         style.year_text(prior, context.settings.language) == base)
@@ -153,7 +153,7 @@ fn compact_author_year_keys(context, request, keys) {
     >
 }
 
-fn item_piece(context, request, item, form) {
+fn item_piece(context, request, item, form) any^ {
     let settings = context.settings
     let single_form = if (form == "cites") "cite"
         else if (form == "parencites") "parencite"
@@ -177,7 +177,7 @@ fn item_piece(context, request, item, form) {
         } else if (settings.citestyle == "authoryear-comp" and compact_form(single_form)) {
             compact_author_year_keys(context, request, item.keys)
         } else {
-            for (i, key in unique_keys(item.keys, 0, [])) {
+            for (i, key in ((unique_keys(item.keys, 0, [])) ^ { [] })) {
                 if (i > 0) {
                     if (settings.citestyle == "alphabetic" and compact_form(single_form)) { "; " }
                     else if (numeric and compact_form(single_form)) { ", " }
@@ -197,7 +197,7 @@ fn footcite_number(footnotes, offset) {
     if (len(found) == 0) 0 else found[0]
 }
 
-pub fn render_citation(node, context, footnotes) {
+pub fn render_citation(node, context, footnotes) any^ {
     if (context.processor == "csl") csl.render_citation(node, context, footnotes)
     else {
     let request = model.request_at(context, node.source_offset)
@@ -220,7 +220,7 @@ pub fn render_citation(node, context, footnotes) {
         >
     } else if (request.tag == "nocite") null
     else <span class: "latex-cites", id: "cite-" ++ string(request.offset),
-        for (i, item in request.items) {
+        for (i, item in ((request.items) ^ { [] })) {
             if (i > 0) { "; " }
             item_piece(context, request, item, request.tag)
         }
@@ -228,7 +228,7 @@ pub fn render_citation(node, context, footnotes) {
     }
 }
 
-fn external_url(kind, value) {
+fn external_url(kind, value) any^ {
     if (value == null or trim(value) == "") null
     else if (kind == "doi") "https://doi.org/" ++ trim(value)
     else if (starts_with(value, "https://") or starts_with(value, "http://")) value
@@ -248,7 +248,7 @@ fn entry_links(entry, settings) {
     >
 }
 
-fn bibliography_label(entry, settings) {
+fn bibliography_label(entry, settings) any^ {
     if (settings.bibstyle == "numeric" or settings.bibstyle == "numeric-comp")
         "[" ++ string(entry.number) ++ "] "
     else if (settings.bibstyle == "alphabetic") "[" ++ entry.label ++ "] "
@@ -288,7 +288,7 @@ fn bibliography_heading(record, settings) {
     else <h2 title>
 }
 
-pub fn render_bibliography(node, context) {
+pub fn render_bibliography(node, context) any^ {
     if (context.processor == "csl") csl.render_bibliography(node, context)
     else {
     let record = model.print_at(context, node.source_offset)
@@ -303,14 +303,14 @@ pub fn render_bibliography(node, context) {
         id: "bibliography-" ++ string(record.index),
         bibliography_heading(record, context.settings);
         <ol class: "latex-bib-list",
-            for (entry in record.entries)
+            for (entry in ((record.entries) ^ { [] }))
                 bibliography_item(entry, record, context.settings, context.requests)
         >
     >
     }
 }
 
-pub fn render_footcite_content(node, context) {
+pub fn render_footcite_content(node, context) any^ {
     if (context.processor == "csl") csl.render_content(node, context)
     else {
     let request = model.request_at(context, node.source_offset)
@@ -319,7 +319,7 @@ pub fn render_footcite_content(node, context) {
     else if (not request.valid or request.starred or not valid_profile(context.settings))
         util.unsupported_element("biblatex", "Unsupported footnote citation", node.source_offset)
     else <span class: "latex-cites",
-        for (i, item in request.items) {
+        for (i, item in ((request.items) ^ { [] })) {
             if (i > 0) { "; " }
             item_piece(context, request, item, "footcite")
         }

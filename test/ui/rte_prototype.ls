@@ -31,19 +31,19 @@ let initial_body = initial_doc[0]
 fn maybe_attr(name, value) => if (value == null) { [] } else { [{name: name, value: value}] }
 fn attrs_concat(a, b) => [*a, *b]
 
-fn editor_attrs(item) {
+fn editor_attrs(item) any^ {
   if (type(item) != element) { [] }
   else if (name(item) == 'a') { attrs_concat(maybe_attr('href', item.href), maybe_attr('title', item.title)) }
   else if (name(item) == 'img') { attrs_concat(maybe_attr('src', item.src), maybe_attr('alt', item.alt)) }
   else { [] }
 }
 
-fn mark_to_editor(item) {
+fn mark_to_editor(item) any^ {
   if (type(item) == string) { text(item) }
   else if (type(item) == element) {
     // Element indexing includes its optional value slot; semantic model
     // children come from content() so absent slots never become text "null".
-    let kids = [for (child in content(item)) mark_to_editor(child)]
+    let kids = [for (child in content(item)^) mark_to_editor(child)]
     let tag = if (name(item) == 'code' and len(kids) == 1 and is_text(kids[0]) and kids[0].text.contains("\n")) { 'code_block' } else { name(item) }
     node_attrs(tag, editor_attrs(item), kids)
   }
@@ -55,7 +55,7 @@ fn attr_value_at(attrs, key, i, n) {
   else if (attrs[i].name == key) { attrs[i].value }
   else { attr_value_at(attrs, key, i + 1, n) }
 }
-fn attr_value(node, key) => attr_value_at(node.attrs, key, 0, len(node.attrs))
+fn attr_value(node, key) any^ => attr_value_at(node.attrs, key, 0, len(node.attrs))
 
 fn text_has_mark_at(marks, mark, i, n) {
   if (i >= n) { false }
@@ -65,7 +65,7 @@ fn text_has_mark_at(marks, mark, i, n) {
 }
 fn text_has_mark(marks, mark) => text_has_mark_at(marks, mark, 0, len(marks))
 
-fn render_text_leaf(leaf) {
+fn render_text_leaf(leaf) any^ {
   let content0 = if (leaf.text == "") { "\u200B" } else { leaf.text }
   let content1 = if (text_has_mark(leaf.marks, 'code')) { <code content0> } else { content0 }
   let content2 = if (text_has_mark(leaf.marks, 'u')) { <u content1> } else { content1 }
@@ -117,7 +117,7 @@ fn toolbar_command(button) => toolbar_command_at(button, 0)
 
 view any { ~ }
 
-view map {
+view map () any^ {
   if (~.kind == 'text') { render_text_leaf(~) }
   else if (~.kind == 'node' and ~.tag == 'doc') { <div class:"doc-body", *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'h1') { <h1 *[for (c in ~.content) apply(c)]> }
@@ -230,7 +230,7 @@ on editaction(evt) {
 }
 on selectionchange(evt) {
   if (evt.source_selection != null or evt.source_pos != null) {
-    if (not editor.mounted) {
+    if ((not editor.mounted)^) {
       editor = edit_mount(editor, evt.target, 'html5_subset')
     }
     let accepted = edit_accept_dom_selection(editor, evt)
@@ -250,8 +250,8 @@ on rte_cmd(evt) {
       let run = edit_handle_request(editor, request)
       editor = run.editor
       status = if (run.result.failure == null) cmd else run.result.failure
-      if (editor.surface_handle != null and
-          not dom.finish_model_edit(editor.surface_handle, run.result)) {
+      if ((editor.surface_handle != null and
+          not dom.finish_model_edit(editor.surface_handle, run.result))^) {
         status = "model-completion-failed"
       }
       return null

@@ -2,16 +2,16 @@ import model: lambda.graph.model
 import normalize: lambda.graph.normalize
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn property_values(value) => [
-  for (group in children(value, "properties"), property in children(group, "property"))
+  for (group in children(value, "properties"), property in ((children(group, "property")) ^ { [] }))
     [property.name, property.value, property.origin, property["defining-scope"]]
 ]
 
 fn named_properties(value, wanted) => [
-  for (group in children(value, "properties"), property in children(group, "property")
+  for (group in children(value, "properties"), property in ((children(group, "property")) ^ { [] })
     where property.name == wanted)
     [property.value, property.origin, property["defining-scope"]]
 ]
@@ -35,9 +35,9 @@ let groups = model.subgraphs(graph)
     edge.stroke, edge.weight, edge["source-segment-index"],
     edge["source-expansion-index"], property_values(edge)]],
   groups: [for (group in groups) [group.id, group.role,
-    [for (member in children(group, "member")) member.node],
+    [for (member in ((children(group, "member")) ^ { [] })) member.node],
     named_properties(group, "rankdir"), named_properties(group, "rank")]],
-  constraints: [for (value in model.constraints(graph)) [value.kind, value.value,
-    value.scope, [for (member in children(value, "member")) member.node]]],
+  constraints: [for (value in ((model.constraints(graph)) ^ { [] })) [value.kind, value.value,
+    value.scope, [for (member in ((children(value, "member")) ^ { [] })) member.node]]],
   idempotent: normalize.normalize(graph).graph == graph
 }

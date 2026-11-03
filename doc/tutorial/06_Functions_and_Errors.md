@@ -10,7 +10,7 @@ You have called built-in functions and written a few one-line `fn`s. This chapte
 // pricing.ls
 fn with_tax(price: float) float => price * 1.2
 
-fn label(book) {
+fn label(book: {title: string, year: int}) {
     let year = string(book.year)
     book.title ++ " (" ++ year ++ ")"
 }
@@ -28,7 +28,7 @@ lambda pricing.ls
 "Clean Code (2008)"
 ```
 
-Parameter and return types are optional, as `label` shows, and checked when present ([Chapter 5](05_Types_and_Schemas.md)). A block's value is *every* expression in it, not just the last one — `{ 1; 2 }` produces both numbers, as the top level of a script does — so write the intermediate steps as `let` bindings and end with a single expression. An `fn` has no `return`.
+Parameter and return types are optional and checked when present; `label` specifies the fields it needs ([Chapter 5](05_Types_and_Schemas.md)). A block's value is *every* expression in it, not just the last one — `{ 1; 2 }` produces both numbers, as the top level of a script does — so write the intermediate steps as `let` bindings and end with a single expression. An `fn` has no `return`.
 
 ## Parameters
 
@@ -68,12 +68,12 @@ lambda params.ls
 let books = input("books.json")^
 
 fn discount(pct) => (price) => price * (100 - pct) / 100
-fn reprice(rule) => books |> rule(~.price)
+fn reprice(rule) array^ => books |> rule(~.price)
 
 let ten_off = discount(10)
 ten_off(50.0)
-reprice(ten_off)
-reprice((p) => p + 5)
+reprice(ten_off)^
+reprice((p) => p + 5)^
 sort(books, (b) => b.year) |> ~.year
 reduce(books, (a, b) => if (a.price <= b.price) a else b).title
 ```
@@ -91,7 +91,7 @@ lambda discounts.ls
 ```
 
 - `discount(10)` returns an arrow that still sees `pct`, the argument it was made with. Such a function is a **closure**. What it captures is a snapshot, which it can read but never change.
-- `reprice` is a **higher-order** function: it takes the pricing rule as a parameter, so one function applies any rule.
+- `reprice` is a **higher-order** function: it takes the pricing rule as a parameter, so one function applies any rule. Its `array^` result admits an error from dynamic application; postfix `^` forwards an error. The error-handling sections below explain both spellings (S7.4.2v3/S7.6.3v3).
 - Built-ins take functions too: `sort` orders by the key an arrow computes, and `reduce` combines a collection pairwise — here, down to the cheapest book.
 
 ## Method-Style Calls
@@ -117,8 +117,8 @@ A function can call itself. `total` adds up numbers nested to any depth: the tot
 
 ```lambda
 // nested.ls
-fn total(v) => if (v is array) sum(v |> total(~)) else v
-total([1, [2, 3], [[4]]])
+fn total(v) number^ => if (v is array) sum(v |> total(~)) else v
+total([1, [2, 3], [[4]]])^
 ```
 
 ```bash
@@ -131,7 +131,7 @@ lambda nested.ls
 
 ## Pure Functions
 
-An `fn` is **pure**: its result depends only on its arguments, and calling it does nothing else. It cannot print, write a file or change a variable, and it cannot call a procedure — a `pn` — that does. Save this as `pure.ls`:
+An `fn` is **pure**: it can use its own local `var` bindings and loops while computing a result, but it cannot change a caller's or enclosing function's variables (S12.1.2v3, S9.1.7v2). It cannot print, write a file or call a procedure — a `pn` — that does. Save this as `pure.ls`:
 
 ```lambda error=E224
 // pure.ls
@@ -269,14 +269,14 @@ lambda ignored.ls
 ```
 
 ```text partial
-ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: use 'parse_price(...)^' to propagate, or handle with 'parse_price(...) ^ { ... }'
+ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: retain it in a binding, use 'parse_price(...)^' to propagate, or handle with 'parse_price(...) ^ { ... }'
 ```
 
 The message lists the ways to engage the error: propagate it with `^` or handle it with `^ { … }` (S7.5.1v2); `or` does not engage the channel (S7.5.3v2). A typed binding counts too: `let r: float | error = parse_price(s)` accepts the error as data. Built-ins that can fail follow the same rule, which is why reading a file is written `input("books.json")^`.
 
 ## Branching and Wrapping
 
-The two-arm form `e ^ { … } ~ { … }` handles both outcomes: the first block runs on an error, with `^` bound to it, and the second on success, with `~` bound to the value. Inside a handler, `error("…", ^)` builds a new error that wraps the current one, adding context while keeping the cause in its `source` field. Save this as `report.ls`:
+A single handler recovers from errors. Use `match` to transform success and error outcomes separately (S7.6.2v5). Inside a handler, `error("…", ^)` builds a new error that wraps the current one, adding context while keeping the cause in its `source` field. Save this as `report.ls`:
 
 ```lambda
 // report.ls
@@ -293,8 +293,10 @@ fn parse_line(line: string) float^ {
 
 let lines = ["Clean Code,37.90", "SICP,free"];
 [for (line in lines)
-    parse_line(line) ^ { ^.message ++ " (" ++ ^.source.message ++ ")" }
-                     ~ { "ok: " ++ ~ }]
+    match (parse_line(line) ^ { ^ }) {
+        case error: ~.message ++ " (" ++ ~.source.message ++ ")"
+        default: "ok: " ++ ~
+    }]
 ```
 
 ```bash
@@ -305,7 +307,7 @@ lambda report.ls
 ["ok: 37.9", "rejected SICP (bad price: free)"]
 ```
 
-`parse_line` knows which line failed, which `parse_price` does not, so it raises a new error with that context and the original as its source; the report reads both messages. These handlers work on `fn` calls; on a procedure call, a handler is a statement of its own (S7.6.7v3), as [Lambda_Error_Handling.md](../Lambda_Error_Handling.md) describes.
+`parse_line` knows which line failed, which `parse_price` does not, so it raises a new error with that context and the original as its source; the report reads both messages. These handlers preserve values on both `fn` and `pn` calls, including suspension (S7.6.7v5), as [Lambda_Error_Handling.md](../Lambda_Error_Handling.md) describes.
 
 ## What You Learned
 
@@ -314,7 +316,7 @@ lambda report.ls
 - `xs.sort()` calls a built-in method-style, and functions may call themselves.
 - An `fn` is pure and cannot call a `pn` (E224).
 - Errors are values: `error("…")` makes one, `is error` tests for one, `^ { … }` supplies an error default, and a `T | error` function returns them as data.
-- A `T^` function `raise`s errors its callers must engage: `^` propagates, `^ { … }` handles with `^.message` and `^.code`, `^ { … } ~ { … }` branches, and ignoring the error is compile error E228.
+- A `T^` function `raise`s errors its callers must engage: `^` propagates, `^ { … }` handles with `^.message` and `^.code`, `match` branches on an outcome, and ignoring the error is compile error E228.
 - `error("…", ^)` wraps an error with context.
 
 The references are [Lambda_Func.md](../Lambda_Func.md) and [Lambda_Error_Handling.md](../Lambda_Error_Handling.md). Next, [Chapter 7](07_Procedures_IO_and_Tasks.md) turns to procedures, I/O and tasks.

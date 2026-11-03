@@ -1,0 +1,1 @@
+a functional comprehension cannot mutate enclosing binding 'total'

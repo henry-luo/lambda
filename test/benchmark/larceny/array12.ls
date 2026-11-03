@@ -4,9 +4,9 @@
 // Creates array of 10000 elements, fills with indices, sums all
 // Expected: sum(0..9999) = 49995000
 
-pn benchmark() int {
+fn benchmark() int^ {
     let size: int = 10000
-    var arr: int[] = fill(size, 0)
+    var arr: int[] = fill(size, 0)^
 
     // Fill with index values
     var i: int = 0
@@ -25,7 +25,7 @@ pn benchmark() int {
             s = s + arr[i]
             i = i + 1
         }
-        total = s
+        total = s^
         iter = iter + 1
     }
     return total
@@ -35,7 +35,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 49995000) {
+    if ((result == 49995000)^) {
         print("array1: PASS\n")
     } else {
         print("array1: FAIL result=")

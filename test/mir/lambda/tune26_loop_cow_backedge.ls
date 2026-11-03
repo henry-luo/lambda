@@ -14,8 +14,8 @@ pn main() {
     let addends: float[] = [1.0]
     var iteration: int = 0
     while (iteration < 2) {
-        tune26_loop_cow_add(values, addends)
-        tune26_loop_cow_snapshot(values)
+        tune26_loop_cow_add(values, addends)^
+        tune26_loop_cow_snapshot(values)^
         iteration = iteration + 1
     }
     print(values[0]); print("\n")

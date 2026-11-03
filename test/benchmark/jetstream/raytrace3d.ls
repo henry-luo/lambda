@@ -3,41 +3,41 @@
 // Original: Apple Inc.
 
 // Vector operations (3-element arrays)
-pn vec3(x: float, y: float, z: float) {
+fn vec3(x: float, y: float, z: float) {
     return [x, y, z]
 }
 
-pn vec_add(v1: float[], v2: float[]) {
+fn vec_add(v1: float[], v2: float[]) {
     return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]]
 }
 
-pn vec_sub(v1: float[], v2: float[]) {
+fn vec_sub(v1: float[], v2: float[]) {
     return [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]]
 }
 
-pn vec_scale(v: float[], s: float) {
+fn vec_scale(v: float[], s: float) {
     return [v[0] * s, v[1] * s, v[2] * s]
 }
 
-pn vec_scalev(v1: float[], v2: float[]) {
+fn vec_scalev(v1: float[], v2: float[]) {
     return [v1[0] * v2[0], v1[1] * v2[1], v1[2] * v2[2]]
 }
 
-pn vec_dot(v1: float[], v2: float[]) float {
+fn vec_dot(v1: float[], v2: float[]) float {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
 }
 
-pn vec_cross(v1: float[], v2: float[]) {
+fn vec_cross(v1: float[], v2: float[]) {
     return [v1[1] * v2[2] - v1[2] * v2[1],
             v1[2] * v2[0] - v1[0] * v2[2],
             v1[0] * v2[1] - v1[1] * v2[0]]
 }
 
-pn vec_length(v: float[]) float {
+fn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-pn vec_normalise(v: float[]) {
+fn vec_normalise(v: float[]) {
     var l = vec_length(v)
     return [v[0] / l, v[1] / l, v[2] / l]
 }
@@ -57,7 +57,7 @@ pn vec_scale_inplace(v: float[], s: float) {
 }
 
 // Matrix: flat 12-element array (3x4)
-pn transform_matrix(m: float[], v: float[]) {
+fn transform_matrix(m: float[], v: float[]) {
     var x = m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + m[3]
     var y = m[4] * v[0] + m[5] * v[1] + m[6] * v[2] + m[7]
     var z = m[8] * v[0] + m[9] * v[1] + m[10] * v[2] + m[11]
@@ -90,7 +90,7 @@ pn invert_matrix(m: float[]) {
 }
 
 // Triangle: stored as a map with precomputed intersection data
-pn create_triangle(p1: float[], p2: float[], p3: float[]) {
+fn create_triangle(p1: float[], p2: float[], p3: float[]) {
     var edge1 = vec_sub(p3, p1)
     var edge2 = vec_sub(p2, p1)
     var normal = vec_cross(edge1, edge2)
@@ -127,7 +127,7 @@ pn create_triangle(p1: float[], p2: float[], p3: float[]) {
             material: [0.7, 0.7, 0.7], shader: null, reflection: 0.0}
 }
 
-pn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float) float {
+fn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float) float {
     var u = (tri.axis + 1) % 3
     var v = (tri.axis + 2) % 3
     var d = dir[tri.axis] + tri.nu * dir[u] + tri.nv * dir[v]
@@ -155,7 +155,7 @@ pn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float)
 }
 
 // Scene: list of triangles, lights, ambient, background
-pn create_scene(triangles) {
+fn create_scene(triangles) {
     return {triangles: triangles, lights: fill(0, null),
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}
@@ -181,8 +181,8 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         // An invalid intersection cannot be a hit; keep the soft error channel explicit.
         var d_result = triangle_intersect(tri, origin, dir, near, far)
         var d: float = match d_result { case error: -1.0 case float: d_result }
-        if (d > 0.0) {
-            far = d
+        if ((d > 0.0)^) {
+            far = d^
             closest = tri
         }
         i = i + 1
@@ -192,7 +192,7 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
     }
     var normal = closest.normal
     var hit = vec_add(origin, vec_scale(dir, far))
-    if (vec_dot(dir, normal) > 0.0) {
+    if ((vec_dot(dir, normal) > 0.0)^) {
         normal = [0.0 - normal[0], 0.0 - normal[1], 0.0 - normal[2]]
     }
     var colour = closest.material
@@ -209,11 +209,11 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         // Shadow test
         var blocked = false
         var bi: int = 0
-        while (bi < scene.n_triangles) {
+        while ((bi < scene.n_triangles)^) {
             var tri = (scene.triangles)[bi]
             var sd_result = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
             var sd: float = match sd_result { case error: -1.0 case float: sd_result }
-            if (sd > 0.0) {
+            if ((sd > 0.0)^) {
                 blocked = true
                 bi = scene.n_triangles  // break
             }
@@ -222,7 +222,7 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         if (blocked == false) {
             var nl_result = vec_dot(normal, to_light)
             var nl: float = match nl_result { case error: 0.0 case float: nl_result }
-            if (nl > 0.0) {
+            if ((nl > 0.0)^) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }
         }
@@ -321,8 +321,8 @@ pn raytrace_scene() {
     var all_tris = triangles ++ [floor1, floor2]
 
     var scene = create_scene(all_tris)
-    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])
-    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])
+    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])^
+    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])^
     scene_add_light(scene, vec3(23.0, 20.0, 17.0), [0.7, 0.7, 0.7])
     scene.ambient = [0.1, 0.1, 0.1]
 
@@ -343,7 +343,7 @@ pn main() {
     }
     var __t1 = clock()
     // 30x30 = 900 pixels per iteration, 8 iterations = 7200
-    if (total_pixels == 7200) {
+    if ((total_pixels == 7200)^) {
         print("3d-raytrace: PASS (pixels=" ++ total_pixels ++ ")\n")
     } else {
         print("3d-raytrace: DONE (pixels=" ++ total_pixels ++ ")\n")

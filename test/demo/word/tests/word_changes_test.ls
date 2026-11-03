@@ -45,11 +45,11 @@ model.plain_text(model.execute(removed,"review.rejectAll")^.doc)=="Hello world"
 let unicode = model.execute(enabled,"text.insert",{data:"秋Ω"})^
 model.plain_text(unicode.doc)=="秋ΩHello world"
 changes.entries(unicode.doc)[0].inserted=="秋Ω"
-model.execute(enabled,"text.enter") ^ { true } ~ { false }
-model.execute(enabled,"insert.table",{rows:1,cols:1,header:false}) ^ { true } ~ { false }
+match (model.execute(enabled,"text.enter") ^ { ^ }) { case error: true default: false }
+match (model.execute(enabled,"insert.table",{rows:1,cols:1,header:false}) ^ { ^ }) { case error: true default: false }
 files.restore(files.archive(second.doc,"Tracked"))^.doc==second.doc
 changes.entries(files.import_html_document(files.html_document(second.doc,"Tracked")^)^)==changes.entries(second.doc)
-model.execute(second,"review.reject",{id:"missing"}) ^ { true } ~ { false }
+match (model.execute(second,"review.reject",{id:"missing"}) ^ { ^ }) { case error: true default: false }
 let off = model.execute(second,"review.trackChanges",{enabled:false})^
 len(changes.entries(model.execute(off,"text.insert",{data:"plain"})^.doc))==2
 // A rejected insertion must leave a usable caret, and typing runs must coalesce.
@@ -58,7 +58,7 @@ let only = model.execute(empty,"text.insert",{data:"New"})^
 let empty_again = model.execute(only,"review.rejectAll")^
 model.plain_text(empty_again.doc)==""
 model.plain_text(model.execute(empty_again,"text.insert",{data:"Again"})^.doc)=="Again"
-fn typing(ed,n) => if (n==0) ed else typing(model.execute(ed,"text.insert",{data:"a"})^,n-1)
+fn typing(ed,n) any^ => if (n==0) ed else typing(model.execute(ed,"text.insert",{data:"a"})^,n-1)
 let typed = typing(empty,20)
 len(changes.entries(typed.doc))==1
 len(node_at(typed.doc,[0]).content)==1

@@ -96,7 +96,7 @@ pn test_fill_zero() {
     print(" ")
     print(null_appended[0])
     print(" ")
-    var typed_arr:int[] = fill(0, 0)
+    var typed_arr:int[] = fill(0, 0)^
     print(len(typed_arr))
     print(" ")
     var typed_appended = typed_arr ++ [42]
@@ -110,7 +110,7 @@ pn test_fill_zero() {
 // Test 7: int[] = fill(n, int) → exact match, mutation works
 // ============================================================
 pn test_fill_int_typed_int() {
-    var arr:int[] = fill(5, 0)
+    var arr:int[] = fill(5, 0)^
     arr[0] = 10
     arr[2] = 20
     arr[4] = 40
@@ -130,7 +130,7 @@ pn test_fill_int_typed_int() {
 // Test 8: float[] = fill(n, float) → exact match, mutation works
 // ============================================================
 pn test_fill_float_typed_float() {
-    var arr:float[] = fill(5, 0.0)
+    var arr:float[] = fill(5, 0.0)^
     arr[0] = 1.5
     arr[2] = 2.5
     arr[4] = 4.5
@@ -150,7 +150,7 @@ pn test_fill_float_typed_float() {
 // Test 9: int[] = fill(n, int) → exact typed initialization
 // ============================================================
 pn test_fill_float_typed_int() {
-    var arr:int[] = fill(5, 0)
+    var arr:int[] = fill(5, 0)^
     arr[0] = 7
     arr[4] = 99
     print(arr[0])
@@ -165,7 +165,7 @@ pn test_fill_float_typed_int() {
 // Test 10: float[] = fill(n, float) → exact typed initialization
 // ============================================================
 pn test_fill_int_typed_float() {
-    var arr:float[] = fill(5, 0.0)
+    var arr:float[] = fill(5, 0.0)^
     arr[0] = 3.14
     arr[4] = 2.72
     print(arr[0])
@@ -180,7 +180,7 @@ pn test_fill_int_typed_float() {
 // Test 11: int[] = fill(n, int) → exact typed initialization
 // ============================================================
 pn test_fill_bool_typed_int() {
-    var arr:int[] = fill(3, 0)
+    var arr:int[] = fill(3, 0)^
     arr[0] = 42
     arr[2] = 99
     print(arr[0])
@@ -195,7 +195,7 @@ pn test_fill_bool_typed_int() {
 // Test 12: float[] = fill(n, float) → exact typed initialization
 // ============================================================
 pn test_fill_bool_typed_float() {
-    var arr:float[] = fill(3, 0.0)
+    var arr:float[] = fill(3, 0.0)^
     arr[0] = 1.5
     arr[2] = 9.9
     print(arr[0])
@@ -210,7 +210,7 @@ pn test_fill_bool_typed_float() {
 // Test 13: fill() with non-zero int value, typed int[]
 // ============================================================
 pn test_fill_nonzero_int_typed() {
-    var arr:int[] = fill(4, 7)
+    var arr:int[] = fill(4, 7)^
     print(arr[0])
     print(" ")
     print(arr[1])
@@ -228,7 +228,7 @@ pn test_fill_nonzero_int_typed() {
 // Test 14: fill() with non-zero float value, typed float[]
 // ============================================================
 pn test_fill_nonzero_float_typed() {
-    var arr:float[] = fill(4, 3.14)
+    var arr:float[] = fill(4, 3.14)^
     print(arr[0])
     print(" ")
     print(arr[1])
@@ -310,7 +310,7 @@ pn test_fill_wrapper_cross_int() {
 // Test 19: Large fill + typed mutation (stress test)
 // ============================================================
 pn test_fill_large_typed() {
-    var arr:int[] = fill(1000, 0)
+    var arr:int[] = fill(1000, 0)^
     arr[0] = 1
     arr[499] = 500
     arr[999] = 1000
@@ -326,7 +326,7 @@ pn test_fill_large_typed() {
 // Test 20: fill() + loop mutation (typical benchmark pattern)
 // ============================================================
 pn test_fill_loop_mutation() {
-    var arr:int[] = fill(10, 0)
+    var arr:int[] = fill(10, 0)^
     var i: int = 0
     while (i < 10) {
         arr[i] = i * i
@@ -344,7 +344,7 @@ pn test_fill_loop_mutation() {
 // Test 21: fill() + negative int value, typed int[]
 // ============================================================
 pn test_fill_negative_int() {
-    var arr:int[] = fill(3, -1)
+    var arr:int[] = fill(3, -1)^
     print(arr[0])
     print(" ")
     print(arr[1])
@@ -360,7 +360,7 @@ pn test_fill_negative_int() {
 // Test 22: fill() + negative float value, typed float[]
 // ============================================================
 pn test_fill_negative_float() {
-    var arr:float[] = fill(3, -1.5)
+    var arr:float[] = fill(3, -1.5)^
     print(arr[0])
     print(" ")
     print(arr[1])
@@ -393,22 +393,22 @@ pn main() {
     test_fill_bool_untyped()
     test_fill_string_untyped()
     test_fill_null_untyped()
-    test_fill_zero()
-    test_fill_int_typed_int()
-    test_fill_float_typed_float()
-    test_fill_float_typed_int()
-    test_fill_int_typed_float()
-    test_fill_bool_typed_int()
-    test_fill_bool_typed_float()
-    test_fill_nonzero_int_typed()
-    test_fill_nonzero_float_typed()
+    test_fill_zero()^
+    test_fill_int_typed_int()^
+    test_fill_float_typed_float()^
+    test_fill_float_typed_int()^
+    test_fill_int_typed_float()^
+    test_fill_bool_typed_int()^
+    test_fill_bool_typed_float()^
+    test_fill_nonzero_int_typed()^
+    test_fill_nonzero_float_typed()^
     test_fill_wrapper_typed_int()
     test_fill_wrapper_typed_float()
     test_fill_wrapper_cross_float()
     test_fill_wrapper_cross_int()
-    test_fill_large_typed()
-    test_fill_loop_mutation()
-    test_fill_negative_int()
-    test_fill_negative_float()
+    test_fill_large_typed()^
+    test_fill_loop_mutation()^
+    test_fill_negative_int()^
+    test_fill_negative_float()^
     test_fill_bool_mixed_write()
 }

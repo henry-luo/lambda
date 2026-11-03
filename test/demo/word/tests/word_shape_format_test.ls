@@ -61,13 +61,13 @@ all([for (s in ["solid","outlined","hollow","shadowed"]) model.execute(original,
 art.settings(image.selected(edited_art).node).style=="outlined" and art.settings(image.selected(edited_art).node).text=="Hello"
 attrs_get(image.selected(edited_art).node.attrs,'alt')=="Decorative hello"
 model.execute(edited_art,"edit.undo")^.doc==wordart.doc
-model.execute(base,"shape.format",{values:{fill:"#3478cc"}}) ^ {true} ~ {false}
-model.execute(original,"shape.format",{preset:"unknown"}) ^ {true} ~ {false}
-model.execute(wordart,"shape.format",{preset:"blue"}) ^ {true} ~ {false}
-model.execute(original,"shape.format",{values:{unknown:1}}) ^ {true} ~ {false}
+match (model.execute(base,"shape.format",{values:{fill:"#3478cc"}}) ^ { ^ }) { case error: true default: false }
+match (model.execute(original,"shape.format",{preset:"unknown"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(wordart,"shape.format",{preset:"blue"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(original,"shape.format",{values:{unknown:1}}) ^ { ^ }) { case error: true default: false }
 all([for (bad in [{width:0},{height:2001},{rotation:181},{fill:"url(file.svg)"},{weight:13},{opacity:-1},
     {opacity:101},{direction:45},{dash:"wavy"},{effect:"glow"},{inset:-1},{bold:"true"},{font:""},{text_style:"unknown"}])
-    model.execute(original,"shape.format",{values:bad}) ^ {true} ~ {false}]
+    match (model.execute(original,"shape.format",{values:bad}) ^ { ^ }) { case error: true default: false }]
 )
 // older documents receive defaults while retaining their authored colors and dimensions.
 let legacy = node_attrs('img',[{name:'data-word-shape',value:"{\"kind\":\"rect\",\"width\":100,\"fill\":\"#527f78\"}"}],[])

@@ -23,10 +23,10 @@ fn search_bar(st) => <div class:"search-bar",
     if (st.hits != null) button("clear-search", "text-button", "clear-search", null, "Clear", {}) else null;
     if (st.note != null) <span id:"note", class:"note", st.note> else null>
 
-fn rail(st) {
-    let kinds = [for (k in model.kind_counts(st.records)) <button id:"kind-" ++ k.kind, type:"button", class:"rail-row",
+fn rail(st) any^ {
+    let kinds = [for (k in ((model.kind_counts(st.records)) ^ { [] })) <button id:"kind-" ++ k.kind, type:"button", class:"rail-row",
         'data-action':"kind", 'data-value':k.kind, *:on_if(st.kind == k.kind), <span k.label>; <span class:"count", string(k.count)>>]
-    let sites = [for (s in model.site_counts(st.records)) <button type:"button", class:"rail-row site", 'data-action':"site",
+    let sites = [for (s in ((model.site_counts(st.records)) ^ { [] })) <button type:"button", class:"rail-row site", 'data-action':"site",
         'data-value':s.site, *:on_if(st.site == s.site), <span s.site>; <span class:"count", string(s.count)>>]
     let rows = [<h2 "Library">, *kinds, <h2 "Sites">, *sites];
     <nav class:"rail", 'aria-label':"Library", *rows>

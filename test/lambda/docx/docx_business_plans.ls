@@ -1,5 +1,5 @@
 import d: lambda.doc.docx
-fn compact(text) => replace(replace(replace(replace(text,"\n",""),"\r",""),"\t","")," ","")
+fn compact(text) any^ => replace(replace(replace(replace(text,"\n",""),"\r",""),"\t","")," ","")
 let cases = [
     {file:"biz-plan1",images:"png",tables:1,gaps:0,blocks:2,first:"April 4, 20XX",last:"Frankfort, KY 09876"},
     {file:"biz-plan2",images:"jpeg",tables:6,gaps:51,blocks:116,first:"Small Business Plan",last:"projections"}

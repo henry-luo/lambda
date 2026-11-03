@@ -34,7 +34,7 @@ let impact = combat.projectiles(arena, {*: rocket, time: 0.1}, rules);
     armor: [hurt.player.health, hurt.player.armor, hurt.player.armor_type,
         easy.player.health, easy.player.armor, immune.player.health],
     death: [dead.mode, dead.player.health, dead.player.dead_at, dead.effects[len(dead.effects) - 1].sound],
-    barrels: [for (entry in exploded.actors) entry.collected],
+    barrels: [for (entry in ((exploded.actors) ^ { [] })) entry.collected],
     infighting: [infighting.actors[0].ai.target, infighting.actors[0].ai.threshold],
     rocket: [rocket.player.ammo.rockets, len(rocket.projectiles), len(impact.projectiles), impact.actors[0].collected]
 }

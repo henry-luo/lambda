@@ -2,7 +2,7 @@
 import m: .mod_model
 import geom: lambda.editor.draw.geometry
 
-pub fn n(v) => string(round(v*100)/100)
+pub fn n(v) any^ => string(round(v*100)/100)
 let ICONS = {
     select:"M5 3L19 13 12 14 9 21Z",nodes:"M5 18L10 6 19 16M3 16H7V20H3ZM8 4H12V8H8ZM17 14H21V18H17Z",
     marquee:"M3 8V3H8M16 3H21V8M21 16V21H16M8 21H3V16",
@@ -47,10 +47,10 @@ pub let CONTEXT_ITEMS = [
     {id:"deselect",label:"Deselect",key:"Esc",group:"view"},
     {id:"fit",label:"Fit artboard",key:"0",group:"view"}
 ]
-pub fn context_enabled(st,id) => if (id=="undo" or id=="redo") len(st.hist[id])>0
+pub fn context_enabled(st,id) any^ => if (id=="undo" or id=="redo") len(st.hist[id])>0
     else if (id=="paste" or id=="paste-here") (if (st.context.image==true) m.can_add_image(st) else m.can_paste(st))
     else if (id=="import-image") m.can_add_image(st)
-    else if (id=="select-all") len(m.selected_ids(m.select_ids(st,[for (o in m.objects(st.doc)) o.id])))>0
+    else if (id=="select-all") len(m.selected_ids(m.select_ids(st,[for (o in ((m.objects(st.doc)) ^ { [] })) o.id])))>0
     else if (id=="fit") true
     else len(m.selected_ids(st))>0 and (id!="duplicate" or len(m.objects(st.doc))+len(m.selected_ids(st))<=1000)
 pub fn context_menu(st) => <div id:"sketch-context-menu",class:"context-menu",role:"menu",'aria-label':"Canvas actions",
@@ -87,7 +87,7 @@ pub fn overlay(st) {
             if (len(picked)>1) (for (item in picked) <rect class:"selected-object",x:n(item.x),y:n(item.y),width:n(item.width),height:n(item.height),
                 fill:"none",stroke:"#a89ae9",'stroke-width':n(1/st.zoom)>);
             <rect id:"selection-box",x:n(box.x),y:n(box.y),width:n(box.width),height:n(box.height),fill:"none",stroke:"#8170e8",'stroke-width':n(1.3/st.zoom)>
-            if (o!=null and st.tool == "nodes") (for (i,p in m.points(o)) <rect id:"node-" ++ string(i),x:n(p.x-size/2),y:n(p.y-size/2),width:n(size),height:n(size),fill:"white",stroke:"#8170e8",'stroke-width':n(1.5/st.zoom)>)
+            if (o!=null and st.tool == "nodes") (for (i,p in ((m.points(o)) ^ { [] })) <rect id:"node-" ++ string(i),x:n(p.x-size/2),y:n(p.y-size/2),width:n(size),height:n(size),fill:"white",stroke:"#8170e8",'stroke-width':n(1.5/st.zoom)>)
             else if (o!=null and st.tool == "select") <rect id:"resize-handle",x:n(o.x+o.width-size/2),y:n(o.y+o.height-size/2),width:n(size),height:n(size),fill:"white",stroke:"#8170e8",'stroke-width':n(1.5/st.zoom)>>;
         if (st.drag.mode=="marquee") (let rect = geom.rect_from_points(st.drag.start,st.drag.end),
             <rect id:"marquee",x:n(rect.x),y:n(rect.y),width:n(rect.width),height:n(rect.height),
@@ -100,7 +100,7 @@ pub fn svg(doc) => <svg xmlns:"http://www.w3.org/2000/svg",width:n(doc.width),he
     <title doc.title><defs <clipPath id:"export-clip",<rect width:n(doc.width),height:n(doc.height)>>>;
     <rect width:n(doc.width),height:n(doc.height),fill:doc.background>;
     <g 'clip-path':"url(#export-clip)",(artwork(doc,"export-"))>>
-pub fn layers(st) => <div for (i in 0 to len(st.doc.layers)-1)
+pub fn layers(st) => <div for (i in ((0 to len(st.doc.layers)-1) ^ { [] }))
     (let l = st.doc.layers[len(st.doc.layers)-1-i], <div class:"layer-row" ++ (if (l.id==st.active) " active" else ""),
         (button("visible-" ++ l.id,if (l.visible) "Hide " ++ l.name else "Show " ++ l.name,"layer-visible/" ++ l.id,"eye",{'aria-pressed':string(l.visible),class:if (l.visible) "mini" else "mini off"}));
         <button id:"layer-" ++ l.id,class:"layer-pick",type:"button",'data-action':"layer-select/" ++ l.id,'aria-pressed':string(l.id==st.active),

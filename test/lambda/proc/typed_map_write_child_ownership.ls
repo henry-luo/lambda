@@ -17,7 +17,7 @@
 
 type H = {a: array, b: array, c: array, n: int}
 
-pn mk() H {
+pn mk() H^ {
     var h: H = {a: fill(4, 0), b: fill(4, 0), c: fill(4, 0), n: 0}
     return h
 }
@@ -36,37 +36,37 @@ pn write_a(var h: H, v: int) {
 
 pn main() {
     // no field write before the aliased element write
-    var fresh: H = mk()
+    var fresh: H = mk()^
     write_a(fresh, 1)
     print(fresh.a[0]) print(" ") print(fresh.n)
     print("\n")
 
     // one, two and three field replacements: each clones the root again
-    var one: H = mk()
-    one.a = fill(4, 0)
+    var one: H = mk()^
+    one.a = fill(4, 0)^
     write_a(one, 2)
     print(one.a[0])
     print("\n")
 
-    var two: H = mk()
-    two.a = fill(4, 0)
-    two.b = fill(4, 0)
+    var two: H = mk()^
+    two.a = fill(4, 0)^
+    two.b = fill(4, 0)^
     write_a(two, 3)
     print(two.a[0])
     print("\n")
 
-    var three: H = mk()
-    three.a = fill(4, 0)
-    three.b = fill(4, 0)
-    three.c = fill(4, 0)
+    var three: H = mk()^
+    three.a = fill(4, 0)^
+    three.b = fill(4, 0)^
+    three.c = fill(4, 0)^
     write_a(three, 4)
     print(three.a[0])
     print("\n")
 
     // repeated writes accumulate through the same alias
-    var many: H = mk()
-    many.a = fill(4, 0)
-    many.b = fill(4, 0)
+    var many: H = mk()^
+    many.a = fill(4, 0)^
+    many.b = fill(4, 0)^
     write_a(many, 5)
     write_a(many, 6)
     print(many.a[0]) print(" ") print(many.n)
@@ -74,10 +74,10 @@ pn main() {
 
     // a live observer of the ROOT keeps COW's guarantee: the pre-image is
     // shared, so its children keep their marks and the snapshot is unaffected
-    var shared: H = mk()
+    var shared: H = mk()^
     let snap = shared
-    shared.a = fill(4, 0)
-    shared.b = fill(4, 0)
+    shared.a = fill(4, 0)^
+    shared.b = fill(4, 0)^
     write_a(shared, 9)
     print(snap.a[0]) print(" ") print(shared.a[0])
     print("\n")

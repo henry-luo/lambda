@@ -19,16 +19,16 @@ pub let wraps = [{id:"inline",label:"In Line with Text",icon:"wrap_inline"},
 pub let positions = [for (v in [{id:"top",label:"Top"},{id:"middle",label:"Middle"},{id:"bottom",label:"Bottom"}])
     for (h in [{id:"left",label:"Left"},{id:"center",label:"Center"},{id:"right",label:"Right"}])
         {id:v.id ++ "-" ++ h.id,label:v.label ++ " " ++ h.label,h:h.id,v:v.id}]
-pub fn settings(n) { let p=objects.settings(n,key,defaults); if (p!=null and valid(p)) p else defaults }
-pub fn floating(n) { let w=settings(n).wrap; w=="front" or w=="behind" }
+pub fn settings(n) any^ { let p=objects.settings(n,key,defaults); if (p!=null and valid(p)) p else defaults }
+pub fn floating(n) any^ { let w=settings(n).wrap; w=="front" or w=="behind" }
 pub fn layer(p) => if (p.wrap=="behind") -p.z else p.z
 pub fn anchor(doc,path) => [for (i in 1 to len(path)-1,let p=slice(path,0,i),let n=node_at(doc,p)
-    where contains(['p','li','td','th','h1','h2','h3','h4','h5','h6','div','blockquote'],n.tag)) p][last]
-pub fn sheet(doc,path) => len([for (start in page.starts(doc) where start<=path[0]) start])
+    where ((contains(['p','li','td','th','h1','h2','h3','h4','h5','h6','div','blockquote'],n.tag)) ^ { false })) p][last]
+pub fn sheet(doc,path) => len([for (start in ((page.starts(doc)) ^ { [] }) where start<=path[0]) start])
 pub fn entries(doc) => [for (i,e in image.images(doc)) {*:e,index:i,layout:settings(e.node),page:sheet(doc,e.path),
     label:attrs_get(e.node.attrs,'alt') or "Picture " ++ string(i+1)}]
 fn px(n) => string(n) ++ "px"
-pub fn style(n,p) {
+pub fn style(n,p) any^ {
     let values = {position:if (contains(["front","behind"],p.wrap)) "absolute" else "relative",
         float:if (p.wrap=="square") p.side else "none",display:if (p.wrap=="topBottom") "block" else "inline-block",
         clear:if (p.wrap=="topBottom") "both" else "none",
@@ -41,7 +41,7 @@ pub fn style(n,p) {
     let css = inline_format.css_set_many(attrs_get(n.attrs,'style'),values)
     inline_format.css_set(css,"transform",objects.transform_style(n,null,p))
 }
-fn valid(p) => contains([for (w in wraps) w.id],p.wrap) and contains(["left","right"],p.side) and
+fn valid(p) any^ => contains([for (w in wraps) w.id],p.wrap) and contains(["left","right"],p.side) and
     all([for (v in [p.x,p.y,p.distance,p.z]) geom.finite_number(v)]) and abs(p.x)<=10000 and abs(p.y)<=10000 and
     p.distance>=0 and p.distance<=100 and p.z>=1 and p.z<=100000 and
     all([for (v in [p.hidden,p.flip_x,p.flip_y]) v is bool])
@@ -66,13 +66,13 @@ pub fn transaction(editor,id,p) map^ {
     if (selected==null) raise error("Word: select a picture or illustration first")
     else if (id=="object.layer") {
         // wrapping determines the text plane; ordering operates within that plane.
-        let peers = [for (e in entries(editor.doc) where e.page==sheet(editor.doc,selected.path) and
-            (e.layout.wrap=="behind")== (old.wrap=="behind")) e]
-        let ordered = sort(peers,(e)=>layer(e.layout))
-        let index = [for (i,e in ordered where e.path==selected.path) i][0]
+        let peers = [for (e in ((entries(editor.doc)) ^ { [] }) where ((e.page==sheet(editor.doc,selected.path) and
+            (e.layout.wrap=="behind")== (old.wrap=="behind")) ^ { false })) e]
+        let ordered = sort(peers,(e)any^ =>layer(e.layout))
+        let index = [for (i,e in ordered where ((e.path==selected.path) ^ { false })) i][0]
         let target = if (p.action=="front") len(ordered)-1 else if (p.action=="back") 0
             else if (p.action=="forward") min(len(ordered)-1,index+1) else max(0,index-1)
-        let rest = [for (e in ordered where e.path!=selected.path) e]
+        let rest = [for (e in ordered where ((e.path!=selected.path) ^ { false })) e]
         let order = [*slice(rest,0,target),ordered[index],*slice(rest,target)]
         if (not contains(["front","back","forward","backward"],p.action)) raise error("Word: choose a layer order")
         else layer_steps(tx,order,0)^

@@ -1,7 +1,7 @@
 // D2.8.2/D8.2.4v2: a success contract never erases a defect or a rebind.
 fn probabilities() float[] => [0.25, 0.75]
-pn failed_probabilities(count) float[] {
-    var values: float[] = fill(count, 0.5)
+pn failed_probabilities(count) float[]^ {
+    var values: float[] = fill(count, 0.5)^
     return values
 }
 pn read_probabilities(index: int) {

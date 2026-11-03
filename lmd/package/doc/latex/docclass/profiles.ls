@@ -146,7 +146,7 @@ pub fn field_head(tag, family) {
 }
 
 // elsarticle's note marks: corresponding authors ∗, footnotes 1, title notes ☆
-pub fn note_mark(kind, i) {
+pub fn note_mark(kind, i) any^ {
     if (kind == "fntext") string(i + 1)
     else util.str_repeat(if (kind == "tnotetext") "☆" else "∗", i + 1)
 }
@@ -214,9 +214,9 @@ pub let SECNUM_DEPTHS = {part: -1, chapter: 0, section: 1, subsection: 2, subsub
 // ---- journals -----------------------------------------------------------------------
 
 // llncs's \institute{A \and B}: one affiliation per \and-separated part
-pub fn split_at_and(nodes) => split_on(nodes, 0, [], [])
+pub fn split_at_and(nodes) any^ => split_on(nodes, 0, [], [])
 
-fn split_on(nodes, i, current, acc) {
+fn split_on(nodes, i, current, acc) any^ {
     if (i >= len(nodes)) acc ++ [current]
     else if (nodes[i] is element and string(name(nodes[i])) == "and") split_on(nodes, i + 1, [], acc ++ [current])
     else split_on(nodes, i + 1, current ++ [nodes[i]], acc)
@@ -225,14 +225,14 @@ fn split_on(nodes, i, current, acc) {
 // acmart's \ccsdesc[weight]{Concept~Sub~Leaf}: the concept path and its weight
 pub fn ccs_concept(el) {
     let raw = util.raw_argument(el, "required", 0) or ""
-    {path: [for (part in split(raw, "~") where trim(part) != "") trim(part)],
+    {path: [for (part in ((split(raw, "~")) ^ { [] }) where trim(part) != "") trim(part)],
      weight: int(trim(util.optional_raw(el) or "100")) ^ { 100 }}
 }
 
 // revtex's superscriptaddress: affiliations numbered in order of first use, and each
 // author marked with the numbers of the affiliations that follow it
 pub fn superscript_marks(entries) {
-    let affils = [for (e in entries where is_affil(e)) util.text_of(e.el)]
+    let affils = [for (e in entries where ((is_affil(e)) ^ { false })) util.text_of(e.el)]
     let unique = [for (i, text in affils where not any([for (j, other in affils where j < i) other == text])) text]
     let numbered = [for (e in entries) {*:e, number: if (is_affil(e))
         string(position(unique, util.text_of(e.el)) + 1) else null}];
@@ -258,21 +258,21 @@ pub fn trim_edges(nodes) {
 // ---- exam ---------------------------------------------------------------------------
 
 // a question's or part's points, from \question[2] or \part[2]
-pub fn points_of(el) {
+pub fn points_of(el) any^ {
     let raw = if (el.toc != null) util.text_of(el.toc) else util.optional_raw(el)
     if (raw == null) null else float(trim(raw)) ^ { null }
 }
 
 // exam's point label: (2 points), [2 points] with \bracketedpoints; one point is
 // singular, and \pointname names both
-pub fn points_label(points, bracketed, point_name) {
+pub fn points_label(points, bracketed, point_name) any^ {
     let word = if (point_name != null) point_name else if (points == 1.0) " point" else " points"
     let text = whole(points) ++ word
     if (bracketed) "[" ++ text ++ "]" else "(" ++ text ++ ")"
 }
 
 // a point count as exam prints it: 2, 2.5
-pub fn whole(points) => if ((points == float(int(points))) ^ { false }) string(int(points)) else string(points)
+pub fn whole(points) any^ => if ((points == float(int(points))) ^ { false }) string(int(points)) else string(points)
 
 // ---- stylesheets ----------------------------------------------------------------------
 

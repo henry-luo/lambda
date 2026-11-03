@@ -12,26 +12,26 @@ pub fn settings(doc) {
     let p = objects.settings(doc,"data-word-tracking",defaults)
     if (p.enabled is bool and p.author is string and trim(p.author)!="") p else defaults
 }
-fn span(marks) => if (mark_value(marks,'span') is array) mark_value(marks,'span') else []
-pub fn change_id(marks) => attrs_get(span(marks),'data-word-change')
-pub fn change_kind(marks) => attrs_get(span(marks),'data-word-change-kind')
-pub fn deleted(marks) => change_kind(marks)=="delete"
-fn author(marks) => attrs_get(span(marks),'data-word-change-author')
-fn clean_marks(marks) {
-    let attrs = [for (a in span(marks) where not contains(['data-word-change','data-word-change-kind','data-word-change-author'],a.name)) a]
+fn span(marks) any^ => if (mark_value(marks,'span') is array) mark_value(marks,'span') else []
+pub fn change_id(marks) any^ => attrs_get(span(marks),'data-word-change')
+pub fn change_kind(marks) any^ => attrs_get(span(marks),'data-word-change-kind')
+pub fn deleted(marks) any^ => change_kind(marks)=="delete"
+fn author(marks) any^ => attrs_get(span(marks),'data-word-change-author')
+fn clean_marks(marks) any^ {
+    let attrs = [for (a in ((span(marks)) ^ { [] }) where ((not contains(['data-word-change','data-word-change-kind','data-word-change-author'],a.name)) ^ { false })) a]
     if (len(attrs)==0) without_mark(marks,'span') else with_mark(marks,'span',attrs)
 }
-fn revision_marks(marks,id,kind,by) => with_mark(clean_marks(marks),'span',
+fn revision_marks(marks,id,kind,by) any^ => with_mark(clean_marks(marks),'span',
     [*span(clean_marks(marks)),{name:'data-word-change',value:id},{name:'data-word-change-kind',value:kind},{name:'data-word-change-author',value:by}])
 pub fn entries(doc) {
-    let leaves = [for (entry in inline_format.leaves(doc) where change_id(entry.leaf.marks)!=null) entry]
+    let leaves = [for (entry in inline_format.leaves(doc) where ((change_id(entry.leaf.marks)!=null) ^ { false })) entry]
     let ids = unique([for (entry in leaves) change_id(entry.leaf.marks)]);
-    [for (id in ids) {id:id,author:author([for (entry in leaves where change_id(entry.leaf.marks)==id) entry.leaf.marks][0]),
-        inserted:join([for (entry in leaves where change_id(entry.leaf.marks)==id and change_kind(entry.leaf.marks)=="insert") entry.leaf.text],""),
-        removed:join([for (entry in leaves where change_id(entry.leaf.marks)==id and deleted(entry.leaf.marks)) entry.leaf.text],"")}]
+    [for (id in ids) {id:id,author:author([for (entry in leaves where ((change_id(entry.leaf.marks)==id) ^ { false })) entry.leaf.marks][0]),
+        inserted:join([for (entry in leaves where ((change_id(entry.leaf.marks)==id and change_kind(entry.leaf.marks)=="insert") ^ { false })) entry.leaf.text],""),
+        removed:join([for (entry in leaves where ((change_id(entry.leaf.marks)==id and deleted(entry.leaf.marks)) ^ { false })) entry.leaf.text],"")}]
 }
-pub fn selection(doc,id) {
-    let leaves = [for (entry in inline_format.leaves(doc) where change_id(entry.leaf.marks)==id) entry]
+pub fn selection(doc,id) any^ {
+    let leaves = [for (entry in inline_format.leaves(doc) where ((change_id(entry.leaf.marks)==id) ^ { false })) entry]
     if (len(leaves)==0) null else text_selection(pos(leaves[0].path,0),pos(leaves[last].path,len(leaves[last].leaf.text)))
 }
 pub fn configure(editor,p) map^ {
@@ -40,9 +40,9 @@ pub fn configure(editor,p) map^ {
     else tx_step(tx_begin(editor.doc,editor.selection),step_set_attr([],'data-word-tracking',format({*:p,author:trim(p.author)},'json')^))
 }
 let text_tags = ['p','h1','h2','h3','h4','h5','h6','td','th','pre']
-fn flat(n) => is_node(n) and contains(text_tags,n.tag) and all([for (child in n.content) is_text(child)])
+fn flat(n) any^ => is_node(n) and contains(text_tags,n.tag) and all([for (child in n.content) is_text(child)])
 // Replacing paragraphs or inline objects is outside text tracking; reject rather than silently lose revisions.
-fn structure(n) => if (is_text(n)) n.text else if (flat(n)) {tag:n.tag,content:"text"}
+fn structure(n) any^ => if (is_text(n)) n.text else if (flat(n)) {tag:n.tag,content:"text"}
     else {tag:n.tag,content:[for (child in n.content) structure(child)]}
 fn common_edge(a,b,prefix=0,reverse=false) {
     let size = min(len(a),len(b))-prefix
@@ -53,15 +53,15 @@ fn segment(children,start_at,end_at) => [for (i,child in children,let offset=sum
     let a=max(0,start_at-offset),let b=min(len(child.text),end_at-offset) where b>a) text_marked(slice(child.text,a,b),child.marks)]
 fn length_of(children) => sum([for (child in children) len(child.text)])
 fn point_offset(children,path,point) => sum([for (i in 0 to point.path[len(path)]-1) len(children[i].text)])+point.offset
-fn point_at(children,path,offset,i=0) => if (i>=len(children)-1 or offset<len(children[i].text))
+fn point_at(children,path,offset,i=0) any^ => if (i>=len(children)-1 or offset<len(children[i].text))
     pos([*path,i],min(offset,len(children[i].text))) else point_at(children,path,offset-len(children[i].text),i+1)
-fn remap_point(point,path,before,after,at,extra) {
+fn remap_point(point,path,before,after,at,extra) any^ {
     if (not path_is_prefix(path,point.path) or len(point.path)!=len(path)+1) point else {
         let offset = point_offset(before,path,point)
         point_at(after,path,offset+if (offset>=at) extra else 0)
     }
 }
-fn track_block(tx,path,before,after,by) {
+fn track_block(tx,path,before,after,by) any^ {
     let a = split(doc_text(before),"")
     let b = split(doc_text(after),"")
     let prefix = common_edge(a,b)
@@ -73,11 +73,11 @@ fn track_block(tx,path,before,after,by) {
     let added = segment(after.content,at,new_end)
     let existing = [for (child in [*removed,*added]) child.marks][0]
     let reuse = change_kind(existing)=="insert" and author(existing)==by and
-        contains([for (entry in entries(tx.doc_before)) entry.id],change_id(existing))
+        contains([for (entry in ((entries(tx.doc_before)) ^ { [] })) entry.id],change_id(existing))
     let seq = (attrs_get(tx.doc_after.attrs,'data-word-change-seq') or 0)+1
     let id = if (reuse) change_id(existing) else "r" ++ string(seq)
     // Deleting pending insertions cancels them; existing deletions remain until review resolves them.
-    let kept = [for (child in removed where change_kind(child.marks)!="insert")
+    let kept = [for (child in removed where ((change_kind(child.marks)!="insert") ^ { false }))
         if (deleted(child.marks)) child else text_marked(child.text,revision_marks(child.marks,id,"delete",by))]
     let inserted = [for (child in added) text_marked(child.text,revision_marks(child.marks,id,"insert",by))]
     let content = [*segment(before.content,0,at),*kept,*inserted,*segment(after.content,new_end,len(doc_text(after)))]
@@ -90,7 +90,7 @@ fn track_block(tx,path,before,after,by) {
         remap_point(sel.head,path,after.content,children,at,length_of(kept))))
     if (reuse or len(kept)+len(inserted)==0) selected else tx_step(selected,step_set_attr([],'data-word-change-seq',seq))
 }
-fn track_blocks(tx,entries,before,after,by,i) => if (i<0) tx else {
+fn track_blocks(tx,entries,before,after,by,i) any^ => if (i<0) tx else {
     let path = entries[i].path
     let old = node_at(before,path)
     let current = node_at(after,path)
@@ -105,11 +105,11 @@ pub fn filter(editor,tx) map^ {
     else if (structure(tx.doc_before)!=structure(tx.doc_after))
         raise error("Word: this structural edit cannot be tracked yet; turn off Track text changes to continue")
     else {
-        let blocks = [for (entry in descendants(tx.doc_before) where flat(entry.node)) entry]
+        let blocks = [for (entry in ((descendants(tx.doc_before)) ^ { [] }) where ((flat(entry.node)) ^ { false })) entry]
         track_blocks(tx,blocks,tx.doc_before,tx.doc_after,p.author,len(blocks)-1)
     }
 }
-fn resolve_leaves(tx,entries,id,accept,i) => if (i<0) tx else {
+fn resolve_leaves(tx,entries,id,accept,i) any^ => if (i<0) tx else {
     let entry = entries[i]
     let matches = change_id(entry.leaf.marks)!=null and (id==null or change_id(entry.leaf.marks)==id)
     let remove = if (accept) deleted(entry.leaf.marks) else change_kind(entry.leaf.marks)=="insert"
@@ -118,13 +118,13 @@ fn resolve_leaves(tx,entries,id,accept,i) => if (i<0) tx else {
     resolve_leaves(next,entries,id,accept,i-1)
 }
 pub fn resolve(editor,id,accept) map^ {
-    if (id!=null and not contains([for (entry in entries(editor.doc)) entry.id],id)) raise error("Word: this revision no longer exists")
+    if (id!=null and not contains([for (entry in ((entries(editor.doc)) ^ { [] })) entry.id],id)) raise error("Word: this revision no longer exists")
     else {
         let leaves = inline_format.leaves(editor.doc)
         let tx = resolve_leaves(tx_set_meta(tx_begin(editor.doc,editor.selection),"word-review",true),leaves,id,accept,len(leaves)-1)
         let first = inline_format.leaves(tx.doc_after)[0]
         // resolving the only insertion leaves an empty block with a node-position caret.
-        let target = if (first!=null) first.path else [for (entry in descendants(tx.doc_after) where flat(entry.node)) entry.path][0]
+        let target = if (first!=null) first.path else [for (entry in ((descendants(tx.doc_after)) ^ { [] }) where ((flat(entry.node)) ^ { false })) entry.path][0]
         if (target==null) tx else tx_set_selection(tx,text_selection(pos(target,0),pos(target,0)))
     }
 }

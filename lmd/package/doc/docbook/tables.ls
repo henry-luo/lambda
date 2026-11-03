@@ -7,7 +7,7 @@ fn nonnegative_int(value,fallback,description) int^ {
     if (value == null) fallback else {
         let lexical = trim(value)
         let digits = if (starts_with(lexical,"+")) slice(lexical,1,len(lexical)) else lexical;
-        if (digits == "" or not all([for (ch in split(digits,"")) ord(ch) >= 48 and ord(ch) <= 57]))
+        if (digits == "" or not all([for (ch in ((split(digits,"")) ^ { [] })) ord(ch) >= 48 and ord(ch) <= 57]))
             raise c.fail("invalid-table","Invalid " ++ description)
         else int(digits) ^ { raise c.fail("invalid-table","Invalid " ++ description) }
     }
@@ -38,7 +38,7 @@ fn cells(entries,index,cursor,blocked,specs,spans,header,context,renderer) map^ 
         let end_col = if (last_name == null) first else specs[last_name]
         let height = nonnegative_int(c.attr(entry,"morerows"),0,"morerows")^+1;
         if ((span_name != null and span == null) or first == null or end_col == null or first < cursor or
-            end_col < first or end_col >= len(blocked) or any([for (i in first to end_col) blocked[i] > 0]))
+            end_col < first or end_col >= len(blocked) or any([for (i in ((first to end_col) ^ { [] })) blocked[i] > 0]))
             raise c.fail("invalid-table","Unknown column/span, overlapping cell or excessive CALS cell count")
         else {
             let occupied = grid.reserve(blocked,first,end_col,height)

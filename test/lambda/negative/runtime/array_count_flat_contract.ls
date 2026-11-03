@@ -4,4 +4,4 @@
 // `[1, 2]`, on every tier.
 fn dyn(v) => v
 let a: int[3] = dyn([1, 2])
-"bound: " ++ string(a)
+"bound: " ++ string(a^)

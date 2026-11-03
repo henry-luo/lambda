@@ -31,6 +31,6 @@ pn main() {
     print({
         path_count: len(r.paths),
         text_count: len(r.texts),
-        paths: (for (p in r.paths) format(p, 'xml'))
+        paths: (for (p in ((r.paths) ^ { [] })) format(p, 'xml'))
     })
 }

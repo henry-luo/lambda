@@ -32,10 +32,11 @@ liftoff!
 
 ## Variables with `var`
 
-`let` bindings are final. Inside a procedure, `var` declares a variable you can reassign. Without an annotation it accepts any value, and its type widens to follow. With one, the type is a contract: each assignment is checked before it happens, and a value that does not fit stops the procedure with error E201 instead of changing the variable (S11.4.1v3):
+`let` bindings are final. Inside a procedure, `var` declares a variable you can reassign. Without an annotation it accepts any value, and its type widens to follow. With one, the type remains a strict admission target. A known mismatch is a static error. When admission is undecidable statically, Lambda warns with E241, checks at runtime, and stores either the admitted value or a validation error; execution continues (S11.4.1v5/S7.7.4v2):
 
 ```lambda
 // vars.ls
+fn dynamic(value) => value
 pn main() {
     var x = 42
     x = x / 8
@@ -44,7 +45,9 @@ pn main() {
     print(x, type(x), "\n")
     var level: int = 1
     level = level + 1
-    level = "high"
+    level = dynamic("high")
+    print(level is error, "\n")
+    print("continued\n")
 }
 ```
 
@@ -55,10 +58,11 @@ lambda run vars.ls
 ```text partial
 5.25 float
 forty-two string
-error[E201]: type check at assignment to 'level' failed: expected int, got string 'high'
+true
+continued
 ```
 
-The script prints two lines, then stops at `level = "high"` — an error found while the procedure runs, not before it starts like the one in [Chapter 1](01_Getting_Started.md#when-something-goes-wrong). `var` exists only inside a `pn`, as Lambda has no global variables, and a `let` inside a procedure is still final (reassigning it is error E211).
+The failed assignment puts an error in `level`, and the following prints run. Writing `level = "high"` directly instead is a known mismatch and fails before execution with E201. Use `level^` to propagate a bound error or `level ^ { fallback }` to recover explicitly; the declared target remains `int` for the next write. `var` exists only inside a `pn`, as Lambda has no global variables, and a `let` inside a procedure is still final (reassigning it is error E211).
 
 ## Loops
 
@@ -140,7 +144,7 @@ pn main() {
     var books = [{title: "SICP", out: false}, {title: "Clean Code", out: false}]
     let reading_list = [1]
     let staff_picks = [0, 1]
-    check_out(books, reading_list[0])
+    check_out(books, reading_list[0])^
     staff_picks |> books[~].title ++ (if (books[~].out) ": out" else ": in")
 }
 ```
@@ -223,13 +227,13 @@ Time to put the pieces together. This script reads `sales.csv`, totals the reven
 
 ```lambda
 // report.ls
-fn revenue(row) => int(row.units) * decimal(row.price)
+fn revenue(row) decimal^ => int(row.units) * decimal(row.price)
 
 pn main() {
     let rows = input("sales.csv")^
     var totals = {}
     for (row in rows) {
-        totals[row.region] = (totals[row.region] or 0) + revenue(row)
+        totals[row.region] = (totals[row.region] or 0) + revenue(row)^
     }
     output(totals, "report.json")^
     var md = "# Revenue by Region\n\n| Region | Revenue |\n|---|---:|\n"

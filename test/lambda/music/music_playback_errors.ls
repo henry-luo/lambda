@@ -5,7 +5,7 @@ let one={num:1,den:1}
 let tracks=[{id:"p",label:"Piano",channels:[0]}]
 let tiny=tl.finish([tl.message(z,144,60,80),tl.message({num:1,den:1000},128,60)],[],tracks,[],one)^
 let score_text=input("test/music/playback.musicxml",'text')^
-fn score(text) => music.parse(text)^;
+fn score(text) any^ => music.parse(text)^;
 [
  ((music.midi(tiny,{ppqn:1,quantize:true}) ^ { null }) or "invalid")=="invalid",
  ((tl.finish([tl.message(z,144,60,80),tl.message(z,128,60)],[],tracks,[],one) ^ { null }) or "invalid")=="invalid",

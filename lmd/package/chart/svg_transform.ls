@@ -9,7 +9,7 @@ pub fn project(matrix, point) => [matrix[0] * point[0] + matrix[2] * point[1] + 
 pub fn multiply(a, b) => [a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1],
     a[0]*b[2]+a[2]*b[3], a[1]*b[2]+a[3]*b[3], a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]]
 fn rotation(angle) => [math.cos(angle), math.sin(angle), -math.sin(angle), math.cos(angle), 0.0, 0.0]
-fn single(source) {
+fn single(source) any^ {
     let bracket=index_of(source,"(");
     let kind=trim(slice(source,0,bracket));
     let body=slice(source,bracket+1,len(source)-1);
@@ -26,9 +26,9 @@ fn single(source) {
         else if (kind=="skewY" and len(values)==1) [1.0,math.tan(angle),0.0,1.0,0.0,0.0] else null;
     if (not (rest is separators) or result==null or not all(result |> util.finite_number(~))) error("chart: invalid SVG transform") else result
 }
-fn compose(steps,index=0,matrix=identity) => if (matrix is error or index>=len(steps)) matrix
+fn compose(steps,index=0,matrix=identity) any^ => if (matrix is error or index>=len(steps)) matrix
     else (let next=single(steps[index]),if (next is error) next else compose(steps,index+1,multiply(matrix,next)))
-pub fn matrix(source) {
+pub fn matrix(source) any^ {
     if (source==null or source=="") identity else {
         let steps=find(source,operation) |> ~.value;
         let rest=replace(source,operation,"");
@@ -36,10 +36,10 @@ pub fn matrix(source) {
     }
 }
 // absent local transforms preserve the inherited product without multiplying by identity.
-pub fn accumulate(inherited, source) => if (source==null or source=="") inherited else (
+pub fn accumulate(inherited, source) any^ => if (source==null or source=="") inherited else (
     let local=matrix(source), if (local is error) local else multiply(inherited,local))
-pub fn css(matrix) => "matrix("++join(matrix |> util.fmt_num(~),",")++")"
-pub fn interpolate(a,b,t) {
+pub fn css(matrix) any^ => "matrix("++join(matrix |> util.fmt_num(~),",")++")"
+pub fn interpolate(a,b,t) any^ {
     let aa=matrix(a);let bb=matrix(b);
     if (aa is error) aa else if (bb is error) bb else css([for (i,value in aa) util.lerp(value,bb[i],t)])
 }

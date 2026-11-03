@@ -44,9 +44,9 @@ import mesh: .mesh
 // Public API: render a <chart> element into an SVG element
 // ============================================================
 
-pub fn render(chart_el, viewport = null) => render_spec(chart_el, viewport)
+pub fn render(chart_el, viewport = null) any^ => render_spec(chart_el, viewport)
 
-pub fn figure(raw, viewport = null) {
+pub fn figure(raw, viewport = null) any^ {
     let spec=timeline.target(raw);
     if (spec is error) spec else if (not figure_has3d(spec)) render_spec(raw,viewport)
     else if (spec.concat!=null) figure_grid(spec,spec.children,if (spec.concat=="horizontal") len(spec.children) else 1,viewport)
@@ -60,12 +60,12 @@ pub fn figure(raw, viewport = null) {
     else if (plot3d.enabled(spec)) plot3d.figure(spec,viewport) else render_spec(raw,viewport)
 }
 
-fn figure_has3d(raw) {
+fn figure_has3d(raw) any^ {
     let spec=if (raw is element and name(raw)!='svg') parse.parse_top(raw) else raw;
     plot3d.enabled(spec) or any([for (child in spec.children) figure_has3d(child)]) or
         (spec.template!=null and figure_has3d(spec.template)) or any([for (child in spec.layer) figure_has3d(child)])
 }
-fn figure_grid(spec,children,columns,viewport) {
+fn figure_grid(spec,children,columns,viewport) any^ {
     let spacing=if (spec.spacing!=null) spec.spacing else 20.0;
     let context=sizing.viewport(viewport);
     if (not mesh.positive_int(columns) or not util.finite_number(spacing) or spacing<0) error("chart.figure: invalid grid columns or spacing")
@@ -79,7 +79,7 @@ fn figure_grid(spec,children,columns,viewport) {
     }
 }
 
-pub fn figure_frame(raw, frame, viewport = null) {
+pub fn figure_frame(raw, frame, viewport = null) any^ {
     let spec=if (raw is element) parse.parse_top(raw) else raw;
     if (not plot3d.enabled(spec)) render_frame(raw,frame,viewport)
     else {
@@ -93,7 +93,7 @@ pub fn figure_frame(raw, frame, viewport = null) {
 }
 
 // render from a pre-parsed spec map (no element tree needed)
-pub fn render_spec(spec, viewport = null, st = null) {
+pub fn render_spec(spec, viewport = null, st = null) any^ {
     if (spec is element and name(spec) == 'svg') spec else {
         let target = timeline.target(spec);
         if (target is error) target else render_chart(target, viewport, st)
@@ -101,7 +101,7 @@ pub fn render_spec(spec, viewport = null, st = null) {
 }
 
 // Exports and live templates use this same explicit-time sampling entry point.
-pub fn render_frame(raw, frame, viewport = null, st = null) {
+pub fn render_frame(raw, frame, viewport = null, st = null) any^ {
     let spec = if (raw is element) parse.parse_top(raw) else raw;
     let elapsed = if (frame is number) frame else if (frame.time_ms != null) frame.time_ms
         else if (frame.elapsed != null) frame.elapsed else frame.time;
@@ -133,7 +133,7 @@ pub fn render_frame(raw, frame, viewport = null, st = null) {
     }
 }
 
-fn render_chart(raw, viewport, st, reconciled = false) {
+fn render_chart(raw, viewport, st, reconciled = false) any^ {
     let spec = behavior.prepare(raw,st);
     let context = sizing.viewport(viewport);
     let definitions = parameter.definitions(spec);
@@ -150,12 +150,12 @@ fn render_chart(raw, viewport, st, reconciled = false) {
 
 // State belongs to this chart instance, never a module global or a closure (S9.1.4).
 pub fn model(spec, viewport = null, options = {}) => <chart_view spec: spec, viewport: viewport, options: options>
-pub fn interactive(spec, viewport = null, options = {}) {
+pub fn interactive(spec, viewport = null, options = {}) any^ {
     let parsed=if (spec is element) parse.parse_top(spec) else spec;
     if (plot3d.enabled(parsed)) plot3d.interactive(parsed,viewport,options) else apply(model(spec, viewport, options))
 }
 
-view <chart_view> state interaction_state: null, playback_state: null {
+view <chart_view> () any^ state interaction_state: null, playback_state: null {
     let compiled = behavior.prepare(~.spec,interaction_state);
     let definitions = parameter.definitions(compiled);
     let st = parameter.reconcile(definitions,interaction_state);
@@ -221,9 +221,9 @@ on chart_action(evt) {
     } else {
         interaction_state = interaction.update(current, {*:action, type: "chart_action",
             frame: {view: "chart", params: definitions, behaviors: compiled._all_behaviors}})
-        if (interaction_state.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state))) }
-        for (notice in interaction_state._notifications) { emit("chart_interaction", notice) }
-        for (notice in interaction_state._custom_notifications) { emit(notice.name, notice.detail) }
+        if ((interaction_state.values != current.values)^) { emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state))^) }
+        for (notice in ((interaction_state._notifications) ^ { [] })) { emit("chart_interaction", notice) }
+        for (notice in ((interaction_state._custom_notifications) ^ { [] })) { emit(notice.name, notice.detail) }
     }
 }
 
@@ -231,7 +231,7 @@ on chart_action(evt) {
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     // static charts have no clock to advance or previous frame to retain.
-    if (playback_state == null and not needs_playback(~.spec)) { return 'handled' }
+    if ((playback_state == null and not needs_playback(~.spec))^) { return 'handled' }
     let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
     let current = parameter.reconcile(definitions,interaction_state);
     let previous = if (playback_state == null) playback_initial(~, current) else playback_state;
@@ -242,30 +242,30 @@ on render(evt) {
     let next = if (started.phase == "playing") timeline.command(started, {command: "frame"}, evt.time_stamp, plan) else started;
     if (next is error) { return next }
     let newly_started = playback_state == null or changed;
-    if (newly_started or previous.phase == "playing" or changed_input) {
+    if ((newly_started or previous.phase == "playing" or changed_input)^) {
         playback_state = {*:next, spec: ~.spec,parameter_values:current.values, presentation: playback_image(~, current, next)}
-        if (newly_started and next.phase == "playing") { emit("chart_animation", {phase: "start", elapsed: 0.0}) }
-        if (next.notification == "end") { emit("chart_animation", {phase: "end", elapsed: next.elapsed}) }
+        if ((newly_started and next.phase == "playing")^) { emit("chart_animation", {phase: "start", elapsed: 0.0}) }
+        if ((next.notification == "end")^) { emit("chart_animation", {phase: "end", elapsed: next.elapsed}) }
     }
     return 'handled'
 }
-fn has_animation(spec, phase = "enter") {
+fn has_animation(spec, phase = "enter") any^ {
     let node = if (spec is element) parse.parse_top(spec) else spec;
     let options = animation.merge(node.animate, node.mark.animate);
     options != false and (if (phase == null) any([for (key in ["enter", "update", "exit"]) options[key] != null and options[key] != false])
         else options[phase] != null and options[phase] != false) or
         any([for (child in [*node.children, *node.layer, node.template] where child != null) has_animation(child, phase)])
 }
-fn needs_playback(raw) {
+fn needs_playback(raw) any^ {
     let spec = if (raw is element) parse.parse_top(raw) else raw;
     spec.timeline != null or has_animation(spec, null)
 }
-fn playback_plan(raw, duration) {
+fn playback_plan(raw, duration) any^ {
     let spec=if (raw is element) parse.parse_top(raw) else raw;
     if (spec.timeline != null) timeline.configure(spec) else
         {duration: duration, length: duration, repeat: 1, direction: "normal", fill: "forwards"}
 }
-fn playback_initial(model, st, previous = null) => playback_clock(model, st, previous, render_spec(model.spec, model.viewport, st))
+fn playback_initial(model, st, previous = null) any^ => playback_clock(model, st, previous, render_spec(model.spec, model.viewport, st))
 fn playback_clock(model, st, previous, target) {
     let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
     let duration = max(animation.duration(target),animation.duration(previous));
@@ -278,8 +278,8 @@ fn playback_clock(model, st, previous, target) {
 }
 // The settled image is the same pure render the clock and change check need,
 // so it is computed once here instead of once per use (each chart rendered twice on load).
-fn settled_image(model, st, current) => if (current != null) current else render_spec(model.spec, model.viewport, st)
-fn playback_image(model, st, playback, compiled = null) {
+fn settled_image(model, st, current) any^ => if (current != null) current else render_spec(model.spec, model.viewport, st)
+fn playback_image(model, st, playback, compiled = null) any^ {
     // ordinary interactive charts render once without scanning their SVG for animation metadata.
     if (playback == null and not needs_playback(model.spec))
         // reuse this render's behavior plan; live state still belongs to the applied view.
@@ -311,25 +311,25 @@ pn chart_event(model, st, evt) {
     let definitions = parameter.definitions(compiled);
     let current = parameter.reconcile(definitions,st);
     let next = events.dispatch(current, evt, definitions, compiled._all_behaviors);
-    if (next.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, next))) }
-    for (notice in next._notifications) { emit("chart_interaction", notice) }
-    for (notice in next._custom_notifications) { emit(notice.name, notice.detail) }
+    if ((next.values != current.values)^) { emit("chart_change", parameter.expression_values(parameter.values(definitions, next))^) }
+    for (notice in ((next._notifications) ^ { [] })) { emit("chart_interaction", notice) }
+    for (notice in ((next._custom_notifications) ^ { [] })) { emit(notice.name, notice.detail) }
     next
 }
 
-fn render_spec_scoped(spec, scope) {
+fn render_spec_scoped(spec, scope) any^ {
     if (spec is element) spec
     else if (spec.concat) render_concat(spec, scope)
     else if (spec.repeat_row or spec.repeat_column) render_repeat(spec, scope)
     else dispatch(spec, scope)
 }
 
-fn dispatch(spec, scope = "chart") {
+fn dispatch(spec, scope = "chart") any^ {
     let sized = if (spec.layer != null or spec.facet != null) spec else sizing.resolve_view(spec);
     if (sized is error) sized else dispatch_prepared({*:sized, _paint_scope: scope})
 }
 
-fn dispatch_prepared(resolved_spec) {
+fn dispatch_prepared(resolved_spec) any^ {
     let mapping_error = if (resolved_spec.data is array and resolved_spec.layer == null and resolved_spec.facet == null)
         mapping_error(resolved_spec) else null;
     if (resolved_spec.data is error) resolved_spec.data
@@ -362,26 +362,26 @@ fn view_paints(spec) {
     let options = cfg.mark_config(theme, spec.mark);
     let context = mark_context(spec.data, spec.encoding, null, null, {}, null);
     [options.fill, options.color, options.stroke, theme.background, theme.title_color,
-        for (threshold in options.thresholds) threshold.color,
+        for (threshold in ((options.thresholds) ^ { [] })) threshold.color,
         for (key,part in spec.mark.parts,
             let rows=if (string(key)=="link" and spec._graph!=null) spec._graph.links else spec.data,
             let visual=mark.part_context(context,options,string(key),rows)) (
             part.fill,part.color,part.stroke,
             for (row in rows) for (channel in ["color","stroke"]) mark.appearance(visual,channel,row,null),
-            for (value in visual.color_scale.range) value),
+            for (value in ((visual.color_scale.range) ^ { [] })) value),
         for (states in [spec.state,options.state,for (key,part in spec.mark.parts) part.state])
             for (key,style in states) for (value in [style.fill,style.color,style.stroke]) value,
         for (row in spec.data) for (key in ["color", "stroke"]) mark.appearance(context, key, row,
             if (options.kind == "wordcloud" and key == "color") row.color else null),
-        for (value in context.color_scale.range) value,
+        for (value in ((context.color_scale.range) ^ { [] })) value,
         for (key in ["color", "size", "shape"], let guide = cfg.legend_config(theme, spec.encoding[key]))
             for (value in [guide.symbol_fill_color, guide.symbol_stroke_color]) value,
-        for (note in (if (spec.annotation != null) content(spec.annotation) else []))
+        for (note in (((if (spec.annotation != null) content(spec.annotation) else [])) ^ { [] }))
             for (value in [note.color, note.stroke]) value]
 }
 
 // Word clouds share chart data/composition while retaining their measured layout contract.
-fn cloud_marks(data, encoding, options, width, height, visual = null, paints = null) {
+fn cloud_marks(data, encoding, options, width, height, visual = null, paints = null) any^ {
     let text_ch = parse.get_channel(encoding, "text");
     let size_ch = parse.get_channel(encoding, "size");
     let color_ch = parse.get_channel(encoding, "color");
@@ -400,11 +400,11 @@ fn cloud_marks(data, encoding, options, width, height, visual = null, paints = n
             })
         else record];
     // Chart entry points return value errors; preserve the direct API's validation diagnostic (S7.4.1–S7.4.2).
-    let image: element | error = cloud.render(words, {*:options, width: width, height: height});
+    let image: element^ = cloud.render(words, {*:options, width: width, height: height});
     image
 }
 
-fn render_wordcloud(spec) {
+fn render_wordcloud(spec) any^ {
     let paints = spec._paints;
     let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let data = spec.data;
@@ -418,7 +418,7 @@ fn render_wordcloud(spec) {
         if (result is error) result else <svg *:map(result), role: "img",
             'aria-label': if (spec.title) spec.title else "Word cloud",
             'data-unplaced': image["data-unplaced"],
-            for (child in content(result)) child>
+            for (child in ((content(result)) ^ { [] })) child>
     }
 }
 
@@ -426,7 +426,7 @@ fn render_wordcloud(spec) {
 // Single-view chart rendering
 // ============================================================
 
-fn render_single(spec) {
+fn render_single(spec) any^ {
     // resolve theme
     let paints = spec._paints;
     let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
@@ -545,7 +545,7 @@ fn render_single(spec) {
 // Layered chart rendering
 // ============================================================
 
-fn render_layered(spec) {
+fn render_layered(spec) any^ {
     if (coordinate.enabled(spec.coordinate)) render_coordinate(spec) else {
     let layers = composition.leaves(spec);
     let data_error = util.first_error([for (layer in layers)
@@ -554,7 +554,7 @@ fn render_layered(spec) {
         let view_spec = sizing.resolve_view({*:spec, data: [for (layer in layers) for (row in layer.data) row],
             encoding: if (len(layers) > 0) layers[0].encoding else {}});
         if (view_spec is error) view_spec else {
-        let paints = paint.plan([*view_paints(spec), for (layer in layers) for (value in view_paints(layer)) value], spec._paint_scope);
+        let paints = paint.plan([*view_paints(spec), for (layer in layers) for (value in ((view_paints(layer)) ^ { [] })) value], spec._paint_scope);
         if (paints._error is error) paints._error else {
         let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
         let guide_plans = layer_guide_plans(layers, paints);
@@ -583,7 +583,7 @@ fn render_layered(spec) {
             else if (layer.annotation != null) svg.group_class("layer-content", [image,
                 ann.render_plan(guide_layout.annotations[index])]) else image)];
         let failure = util.first_error([*marks, guide_layout.annotations[len(layers)]._error]);
-        let axis_elements = [for (guide in guide_layout.axes) render_layer_axis(guide, lay)];
+        let axis_elements = [for (guide in ((guide_layout.axes) ^ { [] })) render_layer_axis(guide, lay)];
         let grids = [for (guide in axes where guide.config.grid)
             if (guide.key == "x") axis.x_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)
             else axis.y_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)];
@@ -611,14 +611,14 @@ fn layer_scales(layers, width, height) {
 
 fn layer_axes(layers, mappings) {
     let guides = [for (key in ["x", "y"],
-        let selected = [for (index, layer in layers where layer.encoding[key] != null and mappings[index][key] != null and
-            cfg.axis_config(cfg.resolve_theme(layer.config), layer.encoding[key]).enabled)
+        let selected = [for (index, layer in layers where ((layer.encoding[key] != null and mappings[index][key] != null and
+            cfg.axis_config(cfg.resolve_theme(layer.config), layer.encoding[key]).enabled) ^ { false }))
             {index: index, layer: layer}])
         for (ordinal, candidate in selected,
             let channel = candidate.layer.encoding[key],
             let own_options = cfg.axis_config(cfg.resolve_theme(candidate.layer.config), channel),
             let mapping = mappings[candidate.index][key]
-            where own_options.enabled and mapping.kind != "identity") (
+            where ((own_options.enabled and mapping.kind != "identity") ^ { false })) (
             let title = if (channel.title != null) channel.title else channel.field,
             let orient = if (own_options.orient != null) own_options.orient else if (key == "x")
                 (if (ordinal % 2 == 0) "bottom" else "top") else if (ordinal % 2 == 0) "left" else "right",
@@ -628,27 +628,27 @@ fn layer_axes(layers, mappings) {
             {key: key, index: candidate.index, mapping: mapping, title: title, orient: orient,
                 config: {*:options, orient: orient}, space: space + abs(if (options.offset != null) options.offset else 0.0)})];
     [for (index, guide in guides) (
-        let previous = sum([for (prior in slice(guides, 0, index) where prior.orient == guide.orient) prior.space]),
+        let previous = sum([for (prior in ((slice(guides, 0, index)) ^ { [] }) where prior.orient == guide.orient) prior.space]),
         let sign = if (guide.orient == "left" or guide.orient == "top") -1.0 else 1.0,
         {*:guide, config: {*:guide.config, offset: sign * previous +
             (if (guide.config.offset != null) guide.config.offset else 0.0)}})]
 }
 
-fn render_layer_axis(guide, lay) => if (guide.key == "x")
+fn render_layer_axis(guide, lay) any^ => if (guide.key == "x")
     axis.x_axis(guide.mapping, lay.plot_w, lay.plot_h, guide.config, guide.title)
     else axis.y_axis(guide.mapping, lay.plot_w, lay.plot_h, guide.config, guide.title)
 
 fn layer_guide_plans(layers, paints) {
     [for (layer in layers where layer.mark.kind != "wordcloud")
-        for (plan in leg.plans(layer.encoding, mark_context(layer.data, layer.encoding, null, null, {}, layer.stack_mode),
-            {*:cfg.resolve_theme(layer.config), _paints: paints})) plan]
+        for (plan in ((leg.plans(layer.encoding, mark_context(layer.data, layer.encoding, null, null, {}, layer.stack_mode),
+            {*:cfg.resolve_theme(layer.config), _paints: paints})) ^ { [] })) plan]
 }
 
 // ============================================================
 // Arc (pie/donut) chart rendering
 // ============================================================
 
-fn render_arc(spec) {
+fn render_arc(spec) any^ {
     let paints = spec._paints;
     let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let legend_cfg = cfg.legend_config(theme);
@@ -701,14 +701,14 @@ fn render_arc(spec) {
     if (failure is error) failure else svg.svg_root(width, height, children, {*:cfg.svg_attributes(theme), *:interaction_attributes(spec)})
 }
 
-fn arc_context(data, encoding, options, width, height, paints, cx = null, cy = null) =>
+fn arc_context(data, encoding, options, width, height, paints, cx = null, cy = null) any^ =>
     renderer.arc_context(data,encoding,options,width,height,paints,cx,cy)
 
 // ============================================================
 // Stacking helpers
 // ============================================================
 
-fn build_stacked_y_scale(data, rlo, rhi, mode, channel = null) {
+fn build_stacked_y_scale(data, rlo, rhi, mode, channel = null) any^ {
     let y0_vals = data |> float(~["_y0"])
     let y1_vals = data |> float(~["_y1"])
     let all_vals = [*y0_vals, *y1_vals]
@@ -716,15 +716,15 @@ fn build_stacked_y_scale(data, rlo, rhi, mode, channel = null) {
     scale.configured_scale(all_vals, rlo, rhi, "linear", channel.scale, include_zero)
 }
 
-fn prepare_mark_data(spec) => if (history.supports(spec)) {*:spec,mark:{*:spec.mark,
+fn prepare_mark_data(spec) any^ => if (history.supports(spec)) {*:spec,mark:{*:spec.mark,
     timeline_options:if (spec.mark.timeline_options!=null) spec.mark.timeline_options else spec.timeline_options}} else renderer.prepare_mark_data(spec)
 
 // build y scale that also considers y2_field for dual-value marks
-fn build_position_scale_y2(y_ch, data, rlo, rhi, mark_type, y2_field) {
+fn build_position_scale_y2(y_ch, data, rlo, rhi, mark_type, y2_field) any^ {
     scale.position_scale(y_ch, data, rlo, rhi, mark_type, false, y2_field)
 }
 
-fn mark_context(data, encoding, x_scale, y_scale, lay, stack_mode) =>
+fn mark_context(data, encoding, x_scale, y_scale, lay, stack_mode) any^ =>
     renderer.mark_context(data,encoding,x_scale,y_scale,lay,stack_mode)
 
 // Union values across each layer's own records and both endpoints before deriving shared scales.
@@ -737,22 +737,22 @@ fn guide_values(mapping) => if (mapping != null and mapping.kind != "identity") 
 // Dispatch mark rendering
 // ============================================================
 
-fn render_mark(mark_type, data, ctx, mark_spec) => if (mark_type=="timeline") history.render({data:data,encoding:ctx.encoding,
+fn render_mark(mark_type, data, ctx, mark_spec) any^ => if (mark_type=="timeline") history.render({data:data,encoding:ctx.encoding,
     width:ctx.plot_w,height:ctx.plot_h,padding:0,mark:mark_spec,timeline_options:mark_spec.timeline_options})
     else renderer.render(mark_type,data,ctx,mark_spec)
-fn clip_marks(marks, width, height) => renderer.clip_marks(marks,width,height)
+fn clip_marks(marks, width, height) any^ => renderer.clip_marks(marks,width,height)
 
 // A coordinate view resolves all layers against one plot, with independent data scales.
-fn render_coordinate(spec) {
+fn render_coordinate(spec) any^ {
     let layers = if (spec.layer != null) composition.leaves(spec) else [spec];
     let sized = sizing.resolve_view(spec);
-    let paints = paint.plan([for (layer in layers) for (value in view_paints(layer)) value], spec._paint_scope);
+    let paints = paint.plan([for (layer in layers) for (value in ((view_paints(layer)) ^ { [] })) value], spec._paint_scope);
     let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let guides = layer_guide_plans(layers, paints);
     let failure=util.first_error([sized,paints._error]);
     if (failure is error) failure else fit_coordinate(sized,layers,theme,paints,guides)
 }
-fn fit_coordinate(spec,layers,theme,paints,guides,reserved={left:0.0,right:0.0,top:0.0,bottom:0.0}) {
+fn fit_coordinate(spec,layers,theme,paints,guides,reserved={left:0.0,right:0.0,top:0.0,bottom:0.0}) any^ {
     let lay=layout.compute_layout(spec,null,null,false,null,guides);
     let model=coordinate.configure(spec.coordinate,lay.plot_w,lay.plot_h);
     let images=[for (layer in layers) coordinate_layer(layer,model,lay,theme,paints)];
@@ -818,7 +818,7 @@ fn coordinate_arcs(data, ctx, options, model) {
     let invalid = util.first_error([radii, angles,
         if (not util.finite_number(gap) or gap<0) error("chart: arc padding must be finite and nonnegative"),
         if (not ranged and (not util.finite_number(total) or any(weights |> ~ < 0))) error("chart: pie weights must be finite and nonnegative")]);
-    if (invalid is error) invalid else svg.group_class("marks arcs", [for (i, row in data where ranged or (total > 0 and weights[i] > 0),
+    if (invalid is error) invalid else svg.group_class("marks arcs", [for (i, row in data where ((ranged or (total > 0 and weights[i] > 0)) ^ { false }),
         let divisor=if (ctx.encoding.theta.scale.range!=null and parse.option_enabled(ctx.encoding.theta,"scale")) 1.0 else util.TAU,
         let first = if (ranged) scale.scale_apply(angles, parse.channel_value(ctx.encoding.theta, row)) / divisor else sum(slice(weights, 0, i)) / total,
         let end_fraction = if (ranged) scale.scale_apply(angles, parse.channel_value(ctx.encoding.theta2, row)) / divisor else first + weights[i] / total,
@@ -842,7 +842,7 @@ fn coordinate_arcs(data, ctx, options, model) {
 // Assemble final SVG from components
 // ============================================================
 
-fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, theme) {
+fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, theme) any^ {
     let failure = util.first_error([theme._paints._error, lay._error, marks_el, x_axis_el, y_axis_el, legend_el]);
     if (failure is error) failure else {
     // Preserve fractional dimensions for measured marks and SVG viewports.
@@ -885,7 +885,7 @@ fn interaction_attributes(spec) => if (spec._interactive != true) {} else {'data
 // Faceted chart rendering (small multiples)
 // ============================================================
 
-fn render_faceted(spec) {
+fn render_faceted(spec) any^ {
     let base_theme = cfg.resolve_theme(spec.config);
     let paints = paint.plan([base_theme.background, base_theme.title_color], spec._paint_scope);
     let theme = {*:base_theme, _paints: paints};
@@ -903,7 +903,7 @@ fn render_faceted(spec) {
     let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding, theme, headers);
     let failure = util.first_error([paints._error, flay._error, *images]);
     if (failure is error) failure else {
-    let cells = [for (i in 0 to (n - 1),
+    let cells = [for (i in ((0 to (n - 1)) ^ { [] }),
         let pos = layout.facet_cell_pos(flay, i))
         <g transform: svg.translate(pos.x, pos.y + flay.header_h),
             <text x: sub_w / 2.0, y: 0.0 - flay.headers[i].bottom - 4.0, 'text-anchor': "middle",
@@ -927,7 +927,7 @@ fn render_faceted(spec) {
 // Concat composition (hconcat / vconcat)
 // ============================================================
 
-fn render_concat(spec, scope) {
+fn render_concat(spec, scope) any^ {
     let direction = spec.concat;
     let theme = cfg.resolve_theme(spec.config);
     let paints = paint.plan([theme.background], scope);
@@ -971,7 +971,7 @@ fn render_concat(spec, scope) {
     let total_h = if (plan.height != null) plan.height else natural_h;
 
     // wrap each sub-svg in a translated group
-    let groups = [for (i in 0 to (n - 1))
+    let groups = [for (i in ((0 to (n - 1)) ^ { [] }))
         <g transform: svg.translate(items[i].x, items[i].y),
             sub_svgs[i]
         >];
@@ -1003,7 +1003,7 @@ fn position_subs(sizes, is_h, spacing, idx, offset, acc) {
 // Repeat composition (parameterized chart grid)
 // ============================================================
 
-fn render_repeat(spec, scope) {
+fn render_repeat(spec, scope) any^ {
     let row_fields = if (spec.repeat_row) spec.repeat_row else [""];
     let col_fields = if (spec.repeat_column) spec.repeat_column else [""];
     let n_rows = len(row_fields);
@@ -1014,8 +1014,8 @@ fn render_repeat(spec, scope) {
         render_spec_scoped({*:child, _viewport: viewport}, scope ++ "-r" ++ string(index))];
 
     // build each row as an hconcat of its column charts
-    let rows_svgs = [for (ri in 0 to (n_rows - 1),
-                         let row_charts = [for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci]],
+    let rows_svgs = [for (ri in ((0 to (n_rows - 1)) ^ { [] }),
+                         let row_charts = [for (ci in ((0 to (n_cols - 1)) ^ { [] })) sub_charts[ri * n_cols + ci]],
                          let row_spec = {concat: "horizontal", spacing: 10.0, children: row_charts, config: spec.config})
         render_concat(row_spec, scope ++ "-row" ++ string(ri))];
 

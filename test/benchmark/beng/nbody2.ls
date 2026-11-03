@@ -8,22 +8,24 @@ let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
-pn format9(x: float) string {
+fn format9(x: float) string^ {
+    var work_x: float = x
+
     var neg: string = ""
-    if (x < 0.0) {
+    if (work_x < 0.0) {
         neg = "-"
-        x = -x
+        work_x = -work_x
     }
-    var int_part: int = int(floor(x))
-    var frac: float = x - float(int_part)
+    var int_part: int = int(floor(work_x))
+    var frac: float = work_x - float(int_part)
     var scaled: float = frac * 1000000000.0 + 0.5
     var fl: float = floor(scaled)
-    var frac_int: int = int(fl)
-    if (frac_int >= 1000000000) {
+    var frac_int: int = int(fl)^
+    if ((frac_int >= 1000000000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
-    var frac_str: string = string(frac_int)
+    var frac_str: string = string(frac_int)^
     var pad: int = 9 - len(frac_str)
     var prefix: string = ""
     while (pad > 0) {
@@ -47,13 +49,13 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
             var distance: float = math.sqrt(d_squared)
             var mag: float = dt / (d_squared * distance)
 
-            bvx[i] = bvx[i] - dx * bmass[j] * mag
-            bvy[i] = bvy[i] - dy * bmass[j] * mag
-            bvz[i] = bvz[i] - dz * bmass[j] * mag
+            bvx[i] = (bvx[i] - dx * bmass[j] * mag)^
+            bvy[i] = (bvy[i] - dy * bmass[j] * mag)^
+            bvz[i] = (bvz[i] - dz * bmass[j] * mag)^
 
-            bvx[j] = bvx[j] + dx * bmass[i] * mag
-            bvy[j] = bvy[j] + dy * bmass[i] * mag
-            bvz[j] = bvz[j] + dz * bmass[i] * mag
+            bvx[j] = (bvx[j] + dx * bmass[i] * mag)^
+            bvy[j] = (bvy[j] + dy * bmass[i] * mag)^
+            bvz[j] = (bvz[j] + dz * bmass[i] * mag)^
             j = j + 1
         }
         i = i + 1
@@ -67,7 +69,7 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float {
+fn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float^ {
     var e: float = 0.0
     var i: int = 0
     while (i < 5) {
@@ -98,9 +100,9 @@ pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], bmass: 
         pz = pz + bvz[i] * bmass[i]
         i = i + 1
     }
-    bvx[0] = -(px / SOLAR_MASS)
-    bvy[0] = -(py / SOLAR_MASS)
-    bvz[0] = -(pz / SOLAR_MASS)
+    bvx[0] = (-(px / SOLAR_MASS))^
+    bvy[0] = (-(py / SOLAR_MASS))^
+    bvz[0] = (-(pz / SOLAR_MASS))^
 }
 
 pn main() {
@@ -141,12 +143,12 @@ pn main() {
         4.36624404335156298e-05 * SOLAR_MASS,
         5.15138902046611451e-05 * SOLAR_MASS]
 
-    offset_momentum(bvx, bvy, bvz, bmass)
+    offset_momentum(bvx, bvy, bvz, bmass)^
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")
 
     var i: int = 0
     while (i < N) {
-        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
+        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)^
         i = i + 1
     }
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")

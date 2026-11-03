@@ -46,7 +46,7 @@ pn main() {
     // a null `string?` field read bound to a `var`
     var source = {value: "left"}
     var target: Row = source
-    target.value = dyn(null)
+    target.value = dyn(null)^
     var blank = target.value
     print([blank, blank == null, target])
     print("\n")

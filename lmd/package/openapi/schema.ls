@@ -30,7 +30,7 @@ pub fn spec_to_schema(spec) {
 // schema_obj: the JSON Schema object
 // all_schemas: the full components.schemas map for resolving $ref
 // returns: string with "type TypeName = ..." definition
-pub fn convert_type(type_name, schema_obj, all_schemas) {
+pub fn convert_type(type_name, schema_obj, all_schemas) any^ {
     let body = convert_schema(schema_obj, all_schemas);
     "type " ++ type_name ++ " = " ++ body
 }
@@ -40,7 +40,7 @@ pub fn convert_type(type_name, schema_obj, all_schemas) {
 // ============================================================
 
 // Convert a JSON Schema object to a Lambda type expression string.
-fn convert_schema(schema, all_schemas) {
+fn convert_schema(schema, all_schemas) any^ {
     // handle $ref
     let ref = schema["$ref"];
     if (ref != null) util.ref_to_name(ref)
@@ -94,7 +94,7 @@ fn convert_object(schema, all_schemas) {
 // Array schema → Lambda array type
 // ============================================================
 
-fn convert_array(schema, all_schemas) {
+fn convert_array(schema, all_schemas) any^ {
     let items = schema.items;
     if (items == null) "any[]"
     else {
@@ -151,7 +151,7 @@ fn convert_enum(values) {
 // path: e.g. "/pets"
 // method: e.g. "post"
 // returns: schema map or null
-pub fn request_schema(spec, path, method) {
+pub fn request_schema(spec, path, method) any^ {
     let op = spec.paths[path][method];
     if (op == null) null
     else {
@@ -172,7 +172,7 @@ pub fn request_schema(spec, path, method) {
 // method: e.g. "get"
 // status: e.g. "200"
 // returns: schema map or null
-pub fn response_schema(spec, path, method, status) {
+pub fn response_schema(spec, path, method, status) any^ {
     let op = spec.paths[path][method];
     if (op == null) null
     else {

@@ -1,8 +1,8 @@
 // The math input boundary expands scoped TeX definitions before digestion.
 import util: lambda.doc.math.util
 
-fn ast(source) => parse(source, {type: "math", flavor: "latex"})^
-fn text(source) => util.text_of(ast(source))
+fn ast(source) any^ => parse(source, {type: "math", flavor: "latex"})^
+fn text(source) any^ => util.text_of(ast(source))
 
 let image = util.content_items(ast("\\def\\logo{\\includegraphics[height=0.8em,alt={KA, logo}]{a_b.png}}\\logo"))[0]
 let fraction = util.content_items(ast("\\def\\pair#1{#1+#1}\\frac{\\pair{x}}{2}"))[0]

@@ -5,17 +5,17 @@ fn next_at(text,at) => if (at < len(text) and text[at] == "'") at + 1 else at
 fn edge(text,start,end,value,kind,fuzzy) =>
     {start:start,end:next_at(text,end),typed:slice(text,start,end),value:value,kind:kind,fuzzy:fuzzy}
 
-fn at(text,position,table,pairs) array {
+fn at(text,position,table,pairs) array^ {
     if (text[position] == "'") []
     else {
         let full = [for (width in 1 to min(6,len(text) - position)) {
             let token = slice(text,position,position + width);
-            [for (value in s.expand(table,token,pairs))
+            [for (value in ((s.expand(table,token,pairs)) ^ { [] }))
                 edge(text,position,position + width,value,"full",value != token)]
         }]
         let initials = [for (width in 1 to min(2,len(text) - position)) {
             let token = slice(text,position,position + width);
-            if (token in table.initials) [for (value in s.initials(token,pairs))
+            if (token in table.initials) [for (value in ((s.initials(token,pairs)) ^ { [] }))
                 edge(text,position,position + width,value,"initial",value != token)] else []
         }]
         let tail = slice(text,position)
@@ -39,13 +39,13 @@ pub fn build(table,raw,pairs) map^ {
     let bounded = c.require(len(letters) <= 32,"input exceeds 32 letters")^
     let separators = c.require(not starts_with(text,"'") and not contains(text,"''"),
         "empty syllable before a separator")^
-    let edges = [for (position in 0 to len(text) - 1) at(text,position,table,pairs)];
+    let edges = [for (position in ((0 to len(text) - 1) ^ { [] })) at(text,position,table,pairs)];
     {input:text,edges:edges}
 }
 
 // a leading match must belong to a complete lattice route; otherwise x in xi'an
 // could invent a separate first syllable and ignore the unsegmentable i' suffix.
-fn reachable(graph,at,suffix) array {
+fn reachable(graph,at,suffix) array^ {
     if (at < 0) suffix
     else {
         let viable = any([for (item in graph.edges[at]) suffix[item.end - at - 1]]);
@@ -56,33 +56,33 @@ fn reachable(graph,at,suffix) array {
 fn viable_edges(graph,viable,position) array =>
     [for (item in graph.edges[position] where viable[item.end]) item]
 
-fn caret_route(graph,viable,position) array => if (position == len(graph.input)) [position]
+fn caret_route(graph,viable,position) array^ => if (position == len(graph.input)) [position]
     else [position,*caret_route(graph,viable,viable_edges(graph,viable,position)[0].end)]
 
-pub fn caret_stops(graph) array {
+pub fn caret_stops(graph) array^ {
     let viable = reachable(graph,len(graph.input) - 1,[true]);
     // use the same longest-exact-first viable route as lookup; invalid tails stay editable.
     if (viable[0]) caret_route(graph,viable,0)
-    else [for (position in 0 to len(graph.input)) position]
+    else [for (position in ((0 to len(graph.input)) ^ { [] })) position]
 }
 
-fn walk(graph,viable,pending,result,limit) map {
+fn walk(graph,viable,pending,result,limit) map^ {
     if (len(pending) == 0) {paths:result,truncated:false}
     else if (len(result) >= limit) {paths:result,truncated:true}
     else {
         let current = pending[0]
         let children = if (current.end < len(graph.input) and len(current.tokens) < 9 and
             current.tokens[len(current.tokens) - 1].kind != "prefix")
-            [for (item in viable_edges(graph,viable,current.end))
+            [for (item in ((viable_edges(graph,viable,current.end)) ^ { [] }))
                 {tokens:[*current.tokens,item],end:item.end}] else [];
         walk(graph,viable,[*children,*drop(pending,1)],[*result,current],limit)
     }
 }
 
-pub fn paths(graph,limit) map =>
+pub fn paths(graph,limit) map^ =>
     if (len(graph.input) == 0) {paths:[],truncated:false}
     else {
         let viable = reachable(graph,len(graph.input) - 1,[true]);
-        walk(graph,viable,[for (item in viable_edges(graph,viable,0))
+        walk(graph,viable,[for (item in ((viable_edges(graph,viable,0)) ^ { [] }))
             {tokens:[item],end:item.end}],[],limit)
     }

@@ -24,9 +24,9 @@ let CSS_URL = \("url(" (!")")* ")")
 let CSS_IMPORT = \("@import" (!";")* ";"?)
 
 // "java\tscript:" is "javascript:" to a URL parser: drop controls and spaces
-fn squeezed(url) => lower(join([for (ch in split(url, "") where ord(ch) > 32) ch], ""))
+fn squeezed(url) any^ => lower(join([for (ch in ((split(url, "")) ^ { [] }) where ((ord(ch) > 32) ^ { false })) ch], ""))
 
-fn is_remote(url) {
+fn is_remote(url) any^ {
     let s = squeezed(url);
     starts_with(s, "http:") or starts_with(s, "https:") or starts_with(s, "//") or starts_with(s, "ftp:")
 }
@@ -35,7 +35,7 @@ fn is_remote(url) {
 // (RFC 2392), an inline image, or a network URL once remote content is
 // allowed; null drops it. A relative URL would resolve against the window's
 // own folder, never the sender's, so it goes too.
-fn resource(url, cx) {
+fn resource(url, cx) any^ {
     let s = squeezed(url);
     if (starts_with(s, "cid:")) cx.cids[slice(trim(url), 4)]
     else if (starts_with(s, "data:image/")) url
@@ -43,16 +43,16 @@ fn resource(url, cx) {
     else null
 }
 
-fn descriptor(c) => if (c.w != null) " " ++ string(int(c.w)) ++ "w" else if (c.x != null) " " ++ string(c.x) ++ "x" else ""
+fn descriptor(c) any^ => if (c.w != null) " " ++ string(int(c.w)) ++ "w" else if (c.x != null) " " ++ string(c.x) ++ "x" else ""
 
-fn srcset(value, cx) {
-    let kept = [for (c in n.srcset_candidates(value), let r = resource(c.url, cx) where r != null) r ++ descriptor(c)];
+fn srcset(value, cx) any^ {
+    let kept = [for (c in n.srcset_candidates(value), let r = resource(c.url, cx) where ((r != null) ^ { false })) r ++ descriptor(c)];
     if (len(kept) == 0) null else join(kept, ", ")
 }
 
 // Links never navigate the frame. One to the outside moves to data-href and
 // shows its target as the title until the window can open it (§5.8).
-fn link(value, titled) {
+fn link(value, titled) any^ {
     let s = squeezed(value);
     if (starts_with(s, "#")) [["href", value]]
     else if (starts_with(s, "http:") or starts_with(s, "https:") or starts_with(s, "mailto:"))
@@ -61,7 +61,7 @@ fn link(value, titled) {
 }
 
 // each match replaced by f(match), letters in any case
-fn replace_all(s, pattern, f) {
+fn replace_all(s, pattern, f) any^ {
     let found = find(s, pattern, {ignore_case: true});
     if (len(found) == 0) s else {
         let ends = [0, *[for (m in found) m.index + len(m.value)]];
@@ -69,19 +69,19 @@ fn replace_all(s, pattern, f) {
     }
 }
 
-fn css_url_value(token) {
+fn css_url_value(token) any^ {
     let inner = trim(slice(token, 4, len(token) - 1));
     if (len(inner) >= 2 and (starts_with(inner, "\"") or starts_with(inner, "'"))) slice(inner, 1, len(inner) - 1) else inner
 }
 
 // Style text without @import rules, and with each url() it may not load
 // replaced by `none`, which leaves its declaration valid.
-pub fn clean_css(text, cx) => replace_all(replace_all(text, CSS_IMPORT, (m) => ""), CSS_URL, (m) => {
+pub fn clean_css(text, cx) any^ => replace_all(replace_all(text, CSS_IMPORT, (m) => ""), CSS_URL, (m) any^ => {
     let r = resource(css_url_value(m), cx);
     if (r == null) "none" else "url(\"" ++ replace(r, "\"", "%22") ++ "\")"
 })
 
-fn clean_attr(tag, a, titled, cx) {
+fn clean_attr(tag, a, titled, cx) any^ {
     let key = lower(a[0]);
     if (starts_with(key, "on") or key in REFUSED) []
     else if (key == "style") [["style", clean_css(a[1], cx)]]
@@ -93,7 +93,7 @@ fn clean_attr(tag, a, titled, cx) {
 
 fn clean_attrs(e, cx) {
     let titled = n.attr(e, "title") != null;
-    [for (a in e.attrs, c in clean_attr(e.tag, a, titled, cx)) c]
+    [for (a in e.attrs, c in ((clean_attr(e.tag, a, titled, cx)) ^ { [] })) c]
 }
 
 // <noscript> holds raw text while scripting is on, as the parser assumed;
@@ -101,11 +101,11 @@ fn clean_attrs(e, cx) {
 fn noscript_kids(e) {
     let raw = join([for (k in e.kids where k is string) k], "")
     let doc = parse(raw, 'html') ^ { null };
-    let parts = if (doc == null) [] else [for (top in n.elems(n.of(doc)), part in n.elems(top)) part];
+    let parts = if (doc == null) [] else [for (top in ((n.elems(n.of(doc))) ^ { [] }), part in ((n.elems(top)) ^ { [] })) part];
     [for (part in parts, k in part.kids) k]
 }
 
-fn clean_node(k, cx) {
+fn clean_node(k, cx) any^ {
     if (k is string) [k]
     // comments carry Outlook's conditional markup ([if mso]), nothing to show
     else if (k.tag == "#comment" or k.tag in DROPPED) []
@@ -115,14 +115,14 @@ fn clean_node(k, cx) {
     else [n.mk(k.tag, clean_attrs(k, cx), clean_kids(k.kids, cx))]
 }
 
-fn clean_kids(kids, cx) => [for (k in kids, c in clean_node(k, cx)) c]
+fn clean_kids(kids, cx) => [for (k in kids, c in ((clean_node(k, cx)) ^ { [] })) c]
 
-fn css_remote(text) => len([for (m in find(text, CSS_URL, {ignore_case: true}) where is_remote(css_url_value(m.value))) m])
+fn css_remote(text) => len([for (m in find(text, CSS_URL, {ignore_case: true}) where ((is_remote(css_url_value(m.value))) ^ { false })) m])
 
-fn attr_remote(tag, a) {
+fn attr_remote(tag, a) any^ {
     let key = lower(a[0]);
     if (key == "style") css_remote(a[1])
-    else if (key in SRCSETS) len([for (c in n.srcset_candidates(a[1]) where is_remote(c.url)) c])
+    else if (key in SRCSETS) len([for (c in ((n.srcset_candidates(a[1])) ^ { [] }) where ((is_remote(c.url)) ^ { false })) c])
     else if (key in LOADS and not (key in ["href", "xlink:href"] and tag in LINKS) and is_remote(a[1])) 1
     else 0
 }
@@ -133,7 +133,7 @@ fn remote_loads(root) => sum([for (e in n.all_elements(root))
 
 // Content-ID → data: URL for the parts an HTML body names by cid: (RFC 2392)
 // a part's content as a data: URL
-pub fn data_url(p) {
+pub fn data_url(p) any^ {
     let json = format(p.content, 'json');
     "data:" ++ p.type ++ ";base64," ++ slice(json, 1, len(json) - 1)
 }
@@ -143,13 +143,13 @@ pub fn cid_urls(parts) => reduce([{}, *[for (p in parts where p.cid != null and 
 // An HTML body as a standalone document for a message frame's srcdoc.
 // options.remote allows network loads; options.cids maps Content-IDs to data:
 // URLs (cid_urls). `blocked` counts the remote loads left out.
-pub fn clean(html, options) {
+pub fn clean(html, options) any^ {
     let cx = {remote: options.remote == true, cids: if (options.cids == null) {} else options.cids}
     let doc = parse(html, 'html') ^ { null }
-    let root = if (doc == null) null else [for (k in n.of(doc).kids where n.is_el(k) and k.tag == "html") k][0]
-    let head = if (root == null) null else [for (k in root.kids where n.is_el(k) and k.tag == "head") k][0]
-    let body = if (root == null) null else [for (k in root.kids where n.is_el(k) and k.tag == "body") k][0]
-    let styles = if (head == null) [] else [for (k in clean_kids(head.kids, cx) where n.is_el(k) and k.tag == "style") k]
+    let root = if (doc == null) null else [for (k in ((n.of(doc).kids) ^ { [] }) where ((n.is_el(k) and k.tag == "html") ^ { false })) k][0]
+    let head = if (root == null) null else [for (k in root.kids where ((n.is_el(k) and k.tag == "head") ^ { false })) k][0]
+    let body = if (root == null) null else [for (k in root.kids where ((n.is_el(k) and k.tag == "body") ^ { false })) k][0]
+    let styles = if (head == null) [] else [for (k in ((clean_kids(head.kids, cx)) ^ { [] }) where ((n.is_el(k) and k.tag == "style") ^ { false })) k]
     let body_node = if (body == null) n.mk("body", [], []) else n.mk("body", clean_attrs(body, cx), clean_kids(body.kids, cx));
     {html: "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>" ++ LINK_STYLE ++ "</style>" ++
         n.to_html(styles) ++ "</head>" ++ n.to_html([body_node]) ++ "</html>",

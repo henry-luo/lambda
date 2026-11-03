@@ -22,7 +22,7 @@ pub fn openapi_json(spec) => format(spec, 'json') ^ { "" }
 // spec_url: URL path to the openapi.json endpoint (e.g. "/openapi.json")
 // title: page title (optional, defaults to spec title if available)
 // returns: HTML string
-pub fn swagger_ui_html(spec_url, title) {
+pub fn swagger_ui_html(spec_url, title) any^ {
     let page_title = if (title != null and len(title) > 0) title
                      else "API Documentation";
     swagger_page(spec_url, page_title)
@@ -33,7 +33,7 @@ pub fn swagger_ui_html(spec_url, title) {
 //
 // spec: parsed OpenAPI spec map
 // returns: HTML string
-pub fn swagger_ui_inline(spec) {
+pub fn swagger_ui_inline(spec) any^ {
     let title = util.get_or(spec.info, "title", "API Documentation");
     let spec_json = format(spec, 'json');
     swagger_page_inline(spec_json, title)
@@ -44,7 +44,7 @@ pub fn swagger_ui_inline(spec) {
 // spec_url: URL to the openapi.json endpoint
 // title: page title
 // returns: HTML string
-pub fn redoc_html(spec_url, title) {
+pub fn redoc_html(spec_url, title) any^ {
     let page_title = if (title != null and len(title) > 0) title
                      else "API Documentation";
     redoc_page(spec_url, page_title)

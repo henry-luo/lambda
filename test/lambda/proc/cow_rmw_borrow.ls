@@ -7,7 +7,7 @@ pn arr_set(var a, idx, val) {          // cd/havlak's 2-level handle store
     var i0 = idx div 16
     var l0 = a.l0
     var c1 = l0[i0]
-    if (c1 == null) { c1 = fill(16, null) }
+    if ((c1 == null)^) { c1 = fill(16, null) }
     c1[i1] = val
     l0[i0] = c1
     a.l0 = l0
@@ -48,7 +48,7 @@ pn shared_root(var a) {                // spine shared at run time: falls back t
 }
 pn rebound(var a) {                    // handle rebound to a fresh container on one path
     var l = a.ys
-    if (l == null) { l = fill(2, 0) }
+    if ((l == null)^) { l = fill(2, 0) }
     l[0] = l[0] + 11
     a.ys = l
     return 0
@@ -79,10 +79,10 @@ pn loop_handle(var a, n) {             // handle written in a loop whose counter
 pn main() {
     var a = { l0: fill(4, null), xs: [0, 0, 0], ys: null, nums: fill(3, 1), node: {left: 0, right: 0} }
     var k = 0
-    while (k < 40) { arr_set(a, k * 3 % 60, k); k = k + 1 }
+    while (k < 40) { arr_set(a, k * 3 % 60, k)^; k = k + 1 }
     var got = []
     var j = 0
-    while (j < 60) { push(got, arr_get(a, j)); j = j + 1 }
+    while (j < 60) { push(got, arr_get(a, j))^; j = j + 1 }
     print(got, "\n")
     var other = []
     print(read_between(a), " ", a.xs, "\n")

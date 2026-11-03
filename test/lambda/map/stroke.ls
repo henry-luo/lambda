@@ -1,8 +1,8 @@
 import maps: lambda.map
 let camera={width:256,height:192,zoom:0};
-fn position(x,y) => maps.unproject(camera,[x,y])
+fn position(x,y) any^ => maps.unproject(camera,[x,y])
 let line=maps.source("road",{type:"Feature",id:"road",properties:{},geometry:{type:"LineString",coordinates:[position(64,96),position(160,96)]}});
-fn model(cap) => maps.geomap([line,maps.layer("road","line","road",{'line-color':"#00f",'line-width':10},{'line-cap':cap,'line-join':"bevel"})],camera)
+fn model(cap) any^ => maps.geomap([line,maps.layer("road","line","road",{'line-color':"#00f",'line-width':10},{'line-cap':cap,'line-join':"bevel"})],camera)
 let butt=maps.plan(model("butt")),round=maps.plan(model("round")),square=maps.plan(model("square"));
 let polygon=maps.geomap([maps.source("land",{type:"Polygon",coordinates:[
     [position(32,32),position(224,32),position(224,160),position(32,160),position(32,32)],

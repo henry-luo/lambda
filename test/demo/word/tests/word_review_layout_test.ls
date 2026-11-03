@@ -17,8 +17,8 @@ page.settings(landscape.doc) == setup
 page.geometry(landscape.doc).width == 1056
 page.geometry(landscape.doc).height == 816
 model.execute(landscape,"edit.undo")^.doc == doc
-model.execute(landscape,"layout.pageSetup",{paper:"A5",orientation:"portrait",left:80,right:80}) ^ { true } ~ { false }
-model.execute(editor,"layout.pageSetup",{paper:"unknown"}) ^ { true } ~ { false }
+match (model.execute(landscape,"layout.pageSetup",{paper:"A5",orientation:"portrait",left:80,right:80}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"layout.pageSetup",{paper:"unknown"}) ^ { ^ }) { case error: true default: false }
 let caret = edit_set_selection(landscape,text_selection(pos([0,0],5),pos([0,0],5)))
 let broken = model.execute(caret,"insert.pageBreak")^
 len(broken.doc.content)==2
@@ -58,9 +58,9 @@ review.has_anchor(model.leaves(imported)[0].leaf.marks,"c2")
 let typed = model.execute(commented,"text.insert",{data:"Hi"})^
 model.plain_text(typed.doc) == "Hi world"
 model.comment_selection(typed,"c1") != null
-model.execute(editor,"review.addComment",{text:"No selection"}) ^ { true } ~ { false }
-model.execute(commented,"review.addComment",{text:"  "}) ^ { true } ~ { false }
-model.execute(commented,"review.deleteComment",{id:"missing"}) ^ { true } ~ { false }
+match (model.execute(editor,"review.addComment",{text:"No selection"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(commented,"review.addComment",{text:"  "}) ^ { ^ }) { case error: true default: false }
+match (model.execute(commented,"review.deleteComment",{id:"missing"}) ^ { ^ }) { case error: true default: false }
 let empty = node('doc',[node('p',[])])
 model.execute(model.open_editor(empty),"text.insert",{data:"Start again"})^.doc.content[0].content[0].text == "Start again"
 files.restore(files.archive(empty,"Empty paragraph"))^.doc == empty

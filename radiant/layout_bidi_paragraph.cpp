@@ -64,7 +64,7 @@ uint32_t bidi_source_codepoint(DomNode* source, uint32_t codepoint) {
     // CSS Text §4 transforms a collapsed segment break before bidi resolution;
     // preserved breaks remain paragraph boundaries rather than line characters.
     return layout_text_is_segment_break(codepoint) &&
-        layout_white_space_collapses_newlines(get_white_space_value(source)) ? ' ' : codepoint;
+        layout_text_collapses_segment_breaks(source) ? ' ' : codepoint;
 }
 
 template<class Visitor>
@@ -78,7 +78,7 @@ static void bidi_walk_paragraph_source(DomNode* node, Visitor& visitor,
         if (!start || !visitor.text_begin(text)) return;
         const unsigned char* cursor = start;
         const unsigned char* end = start + text->length;
-        bool preserve_breaks = !layout_white_space_collapses_newlines(get_white_space_value(node));
+        bool preserve_breaks = !layout_text_collapses_segment_breaks(node);
         bool upright = layout_text_uses_upright_orientation(node);
         while (cursor < end && !visitor.done()) {
             const unsigned char* before = cursor;
@@ -100,7 +100,11 @@ static void bidi_walk_paragraph_source(DomNode* node, Visitor& visitor,
         visitor.out_of_flow(element);
         return;
     }
-    if (element->tag() == MARKUP_NAME_BR) { visitor.boundary(node); return; }
+    if (element->tag() == MARKUP_NAME_BR) {
+        if (layout_ruby_annotation_content(element)) visitor.object(element);
+        else visitor.boundary(node);
+        return;
+    }
     if (layout_intrinsic_element_is_atomic_inline(element) || node->view_type == RDT_VIEW_MARKER) {
         visitor.object(element);
         return;
@@ -235,9 +239,10 @@ struct BidiParagraphCollector {
     InlineFrame* frame = nullptr;
     bool valid = true;
     int paragraph = 0;
+    DomElement* scope;
     CssEnum direction;
 
-    explicit BidiParagraphCollector(CssEnum dir) : direction(dir) {
+    BidiParagraphCollector(CssEnum dir, DomElement* source) : scope(source), direction(dir) {
         valid = paragraphs.append({0,0,dir,false});
     }
     bool done() const { return !valid; }
@@ -294,8 +299,7 @@ struct BidiParagraphCollector {
     DomNode* children(DomElement* element) { return layout_render_child_list(element); }
     bool enter_inline(DomElement* element,CssEnum mode,InlineFrame* current) {
         if (layout_is_shadow_slot(element)) { valid = false; return false; }
-        if (layout_ruby_annotation_node(element) && element->parent &&
-            resolve_display_value(element->parent).inner == CSS_VALUE_RUBY) return false;
+        if (layout_ruby_annotation_outside_scope(element, scope)) return false;
         if (resolve_display_value(element).outer != CSS_VALUE_CONTENTS && element->specified_style &&
             style_tree_get_declaration(element->specified_style,CSS_PROPERTY_UNICODE_BIDI)) {
             mode = css_prop_compute_cascaded_keyword(element,CSS_PROPERTY_UNICODE_BIDI,CSS_VALUE_NORMAL);
@@ -308,7 +312,8 @@ struct BidiParagraphCollector {
         return true;
     }
     void object(DomElement* element) {
-        uint32_t cp = 0xFFFC;
+        uint32_t cp = element->tag() == MARKUP_NAME_BR && layout_ruby_annotation_content(element)
+            ? ' ' : 0xFFFC;
         if (element->view_type == RDT_VIEW_MARKER) {
             MarkerProp* marker = element->marker_prop();
             if (!marker || marker->is_outside || marker->width <= 0.0f) return;
@@ -343,7 +348,7 @@ LayoutBidiParagraphCache* bidi_source_paragraphs(LayoutContext* context,
     for (LayoutBidiParagraphCache* entry = context->block.bidi_paragraphs; entry; entry = entry->next)
         if (entry->scope == source && entry->direction == direction && entry->root_mode == root_mode)
             return entry;
-    BidiParagraphCollector collector(direction);
+    BidiParagraphCollector collector(direction, source);
     BidiParagraphCollector::InlineFrame root = {};
     bool override = root_mode == CSS_VALUE_BIDI_OVERRIDE || root_mode == CSS_VALUE_ISOLATE_OVERRIDE;
     collector.open(&root,override ? CSS_VALUE_BIDI_OVERRIDE : CSS_VALUE_NORMAL,direction);

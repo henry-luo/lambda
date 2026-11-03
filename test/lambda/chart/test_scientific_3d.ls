@@ -2,7 +2,7 @@ import chart: lambda.chart.chart
 import plot: lambda.chart.plot3d
 import camera: lambda.scene3d.camera
 fn near(a,b) => abs(a-b)<1e-9
-fn elements(node) => if (node is element) [node,for (child in content(node)) for (item in elements(child)) item] else []
+fn elements(node) any^ => if (node is element) [node,for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
 let spec={width:320,height:240,coordinate:{type:"cartesian3d",camera:{position:[0,0,4],target:[0,0,0],fov:90}},
     data:[{id:"center",x:0,y:0,z:0},{id:"corner",x:1,y:1,z:1}],mark:{kind:"point"}};
 let prepared=plot.prepare(spec);

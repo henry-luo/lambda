@@ -22,19 +22,19 @@ fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn replace_recipe(session_value,recipe) => {*:session_value,dirty:true,hist:if (session_value.tool == "crop")
     model.draft(session_value.hist,recipe) else model.commit_edit(session_value.hist,recipe)}
 fn replace_layers(session_value,recipe) => {*:session_value,hist:model.commit_edit(session_value.hist,recipe)}
-fn object_change(recipe,id,key,requested) {
+fn object_change(recipe,id,key,requested) any^ {
     let numeric = if (contains(layers.placement_keys,key)) float(requested) ^ { null } else null;
     if (contains(layers.placement_keys,key))
         if (numeric is number) layers.change(recipe,id,key,numeric/100) else recipe
     else layers.change(recipe,id,key,requested)
 }
-fn output_aspect(session_value) {
+fn output_aspect(session_value) any^ {
     let recipe = model.current(session_value.hist)
     let box = geometry.bounds(recipe.crop,if (recipe.turns%2 == 0) session_value.source.width else session_value.source.height,
         if (recipe.turns%2 == 0) session_value.source.height else session_value.source.width);
     (box.right-box.left)/(box.bottom-box.top)
 }
-fn add_layer(session_value,kind,text="Your story") {
+fn add_layer(session_value,kind,text="Your story") any^ {
     let recipe = model.current(session_value.hist)
     let layer = layers.create(recipe,kind,text,output_aspect(session_value));
     if (len(recipe.layers) >= 24) session_value else {*:replace_layers(session_value,{*:recipe,layers:[*recipe.layers,layer]}),
@@ -50,7 +50,7 @@ pn change_source(owner,session_value,path) any^ {
 pn command(owner,session_value,action) any^ {
     let recipe = model.current(session_value.hist)
     if (action == "add-text") { return add_layer(session_value,"text",field(owner,"text-entry")) }
-    if (starts_with(action,"layer-")) {
+    if (starts_with(action,"layer-")^) {
         let changed = if (action == "layer-delete") layers.remove(recipe,session_value.selected)
             else if (action == "layer-duplicate") layers.duplicate(recipe,session_value.selected)
             else layers.reorder(recipe,session_value.selected,if (action == "layer-front") 1 else -1)
@@ -64,7 +64,7 @@ pn command(owner,session_value,action) any^ {
     if (action == "close-dialog") { present.dialog(owner,""); return session_value }
     if (action == "toggle-inspector") { return {*:session_value,inspector_open:not session_value.inspector_open} }
     if (action == "open-confirm") { return change_source(owner,session_value,field(owner,"open-path"))^ }
-    if (starts_with(action,"sample-")) { return change_source(owner,session_value,url_resolve(BASE,"assets/" ++ slice(action,7) ++ ".jpg"))^ }
+    if (starts_with(action,"sample-")^) { return change_source(owner,session_value,url_resolve(BASE,"assets/" ++ slice(action,7) ++ ".jpg"))^ }
     if (action == "export-confirm") {
         // repeated activation shares the running export instead of launching another snapshot.
         if (session_value.export_job>0) { return session_value }
@@ -72,20 +72,20 @@ pn command(owner,session_value,action) any^ {
         let request=files.prepare_export(field(owner,"export-path"),session_value.source,requested)^
         let token=radiant.image_job(owner,{action:"start",channel:"export",source:string(session_value.source.identity),
             pixels:session_value.source.pixels,options:pipeline.options(requested),destination:request.raster})^
-        present.message(owner,"Exporting PNG…")
+        present.message(owner,"Exporting PNG…")^
         present.dialog(owner,"")
         dom.set_attribute(owner,"data-exporting","true")
-        present.attribute(owner,"export-confirm","disabled","")
+        present.attribute(owner,"export-confirm","disabled","")^
         return {*:session_value,export_job:token,export_request:{*:request,before:recipe}}
     }
     if (action == "recipe-save") {
         files.write_recipe(field(owner,"recipe-path"),session_value.source,recipe)^
-        present.message(owner,"Recipe saved · " ++ field(owner,"recipe-path"))
+        present.message(owner,"Recipe saved · " ++ field(owner,"recipe-path"))^
         return session_value
     }
     if (action == "recipe-load") {
         let restored = files.read_recipe(field(owner,"recipe-path"),session_value.source)^
-        present.message(owner,"Recipe restored")
+        present.message(owner,"Recipe restored")^
         present.dialog(owner,"")
         return replace_recipe(session_value,restored)
     }
@@ -133,12 +133,12 @@ on photo_frame(evt) {
             if (done.success) {
                 let began=clock()
                 files.finish_export(request,[done.height,done.width,4]) ^ { problem=^.message }
-                dom.set_attribute(evt.target,"data-export-process_us",string(done.elapsed_us))
-                dom.set_attribute(evt.target,"data-export-encode_us",string(done.encode_us))
+                dom.set_attribute(evt.target,"data-export-process_us",string(done.elapsed_us)^)
+                dom.set_attribute(evt.target,"data-export-encode_us",string(done.encode_us)^)
                 dom.set_attribute(evt.target,"data-export-compose_us",string(int((clock()-began)*1000000)))
                 if (problem is null) {
-                    present.message(evt.target,"Saved PNG · " ++ string(done.width) ++ " × " ++ string(done.height) ++ " · " ++ request.target)
-                    if (session.source.identity==request.source.identity and model.current(session.hist)==request.before) {
+                    present.message(evt.target,"Saved PNG · " ++ string(done.width) ++ " × " ++ string(done.height) ++ " · " ++ request.target)^
+                    if ((session.source.identity==request.source.identity and model.current(session.hist)==request.before)^) {
                         session=replace_recipe(session,request.recipe)
                     }
                 }
@@ -147,16 +147,16 @@ on photo_frame(evt) {
                 problem="Photo: image processing, encoding, or destination write failed"
             }
             dom.set_attribute(evt.target,"data-exporting","false")
-            present.attribute(evt.target,"export-confirm","disabled",null)
+            present.attribute(evt.target,"export-confirm","disabled",null)^
             session={*:session,export_job:0,export_request:null}
         }
     }
-    present.paint(evt.target,session) ^ { problem=^.message } ~ { session=~ }
+    { let __error_outcome_1 = present.paint(evt.target,session) ^ { ^ }; if (__error_outcome_1 is error) { problem=__error_outcome_1.message } else match __error_outcome_1 { case any { session=~ } } }
     if (not (problem is null)) {
-        present.message(evt.target,problem,true)
+        present.message(evt.target,problem,true)^
         radiant.image_job(evt.target,{action:"cancel",channel:"preview"})
         session={*:session,job:0,token:0}
-        if (session.export_job>0) { session=present.schedule(evt.target,session) }
+        if ((session.export_job>0)^) { session=present.schedule(evt.target,session) }
     }
     return 'handled'
 }
@@ -173,10 +173,10 @@ on click(evt) {
         let selected = dom.get_attribute(tool,"data-tool")
         session = {*:session,tool:selected,inspector_open:if (selected == session.tool) not session.inspector_open else true,dirty:true,zoom:0,pan:{x:0,y:0},
             hist:if (selected == "crop") model.begin(session.hist) else if (session.tool == "crop") model.discard(session.hist) else session.hist}
-        dom.set_scroll_state(present.node(owner,"inspector"),0.0,0.0)
+        dom.set_scroll_state(present.node(owner,"inspector")^,0.0,0.0)
     } else if (asset != null) {
         session = add_layer(session,dom.get_attribute(asset,"data-add"))
-        if (len(model.current(session.hist).layers) >= 24) present.message(owner,"Up to 24 layers per image.")
+        if ((len(model.current(session.hist).layers) >= 24)^) present.message(owner,"Up to 24 layers per image.")^
     } else if (swatch != null) {
         session = replace_layers(session,layers.change(model.current(session.hist),session.selected,"color",dom.get_attribute(swatch,"data-color")))
     } else if (preset != null and preset != owner) {
@@ -186,8 +186,8 @@ on click(evt) {
         session = replace_recipe(session,model.change(model.current(session.hist),key,model.recipe()[key]))
     } else if (action != null) {
         var problem = null
-        command(owner,session,dom.get_attribute(action,"data-action")) ^ { problem = ^.message } ~ { session = ~ }
-        if (not (problem is null)) present.message(owner,problem,true)
+        { let __error_outcome_2 = command(owner,session,dom.get_attribute(action,"data-action")) ^ { ^ }; if (__error_outcome_2 is error) { problem = __error_outcome_2.message } else match __error_outcome_2 { case any { session = ~ } } }
+        if (not (problem is null)) present.message(owner,problem,true)^
     } else { return 'pass' }
     session = present.schedule(owner,session)
     return 'handled'
@@ -197,7 +197,7 @@ on input(evt) {
     let object_key = dom.get_attribute(evt.target,"data-object")
     if (object_key != null) {
         // native text buffers must finish a numeric/color draft before it becomes an edit.
-        if (object_key == "color" or contains(layers.placement_keys,object_key)) { return 'pass' }
+        if ((object_key == "color" or contains(layers.placement_keys,object_key))^) { return 'pass' }
         let requested = dom.get_state(evt.target,"value")
         let recipe = model.current(session.hist)
         let changed = object_change(recipe,session.selected,object_key,requested)
@@ -234,18 +234,18 @@ on change(evt) {
     } else if (edge != null) {
         let rect = {*:recipe.crop,[edge]:float(dom.get_state(evt.target,"value"))/100}
         if (not geometry.valid(rect)) {
-            present.message(owner,"Crop edges must form a nonempty rectangle inside the image",true)
+            present.message(owner,"Crop edges must form a nonempty rectangle inside the image",true)^
             return 'handled'
         }
         session = {*:session,dirty:true,hist:model.draft(session.hist,{*:recipe,crop:rect})}
     } else if (id == "export-width" or id == "export-height") {
-        if (dom.get_state(present.node(owner,"aspect-lock"),"checked") == true) {
+        if ((dom.get_state(present.node(owner,"aspect-lock"),"checked") == true)^) {
             let dims = geometry.bounds(recipe.crop,if (recipe.turns%2 == 0) session.source.width else session.source.height,
                 if (recipe.turns%2 == 0) session.source.height else session.source.width)
             let ratio = (dims.right-dims.left)/(dims.bottom-dims.top)
             let requested = int(dom.get_state(evt.target,"value"))
             present.value(owner,if (id == "export-width") "export-height" else "export-width",
-                if (requested == 0) 0 else max(1,int(round(if (id == "export-width") requested/ratio else requested*ratio))))
+                if (requested == 0) 0 else max(1,int(round(if (id == "export-width") requested/ratio else requested*ratio))))^
         }
         return 'handled'
     } else { return 'pass' }
@@ -271,14 +271,14 @@ on pointerdown(evt) {
     let recipe = model.current(session.hist)
     let selected = if (layer_handle != null) session.selected else if (layers.object_tool(session.tool))
         layers.hit(recipe,(evt.clientX-box.x)/box.width,(evt.clientY-box.y)/box.height,box.width/box.height) else null
-    if (selected != null and selected != 0) {
+    if ((selected != null and selected != 0)^) {
         session = {*:session,selected:selected,drag:{x:evt.clientX,y:evt.clientY,width:box.width,height:box.height,
             handle:if (layer_handle == null) "move" else dom.get_attribute(layer_handle,"data-layer-handle"),
             layer:layers.selected(recipe,selected),recipe:recipe}}
         dom.set_pointer_capture(evt.target,evt.pointerId)
         return 'prevent-default'
     }
-    if (layers.object_tool(session.tool)) {
+    if (layers.object_tool(session.tool)^) {
         session = present.schedule(owner,{*:session,selected:0})
         return 'pass'
     }
@@ -288,12 +288,12 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let drag = session.drag
-    if (drag.layer != null) {
+    if ((drag.layer != null)^) {
         let changed = layers.drag(drag.layer,drag.handle,(evt.clientX-drag.x)/drag.width,(evt.clientY-drag.y)/drag.height,drag.width/drag.height)
         session = {*:session,hist:model.draft(session.hist,layers.update(model.current(session.hist),drag.layer.id,changed))}
-    } else if (drag.handle == "pan") {
+    } else if ((drag.handle == "pan")^) {
         session = {*:session,pan:{x:drag.pan.x+evt.clientX-drag.x,y:drag.pan.y+evt.clientY-drag.y}}
     } else {
         let dims = pipeline.dimensions(session.source.proxy,model.current(session.hist))
@@ -304,7 +304,7 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.drag.layer != null) { session = replace_layers(session,model.current(session.hist)) }
+    if ((session.drag.layer != null)^) { session = replace_layers(session,model.current(session.hist)) }
     session = present.schedule(owner_of(evt),{*:session,drag:null,gesture:null,compare:false,dirty:session.dirty or session.compare})
     return 'pass'
 }
@@ -329,7 +329,7 @@ on keydown(evt) {
     if (evt.key == "Escape") {
         // the select behavior dismisses its popup before editor-level Escape actions.
         if (editing and dom.matches(control,"select") and dom.dropdown_open(control)) { return 'pass' }
-        present.dialog(owner,"")
+        present.dialog(owner,"")^
         session = present.schedule(owner,{*:session,hist:model.discard(session.hist),tool:if (session.tool == "crop") "adjust" else session.tool,
             drag:null,compare:false,dirty:true})
         return 'prevent-default'
@@ -339,12 +339,12 @@ on keydown(evt) {
         session = present.schedule(owner,command(owner,session,if (evt.shiftKey) "redo" else "undo")^)
         return 'prevent-default'
     }
-    if (not editing and layers.object_tool(session.tool) and layers.selected(model.current(session.hist),session.selected) != null) {
+    if ((not editing and layers.object_tool(session.tool) and layers.selected(model.current(session.hist),session.selected) != null)^) {
         if (evt.key == "Delete" or evt.key == "Backspace") {
             session = present.schedule(owner,command(owner,session,"layer-delete")^)
             return 'prevent-default'
         }
-        if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"],evt.key)) {
+        if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"],evt.key)^) {
             let layer = layers.selected(model.current(session.hist),session.selected)
             let amount = if (evt.shiftKey) 0.02 else 0.002
             let moved = layers.drag(layer,"move",if (evt.key == "ArrowLeft") -amount else if (evt.key == "ArrowRight") amount else 0,
@@ -360,17 +360,17 @@ on keydown(evt) {
     return 'pass'
 }
 on keyup(evt) {
-    if (session.compare) { session = present.schedule(owner_of(evt),{*:session,compare:false,dirty:true}) }
+    if (session.compare^) { session = present.schedule(owner_of(evt),{*:session,compare:false,dirty:true}) }
     return 'pass'
 }
 on blur(evt) {
-    if (session.compare and dom.closest(evt.relatedTarget,"#photo") == null) {
+    if ((session.compare and dom.closest(evt.relatedTarget,"#photo") == null)^) {
         session = present.schedule(owner_of(evt),{*:session,compare:false,drag:null,dirty:true})
     }
     return 'pass'
 }
 on closerequest(evt) {
-    if (session.token > 0) dom.cancel_frame(owner_of(evt),session.token)
+    if ((session.token > 0)^) dom.cancel_frame(owner_of(evt),session.token)^
     radiant.image_job(owner_of(evt),{action:"cancel",channel:"preview"})
     radiant.image_job(owner_of(evt),{action:"cancel",channel:"export"})
     session = {*:session,token:0,job:0,export_job:0,drag:null,compare:false}

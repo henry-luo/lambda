@@ -6,15 +6,15 @@
 // M[i][j] -> m[i*4+j]
 
 // signatures and matrix/vector locals use the same packed float representation.
-pn mat4_identity() float[] {
+fn mat4_identity() float[] {
     return [1.0,0.0,0.0,0.0,
             0.0,1.0,0.0,0.0,
             0.0,0.0,1.0,0.0,
             0.0,0.0,0.0,1.0]
 }
 
-pn mat4_mul(m1: float[], m2: float[]) float[] {
-    var m: float[] = fill(16, 0.0)
+fn mat4_mul(m1: float[], m2: float[]) float[]^ {
+    var m: float[] = fill(16, 0.0)^
     var i: int = 0
     while (i < 4) {
         var j: int = 0
@@ -30,8 +30,8 @@ pn mat4_mul(m1: float[], m2: float[]) float[] {
     return m
 }
 
-pn mat4_add(m1: float[], m2: float[]) float[] {
-    var m: float[] = fill(16, 0.0)
+fn mat4_add(m1: float[], m2: float[]) float[]^ {
+    var m: float[] = fill(16, 0.0)^
     var i: int = 0
     while (i < 16) {
         m[i] = m1[i] + m2[i]
@@ -41,8 +41,8 @@ pn mat4_add(m1: float[], m2: float[]) float[] {
 }
 
 // multiply 4x4 matrix with 4-element vector
-pn vmulti(m: float[], v: float[]) float[] {
-    var r: float[] = fill(4, 0.0)
+fn vmulti(m: float[], v: float[]) float[]^ {
+    var r: float[] = fill(4, 0.0)^
     var i: int = 0
     while (i < 4) {
         r[i] = m[i * 4 + 0] * v[0] + m[i * 4 + 1] * v[1] +
@@ -53,8 +53,8 @@ pn vmulti(m: float[], v: float[]) float[] {
 }
 
 // multiply 3x3 sub-matrix with 3-element vector
-pn vmulti2(m: float[], v: float[]) float[] {
-    var r: float[] = fill(3, 0.0)
+fn vmulti2(m: float[], v: float[]) float[]^ {
+    var r: float[] = fill(3, 0.0)^
     var i: int = 0
     while (i < 3) {
         r[i] = m[i * 4 + 0] * v[0] + m[i * 4 + 1] * v[1] + m[i * 4 + 2] * v[2]
@@ -63,7 +63,7 @@ pn vmulti2(m: float[], v: float[]) float[] {
     return r
 }
 
-pn translate_mat(m: float[], dx: float, dy: float, dz: float) float[] {
+fn translate_mat(m: float[], dx: float, dy: float, dz: float) float[]^ {
     var t: float[] = [1.0,0.0,0.0,dx,
              0.0,1.0,0.0,dy,
              0.0,0.0,1.0,dz,
@@ -71,7 +71,7 @@ pn translate_mat(m: float[], dx: float, dy: float, dz: float) float[] {
     return mat4_mul(t, m)
 }
 
-pn rotate_x(m: float[], phi: float) float[] {
+fn rotate_x(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -82,7 +82,7 @@ pn rotate_x(m: float[], phi: float) float[] {
     return mat4_mul(r, m)
 }
 
-pn rotate_y(m: float[], phi: float) float[] {
+fn rotate_y(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -93,7 +93,7 @@ pn rotate_y(m: float[], phi: float) float[] {
     return mat4_mul(r, m)
 }
 
-pn rotate_z(m: float[], phi: float) float[] {
+fn rotate_z(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -104,22 +104,22 @@ pn rotate_z(m: float[], phi: float) float[] {
     return mat4_mul(r, m)
 }
 
-pn calc_cross(v0: float[], v1: float[]) float[] {
+fn calc_cross(v0: float[], v1: float[]) float[] {
     return [v0[1] * v1[2] - v0[2] * v1[1],
             v0[2] * v1[0] - v0[0] * v1[2],
             v0[0] * v1[1] - v0[1] * v1[0]]
 }
 
-pn calc_normal(v0: float[], v1: float[], v2: float[]) float[] {
+fn calc_normal(v0: float[], v1: float[], v2: float[]) float[]^ {
     var a: float[] = [v0[0] - v1[0], v0[1] - v1[1], v0[2] - v1[2]]
     var b: float[] = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]]
-    var cross: float[] = calc_cross(a, b)
+    var cross: float[] = calc_cross(a, b)^
     var length: float = math.sqrt(cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2])
     return [cross[0] / length, cross[1] / length, cross[2] / length, 1.0]
 }
 
 // Draw line (just count pixels, no actual rendering)
-pn draw_line(from_v: float[], to_v: float[], last_px: int) int {
+fn draw_line(from_v: float[], to_v: float[], last_px: int) int^ {
     var x1: float = from_v[0]
     var x2: float = to_v[0]
     var y1: float = from_v[1]
@@ -127,20 +127,20 @@ pn draw_line(from_v: float[], to_v: float[], last_px: int) int {
     var dx: float = abs(x2 - x1)
     var dy: float = abs(y2 - y1)
     var num_pix: float = 0.0
-    if (dx >= dy) {
-        num_pix = dx
+    if ((dx >= dy)^) {
+        num_pix = dx^
     } else {
-        num_pix = dy
+        num_pix = dy^
     }
     return int(round(float(last_px) + num_pix))
 }
 
-pn run_cube(cube_size: int) float {
+fn run_cube(cube_size: int) float^ {
     let cs: float = float(cube_size)
 
     // Qube vertices as flat array: 9 points x 4 components = 36
     // q[i] = [x, y, z, 1]
-    var qv: float[] = fill(36, 0.0)
+    var qv: float[] = fill(36, 0.0)^
     // P0: -cs,-cs,cs
     qv[0] = 0.0 - cs
     qv[1] = 0.0 - cs
@@ -191,7 +191,7 @@ pn run_cube(cube_size: int) float {
     var edges: int[] = [0,1,2, 3,2,6, 7,6,5, 4,5,1, 4,0,3, 1,5,6]
 
     // Calculate normals for 6 faces
-    var normals: float[] = fill(24, 0.0)
+    var normals: float[] = fill(24, 0.0)^
     var fi: int = 0
     while (fi < 6) {
         var e0: int = edges[fi * 3]
@@ -200,7 +200,7 @@ pn run_cube(cube_size: int) float {
         var n: float[] = calc_normal(
             [qv[e0 * 4], qv[e0 * 4 + 1], qv[e0 * 4 + 2]],
             [qv[e1 * 4], qv[e1 * 4 + 1], qv[e1 * 4 + 2]],
-            [qv[e2 * 4], qv[e2 * 4 + 1], qv[e2 * 4 + 2]])
+            [qv[e2 * 4], qv[e2 * 4 + 1], qv[e2 * 4 + 2]])^
         normals[fi * 4] = n[0]
         normals[fi * 4 + 1] = n[1]
         normals[fi * 4 + 2] = n[2]
@@ -214,17 +214,17 @@ pn run_cube(cube_size: int) float {
 
     // Initial translation to origin
     var mtrans = translate_mat(mat4_identity(), origin[0], origin[1], origin[2])
-    mqube = mat4_mul(mtrans, mqube)
+    mqube = mat4_mul(mtrans, mqube)^
 
     // Transform all 9 points
     var pi: int = 0
     while (pi < 9) {
-        var old_v: float[] = fill(4, 0.0)
+        var old_v: float[] = fill(4, 0.0)^
         old_v[0] = qv[pi * 4]
         old_v[1] = qv[pi * 4 + 1]
         old_v[2] = qv[pi * 4 + 2]
         old_v[3] = qv[pi * 4 + 3]
-        var new_v: float[] = vmulti(mtrans, old_v)
+        var new_v: float[] = vmulti(mtrans, old_v)^
         qv[pi * 4] = new_v[0]
         qv[pi * 4 + 1] = new_v[1]
         qv[pi * 4 + 2] = new_v[2]
@@ -240,7 +240,7 @@ pn run_cube(cube_size: int) float {
         // Build transform: translate to center, rotate, translate back
         // build the temporary vector in the packed lane so its declaration
         // contract sees the same ArrayNum carrier as qv (D2.2.2).
-        var center_v: float[] = fill(4, 0.0)
+        var center_v: float[] = fill(4, 0.0)^
         center_v[0] = qv[32]
         center_v[1] = qv[33]
         center_v[2] = qv[34]
@@ -250,17 +250,17 @@ pn run_cube(cube_size: int) float {
         mtrans = rotate_y(mtrans, 3.0)
         mtrans = rotate_z(mtrans, 5.0)
         mtrans = translate_mat(mtrans, center_v[0], center_v[1], center_v[2])
-        mqube = mat4_mul(mtrans, mqube)
+        mqube = mat4_mul(mtrans, mqube)^
 
         // Transform vertices
         pi = 8
         while (pi >= 0) {
-            var old2: float[] = fill(4, 0.0)
+            var old2: float[] = fill(4, 0.0)^
             old2[0] = qv[pi * 4]
             old2[1] = qv[pi * 4 + 1]
             old2[2] = qv[pi * 4 + 2]
             old2[3] = qv[pi * 4 + 3]
-            var new2: float[] = vmulti(mtrans, old2)
+            var new2: float[] = vmulti(mtrans, old2)^
             qv[pi * 4] = new2[0]
             qv[pi * 4 + 1] = new2[1]
             qv[pi * 4 + 2] = new2[2]
@@ -269,10 +269,10 @@ pn run_cube(cube_size: int) float {
         }
 
         // Calculate current normals and draw visible faces
-        var cur_n: float[] = fill(18, 0.0)
+        var cur_n: float[] = fill(18, 0.0)^
         var ni: int = 0
         while (ni < 6) {
-            var nv: float[] = vmulti2(mqube, [normals[ni * 4], normals[ni * 4 + 1], normals[ni * 4 + 2]])
+            var nv: float[] = vmulti2(mqube, [normals[ni * 4], normals[ni * 4 + 1], normals[ni * 4 + 2]])^
             cur_n[ni * 3] = nv[0]
             cur_n[ni * 3 + 1] = nv[1]
             cur_n[ni * 3 + 2] = nv[2]
@@ -280,25 +280,25 @@ pn run_cube(cube_size: int) float {
         }
 
         // 12 line drawn flags
-        var line_drawn: int[] = fill(12, 0)
+        var line_drawn: int[] = fill(12, 0)^
         last_px = 0
 
         // Face 0: vertices 0,1,2,3 (lines 0,1,2,3)
         if (cur_n[0 * 3 + 2] < 0.0) {
             if (line_drawn[0] == 0) {
-                last_px = draw_line([qv[0], qv[1]], [qv[4], qv[5]], last_px)
+                last_px = draw_line([qv[0], qv[1]], [qv[4], qv[5]], last_px)^
                 line_drawn[0] = 1
             }
             if (line_drawn[1] == 0) {
-                last_px = draw_line([qv[4], qv[5]], [qv[8], qv[9]], last_px)
+                last_px = draw_line([qv[4], qv[5]], [qv[8], qv[9]], last_px)^
                 line_drawn[1] = 1
             }
             if (line_drawn[2] == 0) {
-                last_px = draw_line([qv[8], qv[9]], [qv[12], qv[13]], last_px)
+                last_px = draw_line([qv[8], qv[9]], [qv[12], qv[13]], last_px)^
                 line_drawn[2] = 1
             }
             if (line_drawn[3] == 0) {
-                last_px = draw_line([qv[12], qv[13]], [qv[0], qv[1]], last_px)
+                last_px = draw_line([qv[12], qv[13]], [qv[0], qv[1]], last_px)^
                 line_drawn[3] = 1
             }
         }
@@ -306,19 +306,19 @@ pn run_cube(cube_size: int) float {
         // Face 1: vertices 3,2,6,7 (lines 2,9,6,10)
         if (cur_n[1 * 3 + 2] < 0.0) {
             if (line_drawn[2] == 0) {
-                last_px = draw_line([qv[12], qv[13]], [qv[8], qv[9]], last_px)
+                last_px = draw_line([qv[12], qv[13]], [qv[8], qv[9]], last_px)^
                 line_drawn[2] = 1
             }
             if (line_drawn[9] == 0) {
-                last_px = draw_line([qv[8], qv[9]], [qv[24], qv[25]], last_px)
+                last_px = draw_line([qv[8], qv[9]], [qv[24], qv[25]], last_px)^
                 line_drawn[9] = 1
             }
             if (line_drawn[6] == 0) {
-                last_px = draw_line([qv[24], qv[25]], [qv[28], qv[29]], last_px)
+                last_px = draw_line([qv[24], qv[25]], [qv[28], qv[29]], last_px)^
                 line_drawn[6] = 1
             }
             if (line_drawn[10] == 0) {
-                last_px = draw_line([qv[28], qv[29]], [qv[12], qv[13]], last_px)
+                last_px = draw_line([qv[28], qv[29]], [qv[12], qv[13]], last_px)^
                 line_drawn[10] = 1
             }
         }
@@ -326,19 +326,19 @@ pn run_cube(cube_size: int) float {
         // Face 2: vertices 4,5,6,7 (lines 4,5,6,7)
         if (cur_n[2 * 3 + 2] < 0.0) {
             if (line_drawn[4] == 0) {
-                last_px = draw_line([qv[16], qv[17]], [qv[20], qv[21]], last_px)
+                last_px = draw_line([qv[16], qv[17]], [qv[20], qv[21]], last_px)^
                 line_drawn[4] = 1
             }
             if (line_drawn[5] == 0) {
-                last_px = draw_line([qv[20], qv[21]], [qv[24], qv[25]], last_px)
+                last_px = draw_line([qv[20], qv[21]], [qv[24], qv[25]], last_px)^
                 line_drawn[5] = 1
             }
             if (line_drawn[6] == 0) {
-                last_px = draw_line([qv[24], qv[25]], [qv[28], qv[29]], last_px)
+                last_px = draw_line([qv[24], qv[25]], [qv[28], qv[29]], last_px)^
                 line_drawn[6] = 1
             }
             if (line_drawn[7] == 0) {
-                last_px = draw_line([qv[28], qv[29]], [qv[16], qv[17]], last_px)
+                last_px = draw_line([qv[28], qv[29]], [qv[16], qv[17]], last_px)^
                 line_drawn[7] = 1
             }
         }
@@ -346,19 +346,19 @@ pn run_cube(cube_size: int) float {
         // Face 3: vertices 4,5,1,0 (lines 4,8,0,11)
         if (cur_n[3 * 3 + 2] < 0.0) {
             if (line_drawn[4] == 0) {
-                last_px = draw_line([qv[16], qv[17]], [qv[20], qv[21]], last_px)
+                last_px = draw_line([qv[16], qv[17]], [qv[20], qv[21]], last_px)^
                 line_drawn[4] = 1
             }
             if (line_drawn[8] == 0) {
-                last_px = draw_line([qv[20], qv[21]], [qv[4], qv[5]], last_px)
+                last_px = draw_line([qv[20], qv[21]], [qv[4], qv[5]], last_px)^
                 line_drawn[8] = 1
             }
             if (line_drawn[0] == 0) {
-                last_px = draw_line([qv[4], qv[5]], [qv[0], qv[1]], last_px)
+                last_px = draw_line([qv[4], qv[5]], [qv[0], qv[1]], last_px)^
                 line_drawn[0] = 1
             }
             if (line_drawn[11] == 0) {
-                last_px = draw_line([qv[0], qv[1]], [qv[16], qv[17]], last_px)
+                last_px = draw_line([qv[0], qv[1]], [qv[16], qv[17]], last_px)^
                 line_drawn[11] = 1
             }
         }
@@ -366,19 +366,19 @@ pn run_cube(cube_size: int) float {
         // Face 4: vertices 4,0,3,7 (lines 11,3,10,7)
         if (cur_n[4 * 3 + 2] < 0.0) {
             if (line_drawn[11] == 0) {
-                last_px = draw_line([qv[16], qv[17]], [qv[0], qv[1]], last_px)
+                last_px = draw_line([qv[16], qv[17]], [qv[0], qv[1]], last_px)^
                 line_drawn[11] = 1
             }
             if (line_drawn[3] == 0) {
-                last_px = draw_line([qv[0], qv[1]], [qv[12], qv[13]], last_px)
+                last_px = draw_line([qv[0], qv[1]], [qv[12], qv[13]], last_px)^
                 line_drawn[3] = 1
             }
             if (line_drawn[10] == 0) {
-                last_px = draw_line([qv[12], qv[13]], [qv[28], qv[29]], last_px)
+                last_px = draw_line([qv[12], qv[13]], [qv[28], qv[29]], last_px)^
                 line_drawn[10] = 1
             }
             if (line_drawn[7] == 0) {
-                last_px = draw_line([qv[28], qv[29]], [qv[16], qv[17]], last_px)
+                last_px = draw_line([qv[28], qv[29]], [qv[16], qv[17]], last_px)^
                 line_drawn[7] = 1
             }
         }
@@ -386,19 +386,19 @@ pn run_cube(cube_size: int) float {
         // Face 5: vertices 1,5,6,2 (lines 8,5,9,1)
         if (cur_n[5 * 3 + 2] < 0.0) {
             if (line_drawn[8] == 0) {
-                last_px = draw_line([qv[4], qv[5]], [qv[20], qv[21]], last_px)
+                last_px = draw_line([qv[4], qv[5]], [qv[20], qv[21]], last_px)^
                 line_drawn[8] = 1
             }
             if (line_drawn[5] == 0) {
-                last_px = draw_line([qv[20], qv[21]], [qv[24], qv[25]], last_px)
+                last_px = draw_line([qv[20], qv[21]], [qv[24], qv[25]], last_px)^
                 line_drawn[5] = 1
             }
             if (line_drawn[9] == 0) {
-                last_px = draw_line([qv[24], qv[25]], [qv[8], qv[9]], last_px)
+                last_px = draw_line([qv[24], qv[25]], [qv[8], qv[9]], last_px)^
                 line_drawn[9] = 1
             }
             if (line_drawn[1] == 0) {
-                last_px = draw_line([qv[8], qv[9]], [qv[4], qv[5]], last_px)
+                last_px = draw_line([qv[8], qv[9]], [qv[4], qv[5]], last_px)^
                 line_drawn[1] = 1
             }
         }
@@ -416,13 +416,13 @@ pn run_cube(cube_size: int) float {
     return sum
 }
 
-pn run() bool {
+pn run() bool^ {
     // Validate across 4 cube sizes: 20, 40, 80, 160
     // JS expected: all sizes produce sum ~= 2889.0
     var pass = true
     var sz: int = 20
     while (sz <= 160) {
-        var sum: float = run_cube(sz)
+        var sum: float = run_cube(sz)^
         var expected: float = 2889.0
         var diff: float = sum - expected
         if (diff < 0.0) {
@@ -443,7 +443,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 8) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

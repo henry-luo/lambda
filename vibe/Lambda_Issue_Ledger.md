@@ -18,6 +18,10 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Type-operator precedence follow-up — 2026-11-03
+
+The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern precedence `to` > `&` > `!` > `|`. The production C parser has distinct binding powers for these operators. **LR02-37 remains open pending focused qualification; no tests were run in this change.**
+
 ## Names, containment and matrix-row follow-up — 2026-10-31
 
 Implemented the long-name portion of **LR07-11**, correctness residues 1–4 of
@@ -480,6 +484,39 @@ that starts one.
 ---
 
 
+<a id="lr01-21"></a>**LR01-21 · Disabling MIR reuse can recurse on a retained AST hit · OPEN (found 2026-11-03)**
+
+Reproduced on the error-handling branch over `f7ce32b36`: running the complete
+`test_io_terminal_gtest.exe` with `LAMBDA_DISABLE_MIR_CACHE=1` exhausts the
+native stack in `load_script`; normal caching passes all ten cases. An earlier
+interpreter import leaves an AST artifact. A later forced-JIT import skips
+AST lookup (`lambda/runtime/runner.cpp:2224`) but selects an AST build claim
+because MIR reuse is disabled (`:2266`). The READY claim retries the same
+lookup (`:2291`) indefinitely. These selection conditions are unchanged from
+the pre-rework `0452aaabc` source. The claim and hit paths must agree on the
+artifact kind without changing the requested execution tier (D8.1.1v18,
+D8.5.1v3). This is separate from error-union admission. Bounded LLDB trace and
+source comparison: `temp/error-handling/m8-terminal-no-cache-stack.log` and
+`m8-cache-retry-root-review.json`; qualification record:
+[type/error implementation](<impl/Lambda_Impl_Type_Error_Handling (done).md>).
+
+<a id="lr01-22"></a>**LR01-22 · Experimental Lambda MIR MVP needs the new error rules · OPEN (2026-11-03)**
+
+The production frontend enforces S7.7.2v2/S7.7.4v2 retained binding outcomes
+and S11.4.6v4 normal admission through error unions. Experimental MVP fixtures
+still use clean returns after fallible admissions/assignments and unchecked
+loop conversions. Six incompatible fixtures were found against `88d30f849`;
+the latest MVP work at `1b0927e30` brings the current count to eleven.
+`admitted_call` explicitly rejects propagation, and unary admission excludes
+`OPERATOR_PROPAGATE` (`lambda/runtime/mvp/mvp_plan.cpp`). Adapt fixtures and
+prototype together; do not restore declaration exits or erase error outcomes.
+Normal admission and post-binding recovery also need prototype qualification.
+**USER, 2026-11-03: leave MVP adaptation to the ongoing main-checkout work.**
+This merge preserves that implementation without claiming MVP qualification.
+Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
+and `final-source-audit.json`.
+[Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
+
 ## 2. Parsing & AST construction (LR_02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**
@@ -609,8 +646,8 @@ every use fails to parse.
 <a id="lr02-36"></a>**LR02-36 · A quoted-path `import` without an alias is silently ignored · OPEN (found 2026-10-07, std test triage)**
 `import './circular_import.ls'` at the top of a script neither imports nor errors: the quoted-module branch at `lambda/runtime/build_ast.cpp:13179` only acts when `node->alias` is set, so the script runs as if the line were absent (it printed `42`). S16.9.8 gives the relative form `import .circular_import`, which does detect the cycle (E217, now asserted by `NegativeScriptTest.SelfImportIsCircularE217`). The unaliased quoted form should be rejected or resolved, not dropped.
 
-<a id="lr02-37"></a>**LR02-37 · The C expression parser gives `|`, `&`, `!` and `to` one binding power, so a type operation means one thing in a `type` declaration and another in a value expression (S10.1.1v4) · OPEN (found 2026-09-27 by the string-pattern audit; filed 2026-10-23)**
-`infix_bp` maps all four tokens to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c:1856`–`1858`), while the type-pattern parser and the reference grammar rank `to` above `&` above `!` above `|`. Re-checked 2026-10-23: with `type T = "a" | "b" & "c"` and `let x = "a" | "b" & "c"`, `"a" is T` is `true` and `"a" is x` is `false`; `let r = 5 | 1 to 3` fails at run time ("range bounds must be exact integers or single-codepoint strings") while the same type admits 5 and 1 to 3. S10.1.1v4 promises a type operation the same meaning wherever it is written; no ruling fixes the tiers themselves (SPO7, [LR05-17](#lr05-17)). Recommendation: make the reference-grammar order a clause of S10.1.1 and align the C expression parser. Record: [Lambda_Design_String_Pattern.md §5.5](Lambda_Design_String_Pattern.md#55-the-same-operators-in-value-expressions).
+<a id="lr02-37"></a>**LR02-37 · The C expression parser gave `|`, `&`, `!` and `to` one binding power · OPEN (S10.1.1v5 implemented 2026-11-03; qualification pending)**
+`infix_bp` previously mapped all four operators to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c`). That made `type T = "a" | "b" & "c"` admit `"a"`, while the same expression in `let x = ...` denoted `none`; `let r = 5 | 1 to 3` also failed at run time. **S10.1.1v5** adopts the reference grammar and type-pattern order, `to` > `&` > `!` > `|`, left-associative. The C parser now has separate binding powers, so both contexts group the first example as `"a" | ("b" & "c")`, and the range expression as `5 | (1 to 3)`. The previous reproducers have not yet been rerun.
 
 ## 3. Value & type model (LR_03)
 
@@ -767,7 +804,7 @@ this sits outside the pool/GC discipline.
 
 <a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
 These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
-- **SPO7, value half:** the tiers of `|`, `&`, binary `!` and `to` in value expressions. The island half is SP19. The resulting divergence between front ends is [LR02-37](#lr02-37).
+- **SPO7, value half resolved 2026-11-03 (S10.1.1v5):** value expressions now use `to` > `&` > `!` > `|`; implementation qualification remains [LR02-37](#lr02-37). The island half is SP19.
 - **SPO10:** what `.`, `...` and `"\s"` match across line terminators. Today `.` stops at a newline and `...` does not; the recommendation is a dotall `.` and the ECMAScript `\s` set.
 - **SPO12, spelling half:** how to write a case-insensitive `is` or `match`. The folding rule is S17.7.1. SP16's `\tag( … )` family, which the recommendation leaned on, was superseded by SP24.
 - **SPO1:** multi-letter and Unicode class names (`\p{Letter}`), deferred on 2026-08-07.

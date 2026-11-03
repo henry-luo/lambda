@@ -5,13 +5,13 @@
 // The native return lane cannot represent an error, so it travels beside the
 // value on the error lane; before LR12-24 the JIT republished the error Item's
 // raw bits through the value lane instead -- `inf` from int, `nan` from float.
-pn int_acc(a: int[], i: int) int {
+pn int_acc(a: int[], i: int) int^ {
     var s: int = 1
     s = s + a[i]
     return s
 }
 
-pn float_acc(a: float[], i: int) float {
+pn float_acc(a: float[], i: int) float^ {
     var s: float = 1.0
     s = s + a[i]
     return s
@@ -20,7 +20,7 @@ pn float_acc(a: float[], i: int) float {
 // TE-18 case 1: the same skip at a DECLARATION boundary. The out-of-range read
 // admits null before the binding exists, so the block -- here the fn body --
 // yields the error rather than the declared `float`.
-pn read_sum(xs: float[], ys: float[], index: int) float {
+pn read_sum(xs: float[], ys: float[], index: int) float^ {
     let left: float = xs[index]
     let right: float = ys[index]
     return left + right

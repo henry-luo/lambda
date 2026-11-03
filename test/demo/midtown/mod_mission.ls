@@ -16,9 +16,9 @@ pub let STOPS = [for (b in city.BLOCKS, p in [
 pub fn initial() => {phase: "idle", target: null, deadline: 0.0, limit: 0.0, cash: 0, streak: 0, delivered: 0,
     runs: 0, damage_at_pickup: 0.0, message: null}
 // a stop at least `far` metres from the car, chosen by a key that changes with every leg
-fn pick(x, z, far, salt) {
-    let options = [for (s in STOPS where u.dist(s.x, s.z, x, z) >= far) s];
-    options[rng.below(rng.derive(KEY, salt), len(options))]
+fn pick(x, z, far, salt) any^ {
+    let options = [for (s in STOPS where u.dist(s.x, s.z, x, z)^ >= far) s];
+    options[rng.below(rng.derive(KEY, salt), len(options))^]
 }
 pub fn begin(m, car) {
     let target = pick(car.x, car.z, 110.0, ["pickup", m.runs, m.delivered]);
@@ -30,7 +30,7 @@ pub fn stop(m) => {*: m, phase: "idle", target: null, streak: 0, message: "Couri
 pub fn allowance(a, b) => round((abs(a.x - b.x) + abs(a.z - b.z)) / 11.0 + 14.0)
 pub fn reward(m, left) => int(round((60.0 + 6.0 * max(0.0, left)) * (1.0 + 0.25 * m.streak))) ^ { 0 }
 
-pub fn step(m, car, t) {
+pub fn step(m, car, t) any^ {
     let near = m.target != null and u.dist(car.x, car.z, m.target.x, m.target.z) < REACH;
     if (m.phase == "pickup" and near) {
         let dropoff = pick(car.x, car.z, 190.0, ["dropoff", m.runs, m.delivered])

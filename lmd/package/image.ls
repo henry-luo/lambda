@@ -5,7 +5,7 @@ pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^
 pub fn from_array(samples, options = {}) element^ => lambda.sys.image_raster(samples, options)^
 pub fn channel(raster, channel_name) array^ => lambda.sys.image_region(raster, null, channel_name)^
 pub fn checked_options(options, allowed) map^ {
-    if (not (options is map) or len([for (key, value in options where not (string(key) in allowed)) key]) > 0)
+    if (not (options is map) or len([for (key, value in options where ((not (string(key) in allowed)) ^ { false })) key]) > 0)
         raise error("image: unknown option or options are not a map")
     else options
 }
@@ -19,7 +19,7 @@ pub fn materialize(raster) element =>
         channels: raster.channels, color: raster.color, alpha_mode: raster.alpha_mode,
         pixels: raster.pixels>
 
-pub fn raster_of(layer) element? => [for (child in content(layer) where name(child) == 'raster') child][0]
+pub fn raster_of(layer) element? => [for (child in ((content(layer)) ^ { [] }) where ((name(child) == 'raster') ^ { false })) child][0]
 pub fn layer(raster, options = {}) element => <layer kind: 'raster', *: options, raster>
 pub fn adjustment_layer(options = {}, layer_options = {}) element =>
     <layer kind:'adjustment',*:layer_options,<effect kind:'adjust',enabled:true,name:"Adjustment",options:options>>
@@ -31,12 +31,12 @@ pub fn stack(layers, options = {}) element => <stack *: options, *layers>
 pub fn frame(composition, duration, options = {}) element =>
     <frame duration: duration, *: options, composition>
 pub fn document(composition, options = {}) element => <image *: options, composition>
-pub fn frames(image) array => [for (child in content(image) where name(child) == 'frame') child]
+pub fn frames(image) array => [for (child in ((content(image)) ^ { [] }) where ((name(child) == 'frame') ^ { false })) child]
 pub fn layers(composition) array =>
-    [for (child in content(composition) where name(child) in ['layer', 'stack']) child]
-pub fn assets(image) element? => [for (child in content(image) where name(child) == 'assets') child][0]
+    [for (child in ((content(composition)) ^ { [] }) where ((name(child) in ['layer', 'stack']) ^ { false })) child]
+pub fn assets(image) element? => [for (child in ((content(image)) ^ { [] }) where ((name(child) == 'assets') ^ { false })) child][0]
 pub fn composition(image, frame_index = 0) element? {
-    let direct = [for (child in content(image) where name(child) == 'stack') child]
+    let direct = [for (child in ((content(image)) ^ { [] }) where ((name(child) == 'stack') ^ { false })) child]
     if (len(direct) == 1) direct[0] else frames(image)[frame_index][0]
 }
 
@@ -112,7 +112,7 @@ pub fn encode(image, options = {}) binary^ {
                 raise error("image.encode: animation exceeds the decoded frame budget") else true
         let rendered = if (options.frame != null or len(timeline) == 0)
                 [render_frame(doc, {frame: options.frame})^]
-            else [for (i in 0 to (len(timeline) - 1)) render_frame(doc, {frame: i})^]
+            else [for (i in ((0 to (len(timeline) - 1)) ^ { [] })) render_frame(doc, {frame: i})^]
         lambda.sys.image_encode(doc, rendered, options)^
     } else {
         let rendered = render_frame(doc, {frame: options.frame})^
@@ -127,9 +127,9 @@ pub pn write(image, target, options = {}) bool^ {
 
 // Pure replacements share unchanged children and invalidate the derived preview.
 pub fn with_children(node, children) element^ => lambda.sys.image_patch(node, {},
-    if (name(node) == 'image') [for (child in children where name(child) != 'preview') child] else children)^
+    if (name(node) == 'image') [for (child in children where ((name(child) != 'preview') ^ { false })) child] else children)^
 pub fn with_properties(node, properties) element^ => lambda.sys.image_patch(node, properties,
-    if (name(node) == 'image') [for (child in content(node) where name(child) != 'preview') child] else null)^
+    if (name(node) == 'image') [for (child in ((content(node)) ^ { [] }) where ((name(child) != 'preview') ^ { false })) child] else null)^
 pub fn adopt(node) element^ {
     if (name(node) == 'raster') {
         let owned = from_array(node.pixels, {color_space: node.color})^
@@ -141,7 +141,7 @@ pub fn adopt(node) element^ {
         else owned
     }
     else if (name(node) in ['image', 'frame', 'stack', 'layer', 'mask', 'preview'])
-        with_children(node, [for (child in content(node)) adopt(child)^])^
+        with_children(node, [for (child in ((content(node)) ^ { [] })) adopt(child)^])^
     else node
 }
 
@@ -175,7 +175,7 @@ pub fn reorder(node, from_index, to_index) element^ {
 pub fn mask(raster, options = {}) element => <mask role: 'alpha', *: options, raster>
 pub fn to_animation(image, duration) element^ {
     if (len(frames(image)) > 0) image
-    else with_children(image, [for (child in content(image))
+    else with_children(image, [for (child in ((content(image)) ^ { [] }))
         if (name(child) == 'stack') frame(child, duration) else child])^
 }
 
@@ -209,7 +209,7 @@ pub fn info(image) map => {width: image.width, height: image.height,
 pub fn validate(image) bool^ {
     let timeline = frames(image)
     if (len(timeline) == 0) { let checked = render_frame(image)^; true }
-    else { let checked = [for (i in 0 to (len(timeline) - 1)) render_frame(image, {frame: i})^]; true }
+    else { let checked = [for (i in ((0 to (len(timeline) - 1)) ^ { [] })) render_frame(image, {frame: i})^]; true }
 }
 
 pub fn capabilities() array^ => lambda.sys.image_capabilities()^
@@ -221,9 +221,9 @@ pub fn encode_report(image, options = {}) map^ {
         preserved: if (format in ['psd', "psd"]) ['hierarchy', 'names', 'geometry', 'opacity', 'masks']
             else if (format in ['gif', "gif"]) ['timing', 'plays'] else [],
         rasterized: if (format in ['psd', "psd"]) [] else ['composition'],
-        omitted: [*if (assets(image) == null) [] else [for (asset in content(assets(image))) asset.id],
+        omitted: [*if (assets(image) == null) [] else [for (asset in ((content(assets(image))) ^ { [] })) asset.id],
             *if (len(frames(image)) > 0 and not (format in ['gif', "gif"])) ['timing'] else [],
-            *if (len([for (child in content(image) where name(child) == 'metadata') child]) > 0) ['metadata'] else []],
+            *if (len([for (child in ((content(image)) ^ { [] }) where ((name(child) == 'metadata') ^ { false })) child]) > 0) ['metadata'] else []],
         notes: if (format in ['psd', "psd"]) ["opacity and mask default round to 8 bits",
             "source blocks are rewritten; opaque source metadata is not copied"] else []}}
 }

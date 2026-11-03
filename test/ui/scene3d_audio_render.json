@@ -1,0 +1,29 @@
+{
+  "name":"Scene3D explicit render jobs retain private virtual output and stream through procedural IO",
+  "html":"test/ui/scene3d_audio.html",
+  "viewport":{"width":200,"height":160},
+  "env":[{"key":"LAMBDA_AUDIO_OUTPUT","value":"offline"}],
+  "input_turn_ms":0,
+  "event_interval_ms":0,
+  "events":[
+    {"type":"script","js":"audioSceneRequest('open')"},
+    {"type":"script","js":"audioSceneRender('open')"},
+    {"type":"assert_script","js":"sceneRender.state==='ready'&&typeof sceneRender.job==='bigint'&&sceneRender.frames===256n&&sceneRender.rendered===0n&&sceneRender.pending.length===2&&sceneRender.sample_rate===48000&&sceneRender.channels===2"},
+    {"type":"advance_time","ms":25,"steps":1},
+    {"type":"script","js":"audioSceneRender('read')"},
+    {"type":"assert_script","js":"sceneRender.rendered===0n&&sceneRender.history.length===0"},
+    {"type":"script","js":"sceneRender.pending[0].requested=999n;audioSceneRender('step')"},
+    {"type":"assert_script","js":"sceneRender.state==='running'&&sceneRender.rendered===128n&&sceneRender.history[0].actual===17n&&sceneRender.history[0].status==='applied'&&sceneRender.pending.length===1"},
+    {"type":"advance_time","ms":10,"steps":1},
+    {"type":"script","js":"audioSceneRender('step')"},
+    {"type":"assert_script","js":"sceneRender.state==='complete'&&sceneRender.rendered===256n&&sceneRender.history.length===2&&sceneRender.history[1].actual===177n&&sceneRender.pending.length===0"},
+    {"type":"script","js":"audioSceneRender('file')"},
+    {"type":"assert_script","js":"sceneRender.state==='complete'&&sceneRender.bytes===2048n"},
+    {"type":"script","js":"audioSceneRequest('read')"},
+    {"type":"assert_script","js":"sceneAudio.audio_frame===0n&&sceneAudio.sources[0].state==='ready'&&sceneAudio.document_players===1n&&sceneAudio.cue_history.length===0"},
+    {"type":"script","js":"audioSceneRender('cancel')"},
+    {"type":"assert_script","js":"sceneRender.state==='cancelled'&&sceneRender.bytes===0n"},
+    {"type":"script","js":"audioSceneRender('close')"},
+    {"type":"assert_script","js":"sceneRenderClosed===true"}
+  ]
+}

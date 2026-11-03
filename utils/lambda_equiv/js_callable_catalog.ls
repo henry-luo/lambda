@@ -16,11 +16,11 @@ pub pn callable_macro_rows(source: string, macro: string) {
             let ch = slice(source, cursor, cursor + 1)
             if (quoted) {
                 if (escaped) { escaped = false }
-                else if (ch == "\\") { escaped = true }
-                else if (ch == "\"") { quoted = false }
-            } else if (ch == "\"") { quoted = true }
-            else if (ch == "(") { depth = depth + 1 }
-            else if (ch == ")") { depth = depth - 1 }
+                else if ((ch == "\\")^) { escaped = true }
+                else if ((ch == "\"")^) { quoted = false }
+            } else if ((ch == "\"")^) { quoted = true }
+            else if ((ch == "(")^) { depth = depth + 1 }
+            else if ((ch == ")")^) { depth = depth - 1 }
             cursor = cursor + 1
         }
         if (depth > 0) {
@@ -34,16 +34,16 @@ pub pn callable_macro_rows(source: string, macro: string) {
         quoted = false
         escaped = false
         var at = 0
-        while (at < len(body)) {
+        while ((at < len(body))^) {
             let ch = slice(body, at, at + 1)
             if (quoted) {
                 if (escaped) { escaped = false }
-                else if (ch == "\\") { escaped = true }
-                else if (ch == "\"") { quoted = false }
-            } else if (ch == "\"") { quoted = true }
-            else if (ch == "(") { nesting = nesting + 1 }
-            else if (ch == ")") { nesting = nesting - 1 }
-            else if (ch == "," and nesting == 0) {
+                else if ((ch == "\\")^) { escaped = true }
+                else if ((ch == "\"")^) { quoted = false }
+            } else if ((ch == "\"")^) { quoted = true }
+            else if ((ch == "(")^) { nesting = nesting + 1 }
+            else if ((ch == ")")^) { nesting = nesting - 1 }
+            else if ((ch == "," and nesting == 0)^) {
                 args = args ++ [trim(slice(body, arg_start, at))]
                 arg_start = at + 1
             }
@@ -57,8 +57,8 @@ pub pn callable_macro_rows(source: string, macro: string) {
 }
 
 pn callable_quoted(value: string) {
-    if (len(value) < 2 or slice(value, 0, 1) != "\"" or
-        slice(value, len(value) - 1) != "\"") { return null }
+    if ((len(value) < 2 or slice(value, 0, 1) != "\"" or
+        slice(value, len(value) - 1) != "\"")^) { return null }
     return parse(value, "json") ^ { null }
 }
 
@@ -69,13 +69,13 @@ pn callable_length(value: string) {
 pub pn callable_catalog_errors(source: string) {
     var errors = []
     var owners = {}
-    for (row in callable_macro_rows(source, "JS_BUILTIN_OWNER")) {
+    for (row in callable_macro_rows(source, "JS_BUILTIN_OWNER")^) {
         if (len(row) == 1) { owners[row[0]] = true }
     }
     var targets = {}
     for (spec in [{name: "JS_BUILTIN_ID", width: 3},
                   {name: "JS_BUILTIN_CONSTRUCTOR_TARGET", width: 4}]) {
-        for (row in callable_macro_rows(source, spec.name)) {
+        for (row in callable_macro_rows(source, spec.name)^) {
             if (len(row) != spec.width) {
                 errors = errors ++ [spec.name ++ ": expected " ++ string(spec.width) ++
                                     " arguments, got " ++ string(len(row))]
@@ -97,8 +97,8 @@ pub pn callable_catalog_errors(source: string) {
 
     var seen_bindings = {}
     var aliases = {}
-    for (row in callable_macro_rows(source, "JS_BUILTIN_METHOD")) {
-        if (len(row) != 9) {
+    for (row in callable_macro_rows(source, "JS_BUILTIN_METHOD")^) {
+        if ((len(row) != 9)^) {
             errors = errors ++ ["JS_BUILTIN_METHOD: expected 9 arguments, got " ++ string(len(row))]
             continue
         }
@@ -115,15 +115,15 @@ pub pn callable_catalog_errors(source: string) {
         if (owners[owner] == null) {
             errors = errors ++ ["binding " ++ name_literal ++ " has unknown owner " ++ owner]
         }
-        if (name == null) {
+        if ((name == null)^) {
             errors = errors ++ ["binding has invalid name literal " ++ name_literal]
             continue
         }
         let declared = callable_length(length)
-        if (declared == null) {
+        if ((declared == null)^) {
             errors = errors ++ ["binding " ++ owner ++ "." ++ name ++
                                 " has non-integer length " ++ length]
-        } else if (declared != len(name)) {
+        } else if ((declared != len(name))^) {
             errors = errors ++ ["binding " ++ owner ++ "." ++ name ++
                                 " has mismatched length " ++ length]
         }
@@ -148,8 +148,8 @@ pub pn callable_catalog_errors(source: string) {
 
     var seen_ids = {}
     var seen_names = {}
-    for (row in callable_macro_rows(source, "JS_BUILTIN_GLOBAL")) {
-        if (len(row) != 8) {
+    for (row in callable_macro_rows(source, "JS_BUILTIN_GLOBAL")^) {
+        if ((len(row) != 8)^) {
             errors = errors ++ ["JS_BUILTIN_GLOBAL: expected 8 arguments, got " ++ string(len(row))]
             continue
         }
@@ -160,14 +160,14 @@ pub pn callable_catalog_errors(source: string) {
         let runtime_id = row[4]
         let target_id = row[5]
         let name = callable_quoted(name_literal)
-        if (name == null) {
+        if ((name == null)^) {
             errors = errors ++ ["global has invalid name literal " ++ name_literal]
             continue
         }
         let declared = callable_length(length)
-        if (declared == null) {
+        if ((declared == null)^) {
             errors = errors ++ ["global " ++ name ++ " has non-integer length " ++ length]
-        } else if (declared != len(name)) {
+        } else if ((declared != len(name))^) {
             errors = errors ++ ["global " ++ name ++ " has mismatched length " ++ length]
         }
         if (seen_ids[global_id] != null) { errors = errors ++ ["duplicate global id " ++ global_id] }

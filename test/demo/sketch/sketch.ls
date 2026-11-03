@@ -13,7 +13,7 @@ let BASE = url_resolve(resources.entry_uri()^,".")
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"sketch")
 pn publish(owner,previous,next) { return present.sync(owner,next,previous) }
 pn focus_canvas(owner) { dom.focus_set(present.node(owner,"stage"),false) }
-fn paste_source(st,snapshot) => if (len(st.clipboard)>0 and st.clipboard_snapshot==snapshot) null else raster.clipboard_source(snapshot)
+fn paste_source(st,snapshot) any^ => if (len(st.clipboard)>0 and st.clipboard_snapshot==snapshot) null else raster.clipboard_source(snapshot)
 pn open_context(owner,st,x,y,pick=true) {
     let p = present.point(owner,st,x,y)
     let base = m.finish_edit(st)
@@ -26,14 +26,14 @@ pn open_context(owner,st,x,y,pick=true) {
 pn command(owner,st,action,shift=false) any^ {
     if (st.drag != null) { return st }
     if (contains(["dock-properties","dock-layers"],action)) { return {*:st,dock_tab:slice(action,5)} }
-    if (starts_with(action,"tool-")) { return {*:st,tool:slice(action,5),pen:[],error:"",status:"Tool selected."} }
-    if (starts_with(action,"color-")) {
+    if (starts_with(action,"tool-")^) { return {*:st,tool:slice(action,5),pen:[],error:"",status:"Tool selected."} }
+    if (starts_with(action,"color-")^) {
         let color = slice(action,6)
         let text_ink = m.chosen(st).kind=="text"
         let next = m.finish_edit(m.property(st,if (shift or text_ink) "fill" else "stroke",color)^)
         return if (text_ink and not shift) {*:next,stroke:color} else next
     }
-    if (starts_with(action,"layer-")) {
+    if (starts_with(action,"layer-")^) {
         let parts = split(slice(action,6),"/")
         return m.layer_action(st,parts[0],if (len(parts)>1) parts[1] else "")
     }
@@ -50,7 +50,7 @@ pn command(owner,st,action,shift=false) any^ {
         let src = paste_source(st,dom.clipboard_read())
         return if (src!=null) m.add_image(st,raster.from_uri(src)^,point) else m.paste(st,point)
     }
-    if (action=="select-all") { return m.select_ids(st,[for (o in m.objects(st.doc)) o.id]) }
+    if (action=="select-all") { return m.select_ids(st,[for (o in ((m.objects(st.doc)) ^ { [] })) o.id]) }
     if (action=="deselect") { return m.select_ids(st,[]) }
     if (action=="front" or action=="back") { return m.arrange(st,action=="front") }
     if (action=="finish-path" or action=="close-path") { return m.finish_pen(st,action=="close-path") }
@@ -73,7 +73,7 @@ pn command(owner,st,action,shift=false) any^ {
             return {*:next,dialog:if (next.error=="") "" else st.dialog}
         }
         let ext = if (st.dialog=="export") ".svg" else ".sketch"
-        if (not ends_with(lower(path),ext)) raise error("Sketch: choose a " ++ ext ++ " file path.")
+        if ((not ends_with(lower(path),ext))^) raise error("Sketch: choose a " ++ ext ++ " file path.")
         if (st.dialog=="open") { return present.fit(owner,m.open_document(st,m.decode(input(path,'json')^)^)) }
         io.mkdir("temp") ^ { null }
         io.mkdir("temp/sketch") ^ { null }
@@ -86,13 +86,13 @@ pn command(owner,st,action,shift=false) any^ {
 pn dispatch(owner,st,action,shift=false) {
     let base = m.finish_edit(st)
     var result = base
-    command(owner,base,action,shift) ^ { result = {*:base,error:^.message,status:^.message} } ~ { result = ~ }
+    { let __error_outcome_1 = command(owner,base,action,shift) ^ { ^ }; if (__error_outcome_1 is error) { result = {*:base,error:__error_outcome_1.message,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { result = ~ } } }
     return {*:result,context:null}
 }
 pn update_property(st,control,final=false) {
     let key = dom.get_attribute(control,"data-property")
     var result = st
-    m.property(st,key,dom.get_state(control,"value")) ^ { result = {*:st,error:^.message} } ~ { result = ~ }
+    { let __error_outcome_2 = m.property(st,key,dom.get_state(control,"value")) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:st,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     return if (final) m.finish_edit(result) else result
 }
 
@@ -104,14 +104,14 @@ on sketch_activate(evt) {
     return 'handled'
 }
 on sketch_menu_ready(evt) {
-    if (evt.event_phase!=2 or session.context==null) { return 'pass' }
+    if ((evt.event_phase!=2 or session.context==null)^) { return 'pass' }
     // placement and focus wait for the newly visible menu's committed layout (D7.4.6).
-    menus.fit(evt.target,"sketch-context-menu","sketch")
+    menus.fit(evt.target,"sketch-context-menu","sketch")^
     menus.focus(evt.target,"sketch-context-menu")
     return 'handled'
 }
 on contextmenu(evt) {
-    if (session.dialog!="" or session.drag!=null or dom.closest(evt.target,"#stage")==null or dom.closest(evt.target,"button")!=null) { return 'pass' }
+    if ((session.dialog!="" or session.drag!=null or dom.closest(evt.target,"#stage")==null or dom.closest(evt.target,"button")!=null)^) { return 'pass' }
     let owner = owner_of(evt)
     session = publish(owner,session,open_context(owner,session,evt.clientX,evt.clientY))
     return 'prevent-default'
@@ -120,29 +120,29 @@ on click(evt) {
     if (evt.button!=null and evt.button!=0) { return 'pass' }
     let owner = owner_of(evt)
     let button = dom.closest(evt.target,"button[data-action]")
-    if (button==null or (session.dialog!="" and dom.closest(button,"#file-dialog")==null)) { return 'pass' }
+    if ((button==null or (session.dialog!="" and dom.closest(button,"#file-dialog")==null))^) { return 'pass' }
     let action = dom.get_attribute(button,"data-action")
     let before = session
     session = publish(owner,before,dispatch(owner,session,action,evt.shiftKey))
-    if (session.dialog!="" and before.dialog=="") dom.focus_set(present.node(owner,"file-path"),false)
-    else if (session.dialog=="" and before.dialog!="") dom.focus_set(present.node(owner,before.dialog),false)
-    else if (starts_with(action,"dock-")) dom.focus_set(button,false)
-    else if (session.dialog=="") focus_canvas(owner)
+    if ((session.dialog!="" and before.dialog=="")^) dom.focus_set(present.node(owner,"file-path")^,false)
+    else if ((session.dialog=="" and before.dialog!="")^) dom.focus_set(present.node(owner,before.dialog)^,false)
+    else if (starts_with(action,"dock-")^) dom.focus_set(button,false)
+    else if ((session.dialog=="")^) focus_canvas(owner)^
     return 'handled'
 }
 on input(evt) {
-    if (session.dialog!="" or session.drag!=null or dom.get_attribute(evt.target,"data-property")==null) { return 'pass' }
+    if ((session.dialog!="" or session.drag!=null or dom.get_attribute(evt.target,"data-property")==null)^) { return 'pass' }
     session = publish(owner_of(evt),session,update_property(session,evt.target))
     return 'handled'
 }
 on change(evt) {
-    if (session.dialog!="" or session.drag!=null or dom.get_attribute(evt.target,"data-property")==null) { return 'pass' }
+    if ((session.dialog!="" or session.drag!=null or dom.get_attribute(evt.target,"data-property")==null)^) { return 'pass' }
     session = publish(owner_of(evt),session,update_property(session,evt.target,true))
     return 'handled'
 }
 on focusout(evt) {
-    if (session.context!=null and dom.closest(evt.target,"#sketch-context-menu")!=null and evt.relatedTarget!=null and
-        dom.closest(evt.relatedTarget,"#sketch-context-menu")==null) {
+    if ((session.context!=null and dom.closest(evt.target,"#sketch-context-menu")!=null and evt.relatedTarget!=null and
+        dom.closest(evt.relatedTarget,"#sketch-context-menu")==null)^) {
         session = publish(owner_of(evt),session,{*:session,context:null})
     }
     if (dom.get_attribute(evt.target,"data-property")==null) { return 'pass' }
@@ -160,27 +160,27 @@ on focusout(evt) {
 on pointerdown(evt) {
     let owner = owner_of(evt)
     // native contextmenu precedes the secondary press; only a primary outside press dismisses it.
-    if (evt.button==0 and session.context!=null and dom.closest(evt.target,"#sketch-context-menu")==null) {
+    if ((evt.button==0 and session.context!=null and dom.closest(evt.target,"#sketch-context-menu")==null)^) {
         session = publish(owner,session,{*:session,context:null})
     }
-    if (session.dialog!="" or evt.button!=0 or session.drag!=null or dom.closest(evt.target,"#stage")==null or dom.closest(evt.target,"button")!=null) { return 'pass' }
+    if ((session.dialog!="" or evt.button!=0 or session.drag!=null or dom.closest(evt.target,"#stage")==null or dom.closest(evt.target,"button")!=null)^) { return 'pass' }
     let before = session
     session = m.finish_edit(session)
     focus_canvas(owner)
     let p = present.point(owner,session,evt.clientX,evt.clientY)
-    if (session.tool=="pan") {
+    if ((session.tool=="pan")^) {
         session = {*:session,drag:{mode:"pan",before:session.doc,pointer:evt.pointerId,
             start:{x:evt.clientX,y:evt.clientY},pan:session.pan}}
-    } else if (m.inside(session.doc,p) or contains(["select","marquee","nodes"],session.tool)) {
+    } else if ((m.inside(session.doc,p) or contains(["select","marquee","nodes"],session.tool))^) {
         // selection may start in the pasteboard around the artboard and finish inside it.
         session = if (session.tool=="pen") m.pen_point(session,p) else m.begin(session,p,evt.pointerId,evt.shiftKey)
     }
-    if (session.drag!=null) dom.set_pointer_capture(present.node(owner,"stage"),evt.pointerId)
+    if ((session.drag!=null)^) dom.set_pointer_capture(present.node(owner,"stage")^,evt.pointerId)
     session = publish(owner,before,session)
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag==null or session.drag.pointer!=evt.pointerId) { return 'pass' }
+    if ((session.drag==null or session.drag.pointer!=evt.pointerId)^) { return 'pass' }
     let owner = owner_of(evt)
     let next = if (session.drag.mode=="pan") {*:session,pan:{x:session.drag.pan.x-(evt.clientX-session.drag.start.x)/session.zoom,
         y:session.drag.pan.y-(evt.clientY-session.drag.start.y)/session.zoom}}
@@ -189,7 +189,7 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.drag==null or session.drag.pointer!=evt.pointerId) { return 'pass' }
+    if ((session.drag==null or session.drag.pointer!=evt.pointerId)^) { return 'pass' }
     let owner = owner_of(evt)
     let previewed = if (session.drag.mode=="pan") session else m.preview(session,present.point(owner,session,evt.clientX,evt.clientY),evt.shiftKey)
     dom.release_pointer_capture(present.node(owner,"stage"),evt.pointerId)
@@ -199,13 +199,13 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
-    if (session.drag==null or session.drag.pointer!=evt.pointerId) { return 'pass' }
+    if ((session.drag==null or session.drag.pointer!=evt.pointerId)^) { return 'pass' }
     dom.release_pointer_capture(present.node(owner_of(evt),"stage"),evt.pointerId)
     session = publish(owner_of(evt),session,m.cancel(session))
     return 'handled'
 }
 on wheel(evt) {
-    if (session.dialog!="" or session.drag!=null or dom.closest(evt.target,"#stage")==null) { return 'pass' }
+    if ((session.dialog!="" or session.drag!=null or dom.closest(evt.target,"#stage")==null)^) { return 'pass' }
     let owner = owner_of(evt)
     var next = {*:session,context:null}
     if (evt.ctrlKey or evt.metaKey) {
@@ -221,14 +221,14 @@ on wheel(evt) {
 on keydown(evt) {
     let owner = owner_of(evt)
     let key = lower(evt.key)
-    if (session.context!=null and contains(["escape","tab"],key)) {
+    if ((session.context!=null and contains(["escape","tab"],key))^) {
         session = publish(owner,session,{*:session,context:null})
-        focus_canvas(owner)
+        focus_canvas(owner)^
         return 'prevent-default'
     }
-    if (session.context!=null) {
-        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) {
-            menus.navigate(evt.target,"sketch-context-menu",evt.key)
+    if ((session.context!=null)^) {
+        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)^) {
+            menus.navigate(evt.target,"sketch-context-menu",evt.key)^
             let focused = dom.query_selector(present.node(owner,"sketch-context-menu"),"button:focus")
             if (focused!=null) dom.scroll_into_view(focused)
             return 'prevent-default'
@@ -241,30 +241,30 @@ on keydown(evt) {
     }
     if (key=="escape") {
         let before = session
-        if (session.drag!=null) dom.release_pointer_capture(present.node(owner,"stage"),session.drag.pointer)
+        if ((session.drag!=null)^) dom.release_pointer_capture(present.node(owner,"stage"),session.drag.pointer)^
         session = publish(owner,before,m.cancel(session))
-        if (before.dialog!="") dom.focus_set(present.node(owner,before.dialog),false)
+        if ((before.dialog!="")^) dom.focus_set(present.node(owner,before.dialog)^,false)
         return 'prevent-default'
     }
-    if (session.dialog!="") {
+    if ((session.dialog!="")^) {
         if (key=="tab") {
             let order = ["file-path","file-cancel","file-confirm"]
             let indexes = [for (i,id in order where id==dom.get_attribute(evt.target,"id")) i]
             let at = if (len(indexes)>0) indexes[0] else 0
-            dom.focus_set(present.node(owner,order[(at+(if (evt.shiftKey) 2 else 1))%3]),false)
+            dom.focus_set(present.node(owner,order[(at+(if (evt.shiftKey) 2 else 1))%3])^,false)
             return 'prevent-default'
         }
         if (key=="enter") { session = publish(owner,session,dispatch(owner,session,"file-confirm")); return 'prevent-default' }
         return 'pass'
     }
-    if (dom.closest(evt.target,".dock-tabs [role=tab]")!=null and not (evt.ctrlKey or evt.metaKey or evt.altKey) and
-        contains(["arrowleft","arrowright","home","end"],key)) {
+    if ((dom.closest(evt.target,".dock-tabs [role=tab]")!=null and not (evt.ctrlKey or evt.metaKey or evt.altKey) and
+        contains(["arrowleft","arrowright","home","end"],key))^) {
         let panel = if (key=="home") "properties" else if (key=="end") "layers" else if (session.dock_tab=="layers") "properties" else "layers"
         session = publish(owner,session,dispatch(owner,session,"dock-" ++ panel))
-        dom.focus_set(present.node(owner,"dock-tab-" ++ panel),false)
+        dom.focus_set(present.node(owner,"dock-tab-" ++ panel)^,false)
         return 'prevent-default'
     }
-    if (dom.closest(evt.target,"input,textarea,select")!=null or session.drag!=null or evt.altKey) { return 'pass' }
+    if ((dom.closest(evt.target,"input,textarea,select")!=null or session.drag!=null or evt.altKey)^) { return 'pass' }
     if ((key=="contextmenu" or (key=="f10" and evt.shiftKey)) and dom.closest(evt.target,"#stage")!=null) {
         let box = m.selection_box(session)
         let anchor = if (box!=null) present.client_point(owner,session,{x:box.x+box.width/2,y:box.y+box.height/2})
@@ -284,7 +284,7 @@ on keydown(evt) {
         else if (key=="delete" or key=="backspace") "delete" else if (key=="enter") "finish-path"
         else if (key=="0") "fit" else if (key=="=" or key=="+") "zoom-in" else if (key=="-") "zoom-out" else null
     let before = session
-    if (contains(["arrowleft","arrowright","arrowup","arrowdown"],key) and not modifier) {
+    if ((contains(["arrowleft","arrowright","arrowup","arrowdown"],key) and not modifier)^) {
         let amount = if (evt.shiftKey) 10.0 else 1.0
         session = publish(owner,before,m.nudge(m.finish_edit(session),if (key=="arrowleft") -amount else if (key=="arrowright") amount else 0.0,
             if (key=="arrowup") -amount else if (key=="arrowdown") amount else 0.0)^)
@@ -293,7 +293,7 @@ on keydown(evt) {
         session = publish(owner,session,m.finish_edit(m.property(session,"size",m.clamp(session.size+(if (key=="[") -1 else 1),.1,4096))^))
     } else if (action!=null) {
         session = publish(owner,before,dispatch(owner,session,action))
-        if (session.dialog!="") dom.focus_set(present.node(owner,"file-path"),false)
+        if ((session.dialog!="")^) dom.focus_set(present.node(owner,"file-path")^,false)
     } else { return 'pass' }
     return 'prevent-default'
 }

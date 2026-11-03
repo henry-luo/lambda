@@ -1460,13 +1460,7 @@ static const char* scene3d_animation_commands_apply(void* owner, const void* pay
     }
     return nullptr;
 }
-static const char* scene3d_command_name(ItemReader value) {
-    const char* text = value.isString()   ? value.asString()->chars
-                       : value.isSymbol() ? value.asSymbol()->chars
-                                          : nullptr;
-    size_t length = value.isString() ? value.asString()->len : value.isSymbol() ? value.asSymbol()->len : 0;
-    return text && length && length < 128 && !memchr(text, 0, length) ? text : nullptr;
-}
+
 static bool scene3d_animation_real(ItemReader value, double fallback, double* result) {
     if (value.isNull()) {
         *result = fallback;

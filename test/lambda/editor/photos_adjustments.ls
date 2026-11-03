@@ -5,8 +5,8 @@ import effects: lambda.editor.raster.effects
 import project: lambda.image.project
 import interaction: lambda.editor.raster.interaction
 fn check(value) => value
-fn pixels(st) => img.to_bytes(img.render_frame(st.doc)^)^
-fn refused(st,command) => editor.exec(st,command) ^ { true } ~ { false }
+fn pixels(st) any^ => img.to_bytes(img.render_frame(st.doc)^)^
+fn refused(st,command) => match (editor.exec(st,command) ^ { ^ }) { case error: true default: false }
 let source = img.from_bytes(b'204080ff80a0c080',{width:2,height:1})^
 let original = editor.open_session(img.of_raster(source))^
 let base_id = original.selected[0]
@@ -49,7 +49,7 @@ let lower = editor.exec(st,{id:"layer.reorder",index:1})^
 check(pixels(lower) == pixels(original))
 let reopened = project.decode(project.encode(st.doc)^)^
 check(model.adjustment(model.lookup(reopened,id).node) and img.to_bytes(img.render_frame(reopened)^)^ == pixels(st))
-check(img.encode(st.doc,{format:'psd'}) ^ { true } ~ { false })
+check(match (img.encode(st.doc,{format:'psd'}) ^ { ^ }) { case error: true default: false })
 check(refused(st,{id:"layer.transform",angle:15}) and refused(st,{id:"layer.rasterize"}))
 check(refused(st,{id:"layer.blend",blend:"multiply"}) and refused(st,{id:"style.add",options:{kind:"color_overlay",color:[1,0,0,1]}}))
 check(refused(st,{id:"effect.add",options:{softness:1}}) and refused(st,{id:"effect.add",options:{vignette:0.5}}))

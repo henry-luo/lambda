@@ -10,20 +10,22 @@ pn four1(data: float[], n: int) any {
     var i: int = 0
     var j: int = 0
     while (i < n) {
-        if (i < j) {
+        if ((i < j)^) {
             var temp = data[i]
             data[i] = data[j]
             data[j] = temp
             temp = data[i + 1]
-            data[i + 1] = data[j + 1]
+            data[i + 1] = ((data[j + 1]))
             data[j + 1] = temp
         }
         // C14c: `div` keeps truncation semantics but takes its result domain
         // from `/`, so int div int is a float. An int binding needs int().
-        var m: int = int(n div 2)
-        while (m >= 2 and j >= m) {
+        let _admitted_m_23: int = int(n div 2)
+        var m: int = _admitted_m_23^
+        while ((m >= 2 and j >= m)^) {
             j = j - m
-            m = int(m div 2)
+            let _admitted_m_26: int = int(m div 2)^
+            m = _admitted_m_26^
         }
         j = j + m
         i = i + 2
@@ -61,8 +63,8 @@ pn four1(data: float[], n: int) any {
     }
 }
 
-pn benchmark() float {
-    var data:float[] = fill(4096, 0.0)
+pn benchmark() float^ {
+    var data:float[] = fill(4096, 0.0)^
     four1(data, 4096)
     var result = data[0]
     return result
@@ -72,7 +74,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 0.0) {
+    if ((result == 0.0)^) {
         print("fft: PASS\n")
     } else {
         print("fft: FAIL result=")

@@ -1,0 +1,11 @@
+inf
+inf
+nan
+false
+true
+nan
+-2
+-1
+7.5
+-inf
+16

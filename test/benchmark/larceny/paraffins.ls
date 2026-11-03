@@ -16,21 +16,21 @@
 //           nb(17) = 24894, nb(23) = 5731580
 
 // Multiset coefficients: choose k items from n with repetition
-pn ms2(r) {
+fn ms2(r) {
     return r * (r + 1) div 2
 }
 
-pn ms3(r) {
+fn ms3(r) {
     return r * (r + 1) * (r + 2) div 6
 }
 
-pn ms4(r) {
+fn ms4(r) {
     return r * (r + 1) * (r + 2) * (r + 3) div 24
 }
 
 // Count radicals of size k given rcount[] (radical counts for smaller sizes)
 // A radical: central C + 3 sub-radicals of sizes s1 <= s2 <= s3, s1+s2+s3 = k-1
-pn count_radicals(rcount, k) {
+fn count_radicals(rcount, k) any^ {
     var count = 0
     var target = k - 1
     var nc1 = 0
@@ -65,7 +65,7 @@ pn count_radicals(rcount, k) {
 
 // BCP: bond-centered paraffins (even n only)
 // Two radicals of size n/2, unordered pair => ms2(rcount[n/2])
-pn count_bcp(rcount, n) {
+fn count_bcp(rcount, n) any^ {
     if (n % 2 != 0) {
         return 0
     }
@@ -77,7 +77,7 @@ pn count_bcp(rcount, n) {
 // CCP: carbon-centered paraffins
 // 4 sub-radicals of sizes s1 <= s2 <= s3 <= s4, sum = n-1
 // max_rad = floor((n-1)/2) ensures no overlap with BCP and no out-of-bounds
-pn count_ccp(rcount, n) {
+fn count_ccp(rcount, n) any^ {
     var m = n - 1
     var max_rad = shr(m, 1)
     var count = 0
@@ -129,7 +129,7 @@ pn count_ccp(rcount, n) {
     return count
 }
 
-pn nb(n) {
+fn nb(n) any^ {
     if (n < 1) {
         return 0
     }
@@ -139,7 +139,7 @@ pn nb(n) {
 
     var k = 1
     while (k <= half) {
-        rcount[k] = count_radicals(rcount, k)
+        rcount[k] = count_radicals(rcount, k)^
         k = k + 1
     }
 
@@ -164,7 +164,7 @@ pn main() {
 
     // result = nb(23)
     print("paraffins: nb(23) = " ++ result ++ "\n")
-    if (result == 5731580) {
+    if ((result == 5731580)^) {
         print("paraffins: PASS\n")
     } else {
         print("paraffins: FAIL (expected 5731580)\n")

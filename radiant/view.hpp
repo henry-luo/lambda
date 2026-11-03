@@ -411,6 +411,12 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
 bool view_visibility_is_hidden(const View* view);
+inline bool view_ruby_annotation_is_hidden(const View* view) {
+    for (const DomNode* node = view; node; node = node->parent) {
+        if (node->ruby_annotation_hidden) return true;
+    }
+    return false;
+}
 bool view_focus_is_hidden(View* view);
 bool view_size_containment_applies(DisplayValue display);
 bool view_contents_are_skipped(const View* view);
@@ -1076,6 +1082,7 @@ typedef struct {
     float last_segment_min = -1.0f;
     float interior_min_content = 0.0f;
     bool has_min_content_break = false;
+    bool has_used_content_break = false; // includes emergency opportunities excluded from min-content
     // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
     // the content spans multiple lines. These fields allow the parent's inline run
     // accumulation to split at forced break points rather than summing all lines.
@@ -2020,7 +2027,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
-    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
+    float inline_relative_x, inline_relative_y; // offsets already applied in the parent inline frame
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
@@ -2524,6 +2531,8 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     float collapsed_space_advance; // advance already removed by whitespace processing, including soft wraps
     float justification_spacing;  // CSS-pixel expansion selected by the owning line
+    float ruby_alignment_offset; // glyph inset; query rectangles include the allocated column edges
+    float ruby_alignment_advance; // alignment space included in this rectangle's inline extent
     int start_index, length;  // start and length of the text in the style node
     int trailing_whitespace_bytes; // line-end suppression keeps source ownership in length
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
@@ -2807,6 +2816,7 @@ bool view_geometry_walk_dom_tree(DomNode* root, ViewGeometryDomVisitor visitor,
                                  void* context);
 bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancestor,
                                      bool include_ancestor = true);
+DomNode* view_geometry_dom_common_ancestor(DomNode* first, DomNode* second);
 RdtLogicalPoint view_geometry_local_to_block_document(
     View* view, RdtLogicalPoint local);
 RdtLogicalPoint view_geometry_node_viewport_origin_resolved(
@@ -4390,6 +4400,9 @@ bool css_is_mathml_element(const DomElement* element);
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height);
 DisplayValue blockify_display(DisplayValue display);
+bool css_display_is_ruby_internal(CssEnum display);
+bool css_display_is_ruby_role(CssEnum display);
+CssEnum css_ruby_compute_unicode_bidi(CssEnum value);
 
 namespace lam {
 

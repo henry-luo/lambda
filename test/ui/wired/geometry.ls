@@ -1,6 +1,6 @@
 import ui: lambda.ui.wired
 
-view wired_geometry: <wired_geometry> state expanded:false {
+view wired_geometry: <wired_geometry> () any^ state expanded:false {
     ui.render(<wired.flex direction:'vertical',align:"flex-start",gap:16,
         <wired.button id:"grow",style:"width:200px;","Grow card">
         <wired.badge id:"badge",style:"width:120px;height:30px;","Draft">

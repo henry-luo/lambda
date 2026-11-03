@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/ray.ls. */
 extern int printf(const char *, ...);
 extern double sqrt(double);
@@ -17,6 +18,7 @@ static double sphere_intersect(double dx, double dy, double dz, double cx, doubl
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     double sx[4] = {0.0, -2.0, 2.0, 0.0};
     double sy[4] = {0.0, 0.0, 0.0, 2.0};
     double sz[4] = {5.0, 5.0, 5.0, 5.0};
@@ -38,6 +40,8 @@ int main(void) {
             if (nearest < 999999.0) hits++;
         }
     }
+    BENCH_KERNEL_END();
     printf("ray: hits=%d\n%s\n", hits, hits > 0 && hits < 10000 ? "ray: PASS" : "ray: FAIL");
+    BENCH_KERNEL_REPORT();
     return hits <= 0 || hits >= 10000;
 }

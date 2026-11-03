@@ -40,7 +40,7 @@ view <gallery> state phase:"none", notice:"none", mounted:true {
 on click(evt) {
     let id=dom.get_attribute(evt.target,"id")
     if (id=="mount") { mounted=not mounted;return 'handled' }
-    if (not contains(["play","pause","resume","seek","reverse","cancel"],id)) { return 'pass' }
+    if ((not contains(["play","pause","resume","seek","reverse","cancel"],id))^) { return 'pass' }
     let host=dom.query_selector(dom.closest(evt.target,"#playback"),".lambda-chart")
     dom.dispatch(host,{type:"chart_action",bubbles:true,detail:{command:id,position:1000}})
     return 'handled'

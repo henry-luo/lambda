@@ -16,17 +16,17 @@ fn options_for(options) map^ {
         o.show_lyrics is bool and o.respect_breaks is bool and (o.parts==null or o.parts is array),"invalid layout options")^;
     o
 }
-fn prior_context(part,i,staff) => if (i==0) null else (
+fn prior_context(part,i,staff) any^ => if (i==0) null else (
     let previous=part.measures[i-1],
     (if (len(previous.changes)>0) previous.changes[len(previous.changes)-1].context else previous.context).staffs[staff-1])
-fn measure_headers(parts,i,profile,repeated) => [for (p in parts, j,st in p.measures[i].context.staffs) (
+fn measure_headers(parts,i,profile,repeated) any^ => [for (p in parts, j,st in p.measures[i].context.staffs) (
     let header=h.prepare(profile,st,prior_context(p,i,j+1),repeated)^,
     {*:header,part:p.id,staff:j+1})]
 fn at_onset(items,onset) => [for (x in items where x.onset==onset) x]
 fn measure_plan(parts,i,profile,options,lanes,score) map^ {
     let raw=[for (p in parts) {*:p.measures[i],part:p.id}]
     let events=n.prepare([for (m in raw,e in m.events) {*:e,lyrics:if (options.show_lyrics)
-        [for (l in lyrics.underlays(score,e) where l.visible) {*:l,lane:lanes[lyrics.line_key(e,l)]}] else []}],profile)^
+        [for (l in ((lyrics.underlays(score,e)) ^ { [] }) where l.visible) {*:l,lane:lanes[lyrics.line_key(e,l)]}] else []}],profile)^
     let beams=n.beam_groups(events)^
     let headers=measure_headers(parts,i,profile,false)
     let repeated=measure_headers(parts,i,profile,true)
@@ -38,12 +38,12 @@ fn measure_plan(parts,i,profile,options,lanes,score) map^ {
         widths:[for (entry in dir.entries) f.measure(profile,[entry.text],1.4)^[0].width]}]
     let times=[for (entry in n.ordered([for (at in unique([t.ZERO,*[for (e in events) e.onset],
         *[for (ch in changes) ch.onset],*[for (dir in directions) dir.onset]])) {onset:at}])) entry.onset]
-    let columns=c.fold([for (j,at in times) {onset:at,index:j}],{end:0.0,columns:[]},(acc,slot)=>(
+    let columns=c.fold([for (j,at in times) {onset:at,index:j}],{end:0.0,columns:[]},(acc,slot)any^ =>(
         let notes=at_onset(events,slot.onset),
         let grace=[for (e in notes where e.grace and not e.chord) e],
         let left=max([0.4,*[for (e in notes) e.left]])+float(len(grace))*2.0,
-        let right=max([1.4,*[for (e in notes) e.right],*[for (dir in at_onset(directions,slot.onset),w in dir.widths) w]]),
-        let prefix=max([0.0,*[for (ch in at_onset(changes,slot.onset)) ch.width]]),
+        let right=max([1.4,*[for (e in notes) e.right],*[for (dir in ((at_onset(directions,slot.onset)) ^ { [] }),w in dir.widths) w]]),
+        let prefix=max([0.0,*[for (ch in ((at_onset(changes,slot.onset)) ^ { [] })) ch.width]]),
         let next=times[slot.index+1] or raw[0].span,
         let weight=sqrt(max(0.0625,t.value(t.sub(next,slot.onset)^))),
         let x=acc.end+prefix+left,
@@ -61,7 +61,7 @@ fn systems(measures,available,options) => (
          current:if (split) [m] else [*acc.current,m],
          width:(if (split) 0.0 else acc.width)+m.body_width+(if (split or len(acc.current)==0) m.start_prefix else m.prefix)})),
     [*packed.done,{measures:packed.current,width:packed.width}])
-fn staff_plan(parts,system) => c.fold([for (p in parts,i in 1 to len(p.measures[0].context.staffs)) {part:p.id,staff:i}],
+fn staff_plan(parts,system) => c.fold([for (p in parts,i in ((1 to len(p.measures[0].context.staffs)) ^ { [] })) {part:p.id,staff:i}],
     {bottom:0.0,staffs:[]},(acc,key)=>(
         let events=[for (m in system.measures,e in m.events where e.part==key.part and e.staff==key.staff) e],
         let top=min([-3.0,*[for (e in events) min(e.y+e.glyph.ink.top,
@@ -85,7 +85,7 @@ fn place_system(system,parts,available,left,profile,is_last) map^ {
         let prefix=if (row.index==0) m.start_prefix else m.prefix,
         let total_weight=sum([for (col in m.columns) col.weight]),
         let columns=[for (i,col in m.columns) {*:col,x:acc.x+prefix+col.x+
-            extra*sum([for (prior in slice(m.columns,0,i)) prior.weight])/total_weight}],
+            extra*sum([for (prior in ((slice(m.columns,0,i)) ^ { [] })) prior.weight])/total_weight}],
         let width=prefix+m.body_width+extra,
         let events=[for (e in m.events) (
             let column=at_onset(columns,e.onset)[0],
@@ -123,7 +123,7 @@ pub fn layout(score, options = {}) map^ {
     let ids=[for (p in score.parts) p.id]
     let valid_parts=c.require(o.parts==null or len(o.parts)>0 and len(unique(o.parts))==len(o.parts) and
         all([for (p in o.parts) contains(ids,p)]),"invalid part selection")^
-    let parts=[for (p in score.parts where o.parts==null or contains(o.parts,p.id)) p]
+    let parts=[for (p in score.parts where ((o.parts==null or contains(o.parts,p.id)) ^ { false })) p]
     let lanes=lyrics.lanes(parts)
     let stable_staffs=c.require(all([for (p in parts,m in p.measures) len(m.context.staffs)==len(p.measures[0].context.staffs)]),
         "changing staff counts are not supported")^
@@ -140,7 +140,7 @@ pub fn layout(score, options = {}) map^ {
         *c.option_warnings(options,["width","scale","mode","page_height","parts","show_title","show_lyrics","respect_breaks","strict"])^,
         // compare natural widths; floating justification can round past the available width.
         *[for (s in broken where s.width>available) c.diagnostic("overflow","system exceeds requested width",s.measures[0].label)],
-        *[for (page in paged.pages where o.mode=='pages' and page.height>o.page_height/unit)
+        *[for (page in ((((((paged.pages) ^ { [] }))))) where o.mode=='pages' and page.height>o.page_height/unit)
             c.diagnostic("overflow","system exceeds requested page height",string(page.index))]],o)^;
     {kind:"music-layout",version:1,score:score,options:o,profile:profile,unit:unit,parts:parts,
         pages:paged.pages,systems:paged.systems,diagnostics:warnings}

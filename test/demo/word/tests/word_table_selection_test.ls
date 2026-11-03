@@ -25,7 +25,7 @@ single.doc==doc and len(single.history.undo)==0
 tables.native_editor(column).selection==text_selection(pos([1,0,1],0),pos([1,0,1],0))
 model.table_context(row).row_index==1 and model.table_context(column).col_index==1
 let bordered = model.execute(single,"table.borders",{preset:"all",style:"dashed",width:2,color:"#2864ad"})^
-fn css(editor,path,key) => model.css_get(attrs_get(node_at(editor.doc,path).attrs,'style'),key);
+fn css(editor,path,key) any^ => model.css_get(attrs_get(node_at(editor.doc,path).attrs,'style'),key);
 all([for (side in ["top","right","bottom","left"]) css(bordered,[1,1,1],"border-" ++ side)=="2pt dashed #2864ad"])
 css(bordered,[1,1,0],"border-right")=="2pt dashed #2864ad" and css(bordered,[1,0,1],"border-bottom")=="2pt dashed #2864ad"
 css(bordered,[1,1,0],"border-left")==null
@@ -71,7 +71,7 @@ let pretty = edit_apply(column,tables.replace_transaction(column,"insertFromPast
     "<table>\n <tr>\n <th>X</th>\n </tr>\n <tr>\n <td>Y</td>\n </tr>\n <tr>\n <td>Z</td>\n </tr>\n</table>"));
 doc_text(node_at(pretty.doc,[1,0,1]))=="X" and doc_text(node_at(pretty.doc,[1,1,1]))=="Y" and doc_text(node_at(pretty.doc,[1,2,1]))=="Z"
 
-fn range_editor(a,b) => edit_set_selection(base,text_selection(pos(a,1),pos(b,0)))
+fn range_editor(a,b) any^ => edit_set_selection(base,text_selection(pos(a,1),pos(b,0)))
 let within = range_editor([1,1,1,0],[1,1,1,0])
 let across = tables.promote(range_editor([1,1,1,0],[1,2,2,0]))
 let reverse = tables.promote(range_editor([1,2,2,0],[1,1,1,0]));

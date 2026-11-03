@@ -6,7 +6,7 @@
 
 let N = 200
 
-pn next_rand(seed: int) int {
+fn next_rand(seed: int) int {
     return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
@@ -33,23 +33,23 @@ pn main() {
     let size: int = N * N
     // The annotation binds the public contract; fill retains packed float
     // storage until a checked write requires a representation change.
-    var a: float[] = fill(size, 0.0)
-    var b: float[] = fill(size, 0.0)
-    var c: float[] = fill(size, 0.0)
+    var a: float[] = fill(size, 0.0)^
+    var b: float[] = fill(size, 0.0)^
+    var c: float[] = fill(size, 0.0)^
 
     // Initialize with pseudo-random values in [-1.0, 1.0)
     var seed: int = 42
     var i: int = 0
     while (i < size) {
-        seed = next_rand(seed)
+        seed = next_rand(seed)^
         a[i] = float(seed % 2000) / 1000.0 - 1.0
-        seed = next_rand(seed)
+        seed = next_rand(seed)^
         b[i] = float(seed % 2000) / 1000.0 - 1.0
         i = i + 1
     }
 
     // Multiply
-    matmul(a, b, c, N)
+    matmul(a, b, c, N)^
 
     // Sum result matrix
     var total: float = 0.0
@@ -61,7 +61,7 @@ pn main() {
     var __t1 = clock()
 
     // Print truncated sum for verification
-    let int_total: int = int(floor(total))
+    let int_total: int = int(floor(total))^
     print("matmul: sum=" ++ int_total ++ "\n")
     print("matmul: DONE\n")
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

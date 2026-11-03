@@ -170,6 +170,10 @@ static inline AstCallNode* ast_pipe_sys_call(AstNode* node, const SysFuncInfo** 
     return (AstCallNode*)right;
 }
 
+// Static admission may use closed expression evidence without removing reification.
+StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
+    Type* proof_type = NULL);
+
 static inline bool ast_block_may_carry_defect(AstNode* node,
     AstCallDefectPredicate call_may_defect, void* ctx, int depth);
 
@@ -187,6 +191,7 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
         return call_may_defect((AstCallNode*)node, ctx);
     case AST_NODE_IDENT: {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry && entry->admission_may_fail) return true;
         AstNode* binding = entry ? entry->node : NULL;
         return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
             !((AstDeclaratorNode*)binding)->declared_type &&
@@ -259,6 +264,16 @@ static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
 // scans (build_ast's and the MIR solve) ask this before their own gates.
 static inline bool ast_node_originates_defect(AstNode* node) {
     switch (node->node_type) {
+    case AST_NODE_UNARY: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        // S7.6.3v3: propagation can complete an otherwise scalar callable.
+        return unary->op == OPERATOR_PROPAGATE && unary->operand &&
+            lambda_type_accepts_error(unary->operand->type);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        return call->propagate && lambda_type_has_proven_error(call->propagated_error_type);
+    }
     case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_CRUD_STAM: case AST_NODE_OPEN_STAM:
     case AST_NODE_START: case AST_NODE_HANDLER_STAM:
@@ -287,6 +302,9 @@ static inline bool ast_call_may_force_virtual_content(AstCallNode* call) {
     return !base || base->type_id == LMD_TYPE_ANY ||
         is_element_family_type_id(base->type_id) || base->type_id == LMD_TYPE_PATH;
 }
+
+// Resolve the callee's conversion target independently of its outcome type.
+Type* ast_called_type_target(AstNode* function);
 
 // LR03-13 (S11.4.1v3, S7.7.1): a call through a declared function-type
 // contract -- a binding or parameter annotated `fn (...) T` -- checks its
@@ -665,6 +683,14 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)stmt;
             AstNode* callee_node = ast_unwrap_primary(call->function);
+            if (call->is_proc_method && callee_node &&
+                    callee_node->node_type == AST_NODE_MEMBER_EXPR) {
+                // S9.1.2: the implicit receiver is a mutable argument too.
+                // Ignoring it lets an alias borrow survive a method write.
+                AstIdentNode* receiver = ast_compound_root_ident(
+                    ((AstFieldNode*)callee_node)->object);
+                if (receiver && receiver->entry == root) return true;
+            }
             AstFuncNode* callee = NULL;
             if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* fn_ident = (AstIdentNode*)callee_node;
@@ -813,7 +839,7 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             AstHandlerNode* handler = (AstHandlerNode*)stmt;
             if (ast_body_may_write_entry(handler->operand, root, include_rebind)) return true;
             if (ast_body_may_write_entry(handler->body, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(handler->value_body, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(handler->filter, root, include_rebind)) return true;
             break;
         }
         case AST_NODE_START:
@@ -853,6 +879,8 @@ typedef struct AstListNode : AstArrayNode {
     uint16_t interp_proc_decl_count;
     uint16_t interp_proc_stam_count;
     bool interp_proc_scanned;
+    // Result sequencing belongs to the enclosing callable, not branch scope.
+    bool procedural_results;
 } AstListNode;
 
 static inline bool ast_block_may_carry_defect(AstNode* node,
@@ -866,8 +894,7 @@ static inline bool ast_block_may_carry_defect(AstNode* node,
         for (; decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR; decl = decl->next) {
             AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
             if (named->declared_type && !lambda_type_accepts_error(named->declared_type) &&
-                    (lambda_static_boundary_relation(named->init ? named->init->type : NULL,
-                        named->declared_type, false) != STATIC_BOUNDARY_PROVEN ||
+                    (lambda_ast_boundary_relation(named->init, named->declared_type) != STATIC_BOUNDARY_PROVEN ||
                      ast_value_may_carry_defect(named->init, call_may_defect, ctx, depth + 1))) {
                 // S7.7.2: this block may complete with its declaration's error.
                 return true;
@@ -967,6 +994,7 @@ typedef struct AstViewNode : AstNode {
     AstNode* pattern;           // model pattern (type expression)
     AstNamedNode* param;        // optional parameters (linked list)
     AstNode* body;              // functional body
+    TypeFunc* signature;       // S12.1.3v2/S11.4.3: the view's return contract
     struct AstStateEntry* state; // optional state declarations (linked list)
     struct AstEventHandler* handler; // optional event handlers (linked list)
     NameScope* vars;            // scope for params and state
@@ -1124,10 +1152,9 @@ static inline bool is_view_handler_body_binding(int node_type) {
         node_type == AST_NODE_VAR_STAM;
 }
 
-// Procedural side-effect statements: they execute but contribute no output
-// value. IF_EXPR / WHILE_STAM / FOR_STAM can appear in functional code and do
-// produce values, so they are deliberately absent.
+// statement loops and local writes contribute no value in either callable colour.
 static inline bool is_side_effect_stam(int node_type) {
+    // S7.6.1v5: procedure handlers contribute their selected normal value.
     switch (node_type) {
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_BREAK_STAM:
@@ -1136,8 +1163,8 @@ static inline bool is_side_effect_stam(int node_type) {
     case AST_NODE_RAISE_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_LOOP:
     case AST_NODE_PIPE_FILE_STAM:
-    case AST_NODE_HANDLER_STAM:
     // Tier 3: a CRUD statement contributes no output value; it records an edit.
     case AST_NODE_CRUD_STAM:
     case AST_NODE_OPEN_STAM:
@@ -1145,6 +1172,17 @@ static inline bool is_side_effect_stam(int node_type) {
     default:
         return false;
     }
+}
+
+static inline AstFuncNode* ast_scope_function(NameScope* scope) {
+    for (; scope; scope = scope->parent) {
+        if (scope->lambda_function) return scope->lambda_function;
+    }
+    return NULL;
+}
+
+static inline bool ast_scope_allows_local_control(NameScope* scope) {
+    return scope && (scope->is_proc || ast_scope_function(scope));
 }
 
 // A functional block's value when it has exactly one value item among its
@@ -1164,13 +1202,8 @@ static inline AstNode* ast_content_single_value(AstNode* items) {
     return value;
 }
 
-// S16.6.8: the pn-only constructs whose presence at a block's TOP LEVEL makes
-// the block a statement rather than an expression. Deliberately narrower than
-// `is_side_effect_stam`: `raise` is an expression (fn-land divergence) and a
-// handler statement is not pn-only, so neither disqualifies a block from value
-// position. `while` is included because S16.6.5 makes it procedural-only, so a
-// block containing one can never be a functional value.
-static inline bool is_procedural_only_stam(int node_type) {
+// S16.6.8v3: imperative statement position is independent of call colour.
+static inline bool is_imperative_statement(int node_type) {
     switch (node_type) {
     case AST_NODE_RETURN_STAM:
     case AST_NODE_BREAK_STAM:
@@ -1196,6 +1229,39 @@ enum AstBranchKind { AST_BRANCH_NEUTRAL = 0, AST_BRANCH_VALUE, AST_BRANCH_CONTRO
 
 AstBranchKind ast_branch_kind(AstNode* node);
 
+static inline bool ast_is_control_flow_statement(AstNode* node) {
+    return node && (node->node_type == AST_NODE_IF_EXPR ||
+        node->node_type == AST_NODE_MATCH_EXPR) &&
+        ast_branch_kind(node) == AST_BRANCH_CONTROL;
+}
+
+// comparisons inspect their operands without publishing either operand.
+static inline bool ast_binary_only_reads_operands(Operator op) {
+    switch (op) {
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+    case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_REF_EQ:
+    case OPERATOR_ELEM_EQ: case OPERATOR_ELEM_NE: case OPERATOR_ELEM_LT:
+    case OPERATOR_ELEM_LE: case OPERATOR_ELEM_GT: case OPERATOR_ELEM_GE:
+    case OPERATOR_IS: case OPERATOR_SUBTYPE: case OPERATOR_IS_NAN:
+    case OPERATOR_IN: case OPERATOR_AT: case OPERATOR_OF:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline bool ast_node_transfers_control(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    return node && (node->node_type == AST_NODE_RETURN_STAM ||
+        node->node_type == AST_NODE_RAISE_STAM ||
+        node->node_type == AST_NODE_RAISE_EXPR);
+}
+
+static inline bool ast_block_item_is_statement(AstNode* node, bool is_proc) {
+    return node && (is_side_effect_stam(node->node_type) ||
+        (!is_proc && ast_is_control_flow_statement(node)));
+}
+
 // S16.6.8: a braced block is a STATEMENT, never an expression, when its
 // interior is procedural. Classification is by interior, extending S16.4.1v2's
 // doctrine from map-vs-block to statement-ness — so a functional block
@@ -1210,8 +1276,9 @@ static inline bool ast_block_is_procedural(AstNode* node) {
 // statements. Both execution tiers use this predicate before throwing away a
 // statement result, so an OOB store cannot become a successful no-op (S7.1.1).
 static inline bool side_effect_result_can_error(int node_type) {
+    // S7.7.4v2: a completed whole-variable store captures its error outcome.
+    // Rejected admission is handled before commit; field/index failures stay here.
     switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
@@ -1357,6 +1424,8 @@ typedef struct Transpiler : Script {
     // closures; `(Script*)this` is valid only during construction.
     Script* script_owner;
     Runtime* runtime;
+    // CW24 candidates belong to this compilation, including late MIR checks.
+    NameEntry* place_copy_pending;
     // The lazy whole-script POC runs MIR Direct while the T0 AST index is
     // still needed by the active interpreter. Ordinary eager loading can
     // release this index after code generation; the POC must retain it.
@@ -1424,6 +1493,7 @@ typedef struct Transpiler : Script {
 
     // A bare `^`/`^.`/`^[...]` is valid only while building a handler body.
     bool building_handler_body;
+    Type* handler_subject_type;
 
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)

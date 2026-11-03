@@ -6,11 +6,11 @@ import mark: .mark
 import color: .color
 import parse: .parse
 
-fn leaf_count(node) => if (len(node.children) == 0) 1 else sum(node.children |> leaf_count(~))
+fn leaf_count(node) any^ => if (len(node.children) == 0) 1 else sum(node.children |> leaf_count(~))
 
-fn tree_nodes(nodes, offset = 0, depth = 0, parent = null) {
+fn tree_nodes(nodes, offset = 0, depth = 0, parent = null) any^ {
     [for (i, node in nodes,
-        let first = offset + sum([for (previous in slice(nodes, 0, i)) leaf_count(previous)]),
+        let first = offset + sum([for (previous in ((slice(nodes, 0, i)) ^ { [] })) leaf_count(previous)]),
         let descendants = tree_nodes(node.children, first, depth + 1, node.id),
         let children = descendants |: ~.parent == node.id,
         let x = if (len(children) == 0) float(first) + 0.5 else avg(children |> ~.u)) (
@@ -43,7 +43,7 @@ fn pack_siblings(nodes, index = 0, placed = []) {
         let node = nodes[index];
         let candidates = if (len(placed) == 0) [{x: 0.0, y: 0.0, r: node.r}]
             else [for (circle in placed) {x: circle.x + circle.r + node.r, y: circle.y, r: node.r},
-                for (i, a in placed) for (j, b in placed where j > i) for (point in tangent(a, b, node.r)) point];
+                for (i, a in placed) for (j, b in placed where j > i) for (point in ((tangent(a, b, node.r)) ^ { [] })) point];
         let clear = [for (candidate in candidates where all([for (circle in placed)
             distance(candidate, circle) + 0.000000001 >= candidate.r + circle.r])) candidate];
         let chosen = sort(clear, (point) => enclosure([*placed, point]).r)[0];
@@ -51,7 +51,7 @@ fn pack_siblings(nodes, index = 0, placed = []) {
     }
 }
 
-fn packed(node, padding) {
+fn packed(node, padding) any^ {
     if (len(node.children) == 0) {*:node, r: math.sqrt(node.value), packed: []}
     else {
         let children = pack_siblings([for (child in node.children) packed(child, padding)]);
@@ -65,7 +65,7 @@ fn flatten(nodes, x, y, unit, depth = 0, parent = null) => [for (node in nodes,
         {*:node, x: px, y: py, r: node.r * unit, parent: parent, depth: depth},
         *flatten(node.packed, px, py, unit, depth + 1, node.id))]
 
-pub fn layout(data, width, height, options = {}) {
+pub fn layout(data, width, height, options = {}) any^ {
     let roots = hierarchy.forest(data, options);
     let padding = if (options.node_padding != null) options.node_padding else 0.0;
     let orientation = if (options.orientation != null) options.orientation else "vertical";
@@ -94,7 +94,7 @@ pub fn layout(data, width, height, options = {}) {
     }
 }
 
-pub fn render(data, ctx, options) {
+pub fn render(data, ctx, options) any^ {
     let polar=ctx._coordinate!=null and ctx._coordinate.type!="cartesian";
     let laid_out = layout(data, ctx.plot_w, ctx.plot_h, if (polar) {*:options,orientation:"vertical"} else options);
     let nodes=if (polar) [for (node in laid_out) {*:node,y:ctx.plot_h-node.y}] else laid_out;
@@ -103,7 +103,7 @@ pub fn render(data, ctx, options) {
     let label_ctx = mark.part_context(ctx, options, "label", nodes |> ~.row);
     let invalid=util.first_error([nodes,mark.part_error([nc,lc,label_ctx])]);
     if (invalid is error) invalid else svg.group_class("marks " ++ options.kind, [
-        if (options.kind == "tree") for (node in nodes where node.parent != null and mark.part_selected(lc,node.row),
+        if (options.kind == "tree") for (node in nodes where ((node.parent != null and mark.part_selected(lc,node.row)) ^ { false }),
             let parent = (nodes |: ~.id == node.parent)[0],
             let horizontal = options.orientation == "horizontal",
             let mid = if (horizontal) (parent.x + node.x) / 2.0 else (parent.y + node.y) / 2.0)
@@ -116,12 +116,12 @@ pub fn render(data, ctx, options) {
                         else svg.C(parent.x, mid, node.x, mid, node.x, node.y)),
                 *:mark.style(lc, node.row, mark.part_options(options, "link"),
                     {fill: "none", stroke: "#aaa", 'stroke-width': 1, opacity: 1.0}, true)>,
-        for (node in nodes where mark.part_selected(nc,node.row)) <circle class: options.kind ++ "-node", 'data-node': string(node.id), cx: node.x, cy: node.y,
+        for (node in nodes where ((mark.part_selected(nc,node.row)) ^ { false })) <circle class: options.kind ++ "-node", 'data-node': string(node.id), cx: node.x, cy: node.y,
             r: if (options.kind == "pack") node.r else if (options.node_radius != null) options.node_radius else 4.0,
             *:mark.style(nc, node.row, mark.part_options(options, "node"),
                 {fill: color.category10[node.depth % 10], stroke: "white", 'stroke-width': 1, opacity: if (options.kind == "pack") 0.5 else 1.0}),
             mark.tooltip(nc, node.row)>,
-        if (options.labels != false) for (node in nodes where (options.kind != "pack" or len(node.children) == 0) and mark.part_selected(label_ctx,node.row))
+        if (options.labels != false) for (node in nodes where (((options.kind != "pack" or len(node.children) == 0) and mark.part_selected(label_ctx,node.row)) ^ { false }))
             <text class: "cluster-label", x: node.x + (if (options.kind == "tree") 6 else 0), y: node.y,
                 'text-anchor': if (options.kind == "tree") "start" else "middle", 'dominant-baseline': "middle", 'font-size': 11,
                 *:mark.style(label_ctx, node.row, mark.part_options(options, "label"), {fill: "#222", opacity: 1.0}),

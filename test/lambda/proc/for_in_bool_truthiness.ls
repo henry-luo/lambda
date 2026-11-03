@@ -29,7 +29,7 @@ pn main() {
     // elements computed at run time, a fill, and a `where` clause
     let flags = [dyn(1) > 2, dyn(2) > 1]
     for (b in flags) { print(if (b) "t" else "f") }
-    for (b in fill(2, false)) { print(if (b) "t" else "f") }
+    for (b in ((fill(2, false)) ^ { [] })) { print(if (b) "t" else "f") }
     for (b in xs where not b) { print("w") }
     print("\n")
 

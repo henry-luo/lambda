@@ -18,8 +18,8 @@ pub fn normalize(doc) element^ {
    c.fields(doc,["version","generator_version","seed","form","ear_shape","outfit","accessory","marking","hair_style","parameters","appearance"]) and
    len(content(doc))==0 and doc.appearance is map and c.fields(doc.appearance,[for (k,v in PALETTE) string(k)]),"avatar: invalid version 2 or 3 recipe")^
   let appearance={*:PALETTE,*:doc.appearance}
-  let legacy=old.normalize(<avatar *:{*:map([for (k,v in map(doc) where string(k)!="hair_style") (string(k),v)]),generator_version:1,
-   appearance:map([for (k,v in appearance where contains([for (n,p in old.PALETTE) string(n)],string(k))) (string(k),v)])}>)^
+  let legacy=old.normalize(<avatar *:{*:map([for (k,v in map(doc) where ((string(k)!="hair_style") ^ { false })) (string(k),v)]),generator_version:1,
+   appearance:map([for (k,v in appearance where ((contains([for (n,p in old.PALETTE) string(n)],string(k))) ^ { false })) (string(k),v)])}>)^
   let hair=c.value(doc.hair_style,if (doc.form=="human") "short" else if (doc.form=="fairy") "bun" else "none")
   let checked=c.require(contains(HAIR_STYLES,hair),"avatar: unknown hairstyle")^
   let paints=[for (k,v in appearance) color.parse(v)^];
@@ -32,7 +32,7 @@ pub fn generate(description) map^ {
  let doc=normalize(description)^;
  if (doc.generator_version==1) old.generate(doc)^ else forms.generate(doc)^
 }
-pub fn resources(models=null) element {
+pub fn resources(models=null) element^ {
  let all=if (models==null) [] else if (models is array) models else [models]
  let resources=[*content(old.resources()),*[for (m in all) *c.value(m.resources,[])]];
  s.resources([for (r in resources group by r.id as id into batch) batch[0]])

@@ -80,7 +80,7 @@ let restarted = game.action(topped, "restart")
   swaps_hold: swapped.piece.kind == held.held and swapped.held == dropped.piece.kind,
   soft_score: soft.score == 1 and soft.piece.y == playing.piece.y + 1,
   hard_score: hard.score == 2 * (game.landing(board, playing.piece).y - playing.piece.y),
-  locks_four: len([for (cell in hard.board where cell != 0) cell]) == 4,
+  locks_four: len([for (cell in ((hard.board) ^ { [] }) where cell != 0) cell]) == 4,
   next_advances: hard.piece.kind == playing.queue[0],
   preview_refills: len(dropped.queue) >= 4,
   spawn_topout: topped.mode == "over",
@@ -94,9 +94,9 @@ let restarted = game.action(topped, "restart")
 let auto = game.action(initial, "auto")
 let auto_well = {*:auto, board: well, piece: game.spawn(0)}
 let auto_clear = reduce([{game: auto_well, plan: null}, *[for (i in 1 to 12) i]],
-  (acc, unused) => game.auto_step(acc.game, acc.plan))
+  (acc, unused) any^ => game.auto_step(acc.game, acc.plan))
 let auto_round = reduce([{game: auto, plan: null}, *[for (i in 1 to 120) i]],
-  (acc, unused) => game.auto_step(acc.game, acc.plan))
+  (acc, unused) any^ => game.auto_step(acc.game, acc.plan))
 {
   auto_starts: auto.autoplay and auto.mode == "playing",
   auto_uses_rotation_and_clears: auto_clear.game.lines >= 4,

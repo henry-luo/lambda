@@ -12,7 +12,7 @@ pub fn actor(game, id) => [for (entry in game.actors where entry.id == id) entry
 pub fn replace_actor(game, next) => {*: game, actors: [for (entry in game.actors)
     if (entry.id == next.id) next else entry]}
 pub fn target(game, id) => if (id == -1) game.player else actor(game, id)
-pub fn equip(game, slot, rules) => if (rules.WEAPONS[string(slot)] == null or
+pub fn equip(game, slot, rules) any^ => if (rules.WEAPONS[string(slot)] == null or
     not contains(game.player.weapons, slot)) game else weapons.changed(game, slot)
 pub fn roll_damage(game, kind) {
     let sample = game_state.roll(game.seed, if (kind == "melee") 10 else if (kind == "rocket") 8 else 3)
@@ -20,7 +20,7 @@ pub fn roll_damage(game, kind) {
         (if (pickups.active(game.player, "berserk", game.time)) 20 else 2)
         else if (kind == "rocket") 20 else 5)}
 }
-fn damage_player(game, amount) {
+fn damage_player(game, amount) any^ {
     let player_state = game.player
     if (player_state.health <= 0 or pickups.active(player_state, "invulnerability", game.time)) game
     else {
@@ -39,12 +39,12 @@ pub fn splash(map_data, game, position, amount, source, rules, exclude_id = null
     let targets = [for (entry in [{*: game.player, id: -1}, *game.actors],
         let radius = if (entry.id == -1) rules.PLAYER_RADIUS else player.actor_radius(entry, rules),
         let distance = max(0, max(abs(entry.x - position.x), abs(entry.y - position.y)) - radius)
-        where entry.id != exclude_id and (entry.id == -1 or
+        where ((entry.id != exclude_id and (entry.id == -1 or
             (not entry.collected and contains(rules.SHOOTABLE, entry.type))) and distance < amount and
-            world.visible(map_data, game, position, entry, rules)) events.damage(entry.id, amount - distance, source)]
+            world.visible(map_data, game, position, entry, rules)) ^ { false })) events.damage(entry.id, amount - distance, source)]
     events.with_events(game, targets)
 }
-fn damage_actor(map_data, game, victim, amount, source, rules) {
+fn damage_actor(map_data, game, victim, amount, source, rules) any^ {
     if (victim == null or victim.collected or victim.hp <= 0) game else {
         let hp = victim.hp - amount
         let sample = if (hp > 0 and victim.ai != null) game_state.roll(game.seed, 256)
@@ -66,30 +66,30 @@ fn damage_actor(map_data, game, victim, amount, source, rules) {
             if (victim.type == 3003 and game.level_name == "E1M8" and
                 not any([for (entry in dead.actors) entry.type == 3003 and not entry.collected]))
                 reduce([dead, *[for (lift in dead.lifts where lift.tag == 666) lift.sectorIndex]],
-                    (acc, sector_id) => mechanics.lower_lift(acc, sector_id, rules))
+                    (acc, sector_id) any^ => mechanics.lower_lift(acc, sector_id, rules))
             else dead
         }
         else if (victim.type != 2035) events.sound(next, "DSPOPAIN", victim) else next
     }
 }
-fn apply_damage(map_data, game, hit, rules) => if (hit.target == -1) damage_player(game, hit.amount)
+fn apply_damage(map_data, game, hit, rules) any^ => if (hit.target == -1) damage_player(game, hit.amount)
     else damage_actor(map_data, game, actor(game, hit.target), hit.amount, hit.source, rules)
-pub fn resolve_damage(map_data, game, rules) {
-    let hit_index = [for (i in 0 to (len(game.effects) - 1) where game.effects[i].kind == "damage") i][0]
+pub fn resolve_damage(map_data, game, rules) any^ {
+    let hit_index = [for (i in ((0 to (len(game.effects) - 1)) ^ { [] }) where game.effects[i].kind == "damage") i][0]
     if (hit_index == null) game else {
         let hit = game.effects[hit_index]
-        let remaining = {*: game, effects: [for (i in 0 to (len(game.effects) - 1) where i != hit_index) game.effects[i]]}
+        let remaining = {*: game, effects: [for (i in ((0 to (len(game.effects) - 1)) ^ { [] }) where i != hit_index) game.effects[i]]}
         resolve_damage(map_data, apply_damage(map_data, remaining, hit, rules), rules)
     }
 }
-pub fn damage(map_data, game, target_id, amount, source, rules) =>
+pub fn damage(map_data, game, target_id, amount, source, rules) any^ =>
     resolve_damage(map_data, events.with_events(game, [events.damage(target_id, amount, source)]), rules)
 
-fn hitscan_target(game, direction, distance_limit, rules) => sort([for (entry in game.actors,
+fn hitscan_target(game, direction, distance_limit, rules) any^ => sort([for (entry in game.actors,
     let distance = math.sqrt(geo.distance_squared(game.player, entry)),
     let dot = if (distance == 0) 1 else ((entry.x - game.player.x) * direction.x +
         (entry.y - game.player.y) * direction.y) / distance
-    where not entry.collected and contains(rules.SHOOTABLE, entry.type) and distance <= distance_limit and dot >= 0.99)
+    where ((not entry.collected and contains(rules.SHOOTABLE, entry.type) and distance <= distance_limit and dot >= 0.99) ^ { false }))
     {actor: entry, distance: distance}], (hit) => hit.distance)[0].actor
 fn puff(map_data, game, position, target_hit, rules) {
     let distance = math.sqrt(geo.distance_squared(game.player, position))
@@ -99,7 +99,7 @@ fn puff(map_data, game, position, target_hit, rules) {
     events.with_events(game, [{kind: "puff", position: {*: point,
         z: floor_height + rules.EYE_HEIGHT * (if (target_hit) 0.5 else 1)}, at: game.time}])
 }
-fn shot(map_data, game, direction, weapon, rules) {
+fn shot(map_data, game, direction, weapon, rules) any^ {
     let victim = hitscan_target(game, direction, weapon.range, rules)
     if (victim != null and world.visible(map_data, game, game.player, victim, rules)) {
         let sample = roll_damage(game, if (weapon.damageType == "pellets") "hitscan" else weapon.damageType)
@@ -111,13 +111,13 @@ fn shot(map_data, game, direction, weapon, rules) {
             {x: game.player.x + direction.x * wall_hit.distance, y: game.player.y + direction.y * wall_hit.distance}, false, rules)
     } else game
 }
-fn pellet(map_data, game, weapon, rules) {
+fn pellet(map_data, game, weapon, rules) any^ {
     let a = game_state.roll(game.seed, 256)
     let b = game_state.roll(a.seed, 256)
     let angle = game.player.angle + (a.value - b.value) / 255 * math.pi / 8
     shot(map_data, {*: game, seed: b.seed}, geo.forward(angle), weapon, rules)
 }
-pub fn spawn_projectile(game, origin, destination, definition, source, rules) {
+pub fn spawn_projectile(game, origin, destination, definition, source, rules) any^ {
     let distance = math.sqrt(geo.distance_squared(origin, destination) + (destination.z - origin.z) ** 2)
     let projectile = {*: definition, id: game.next_projectile_id, source: source,
         start_x: origin.x, start_y: origin.y, start_z: origin.z, x: origin.x, y: origin.y, z: origin.z,
@@ -127,7 +127,7 @@ pub fn spawn_projectile(game, origin, destination, definition, source, rules) {
     events.sound({*: game, projectiles: [*game.projectiles, projectile],
         next_projectile_id: game.next_projectile_id + 1}, definition.sound, origin)
 }
-pub fn fire(map_data, game, rules) {
+pub fn fire(map_data, game, rules) any^ {
     let weapon = rules.WEAPONS[string(game.player.weapon)]
     if (game.player.health <= 0 or weapons.switching(game) or game.time < game.player.next_fire or weapon == null or
         (weapon.ammoType != null and game.player.ammo[weapon.ammoType] < weapon.ammoPerShot)) game
@@ -148,12 +148,12 @@ pub fn fire(map_data, game, rules) {
         else {
             let audible = events.sound(firing, weapon.sound, game.player)
             if (weapon.damageType == "pellets") reduce([audible, *[for (i in 1 to weapon.pellets) i]],
-                (acc, unused) => pellet(map_data, acc, weapon, rules))
+                (acc, unused) any^ => pellet(map_data, acc, weapon, rules))
             else shot(map_data, audible, direction, weapon, rules)
         }
     }
 }
-fn projectile_tick(map_data, game, projectile, rules) {
+fn projectile_tick(map_data, game, projectile, rules) any^ {
     let elapsed = game.time - projectile.born_at
     let next = {*: projectile, x: projectile.start_x + projectile.dx * projectile.speed * elapsed,
         y: projectile.start_y + projectile.dy * projectile.speed * elapsed,
@@ -167,8 +167,8 @@ fn projectile_tick(map_data, game, projectile, rules) {
     let victim = if (not projectile.is_player_rocket and geo.distance_squared(next, game.player) < 24 ** 2)
         {*: game.player, id: -1} else [for (entry in game.actors,
             let radius = if (entry.ai == null) rules.ENEMY_RADIUS else entry.ai.radius
-            where not entry.collected and entry.id != projectile.source and contains(rules.SHOOTABLE, entry.type) and
-                geo.distance_squared(next, entry) < (24 + radius) ** 2) entry][0]
+            where ((not entry.collected and entry.id != projectile.source and contains(rules.SHOOTABLE, entry.type) and
+                geo.distance_squared(next, entry) < (24 + radius) ** 2) ^ { false })) entry][0]
     let impact = wall_hit != null or next.z <= floor_height or victim != null
     let removed = {*: game, projectiles: [for (entry in game.projectiles where entry.id != projectile.id) entry]}
     if (elapsed >= projectile.lifetime) removed
@@ -191,4 +191,4 @@ fn projectile_tick(map_data, game, projectile, rules) {
     else {*: game, projectiles: [for (entry in game.projectiles) if (entry.id == next.id) next else entry]}
 }
 pub fn projectiles(map_data, game, rules) => reduce([game, *game.projectiles],
-    (acc, projectile) => projectile_tick(map_data, acc, projectile, rules))
+    (acc, projectile) any^ => projectile_tick(map_data, acc, projectile, rules))

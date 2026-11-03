@@ -22,4 +22,4 @@ let spec =
 >
 
 let svg = chart.render(spec)
-format(svg, 'xml')
+format(svg, 'xml')^

@@ -11,14 +11,14 @@ pn main() {
         i = i + 1
     }
     var alias = values
-    alias.push({invalid: true})
+    alias.push({invalid: true})^
     var failed = false
     checked(alias) ^ { failed = true }
     var typed: Value[] = values
     let before = typed
     var rejected = false
     typed.push({invalid: true}) ^ { rejected = true }
-    typed.push({value: 3})
+    typed.push({value: 3})^
     print([total, len(values), len(alias), failed,
         rejected, len(before), len(typed)])
 }

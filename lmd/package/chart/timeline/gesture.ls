@@ -7,10 +7,10 @@ import util: lambda.chart.util
 
 fn distance(a,b) => math.sqrt((a[0]-b[0])**2+(a[1]-b[1])**2)
 fn center(points) => [(points[0].point[0]+points[1].point[0])/2.0,(points[0].point[1]+points[1].point[1])/2.0]
-fn instant(plan, point) => time_map.invert(plan.time_map,coordinate.invert(plan.path,point).fraction)
+fn instant(plan, point) any^ => time_map.invert(plan.time_map,coordinate.invert(plan.path,point).fraction)
 fn begin(points, plan, window, original, surface = "main") => {points:points,start:points,plan:plan,window:window,original:original,moved:false,surface:surface}
 
-pub fn update(current, action, plan, spec) {
+pub fn update(current, action, plan, spec) any^ {
     let gesture=current.gesture;
     let key=c.option(action,"pointer_id",1);
     let point=action.point;

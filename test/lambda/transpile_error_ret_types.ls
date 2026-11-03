@@ -6,9 +6,9 @@ fn safe_sqrt(x: float) float^ {
     else x ** 0.5
 }
 
-fn test_float_ok1() { safe_sqrt(16.0)^ }
-fn test_float_ok2() { safe_sqrt(25.0)^ }
-fn test_float_err() {
+fn test_float_ok1() any^ { safe_sqrt(16.0)^ }
+fn test_float_ok2() any^ { safe_sqrt(25.0)^ }
+fn test_float_err() any^ {
     let val = safe_sqrt(0.0 - 1.0) ^ { ^ }
     if (val is error) 99 else val
 }
@@ -22,9 +22,9 @@ fn safe_greet(name: string) string^ {
     else "Hello " ++ name
 }
 
-fn test_str_ok1() { len(safe_greet("Alice")^) }
-fn test_str_ok2() { len(safe_greet("Bob")^) }
-fn test_str_err() {
+fn test_str_ok1() any^ { len(safe_greet("Alice")^) }
+fn test_str_ok2() any^ { len(safe_greet("Bob")^) }
+fn test_str_err() any^ {
     let val = safe_greet("x") ^ { ^ }
     if (val is error) 99 else len(val)
 }
@@ -38,9 +38,9 @@ fn safe_gt(a: int, b: int) bool^ {
     else (a > b)
 }
 
-fn test_bool_ok1() { safe_gt(10, 5)^ }
-fn test_bool_ok2() { safe_gt(3, 7)^ }
-fn test_bool_err() {
+fn test_bool_ok1() any^ { safe_gt(10, 5)^ }
+fn test_bool_ok2() any^ { safe_gt(3, 7)^ }
+fn test_bool_err() any^ {
     let val = safe_gt(0, 0) ^ { ^ }
     if (val is error) 99 else val
 }
@@ -54,9 +54,9 @@ fn safe_div(a: int, b: int) int^ {
     else a div b
 }
 
-fn test_int_ok1() { safe_div(10, 3)^ }
-fn test_int_ok2() { safe_div(100, 7)^ }
-fn test_int_err() {
+fn test_int_ok1() any^ { safe_div(10, 3)^ }
+fn test_int_ok2() any^ { safe_div(100, 7)^ }
+fn test_int_err() any^ {
     let val = safe_div(10, 0) ^ { ^ }
     if (val is error) 99 else val
 }
@@ -70,8 +70,8 @@ fn compute_doubled_div(a: int, b: int) int^ {
     d * 2
 }
 
-fn test_chain_ok() { compute_doubled_div(10, 2)^ }
-fn test_chain_err() {
+fn test_chain_ok() any^ { compute_doubled_div(10, 2)^ }
+fn test_chain_err() any^ {
     let val = compute_doubled_div(10, 0) ^ { ^ }
     if (val is error) 99 else val
 }
@@ -85,7 +85,7 @@ fn parse_positive(x: int) int^ {
     else x
 }
 
-fn check_pair(a: int, b: int) {
+fn check_pair(a: int, b: int) any^ {
     let x = parse_positive(a) ^ { ^ }
     let y = parse_positive(b) ^ { ^ }
     if (x is error) 91

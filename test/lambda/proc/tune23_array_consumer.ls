@@ -13,6 +13,6 @@ pn main() {
     let open_words = split("one two", " ")
     let first = word(open_words, 0)
     var alias = open_words
-    alias.push(42)
+    alias.push(42)^
     print([total, first, len(open_words), alias[2]])
 }

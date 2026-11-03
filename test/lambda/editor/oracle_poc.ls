@@ -13,13 +13,13 @@ fn next_state(s, tx) =>
   if (tx == null) { s }
   else { {doc: tx.doc_after, selection: tx.sel_after, schema: s.schema} }
 
-fn join_sep_at(arr, sep, i, n, acc) {
+fn join_sep_at(arr, sep, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (i == 0) { join_sep_at(arr, sep, i + 1, n, arr[i]) }
   else { join_sep_at(arr, sep, i + 1, n, acc ++ sep ++ arr[i]) }
 }
-fn join_parts(arr) => join_sep_at(arr, ",", 0, len(arr), "")
-fn join_plus(arr) => join_sep_at(arr, "+", 0, len(arr), "")
+fn join_parts(arr) any^ => join_sep_at(arr, ",", 0, len(arr), "")
+fn join_plus(arr) any^ => join_sep_at(arr, "+", 0, len(arr), "")
 
 // Canonical mark order (matches the JS exporter) so fingerprints agree without
 // a string sort (Lambda's sort() is numeric-only).
@@ -32,7 +32,7 @@ fn mark_present_at(marks, name, i, n) {
 fn ordered_mark_names(marks) =>
   [for (name in MARK_ORDER where mark_present_at(marks, name, 0, len(marks))) string(name)]
 
-fn fp(n) {
+fn fp(n) any^ {
   if (is_text(n)) {
     let ks = ordered_mark_names(n.marks)
     if (len(ks) == 0) { '"' ++ n.text ++ '"' }

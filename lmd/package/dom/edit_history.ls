@@ -16,25 +16,25 @@ fn utf16_width(character) {
     if (ord(character) > 65535) 2 else 1
 }
 
-pub fn codepoint_from_utf16(text, target, index, units) {
+pub fn codepoint_from_utf16(text, target, index, units) any^ {
     if (index >= len(text) or units >= target) index
     else codepoint_from_utf16(text, target, index + 1,
                                units + utf16_width(slice(text, index, index + 1)))
 }
 
-pub fn utf16_from_codepoint(text, target, index, units) {
+pub fn utf16_from_codepoint(text, target, index, units) any^ {
     if (index >= len(text) or index >= target) units
     else utf16_from_codepoint(text, target, index + 1,
                               units + utf16_width(slice(text, index, index + 1)))
 }
 
-pub fn common_prefix(before, after, index, limit) {
+pub fn common_prefix(before, after, index, limit) any^ {
     if (index >= limit or slice(before, index, index + 1) != slice(after, index, index + 1))
         index
     else common_prefix(before, after, index + 1, limit)
 }
 
-pub fn common_suffix(before, after, count, limit) {
+pub fn common_suffix(before, after, count, limit) any^ {
     if (count >= limit or
         slice(before, len(before) - count - 1, len(before) - count) !=
         slice(after, len(after) - count - 1, len(after) - count)) count
@@ -127,7 +127,7 @@ fn history_trim(entries) {
     }
 }
 
-fn can_merge_typing(previous, current) {
+fn can_merge_typing(previous, current) any^ {
     previous != null and current != null and
     previous.history_class == "typing" and current.history_class == "typing" and
     previous.removed == "" and current.removed == "" and
@@ -193,21 +193,21 @@ pub pn record(host, snapshot, phase = null, edit_context = null) {
     let stacked = if (entry == null or current == null or not same_parent) null
         else record_stack(current.history,entry);
     let updated = if (stacked == null) null else session.set_history(host,stacked.history);
-    if (updated == null) { release_entry(host,entry); return false }
+    if ((updated == null)^) { release_entry(host,entry)^; return false }
     return release_entries(host,stacked.released,0)
 }
 
-pub fn can_undo(host) {
+pub fn can_undo(host) any^ {
     let current = session.read(host);
     current != null and len(current.history.undo) > 0
 }
 
-pub fn can_redo(host) {
+pub fn can_redo(host) any^ {
     let current = session.read(host);
     current != null and len(current.history.redo) > 0
 }
 
-fn value_after_replay(value, entry, is_undo) {
+fn value_after_replay(value, entry, is_undo) any^ {
     let expected = if (is_undo) entry.inserted else entry.removed;
     let replacement = if (is_undo) entry.removed else entry.inserted;
     let at = entry.start;
@@ -226,9 +226,9 @@ pn restore_selection(host, entry, is_undo) {
         // Selection APIs use UTF-16 offsets while all package text policy uses
         // codepoints. Convert at this one explicit boundary (D7.2.5).
         dom.set_base_and_extent(selection, entry.node,
-                                utf16_from_codepoint(value, point.anchor, 0, 0),
+                                utf16_from_codepoint(value, point.anchor, 0, 0)^,
                                 entry.node,
-                                utf16_from_codepoint(value, point.focus, 0, 0));
+                                utf16_from_codepoint(value, point.focus, 0, 0)^);
         true
     }
 }
@@ -279,7 +279,7 @@ pn record_composition(host,current,entry,phase,edit_context) {
     let steps = if (entry == null) previous else [*previous,entry];
     if (phase == "compositionStart") {
         session.set_composition(host,{steps:[]})
-        release_entries(host,previous,0)
+        release_entries(host,previous,0)^
         false
     } else if (phase == "insertCompositionText") {
         session.set_composition(host,{steps:steps})
@@ -293,13 +293,13 @@ pn record_composition(host,current,entry,phase,edit_context) {
             if (not restored) { dom.edit_abort_transaction(host,edit_context.token); false }
             else {
                 session.set_composition(host,null)
-                release_entry(host,group)
+                release_entry(host,group)^
                 false
             }
         } else if (group == null) { session.set_composition(host,null); false }
         else {
             let stacked = record_stack(current.history,group);
-            session.set_history_and_composition(host,stacked.history,null)
+            session.set_history_and_composition(host,stacked.history,null)^
             release_entries(host,stacked.released,0)
         }
     }
@@ -315,7 +315,7 @@ pn replay(host, edit_context, is_undo) {
         let entry = entries[len(entries) - 1];
         if (not replay_step(host,edit_context,entry,is_undo)) {
             dom.edit_abort_transaction(host,edit_context.token)
-            clear_history(host,current)
+            clear_history(host,current)^
             false
         } else {
             let restored_typing = if (is_undo) entry.typing_before else entry.typing_after;

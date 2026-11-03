@@ -8,7 +8,7 @@ import M: .mod_model
 fn walls_of(specs) => [for (i, s in specs) M.wall("w" ++ string(i + 1), float(s[0]), float(s[1]), float(s[2]), float(s[3]), float(s[4]))]
 fn rooms_of(specs) => [for (i, s in specs) {id: "r" ++ string(i + 1), name: s[0], floor: s[1], pts: [for (p in s[2]) [float(p[0]), float(p[1])]]}]
 // an opening is [key, wall, at, patch]; furniture is [key, x, y, rot, patch]
-fn spec_item(i, s) => (let id = "i" ++ string(i + 1), let patch = if (len(s) > 4) s[4] else if (len(s) > 3 and s[3] is map) s[3] else {},
+fn spec_item(i, s) any^ => (let id = "i" ++ string(i + 1), let patch = if (len(s) > 4) s[4] else if (len(s) > 3 and s[3] is map) s[3] else {},
     if (C.is_opening(s[0])) M.piece(id, s[0], 0.0, 0.0, 0.0, {wall: s[1], at: float(s[2]), flip: false, *:patch})
     else M.piece(id, s[0], float(s[1]), float(s[2]), float(s[3]), patch))
 fn build(key, title, blurb, walls, rooms, items) {

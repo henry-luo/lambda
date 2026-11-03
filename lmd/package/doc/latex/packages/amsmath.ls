@@ -15,7 +15,7 @@ let KERNEL_ENVIRONMENTS = ["eqnarray", "eqnarray*"]
 
 // whether this adapter renders an environment from its row sources: amsmath's
 // (equation included), IEEEtrantools' IEEEeqnarray, or the kernel's eqnarray
-pub fn handles(tag, packages) =>
+pub fn handles(tag, packages) any^ =>
     (contains(KERNEL_ENVIRONMENTS, tag) or false) or
     (is_environment(tag) or tag == "equation") and (registry.active(packages, "amsmath") or
         ((starts_with(tag, "IEEEeqnarray") or false) and registry.active(packages, "IEEEtrantools")))
@@ -33,15 +33,15 @@ fn collect_operators(node, scoped) {
               starred: tag == "DeclareMathOperator*" or node.starred == true, scoped: scoped,
               offset: node.source_offset}]
         } else [];
-        own ++ [for (child in node, entry in collect_operators(child, nested_scope)) entry]
+        own ++ [for (child in node, entry in ((collect_operators(child, nested_scope)) ^ { [] })) entry]
     }
 }
 
-pub fn operators(ast) {
+pub fn operators(ast) any^ {
     fold_operators(collect_operators(ast, false), 0, [], [])
 }
 
-fn fold_operators(declared, i, definitions, issues) {
+fn fold_operators(declared, i, definitions, issues) any^ {
     if (i >= len(declared)) {definitions: definitions, diagnostics: issues}
     else {
         let entry = declared[i]
@@ -66,12 +66,12 @@ fn command_letter(ch) {
     index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != null
 }
 
-fn command_end(source, i) {
+fn command_end(source, i) any^ {
     if (i >= len(source) or not command_letter(slice(source, i, i + 1))) i
     else command_end(source, i + 1)
 }
 
-fn expand_operators(source, definitions, i, result) {
+fn expand_operators(source, definitions, i, result) any^ {
     if (i >= len(source)) result
     else if (slice(source, i, i + 1) != "\\")
         expand_operators(source, definitions, i + 1,
@@ -85,7 +85,7 @@ fn expand_operators(source, definitions, i, result) {
     }
 }
 
-fn split_tex(source, rows, i, depth, escaped, start, acc) {
+fn split_tex(source, rows, i, depth, escaped, start, acc) any^ {
     if (i >= len(source)) acc ++ [slice(source, start, len(source))]
     else {
         let ch = slice(source, i, i + 1)
@@ -104,12 +104,12 @@ fn split_tex(source, rows, i, depth, escaped, start, acc) {
     }
 }
 
-fn cell_expression(source, operators) => expand_operators(trim(source), operators, 0, "")
+fn cell_expression(source, operators) any^ => expand_operators(trim(source), operators, 0, "")
 
 fn parse_cell(expression) =>
     if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
 
-fn math_cell(source, display, operators, offset) {
+fn math_cell(source, display, operators, offset) any^ {
     let expression = cell_expression(source, operators)
     let ast = parse_cell(expression)
     if (expression == "") ""
@@ -120,7 +120,7 @@ fn math_cell(source, display, operators, offset) {
 }
 
 // gather, multline and equation rows are one cell; alignments split at top-level &
-fn row_cells(source, gathered) =>
+fn row_cells(source, gathered) any^ =>
     if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, [])
 
 // the parsed math of every cell, expanded as for rendering, for the unmapped-command scan
@@ -128,10 +128,10 @@ pub fn cell_asts(el, operators) {
     let tag = string(name(el))
     let gathered = starts_with(tag, "gather") or starts_with(tag, "multline") or
         starts_with(tag, "equation")
-    let cells = [for (row in rows_for(el), cell in (if (row.error is null)
-        row_cells(row.math, gathered) else [])) cell];
+    let cells = [for (row in ((rows_for(el)) ^ { [] }), cell in (((if (row.error is null)
+        row_cells(row.math, gathered) else [])) ^ { [] })) cell];
     [for (cell in cells, let ast = parse_cell(cell_expression(cell, operators))
-        where ast != null) ast]
+        where ((ast != null) ^ { false })) ast]
 }
 
 // cell_align(i) is the CSS alignment of the row's i-th cell; tag is the row's
@@ -151,12 +151,12 @@ pub let TAG_FORMATS = {textbf: "font-weight:bold", textit: "font-style:italic", 
     textsl: "font-style:oblique", textsf: font_decl.SANS_CSS, texttt: font_decl.MONO_CSS,
     textrm: "", textup: "font-style:normal", textnormal: ""}
 
-pub fn tag_format(inner) =>
+pub fn tag_format(inner) any^ =>
     if (inner == null) null else TAG_FORMATS[util.strip_backslash(trim(inner))]
 
 // a tag as printed: in parentheses, framed by the current mathtools tag form, or
 // bare for \tag*; null when the row is unnumbered
-pub fn tag_text(display, bare, form) {
+pub fn tag_text(display, bare, form) any^ {
     let style = if (form == null) null else tag_format(form.inner);
     if (display == null) null
     else if (bare) display
@@ -173,7 +173,7 @@ let ANNOTATIONS = [
     {prefix: "\\nonumber", kind: "suppress", value: false}
 ]
 
-fn annotation_at(source, i, candidate) {
+fn annotation_at(source, i, candidate) any^ {
     if (candidate >= len(ANNOTATIONS)) null
     else {
         let annotation = ANNOTATIONS[candidate]
@@ -182,7 +182,7 @@ fn annotation_at(source, i, candidate) {
     }
 }
 
-fn brace_close(source, i, depth, escaped) {
+fn brace_close(source, i, depth, escaped) any^ {
     if (i >= len(source)) null
     else {
         let ch = slice(source, i, i + 1)
@@ -195,7 +195,7 @@ fn brace_close(source, i, depth, escaped) {
     }
 }
 
-fn strip_annotations(source, i, depth, st) {
+fn strip_annotations(source, i, depth, st) any^ {
     if (i >= len(source)) {*:st, math: trim(st.math)}
     else {
         let ch = slice(source, i, i + 1)
@@ -231,7 +231,7 @@ fn strip_annotations(source, i, depth, st) {
     }
 }
 
-pub fn rows_for(el) {
+pub fn rows_for(el) any^ {
     let tag = string(name(el))
     let parsed = alignat_body(if (el.source != null) el.source else "", tag)
     if (not (parsed.error is null))
@@ -239,7 +239,7 @@ pub fn rows_for(el) {
           suppress: false, error: parsed.error}]
     else {
         let sources = if (starts_with(tag, "equation")) [parsed.source]
-            else [for (row in split_tex(parsed.source, true, 0, 0, false, 0, [])
+            else [for (row in ((split_tex(parsed.source, true, 0, 0, false, 0, [])) ^ { [] })
                 where trim(row) != "") row];
         [for (source in sources)
             strip_annotations(source, 0, 0, {math: "", label: null, tag: null,
@@ -247,7 +247,7 @@ pub fn rows_for(el) {
     }
 }
 
-fn alignat_body(source, tag) {
+fn alignat_body(source, tag) any^ {
     if (starts_with(tag, "IEEEeqnarray")) {
         let trimmed = trim(source)
         let close = index_of(trimmed, "}")
@@ -272,7 +272,7 @@ fn alignat_body(source, tag) {
     }
 }
 
-fn valid_ieee_columns(columns, index) {
+fn valid_ieee_columns(columns, index) any^ {
     if (index >= len(columns)) index > 0
     else {
         let ch = slice(columns, index, index + 1)
@@ -282,7 +282,7 @@ fn valid_ieee_columns(columns, index) {
     }
 }
 
-fn render_alignment(el, tag, rows, numbers, operators) {
+fn render_alignment(el, tag, rows, numbers, operators) any^ {
     if (el.source != null and index_of(el.source, "\\intertext") != null)
         util.unsupported_element("amsmath", "Alignment intertext is not supported", el.source_offset)
     else {
@@ -298,20 +298,20 @@ fn render_alignment(el, tag, rows, numbers, operators) {
                     if (multline and i == 0) (c) => "left"
                     else if (multline and i == len(rows) - 1) (c) => "right"
                     else if (gathered) (c) => "center"
-                    else (c) => columns[c % len(columns)],
+                    else (c) any^ => columns[c % len(columns)],
                     if (row.label != null) util.slugify(row.label) else null,
                     row_tag(row, numbers, i), operators, el.source_offset)>
     }
 }
 
 // row i's framed tag: its number (or \tag) in the tag form current where it stands
-fn row_tag(row, numbers, i) {
+fn row_tag(row, numbers, i) any^ {
     let entry = if (numbers != null and i < len(numbers)) numbers[i] else null
     tag_text(if (entry != null) entry.display else row.tag, row.bare_tag,
         if (entry != null) entry.form else null)
 }
 
-pub fn render_environment(el, numbers, operators) {
+pub fn render_environment(el, numbers, operators) any^ {
     let tag = string(name(el))
     let rows = rows_for(el)
     let active_operators = [for (entry in operators

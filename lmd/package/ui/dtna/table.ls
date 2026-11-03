@@ -18,7 +18,7 @@ fn validate_sort(columns, sorting) bool^ {
         not any([for (column in columns) column.key == sorting.key and column.sortable])) raise c.fail("table","sort needs a sortable column key and asc/desc direction")
     else true
 }
-fn field(column) => c.option(column,"data_index",column.key)
+fn field(column) any^ => c.option(column,"data_index",column.key)
 fn validate_filters(columns, filters) bool^ {
     if (not (filters is map)) raise c.fail("table","filters must be a map")
     else (
@@ -36,7 +36,7 @@ pub fn table(props) element^ {
     let columns = [for (column in props.columns) (
         let names = c.properties(column,["key","title","data_index","sortable","filters","render","width","align"],"table column")^,
         let booleans = c.boolean_props(column,["sortable"],"table column")^,
-        let options = collection.validate([for (option in c.option(column,"filters",[])) {key:option.value,disabled:option.disabled}],"table filters")^,
+        let options = collection.validate([for (option in ((c.option(column,"filters",[])) ^ { [] })) {key:option.value,disabled:option.disabled}],"table filters")^,
         if (not (field(column) is string or field(column) is symbol)) raise c.fail("table","data_index must be a string or symbol")
         else if (column.filters != null and not (column.filters is array)) raise c.fail("table","column filters must be arrays")
         else if (column.render != null and not (column.render is fn)) raise c.fail("table","cell render must be a pure function")
@@ -58,35 +58,35 @@ pub fn table(props) element^ {
         c.has(props,name) and c.has(props,"default_" ++ name)])) raise c.fail("table","controlled and default props are mutually exclusive")
     else node
 }
-pub fn model(props, sorting = null, filters = {}, current = 1) {
+pub fn model(props, sorting = null, filters = {}, current = 1) any^ {
     let filtered = [for (entry in rows(props)^ where all([for (column in props.columns)
         filters[column.key] == null or entry.data[field(column)] == filters[column.key]])) entry]
     let column = [for (entry in props.columns where entry.key == sorting.key) entry][0]
-    let ordered = if (sorting == null) filtered else sort(filtered,{dir:sorting.direction,by:(entry) => entry.data[field(column)]})
+    let ordered = if (sorting == null) filtered else sort(filtered,{dir:sorting.direction,by:(entry) any^ => entry.data[field(column)]})
     let size = c.option(props,"page_size",10)
     let pages = if (props.pagination == false) 1 else collection.page_count(len(ordered),size)
     let page = min(max(1,current),pages);
     {rows:if (props.pagination == false) ordered else collection.page_rows(ordered,page,size)^,total:len(ordered),pages:pages,current:page,page_size:size}
 }
-fn current_value(node, name, current) => c.option(c.props(node),name,current)
+fn current_value(node, name, current) any^ => c.option(c.props(node),name,current)
 fn selection_mode(node) string^ => c.text(c.option(c.props(node),"selection",'none'))^
-fn col_style(column) => (if (column.width == null) "" else "width:" ++ c.px(column.width) ++ ";") ++
+fn col_style(column) any^ => (if (column.width == null) "" else "width:" ++ c.px(column.width) ++ ";") ++
     (if (column.align == null) "" else "text-align:" ++ c.text(column.align) ++ ";")
-fn cell(column, entry) => c.render(if (column.render == null) entry.data[field(column)] else column.render(entry.data[field(column)],entry.data,entry.index))
-fn check_button(node, entry, selected) => <button type:"button",class:"dtna-check",["data-dtna-table-select"]:string(entry.index),
+fn cell(column, entry) any^ => c.render(if (column.render == null) entry.data[field(column)] else column.render(entry.data[field(column)],entry.data,entry.index))
+fn check_button(node, entry, selected) any^ => <button type:"button",class:"dtna-check",["data-dtna-table-select"]:string(entry.index),
     role:if (selection_mode(node)^ == "single") "radio" else "checkbox",["aria-checked"]:c.aria(contains(selected,entry.key)),
     ["aria-label"]:"Select row " ++ c.text(entry.key),*:c.boolean_attr("disabled",c.props(node).disabled or entry.disabled),if (contains(selected,entry.key)) "✓" else "">
-view dtna_table: <dtna.table> state sorting:c.option(c.props(~),"default_sort",null),filters:c.option(c.props(~),"default_filters",{}),
-    current:c.option(c.props(~),"default_current",1),selected:c.option(c.props(~),"default_selected_keys",[]),expanded:c.option(c.props(~),"default_expanded_keys",[]) {
+view dtna_table: <dtna.table> () any^ state sorting:(c.option(c.props(~),"default_sort",null) ^ { null }),filters:(c.option(c.props(~),"default_filters",{}) ^ { ({}) }),
+    current:(c.option(c.props(~),"default_current",1) ^ { 1 }),selected:(c.option(c.props(~),"default_selected_keys",[]) ^ { [] }),expanded:(c.option(c.props(~),"default_expanded_keys",[]) ^ { [] }) {
     let order = current_value(~,"sort",sorting)
     let filtering = current_value(~,"filters",filters)
     let data = model(c.props(~),order,filtering,current_value(~,"current",current))
     let chosen = current_value(~,"selected_keys",selected)
     let opened = current_value(~,"expanded_keys",expanded)
-    let candidates = [for (entry in collection.enabled(data.rows)) entry.key]
+    let candidates = [for (entry in ((collection.enabled(data.rows)) ^ { [] })) entry.key]
     let checked = len(candidates) > 0 and all([for (key in candidates) contains(chosen,key)])
     let some = any([for (key in candidates) contains(chosen,key)])
-    let expandable = any([for (row in c.props(~).rows) row.detail != null])
+    let expandable = any([for (row in ((c.props(~).rows) ^ { [] })) row.detail != null])
     let span = len(c.props(~).columns) + (if (selection_mode(~)^ == "none") 0 else 1) + (if (expandable) 1 else 0);
     <div *:c.attrs(c.props(~)),class:c.classes('table',c.props(~)) ++ (if (c.props(~).bordered) " dtna-table-bordered" else ""),style:c.props(~).style,
         ["aria-busy"]:c.aria(c.props(~).loading),*[
@@ -97,7 +97,7 @@ view dtna_table: <dtna.table> state sorting:c.option(c.props(~),"default_sort",n
                 if (selection_mode(~)^ != "none") <th scope:"col",if (selection_mode(~)^ == "multiple") <button type:"button",class:"dtna-check",role:"checkbox",
                     ["data-dtna-table-all"]:"",["aria-label"]:"Select page",["aria-checked"]:if (checked) "true" else if (some) "mixed" else "false",
                     *:c.boolean_attr("disabled",c.props(~).disabled or len(candidates) == 0),if (checked) "✓" else if (some) "−" else ""> else null> else null,
-                *[for (index,column in c.props(~).columns) <th scope:"col",style:col_style(column),
+                *[for (index,column in ((c.props(~).columns) ^ { [] })) <th scope:"col",style:col_style(column),
                     *:(if (column.sortable) {'aria-sort':if (order.key != column.key) "none" else if (order.direction == 'asc') "ascending" else "descending"} else {}),*[
                     if (column.sortable) <button type:"button",class:"dtna-table-sort",["data-dtna-table-sort"]:string(index),
                         *:c.boolean_attr("disabled",c.props(~).disabled),*[c.render(column.title),<span ["aria-hidden"]:"true",if (order.key != column.key) " ↕" else if (order.direction == 'asc') " ↑" else " ↓">]>
@@ -107,22 +107,22 @@ view dtna_table: <dtna.table> state sorting:c.option(c.props(~),"default_sort",n
                             ["data-dtna-table-filter"]:string(index),["data-dtna-filter-option"]:string(option_index),
                             ["aria-pressed"]:c.aria(filtering[column.key] == option.value),*:c.boolean_attr("disabled",c.props(~).disabled or option.disabled),c.render(option.label)>]> else null]>]]>>,
             <tbody *[if (len(data.rows) == 0) <tr <td colspan:string(span),class:"dtna-empty",c.render(c.option(c.props(~),"empty_text","No data"))>> else null,
-                *[for (entry in data.rows) for (row in [
+                *[for (entry in ((data.rows) ^ { [] })) for (row in [
                     <tr class:if (contains(chosen,entry.key)) "dtna-table-selected" else null,["data-dtna-row"]:string(entry.index),*[
                         if (expandable) <td if (entry.data.detail != null) <button type:"button",class:"dtna-table-expand",["data-dtna-table-expand"]:string(entry.index),
                             ["aria-label"]:"Expand row " ++ c.text(entry.key),["aria-expanded"]:c.aria(contains(opened,entry.key)),
                             *:c.boolean_attr("disabled",c.props(~).disabled or entry.disabled),if (contains(opened,entry.key)) "−" else "+"> else null> else null,
                         if (selection_mode(~)^ != "none") <td check_button(~,entry,chosen)> else null,
-                        *[for (column in c.props(~).columns) <td style:col_style(column),cell(column,entry)>]]>,
+                        *[for (column in ((c.props(~).columns) ^ { [] })) <td style:col_style(column),cell(column,entry)>]]>,
                     if (entry.data.detail != null and contains(opened,entry.key)) <tr class:"dtna-table-detail",<td colspan:string(span),c.render(entry.data.detail)>> else null]) row]]>,
             if (c.props(~).summary != null) <tfoot <tr <td colspan:string(span),c.render(c.props(~).summary)>>> else null]>>,
         if (c.props(~).loading) <div role:"status",class:"dtna-table-loading","Loading…"> else null,
         if (c.props(~).pagination != false) <nav class:"dtna-pagination",["aria-label"]:"Table pagination",*navigation.page_controls(data.current,data.pages,c.props(~).disabled == true)> else null]>
 }
 on click(evt) {
-    if (c.props(~).disabled or interaction.root(~,evt) == null) { return 'pass' }
+    if ((c.props(~).disabled or interaction.root(~,evt) == null)^) { return 'pass' }
     let target = interaction.target(~,evt,"[data-dtna-table-sort],[data-dtna-table-filter],[data-dtna-page],[data-dtna-table-select],[data-dtna-table-all],[data-dtna-table-expand]")
-    if (target == null or dom.get_state(target,"disabled")) { return 'pass' }
+    if ((target == null or dom.get_state(target,"disabled"))^) { return 'pass' }
     let data = model(c.props(~),current_value(~,"sort",sorting),current_value(~,"filters",filters),current_value(~,"current",current))
     let sort_index = dom.get_attribute(target,"data-dtna-table-sort")
     let filter_index = dom.get_attribute(target,"data-dtna-table-filter")
@@ -146,7 +146,7 @@ on click(evt) {
         expanded = collection.toggle(current_value(~,"expanded_keys",expanded),entry.key)
     } else {
         let chosen = current_value(~,"selected_keys",selected)
-        let candidates = [for (entry in collection.enabled(data.rows)) entry.key]
+        let candidates = [for (entry in collection.enabled(data.rows)^) entry.key]
         let entry = if (row_index == null) null else rows(c.props(~))^[(int(row_index) ^ { null }) or 0]
         if (entry != null and entry.disabled) { return 'pass' }
         selected = if (row_index == null) collection.set_keys(chosen,candidates,not all([for (key in candidates) contains(chosen,key)]))
@@ -157,6 +157,6 @@ on click(evt) {
         else if (action == 'expand') {expanded_keys:expanded}
         else {sort:if (action == 'sort') sorting else current_value(~,"sort",sorting),
             filters:if (action == 'filter') filters else current_value(~,"filters",filters),
-            current:current,page_size:data.page_size}))
+            current:current,page_size:data.page_size})^)
     'pass'
 }

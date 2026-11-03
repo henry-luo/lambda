@@ -39,7 +39,7 @@ pn t_var_bound(n) {
 
 // Typed float array
 pn t_float_array() {
-    var arr:float[] = fill(3, 0.0)
+    var arr:float[] = fill(3, 0.0)^
     for i in 0 to 2 { arr[i] = i * 1.5 }
     print("float=" ++ (arr[0]) ++ " " ++ (arr[1]) ++ " " ++ (arr[2]) ++ "\n")
 }
@@ -76,7 +76,7 @@ pn main() {
     t_sum()
     t_num_array()
     t_var_bound(5)
-    t_float_array()
+    t_float_array()^
     t_generic_array()
     t_nested()
     t_void_body()

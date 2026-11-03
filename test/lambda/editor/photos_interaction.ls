@@ -16,13 +16,13 @@ let final = interaction.finish(draft)^
 check("one-transaction",len(final.hist.undo) == len(st.hist.undo)+1 and final.gesture == null)
 check("undo",editor.exec(final,{id:"history.undo"})^.doc == st.doc)
 check("no-op",len(interaction.finish(begin)^.hist.undo) == len(st.hist.undo))
-check("gesture-command",editor.exec(begin,{id:"layer.delete"}) ^ { true } ~ { false })
+check("gesture-command",match (editor.exec(begin,{id:"layer.delete"}) ^ { ^ }) { case error: true default: false })
 let pan = interaction.preview(interaction.begin({*:st,tool:"pan"},input)^,
     {point:{x:8,y:10},screen:{x:80,y:100}})^
 check("pan",pan.doc == st.doc and pan.pan == {x:50,y:60})
 check("pan-no-history",len(interaction.finish(pan)^.hist.undo) == len(st.hist.undo))
 check("pan-cancel",interaction.cancel(pan).pan == st.pan)
-check("unknown-option",editor.exec(st,{id:"layer.move",dx:1,dy:2,typo:1}) ^ { true } ~ { false })
+check("unknown-option",match (editor.exec(st,{id:"layer.move",dx:1,dy:2,typo:1}) ^ { ^ }) { case error: true default: false })
 check("registry",editor.command_state(st,"layer.move")^.enabled and not editor.command_state(st,"unknown")^.enabled)
 let imported = editor.open_session(img.of_raster(raster))^
 let clicked = interaction.finish(interaction.preview(interaction.begin(imported,input)^,input)^)^

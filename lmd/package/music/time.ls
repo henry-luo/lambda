@@ -23,7 +23,7 @@ pub fn mul(a, b) map^ {
     ratio((a.num div g) * (b.num div h), (a.den div h) * (b.den div g))^
 }
 pub fn divide(a, b) map^ => mul(a, ratio(b.den, b.num)^)^
-pub fn value(a) => float(a.num) / float(a.den)
+pub fn value(a) any^ => float(a.num) / float(a.den)
 pub fn compare(a, b) => sign(a.num * b.den - b.num * a.den)
 pub fn later(a, b) => if (compare(a, b) >= 0) a else b
 
@@ -34,7 +34,7 @@ pub fn from_decimal(raw) map^ {
     let fields = split(body, ".")
     let digits = join(fields, "")
     let checked = if (len(fields) > 2 or len(digits) == 0 or len(digits) > 9 or
-        any([for (c in split(digits, "")) ord(c) < 48 or ord(c) > 57]))
+        any([for (c in ((split(digits, "")) ^ { [] })) ord(c) < 48 or ord(c) > 57]))
         raise error("music time: expected a bounded decimal number")
     let denominator = if (len(fields) == 2) int(10 ** len(fields[1])) else 1
     ratio(int(digits) * (if (negative) -1 else 1), denominator)^

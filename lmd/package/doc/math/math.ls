@@ -4,8 +4,8 @@ import mathml: .mathml
 import mathml_layout: .mathml_layout
 import writer: .format
 
-pub fn to_latex(ast) => writer.to_latex(ast)
-pub fn to_ascii(ast) => writer.to_ascii(ast)
+pub fn to_latex(ast) any^ => writer.to_latex(ast)
+pub fn to_ascii(ast) any^ => writer.to_ascii(ast)
 pub fn format(ast, options = null) string^ => writer.format(ast, options)^
 
 // The pure mathml module can also be imported directly by runtime-only hosts.
@@ -20,13 +20,13 @@ pub fn render_box(ast, options = null) map | error {
 }
 pub fn render_math(ast, options = null) element | error { render_box(ast, options)^.element }
 pub fn render_box_element(measured_box) { measured_box.element }
-pub fn render_display(ast) { render_math(ast, {display: true})^ }
-pub fn render_inline(ast) { render_math(ast, {display: false})^ }
-pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true})^ }
+pub fn render_display(ast) any^ { render_math(ast, {display: true})^ }
+pub fn render_inline(ast) any^ { render_math(ast, {display: false})^ }
+pub fn render_standalone(ast) any^ { render_math(ast, {display: true, standalone: true})^ }
 
 // Generic commands the typesetter has no rendering for; it paints their names,
 // so a caller must report them rather than count the output as success.
-pub fn unmapped_commands(ast) => typeset.unmapped_commands(ast)
+pub fn unmapped_commands(ast) any^ => typeset.unmapped_commands(ast)
 // symbols a \boldsymbol leaves at regular weight (no bundled bold glyph)
 pub fn regular_bold_symbols(ast) array | error { typeset.regular_bold_symbols(ast)^ }
 

@@ -14,10 +14,10 @@ pub fn items(spec, snapshot = null) {
     let ordered=if (order is array) [for (id in order) (shown |: ~.id==c.text(id))[0]] |: ~!=null else shown;
     [if (c.option(c.attrs(snapshot),"view",spec.view)=="story" and spec.intro!=null and spec.intro.visible!=false) spec.intro,*ordered] |: ~!=null
 }
-pub fn item(spec, id) => if (spec.intro!=null and spec.intro.id==id) spec.intro
+pub fn item(spec, id) any^ => if (spec.intro!=null and spec.intro.id==id) spec.intro
     else if (spec._timeline!=null and spec.events==spec._timeline.index.events) index.event(spec._timeline.index,id)
     else (spec.events |: ~.id==id)[0]
-pub fn contains_item(spec, snapshot, id) {
+pub fn contains_item(spec, snapshot, id) any^ {
     let cached=spec._timeline;
     if (cached==null or spec.events!=cached.index.events or layout.visibility_key(spec,snapshot)!=cached.key)
         contains(items(spec,snapshot) |> ~.id,id)
@@ -52,7 +52,7 @@ pub fn plan(spec, snapshot = null) {
     }
     }
 }
-pub fn sample(plan, elapsed) {
+pub fn sample(plan, elapsed) any^ {
     if (plan is error) plan else if (not util.finite_number(elapsed) or elapsed<0) c.fail("slideshow.time","expected nonnegative elapsed milliseconds")
     else if (len(plan.slides)==0) {active_id:null,index:null,progress:0,overall_progress:0,complete:true}
     else {
@@ -80,7 +80,7 @@ pub fn sample(plan, elapsed) {
             complete:position.complete,cycle:position.cycle}
     }
 }
-pub fn command(current, action, now, spec) {
+pub fn command(current, action, now, spec) any^ {
     let timeline=plan(spec,current);
     let before=current.playback;
     let op=c.text(action.type);
@@ -107,7 +107,7 @@ pub fn command(current, action, now, spec) {
 }
 
 // Manual navigation resets the retained playhead before the next clock tick.
-pub fn align(current, id, now, spec) {
+pub fn align(current, id, now, spec) any^ {
     if (not contains(["playing","paused"],current.playback.phase)) {*:current,story_frame:null}
     else {
         let timeline=plan(spec,current);
@@ -118,7 +118,7 @@ pub fn align(current, id, now, spec) {
 }
 
 // Keep the visible slide fraction and cycle when source order or durations change.
-pub fn rebase(previous, current, previous_spec, spec, now = null) {
+pub fn rebase(previous, current, previous_spec, spec, now = null) any^ {
     if (not contains(["playing","paused"],previous.playback.phase)) {*:current,story_frame:null,media_wait:null}
     else {
         let before=plan(previous_spec,previous);
@@ -143,12 +143,12 @@ pub fn rebase(previous, current, previous_spec, spec, now = null) {
             story_frame:sample(after,settled.elapsed),media_wait:null}
     }
 }
-pub fn frame(spec, snapshot = null) {
+pub fn frame(spec, snapshot = null) any^ {
     let sampled=if (snapshot.story_frame!=null and snapshot.story_frame.active_id==snapshot.active_id) snapshot.story_frame
         else if (snapshot.playback.elapsed!=null) sample(plan(spec,snapshot),snapshot.playback.elapsed) else null;
     if (sampled is error) sampled else if (snapshot.active_id==null or sampled.active_id==snapshot.active_id) sampled else null
 }
-pub fn style(spec, snapshot = null, outgoing = false) {
+pub fn style(spec, snapshot = null, outgoing = false) any^ {
     let transition=frame(spec,snapshot).transition;
     let progress=transition.progress;
     if (transition==null or spec.motion!="full" or snapshot.playback.phase=="idle" and snapshot.sample_time_ms==null) ""

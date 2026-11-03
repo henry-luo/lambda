@@ -5,7 +5,7 @@ import geometry: .geometry
 
 fn option(options,key,fallback) => if (options[key]!=null) options[key] else fallback
 fn distance(a,b,metric) => math.hypot((b[0]-a[0])*metric[0],(b[1]-a[1])*metric[1])
-fn evaluate(prepared,p,s,direction) {
+fn evaluate(prepared,p,s,direction) any^ {
     let sample=mesh.locate(prepared,p,s.components);
     let vector=if (sample!=null) [sample.values[s.components[0]],sample.values[s.components[1]]] else null;
     let magnitude=if (vector!=null) math.hypot(vector[0]*s.metric_scale[0],vector[1]*s.metric_scale[1]) else null;
@@ -25,7 +25,7 @@ fn rk(prepared,p,h,s,direction) {
 }
 fn sample_record(p,e,length) => {x:p[0],y:p[1],magnitude:e.magnitude,length:length,face:e.face,face_id:e.face_id}
 
-fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
+fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) any^ {
     let previous=points[len(points)-1];
     let p=[previous.x,previous.y];
     let first=evaluate(prepared,p,s,direction);
@@ -50,8 +50,8 @@ fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
         else {
             let traveled=distance(p,trial,s.metric_scale);
             let next=sample_record(trial,result.terminal,length+traveled);
-            let closed=len(points)>8 and any([for (i,old in points where i<len(points)-4 and length-old.length>4*s.max_step and
-                distance(trial,[old.x,old.y],s.metric_scale)<s.closure_tolerance,
+            let closed=len(points)>8 and any([for (i,old in points where ((i<len(points)-4 and length-old.length>4*s.max_step and
+                distance(trial,[old.x,old.y],s.metric_scale)<s.closure_tolerance) ^ { false }),
                 let tangent=evaluate(prepared,[old.x,old.y],s,direction).tangent)
                 sum([for (axis in 0 to 1) tangent[axis]*result.terminal.tangent[axis]*s.metric_scale[axis]**2])>0.9]);
             let crowded=any([for (old in occupied) distance(trial,[old.x,old.y],s.metric_scale)<s.spacing]);
@@ -62,7 +62,7 @@ fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
     }
 }
 
-fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) {
+fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) any^ {
     if (index>=len(seeds)) {paths:paths,metadata:{settings:s,seeds:len(seeds),steps:used,vertices:vertices},diagnostics:{incomplete:any(paths |> ~.incomplete)}}
     else if (used>=s.max_total_steps or vertices>=s.max_total_vertices) error("stream.trace: total work limit exceeded")
     else {
@@ -77,8 +77,8 @@ fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) {
         let backward=if (skipped or s.direction=="forward") null else integrate(prepared,
             {*:settings,max_steps:max(0,settings.max_steps-option(forward,"steps",0)),max_vertices:max(1,settings.max_vertices-len(forward.points)+1)},-1,initial,s.initial_step,0.0,0,occupied);
         let back_length=if (backward!=null and len(backward.points)>0) backward.points[len(backward.points)-1].length else 0.0;
-        let points=if (skipped) [] else [for (point in reverse(backward.points)) {*:point,length:back_length-point.length},
-            for (i,point in forward.points where backward==null or i>0) {*:point,length:back_length+point.length}];
+        let points=if (skipped) [] else [for (point in ((reverse(backward.points)) ^ { [] })) {*:point,length:back_length-point.length},
+            for (i,point in ((forward.points) ^ { [] }) where ((backward==null or i>0) ^ { false })) {*:point,length:back_length+point.length}];
         let path={id:seed.id,seed:seed,points:points,forward:if (skipped) if (e==null) "outside" else "occupied" else forward.reason,
             backward:if (skipped) if (e==null) "outside" else "occupied" else backward.reason,
             incomplete:forward.incomplete==true or backward.incomplete==true};
@@ -86,7 +86,7 @@ fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) {
     }
 }
 
-pub fn trace(field,options={}) {
+pub fn trace(field,options={}) any^ {
     let prepared=mesh.prepare(field,options);
     let metric=option(options,"metric_scale",[1.0,1.0]);
     let extent=prepared.index.extent;
@@ -112,7 +112,7 @@ pub fn trace(field,options={}) {
     else if (s.automatic and ceil(8*density)**2>s.max_seeds) error("stream.trace: seed limit exceeded")
     else {
         let cells=int(ceil(8*density));
-        let seeds=if (s.automatic) [for (j in 0 to (cells-1)) for (i in 0 to (cells-1))
+        let seeds=if (s.automatic) [for (j in ((0 to (cells-1)) ^ { [] })) for (i in ((0 to (cells-1)) ^ { [] }))
             {id:[j,i],x:extent[0][0]+(i+0.5)/cells*(extent[0][1]-extent[0][0]),y:extent[1][0]+(j+0.5)/cells*(extent[1][1]-extent[1][0])}]
             else if (options.seeds is array) [for (i,p in options.seeds) {*:p,id:if (p.id!=null) p.id else i}] else null;
         if (seeds==null or len(seeds)>s.max_seeds or not all([for (seed in seeds) mesh.finite(seed.x) and mesh.finite(seed.y)]) or

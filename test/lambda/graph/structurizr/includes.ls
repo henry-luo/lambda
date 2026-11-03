@@ -7,7 +7,7 @@ fn descendants(value) => [
 ]
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 let source = (input(
@@ -17,8 +17,8 @@ let workspace = structurizr.normalize(source)
 let graph = structurizr.project(workspace, "Containers")
 let canonical_model = children(workspace, "c4-model")[0]
 let canonical_views = children(workspace, "c4-views")[0]
-let included = [for (value in descendants(source),
-  let file = model.optional(value, "source-file") where file != null) string(file)]
+let included = [for (value in ((descendants(source)) ^ { [] }),
+  let file = model.optional(value, "source-file") where ((file != null) ^ { false })) string(file)]
 
 let cycle_source = (input(
   "test/lambda/graph/structurizr/includes/cycle.dsl",
@@ -35,16 +35,16 @@ let policy_workspace = structurizr.normalize(policy_source)
     if (policy_source is error) policy_source else null],
   resolved: [source["include-file-count"], source["include-byte-count"] > 0,
     len(unique(included)),
-    len([for (file in included where ends_with(file, "containers.dsl")) file]) > 0],
-  elements: [for (value in children(canonical_model, "c4-element"))
+    len([for (file in included where ((ends_with(file, "containers.dsl")) ^ { false })) file]) > 0],
+  elements: [for (value in ((children(canonical_model, "c4-element")) ^ { [] }))
     [value.id, value.kind, value.parent]],
-  relationships: [for (value in children(canonical_model, "c4-relationship"))
+  relationships: [for (value in ((children(canonical_model, "c4-relationship")) ^ { [] }))
     [value.source, value.destination, value.description]],
-  views: [for (value in children(canonical_views, "c4-view")) value.key],
-  graph: [for (value in model.nodes(graph)) value.id],
-  diagnostics: [for (value in model.diagnostics(workspace)) value.code],
+  views: [for (value in ((children(canonical_views, "c4-view")) ^ { [] })) value.key],
+  graph: [for (value in ((model.nodes(graph)) ^ { [] })) value.id],
+  diagnostics: [for (value in ((model.diagnostics(workspace)) ^ { [] })) value.code],
   cycle: [cycle_source["include-file-count"],
-    for (value in model.diagnostics(cycle_workspace)) value.code],
+    for (value in ((model.diagnostics(cycle_workspace)) ^ { [] })) value.code],
   policy: [policy_source["include-file-count"],
-    for (value in model.diagnostics(policy_workspace)) value.code]
+    for (value in ((model.diagnostics(policy_workspace)) ^ { [] })) value.code]
 }

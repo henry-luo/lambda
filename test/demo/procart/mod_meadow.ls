@@ -49,7 +49,7 @@ pub fn check_parameters(o) bool^ {
 fn tree_parts(plant,k) array {
     let scale = solid.branch_scale(plant),recipe = plant.recipe;
     [*solid.pieces(plant,false,false),
-     *[for (whorl in 0 to (solid.whorls(plant)-1),let turn = float(whorl)*2.0*math.pi/float(solid.whorls(plant)))
+     *[for (whorl in ((0 to (solid.whorls(plant)-1)) ^ { [] }),let turn = float(whorl)*2.0*math.pi/float(solid.whorls(plant)))
         for (i,tip in plant.tips,let key = rng.at(rng.derive(k,whorl),i),let r = recipe.canopy_radius*rng.between(key,0.8,1.2))
             solid.oval(solid.spatial(tip.x,tip.y,turn,scale),[r*1.15,r*0.8,r],
                 rng.pick(rng.at(key,1),recipe.canopy_colors),"canopy")]]
@@ -70,22 +70,22 @@ pub fn specimen(o,climate=null) map^ {
     }
 }
 
-pub fn elevation(model,x,z) float => field.sample(model.height,
+pub fn elevation(model,x,z) float^ => field.sample(model.height,
     (x/model.width+0.5)*float(len(model.height[0])-1),(z/model.depth+0.5)*float(len(model.height)-1))*model.relief
 
 fn on_path(x,z,width) bool => abs(x-0.9*sin(z*0.45)) < width/2.0
 
-fn placed(o,parts,ground) array {
+fn placed(o,parts,ground) array^ {
     let origin = t.point(o.matrix,[0.0,0.0,0.0])^
     let aquatic=o.parameters.species == "water-lily"
     let anchored = if (aquatic and ground.pond != null) ground.pond.level else elevation(ground,origin[0],origin[2]);
     [for (p in parts,let world = solid.placed(p,o.matrix),
         let lift = if (o.kind == "grass") elevation(ground,world.position[0],world.position[2]) else anchored
-        where (aquatic or ground.pond == null or pond.distance(ground.pond,world.position[0],world.position[2])>1.18) and
-            (o.kind != "grass" or not on_path(world.position[0],world.position[2],ground.path_width)))
+        where (((aquatic or ground.pond == null or pond.distance(ground.pond,world.position[0],world.position[2])>1.18) and
+            (o.kind != "grass" or not on_path(world.position[0],world.position[2],ground.path_width))) ^ { false }))
         {*:solid.placed(world,t.matrix([0.0,lift,0.0],[0.0,0.0,0.0],[1.0,1.0,1.0])^),category:o.kind}]
 }
-fn assemble(objects,models,ground) array => [for (i,o in objects) {
+fn assemble(objects,models,ground) array^ => [for (i,o in objects) {
     let origin=t.point(o.matrix,[0.0,0.0,0.0])^
     let aquatic=o.parameters.species == "water-lily"
     let root=[origin[0],if (aquatic and ground.pond != null) ground.pond.level else elevation(ground,origin[0],origin[2]),origin[2]]
@@ -127,7 +127,7 @@ pub fn conditions(model,config) map^ {
 fn ground_mesh(model) element^ {
     let mesh = adapt.heightfield(model.height,{dx:model.width/float(len(model.height[0])-1),
         dz:model.depth/float(len(model.height)-1),height_scale:model.relief})^
-    let positions = [for (i in 0 to (len(mesh.positions) div 3-1))
+    let positions = [for (i in ((0 to (len(mesh.positions) div 3-1)) ^ { [] }))
         *[mesh.positions[i*3]-model.width/2.0,mesh.positions[i*3+1],mesh.positions[i*3+2]-model.depth/2.0]]
     let colors = [for (i in 0 to (len(positions) div 3-1),let x = positions[i*3],let z = positions[i*3+2],
         let v = positions[i*3+1]/max(model.relief,0.001))
@@ -136,10 +136,10 @@ fn ground_mesh(model) element^ {
     s.mesh(s.geometry(positions,{indices:mesh.indices,colors:colors}),s.material('lambert',{color:"#ffffff",side:'double'}),{'receive-shadow':true})
 }
 
-fn ground_sides(model) element {
+fn ground_sides(model) element^ {
     let h = len(model.height),w = len(model.height[0])
-    let border = [*[for (x in 0 to (w-1)) [x,0]],*[for (y in 1 to (h-1)) [w-1,y]],
-        *[for (x in 0 to (w-2)) [w-2-x,h-1]],*[for (y in 0 to (h-3)) [0,h-2-y]]]
+    let border = [*[for (x in ((0 to (w-1)) ^ { [] })) [x,0]],*[for (y in ((1 to (h-1)) ^ { [] })) [w-1,y]],
+        *[for (x in ((0 to (w-2)) ^ { [] })) [w-2-x,h-1]],*[for (y in ((0 to (h-3)) ^ { [] })) [0,h-2-y]]]
     let points = [for (p in border) [float(p[0])/float(w-1)*model.width-model.width/2.0,
         model.height[p[1]][p[0]]*model.relief,float(p[1])/float(h-1)*model.depth-model.depth/2.0]];
     s.mesh(s.geometry([for (i,a in points,let b = points[(i+1)%len(points)])
@@ -147,14 +147,14 @@ fn ground_sides(model) element {
         s.material('lambert',{color:"#8a7757",side:'double'}))
 }
 
-pub fn home() map => camera.prepare({position:[26.0,21.0,29.0],target:[0.0,0.7,0.0],fov:40.0})
+pub fn home() map^ => camera.prepare({position:[26.0,21.0,29.0],target:[0.0,0.7,0.0],fov:40.0})
 fn organism(item,climate) element {
     let local=env.rooted(item.parts,item.root);
     <group id:item.id,position:item.root,'data-species':item.species,
         'data-openness':string(if (item.response != null) round(item.response.openness*1000.0)/1000.0 else 1.0),
         *viewer.meshes(local,{'cast-shadow':true,'receive-shadow':true})>
 }
-fn atmosphere(model,motion) array {
+fn atmosphere(model,motion) array^ {
     let e=model.environment
     let drops=[for (i in 0 to 95,let key=rng.at(rng.derive(rng.key(model.seed),"rain"),i))
         s.transform([rng.between(key,-model.width/2.0,model.width/2.0),rng.between(rng.at(key,1),0.0,9.0),
@@ -175,9 +175,9 @@ fn scene_frame(model,children,lens) element {
          'data-weather':e.config.weather,'data-time':string(e.config.time),
          style:"display:block;width:100%;height:auto;touch-action:none"})
 }
-pub fn viewport(model,visibility={},motion=true,lens=home()) element^ {
+pub fn viewport(model,visibility={},motion=true,lens=home()^) element^ {
     let e=model.environment
-    let visible=[for (item in model.instances where visibility[item.kind] != false and len(item.parts)>0) item]
+    let visible=[for (item in model.instances where ((visibility[item.kind] != false and len(item.parts)>0) ^ { false })) item]
     // calm plants batch by species; wind retains a separate root pivot for each specimen.
     let display=if (e.wind.speed>0.0) visible else [for (item in visible group by item.species as species into batch)
         {*:batch[0],root:[0.0,0.0,0.0],parts:[for (instance in batch) *instance.parts]}]
@@ -213,7 +213,7 @@ pub fn command(st,action) map^ {
 // keep the source element editable and serializable alongside its generated model.
 pub fn environment(st,config) map^ {
     let checked=env.normalize(config)^
-    let document=<meadow *:map(st.document),*[*[for (n in content(st.document) where name(n) != 'environment') n],env.description(checked)^]>;
+    let document=<meadow *:map(st.document),*[*[for (n in ((content(st.document)) ^ { [] }) where ((name(n) != 'environment') ^ { false })) n],env.description(checked)^]>;
     {*:st,document:document,model:conditions(st.model,checked)^}
 }
 pub fn edit_environment(st,key,value) map^ {
@@ -224,7 +224,7 @@ pub fn edit_environment(st,key,value) map^ {
     environment(st,config)^
 }
 
-pub fn clock(hour) string {
+pub fn clock(hour) string^ {
     let minutes=int(round(hour*60.0))%1440,h=minutes div 60,m=minutes%60;
     (if (h<10) "0" else "")++string(h)++":"++(if (m<10) "0" else "")++string(m)
 }

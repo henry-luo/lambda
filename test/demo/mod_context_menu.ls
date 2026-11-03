@@ -7,8 +7,8 @@ pub fn has_selection(selection) => selection.kind=='node' or selection.kind=='al
 view <context_frame> { ~.rendered }
 on render(evt) {
     if (evt.event_phase==2) {
-        fit(evt.target,~.id,~.owner)
-        if (~.autofocus) focus(evt.target,~.id)
+        fit(evt.target,~.id,~.owner)^
+        if (~.autofocus) focus(evt.target,~.id)^
     }
     return 'pass'
 }
@@ -20,7 +20,7 @@ pub pn fit(node,id,owner) {
     let menu = dom.get_element_by_id(root,id)
     let box = dom.bounding_box(menu)
     let viewport = dom.bounding_box(dom.get_element_by_id(root,owner))
-    dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8))) ++ "px")
+    dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8)))^ ++ "px")
     dom.style_set_property(menu,"top",string(max(8,min(box.y,viewport.height-box.height-8))) ++ "px")
 }
 
@@ -32,7 +32,7 @@ pub pn focus(node,id) {
 pub pn navigate(node,id,key) {
     let menu = dom.get_element_by_id(dom.root_node(node),id)
     let buttons = dom.query_selector_all(menu,"button:not([disabled])")
-    if (len(buttons)==0) { return }
+    if ((len(buttons)==0)^) { return }
     let at = [for (i,button in buttons where button==node) i][0] or 0
     let next = if (key=="Home") 0 else if (key=="End") len(buttons)-1
         else (at+len(buttons)+(if (key=="ArrowUp") -1 else 1))%len(buttons)

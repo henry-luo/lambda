@@ -31,11 +31,11 @@ let overlap = editor.exec(grouped,{id:"layer.select",ids:[grouped.selected[0],ai
 let once = editor.exec(overlap,{id:"layer.align",mode:"left",relative:"canvas"})^
 model.position(model.lookup(once.doc,aid).node) == [0,3] and model.position(model.lookup(once.doc,bid).node) == [7,8]
 let locked = editor.exec(c,{id:"layer.lock"})^
-editor.exec(locked,{id:"layer.align",mode:"left"}) ^ { true } ~ { false }
-editor.exec(c,{id:"layer.distribute",axis:"x"}) ^ { true } ~ { false }
-editor.exec(selected,{id:"layer.align",mode:"invalid"}) ^ { true } ~ { false }
-editor.exec(selected,{id:"layer.distribute",axis:"z"}) ^ { true } ~ { false }
-editor.exec(selected,{id:"layer.align",mode:"top",relative:"other"}) ^ { true } ~ { false }
+match (editor.exec(locked,{id:"layer.align",mode:"left"}) ^ { ^ }) { case error: true default: false }
+match (editor.exec(c,{id:"layer.distribute",axis:"x"}) ^ { ^ }) { case error: true default: false }
+match (editor.exec(selected,{id:"layer.align",mode:"invalid"}) ^ { ^ }) { case error: true default: false }
+match (editor.exec(selected,{id:"layer.distribute",axis:"z"}) ^ { ^ }) { case error: true default: false }
+match (editor.exec(selected,{id:"layer.align",mode:"top",relative:"other"}) ^ { ^ }) { case error: true default: false }
 let hidden = editor.exec(c,{id:"layer.visibility"})^
 let moved_hidden = editor.exec(hidden,{id:"layer.align",mode:"right",relative:"canvas"})^
 model.position(model.lookup(moved_hidden.doc,cid).node) == [18,4] and model.lookup(moved_hidden.doc,cid).node.visible == false

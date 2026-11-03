@@ -25,8 +25,8 @@ pub fn checked(value) map^ {
     else {
         let options = if (value == null) {} else value
         let params = c.get(options,"parameters",{})
-        let unknown = [for (key,item in options where not contains(
-            ["output","target","parameters","unsupported","customization"],string(key))) string(key)];
+        let unknown = [for (key,item in options where ((not contains(
+            ["output","target","parameters","unsupported","customization"],string(key))) ^ { false })) string(key)];
         if (len(unknown) > 0) raise c.fail("invalid-options","Unknown option " ++ unknown[0])
         else if (not (params is map)) raise c.fail("invalid-options","parameters must be a map")
         else if (not contains(["single","chunked"],c.get(options,"output","single")))
@@ -37,15 +37,15 @@ pub fn checked(value) map^ {
             raise c.fail("invalid-options","unsupported must be warn or error")
         else if (options.customization != null and not (options.customization is map))
             raise c.fail("invalid-options","customization must be a map of pure handlers")
-        else if (any([for (key,handler in c.get(options,"customization",{})) not (handler is function)]))
+        else if (any([for (key,handler in ((c.get(options,"customization",{})) ^ { [] })) not (handler is function)]))
             raise c.fail("invalid-options","Every customization handler must be a function")
         else {
             let invalid = [for (key,item in params where
-                (contains(booleans,string(key)) and not (item is bool)) or
+                (((contains(booleans,string(key)) and not (item is bool)) or
                 (contains(strings,string(key)) and not (item is string)) or
                 (contains(positive_integers,string(key)) and (not (item is int) or item < 1)) or
                 (string(key) == "chunk-section-depth" and (not (item is int) or item < 0 or item > 5)) or
-                not contains(booleans ++ strings ++ positive_integers ++ ["chunk-section-depth"],string(key))) string(key)]
+                not contains(booleans ++ strings ++ positive_integers ++ ["chunk-section-depth"],string(key))) ^ { false })) string(key)]
             let merged = {*:DEFAULTS,*:params};
             if (len(invalid) > 0) raise c.fail("invalid-options","Unsupported parameter or invalid type: " ++ invalid[0])
             else if (not contains(["lines","plain"],merged["verbatim-style-default"]))

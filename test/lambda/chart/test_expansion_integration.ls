@@ -14,7 +14,7 @@ import paths:lambda.chart.path_geometry
 import geometry:lambda.chart.geometry
 import colors:lambda.slide.color
 fn check(label,valid)=>if (valid) null else label
-fn elements(node)=>if (node is element) [node,for (child in content(node)) for (value in elements(child)) value] else []
+fn elements(node)any^ =>if (node is element) [node,for (child in ((content(node)) ^ { [] })) for (value in ((elements(child)) ^ { [] })) value] else []
 let graph={nodes:[{id:"a",category:"A"},{id:"b",category:"B"}],links:[{id:"ab",source:"a",target:"b",weight:10}]}
 let spec={data:graph,width:300,height:200,mark:{kind:"force_graph",iterations:0,labels:false,parts:{
     node:{encoding:{color:{field:"category",dtype:"nominal",scale:{range:["#112233","#445566"]}}},interaction:{element_select:true}},

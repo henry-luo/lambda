@@ -6,7 +6,7 @@ pn main() {
     print(len(base)); print(" "); print(len(appended)); print(" ")
     print(appended[2]); print("\n")
 
-    var changed: array = appended
+    var changed: array = appended^
     changed[0] = 9
     print(base[0]); print(" "); print(appended[0]); print(" ")
     print(changed[0]); print("\n")
@@ -32,7 +32,7 @@ pn main() {
     let record = {v: 1}
     let record_base: array = [record, "x"]
     let record_result = append_value(record_base, record)
-    var record_changed: array = record_result
+    var record_changed: array = record_result^
     record_changed[0].v = 9
     print(record_base[0].v); print(" "); print(record_result[0].v); print(" ")
     print(record_changed[0].v); print("\n")

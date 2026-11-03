@@ -62,6 +62,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->paged_reference_width = 0.0f;
     ctx->content_height = 0;
     ctx->advance_y = 0;
+    ctx->annotation_start_space = 0.0f;
     ctx->max_width = 0;
     ctx->max_height = 0;
     ctx->line_height = 0;

@@ -7,6 +7,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/shell.h"
 #include "../../lib/thread_pool.h"
+#include "../../lib/path_str.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -29,6 +30,7 @@ typedef enum ModuleAstPrebuildJobKind {
 
 typedef struct ModuleAstPrebuildRoot {
     const ModuleAstPrebuildProfile* profile;
+    ModuleAstPrebuildScope* scope;
     char* path;
     char* source;
 } ModuleAstPrebuildRoot;
@@ -38,10 +40,12 @@ typedef struct ModuleAstPrebuildJob {
     ModuleAstPrebuildTask* task;
     ModuleAstPrebuildRoot* root;
     ModuleAstPrebuildJobKind kind;
+    ModuleAstPrebuildScope* scope;
 } ModuleAstPrebuildJob;
 
 struct ModuleAstPrebuildTask {
     const ModuleAstPrebuildProfile* profile;
+    ModuleAstPrebuildScope* scope;
     char* key;
     char* path;
     ArrayList* dependencies;  // ModuleAstPrebuildTask*
@@ -62,6 +66,17 @@ typedef struct ModuleAstPrebuildTaskEntry {
     ModuleAstPrebuildTask* task;
 } ModuleAstPrebuildTaskEntry;
 
+struct ModuleAstPrebuildScope {
+    ModuleAstPrebuildRegistry* registry;
+    ModuleAstPrebuildProfiles profiles;
+    SecurityIOClient io;
+    ArrayList* tasks;
+    uint64_t serial;
+    uint64_t jobs;
+    bool closing;
+    pthread_cond_t idle;
+};
+
 typedef TypedHashMap<ModuleAstPrebuildTaskEntry,
     HashMapCStrMemberKeyOps<ModuleAstPrebuildTaskEntry,
         &ModuleAstPrebuildTaskEntry::key>> ModuleAstPrebuildTaskMap;
@@ -70,6 +85,8 @@ struct ModuleAstPrebuildRegistry {
     ModuleAstPrebuildTaskMap tasks;
     const ModuleAstPrebuildProfile* profiles[MODULE_AST_LANGUAGE_COUNT];
     ThreadPool* pool;
+    ArrayList* scopes;
+    uint64_t next_scope;
     pthread_mutex_t mutex;
     uint32_t next_visit_mark;
     bool ready;
@@ -109,6 +126,14 @@ static void module_ast_prebuild_registry_init(void) {
         // loading remains authoritative if a scheduling allocation fails.
         log_warn("module-ast-prebuild: global pool unavailable; running jobs serially");
     }
+    registry->scopes = arraylist_new(0);
+    if (!registry->scopes) {
+        tp_destroy(registry->pool);
+        registry->tasks.destroy();
+        pthread_mutex_destroy(&registry->mutex);
+        return;
+    }
+    registry->next_scope = 1;
     registry->ready = true;
 }
 
@@ -144,8 +169,21 @@ static void module_ast_prebuild_free_root(ModuleAstPrebuildRoot* root) {
     mem_free(root);
 }
 
-static char* module_ast_prebuild_canonical_path(char* path) {
+static char* module_ast_prebuild_canonical_path(char* path, ModuleAstPrebuildScope* scope) {
     if (!path) return NULL;
+    if (scope) {
+        // S2.4.4: lexical resolution performs no native filesystem probes.
+        char normalized[4096];
+        char* result = path_str_normalize_lexical_posix(path, normalized, sizeof(normalized), false) >= 0
+            ? mem_strdup(normalized, MEM_CAT_SYSTEM) : NULL;
+        mem_free(path);
+        if (result && scope->io.canonical_source) {
+            char* canonical = NULL;
+            (void)security_io_source_path(&scope->io, result, &canonical, NULL);
+            mem_free(result); result = canonical;
+        }
+        return result;
+    }
     char* canonical = file_realpath(path);
     if (!canonical) return path;
     mem_free(path);
@@ -153,17 +191,17 @@ static char* module_ast_prebuild_canonical_path(char* path) {
 }
 
 static char* module_ast_prebuild_task_key(const ModuleAstPrebuildProfile* profile,
-        const char* path) {
+        const char* path, ModuleAstPrebuildScope* scope) {
     if (!profile || !path) return NULL;
     const char* name = profile->name ? profile->name : "<unnamed>";
     size_t name_length = strlen(name);
     size_t path_length = strlen(path);
-    if (name_length > SIZE_MAX - path_length - 32) return NULL;
-    size_t capacity = name_length + path_length + 32;
+    if (name_length > SIZE_MAX - path_length - 64) return NULL;
+    size_t capacity = name_length + path_length + 64;
     char* key = (char*)mem_alloc(capacity, MEM_CAT_SYSTEM);
     if (!key) return NULL;
-    int written = snprintf(key, capacity, "%u:%s:%s",
-        (unsigned)profile->language, name, path);
+    int written = snprintf(key, capacity, "%llu:%u:%s:%s",
+        (unsigned long long)(scope ? scope->serial : 0), (unsigned)profile->language, name, path);
     if (written < 0 || (size_t)written >= capacity) {
         mem_free(key);
         return NULL;
@@ -229,6 +267,18 @@ static void module_ast_prebuild_run_job(void* opaque);
 static bool module_ast_prebuild_submit_job(ModuleAstPrebuildRegistry* registry,
         ModuleAstPrebuildJob* job) {
     if (!registry || !job) return false;
+    if (job->scope) {
+        pthread_mutex_lock(&registry->mutex);
+        bool accepting = !job->scope->closing;
+        if (accepting) job->scope->jobs++;
+        pthread_mutex_unlock(&registry->mutex);
+        if (!accepting) {
+            module_ast_prebuild_finish_task(registry, job->task, false);
+            if (job->root) module_ast_prebuild_free_root(job->root);
+            mem_free(job);
+            return false;
+        }
+    }
     if (registry->pool && tp_submit(registry->pool, module_ast_prebuild_run_job,
             job)) return true;
     // A submission failure must not strand direct waiters. The serial fallback
@@ -251,18 +301,19 @@ static void module_ast_prebuild_queue_task(ModuleAstPrebuildRegistry* registry,
     job->registry = registry;
     job->task = task;
     job->kind = kind;
+    job->scope = task->scope;
     (void)module_ast_prebuild_submit_job(registry, job);
 }
 
 static ModuleAstPrebuildTask* module_ast_prebuild_request_task(
         ModuleAstPrebuildRegistry* registry,
-        const ModuleAstPrebuildProfile* profile, char* path) {
+        const ModuleAstPrebuildProfile* profile, char* path, ModuleAstPrebuildScope* scope) {
     if (!registry || !profile || !path) {
         mem_free(path);
         return NULL;
     }
-    path = module_ast_prebuild_canonical_path(path);
-    char* key = module_ast_prebuild_task_key(profile, path);
+    path = module_ast_prebuild_canonical_path(path, scope);
+    char* key = module_ast_prebuild_task_key(profile, path, scope);
     if (!key) {
         mem_free(path);
         return NULL;
@@ -271,6 +322,9 @@ static ModuleAstPrebuildTask* module_ast_prebuild_request_task(
     ModuleAstPrebuildTask* task = NULL;
     bool queue = false;
     pthread_mutex_lock(&registry->mutex);
+    if (scope && scope->closing) {
+        pthread_mutex_unlock(&registry->mutex); mem_free(key); mem_free(path); return NULL;
+    }
     ModuleAstPrebuildTaskEntry probe = {key, NULL};
     const ModuleAstPrebuildTaskEntry* existing = registry->tasks.get(probe);
     if (existing) {
@@ -281,6 +335,7 @@ static ModuleAstPrebuildTask* module_ast_prebuild_request_task(
         task = (ModuleAstPrebuildTask*)mem_calloc(1, sizeof(*task), MEM_CAT_SYSTEM);
         if (task) {
             task->profile = profile;
+            task->scope = scope;
             task->key = key;
             task->path = path;
             if (pthread_cond_init(&task->completed, NULL) == 0) {
@@ -288,10 +343,11 @@ static ModuleAstPrebuildTask* module_ast_prebuild_request_task(
                 // hashmap_set() returns a replaced entry, not the inserted one;
                 // a NULL result is the normal new-key success case.
                 registry->tasks.set(entry);
-                if (!registry->tasks.oom()) {
+                if (!registry->tasks.oom() && (!scope || arraylist_append(scope->tasks, task))) {
                     task->discovery_queued = true;
                     queue = true;
                 } else {
+                    registry->tasks.erase(entry);
                     pthread_cond_destroy(&task->completed);
                     mem_free(task->path);
                     mem_free(task->key);
@@ -446,9 +502,11 @@ static void module_ast_prebuild_activate_task(ModuleAstPrebuildRegistry* registr
 
 static const ModuleAstPrebuildProfile* module_ast_prebuild_profile_for_language(
         ModuleAstPrebuildRegistry* registry,
-        const ModuleAstPrebuildProfile* requester, ModuleAstLanguage language) {
+        const ModuleAstPrebuildProfile* requester, ModuleAstLanguage language,
+        ModuleAstPrebuildScope* scope) {
     if (!registry || language >= MODULE_AST_LANGUAGE_COUNT) return NULL;
     if (requester && requester->language == language) return requester;
+    if (scope) return scope->profiles.profiles[language];
     pthread_mutex_lock(&registry->mutex);
     const ModuleAstPrebuildProfile* profile = registry->profiles[language];
     pthread_mutex_unlock(&registry->mutex);
@@ -460,28 +518,30 @@ static const ModuleAstPrebuildProfile* module_ast_prebuild_profile_for_language(
 static void module_ast_prebuild_discover_imports(
         ModuleAstPrebuildRegistry* registry,
         const ModuleAstPrebuildProfile* profile, const char* path,
-        const char* source, ModuleAstPrebuildTask* parent) {
+        const char* source, ModuleAstPrebuildTask* parent, ModuleAstPrebuildScope* scope) {
     if (!registry || !profile || !path || !source) return;
     ArrayList* specifiers = profile->discover_imports
         ? profile->discover_imports(profile->context, source, strlen(source)) : NULL;
     for (int index = 0; specifiers && index < specifiers->length; index++) {
         const char* specifier = (const char*)specifiers->data[index];
         ModuleAstResolvedImport resolved = {};
-        if (!specifier || !profile->resolve_import ||
-                !profile->resolve_import(profile->context, path, specifier, &resolved) ||
-                !resolved.path) {
+        bool resolved_ok = specifier && (scope
+            ? profile->resolve_authorized && profile->resolve_authorized(profile->context,
+                path, specifier, &resolved, &scope->io)
+            : profile->resolve_import && profile->resolve_import(profile->context, path, specifier, &resolved));
+        if (!resolved_ok || !resolved.path) {
             mem_free(resolved.path);
             continue;
         }
         const ModuleAstPrebuildProfile* dependency_profile =
             module_ast_prebuild_profile_for_language(registry, profile,
-                resolved.language);
+                resolved.language, scope);
         if (!dependency_profile) {
             mem_free(resolved.path);
             continue;
         }
         ModuleAstPrebuildTask* child = module_ast_prebuild_request_task(registry,
-            dependency_profile, resolved.path);
+            dependency_profile, resolved.path, scope);
         if (parent && (!child || !module_ast_prebuild_add_dependency(registry,
                 parent, child))) {
             pthread_mutex_lock(&registry->mutex);
@@ -498,15 +558,16 @@ static void module_ast_prebuild_discover_task(ModuleAstPrebuildRegistry* registr
         module_ast_prebuild_finish_task(registry, task, false);
         return;
     }
-    char* source = read_text_file(task->path);
-    if (!source) {
+    char* source = NULL; size_t length = 0;
+    if (!security_io_read_bytes(task->scope ? &task->scope->io : NULL,
+            task->path, true, UINT64_MAX, MEM_CAT_SYSTEM, &source, &length, NULL)) {
         log_error("module-ast-prebuild: could not read %s",
             task->path ? task->path : "<unknown>");
         module_ast_prebuild_finish_task(registry, task, false);
         return;
     }
     module_ast_prebuild_discover_imports(registry, task->profile, task->path,
-        source, task);
+        source, task, task->scope);
     mem_free(source);
     pthread_mutex_lock(&registry->mutex);
     if (!task->complete) task->discovery_complete = true;
@@ -516,8 +577,13 @@ static void module_ast_prebuild_discover_task(ModuleAstPrebuildRegistry* registr
 
 static void module_ast_prebuild_build_task(ModuleAstPrebuildRegistry* registry,
         ModuleAstPrebuildTask* task) {
-    bool success = task && task->profile && task->profile->build_ast && task->path &&
-        task->profile->build_ast(task->profile->context, task->path);
+    bool success = false;
+    if (task && task->profile && task->path) {
+        success = task->scope
+            ? task->profile->build_authorized && task->profile->build_authorized(
+                task->profile->context, task->path, &task->scope->io)
+            : task->profile->build_ast && task->profile->build_ast(task->profile->context, task->path);
+    }
     module_ast_prebuild_finish_task(registry, task, success);
 }
 
@@ -527,7 +593,10 @@ static void module_ast_prebuild_discover_root(ModuleAstPrebuildRegistry* registr
         module_ast_prebuild_free_root(root);
         return;
     }
-    char* source = root->source ? root->source : read_text_file(root->path);
+    char* source = root->source;
+    size_t length = 0;
+    if (!source) (void)security_io_read_bytes(root->scope ? &root->scope->io : NULL,
+        root->path, true, UINT64_MAX, MEM_CAT_SYSTEM, &source, &length, NULL);
     root->source = NULL;
     if (!source) {
         log_warn("module-ast-prebuild: root discovery could not read %s",
@@ -536,7 +605,7 @@ static void module_ast_prebuild_discover_root(ModuleAstPrebuildRegistry* registr
         return;
     }
     module_ast_prebuild_discover_imports(registry, root->profile, root->path,
-        source, NULL);
+        source, NULL, root->scope);
     mem_free(source);
     module_ast_prebuild_free_root(root);
 }
@@ -551,13 +620,18 @@ static void module_ast_prebuild_run_job(void* opaque) {
     } else {
         module_ast_prebuild_discover_root(job->registry, job->root);
     }
+    if (job->scope) {
+        pthread_mutex_lock(&job->registry->mutex);
+        if (--job->scope->jobs == 0) pthread_cond_broadcast(&job->scope->idle);
+        pthread_mutex_unlock(&job->registry->mutex);
+    }
     mem_free(job);
 }
 
-bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
+static bool module_ast_prebuild_imports_impl(const ModuleAstPrebuildProfiles* profiles,
         ModuleAstLanguage root_language, const char* root_path,
         const char* root_source, size_t root_source_length,
-        ModuleAstPrebuildStats* out_stats) {
+        ModuleAstPrebuildStats* out_stats, ModuleAstPrebuildScope* scope) {
     if (out_stats) memset(out_stats, 0, sizeof(*out_stats));
     if (!module_ast_prebuild_enabled() || !profiles ||
             root_language >= MODULE_AST_LANGUAGE_COUNT || !root_path ||
@@ -566,7 +640,8 @@ bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
     if (!registry) return false;
 
     pthread_mutex_lock(&registry->mutex);
-    bool registered = module_ast_prebuild_register_profiles_locked(registry, profiles);
+    bool registered = scope ? !scope->closing
+        : module_ast_prebuild_register_profiles_locked(registry, profiles);
     pthread_mutex_unlock(&registry->mutex);
     if (!registered) return false;
 
@@ -574,8 +649,9 @@ bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
         sizeof(ModuleAstPrebuildRoot), MEM_CAT_SYSTEM);
     if (!root) return false;
     root->profile = profiles->profiles[root_language];
+    root->scope = scope;
     root->path = module_ast_prebuild_canonical_path(mem_strdup(root_path,
-        MEM_CAT_SYSTEM));
+        MEM_CAT_SYSTEM), scope);
     root->source = root_source ? mem_dup_n(root_source, root_source_length,
         MEM_CAT_SYSTEM) : NULL;
     if (!root->path || (root_source && !root->source)) {
@@ -592,21 +668,22 @@ bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
     job->registry = registry;
     job->root = root;
     job->kind = MODULE_AST_PREBUILD_DISCOVER_ROOT;
+    job->scope = scope;
     if (out_stats && registry->pool) out_stats->worker_pool_runs = 1;
     // Root submission deliberately has no wait-all: direct import consumers
     // rendezvous with only the task future they are about to consume.
     return module_ast_prebuild_submit_job(registry, job);
 }
 
-bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile,
-        const char* path) {
+static bool module_ast_prebuild_await_impl(const ModuleAstPrebuildProfile* profile,
+        const char* path, ModuleAstPrebuildScope* scope) {
     if (!module_ast_prebuild_enabled() || !profile || !path) return false;
     ModuleAstPrebuildRegistry* registry = module_ast_prebuild_registry_get();
-    if (!registry || !module_ast_prebuild_register_profile(registry, profile)) {
+    if (!registry || (!scope && !module_ast_prebuild_register_profile(registry, profile))) {
         return false;
     }
     ModuleAstPrebuildTask* task = module_ast_prebuild_request_task(registry,
-        profile, mem_strdup(path, MEM_CAT_SYSTEM));
+        profile, mem_strdup(path, MEM_CAT_SYSTEM), scope);
     if (!task) return false;
 
     pthread_mutex_lock(&registry->mutex);
@@ -616,6 +693,75 @@ bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile,
     bool success = !task->failed;
     pthread_mutex_unlock(&registry->mutex);
     return success;
+}
+
+bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
+        ModuleAstLanguage language, const char* path, const char* source,
+        size_t length, ModuleAstPrebuildStats* stats) {
+    return module_ast_prebuild_imports_impl(profiles, language, path, source, length, stats, NULL);
+}
+
+bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile, const char* path) {
+    return module_ast_prebuild_await_impl(profile, path, NULL);
+}
+
+ModuleAstPrebuildScope* module_ast_prebuild_scope_open(
+        const ModuleAstPrebuildProfiles* profiles, const SecurityIOClient* io) {
+    if (!profiles || !io || io->version != 1 || !io->read) return NULL;
+    for (int i = 0; i < MODULE_AST_LANGUAGE_COUNT; i++) {
+        const ModuleAstPrebuildProfile* profile = profiles->profiles[i];
+        if (profile && (profile->language != i || !profile->build_authorized || !profile->resolve_authorized)) return NULL;
+    }
+    ModuleAstPrebuildRegistry* registry = module_ast_prebuild_registry_get();
+    if (!registry) return NULL;
+    ModuleAstPrebuildScope* scope = (ModuleAstPrebuildScope*)mem_calloc(1, sizeof(*scope), MEM_CAT_SYSTEM);
+    if (!scope) return NULL;
+    scope->tasks = arraylist_new(0);
+    if (!scope->tasks || pthread_cond_init(&scope->idle, NULL) != 0) {
+        if (scope->tasks) arraylist_free(scope->tasks);
+        mem_free(scope); return NULL;
+    }
+    scope->profiles = *profiles; scope->io = *io;
+    pthread_mutex_lock(&registry->mutex);
+    bool valid = registry->next_scope != UINT64_MAX && arraylist_append(registry->scopes, scope);
+    if (valid) { scope->serial = registry->next_scope++; scope->registry = registry; }
+    pthread_mutex_unlock(&registry->mutex);
+    if (!valid) { pthread_cond_destroy(&scope->idle); arraylist_free(scope->tasks); mem_free(scope); return NULL; }
+    return scope;
+}
+
+bool module_ast_prebuild_scope_imports(ModuleAstPrebuildScope* scope,
+        ModuleAstLanguage language, const char* path, const char* source,
+        size_t length, ModuleAstPrebuildStats* stats) {
+    return scope && scope->registry && module_ast_prebuild_imports_impl(&scope->profiles,
+        language, path, source, length, stats, scope);
+}
+
+bool module_ast_prebuild_scope_await(ModuleAstPrebuildScope* scope,
+        const ModuleAstPrebuildProfile* profile, const char* path) {
+    return scope && scope->registry && profile && profile->language < MODULE_AST_LANGUAGE_COUNT &&
+        scope->profiles.profiles[profile->language] == profile && module_ast_prebuild_await_impl(profile, path, scope);
+}
+
+void module_ast_prebuild_scope_close(ModuleAstPrebuildScope* scope) {
+    if (!scope) return;
+    ModuleAstPrebuildRegistry* registry = scope->registry;
+    if (registry) {
+        pthread_mutex_lock(&registry->mutex);
+        scope->closing = true;
+        while (scope->jobs) pthread_cond_wait(&scope->idle, &registry->mutex);
+        // Consumers have left this Runtime; only its private futures are removed.
+        for (int i = 0; i < scope->tasks->length; i++) {
+            ModuleAstPrebuildTask* task = (ModuleAstPrebuildTask*)scope->tasks->data[i];
+            registry->tasks.erase({task->key, task});
+            module_ast_prebuild_free_task(task);
+        }
+        for (int i = 0; i < registry->scopes->length; i++) {
+            if (registry->scopes->data[i] == scope) { arraylist_remove(registry->scopes, i); break; }
+        }
+        pthread_mutex_unlock(&registry->mutex);
+    }
+    pthread_cond_destroy(&scope->idle); arraylist_free(scope->tasks); mem_free(scope);
 }
 
 void module_ast_prebuild_cleanup(void) {
@@ -628,12 +774,18 @@ void module_ast_prebuild_cleanup(void) {
     registry->pool = NULL;
 
     pthread_mutex_lock(&registry->mutex);
+    for (int i = 0; i < registry->scopes->length; i++) {
+        ModuleAstPrebuildScope* scope = (ModuleAstPrebuildScope*)registry->scopes->data[i];
+        scope->registry = NULL; scope->closing = true;
+        arraylist_clear(scope->tasks);
+    }
     size_t cursor = 0;
     ModuleAstPrebuildTaskEntry* entry = NULL;
     while (registry->tasks.next(&cursor, &entry)) {
         module_ast_prebuild_free_task(entry->task);
     }
     registry->tasks.destroy();
+    arraylist_free(registry->scopes); registry->scopes = NULL;
     memset(registry->profiles, 0, sizeof(registry->profiles));
     registry->next_visit_mark = 0;
     registry->ready = false;

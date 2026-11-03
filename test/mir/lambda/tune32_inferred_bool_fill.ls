@@ -1,6 +1,6 @@
 // D3.3.3v3: an inferred bool fill owns a lane witness, not a bool[] contract.
 pn tune32_bool_hot(n: int) {
-    var flags = fill(n, true)
+    var flags = fill(n, true)^
     var i = 0
     var count = 0
     while (i < n) {
@@ -11,7 +11,7 @@ pn tune32_bool_hot(n: int) {
     print(count); print(" "); print(flags[n]); print("\n")
 }
 pn tune32_bool_fill(n: int) {
-    var flags = fill(n, true)
+    var flags = fill(n, true)^
     var i = 0
     while (i < n) {
         flags[i] = false
@@ -23,11 +23,11 @@ pn tune32_bool_fill(n: int) {
 pn tune32_bool_plain(flags) { flags[0] = false }
 pn tune32_bool_borrow(var flags) { flags[0] = false }
 pn tune32_bool_oob(n: int) any^ {
-    var flags = fill(n, true)
+    var flags = fill(n, true)^
     flags[n] = false
 }
 pn tune32_bool_mixed() {
-    var flags = fill(2, true)
+    var flags = fill(2, true)^
     flags[0] = 7
     print(flags); print("\n")
     flags = ["x", null]
@@ -35,7 +35,7 @@ pn tune32_bool_mixed() {
 }
 
 pn tune32_bool_count(n: int, bound: int) {
-    var flags = fill(n, true)
+    var flags = fill(n, true)^
     var i = 0
     var count = 0
     while (i < bound) {
@@ -46,7 +46,7 @@ pn tune32_bool_count(n: int, bound: int) {
 }
 
 pn tune32_bool_snapshot(n: int) {
-    var flags = fill(n, true)
+    var flags = fill(n, true)^
     let snapshot = flags
     var i = 0
     while (i < n) {
@@ -57,26 +57,29 @@ pn tune32_bool_snapshot(n: int) {
 }
 
 pn main() {
-    tune32_bool_hot(4)
-    tune32_bool_hot(0)
-    tune32_bool_fill(4)
-    tune32_bool_fill(0)
-    var flags = fill(2, true)
+    tune32_bool_hot(4)^
+    tune32_bool_hot(0)^
+    tune32_bool_fill(4)^
+    tune32_bool_fill(0)^
+    var flags = fill(2, true)^
     var snapshot = flags
-    tune32_bool_plain(flags)
+    tune32_bool_plain(flags)^
     print(flags); print(" ")
-    tune32_bool_borrow(flags)
+    tune32_bool_borrow(flags)^
     print(flags); print(" "); print(snapshot); print("\n")
     var failed = false
     tune32_bool_oob(0) ^ { failed = true }
     print(failed); print(" "); print(fill(-1, true)); print("\n")
-    tune32_bool_mixed()
-    tune32_bool_count(4, 4)
-    tune32_bool_count(2, 4)
-    tune32_bool_count(0, 0)
-    tune32_bool_count(0, 2)
-    tune32_bool_snapshot(4)
-    tune32_bool_snapshot(0)
-    tune32_bool_count(-1, 0)
-    tune32_bool_snapshot(-1)
+    tune32_bool_mixed()^
+    tune32_bool_count(4, 4)^
+    tune32_bool_count(2, 4)^
+    tune32_bool_count(0, 0)^
+    tune32_bool_count(0, 2)^
+    tune32_bool_snapshot(4)^
+    tune32_bool_snapshot(0)^
+    // S7.6.3v3: a propagated failed fill completes its callable; retain it here.
+    let rejected_count = tune32_bool_count(-1, 0)
+    let rejected_snapshot = tune32_bool_snapshot(-1)
+    print(rejected_count is error); print("\n")
+    print(rejected_snapshot is error); print("\n")
 }

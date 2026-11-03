@@ -27,7 +27,7 @@ fn return_checks(result, vertical) => [
         by_id(result.nodes, edge.from), vertical),
       target_side: side_terminal(points[final_index], points[final_index - 1],
         by_id(result.nodes, edge.to), vertical),
-      orthogonal: all([for (i in 1 to final_index)
+      orthogonal: all([for (i in ((1 to final_index) ^ { [] }))
         abs(points[i].x - points[i - 1].x) < 0.001 or
           abs(points[i].y - points[i - 1].y) < 0.001])
     }
@@ -37,11 +37,11 @@ fn return_checks(result, vertical) => [
 let source = (input("test/input/simple_diagram.d2",
   {type: "graph", flavor: "d2"})) ^ { null }
 let canonical = normalize.normalize(source)
-let nodes = [for (node in model.nodes(canonical.graph))
+let nodes = [for (node in ((model.nodes(canonical.graph)) ^ { [] }))
   {id: node.id, width: 100, height: 40, shape: node.shape}]
 let edges = model.edges(canonical.graph)
 let html = transform.to_html(source)
-let database_html = [for (node in model.nodes(html)
+let database_html = [for (node in ((model.nodes(html)) ^ { [] })
   where node["data-node-id"] == "database") node][0]
 let rim = model.element_children(database_html)[0]
 let shape_variants = transform.to_html({nodes: [

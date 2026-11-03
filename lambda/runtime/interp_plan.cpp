@@ -899,11 +899,11 @@ typedef struct PlanCtx {
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)decl)->init);
+    AstNode* init = ast_cow_value_source(((AstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
         NameEntry* src = ((AstIdentNode*)init)->entry;
-        entry->cow_owned = src && src->cow_owned;
+        entry->cow_owned = (src && src->cow_owned) || entry->param_alias_written;
         return;
     }
     entry->cow_owned = ast_expr_produces_owned_container(init);
@@ -1139,7 +1139,8 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
             ((AstDeclaratorNode*)decl)->is_type_definition));
     ident->interp_frame_slot_read = entry->storage_assigned &&
         entry->binding_storage == BINDING_STORAGE_REGISTER &&
-        !entry->is_binder && !entry->import && !special_decl && entry->slot >= 0;
+        !entry->is_binder && !entry->import && !entry->lambda_shared_local &&
+        !special_decl && entry->slot >= 0;
 }
 
 static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
@@ -1394,10 +1395,10 @@ static uint32_t plan_need(AstNode* node) {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         uint32_t operand = plan_need(handler->operand);
         uint32_t body = 1 + plan_need(handler->body);
-        uint32_t value = handler->value_body
-            ? 1 + plan_need(handler->value_body) : 0;
+        uint32_t filter = handler->filter ? 2 + plan_need(handler->filter) : 0;
         uint32_t best = operand > body ? operand : body;
-        return value > best ? value : best;
+        if (filter > best) best = filter;
+        return best;
     }
     case AST_NODE_IF_EXPR:
     case AST_NODE_CONDITIONAL_EXPR: {
@@ -1654,6 +1655,11 @@ static void plan_view(PlanCtx* outer, AstViewNode* view) {
     pc.plan = &view->interp_plan;
     pc.storage = BINDING_STORAGE_REGISTER;
     plan_assign_scope(&pc, view->vars);
+    if (view->signature && view->signature->return_contract) {
+        pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
+            view->signature->return_contract);
+        plan_destination(pc.script->pool, view->body, view->signature->return_contract);
+    }
     for (AstStateEntry* state = view->state; state; state = state->next_state) {
         plan_walk(state->value, &pc);
         // The model occupies a scratch home while a state default evaluates.
@@ -1827,13 +1833,15 @@ static bool plan_for_statement_can_hand_off(AstForNode* for_node) {
 }
 
 // D8.1.1v14/v18: a `while` or a plain `for` statement that is a direct statement
-// of a `pn` body can hand the running activation to compiled code at its head
+// of a callable body can hand the running activation to compiled code at its head
 // test. There T0's live state is the frame's named slots (plus, for a `for`,
 // its walk's snapshot and position), and the statements from the loop to the
 // end of the body form a function of them (the continuation). Nested loops
 // are not numbered: their back-edges count toward the enclosing handoff loop.
 static void plan_mark_handoff_loops(AstFuncNode* fn) {
-    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    // shared homes cannot use the ordinary Item live-in transport.
+    if (fn->analysis && fn->analysis->lambda_uses_shared_homes) return;
+    bool is_proc = ((AstNode*)fn)->node_type == AST_NODE_PROC;
     AstNode* body = ast_unwrap_primary(fn->body);
     if (!body || (body->node_type != AST_NODE_CONTENT &&
             body->node_type != AST_NODE_LIST)) return;
@@ -1843,7 +1851,7 @@ static void plan_mark_handoff_loops(AstFuncNode* fn) {
         if (item->node_type == AST_NODE_LOOP &&
                 ((AstLoopControlNode*)item)->form == LOOP_FORM_WHILE) {
             ((AstLoopControlNode*)item)->interp_handoff_ordinal = ++ordinal;
-        } else if (item->node_type == AST_NODE_FOR_EXPR &&
+        } else if (is_proc && item->node_type == AST_NODE_FOR_EXPR &&
                 plan_for_statement_can_hand_off((AstForNode*)item)) {
             ((AstForNode*)item)->interp_handoff_ordinal = ++ordinal;
         }
@@ -2341,6 +2349,7 @@ bool interp_satellite_supported(const Script* script, const AstFuncNode* fn) {
 
 const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn) {
     if (!fn || !fn->analysis || !fn->body) return "no-analysis";
+    if (fn->analysis->lambda_uses_shared_homes) return "shared-capture-homes";
     if (fn->captures) return "captures";
     if (fn->is_generator) return "generator";
     if (fn->is_async) return "async";

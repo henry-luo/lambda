@@ -38,7 +38,7 @@ pub fn next_look(look) => (let i = [for (k, n in LOOK_ORDER where n == look) k][
 pub let HEADLIGHT = 420.0
 
 // ---- materials
-fn paint_id(color) => "m-paint-" ++ slice(color, 1, 7)
+fn paint_id(color) any^ => "m-paint-" ++ slice(color, 1, 7)
 let TRAFFIC_PAINTS = [*tr.PAINTS, "#f2c230"]
 fn std(id, color, options = {}) element => s.material('standard', {id: id, color: color, roughness: 0.8, *: options})
 fn materials(look, lights) => [
@@ -117,14 +117,14 @@ fn shared_geometry() => [
     m.geometry("g-parcel", m.block(0.0, -0.35, 0.0, 0.7, 0.7, 0.7))]
 
 // ---- static city geometry, merged per material
-fn mesh(id, b, material, options = {}) element => s.mesh(m.geometry("g-" ++ id, b), material, {id: id, *: options})
-fn kind_lots(kind, tile) => m.merge([for (b in city.BLOCKS where b.kind == kind) m.ground_quad(b.lx0, b.lz0, b.lx1, b.lz1, city.CURB + 0.004, tile)])
+fn mesh(id, b, material, options = {}) element^ => s.mesh(m.geometry("g-" ++ id, b), material, {id: id, *: options})
+fn kind_lots(kind, tile) any^ => m.merge([for (b in city.BLOCKS where b.kind == kind) m.ground_quad(b.lx0, b.lz0, b.lx1, b.lz1, city.CURB + 0.004, tile)])
 // a stop bar across the approaching lane, from the centreline to the curb on the driver's right
-fn stop_bar(cx, cz, f, r) => if (abs(f[0]) > 0.5)
+fn stop_bar(cx, cz, f, r) any^ => if (abs(f[0]) > 0.5)
         m.ground_quad(cx - 0.25, min(cz + r[1] * 0.3, cz + r[1] * city.ROAD), cx + 0.25, max(cz + r[1] * 0.3, cz + r[1] * city.ROAD), 0.013, 1.0)
     else m.ground_quad(min(cx + r[0] * 0.3, cx + r[0] * city.ROAD), cz - 0.25, max(cx + r[0] * 0.3, cx + r[0] * city.ROAD), cz + 0.25, 0.013, 1.0)
 // centre lines between junction zones, stop lines before each signalled approach, zebra crossings on every arm
-fn markings() {
+fn markings() any^ {
     let n = city.N, e = city.EDGE
     let yellow = [for (i in 0 to n, k in 0 to (n - 1), axis in 0 to 1, off in [-0.17, 0.17],
             let a = city.road(k) + e, let b = city.road(k + 1) - e, let c = city.road(i) + off)
@@ -132,7 +132,7 @@ fn markings() {
     let stops = [for (sg in city.SIGNALS, let f = city.DIRS[sg.d])
         stop_bar(city.road(sg.i) - f[0] * (e + 0.5), city.road(sg.j) - f[1] * (e + 0.5), f, [0.0 - f[1], f[0]])]
     let zebra = [for (i in 0 to n, j in 0 to n, d in 0 to 3, s in 0 to 9, let f = city.DIRS[d]
-            where i + int(f[0]) >= 0 and i + int(f[0]) <= n and j + int(f[1]) >= 0 and j + int(f[1]) <= n)
+            where i + int(f[0])^ >= 0 and i + int(f[0])^ <= n and j + int(f[1])^ >= 0 and j + int(f[1])^ <= n)
         (let x = city.road(i), (let z = city.road(j), (let across = -5.4 + s * 1.2, (let near = e - 2.6,
             if (abs(f[0]) > 0.5) m.ground_quad(x + f[0] * near - (if (f[0] < 0.0) 2.2 else 0.0), z + across - 0.3, x + f[0] * near + (if (f[0] > 0.0) 2.2 else 0.0), z + across + 0.3, 0.013, 1.0)
             else m.ground_quad(x + across - 0.3, z + f[1] * near - (if (f[1] < 0.0) 2.2 else 0.0), x + across + 0.3, z + f[1] * near + (if (f[1] > 0.0) 2.2 else 0.0), 0.013, 1.0)))))];
@@ -147,15 +147,15 @@ fn buildings() {
 }
 let PARKED_SHAPES = {sedan: m.vehicle("sedan"), hatch: m.vehicle("hatch")}
 fn parked_cars() {
-    let placed = (c, part) => m.yawed(PARKED_SHAPES[c.kind][part], c.x, 0.0, c.z, c.heading);
+    let placed = (c, part) any^ => m.yawed(PARKED_SHAPES[c.kind][part], c.x, 0.0, c.z, c.heading);
     [mesh("parked-paint", m.merge([for (c in city.PARKED) m.tinted(placed(c, "paint"), hex_rgb(c.paint))]), "m-parked"),
      *[for (p in ["glass", "trim", "head", "tail"]) mesh("parked-" ++ p, m.merge([for (c in city.PARKED) placed(c, p)]), PART_MATERIAL[p], {'cast-shadow': p == "glass" or p == "trim"})]]
 }
 let HEX = "0123456789abcdef"
-fn nibble(ch) => [for (k in 0 to 15 where slice(HEX, k, k + 1) == lower(ch)) k][0]
+fn nibble(ch) any^ => [for (k in 0 to 15 where slice(HEX, k, k + 1)^ == lower(ch)) k][0]
 fn hex_rgb(c) => [for (k in 0 to 2) (nibble(slice(c, 1 + 2 * k, 2 + 2 * k)) * 16 + nibble(slice(c, 2 + 2 * k, 3 + 2 * k))) / 255.0]
 fn scatter(items, size_of) => [for (p in items) t.compose([p.x, p.y or 0.0, p.z], u.quat(p.face or p.heading or 0.0), [size_of(p), size_of(p), size_of(p)])]
-fn instanced(id, geometry_id, material, matrices, options = {}) element => s.mesh(geometry_id, material, {id: id, instances: matrices, *: options})
+fn instanced(id, geometry_id, material, matrices, options = {}) element^ => s.mesh(geometry_id, material, {id: id, instances: matrices, *: options})
 // trees beyond the barrier, on the grass around the city
 let SCENERY_TREES = [for (k in 0 to 59, let a = k * u.TAU / 60.0, let r = city.LIMIT + 24.0 + (k % 3) * 9.0
     where not (cos(a) > 0.45 and abs(sin(a)) < 0.9)) {x: sin(a) * r * 1.02, z: 0.0 - cos(a) * r, s: 1.1 + (k % 4) * 0.12}]
@@ -192,10 +192,10 @@ fn landmarks() {
      mesh("ramps", m.merge([for (r in city.RAMPS) m.wedge(r, city.CURB)]), "m-steel")]
 }
 // the harbour south of the barrier, hills and a sky dome around everything
-fn surroundings(look) {
+fn surroundings(look) any^ {
     let l = city.LIMIT, sh = city.SHORE
     let dome = s.sphere(12, 24)
-    let colors = [for (i in 0 to (len(dome.positions) div 3 - 1), let y = dome.positions[3 * i + 1] * 2.0, let k = u.clamp(y * 1.6, 0.0, 1.0))
+    let colors = [for (i in 0 to (len(dome.positions)^ div 3 - 1), let y = dome.positions[3 * i + 1] * 2.0, let k = u.clamp(y * 1.6, 0.0, 1.0))
         *[for (c in 0 to 2) u.lerp(look.horizon[c], look.zenith[c], k)]];
     [mesh("grass", m.ground_quad(-1600.0, -1600.0, 1600.0, sh, -0.03, 6.0), "m-grass", {'cast-shadow': false}),
      mesh("barrier", m.merge([m.cuboid(0.0 - l - 1.0, 0.0, 0.0 - l - 1.0, l + 1.0, 1.1, 0.0 - l), m.cuboid(0.0 - l - 1.0, 0.0, l, l + 1.0, 1.1, l + 1.0),
@@ -280,7 +280,7 @@ fn camera_body(c) element => physics.body("camera-rig", [physics.collider("camer
 // ---- clips on the scene clock: signal lamps, the crane's slow slew, harbour ripples, beacon pulse
 let ON = {red: [1.0, 0.06, 0.03], amber: [1.0, 0.55, 0.02], green: [0.1, 1.0, 0.45]}
 let OFF = [0.03, 0.025, 0.02]
-fn lamp_track(g, c) element {
+fn lamp_track(g, c) element^ {
     // group 1 runs half a cycle behind group 0
     let shift = if (g == 1) tr.CYCLE / 2.0 else 0.0
     let spans = if (c == "green") [[0.0, tr.GREEN]] else if (c == "amber") [[tr.GREEN, tr.GREEN + tr.AMBER]] else [[tr.GREEN + tr.AMBER, tr.CYCLE]]
@@ -288,12 +288,12 @@ fn lamp_track(g, c) element {
     let marks = sort(unique([0.0, *edges, tr.CYCLE]))
     let lit_at = (at) => any([for (sp in spans, let local = (at - shift) - tr.CYCLE * floor((at - shift) / tr.CYCLE))
         local >= sp[0] - 0.0001 and local < sp[1] - 0.0001]);
-    s.track("sig-" ++ string(g) ++ "-" ++ c ++ ".emissive", marks, [for (at in marks, x in (if (lit_at(at)) ON[c] else OFF)) x], 'color', {interpolation: 'discrete'})
+    s.track("sig-" ++ string(g) ++ "-" ++ c ++ ".emissive", marks, [for (at in marks, x in (if (lit_at(at)^) ON[c] else OFF)) x], 'color', {interpolation: 'discrete'})
 }
-pub fn clips() => [
+pub fn clips() any^ => [
     s.clip("signals", [for (g in 0 to 1, c in ["red", "amber", "green"]) lamp_track(g, c)], {duration: tr.CYCLE, autoplay: true}),
     s.clip("crane", [s.track("crane-top.quaternion", [0.0, 30.0, 60.0, 90.0, 120.0],
-        [for (a in [0.0, 1.1, 0.4, -0.7, 0.0], q in u.quat(city.CRANE.heading + a)) q], 'quaternion')], {duration: 120.0, autoplay: true}),
+        [for (a in [0.0, 1.1, 0.4, -0.7, 0.0], q in u.quat(city.CRANE.heading + a)^) q], 'quaternion')], {duration: 120.0, autoplay: true}),
     s.clip("harbour-ripples", [s.track("m-water.water-phase", [0.0, 12.0], [0.0, u.TAU])], {duration: 12.0, autoplay: true}),
     s.clip("beacons", [for (k in ["pickup", "drop"]) s.track("m-beacon-" ++ k ++ ".emissive", [0.0, 0.6, 1.2],
         [*(if (k == "pickup") [0.24, 1.0, 0.6] else [1.0, 0.7, 0.18]), *(if (k == "pickup") [0.6, 1.0, 0.85] else [1.0, 0.9, 0.55]),

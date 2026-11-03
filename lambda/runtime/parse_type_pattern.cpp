@@ -63,7 +63,6 @@ enum : uint8_t {
     TP_FLAG_FIELD_OPTIONAL = 1u << 0, // LSF_TP_FIELD: field may be absent
     TP_FLAG_FN_PROC = 1u << 0,       // LSF_TP_FN: the `pn (...)` colour
     TP_FLAG_RAISES = 1u << 1,        // a `^` follows the return type
-    TP_FLAG_ERROR_NODE = 1u << 2,    // the raised channel names its type
 };
 
 struct Lexer {
@@ -772,7 +771,7 @@ AstNode* parse_element_type(Lexer* lx) {
 }
 
 // `fn (a: int, b: string) ReturnType` — params are pattern-only (CT8v2) and the
-// return may carry the raised channel (`T^`, `T^E`), the one place `^` survives
+// return may use the broad outcome shorthand `T^` (S7.4.2v3).
 // (CT3v2/CT4). The node's param/vars stay null: the transpiler reads only
 // ->type from a FUNC_TYPE node, and the TypeFunc carries the full contract.
 // `pn (...)` spells the same contract with the procedure colour; `fn` and `pn`
@@ -780,7 +779,7 @@ AstNode* parse_element_type(Lexer* lx) {
 //
 // Until resolution the TypeFunc holds the parameter list (each TypeParam's
 // `type_expr` is its declared pattern), `body` holds the return pattern, and
-// `params` the raised channel's named type.
+// the broad `^` shorthand is retained as a syntax flag until normalization.
 AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     AstFuncNode* ast_node = (AstFuncNode*)new_node(lx, AST_NODE_FUNC_TYPE,
         sizeof(AstFuncNode), LSF_TP_FN);
@@ -831,15 +830,13 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
         if (!returned) { return NULL; }
         ast_node->body = returned;
         if (eat(lx, '^')) {
-            // `T^` is any error; `T^E` names one. The error arm is a simple
-            // type pattern, never a whole annotation.
             ast_node->syntax_flags |= TP_FLAG_RAISES;
             skip_space(lx);
-            if (lx->p < lx->end && is_ident_start(*lx->p)) {
-                AstNode* err = parse_primary(lx);
-                if (!err) { return NULL; }
-                ast_node->params = err;
-                ast_node->syntax_flags |= TP_FLAG_ERROR_NODE;
+            StrView following = peek_word(lx);
+            if ((following.length && !word_is(following, "as")) || at(lx, '(')) {
+                fail_code(lx, ERR_INVALID_TYPE_SYNTAX,
+                    "typed 'T^E' is removed; use 'T | E' or broad 'T^'");
+                return NULL;
             }
         }
     }
@@ -1145,15 +1142,15 @@ AstNode* parse_binder(Lexer* lx, bool allow_error_suffix) {
     AstNode* base = parse_union(lx);
     if (!base) return NULL;
     if (allow_error_suffix && eat(lx, '^')) {
-        // only a function return gives ^ its raised-channel meaning (S7.4.2).
+        // S7.4.2v3: the same broad union shorthand in every type position.
         AstNode* error = new_node(lx, AST_NODE_TYPE, sizeof(AstTypeNode), LSF_TP_BASE);
         error->syntax_aux = lambda_base_type_index((StrView){"error", 5});
         base = make_binary_node(lx, base, error, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
         StrView named_error = peek_word(lx);
-        if (named_error.length && !word_is(named_error, "as")) {
-            AstNode* explicit_error = parse_primary(lx);
-            if (!explicit_error) return NULL;
-            base = make_binary_node(lx, base, explicit_error, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
+        if ((named_error.length && !word_is(named_error, "as")) || at(lx, '(')) {
+            fail_code(lx, ERR_INVALID_TYPE_SYNTAX,
+                "typed 'T^E' is removed; use 'T | E' or broad 'T^'");
+            return NULL;
         }
     }
     skip_space(lx);
@@ -1343,7 +1340,7 @@ void resolve_field_shape(Transpiler* tp, AstNode* first_field,
 
 void resolve_fn_type(Transpiler* tp, AstFuncNode* ast_node) {
     TypeFunc* fn_type = (TypeFunc*)ast_node->type;
-    set_fn_return_contract(fn_type, &TYPE_ANY_NO_ERROR, false);
+    set_fn_return_contract(tp, fn_type, &TYPE_ANY_NO_ERROR, false);
     int param_count = 0;
     int required_count = 0;
     for (TypeParam* param = fn_type->param; param; param = param->next) {
@@ -1369,16 +1366,10 @@ void resolve_fn_type(Transpiler* tp, AstFuncNode* ast_node) {
         // to the wrapped type: `mk(2)(3)` typed `fn (y: int) int`, so a map
         // literal laid out an int as a function pointer.
         Type* contract = unwrap_simple_type_type(returned->type);
-        set_fn_return_contract(fn_type, contract, true);
-        fn_type->returned = contract;
         if (ast_node->syntax_flags & TP_FLAG_RAISES) {
-            if (ast_node->syntax_flags & TP_FLAG_ERROR_NODE) {
-                resolve_type_pattern(tp, ast_node->params);
-                fn_type->error_type = ast_node->params->type;
-            } else {
-                fn_type->error_type = (Type*)&LIT_TYPE_ERROR;
-            }
+            contract = lambda_type_union_normalized(tp->pool, contract, &TYPE_ERROR);
         }
+        set_fn_return_contract(tp, fn_type, contract, true);
     }
     ast_node->body = NULL;
     ast_node->params = NULL;

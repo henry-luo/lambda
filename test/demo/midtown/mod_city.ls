@@ -25,7 +25,7 @@ let KEY = rng.key(SEED)
 pub fn road(i) => (i - N / 2) * PITCH
 // the nearest road index to a coordinate, clamped to the grid
 pub fn nearest(c) => int(max(0, min(N, round(c / PITCH + N / 2)))) ^ { 0 }
-pub fn kind_at(bi, bj) => slice(PLAN[bj], bi, bi + 1)
+pub fn kind_at(bi, bj) any^ => slice(PLAN[bj], bi, bi + 1)
 pub fn inside_city(x, z) => abs(x) < LIMIT and abs(z) < LIMIT
 pub fn on_road(x, z) =>
     (abs(x - road(nearest(x))) < ROAD and abs(z) < HALF + ROAD) or (abs(z - road(nearest(z))) < ROAD and abs(x) < HALF + ROAD)
@@ -33,14 +33,14 @@ pub fn on_road(x, z) =>
 pub let BLOCKS = [for (bj in 0 to (N - 1), bi in 0 to (N - 1)) {bi: bi, bj: bj, kind: kind_at(bi, bj),
     x0: road(bi), x1: road(bi + 1), z0: road(bj), z1: road(bj + 1),
     lx0: road(bi) + ROAD + WALK, lx1: road(bi + 1) - ROAD - WALK, lz0: road(bj) + ROAD + WALK, lz1: road(bj + 1) - ROAD - WALK}]
-pub fn block_at(x, z) {
+pub fn block_at(x, z) any^ {
     let bi = int(floor(x / PITCH + N / 2)), bj = int(floor(z / PITCH + N / 2));
     if (bi < 0 or bj < 0 or bi >= N or bj >= N) null else BLOCKS[bj * N + bi]
 }
 
 // facade styles: 0 glass curtain wall, 1 stone offices, 2 brick flats, 3 white panels
 pub let STYLES = 4
-fn pick_style(k, kind) {
+fn pick_style(k, kind) any^ {
     let r = rng.unit(rng.derive(k, "style"));
     if (kind == "T") (if (r < 0.7) 0 else 3)
     else if (kind == "O") (if (r < 0.45) 1 else if (r < 0.7) 0 else 3)
@@ -50,7 +50,7 @@ fn building(k, kind, x0, x1, z0, z1, h, base = true) =>
     {x0: x0, x1: x1, z0: z0, z1: z1, h: h, style: pick_style(k, kind), base: base, kind: kind,
      u0: rng.below(rng.derive(k, "u"), 8) / 8.0, v0: rng.below(rng.derive(k, "v"), 8) / 8.0}
 // a parcel's building, set back a little and sometimes left open as a courtyard
-fn parcel(k, kind, x0, x1, z0, z1, lo, hi) {
+fn parcel(k, kind, x0, x1, z0, z1, lo, hi) any^ {
     let back = rng.between(rng.derive(k, "back"), 0.0, 1.5)
     if (rng.chance(rng.derive(k, "open"), 0.12)) []
     else [building(k, kind, x0 + back, x1 - back, z0 + back, z1 - back, round(rng.between(rng.derive(k, "h"), lo, hi) / 3.5) * 3.5 + 1.0)]
@@ -79,22 +79,22 @@ fn block_buildings(b) {
         [for (i, sx in xs, j, sz in zs) *parcel(rng.derive(k, [i, j]), "R", sx[0], sx[1], sz[0], sz[1], 8.0, 21.0)]
     } else []
 }
-pub let BUILDINGS = [for (b in BLOCKS, bd in block_buildings(b)) bd]
+pub let BUILDINGS = [for (b in BLOCKS, bd in block_buildings(b)^) bd]
 
 // ---- street furniture: lamps along every block side, trees on homely streets and in parks
 fn side_points(b, offsets, inset) => [for (t in offsets) *[
     {x: b.x0 + t, z: b.z0 + inset, face: u.PI}, {x: b.x0 + t, z: b.z1 - inset, face: 0.0},
     {x: b.x0 + inset, z: b.z0 + t, face: 0.0 - u.PI / 2.0}, {x: b.x1 - inset, z: b.z0 + t, face: u.PI / 2.0}]]
 // lamp arms reach out over the road they face
-pub let LAMPS = [for (b in BLOCKS, p in side_points(b, [23.0, 41.0], ROAD + 1.0)) p]
+pub let LAMPS = [for (b in BLOCKS, p in side_points(b, [23.0, 41.0], ROAD + 1.0)^) p]
 fn park_trees(b) {
     let k = rng.derive(KEY, ["park", b.bi, b.bj]);
     [for (i in 0 to 3, j in 0 to 3, let kk = rng.derive(k, [i, j]) where not ((i == 1 or i == 2) and (j == 1 or j == 2)))
         {x: b.lx0 + 6.0 + i * 10.7 + rng.between(rng.derive(kk, "x"), -2.0, 2.0),
          z: b.lz0 + 6.0 + j * 10.7 + rng.between(rng.derive(kk, "z"), -2.0, 2.0), s: rng.between(rng.derive(kk, "s"), 0.85, 1.3)}]
 }
-pub let TREES = [*[for (b in BLOCKS, p in side_points(b, [13.0, 32.0, 51.0], ROAD + 1.0) where b.kind == "R") {x: p.x, z: p.z, s: 0.9}],
-    *[for (b in BLOCKS, t in (if (b.kind == "P") park_trees(b) else [])) t],
+pub let TREES = [*[for (b in BLOCKS, p in side_points(b, [13.0, 32.0, 51.0], ROAD + 1.0)^ where b.kind == "R") {x: p.x, z: p.z, s: 0.9}],
+    *[for (b in BLOCKS, t in (if (b.kind == "P") park_trees(b)^ else [])) t],
     *[for (b in BLOCKS, dx in [-14.0, 14.0], dz in [-14.0, 14.0] where b.kind == "X")
         {x: (b.lx0 + b.lx1) / 2.0 + dx, z: (b.lz0 + b.lz1) / 2.0 + dz, s: 1.1}]]
 
@@ -116,7 +116,7 @@ pub let CRANE = (let c = centre(YARD), {x: c[0] - 12.0, z: c[1] + 12.0, height: 
 pub let PARKED_PAINTS = ["#d8d6cf", "#7d8691", "#20242b", "#2a4c7c", "#8b3a2f", "#3a6650", "#c9a24a", "#6e5a8a"]
 pub let PARKED = [for (b in BLOCKS, side in 0 to 3, slot in 0 to 1, let k = rng.derive(KEY, ["parked", b.bi, b.bj, side, slot]),
         let t = (if (slot == 0) 15.0 else 41.0) + rng.between(rng.derive(k, "t"), -3.0, 4.0)
-        where (b.kind == "R" or b.kind == "O") and rng.chance(rng.derive(k, "here"), 0.45))
+        where (b.kind == "R" or b.kind == "O") and rng.chance(rng.derive(k, "here"), 0.45)^)
     (let curb = ROAD - 1.05, {x: if (side == 0 or side == 1) b.x0 + t else if (side == 2) b.x0 + curb else b.x1 - curb,
         z: if (side == 0) b.z0 + curb else if (side == 1) b.z1 - curb else b.z0 + t,
         heading: if (side == 0) u.PI / 2.0 else if (side == 1) 0.0 - u.PI / 2.0 else if (side == 2) 0.0 else u.PI,
@@ -149,7 +149,7 @@ pub fn ground(x, z) {
 
 // travel directions in x/z: east, south, west, north (index d); the right of d is d + 1
 pub let DIRS = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]
-pub fn heading_of_dir(d) => u.heading_of(DIRS[d][0], DIRS[d][1])
+pub fn heading_of_dir(d) any^ => u.heading_of(DIRS[d][0], DIRS[d][1])
 
 // ---- collision: axis-aligned boxes [x0, z0, x1, z1, top] the car cannot drive through
 fn post(x, z, r, top) => [x - r, z - r, x + r, z + r, top]
@@ -179,17 +179,17 @@ pub let OBSTACLES = [
 pub let CELL = 16.0
 pub let CELLS = int(2.0 * (LIMIT + 2.0) / CELL) + 1
 fn cell_of(c) => int(max(0, min(CELLS - 1, floor((c + LIMIT + 2.0) / CELL)))) ^ { 0 }
-let CELL_PAIRS = [for (k, o in OBSTACLES, cx in cell_of(o[0]) to cell_of(o[2]), cz in cell_of(o[1]) to cell_of(o[3]))
+let CELL_PAIRS = [for (k, o in OBSTACLES, cx in cell_of(o[0])^ to cell_of(o[2])^, cz in cell_of(o[1])^ to cell_of(o[3])^)
     {cell: cz * CELLS + cx, k: k}]
 let CELL_MAP = map([for (p in CELL_PAIRS group by p.cell into g) (string(cell), g |> ~.k)])
-pub fn near_obstacles(x, z, r) {
+pub fn near_obstacles(x, z, r) any^ {
     let ids = [for (cx in cell_of(x - r) to cell_of(x + r), cz in cell_of(z - r) to cell_of(z + r),
-        k in (CELL_MAP[string(cz * CELLS + cx)] or [])) k];
+        k in (CELL_MAP[string(cz * CELLS + cx)^] or [])) k];
     [for (k in unique(ids)) OBSTACLES[k]]
 }
 
 // ---- names for the HUD
-pub fn district(x, z) {
+pub fn district(x, z) any^ {
     let b = block_at(x, z)
     if (z > LIMIT) "Harbour Promenade"
     else if (b == null) "City Limits"

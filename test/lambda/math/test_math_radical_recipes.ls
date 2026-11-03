@@ -3,9 +3,9 @@ import math: lambda.doc.math.math
 import font: lambda.doc.math.font
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,{type:"math",flavor:"latex"})^
-fn box(source, options = {}) => math.render_box(ast(source),{font_size:960.0 / 72.27,*:options})^
-fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
+fn ast(source) any^ => parse(source,{type:"math",flavor:"latex"})^
+fn box(source, options = {}) any^ => math.render_box(ast(source),{font_size:960.0 / 72.27,*:options})^
+fn glyphs(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where g.text != "") g]
 fn close(a,b) => abs(a - b) < 0.00003
 
 let sizes = [for (height in [4,10,13,18,24]) box("\\sqrt{\\vphantom{\\rule{0pt}{" ++ string(height) ++ "pt}}}")]
@@ -26,7 +26,7 @@ let checks = [
         parts[0].text == "\uE001" and parts[len(parts) - 1].text == "⎷" and
         len([for (g in parts where g.text == "\uE000") g]) > 1},
     {name:"all radical and accent components keep natural proportions",ok:
-        all([for (b in [*sizes,tall,*accents],g in glyphs(b)) g.sx == 1.0 and g.sy == 1.0])},
+        all([for (b in [*sizes,tall,*accents],g in ((glyphs(b)) ^ { [] })) g.sx == 1.0 and g.sy == 1.0])},
     {name:"root degree uses scriptscript text independently of the nucleus",ok:
         indexed[0].text == "3" and indexed[0].node["font-size"] == 500 and
         indexed[len(indexed) - 1].text == "x" and indexed[len(indexed) - 1].node["font-size"] == 1000},

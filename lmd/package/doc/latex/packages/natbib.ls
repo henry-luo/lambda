@@ -7,13 +7,13 @@ import style: .bib_style
 let STYLES = ["plain", "unsrt", "abbrv", "plainnat", "unsrtnat", "abbrvnat"]
 let OPTIONS = ["numbers", "authoryear", "round", "square", "sort&compress"]
 
-fn style_nodes(node) {
+fn style_nodes(node) any^ {
     if (not (node is element)) []
     else if (string(name(node)) == "bibliographystyle") [node]
-    else [for (child in node, item in style_nodes(child)) item]
+    else [for (child in node, item in ((style_nodes(child)) ^ { [] })) item]
 }
 
-pub fn prepare(ast, base_uri, opts, language) {
+pub fn prepare(ast, base_uri, opts, language) any^ {
     let bibliography = util.find_descendant(ast, "bibliography")
     if (opts == null and bibliography == null)
         {entries: [], context: null, diagnostics: []}
@@ -51,9 +51,9 @@ pub fn prepare(ast, base_uri, opts, language) {
                 else if (numeric and (opts == null or opts.round != "true")) "]" else ")"}
         let prepared = model.prepare(ast, loaded.entries, settings)
         {entries: loaded.entries,
-         context: {*:prepared, prints: [for (record in prepared.prints)
+         context: {*:prepared, prints: [for (record in ((prepared.prints) ^ { [] }))
             {*:record, valid: valid}]},
-         diagnostics: [for (issue in loaded.diagnostics ++ prepared.diagnostics)
+         diagnostics: [for (issue in ((loaded.diagnostics ++ prepared.diagnostics) ^ { [] }))
             {*:issue, package: "natbib"}] ++
             (if (valid) [] else [util.diagnostic("unsupported-natbib-profile", "natbib",
                 chosen, "Unsupported or conflicting BibTeX/natbib style or options", offset)]) ++

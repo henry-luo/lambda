@@ -54,15 +54,15 @@ pub fn transaction(editor,p) map^ {
         raise error("Word: choose a table style and valid row/column options")
     else {
         let tx = tx_step(tx_begin(editor.doc,editor.selection),step_set_attr(ctx.table_path,'data-word-table-style',chosen.style));
-        reduce([tx,*options],(t,entry)=>tx_step(t,step_set_attr(ctx.table_path,entry.attr,string(chosen[entry.id]))))
+        reduce([tx,*options],(t,entry)any^ =>tx_step(t,step_set_attr(ctx.table_path,entry.attr,string(chosen[entry.id]))))
     }
 }
-pub fn shading_value(n) => format.css_get(attrs_get(n.attrs,'style'),"background-color") or
+pub fn shading_value(n) any^ => format.css_get(attrs_get(n.attrs,'style'),"background-color") or
     format.css_get(attrs_get(n.attrs,'style'),"background") or "none"
 pub fn shade_transaction(editor,cells,p) map^ {
     if (len(cells)==0) raise error("Word: select a table cell first")
     else if (p.color!="none" and not colors.hex_color(p.color)) raise error("Word: choose No Color or a #RRGGBB shading color")
-    else reduce([tx_begin(editor.doc,editor.selection),*cells],(tx,cell)=>tx_step(tx,step_set_attr(cell.path,'style',
+    else reduce([tx_begin(editor.doc,editor.selection),*cells],(tx,cell)any^ =>tx_step(tx,step_set_attr(cell.path,'style',
         format.css_set(format.css_set(attrs_get(node_at(tx.doc_after,cell.path).attrs,'style'),"background",null),
             "background-color",if (p.color=="none") null else p.color))))
 }

@@ -4,7 +4,7 @@ fn choose_type(value: any as T) int => 1;
 let int_seed = choose_type(0);
 let text_seed = choose_type("seed");
 
-pn count_selected(value: any) int {
+pn count_selected(value: any) int^ {
     var total: int = 0
     var i: int = 0
     while (i < 4) {

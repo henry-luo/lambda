@@ -6,11 +6,11 @@ import util: lambda.doc.latex.util
 pub fn expression_tree(source) any^ {
     let parsed = parse("\\addplot{" ++ trim(source) ++ "};", {type: "tikz"})^
     let plots = [for (child in parsed
-        where child is element and string(name(child)) == "plot") child]
+        where ((child is element and string(name(child)) == "plot") ^ { false })) child]
     let valid_plot = if (len(plots) != 1)
         raise error("PGF math expression did not produce one plot") else true
     let trees = [for (child in plots[0]
-        where child is element and string(name(child)) != "option") child]
+        where ((child is element and string(name(child)) != "option") ^ { false })) child]
     if (len(trees) != 1) raise error("PGF math expression tree is missing")
     else trees[0]
 }
@@ -84,7 +84,7 @@ pub fn evaluate_source(source, program_data, x = 0.0) float^ {
     expression.evaluate(tree, x, context)^
 }
 
-fn skip_text_space(source, at) =>
+fn skip_text_space(source, at) any^ =>
     if (at >= len(source)) at
     else if (slice(source, at, at + 1) == " " or
              slice(source, at, at + 1) == "\n" or
@@ -133,7 +133,7 @@ pub fn with_tikzmath(program_data, source) any^ {
     {*:program_data, steps: [*program_data.steps, step]}
 }
 
-fn command_end(source, at) {
+fn command_end(source, at) any^ {
     if (at >= len(source)) at
     else if (index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
                      slice(source, at, at + 1)) != null)
@@ -157,7 +157,7 @@ fn foreach_body(raw) any^ {
 }
 
 fn foreach_step(node) any^ {
-    let parts = [for (part in split(trim(node.range), ",")) trim(part)]
+    let parts = [for (part in ((split(trim(node.range), ",")) ^ { [] })) trim(part)]
     let valid_parts = if (len(parts) != 3 or parts[1] != "...")
         raise error("PGFPlots foreach requires a numeric start,...,end range") else true
     let low = opts.numeric_value(parts[0])^
@@ -181,23 +181,23 @@ fn program_step(node) any^ {
 pub fn program(picture, axis_node) any^ {
     let functions = declared_functions(picture)^
     let steps = [for (child in axis_node
-        where child is element and
+        where ((child is element and
             (string(name(child)) == "pgf_definition" or
-             string(name(child)) == "pgfplots_foreach")) program_step(child)^];
+             string(name(child)) == "pgfplots_foreach")) ^ { false })) program_step(child)^];
     {functions: functions, steps: steps}
 }
 
-fn referenced_variables(node, functions, depth = 0) {
+fn referenced_variables(node, functions, depth = 0) any^ {
     if (node is array or node is list)
-        [for (child in node, variable in referenced_variables(child, functions, depth)) variable]
+        [for (child in node, variable in ((referenced_variables(child, functions, depth)) ^ { [] })) variable]
     else if (not (node is element)) []
     else if (string(name(node)) == "variable") [node.name]
     else {
-        let direct = [for (child in content(node), variable in referenced_variables(child, functions, depth)) variable]
+        let direct = [for (child in ((content(node)) ^ { [] }), variable in ((referenced_variables(child, functions, depth)) ^ { [] })) variable]
         let definitions = [for (definition in functions where definition.name == node.name) definition]
         let called = if (string(name(node)) != "function_call" or depth >= 16) []
             else [for (definition in definitions,
-                variable in referenced_variables(definition.tree, functions, depth + 1)) variable];
+                variable in ((referenced_variables(definition.tree, functions, depth + 1)) ^ { [] })) variable];
         [*direct, *called]
     }
 }
@@ -205,26 +205,26 @@ fn referenced_variables(node, functions, depth = 0) {
 fn named(names, target) =>
     len([for (candidate in names where candidate == target) candidate]) > 0
 
-fn dependencies(steps, functions, names, depth) {
+fn dependencies(steps, functions, names, depth) any^ {
     if (depth > len(steps)) names
     else {
-        let used = [for (step in steps where named(names, step.target)) step]
-        let found = [for (step in used, variable in referenced_variables(step.tree, functions))
+        let used = [for (step in steps where ((named(names, step.target)) ^ { false })) step]
+        let found = [for (step in used, variable in ((referenced_variables(step.tree, functions)) ^ { [] }))
             variable]
-        let added = [for (variable in found where not named(names, variable)) variable]
+        let added = [for (variable in found where ((not named(names, variable)) ^ { false })) variable]
         if (len(added) == 0) names
         else dependencies(steps, functions, [*names, *added], depth + 1)
     }
 }
 
 // A plot only evaluates definitions reachable from its expression variables.
-pub fn for_expression(program_data, tree) {
+pub fn for_expression(program_data, tree) any^ {
     if (program_data == null) null
     else {
         let direct = referenced_variables(tree, program_data.functions)
         let names = dependencies(program_data.steps, program_data.functions, direct, 0)
         {*:program_data, steps: [for (step in program_data.steps
-            where named(names, step.target)) step]}
+            where ((named(names, step.target)) ^ { false })) step]}
     }
 }
 

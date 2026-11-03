@@ -4,8 +4,8 @@ pn quote_text(value) { return "[" ++ forward_text(value) ++ "]" }
 pn wrap_text(value) { return "{" ++ quote_text(value) ++ "}" }
 pn native_rows(text) {
     let n = len(text)
-    var previous = fill(n + 1, 0)
-    var current = fill(n + 1, 1)
+    var previous = fill(n + 1, 0)^
+    var current = fill(n + 1, 1)^
     var i = 0
     while (i <= n) { previous[i] = i; i = i + 1 }
     var saved = previous
@@ -14,7 +14,7 @@ pn native_rows(text) {
     return [previous[n], current[n], previous[-1], current[n + 1]]
 }
 pn mixed_rows(value) {
-    var rows = fill(2, 1)
+    var rows = fill(2, 1)^
     var saved = rows
     rows = value
     return [rows[0], rows[-1], saved[0]]

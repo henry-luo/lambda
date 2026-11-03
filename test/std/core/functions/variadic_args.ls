@@ -9,7 +9,7 @@ sum_all(10, 20, 30, 40)
 sum_all(1)
 
 // ===== varg() to access all args =====
-fn count_args(...) => len(varg())
+fn count_args(...) any^ => len(varg())
 count_args(1, 2, 3)
 count_args(7, 8)
 count_args()

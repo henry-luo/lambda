@@ -325,14 +325,14 @@ pn create_task(var w, identity, priority, work,
 pn schedule(var w) {
     var ct = w.tl
     w.ct = ct
-    while (ct != NONE) {
+    while ((ct != NONE)^) {
         var how = tcb_is_held_or_waiting(w, ct)
-        if (how == 1) {
+        if ((how == 1)^) {
             var nxt = w.tasks[ct].link
             ct = nxt
             w.ct = ct
         }
-        if (how == 0) {
+        if ((how == 0)^) {
             var cid = w.tasks[ct].identity
             w.cti = cid
             w.ct = ct
@@ -354,21 +354,21 @@ pn benchmark() {
     // createWorker(WORKER, 1000, workQ, createWaitingWithPacket)
     var workq = create_packet(w, NONE, WORKER, WORK_PACKET_KIND)
     workq = create_packet(w, workq, WORKER, WORK_PACKET_KIND)
-    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)
+    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)^
     w.datas[WORKER] = {destination: HANDLER_A, wcount: 0}
 
     // createHandler(HANDLER_A, 2000, workQ, createWaitingWithPacket)
     workq = create_packet(w, NONE, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)^
     w.datas[HANDLER_A] = {work_in: NONE, device_in: NONE}
 
     // createHandler(HANDLER_B, 3000, workQ, createWaitingWithPacket)
     workq = create_packet(w, NONE, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
     workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
-    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)
+    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)^
     w.datas[HANDLER_B] = {work_in: NONE, device_in: NONE}
 
     // createDevice(DEVICE_A, 4000, null, createWaiting) — pp=false, tw=true, th=false
@@ -379,7 +379,7 @@ pn benchmark() {
     create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)
     w.datas[DEVICE_B] = {pending: NONE}
 
-    schedule(w)
+    schedule(w)^
 
     var qpc = w.qpc
     var hc = w.hc
@@ -402,7 +402,7 @@ pn main() {
     var k = 0
     while (k < 50) {
         var result = benchmark()
-        if (result == 0) {
+        if ((result == 0)^) {
             pass = false
         }
         k = k + 1

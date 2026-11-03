@@ -32,7 +32,7 @@ fn packed(n) => if (is_text(n)) {kind:"text",text:n.text,marks:pack_attrs(n.mark
     else {kind:"node",tag:string(n.tag),attrs:pack_attrs(n.attrs),content:[for (child in n.content) packed(child)]}
 fn valid_attrs(attrs) bool => attrs is array and all([for (a in attrs)
     a is map and (a.name is string or a.name is symbol) and (a.value is string or a.value is number or a.value is bool or a.value == null)])
-fn valid_mark(m) bool => m is map and contains(marks,symbol(m.name)) and
+fn valid_mark(m) bool^ => m is map and contains(marks,symbol(m.name)) and
     (m.value is bool or (valid_attrs(m.value) ^ { false }))
 // restore integer list levels because HTML attributes arrive as strings.
 fn unpack_attrs(attrs,tag=null) => [for (a in attrs) {name:symbol(a.name),
@@ -71,7 +71,7 @@ pub fn export_text(doc,envelope) string^ {
     // apply the reader's size limit before saving, including embedded picture data.
     if (len(source)>4000000) raise error("Word: editable files are limited to 4 MB; reduce picture sizes") else source
 }
-fn check_roundtrip(doc,envelope) {
+fn check_roundtrip(doc,envelope) any^ {
     let loaded = import_text(export_text(doc,envelope)^) ^ { null }
     if (loaded == null or loaded.doc != doc) "the editable snapshot would change the document" else null
 }
@@ -86,9 +86,9 @@ pub fn verify_saved(path,doc,envelope,expected) bool^ {
     source==expected and loaded.doc==doc and loaded.envelope==envelope
 }
 pub pn save_document(file_state,doc,path,overwrite=false) {
-    let result: any | error = session.save(file_state,doc,path,overwrite)
+    let result: any^ = session.save(file_state,doc,path,overwrite)
     if (result is error) { return {ok:false,session:file_state,status:"Not saved: " ++ result.message,conflict:null} }
-    if (not result.ok) { return result }
+    if ((not result.ok)^) { return result }
     // an atomic write alone does not prove the actual file can restore this document.
     let verified = verify_saved(path,doc,file_state.envelope,result.session.disk_text) ^ { false }
     if (not verified) { return {*:result,ok:false,session:file_state,
@@ -107,7 +107,7 @@ pub fn picture_source(path) string^ {
 pub fn supported_path(path) => (ends_with(lower(path),".word.json") or
     contains(["html","htm","md","markdown","txt","docx"],lower(split(path,".")[last]))) ^ { false }
 
-fn office_cell_widths(table,entries,widths,i=0) {
+fn office_cell_widths(table,entries,widths,i=0) any^ {
     if (i>=len(entries)) table else {
         let entry = entries[i]
         let values = slice(widths,entry.col,entry.end_col)
@@ -117,33 +117,33 @@ fn office_cell_widths(table,entries,widths,i=0) {
         office_cell_widths(replace_node_at(table,entry.path,cell),entries,widths,i+1)
     }
 }
-fn office_cell(source) {
-    let paragraphs = [for (child in content(source) where type(child)==element and name(child)=='p') child]
-    let fragment = <p *[for (i,child in content(source)) *if (type(child)==element and name(child)=='p')
+fn office_cell(source) any^ {
+    let paragraphs = [for (child in ((content(source)) ^ { [] }) where ((type(child)==element and name(child)=='p') ^ { false })) child]
+    let fragment = <p *[for (i,child in ((content(source)) ^ { [] })) *if (type(child)==element and name(child)=='p')
         [if (i>0) <br>,<span *:map(child),*content(child)>] else [child]]>
     let imported = html.import_text(format(fragment,'html')^)^
     let normalized = editable_office(imported.doc)
-    let children = [for (child in normalized.doc.content) *if (child.tag=='p') child.content else [child]];
+    let children = [for (child in ((normalized.doc.content) ^ { [] })) *if (child.tag=='p') child.content else [child]];
     {doc:node_attrs(name(source),html.source_attrs(source),children),warnings:normalized.warnings ++
         (if (len(paragraphs)<=1) [] else [{severity:"warning",code:"editable-cell-paragraphs",part:null,
             message:"Multiple table-cell paragraphs became editable lines; their paragraph spacing was omitted."}])}
 }
-fn office_table_part(source) {
+fn office_table_part(source) any^ {
     if (name(source) in ['td','th']) office_cell(source) else {
-        let children = [for (child in content(source) where type(child)==element and name(child) in ['thead','tbody','tfoot','tr','td','th']) office_table_part(child)];
+        let children = [for (child in ((content(source)) ^ { [] }) where ((type(child)==element and name(child) in ['thead','tbody','tfoot','tr','td','th']) ^ { false })) office_table_part(child)];
         {doc:node_attrs(name(source),html.source_attrs(source),[for (child in children) child.doc]),
             warnings:[for (child in children) *child.warnings]}
     }
 }
 // The shared HTML adapter retains block-cell tables atomically; Word opens their inline runs and grid widths.
 fn office_table(source) {
-    let widths = [for (group in content(source) where type(group)==element and name(group)=='colgroup')
-        for (col in content(group) where type(col)==element and name(col)=='col') docx_style.length(docx_style.css_get(col.style,"width"))]
+    let widths = [for (group in ((content(source)) ^ { [] }) where ((type(group)==element and name(group)=='colgroup') ^ { false }))
+        for (col in ((content(group)) ^ { [] }) where ((type(col)==element and name(col)=='col') ^ { false })) docx_style.length(docx_style.css_get(col.style,"width"))]
     let table = office_table_part(source);
     {*:table,doc:if (len(widths)==0) table.doc else office_cell_widths(table.doc,table_grid.entries(table.doc,[]),widths)}
 }
 // DOCX bookmarks are empty spans; other view-only markup becomes editable text with a warning.
-fn editable_office(n) {
+fn editable_office(n) any^ {
     if (is_text(n)) {doc:n,warnings:[]}
     else if (contains(['raw_html','html_block'],n.tag)) {
         let source = helpers.attr_get(n,'source')
@@ -161,16 +161,16 @@ fn editable_office(n) {
 }
 
 // The viewer's physical page wrapper is not editor content; restore supported paper presets separately.
-fn office_page(doc,css) {
+fn office_page(doc,css) any^ {
     let width = docx_style.length(docx_style.css_get(css,"width"))
     let height = docx_style.length(docx_style.css_get(css,"min-height"))
     let matching = [for (paper in page.papers,orientation in ["portrait","landscape"],
         let w=if (orientation=="portrait") paper.width else paper.height,
         let h=if (orientation=="portrait") paper.height else paper.width
-        where width!=null and height!=null and abs(width*25.4/96.0-w)<0.3 and abs(height*25.4/96.0-h)<0.3)
+        where ((width!=null and height!=null and abs(width*25.4/96.0-w)<0.3 and abs(height*25.4/96.0-h)<0.3) ^ { false }))
         {paper:paper.id,orientation:orientation}][0]
     let margins = map([for (side in ["top","right","bottom","left"],
-        let value=docx_style.length(docx_style.css_get(css,"padding-" ++ side)) where value!=null)
+        let value=docx_style.length(docx_style.css_get(css,"padding-" ++ side)) where ((value!=null) ^ { false }))
         (side,round(value*25.4/96.0*100.0)/100.0)])
     let settings = {*:page.defaults,*:matching or {},*:margins};
     if (matching==null or not page.valid(settings)) doc else
@@ -194,7 +194,7 @@ pub fn read_document(path) map^ {
         let loaded = if (contains(["html","htm"],extension)) {doc:import_html_document(source)^}
             else if (extension=="docx") html.import_text(source)^
             else if (contains(["md","markdown"],extension)) markdown.import_text(source)^
-            else if (extension == "txt") {doc:node('doc',[for (line in split(source,"\n")) document.paragraph(line)])}
+            else if (extension == "txt") {doc:node('doc',[for (line in ((split(source,"\n")) ^ { [] })) document.paragraph(line)])}
             else raise error("Word: open .word.json, .html, .md, .txt, or .docx")
         let office = if (extension=="docx") editable_office(loaded.doc) else {doc:loaded.doc,warnings:[]}
         let imported = if (len(office.doc.content)==0) document.blank() else restored(office.doc)^
@@ -228,7 +228,7 @@ pub fn import_html_document(source) map^ {
     import_metadata(restored(loaded.doc)^,loaded.envelope.head)^
 }
 fn import_metadata(doc,head) map^ {
-    let encoded = [for (m in head where type(m)==element and name(m)=='meta' and m["name"]=="lambda-word-metadata") m["content"]][0]
+    let encoded = [for (m in head where ((type(m)==element and name(m)=='meta' and m["name"]=="lambda-word-metadata") ^ { false })) m["content"]][0]
     if (encoded==null) doc else {
         let attrs = parse(encoded,'json')^
         if (not valid_attrs(attrs) or not all([for (a in attrs) contains(metadata_names,symbol(a.name))]))
@@ -236,7 +236,7 @@ fn import_metadata(doc,head) map^ {
         else {*:doc,attrs:unpack_attrs(attrs)}
     }
 }
-fn document_body(doc,paged) {
+fn document_body(doc,paged) any^ {
     let body = html.export_text(doc,{document:false,head:<head>})
     if (paged) columns.pdf_flow(doc,body) else body
 }
@@ -244,7 +244,7 @@ fn document_body(doc,paged) {
 pub fn html_document(doc,title,paged=false,plain=false) string^ => "<!doctype html><html" ++
     (if (paged) " xmlns=\"http://www.w3.org/1999/xhtml\"" else "") ++ (if (plain) " class=\"print-plain\"" else "") ++ "><head><meta charset=\"utf-8\"><title>" ++
     helpers.escape_text(title) ++ "</title><meta name=\"lambda-word-metadata\" content=\"" ++
-    helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where contains(metadata_names,a.name)) a]),'json')^) ++
+    helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where ((contains(metadata_names,a.name)) ^ { false })) a]),'json')^) ++
     "\"><style>" ++ surface.document_css ++ surface.print_css ++ page.export_css(doc) ++ columns.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
     "</style></head><body class=\"word-content\">" ++
     document_body(doc,paged) ++ "</body></html>"
@@ -253,18 +253,18 @@ pub fn pdf_document(doc,title,plain=false) string^ {
     if (columns.settings(doc).count==1) source else {
         // serialize parsed HTML as XML so void elements, text and native namespaces remain well formed.
         let parsed = parse(source,'html')^
-        let root = [for (child in content(parsed) where type(child)==element and name(child)=='html') child][0]
-        let head = [for (child in content(root) where type(child)==element and name(child)=='head') child][0]
+        let root = [for (child in ((content(parsed)) ^ { [] }) where ((type(child)==element and name(child)=='html') ^ { false })) child][0]
+        let head = [for (child in ((content(root)) ^ { [] }) where ((type(child)==element and name(child)=='head') ^ { false })) child][0]
         // the XML formatter retains HTML raw-text tags; escape this generated head for XML parsing.
-        let xml_head = <head *[for (child in content(head))
+        let xml_head = <head *[for (child in ((content(head)) ^ { [] }))
             if (type(child)==element and name(child)=='title') <title helpers.escape_text(join(content(child),""))>
             else if (type(child)==element and name(child)=='style') <style helpers.escape_text(join(content(child),""))>
             else child]>
-        format(<html *:map(root),xml_head; *[for (child in content(root) where child!=head) child]>,'xml')^
+        format(<html *:map(root),xml_head; *[for (child in ((content(root)) ^ { [] }) where child!=head) child]>,'xml')^
     }
 }
 // Resolve the demo's named paragraph rules before handing the copy to the bounded CSS writer.
-fn office_typography(n) {
+fn office_typography(n) any^ {
     if (is_text(n)) n else {
         let named = attrs_get(n.attrs,'data-word-style')
         let rule = if (named==null) "" else docx_style.rule(surface.document_css,".word-content [data-word-style=" ++ string(named) ++ "]")
@@ -304,7 +304,7 @@ pub pn export_document(doc,title,path,plain=false) any^ {
 // print the measured preview sheets as fixed pages: scaled, n-up, and page-range printouts (see mod_print.composed).
 // Radiant's PDF writer does not yet apply CSS transforms or overflow clipping, so each sheet is rasterized at
 // print resolution (where both work, as in the preview) and the PDF carries one full-page image per sheet.
-fn print_head(title,lay) => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++ helpers.escape_text(title) ++
+fn print_head(title,lay) any^ => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++ helpers.escape_text(title) ++
     "</title><style>" ++ surface.document_css ++ surface.print_css ++ "@page { size:" ++ string(lay.width_mm) ++ "mm " ++
     string(lay.height_mm) ++ "mm; margin:0; } body { margin:0; } .print-sheet + .print-sheet { break-before:page; } " ++
     ".print-image { display:block; }</style></head>"

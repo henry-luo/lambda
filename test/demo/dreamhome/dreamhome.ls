@@ -34,10 +34,10 @@ fn initial() => framed(with_home({hist: D.history(), tool: "select", layout: "sp
 
 fn record_edit(st, home, status = null) => if (home == st.home) st
     else {*:st, home: home, hist: D.record(st.hist, st.home), typing: false, status: if (status == null) st.status else status}
-fn sel_thing(st) => M.thing_of(st.home, st.sel)
-fn patch_item(st, patch) => if (M.kind_of(st.sel) != "item" or sel_thing(st) == null) st else record_edit(st, M.update_item(st.home, st.sel, patch))
-fn adjust(st, field, delta, lo, hi) => (let it = sel_thing(st), if (it == null) st else patch_item(st, {[field]: M.clamp(it[field] + delta, lo, hi)}))
-fn turn(st, delta) => (let it = sel_thing(st), if (it == null or it.wall != null) st
+fn sel_thing(st) any^ => M.thing_of(st.home, st.sel)
+fn patch_item(st, patch) any^ => if (M.kind_of(st.sel) != "item" or sel_thing(st) == null) st else record_edit(st, M.update_item(st.home, st.sel, patch))
+fn adjust(st, field, delta, lo, hi) any^ => (let it = sel_thing(st), if (it == null) st else patch_item(st, {[field]: M.clamp(it[field] + delta, lo, hi)}))
+fn turn(st, delta) any^ => (let it = sel_thing(st), if (it == null or it.wall != null) st
     else (let r = it.rot + delta, patch_item(st, {rot: if (r > 180.0) r - 360.0 else if (r <= -180.0) r + 360.0 else r})))
 
 // Where a new piece goes: near the middle of the selected room, else of the room
@@ -47,14 +47,14 @@ fn drop_point(st, key) {
     let at = if (r != null) M.centroid(r.pts) else [st.view2d.cx, st.view2d.cy]
     let c = C.item_of(key)
     let reach = (c.w + c.d) / 4.0
-    let standing = [for (it in M.furniture(st.home) where not P.overhead(it)) it]
+    let standing = [for (it in ((M.furniture(st.home)) ^ { [] }) where ((not P.overhead(it)) ^ { false })) it]
     let spots = [for (ring in 0 to 8, k in 0 to (if (ring == 0) 0 else ring * 6 - 1),
         let a = 2.0 * math.pi * k / max(1, ring * 6), let x = M.snap(at[0] + ring * 30.0 * math.cos(a)), let y = M.snap(at[1] + ring * 30.0 * math.sin(a))
-        where (r == null or M.inside(r.pts, x, y)) and all([for (it in standing) M.dist(x, y, it.x, it.y) > reach + (it.w + it.d) / 4.0]))
+        where (((r == null or M.inside(r.pts, x, y)) and all([for (it in standing) M.dist(x, y, it.x, it.y) > reach + (it.w + it.d) / 4.0])) ^ { false }))
         [x, y]];
     if (len(spots) > 0) spots[0] else [M.snap(at[0]), M.snap(at[1])]
 }
-fn add_piece(st, key) {
+fn add_piece(st, key) any^ {
     let c = C.item_of(key)
     if (c.opening == null) {
         let at = drop_point(st, key)
@@ -68,22 +68,22 @@ fn add_piece(st, key) {
             {*:record_edit(st, added.home, "Added a " ++ lower(c.name) ++ ". Drag it along the wall, or onto another wall."), sel: added.id, tool: "select"})
     }
 }
-fn set_wall_len(st, delta) => (let w = sel_thing(st), if (w == null) st
+fn set_wall_len(st, delta) any^ => (let w = sel_thing(st), if (w == null) st
     else (let l = M.clamp(M.wall_len(w) + delta, 30.0, 3000.0), let u = M.wall_dir(w),
         record_edit(st, M.move_points(st.home, [[w.x2, w.y2, w.x1 + u.x * l, w.y1 + u.y * l]]))))
-fn paint_all(st) => (let w = sel_thing(st), if (w == null) st
+fn paint_all(st) any^ => (let w = sel_thing(st), if (w == null) st
     else record_edit(st, {*:st.home, walls: [for (x in st.home.walls) {*:x, color: w.color}]}, "Every wall now has this paint."))
 fn zoom_by(st, k) => {*:st, view2d: {*:st.view2d, zoom: M.clamp(st.view2d.zoom * k, .08, 3.0)}}
-fn history_step(st, forward) => (let step = if (forward) D.redo_step(st.hist, st.home) else D.undo_step(st.hist, st.home),
+fn history_step(st, forward) any^ => (let step = if (forward) D.redo_step(st.hist, st.home) else D.undo_step(st.hist, st.home),
     if (step == null) st else {*:st, home: step.value, hist: step.history, sel: if (M.thing_of(step.value, st.sel) == null) null else st.sel,
         typing: false, status: if (forward) "Redone." else "Undone."})
 fn use_template(st, key) => (let t = T.template_of(key),
     {*:framed(with_home(record_edit(st, t.home, "Started from " ++ t.title ++ ". Undo brings back your previous home."), t.home)),
         sel: null, dialog: null, tool: if (key == "blank") "room" else "select"})
-fn delete_sel(st) => (let k = M.kind_of(st.sel), if (sel_thing(st) == null) st
+fn delete_sel(st) any^ => (let k = M.kind_of(st.sel), if (sel_thing(st) == null) st
     else {*:record_edit(st, M.remove(st.home, st.sel), (if (k == "wall") "Wall deleted" else if (k == "room") "Floor deleted" else "Deleted") ++ ". Undo brings it back."), sel: null})
 
-fn change(st, verb, arg) => if (verb == "tool") {*:st, tool: arg, sel: if (arg == "select") st.sel else null,
+fn change(st, verb, arg) any^ => if (verb == "tool") {*:st, tool: arg, sel: if (arg == "select") st.sel else null,
         status: if (arg == "wall") "Drag in the plan to draw a wall." else if (arg == "room") "Drag in the plan to draw a room." else st.status}
     else if (verb == "layout") framed({*:st, layout: arg})
     else if (verb == "cat") {*:st, cat: arg}
@@ -123,7 +123,7 @@ fn change(st, verb, arg) => if (verb == "tool") {*:st, tool: arg, sel: if (arg =
 
 pn ensure_dir(path) {
     var at = ""
-    for (part in split(path, "/")) {
+    for (part in split(path, "/")^) {
         at = if (at == "") part else at ++ "/" ++ part
         if (part != "" and part != "." and not exists(at)) io.mkdir(at) ^ { null }
     }
@@ -138,7 +138,7 @@ let SHEET_CSS = "html, body { margin: 0; background: #ffffff; } svg { display: b
 pn export_files(st, kind) any^ {
     let dir = trim(st.path)
     if (dir == "") raise error("Choose a folder first.")
-    ensure_dir(dir)
+    ensure_dir(dir)^
     let stem = dir ++ "/" ++ D.slug(st.home.title, "home")
     let b = M.bounds(st.home)
     let aspect = (b.y1 - b.y0 + 240.0) / (b.x1 - b.x0 + 240.0)
@@ -176,13 +176,12 @@ pn open_home(st) any^ {
 pn command(st, verb, arg) {
     if (verb == "export" or verb == "save") {
         var next = {*:st, note: ""}
-        export_files(st, if (verb == "save") "mark" else arg) ^ { next = {*:st, note: ^.message, status: ^.message} }
-            ~ { next = {*:st, note: ~, status: ~} }
+        { let __error_outcome_1 = export_files(st, if (verb == "save") "mark" else arg) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:st, note: __error_outcome_1.message, status: __error_outcome_1.message} } else match __error_outcome_1 { case any { next = {*:st, note: ~, status: ~} } } }
         return next
     }
     if (verb == "open") {
         var next = st
-        open_home(st) ^ { next = {*:st, note: ^.message} } ~ { next = ~ }
+        { let __error_outcome_2 = open_home(st) ^ { ^ }; if (__error_outcome_2 is error) { next = {*:st, note: __error_outcome_2.message} } else match __error_outcome_2 { case any { next = ~ } } }
         return next
     }
     return change({*:st, typing: false}, verb, arg)
@@ -198,7 +197,7 @@ fn local(it, x, y) => (let r = it.rot / M.DEG, let dx = x - it.x, let dy = y - i
 
 // The result of a plan drag so far, recomputed from the pointer's total travel:
 // a patch for the dragged piece, a whole new home, a camera, or a draft shape.
-fn dragged(st, x, y, free) {
+fn dragged(st, x, y, free) any^ {
     let d = st.drag
     let p = plan_xy(d, x, y)
     let q = d.p0
@@ -225,14 +224,14 @@ fn dragged(st, x, y, free) {
     else {}
 }
 
-fn transform_of(it) => "translate(" ++ A.n(it.x) ++ " " ++ A.n(it.y) ++ ") rotate(" ++ A.n(it.rot) ++ ")"
+fn transform_of(it) any^ => "translate(" ++ A.n(it.x) ++ " " ++ A.n(it.y) ++ ") rotate(" ++ A.n(it.rot) ++ ")"
 pn set(el, key, value) { if (el != null) dom.set_attribute(el, key, value) }
 // D4.5.1v4: a drag previews on the plan's own elements and commits once, on release
 pn publish_structure(root, st, home) {
     let g = dom.query_selector(root, "#plan-structure")
     if (g == null) { return null }
     let el = P.structure(home, st.sel, st.view2d.zoom, st.dims)
-    dom.set_inner_html(g, join([for (c in content(el)) format(c, 'xml')], ""))
+    dom.set_inner_html(g, join([for (c in content(el)^) format(c, 'xml')], ""))
 }
 pn publish_camera(root, st) {
     let cam = dom.query_selector(root, "#cam")
@@ -255,7 +254,7 @@ pn publish_drag(root, st, step) {
     }
     else if (step.home != null) publish_structure(root, st, step.home)
     else if (step.walker != null) {
-        set(dom.query_selector(root, "#walker"), "transform", "translate(" ++ A.n(step.walker.x) ++ " " ++ A.n(step.walker.y) ++ ") rotate(" ++ A.n(step.walker.yaw) ++ ")")
+        set(dom.query_selector(root, "#walker"), "transform", "translate(" ++ A.n(step.walker.x) ++ " " ++ A.n(step.walker.y) ++ ") rotate(" ++ A.n(step.walker.yaw) ++ ")")^
         publish_camera(root, {*:st, walker: step.walker})
     }
     else if (step.draft != null) {
@@ -263,23 +262,23 @@ pn publish_drag(root, st, step) {
         let label = dom.query_selector(root, "#draft-label")
         if (d.mode == "draw-wall") {
             let line = dom.query_selector(root, "#draft-wall")
-            set(line, "x1", A.n(r[0])); set(line, "y1", A.n(r[1])); set(line, "x2", A.n(r[2])); set(line, "y2", A.n(r[3]))
-            set(line, "visibility", "visible")
-            if (label != null) dom.set_text_content(label, A.n(M.dist(r[0], r[1], r[2], r[3]) / 100.0) ++ " m")
+            set(line, "x1", A.n(r[0]))^; set(line, "y1", A.n(r[1]))^; set(line, "x2", A.n(r[2]))^; set(line, "y2", A.n(r[3]))^
+            set(line, "visibility", "visible")^
+            if (label != null) dom.set_text_content(label, A.n(M.dist(r[0], r[1], r[2], r[3]) / 100.0)^ ++ " m")
         }
         else {
             let rect = dom.query_selector(root, "#draft-room")
-            set(rect, "x", A.n(min(r[0], r[2]))); set(rect, "y", A.n(min(r[1], r[3])))
-            set(rect, "width", A.n(max(1.0, abs(r[2] - r[0])))); set(rect, "height", A.n(max(1.0, abs(r[3] - r[1]))))
-            set(rect, "visibility", "visible")
-            if (label != null) dom.set_text_content(label, A.n(abs(r[2] - r[0]) / 100.0) ++ " × " ++ A.n(abs(r[3] - r[1]) / 100.0) ++ " m")
+            set(rect, "x", A.n(min(r[0], r[2])))^; set(rect, "y", A.n(min(r[1], r[3])))^
+            set(rect, "width", A.n(max(1.0, abs(r[2] - r[0]))))^; set(rect, "height", A.n(max(1.0, abs(r[3] - r[1]))))^
+            set(rect, "visibility", "visible")^
+            if (label != null) dom.set_text_content(label, A.n(abs(r[2] - r[0]) / 100.0)^ ++ " × " ++ A.n(abs(r[3] - r[1]) / 100.0)^ ++ " m")
         }
-        set(label, "x", A.n(r[2] + 12.0 / d.z)); set(label, "y", A.n(r[3] - 12.0 / d.z)); set(label, "visibility", "visible")
+        set(label, "x", A.n(r[2] + 12.0 / d.z))^; set(label, "y", A.n(r[3] - 12.0 / d.z))^; set(label, "visibility", "visible")
     }
 }
 
 // the drag's last step becomes one edit, or a selection when the pointer barely moved
-fn finish(st, step, moved) {
+fn finish(st, step, moved) any^ {
     let d = st.drag
     let base = {*:st, drag: null}
     if (d.mode == "pan") (if (moved) {*:base, view2d: step.view2d} else {*:base, sel: null})
@@ -353,7 +352,7 @@ on control_change(req) {
     else if (req.action == "open-path") { st = {*:st, open_path: req.value} }
 }
 on pointerdown(evt) {
-    if (st.dialog != null or evt.button != 0) { return 'pass' }
+    if ((st.dialog != null or evt.button != 0)^) { return 'pass' }
     let root = dom.root_node(evt.target)
     let scene = dom.closest(evt.target, "scene3d")
     if (scene != null) {
@@ -385,22 +384,22 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     let root = dom.root_node(evt.target)
-    if (st.drag.box == null) {
+    if ((st.drag.box == null)^) {
         let step = orbit_drag(st, evt.clientX, evt.clientY)
-        publish_camera(root, {*:st, *:step})
+        publish_camera(root, {*:st, *:step})^
     }
-    else if (travelled(st.drag, evt) or st.drag.mode == "draw-wall" or st.drag.mode == "draw-room") {
-        publish_drag(root, st, dragged(st, evt.clientX, evt.clientY, evt.shiftKey))
+    else if ((travelled(st.drag, evt) or st.drag.mode == "draw-wall" or st.drag.mode == "draw-room")^) {
+        publish_drag(root, st, dragged(st, evt.clientX, evt.clientY, evt.shiftKey))^
     }
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     let d = st.drag
     let target = if (d.box == null) dom.query_selector(dom.root_node(evt.target), "scene3d") else dom.query_selector(dom.root_node(evt.target), "#plan")
-    if (target != null) dom.release_pointer_capture(target, evt.pointerId)
+    if ((target != null)^) dom.release_pointer_capture(target, evt.pointerId)
     // a click in the 3D view without a drag picks what is under it
     st = if (d.box == null and not travelled(d, evt) and target != null)
             (let b = dom.bounding_box(target), {*:st, drag: null, sel: S.pick(st.home, st, b.width, b.height, evt.clientX - b.x, evt.clientY - b.y)})
@@ -409,14 +408,14 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     // the drag only touched the plan's elements and the camera: a re-render restores them
     st = {*:st, drag: null, view2d: {*:st.view2d}}
     return 'prevent-default'
 }
 on wheel(evt) {
     if (dom.closest(evt.target, "scene3d") != null) {
-        if (st.mode3d == "walk") { st = {*:st, walker: walked(st.walker, if (evt.deltaY < 0) "w" else "s")} }
+        if ((st.mode3d == "walk")^) { st = {*:st, walker: walked(st.walker, if (evt.deltaY < 0) "w" else "s")} }
         else { st = {*:st, orbit: {*:st.orbit, dist: M.clamp(st.orbit.dist * (if (evt.deltaY < 0) .9 else 1.0 / .9), 2.0, 60.0)}} }
         return 'prevent-default'
     }
@@ -432,19 +431,19 @@ on wheel(evt) {
     return 'prevent-default'
 }
 on keydown(evt) {
-    if (st.dialog != null) {
+    if ((st.dialog != null)^) {
         if (evt.key == "Escape") { st = {*:st, dialog: null}; return 'prevent-default' }
         return 'pass'
     }
     if (typing_target(evt)) { return 'pass' }
     let mod = evt.metaKey or evt.ctrlKey
     let key = lower(evt.key)
-    if (st.mode3d == "walk" and st.layout != "plan" and not mod and (contains(["w", "a", "s", "d"], key) or
-            (st.sel == null and contains(["arrowup", "arrowdown", "arrowleft", "arrowright"], key)))) {
+    if ((st.mode3d == "walk" and st.layout != "plan" and not mod and (contains(["w", "a", "s", "d"], key) or
+            (st.sel == null and contains(["arrowup", "arrowdown", "arrowleft", "arrowright"], key))))^) {
         st = {*:st, walker: walked(st.walker, key)}
         return 'prevent-default'
     }
-    if (contains(["arrowleft", "arrowright", "arrowup", "arrowdown"], key) and M.kind_of(st.sel) == "item") {
+    if ((contains(["arrowleft", "arrowright", "arrowup", "arrowdown"], key) and M.kind_of(st.sel) == "item")^) {
         let it = sel_thing(st)
         let step = if (evt.shiftKey) 1.0 else 10.0
         st = if (it.wall != null) patch_item(st, {at: it.at + (if (key == "arrowleft" or key == "arrowup") 0.0 - step else step)})

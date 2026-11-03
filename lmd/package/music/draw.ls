@@ -2,7 +2,7 @@
 import f: .fonts
 
 pub fn bounds(left, top, right, bottom) => {left:left, top:top, right:right, bottom:bottom}
-pub fn union(items) => if (len(items)==0) bounds(0.0,0.0,0.0,0.0) else
+pub fn union(items) any^ => if (len(items)==0) bounds(0.0,0.0,0.0,0.0) else
     bounds(min([for (b in items) b.left]),min([for (b in items) b.top]),
         max([for (b in items) b.right]),max([for (b in items) b.bottom]))
 pub fn glyph(profile, key, x, y, size = 1.0, height_scale = null) map^ {

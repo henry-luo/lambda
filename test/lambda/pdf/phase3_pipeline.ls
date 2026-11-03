@@ -25,12 +25,12 @@ pn main() {
 }
 
 // helpers — Lambda doesn't ship a substring count, so do it via split
-fn contains(s, sub) {
+fn contains(s, sub) any^ {
     let parts = split(s, sub);
     (len(parts) >= 2)
 }
 
-fn string_count(s, sub) {
+fn string_count(s, sub) any^ {
     let parts = split(s, sub)
     len(parts) - 1
 }

@@ -6,7 +6,7 @@ import guides: lambda.editor.raster.guides
 import channels: lambda.editor.raster.channels
 import project: lambda.image.project
 fn check(value) => value
-fn pixels(doc) => img.to_bytes(img.render_frame(doc)^)^
+fn pixels(doc) any^ => img.to_bytes(img.render_frame(doc)^)^
 let red = img.blank({width:4,height:2,color:[1,0,0,1]})^
 let local_mask = img.mask(img.from_bytes(b'ff80ff80ff80ff80',{width:4,height:2,channels:1})^,{default:0})
 let group_mask = img.mask(img.selection(8,6,{shape:"rectangle",start:[2,2],end:[4,4]})^,{default:0})
@@ -31,7 +31,7 @@ let enlarged = editor.exec(st,{id:"document.resize_canvas",width:14,height:10,an
 check(model.position(model.lookup(enlarged.doc,"leaf").node) == [8,6])
 check(img.to_bytes(enlarged.selection)^ == img.to_bytes(img.reframe(st.selection,[-6,-4,8,6])^)^)
 check(channels.items(enlarged.doc)[0][0] == enlarged.selection)
-check([for (g in guides.items(enlarged.doc)) g.position] == [9,8])
+check([for (g in ((guides.items(enlarged.doc)) ^ { [] })) g.position] == [9,8])
 check(len(enlarged.hist.undo) == len(st.hist.undo)+1)
 check(editor.exec(enlarged,{id:"history.undo"})^.doc == st.doc and editor.exec(enlarged,{id:"history.undo"})^.selection == st.selection)
 check(editor.exec(editor.exec(enlarged,{id:"history.undo"})^,{id:"history.redo"})^.doc == enlarged.doc)
@@ -45,8 +45,8 @@ check(canvas.offset(st.doc,{width:11,height:9},"center")^ == [1,1])
 check(canvas.offset({width:11,height:9},st.doc,"center")^ == [-2,-2])
 check(editor.exec(st,{id:"document.resize_canvas",width:14,height:10})^.doc == editor.exec(st,{id:"document.resize_canvas",width:14,height:10,anchor:"top-left"})^.doc)
 check(editor.exec(st,{id:"document.resize_canvas",width:8,height:6,anchor:"center"})^.hist == st.hist)
-check(editor.exec(st,{id:"document.resize_canvas",width:14,height:10,anchor:"bad"}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"document.resize_image",width:14,height:10,anchor:"center"}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"document.resize_canvas",width:14,height:10,anchor:"bad"}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"document.resize_image",width:14,height:10,anchor:"center"}) ^ { ^ }) { case error: true default: false })
 check(project.decode(project.encode(enlarged.doc)^)^ == enlarged.doc)
 let moved = editor.exec(initial,{id:"layer.move",dx:1,dy:1})^
 check(pixels(moved.doc) == img.to_bytes(img.reframe(original_pixels,[-1,-1,7,5])^)^)

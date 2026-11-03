@@ -3,6 +3,8 @@
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/path_str.h"
+#include "../io/security_io.h"
 #include "../io/mark_builder.hpp"
 #include "../core/mark_reader.hpp"
 #include <string.h>
@@ -20,10 +22,22 @@ struct StructurizrIncludeResolver {
     ArrayList* stack;
     size_t file_count;
     size_t byte_count;
+    const SecurityIOClient* io;
 
-    StructurizrIncludeResolver(Input* source_input, Element* source_root, char* source_dir)
+    StructurizrIncludeResolver(Input* source_input, Element* source_root, char* source_dir,
+            const SecurityIOClient* client)
         : input(source_input), root(source_root), root_dir(source_dir),
-          stack(arraylist_new(8)), file_count(0), byte_count(0) {}
+          stack(arraylist_new(8)), file_count(0), byte_count(0), io(client) {}
+
+    static char* resolve_path(const SecurityIOClient* io, const char* path) {
+        if (!path) return nullptr;
+        if (!io) return file_realpath(path);
+        // The broker rejects links on acquisition. Lexical normalization keeps
+        // the parser's beside-document restriction without an ambient probe.
+        char normalized[4096];
+        return path_str_normalize_lexical_posix(path, normalized, sizeof(normalized), true) >= 0
+            ? mem_strdup(normalized, MEM_CAT_TEMP) : nullptr;
+    }
 
     ~StructurizrIncludeResolver() {
         while (stack && stack->length > 0) mem_free(arraylist_pop(stack));
@@ -150,21 +164,16 @@ struct StructurizrIncludeResolver {
                 "Structurizr local include cycle detected", directive, path);
             return;
         }
-        int64_t size = file_size(path);
-        if (size < 0) {
-            diagnostic("structurizr.include-missing",
-                "Structurizr local include file is unavailable", directive, path);
-            return;
-        }
-        if (file_count >= STRUCTURIZR_INCLUDE_MAX_FILES ||
-            (size_t)size > STRUCTURIZR_INCLUDE_MAX_BYTES - byte_count) {
+        if (file_count >= STRUCTURIZR_INCLUDE_MAX_FILES) {
             diagnostic("structurizr.include-limit",
                 "Structurizr include file or byte limit exceeded", directive, path);
             return;
         }
 
-        char* source = read_text_file(path);
-        if (!source) {
+        char* source = nullptr;
+        size_t size = 0;
+        if (!security_io_read_bytes(io, path, false, STRUCTURIZR_INCLUDE_MAX_BYTES - byte_count,
+                MEM_CAT_INPUT_OTHER, &source, &size, nullptr)) {
             diagnostic("structurizr.include-missing",
                 "Structurizr local include file could not be read", directive, path);
             return;
@@ -195,6 +204,25 @@ struct StructurizrIncludeResolver {
 
     void resolve_directory(Element* directive, const char* context, const char* path,
                            size_t depth) {
+        if (io) {
+            SecurityDirectory listing = {};
+            if (!security_io_enumerate(io, path, SECURITY_IO_DIRECTORY_LIMIT, &listing, nullptr)) {
+                diagnostic("structurizr.include-missing",
+                    "Structurizr local include directory is unavailable", directive, path);
+                return;
+            }
+            for (uint32_t i = 0; i < listing.count; i++) {
+                SecurityDirectoryEntry* entry = &listing.entries[i];
+                if (!entry->is_directory && (file_path_has_ext_ci(entry->name, "dsl") ||
+                        file_path_has_ext_ci(entry->name, "structurizr"))) {
+                    char* joined = file_path_join(path, entry->name);
+                    if (joined) resolve_file(directive, context, joined, depth);
+                    mem_free(joined);
+                }
+            }
+            security_io_directory_free(&listing);
+            return;
+        }
         ArrayList* entries = dir_list(path);
         if (!entries) {
             diagnostic("structurizr.include-missing",
@@ -234,24 +262,28 @@ struct StructurizrIncludeResolver {
         }
         char* joined = is_absolute(target)
             ? mem_strdup(target, MEM_CAT_TEMP) : file_path_join(containing_dir, target);
-        char* canonical = joined ? file_realpath(joined) : nullptr;
+        char* canonical = resolve_path(io, joined);
         if (!canonical) {
             diagnostic("structurizr.include-missing",
                 "Structurizr local include path is unavailable", directive, target);
         } else if (!within_root(canonical)) {
             diagnostic("structurizr.include-policy",
                 "Structurizr include escapes the allowed root", directive, target);
-        } else if (file_is_dir(canonical)) {
-            resolve_directory(directive, context, canonical, depth);
         } else {
-            resolve_file(directive, context, canonical, depth);
+            int32_t kind = SECURITY_OBJECT_FILE;
+            bool available = io ? security_io_input_kind(io, canonical, &kind, nullptr) : true;
+            if (!io && file_is_dir(canonical)) kind = SECURITY_OBJECT_DIRECTORY;
+            if (!available) diagnostic("structurizr.include-missing",
+                "Structurizr local include path is unavailable", directive, target);
+            else if (kind == SECURITY_OBJECT_DIRECTORY) resolve_directory(directive, context, canonical, depth);
+            else resolve_file(directive, context, canonical, depth);
         }
         if (canonical) mem_free(canonical);
         if (joined) mem_free(joined);
     }
 
     void resolve(const char* root_path) {
-        char* canonical_root = file_realpath(root_path);
+        char* canonical_root = resolve_path(io, root_path);
         if (!canonical_root) return;
         arraylist_append(stack, canonical_root);
         resolve_children(root, "workspace", root_dir, 0);
@@ -261,13 +293,14 @@ struct StructurizrIncludeResolver {
     }
 };
 
-void resolve_graph_structurizr_local_includes(Input* input, const char* root_path) {
+void resolve_graph_structurizr_local_includes(Input* input, const char* root_path,
+        const SecurityIOClient* io) {
     if (!input || !root_path || input->root.type_id() != LMD_TYPE_ELEMENT) return;
-    char* canonical_root = file_realpath(root_path);
+    char* canonical_root = StructurizrIncludeResolver::resolve_path(io, root_path);
     if (!canonical_root) return;
     char* root_dir = file_path_dirname(canonical_root);
     mem_free(canonical_root);
     if (!root_dir) return;
-    StructurizrIncludeResolver resolver(input, input->root.element, root_dir);
+    StructurizrIncludeResolver resolver(input, input->root.element, root_dir, io);
     resolver.resolve(root_path);
 }

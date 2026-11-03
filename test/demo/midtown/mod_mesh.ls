@@ -39,8 +39,8 @@ pub fn placed(b, m) {
         let l = max(sqrt(x * x + y * y + z * z), 0.000001)) *[x / l, y / l, z / l]];
     {*: b, positions: t.points(m, b.positions) ^ { [] }, normals: n}
 }
-pub fn yawed(b, x, y, z, yaw, size = 1.0) => placed(b, t.compose([x, y, z], u.quat(yaw), [size, size, size]))
-pub fn tinted(b, rgb) => {*: b, colors: [for (i in 1 to (len(b.positions) div 3)) *rgb]}
+pub fn yawed(b, x, y, z, yaw, size = 1.0) any^ => placed(b, t.compose([x, y, z], u.quat(yaw), [size, size, size]))
+pub fn tinted(b, rgb) any^ => {*: b, colors: [for (i in 1 to (len(b.positions)^ div 3)) *rgb]}
 // a vertical cylinder or cone from y0 to y1
 pub fn post(x, z, y0, y1, r0, r1, segments = 10) => prim.sweep([[x, y0, z], [x, y1, z]], [r0, r1], segments, true)
 
@@ -58,8 +58,8 @@ pub fn walls(b, y0, y1, u_span, v_span, u0 = 0.0, v0 = 0.0, from = 0.0) {
             let va = v0 + (y0 - from) / v_span, let vb = v0 + (y1 - from) / v_span)
         quad([p[k][0], y0, p[k][1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[k][0], y1, p[k][1]], [ua, va, ub, va, ub, vb, ua, vb])])
 }
-pub fn facade(b, ground) => walls(b, if (b.base) ground + BASE else ground, b.h, 8.0 * BAY, 8.0 * STOREY, b.u0, b.v0, ground + BASE)
-pub fn storefront(b, ground) => if (not b.base) EMPTY else walls(b, ground, ground + BASE, 4.0 * BAY, BASE, b.u0, 0.0, ground)
+pub fn facade(b, ground) any^ => walls(b, if (b.base) ground + BASE else ground, b.h, 8.0 * BAY, 8.0 * STOREY, b.u0, b.v0, ground + BASE)
+pub fn storefront(b, ground) any^ => if (not b.base) EMPTY else walls(b, ground, ground + BASE, 4.0 * BAY, BASE, b.u0, 0.0, ground)
 pub fn roof(b) => quad([b.x0, b.h, b.z1], [b.x1, b.h, b.z1], [b.x1, b.h, b.z0], [b.x0, b.h, b.z0],
     [b.x0 / 8.0, b.z1 / 8.0, b.x1 / 8.0, b.z1 / 8.0, b.x1 / 8.0, b.z0 / 8.0, b.x0 / 8.0, b.z0 / 8.0])
 // rooftop clutter: plant rooms on offices and flats, a mast on each tower crown
@@ -159,5 +159,5 @@ pub fn signal_mast() => merge([post(0.0, 0.0, 0.0, 5.9, 0.13, 0.1, 8), cuboid(0.
     cuboid(3.62, 4.25, -0.12, 4.0, 5.62, 0.12), cuboid(3.52, 4.15, -0.14, 4.1, 5.72, -0.12)])
 pub fn signal_lamp(slot) => (let y = 5.37 - slot * 0.42, cuboid(3.68, y - 0.15, 0.12, 3.94, y + 0.15, 0.16))
 pub fn trunk() => post(0.0, 0.0, 0.0, 2.6, 0.2, 0.14, 7)
-pub fn crown() => (let ball = shapes.sphere(7, 10), placed({positions: ball.positions, normals: ball.normals, uvs: ball.uvs, indices: ball.indices},
+pub fn crown() any^ => (let ball = shapes.sphere(7, 10), placed({positions: ball.positions, normals: ball.normals, uvs: ball.uvs, indices: ball.indices},
     t.compose([0.0, 3.9, 0.0], [0.0, 0.0, 0.0, 1.0], [3.8, 3.3, 3.8])))

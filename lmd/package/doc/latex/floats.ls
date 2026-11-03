@@ -39,7 +39,7 @@ let LISTING_KIND = {counter: "listing", name: "Listing", list: "listoflistings",
 // the float kinds of a document's active packages
 pub fn kinds_for(packages) {
     let algorithm = [for (pkg, style in ALGORITHM_STYLES,
-        let opts = package_options(packages, string(pkg)) where opts != null)
+        let opts = package_options(packages, string(pkg)) where ((opts != null) ^ { false }))
         {*:ALGORITHM_KIND, style: style_option(opts, style),
          within: if (opts.section != null) "section" else if (opts.chapter != null) "chapter" else null}]
     let with_algorithm = if (len(algorithm) == 0) KINDS else {*:KINDS, algorithm: algorithm[0]};
@@ -63,7 +63,7 @@ pub fn kind_of_file(kinds, file) {
 }
 
 // a float environment's kind: its own name, or the unstarred name of a spanning variant
-pub fn kind_of(kinds, tag) {
+pub fn kind_of(kinds, tag) any^ {
     let base = if (ends_with(tag, "*")) slice(tag, 0, len(tag) - 1) else tag
     if (kinds[base] != null and kinds[base].listed_only != true) base else null
 }
@@ -80,7 +80,7 @@ pub fn kind_for_list(kinds, command) {
 pub fn own_child(el, tag) {
     if (not (el is element)) null
     else {
-        let found = [for (child in el, let hit = own_match(child, tag) where hit != null) hit]
+        let found = [for (child in el, let hit = own_match(child, tag) where ((hit != null) ^ { false })) hit]
         if (len(found) == 0) null else found[0]
     }
 }
@@ -96,7 +96,7 @@ fn own_match(node, tag) {
 }
 
 // list text of a caption: the optional short form when given; starred captions are not listed
-pub fn list_caption(caption) {
+pub fn list_caption(caption) any^ {
     if (caption == null or caption.starred == true or string(name(caption)) == "caption*") null
     else {
         let short = util.optional_raw(caption)

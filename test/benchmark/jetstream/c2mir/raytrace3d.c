@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of jetstream/raytrace3d.ls. */
 extern int printf(const char *, ...);
 extern double sqrt(double);
@@ -316,16 +317,19 @@ static int raytrace_scene(void) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int iter;
     int total_pixels = 0;
     /* JetStream runs 8 iterations */
     for (iter = 0; iter < 8; iter++) {
         total_pixels += raytrace_scene();
     }
+    BENCH_KERNEL_END();
     if (total_pixels == 7200) {
         printf("3d-raytrace: PASS (pixels=%d)\n", total_pixels);
     } else {
         printf("3d-raytrace: DONE (pixels=%d)\n", total_pixels);
     }
+    BENCH_KERNEL_REPORT();
     return total_pixels != 7200;
 }

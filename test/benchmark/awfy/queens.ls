@@ -4,7 +4,7 @@
 // The board tables are `var` params: plain params are snapshots (S9.1.3), so
 // a write-through solver must borrow them or it silently stops searching.
 
-pn get_row_column(free_rows, free_maxs, free_mins, r, c) {
+fn get_row_column(free_rows, free_maxs, free_mins, r, c) {
     if (free_rows[r] and free_maxs[c + r] and free_mins[c - r + 7]) {
         return 1
     }
@@ -37,7 +37,7 @@ pn place_queen(var free_rows, var free_maxs, var free_mins, var queen_rows, c) {
 // a placement is valid when every row holds one queen and no two share a
 // column or a diagonal; `result == 1` alone cannot tell a solver that
 // stopped searching from one that solved the board
-pn is_valid(queen_rows) {
+fn is_valid(queen_rows) {
     var r1 = 0
     while (r1 < 8) {
         let c1 = queen_rows[r1]
@@ -62,7 +62,7 @@ pn queens() {
     var free_maxs = fill(16, true)
     var free_mins = fill(16, true)
     var queen_rows = fill(8, -1)
-    if (place_queen(free_rows, free_maxs, free_mins, queen_rows, 0) != 1) {
+    if ((place_queen(free_rows, free_maxs, free_mins, queen_rows, 0) != 1)^) {
         return 0
     }
     return is_valid(queen_rows)
@@ -71,7 +71,7 @@ pn queens() {
 pn benchmark() {
     var result = 1
     for i in 0 to 9 {
-        if (queens() != 1) {
+        if ((queens() != 1)^) {
             result = 0
         }
     }
@@ -82,7 +82,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("Queens: PASS\n")
     } else {
         print("Queens: FAIL\n")

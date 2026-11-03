@@ -24,15 +24,15 @@ let renamed = m.finish_edit(m.property(top,"layer_name","My ink")^)
 m.layer_of(renamed.doc,renamed.active).name == "My ink"
 let faded = m.finish_edit(m.property(top,"layer_opacity",0.0)^)
 m.hit(faded.doc,{x:30.0,y:30.0}) == "o2"
-m.decode({format:"lambda-sketch",version:99,document:top.doc}) ^ { true } ~ { false }
-m.decode(m.encode({*:top.doc,layers:[]})) ^ { true } ~ { false }
-m.decode(m.encode({*:top.doc,width:nan})) ^ { true } ~ { false }
-m.decode(m.encode({*:top.doc,seq:4})) ^ { true } ~ { false }
-m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[rect,rect]}]})) ^ { true } ~ { false }
-m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[{*:rect,width:-1}]}]})) ^ { true } ~ { false }
-m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[{*:rect,fill:"red"}]}]})) ^ { true } ~ { false }
+match (m.decode({format:"lambda-sketch",version:99,document:top.doc}) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:top.doc,layers:[]})) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:top.doc,width:nan})) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:top.doc,seq:4})) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[rect,rect]}]})) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[{*:rect,width:-1}]}]})) ^ { ^ }) { case error: true default: false }
+match (m.decode(m.encode({*:first.doc,layers:[{*:first.doc.layers[0],objects:[{*:rect,fill:"red"}]}]})) ^ { ^ }) { case error: true default: false }
 let roundtrip = m.decode(parse(format(m.encode(top.doc),'json'),'json')^ )^
 let opened = m.open_document(st,roundtrip)
 opened.doc == top.doc and opened.saved == opened.doc
 let next = m.insert(opened,{*:rect,id:"o" ++ string(opened.doc.seq)})
-len(unique([for (o in m.objects(next.doc)) o.id])) == 3
+len(unique([for (o in ((m.objects(next.doc)) ^ { [] })) o.id])) == 3

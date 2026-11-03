@@ -52,7 +52,7 @@ pub fn follow(cam, car, dt) {
      anchor: [car.x, car.y + 1.3, car.z]}
 }
 // a camera body's rotation: yaw then pitch, so its local -Z looks from position at target
-pub fn look(position, target) {
+pub fn look(position, target) any^ {
     let dx = target[0] - position[0], dy = target[1] - position[1], dz = target[2] - position[2]
     let length = max(sqrt(dx * dx + dy * dy + dz * dz), 0.0001);
     u.quat(math.atan2(0.0 - dx, 0.0 - dz), math.asin(u.clamp(dy / length, -1.0, 1.0)))

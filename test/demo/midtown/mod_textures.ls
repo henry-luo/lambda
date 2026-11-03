@@ -19,7 +19,7 @@ let LIGHTS = ["#ffd58f", "#ffe9bf", "#fff3d6", "#d7e9ff", "#ffc978"]
 // the window opening inside one 64 px cell
 fn opening(style) => if (style == 0) {x: 3, y: 4, w: 58, h: 52} else if (style == 1) {x: 14, y: 14, w: 36, h: 38}
     else if (style == 2) {x: 18, y: 14, w: 28, h: 38} else {x: 0, y: 30, w: 64, h: 24}
-fn lit(style, i, j) => rng.unit(rng.derive(KEY, ["lit", style, i, j])) < (if (style == 0) 0.38 else 0.5)
+fn lit(style, i, j) any^ => rng.unit(rng.derive(KEY, ["lit", style, i, j])) < (if (style == 0) 0.38 else 0.5)
 fn cell_detail(style, x, y) => if (style == 0) [rect(x, y + 56, 64, 8, "#26303a")]
     else if (style == 1) [rect(x + 11, y + 52, 42, 4, "#ddd3bf"), rect(x + 12, y + 10, 40, 4, "#b2a68f")]
     else if (style == 2) [rect(x + 15, y + 52, 34, 4, "#e6dccb"), rect(x + 15, y + 10, 34, 4, "#b56a55"),

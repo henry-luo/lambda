@@ -9,7 +9,7 @@ import presentation: .wired.presentation
 
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
-pub fn render(root) {
+pub fn render(root) any^ {
     if (root is array) [for (child in root) render(child)] else (
         let valid = if (root is element and starts_with(string(name(root)),"wired."))
             contract.validate(c.kind(root),c.props(root))^ else true,
@@ -21,7 +21,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"wired",variables,styles.css,"wired-root")
 }
-view wired_page: <wired.page> { page(content(~),c.props(~))^ }
+view wired_page: <wired.page> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => contract.node('button',props,child)^
 pub fn input(props = {}) element^ => contract.node('input',props)^

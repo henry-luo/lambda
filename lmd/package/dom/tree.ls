@@ -41,7 +41,7 @@ pub fn radio_group(node) {
     let scope = if (owner != null) owner else dom.root_node(node);
     let group = dom.get_attribute(node, "name");
     let peers = dom.query_selector_all(scope, "input[type=radio]");
-    [for (peer in peers where dom.get_attribute(peer, "name") == group and same_owner(form_of(peer), owner)) peer]
+    [for (peer in peers where ((dom.get_attribute(peer, "name") == group and same_owner(form_of(peer), owner)) ^ { false })) peer]
 }
 
 // <details name=...> forms an exclusive accordion group across the document.

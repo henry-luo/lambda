@@ -1,6 +1,6 @@
 # Lambda Runtime — The Procedural Runtime
 
-> **Last verified against tree:** 2026-10-29 *(dry-run owner/configuration only; §2.1 last verified 2026-10-05 for stackful activations; other sections not re-verified since 2026-09-10)*
+> **Last verified against tree:** 2026-11-02 *(function-local state/control and captures; dry-run owner/configuration last verified 2026-10-29, §2.1 stackful activations 2026-10-05; remaining sections retain their earlier verification)*
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the *procedural* half of Lambda: the `pn` procedure flavour, the `run script.ls` / `main()` entry path, and the three machinery clusters that make procedural scripts possible on top of an otherwise pure-functional, JIT-compiled language — the IO/side-effect builtins in `lambda-proc.cpp`, the in-place growable-array mutation builtins `push()`/`splice()`, the for-*statement* loop form (`for i in a to b { arr[i] = v }`), and the static `safety_analyzer` that decides which functions get a stack-overflow guard. It explains what distinguishes procedural code from functional code at the language and codegen level, and where the procedural-specific lowering lives.
 >
@@ -11,11 +11,58 @@
 
 ## 1. Purpose & scope
 
-Lambda is a **pure functional** language by default: a script is an expression, `fn` defines a pure function, and the runtime is JIT-only ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The *procedural* runtime is the bounded set of features that let a script perform ordered, effectful work — print to stdout, read and write files, shell out, mutate an array in place, and drive imperative `for`/`while` loops with assignment bodies. This document owns those features and the codegen that distinguishes them from functional code; it does not re-cover the value model ([LR_03](LR_03_Value_and_Type_Model.md) owns the `Item`/`Array`/`ArrayNum` layout), the MIR lowering of the loop and assignment forms ([LR_07](LR_07_MIR_Transpiler_JIT.md) owns register allocation, boxing, and `transpile_for`'s general structure), the run/CLI dispatch ([LR_01](LR_01_Compilation_Pipeline.md) owns `run_script_file`/`run_script_mir`/`execute_script_and_create_output`), or the runtime stack-overflow guard itself ([LR_08](LR_08_Memory_and_GC.md) owns the GC and the guard's runtime side).
+The 2026-11-02 local-control implementation separates callable ownership from
+effect colour (**S12.1.2v3**, **D6.1.2v2**). `NameScope::lambda_function`
+identifies the lexical activation; `is_proc` continues to control effectful
+calls. Both T0 and MIR preserve functional result collection when a body
+declares `var`, and treat statement loops and imperative branches as
+no-result statements. Parameter-alias ownership analysis now also covers
+local mutation in `fn` (**S9.1.2**). Capture classification records confined
+parent-local references and rejects captured writes on escaping closures
+(**S9.1.4v2**, **D6.2.3v3**). The indexed value-flow graph propagates
+aliases and container contents, computes fixed-point return/retention
+summaries for known Lambda calls (including `varg`), and treats unknown
+retention as escape. Pure-function capture boundaries, escaping intermediate
+procedures and backedges through a captured binding prevent live access.
+
+A shared binding uses an internal one-element GC Array with existing owned
+Item/scalar slots. The parent and confined sibling environments retain that
+same home; assignment and COW replacement update it. T0 roots the home in its
+frame slot; MIR roots both the home and its current value, and reloads mirrors
+after calls. Snapshot reads copy wide scalars and mark containers shared.
+Each execution of a loop-local declaration creates a fresh home. This adds
+no language-visible reference type or conservative native-stack tracing
+(**D4.3.3**, **S9.1.5v2**). AUTO keeps shared-home definitions in T0 under the
+existing satellite refusal contract; explicit JIT supports them. Confined
+procedure bodies still cannot be invoked from the parent `fn`. Equality
+observations and native sibling-home/GC tests cover sharing without relaxing
+that ban (**S5.5.1v2**, **S12.1.1v3**). Qualification is recorded in
+[the implementation plan](<../../../vibe/impl/Lambda_Impl_Function_Local_State (done).md>).
+
+Comma declarations use the same binding initialization as ordinary declarations;
+all decomposed target entries enter the indexed closure-flow graph, and each
+projected container is a COW owner (S12.2.1v3, S16.8.7, D6.2.3v3). Callable
+literals use fresh runtime storage: immutable pooled headers cannot satisfy the
+fresh-owner proof used by direct local stores. Empty functional statement blocks
+return their established null/spreadable-null representation without allocating
+an empty list (S2.5.3v3, S2.5.5v2). Eligible `fn` while suffixes may hand off to a
+continuation of the same colour; collected prefixes and shared-home definitions
+retain the conservative T0 path (D8.1.1v18). Qualification: [decomposition](<../../../vibe/impl/Lambda_Impl_Function_Local_Decomposition (done).md>)
+and [benchmark migration](<../../../vibe/impl/Lambda_Impl_Function_Local_Benchmarks (done).md>).
+
+Lambda is a **pure functional** language by default: a script is an expression, `fn` defines a pure function, and execution uses the T0 interpreter or MIR Direct ([LR_07](LR_07_MIR_Transpiler_JIT.md), D8.1.1v14). The *procedural* runtime is the bounded set of features that let a script perform ordered, effectful work — print to stdout, read and write files, shell out, mutate an array in place, and drive imperative `for`/`while` loops with assignment bodies. This document owns those features and the codegen that distinguishes them from functional code; it does not re-cover the value model ([LR_03](LR_03_Value_and_Type_Model.md) owns the `Item`/`Array`/`ArrayNum` layout), the MIR lowering of the loop and assignment forms ([LR_07](LR_07_MIR_Transpiler_JIT.md) owns register allocation, boxing, and `transpile_for`'s general structure), the run/CLI dispatch ([LR_01](LR_01_Compilation_Pipeline.md) owns `run_script_file`/`run_script_mir`/`execute_script_and_create_output`), or the runtime stack-overflow guard itself ([LR_08](LR_08_Memory_and_GC.md) owns the GC and the guard's runtime side).
 
 <img alt="Procedural vs functional dispatch and feature split" src="diagram/d12_proc_vs_func.svg" width="720">
 
-What makes a function *procedural* is a single bit threaded from the parser to the backend. The parser marks a procedure body as a proc scope (`NameScope::is_proc`, inherited by nested scopes — see `build_for_stam`, `build_ast.cpp:5994`); the MIR transpiler carries it as `MirTranspiler::in_proc` (`transpile-mir.cpp:211`), set while lowering a `pn` body. The `in_proc` flag is what unlocks statement semantics: `transpile-mir.cpp:4466` treats `var`/assignment/`if`/`while`/`for` as *side-effect statements* rather than value-producing expressions, multi-value proc returns are enabled at `:4500`, and `infer_param_type` is given a weaker numeric-inference policy for `pn` parameters (`is_proc`, `:9865`). The system-function registry mirrors the split at the call boundary: a `SysFuncInfo` with `is_proc` set is emitted as a `pn_`-prefixed call, an ordinary one as `fn_` (`transpile-mir.cpp:6653`, `:7511`).
+Callable colour is carried by `NameScope::is_proc` and
+`MirTranspiler::in_proc`; it controls procedure-call permission and the
+procedural last-result convention. Local imperative admission instead uses
+`ast_scope_function`/`ast_scope_allows_local_control` and lexical loop
+ownership. Functional blocks keep collection semantics, with imperative
+branches and statement loops omitted from their result stream. The system
+function registry continues to supply the `fn`/`pn` call bit. Neither a local
+`var` nor a `while` changes that bit (S12.1.1v3–S12.1.2v3).
+
 
 The CLI entry decides which path runs. `lambda script.ls` runs the script as a functional expression (`run_main = false`); `lambda run script.ls` runs the `main()` procedure (`run_main = true`), threaded into the context at `runner.cpp:1373` and selected by `run_script_file` (`main.cpp:696`). Both go through the same MIR Direct compile (`compile_script_as_mir_direct`); the distinction is which entry is invoked and whether proc statements are present — see [LR_01](LR_01_Compilation_Pipeline.md) for the end-to-end run.
 
@@ -23,7 +70,7 @@ The CLI entry decides which path runs. `lambda script.ls` runs the script as a f
 
 ## 2. The procedural / IO builtins (`lambda-proc.cpp`)
 
-`lambda-proc.cpp` is the home of the `pn_*` builtins — the procedures a script reaches through `print`, `output`, `fetch`, `cmd`, the `io.*` module, and `clock`. They are registered as `SYSPROC_*` / side-effect rows in `sys_func_defs[]` (`sys_func_registry.c`), most flagged `can_raise` and returning a `RetItem` so an IO failure propagates as an error through the `T^E` return machinery ([LR_10 — Error Handling]). Under **D5.4.1–D5.4.4**, effectful paths read the active owner’s `Runtime::dry_run` through `lambda_dry_run_enabled()`; when set, each IO procedure returns a fabricated result (`dry_run_fabricated_output`/`_fetch`/`_cmd`, `:36`–`:52`) instead of touching the filesystem or network, so fuzz/test runs still exercise the result-processing code paths without side effects.
+`lambda-proc.cpp` is the home of the `pn_*` builtins — the procedures a script reaches through `print`, `output`, `fetch`, `cmd`, the `io.*` module, and `clock`. They are registered as `SYSPROC_*` / side-effect rows in `sys_func_defs[]` (`sys_func_registry.c`), most flagged `can_raise` and returning a `RetItem` so an IO failure propagates as an error through the `T^` return machinery ([LR_10 — Error Handling]). Under **D5.4.1–D5.4.4**, effectful paths read the active owner’s `Runtime::dry_run` through `lambda_dry_run_enabled()`; when set, each IO procedure returns a fabricated result (`dry_run_fabricated_output`/`_fetch`/`_cmd`, `:36`–`:52`) instead of touching the filesystem or network, so fuzz/test runs still exercise the result-processing code paths without side effects.
 
 - **`pn_print`** (`:56`) — the procedural `print()`: stringifies the Item via `fn_string` and writes it to stdout. It is the one sanctioned `printf` in the runtime (annotated `PRINTF_OK`, `:61`), an explicit exception to the project's `log_*`-only rule, because `print` *is* the user-facing output channel. Returns `ItemNull`.
 - **`pn_emit`** — dispatches a custom event through the lower-owned
@@ -62,7 +109,13 @@ The parking builtins (`pn_wait1`/`pn_wait2`, `pn_receive`, `pn_select`, `pn_slee
 
 **Scopes and both tiers.** `start` records the child in the current lexical task scope through `lambda_task_start_function_scoped`, the same entry in both tiers. In a body with `owns_task_scopes`, MIR brackets each content block with `lambda_task_scope_enter`/`lambda_task_scope_leave`. Its exit-edge helper (`transpile_task_scope_unwind`) joins on normal exits and cancels, then joins, on error exits, covering `return`, `break`, `continue`, and propagated-error edges. T0's `eval_scoped_content` leaves the scope once after the block, which covers every exit because T0 leaves blocks structurally. In both tiers, local-fault landings unwind task scopes (`lambda_task_scope_unwind`). T0 evaluates `start` itself (`eval_start`) and calls the same runtime builtins as MIR. Strict `LAMBDA_EXEC_BACKEND=interp` therefore no longer rejects task-backed bodies, and promotion reads hit counters, never colour (D8.1.1v16). A fixed-arity `pn` may admit TG8 raw variants whether or not it can suspend (D8.3.4v4). Returning a handle marks it escaped; sending or copying the handle does not transfer its scope ownership. The analyzer rejects a started procedure that captures a mutable outer `var`, because a resumed child must never borrow shared mutable state.
 
-A statement handler over a possibly-suspending `pn` call is an ordinary handler: the call parks and resumes in place, and its error reaches the handler as a non-suspending call's does (S7.6.7v4). A value-producing handler over a possibly-suspending operand is still rejected at compile time (`validate_handler_await_node`).
+A handler over a possibly-suspending `pn` call parks and resumes in place;
+its selected outcome remains a value even in a receiving or final-result
+position (S7.6.1v9, S7.6.7v5). `is_statement` retains the procedure fault
+regime independently of result production. `validate_handler_await_node`
+still rejects a potentially suspending operand without that procedure
+classification. M1 qualification is recorded in
+[the error-handling plan](<../../../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 
 `concurrency_js.cpp` is the JS membrane. A `pn` that `wait`s on a JavaScript Promise registers two reactions and parks through `lambda_task_suspend` (`lambda_wait_js_promise`). The reaction resumes it with the fulfilment, or with the rejection converted to a Lambda error. A Lambda handle can be observed as a Promise through `toPromise`, and module namespaces wrap every exported `pn` as a Promise-returning JavaScript function that starts it as a fresh task. Both sides share the same scheduler and libuv loop; no exception representation crosses the boundary.
 

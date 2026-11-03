@@ -5,6 +5,6 @@ pn set_value(var node) { node.value = 7 }
 pn main() {
     var root = {child: {value: 1}}
     var child = root.child
-    set_value(child)
+    set_value(child)^
     print(root.child.value); print(" "); print(child.value); print("\n")
 }

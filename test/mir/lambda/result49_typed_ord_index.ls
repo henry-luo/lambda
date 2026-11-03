@@ -1,10 +1,10 @@
 // An indexed ordinal keeps the string's Unicode and absent-read semantics.
-pn typed_ord_index(value: string, index: int) int? {
+pn typed_ord_index(value: string, index: int) int?^ {
     ord(value[index])
 }
 
 // The index expression can allocate after the source has been evaluated.
-pn typed_ord_index_alloc(value: string, index: int) int? {
+pn typed_ord_index_alloc(value: string, index: int) int?^ {
     ord(value[index + len([index]) - 1])
 }
 

@@ -6,7 +6,7 @@ fn unsupported_rule(message, el, columns) {
         <td colspan: string(if (columns > 0) columns else 1), message>>
 }
 
-pub fn cmidrule(el, columns) {
+pub fn cmidrule(el, columns) any^ {
     let required = util.raw_argument(el, "required", 0)
     let raw = trim(if (required != null) required else util.text_of_skip_brack(el))
     let trim_spec = util.raw_argument(el, "parenthesized", 0)
@@ -32,7 +32,7 @@ pub fn cmidrule(el, columns) {
     }
 }
 
-pub fn addlinespace(el, columns) {
+pub fn addlinespace(el, columns) any^ {
     let raw = util.optional_raw(el)
     let height = if (raw == null) "0.5em" else util.css_dimension(raw)
     if (height == null) {

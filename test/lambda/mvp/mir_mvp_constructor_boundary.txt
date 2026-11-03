@@ -1,0 +1,14 @@
+11
+14
+1 2 3
+after rejected constructors
+[0, 0] [nan, nan]
+[true, true, true] [false, false, false]
+[] [-7, -7]
+[inf, inf] [nan, nan]
+[3, 3] error
+14 14
+9 14
+[8, 7]
+0 65
+14

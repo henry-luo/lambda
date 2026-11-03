@@ -66,7 +66,7 @@ typedef struct WriteEdit {
 // contributes to the block's set, as a stored procedure joins its caller's
 // transaction.
 bool write_set_transaction_open(void);
-void write_set_begin_transaction(void);
+bool write_set_begin_transaction(void);
 
 // PTH80: an `open` block confines CRUD targets to the opened document. NULL
 // means "no confinement", which is the state outside any block.
@@ -88,5 +88,6 @@ void write_set_rollback(void);
 // unhandled runtime error ALWAYS rolls back.
 bool write_set_end_transaction(bool unwinding);
 
-// Cleared with the document context; a write set never outlives its evaluation.
+// D5.4.2-D5.4.4: clears only the active evaluator; heap teardown retires its
+// capsule and explicit roots even when a different evaluator is active.
 void write_set_reset(void);

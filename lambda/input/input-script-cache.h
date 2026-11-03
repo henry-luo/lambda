@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "../io/security_io.h"
 
 #ifdef __cplusplus
 class InputManager;
@@ -54,6 +55,8 @@ typedef struct InputScriptRequest {
     uint64_t dependency_digest;
     uint32_t optimize_level;
     bool module_mode;
+    // Acquisition only: never retained in a source/artifact key or owner.
+    const SecurityIOClient* io;
 } InputScriptRequest;
 
 typedef struct InputScriptArtifactOps {
@@ -169,7 +172,8 @@ bool input_script_cache_record_dependency_by_unit(InputScriptCache* cache,
 // Returns false only when the unit cannot be inspected; out_changed reports
 // a successful source-generation retirement.
 bool input_script_cache_refresh_file_unit(InputScriptCache* cache,
-    uint32_t compilation_unit_id, const char* path, bool* out_changed);
+    uint32_t compilation_unit_id, const char* path, bool* out_changed,
+    const SecurityIOClient* io, SecurityIOResult* out_result);
 // Refresh every file-backed dependency reachable from one logical unit. A
 // failed freshness proof retires that unit's importer cone before a caller can
 // reuse its compiled image (D8.5.1v3).

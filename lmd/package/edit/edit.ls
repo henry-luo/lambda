@@ -29,7 +29,7 @@ fn supported_suffixes() => join([for (f in formats) for (s in f.suffixes) s], ",
 // The format whose suffix the path ends with, or null.
 pub fn format_for_path(path) {
   let lower_path = lower(path)
-  let found = [for (f in formats) for (s in f.suffixes where ends_with(lower_path, s)) f]
+  let found = [for (f in formats) for (s in f.suffixes where ((ends_with(lower_path, s)) ^ { false })) f]
   if (len(found) == 0) null else found[0]
 }
 
@@ -43,7 +43,7 @@ pub pn open_document(path, options) element^ {
   let loaded = format.import_text(source) ^ { raise error(^.message) }
   // Refuse to open what Save could not write back (proposal §2, §9).
   let mismatch = format.check_roundtrip(loaded.doc, loaded.envelope)
-  if (mismatch != null) {
+  if ((mismatch != null)^) {
     raise error("the " ++ format.name ++ " editor cannot keep this document exactly: " ++ mismatch)
   }
   // the rich format behind the view switch, null for plain text
@@ -59,7 +59,7 @@ pub pn open_document(path, options) element^ {
 // over one file (Radiant_Design_Source_Editor OQ7, CED20). Each surface keeps
 // its own state; switching hands the other the view it builds from the
 // current text, `shown` = {mode, session, doc, status}.
-edit <edit_doc> state shown: ~.shown {
+edit <edit_doc> () any^ state shown: ~.shown {
   // the surface's own <body> is this template's result as well; both handle
   // its events, the surface first (render_map_wrapper_lookup)
   if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)

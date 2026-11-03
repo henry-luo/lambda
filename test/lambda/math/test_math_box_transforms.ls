@@ -1,9 +1,9 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn box(source) => math.render_box(parse(source, 'math')^)^
-fn paint(source) => svg.painted_text(box(source).element)
-fn paths(source) => svg.nodes(box(source).element,'path')^
+fn box(source) any^ => math.render_box(parse(source, 'math')^)^
+fn paint(source) any^ => svg.painted_text(box(source).element)
+fn paths(source) any^ => svg.nodes(box(source).element,'path')^
 let plain = box("\\text{b}")
 let raised = box("\\raisebox{1em}{b}")
 let lowered = box("\\raisebox{-1em}{b}")

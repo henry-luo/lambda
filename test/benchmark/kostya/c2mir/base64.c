@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of kostya/base64.ls. */
 extern int printf(const char *, ...);
 
@@ -24,12 +25,15 @@ static int encode(const unsigned char input[10000], char output[13337]) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     unsigned char input[10000];
     char encoded[13337];
     int i;
     int encoded_len = 0;
     for (i = 0; i < 10000; i++) input[i] = 'a';
     for (i = 0; i < 100; i++) encoded_len = encode(input, encoded);
+    BENCH_KERNEL_END();
     printf(encoded_len == 13336 ? "base64: encoded_len=13336 decoded_len=10000\nbase64: PASS\n" : "base64: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return encoded_len != 13336;
 }

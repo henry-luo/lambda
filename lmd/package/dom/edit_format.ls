@@ -17,7 +17,7 @@ fn style_entry(property, value) {
     property ++ ":" ++ value ++ ";"
 }
 
-fn style_value_at(parts, property, index) {
+fn style_value_at(parts, property, index) any^ {
     if (index >= len(parts)) null
     else {
         let pair = split(parts[index], ":");
@@ -27,20 +27,20 @@ fn style_value_at(parts, property, index) {
     }
 }
 
-pub fn style_value(node, property) {
+pub fn style_value(node, property) any^ {
     if (node == null) null
     else style_value_at(split(value_or_empty(dom.get_attribute(node, "style")), ";"),
                         lower(property), 0)
 }
 
-fn wrapper_for(host, node, tag) {
+fn wrapper_for(host, node, tag) any^ {
     // A missing exclusive tag is not a match for text nodes: tag_of(text) is
     // null too. Without this guard ordinary formats incorrectly try to unwrap
     // the selected text node itself instead of creating their wrapper.
     if (tag == null) null else structure.ancestor_with_tag(host, node, tag)
 }
 
-fn wrapper_has_value(wrapper, descriptor) {
+fn wrapper_has_value(wrapper, descriptor) any^ {
     if (wrapper == null) false
     else if (descriptor.attribute_name != null)
         lower(value_or_empty(dom.get_attribute(wrapper, descriptor.attribute_name))) ==
@@ -49,7 +49,7 @@ fn wrapper_has_value(wrapper, descriptor) {
         lower(value_or_empty(descriptor.format_value))
 }
 
-pub fn has_state(host, node, descriptor, use_css) {
+pub fn has_state(host, node, descriptor, use_css) any^ {
     let tag = if (use_css and descriptor.css_property != null) "span"
               else descriptor.format_tag;
     let wrapper = wrapper_for(host, node, tag);
@@ -63,7 +63,7 @@ pub fn has_state(host, node, descriptor, use_css) {
     else wrapper_has_value(wrapper, descriptor)
 }
 
-pub fn value(host, node, descriptor, use_css) {
+pub fn value(host, node, descriptor, use_css) any^ {
     let tag = if (use_css and descriptor.css_property != null) "span"
               else descriptor.format_tag;
     let wrapper = wrapper_for(host, node, tag);
@@ -87,7 +87,7 @@ pn set_wrapper_value(host, token, node, descriptor, use_css) {
         dom.set_attribute(wrapper, "style", style_entry(
             descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
-            else descriptor.css_value))
+            else descriptor.css_value)^)
         true
     }
     else if (descriptor.attribute_name != null) {
@@ -100,7 +100,7 @@ pn set_wrapper_value(host, token, node, descriptor, use_css) {
         // attribute; styleWithCSS only chooses the element spelling (D7.2.5).
         dom.set_attribute(wrapper, "style", style_entry(descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
-            else descriptor.css_value))
+            else descriptor.css_value)^)
         true
     }
     else true
@@ -152,7 +152,7 @@ pub pn apply_format(host, edit_context, descriptor, value) {
     }
 }
 
-fn direct_format_wrapper(host, node) {
+fn direct_format_wrapper(host, node) any^ {
     let parent = if (node == null) null else dom.parent_node(node);
     let tag = if (parent == null or dom.node_type(parent) != 1) ""
               else lower(dom.node_name(parent));

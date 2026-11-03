@@ -2,11 +2,11 @@
 import math: lambda.doc.math.math
 import radiant
 
-fn ast(source) => parse(source, {type: "math", flavor: "latex"})^
+fn ast(source) any^ => parse(source, {type: "math", flavor: "latex"})^
 fn close(a, b) => abs(a - b) < 0.00001
-fn descendants(el, tag) {
+fn descendants(el, tag) any^ {
     if (not (el is element)) []
-    else [*if (name(el) == tag) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
+    else [*if (name(el) == tag) [el] else [], *[for (child in ((content(el)) ^ { [] }), found in ((descendants(child, tag)) ^ { [] })) found]]
 }
 
 let enhanced_bytes = input("test/lambda/math/fonts/NotoSansMath-Regular.ttf", 'binary')^

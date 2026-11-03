@@ -7,6 +7,7 @@
 // procedure's error value (S11.4.10). Every tier must print the same.
 
 type N = {a: int}
+fn opaque(value) => value
 
 fn f_union(a: int[] | null) { a }
 fn f_opt(a: int[]?) { a }
@@ -49,10 +50,10 @@ pn arg_scalar_pn() {
     return p_opt(v)
 }
 
-// J2: reassignments, which the checker never decides
+// S7.7.4v2: runtime-opaque reassignments retain the failed outcome.
 pn reassign_scalar() {
     var x: int = 0
-    x = "s"
+    x = opaque("s")
     return x
 }
 pn reassign_opt_array() {
@@ -83,7 +84,7 @@ pn admitted() {
 
 // an accumulator on its own float lane: the relation defers `total + ...`
 // (the index read may be null) but the lane already is the contract
-pn norms(v: float[], count: int) float {
+pn norms(v: float[], count: int) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < count) {

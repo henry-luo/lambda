@@ -4,11 +4,11 @@ import router: .routing
 import shapes: .shapes
 import paint: .paint
 
-fn rotation(node) {
+fn rotation(node) any^ {
     let c = geom.rect_center(model.box(node));
     "rotate(" ++ string(model.attr(node,"rotation")) ++ " " ++ string(c.x) ++ " " ++ string(c.y) ++ ")"
 }
-fn flipping(node) {
+fn flipping(node) any^ {
     let c = geom.rect_center(model.box(node));
     "translate(" ++ string(c.x) ++ " " ++ string(c.y) ++ ") scale(" ++
         (if (model.attr(node,"flip-x")) "-1" else "1") ++ " " ++ (if (model.attr(node,"flip-y")) "-1" else "1") ++
@@ -55,7 +55,7 @@ pub fn selection_view(drawing,ids,zoom,prefix="") {
     let r = 6/zoom;
     // controls render after every object, so attached endpoints remain visible and draggable.
     <g id:prefix ++ "selection-overlay",
-        *[for (node in model.objects(drawing) where node.tag == 'shape' and contains(ids,model.id(node)))
+        *[for (node in model.objects(drawing) where ((node.tag == 'shape' and contains(ids,model.id(node))) ^ { false }))
             (let b = model.box(node), <g transform:rotation(node),
                 <rect class:"selection-frame",x:b.x-4/zoom,y:b.y-4/zoom,width:b.width+8/zoom,height:b.height+8/zoom,
                     fill:"none",stroke:"#4c6ef5",'stroke-width':1.2/zoom>
@@ -67,12 +67,12 @@ pub fn selection_view(drawing,ids,zoom,prefix="") {
                 > else null)
             >)]
         ; (if (single.tag == 'connector') <g
-            *[for (handle in model.segment_handles(drawing,single,zoom)) <circle id:prefix ++ "edge-segment-" ++ string(handle.index),
+            *[for (handle in ((model.segment_handles(drawing,single,zoom)) ^ { [] })) <circle id:prefix ++ "edge-segment-" ++ string(handle.index),
                 class:"segment-handle",cx:handle.point.x,cy:handle.point.y,r:3.5/zoom,fill:"#81dafa",stroke:"#ffffff",'stroke-width':1/zoom>]
             ; <rect id:prefix ++ "edge-bend-handle",x:handles.bend.x-5/zoom,y:handles.bend.y-5/zoom,width:10/zoom,height:10/zoom,fill:"#fff1d6",stroke:"#d3902a",'stroke-width':1.5/zoom>
             <circle id:prefix ++ "edge-from-handle",cx:handles.from.x,cy:handles.from.y,r:r,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':2/zoom>
             <circle id:prefix ++ "edge-to-handle",cx:handles.to.x,cy:handles.to.y,r:r,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':2/zoom>
-            ; *[for (side in ["from","to"] where model.attr(single,side ++ "-shape") != "")
+            ; *[for (side in ["from","to"] where ((model.attr(single,side ++ "-shape") != "") ^ { false }))
                 connection_mark(handles[side],zoom,prefix ++ "edge-" ++ side ++ "-connection")]
         > else null)
         ; (if (len(ids)>1) <rect id:prefix ++ "group-selection-frame",x:group_box.x-8/zoom,y:group_box.y-8/zoom,width:group_box.width+16/zoom,height:group_box.height+16/zoom,
@@ -80,17 +80,17 @@ pub fn selection_view(drawing,ids,zoom,prefix="") {
     >
 }
 // retained hosts replace only a changed object's children, preserving unrelated SVG nodes.
-pub fn inner_xml(graphic) => join([for (child in content(graphic)) format(child,'xml')],"")
+pub fn inner_xml(graphic) => join([for (child in ((content(graphic)) ^ { [] })) format(child,'xml')],"")
 pub fn svg(drawing,selected="",source="",grid=false,standalone=false,selection=[],zoom=1.0,marquee=null,prefix="") {
     let ids = if (len(selection)>0) selection else if (selected != "") [selected] else [];
     <svg xmlns:"http://www.w3.org/2000/svg",width:if (standalone) string(model.page(drawing).width) else "100%",
         height:if (standalone) string(model.page(drawing).height) else "100%",viewBox:"0 0 " ++ string(model.page(drawing).width) ++ " " ++ string(model.page(drawing).height),role:"img",'aria-label':"Diagram",
-        <defs *[for (node in model.objects(drawing) where node.tag == 'shape' and model.attr(node,"pattern") != "solid") paint.pattern(node,prefix)]
+        <defs *[for (node in model.objects(drawing) where ((node.tag == 'shape' and model.attr(node,"pattern") != "solid") ^ { false })) paint.pattern(node,prefix)]
             ; *[for (node in model.objects(drawing) where node.tag == 'connector') <g (paint.marker(node,"start",prefix));(paint.marker(node,"end",prefix))>]>
         <rect width:model.page(drawing).width,height:model.page(drawing).height,fill:"#ffffff">
         ; (if (grid) <g stroke:"#eef1f6",'stroke-width':0.6,
-            *[for (x in 0 to int(model.page(drawing).width/20)) <path d:"M " ++ string(x*20) ++ " 0 V " ++ string(model.page(drawing).height)>]
-            ; *[for (y in 0 to int(model.page(drawing).height/20)) <path d:"M 0 " ++ string(y*20) ++ " H " ++ string(model.page(drawing).width)>]
+            *[for (x in ((0 to int(model.page(drawing).width/20)) ^ { [] })) <path d:"M " ++ string(x*20) ++ " 0 V " ++ string(model.page(drawing).height)>]
+            ; *[for (y in ((0 to int(model.page(drawing).height/20)) ^ { [] })) <path d:"M 0 " ++ string(y*20) ++ " H " ++ string(model.page(drawing).width)>]
         > else null)
         ; *[for (node in model.objects(drawing) where node.tag == 'connector') edge_view(drawing,node,ids,prefix)]
         ; (if (not standalone) <g id:prefix ++ "connector-draft"> else null)

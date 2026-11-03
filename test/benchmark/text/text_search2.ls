@@ -3,13 +3,13 @@
 let search_rounds = 1536
 let modulus = 1000000007
 
-pn build_corpus() string {
+pn build_corpus() string^ {
     var rows: array = []
     var index = 0
     while (index < 512) {
         rows.push("record-" ++ string(index) ++
             " alpha aaaaaaaaaaaaaaaaaaaaaaaa token-" ++ string(index % 23) ++
-            " omega needle-" ++ string(index % 11))
+            " omega needle-" ++ string(index % 11))^
         index = index + 1
     }
     join(rows, "\n")
@@ -21,10 +21,10 @@ let patterns: string[] = [
     "missing-marker", "record-2047 omega"
 ]
 
-pn to_codes(text: string) int[] {
+pn to_codes(text: string) int[]^ {
     var codes: array = []
     for index of text {
-        codes.push(ord(text[index]))
+        codes.push(ord(text[index]))^
     }
     codes
 }
@@ -43,8 +43,8 @@ pn naive_search(text: int[], pattern: int[], start: int) int {
     return -1
 }
 
-pn prefix_table(pattern: int[]) int[] {
-    var table: int[] = fill(len(pattern), 0)
+pn prefix_table(pattern: int[]) int[]^ {
+    var table: int[] = fill(len(pattern), 0)^
     var length = 0
     var index = 1
     while (index < len(pattern)) {
@@ -80,9 +80,9 @@ pn kmp_search(text: int[], pattern: int[], start: int) int {
     return -1
 }
 
-pn boyer_moore_search(text: int[], pattern: int[], start: int) int {
+pn boyer_moore_search(text: int[], pattern: int[], start: int) int^ {
     if (len(pattern) == 0) { return start }
-    var occurrences: int[] = fill(256, -1)
+    var occurrences: int[] = fill(256, -1)^
     var index = 0
     while (index < len(pattern) - 1) {
         occurrences[pattern[index]] = index
@@ -107,7 +107,7 @@ pn main() {
     let corpus_codes = to_codes(corpus)
     var pattern_codes: array = []
     for pattern_index of patterns {
-        pattern_codes.push(to_codes(patterns[pattern_index]))
+        pattern_codes.push(to_codes(patterns[pattern_index]))^
     }
     var checksum: int = 0
     let t0 = clock()
@@ -119,7 +119,7 @@ pn main() {
             let naive = naive_search(corpus_codes, pattern_codes[index], start)
             let kmp = kmp_search(corpus_codes, pattern_codes[index], start)
             let boyer_moore = boyer_moore_search(corpus_codes, pattern_codes[index], start)
-            if (naive != kmp or kmp != boyer_moore) {
+            if ((naive != kmp or kmp != boyer_moore)^) {
                 print("text_search: FAIL algorithm disagreement\n")
                 return
             }
@@ -128,7 +128,7 @@ pn main() {
         }
         round = round + 1
     }
-    if (checksum == 91395120) {
+    if ((checksum == 91395120)^) {
         print("text_search: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("text_search: FAIL checksum=" ++ string(checksum) ++ "\n")

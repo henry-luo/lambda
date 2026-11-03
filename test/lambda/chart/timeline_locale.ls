@@ -11,7 +11,7 @@ let axis=t.layout({id:"locale-axis",view:"axis",width:700,height:300,locale:"fr-
     window:{from:"2026-01-01",to:"2026-04-01"},axes:[{tick_unit:"month",format:"MMM YYYY",collision:"none"}],
     events:[{id:"a",at:"2026-02-01"}]},null);
 let french_clock=d.normalize("2026-10-11T13:14:15.025+08:00",{locale:"fr-FR",format:"dddd D MMMM YYYY [à] HH:mm:ss.SSS Z"});
-let formatter=(record,context)=>context.locale ++ ":" ++ context.precision ++ ":" ++ string(record.year);
+let formatter=(record,context)any^ =>context.locale ++ ":" ++ context.precision ++ ":" ++ string(record.year);
 let custom=d.normalize("2026-10",{locale:"fr-FR",formatter:formatter});
 let native=d.from_coordinate(t'2026-10-11T05:14:15.025z'.unix,{locale:"fr-FR",timezone:480,
     format:"dddd D MMMM YYYY [à] HH:mm:ss.SSS Z"});
@@ -35,7 +35,7 @@ let all_keys=["first","previous","next","last","fit","play","pause","resume","st
  ["Arabic dual count",c.message({locale:"ar"},"matches","",{count:2})=="حدثان مطابقان"],
  ["authored plural messages",c.message({locale:"en",messages:{matches:{one:"One result",other:"{count} results"}}},"matches","",{count:1})=="One result"],
  ["authored message overrides translation",c.message({locale:"fr",messages:{first:"Commencer"}},"first","First")=="Commencer"],
- ["callback receives exact raw parameters",c.message({locale:"ar",messages:{matches:(parameters)=>string(parameters.count)}},"matches","",{count:12})=="12"],
+ ["callback receives exact raw parameters",c.message({locale:"ar",messages:{matches:(parameters)any^ =>string(parameters.count)}},"matches","",{count:12})=="12"],
  ["French exact grouping",l.format_number(100000000000000000001.25m,"fr",{group:true})=="100\u202f000\u202f000\u202f000\u202f000\u202f000\u202f001,25"],
  ["Arabic exact grouping",l.format_number(-12345.25m,"ar",{group:true})=="-١٢٬٣٤٥٫٢٥"],
  ["pattern grouping is applied once",l.format_number(1234.25,"fr",{group:true,pattern:",.2f"})=="1\u202f234,25"],

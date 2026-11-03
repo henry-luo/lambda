@@ -12,16 +12,10 @@
  */
 #undef main
 
-#include <sys/time.h>
+#include "bench_clock.h"
 
 extern int printf(const char *, ...);
 extern int c2mir_bench_body(void);
-
-static double c2mir_now_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, 0);
-    return (double) tv.tv_sec * 1000.0 + (double) tv.tv_usec / 1000.0;
-}
 
 int main(void) {
     double started = c2mir_now_ms();

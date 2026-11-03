@@ -7,13 +7,13 @@ import d: .draw
 fn clef_name(clef) => (if (clef.sign=="G") "gClef" else if (clef.sign=="F") "fClef" else "cClef") ++
     (if (clef.octave==0) "" else if (clef.octave==1) "8va" else if (clef.octave == -1) "8vb"
      else if (clef.octave==2) "15ma" else "15mb")
-fn digits(profile, value, y) map^ => c.fold(split(value,""),{width:0.0,shapes:[]},(st,ch)=>(
+fn digits(profile, value, y) map^ => c.fold(split(value,""),{width:0.0,shapes:[]},(st,ch)any^ =>(
     let key=if (ch=="+") "timeSigPlus" else "timeSig"++ch,
     let metric=f.glyph(profile,key)^,
     {width:st.width+metric.advance, shapes:[*st.shapes,d.glyph(profile,key,st.width,y)^]}))
 fn time_signature(profile,meter) map^ {
     let groups=meter.groups or [{beats:meter.beats,unit:meter.unit}];
-    c.fold([for (i,g in groups) {index:i,group:g}],{width:0.0,shapes:[]},(st,row)=>(
+    c.fold([for (i,g in groups) {index:i,group:g}],{width:0.0,shapes:[]},(st,row)any^ =>(
         let top=digits(profile,row.group.beats,1.0)^,
         let bottom=digits(profile,string(row.group.unit),3.0)^,
         let width=max(top.width,bottom.width),

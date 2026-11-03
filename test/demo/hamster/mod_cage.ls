@@ -38,36 +38,36 @@ pub fn starter() => [
     room("room-7","ramp",0,-1,0,1),room("room-8","lookout",0,-2,1),
     room("room-9","sand",1,-2,1),room("room-10","room",1,-1,1),room("room-11","nest",2,-1,1)
 ]
-pub fn port_level(m,side) {
+pub fn port_level(m,side) any^ {
     let local = (side+m.turn)%4;
     if (not contains(entry(m.kind).ports,local)) -9
     else m.level+(if (m.kind == "ramp" and local == 0) 1 else 0)
 }
-pub fn connected(a,b) => if (a == null or b == null or abs(a.x-b.x)+abs(a.z-b.z) != 1) false else (
+pub fn connected(a,b) any^ => if (a == null or b == null or abs(a.x-b.x)+abs(a.z-b.z) != 1) false else (
     let side = if (b.x>a.x) 0 else if (b.z>a.z) 1 else if (b.x<a.x) 2 else 3,
     let level = port_level(a,side),level >= 0 and level == port_level(b,(side+2)%4))
 pub fn neighbors(modules,id,blocked=[]) => (let source = lookup(modules,id),
-    [for (m in modules where connected(source,m) and not contains(blocked,m.id)) m.id])
+    [for (m in modules where ((connected(source,m) and not contains(blocked,m.id)) ^ { false })) m.id])
 pub fn open_side(modules,m,side) => len([for (other in modules where
-    other.x == m.x+directions[side][0] and other.z == m.z+directions[side][1] and connected(m,other)) other]) > 0
+    ((other.x == m.x+directions[side][0] and other.z == m.z+directions[side][1] and connected(m,other)) ^ { false })) other]) > 0
 
 // breadth-first paths carry their predecessor chain; visited IDs bound traversal even in loops.
 fn search(modules,queue,seen,goal,blocked,index=0) {
     if (index >= len(queue)) [] else (
         let path = queue[index],let id = path[last],
         if (id == goal) path else (
-            let fresh = [for (next in neighbors(modules,id,blocked) where not contains(seen,next)) next],
+            let fresh = [for (next in ((neighbors(modules,id,blocked)) ^ { [] }) where ((not contains(seen,next)) ^ { false })) next],
             search(modules,[*queue,*[for (next in fresh) [*path,next]]],[*seen,*fresh],goal,blocked,index+1)))
 }
 pub fn route(modules,from,to,blocked=[]) => if (lookup(modules,from) == null or lookup(modules,to) == null) []
     else search(modules,[[from]],[from],to,blocked)
 fn flood(modules,queue,blocked,index=0) => if (index >= len(queue)) queue else (
-    let fresh = [for (next in neighbors(modules,queue[index],blocked) where not contains(queue,next)) next],
+    let fresh = [for (next in ((neighbors(modules,queue[index],blocked)) ^ { [] }) where ((not contains(queue,next)) ^ { false })) next],
     flood(modules,[*queue,*fresh],blocked,index+1))
 pub fn reachable(modules,id,blocked=[]) => if (lookup(modules,id) == null) [] else flood(modules,[id],blocked)
-pub fn links(modules) => [for (i,a in modules) for (j,b in modules where j>i and connected(a,b)) [a.id,b.id]]
+pub fn links(modules) => [for (i,a in modules) for (j,b in modules where ((j>i and connected(a,b)) ^ { false })) [a.id,b.id]]
 pub fn valid_cell(x,z,level) => x is int and z is int and level is int and abs(x)<=2 and abs(z)<=2 and level>=0 and level<=1
-pub fn can_place(modules,m,ignore="") => entry(m.kind) != null and valid_cell(m.x,m.z,m.level) and
+pub fn can_place(modules,m,ignore="") any^ => entry(m.kind) != null and valid_cell(m.x,m.z,m.level) and
     m.turn is int and m.turn >= 0 and m.turn <= 3 and (m.kind != "ramp" or m.level == 0) and
     len([for (other in modules where other.id != ignore and other.x == m.x and other.z == m.z and other.level == m.level) other]) == 0
 pub fn grid_point(cam,x,y,level) => (let ray = camera.ray(cam,x,y),

@@ -59,7 +59,7 @@ fn player_record(car) => {id: "player", player: true, x: car.x, z: car.z, headin
 
 // ---- the pure step
 fn say(st, text, t, seconds = 2.6) => {*: st, toast: text, toast_until: t + seconds}
-pub fn advance(st, dt, t) {
+pub fn advance(st, dt, t) any^ {
     if (st.paused or dt <= 0.0) {*: st, t: t}
     else {
         let drive = st.started and st.auto == null
@@ -97,7 +97,7 @@ fn wheel_targets(car) {
         target(sc.WHEEL_IDS[k], [car.x + off[0], car.y + off[1], car.z + off[2]],
             t.quaternion_multiply(t.quaternion_multiply(q, u.quat(if (w.front) car.steer else 0.0)), spin_q(car.spin)))]
 }
-fn beacon_target(kind, m, t) {
+fn beacon_target(kind, m, t) any^ {
     let active = m.target != null and ((kind == "pickup" and m.phase == "pickup") or (kind == "drop" and m.phase == "deliver"));
     target("beacon-" ++ kind, if (active) [m.target.x, city.CURB, m.target.z] else [0.0, sc.PARKED_Y, 0.0], u.quat(t * 1.6))
 }
@@ -115,7 +115,7 @@ pn unblocked(scene, camera) {
     if (length < 0.5) { return p }
     let hits = ps.query(scene, [{type: "ray", origin: tg, direction: d, distance: length, groups: {membership: sc.PROPS, filter: sc.STATIC}}])
     let hit = if (hits is array and len(hits) > 0) hits[0] else null
-    if (hit == null or not (hit.distance is number)) { return p }
+    if ((hit == null or not (hit.distance is number))^) { return p }
     let keep = max(1.2, float(hit.distance) - 0.6) / length
     return [tg[0] + d[0] * keep, tg[1] + d[1] * keep, tg[2] + d[2] * keep]
 }
@@ -138,67 +138,67 @@ pn digits(cells, before, after) {
     for (i, row in cells) {
         let a = slice(before, i, i + 1), b = slice(after, i, i + 1)
         if (a != b) {
-            paint(row[index_of(hud.GLYPHS, a)], "opacity", "0")
+            paint(row[index_of(hud.GLYPHS, a)], "opacity", "0")^
             paint(row[index_of(hud.GLYPHS, b)], "opacity", "1")
         }
     }
 }
-fn padded(text, width) => join(fill(max(0, width - len(text)), " "), "") ++ text
-fn deg(a) => numbers.fixed(a * 180.0 / u.PI, 2) ++ "deg"
-fn px(x) => numbers.fixed(x, 2) ++ "px"
+fn padded(text, width) any^ => join(fill(max(0, width - len(text)), " ")^, "") ++ text
+fn deg(a) any^ => numbers.fixed(a * 180.0 / u.PI, 2) ++ "deg"
+fn px(x) any^ => numbers.fixed(x, 2) ++ "px"
 
 pn hud_frame(h, st) {
     let car = st.car
     let kmh = v.speed(car) * 3.6
     let speed = padded(string(int(round(kmh)) ^ { 0 }), 3)
-    digits(h.speed, st.shown.speed, speed)
-    paint(h.needle, "transform", "rotate(" ++ numbers.fixed(-120.0 + 240.0 * u.clamp(kmh / 220.0, 0.0, 1.05), 2) ++ "deg)")
-    paint(h.rpm, "transform", "scaleX(" ++ numbers.fixed(u.clamp(car.rpm / v.SPEC.red_rpm, 0.05, 1.0), 3) ++ ")")
-    paint(h.damage, "transform", "scaleX(" ++ numbers.fixed(car.damage / 100.0, 3) ++ ")")
+    digits(h.speed, st.shown.speed, speed)^
+    paint(h.needle, "transform", "rotate(" ++ numbers.fixed(-120.0 + 240.0 * u.clamp(kmh / 220.0, 0.0, 1.05), 2) ++ "deg)")^
+    paint(h.rpm, "transform", "scaleX(" ++ numbers.fixed(u.clamp(car.rpm / v.SPEC.red_rpm, 0.05, 1.0), 3) ++ ")")^
+    paint(h.damage, "transform", "scaleX(" ++ numbers.fixed(car.damage / 100.0, 3) ++ ")")^
     let gear = v.gear_label(car)
-    if (gear != st.shown.gear) {
+    if ((gear != st.shown.gear)^) {
         for (k, g in hud.GEARS) { if (g == st.shown.gear or g == gear) paint(h.gears[k], "opacity", if (g == gear) "1" else "0") }
     }
     // the map turns so the car always points up
     let turn = car.heading - u.PI
-    paint(h.map, "transform", "rotate(" ++ deg(turn) ++ ") scale(" ++ numbers.fixed(hud.MAP_SCALE, 3) ++ ") translate(" ++ px(0.0 - car.x) ++ ", " ++ px(0.0 - car.z) ++ ")")
-    paint(h.north, "transform", "rotate(" ++ deg(turn) ++ ")")
+    paint(h.map, "transform", "rotate(" ++ deg(turn) ++ ") scale(" ++ numbers.fixed(hud.MAP_SCALE, 3) ++ ") translate(" ++ px(0.0 - car.x) ++ ", " ++ px(0.0 - car.z) ++ ")")^
+    paint(h.north, "transform", "rotate(" ++ deg(turn) ++ ")")^
     let m = st.mission
     let tgt = m.target
     if (tgt != null) {
-        paint(h.map_target, "transform", "translate(" ++ px(tgt.x) ++ ", " ++ px(tgt.z) ++ ")")
+        paint(h.map_target, "transform", "translate(" ++ px(tgt.x) ++ ", " ++ px(tgt.z) ++ ")")^
         let dx = tgt.x - car.x, dz = tgt.z - car.z
         let sx = dx * cos(turn) - dz * sin(turn), sz = dx * sin(turn) + dz * cos(turn)
         let far = sqrt(dx * dx + dz * dz) * hud.MAP_SCALE > hud.MAP_RADIUS - 8.0
-        paint(h.pointer, "transform", "rotate(" ++ deg(math.atan2(sz, sx) + u.PI / 2.0) ++ ")")
-        paint(h.pointer, "opacity", if (far) "1" else "0")
+        paint(h.pointer, "transform", "rotate(" ++ deg(math.atan2(sz, sx) + u.PI / 2.0) ++ ")")^
+        paint(h.pointer, "opacity", if (far) "1" else "0")^
     }
     let timer = if (m.phase == "deliver") padded(string(int(ceil(ms.time_left(m, st.t))) ^ { 0 }), 3) else "   "
-    digits(h.timer, st.shown.timer, timer)
+    digits(h.timer, st.shown.timer, timer)^
     paint(h.toast, "opacity", numbers.fixed(u.clamp((st.toast_until - st.t) * 2.0, 0.0, 1.0), 2))
 }
 // words change only when the situation does
 pn hud_words(h, st) {
     let car = st.car
     if (st.frames % 15 == 0) {
-        words(h.district, city.district(car.x, car.z))
-        words(h.street, city.street(car.x, car.z))
+        words(h.district, city.district(car.x, car.z))^
+        words(h.street, city.street(car.x, car.z))^
     }
-    words(h.look, sc.LOOKS[st.look].label ++ " · " ++ cam.LABELS[st.camera.mode] ++ (if (st.auto != null) " · AUTO" else ""))
+    words(h.look, sc.LOOKS[st.look].label ++ " · " ++ cam.LABELS[st.camera.mode] ++ (if (st.auto != null) " · AUTO" else ""))^
     let m = st.mission
     let text = if (m.phase == "pickup") "Pick up the parcel on " ++ m.target.name
         else if (m.phase == "deliver") "Deliver to " ++ m.target.name else "Press M to pick up a parcel"
-    words(h.mission_text, text)
-    words(h.cash, "$" ++ string(m.cash) ++ (if (m.delivered > 0) "  ·  " ++ string(m.delivered) ++ " delivered" else ""))
-    scene_dom.attr(h.mission, "data-phase", m.phase)
-    paint(h.timer_box, "opacity", if (m.phase == "deliver") "1" else "0")
-    paint(h.map_target, "opacity", if (m.target != null) "1" else "0")
+    words(h.mission_text, text)^
+    words(h.cash, "$" ++ string(m.cash) ++ (if (m.delivered > 0) "  ·  " ++ string(m.delivered) ++ " delivered" else ""))^
+    scene_dom.attr(h.mission, "data-phase", m.phase)^
+    paint(h.timer_box, "opacity", if (m.phase == "deliver") "1" else "0")^
+    paint(h.map_target, "opacity", if (m.target != null) "1" else "0")^
     if (st.toast != "") words(h.toast_text, st.toast)
 }
 pub pn sync(st) {
     let h = st.handles
-    ps.command(h.scene, commands(st, unblocked(h.scene, st.camera)))
-    hud_frame(h, st)
+    ps.command(h.scene, commands(st, unblocked(h.scene, st.camera)))^
+    hud_frame(h, st)^
     hud_words(h, st)
     let gear = v.gear_label(st.car)
     let timer = if (st.mission.phase == "deliver") padded(string(int(ceil(ms.time_left(st.mission, st.t))) ^ { 0 }), 3) else "   "

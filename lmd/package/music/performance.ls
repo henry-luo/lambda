@@ -10,12 +10,12 @@ fn checked_int(value, fallback, low, high, label) int^ {
     int(n)
 }
 fn instrument_rows(score) array^ {
-    let declared=[for (part in score.parts,ins in (if (len(part.midi_instruments or [])==0)
-        [{id:part.instruments[0].id}] else part.midi_instruments)) {*:ins,part:part.id,label:part.label}]
+    let declared=[for (part in score.parts,ins in (((if (len(part.midi_instruments or [])==0)
+        [{id:part.instruments[0].id}] else part.midi_instruments)) ^ { [] })) {*:ins,part:part.id,label:part.label}]
     let explicit=[for (ins in declared where ins.channel!=null) checked_int(ins.channel,1,1,16,"MIDI channel")^-1]
     let valid=c.require(len(declared)<=15 and len(unique(explicit))==len(explicit) and not contains(explicit,9),
         "MIDI instrument channel collision, percussion, or capacity exceeded")^
-    let free=[for (ch in 0 to 15 where ch!=9 and not contains(explicit,ch)) ch]
+    let free=[for (ch in 0 to 15 where ((ch!=9 and not contains(explicit,ch)) ^ { false })) ch]
     let automatic=[for (i,ins in declared where ins.channel==null) i];
     [for (i,ins in declared) (
         let valid_bank=c.require((ins.bank==null or ins.bank==1) and ins.unpitched==null,"unsupported MIDI bank/percussion instrument")^,
@@ -25,15 +25,15 @@ fn instrument_rows(score) array^ {
          pan:checked_int(if (ins.pan==null) null else round((ins.pan+90)*127/180),64,0,127,"instrument pan")^})]
 }
 fn endings(measures) array^ {
-    let result=c.fold(measures,{active:[],rows:[]},(st,m)=>(
+    let result=c.fold(measures,{active:[],rows:[]},(st,m)any^ =>(
         let begins=[for (b in m.barlines where b.ending.type=="start") b.ending],
         let stops=[for (b in m.barlines where b.ending.type=="stop" or b.ending.type=="discontinue") b.ending],
-        let active=if (len(begins)==0) st.active else [for (s in split(begins[0].number,",")) checked_int(float(trim(s)),1,1,16,"ending number")^],
+        let active=if (len(begins)==0) st.active else [for (s in ((split(begins[0].number,",")) ^ { [] })) checked_int(float(trim(s)),1,1,16,"ending number")^],
         {active:if (len(stops)>0) [] else active,rows:[*st.rows,active]}))^;
     result.rows
 }
 fn repeats(measures) array^ {
-    let result=c.fold(measures,{open:null,pairs:[]},(st,m)=>(
+    let result=c.fold(measures,{open:null,pairs:[]},(st,m)any^ =>(
         let forward=[for (b in m.barlines where b.repeat=="forward") b],
         let backward=[for (b in m.barlines where b.repeat=="backward") b],
         let begin=if (len(forward)>0) m.index else st.open,
@@ -68,7 +68,7 @@ fn bpm_tempo(at,bpm) map^ {
     let valid=c.require(c.finite(bpm) and bpm>0,"nonpositive tempo")^;
     tl.tempo(at,int(round(60000000.0/bpm)))
 }
-fn direction_rows(score,path) array => [for (visit in path,part in score.parts,dir in part.measures[visit.measure].directions)
+fn direction_rows(score,path) array^ => [for (visit in path,part in score.parts,dir in part.measures[visit.measure].directions)
     {*:dir,part:part.id,at:t.add(visit.at,dir.onset)^,visit:visit}]
 fn validate_direction(dir) bool^ {
     let navigation=["dacapo","dalsegno","tocoda","fine","segno","coda"]
@@ -81,8 +81,8 @@ fn validate_direction(dir) bool^ {
     true
 }
 fn velocity(directions,part,at) int^ {
-    let prior=[for (d in directions where d.part==part and t.compare(d.at,at)<=0 and
-        (d.sound.dynamics!=null or len([for (e in d.entries where e.kind=="dynamics") e])>0)) d]
+    let prior=[for (d in directions where ((d.part==part and t.compare(d.at,at)<=0 and
+        (d.sound.dynamics!=null or len([for (e in d.entries where e.kind=="dynamics") e])>0)) ^ { false })) d]
     let dir=prior[len(prior)-1]
     let mark=[for (e in dir.entries where e.kind=="dynamics") e.value][0]
     let raw=if (dir.sound.dynamics!=null) round(float(dir.sound.dynamics)*90/100) else if (mark==null) 80 else velocities[mark]
@@ -101,12 +101,12 @@ fn note_rows(score,path,instruments,directions) array^ {
         {id:e.id,pass:visit.pass,part:part.id,voice:e.voice,staff:e.staff,channel:ins.channel,key:key,rest:e.rest,
          at:at,duration:e.duration,velocity:velocity(directions,part.id,at)^,ties:e.notation.ties})]
 }
-fn tie_key(e) => e.part++":"++e.voice++":"++string(e.staff)++":"++string(e.channel)++":"++string(e.key)
+fn tie_key(e) any^ => e.part++":"++e.voice++":"++string(e.staff)++":"++string(e.channel)++":"++string(e.key)
 fn expression_warnings(score) array => [
-    *[for (e in score.events where len(e.notation.articulations)>0 or len(e.notation.slurs)>0)
+    *[for (e in score.events where ((len(e.notation.articulations)>0 or len(e.notation.slurs)>0) ^ { false }))
         c.diagnostic("playback-expression","articulation and slur expression is not synthesized",e.id)],
     *[for (part in score.parts,m in part.measures,dir in m.directions,e in dir.entries where
-        not contains(["dynamics","metronome","rehearsal"],e.kind))
+        ((not contains(["dynamics","metronome","rehearsal"],e.kind)) ^ { false }))
         c.diagnostic("playback-expression","direction does not alter playback: "++e.kind,part.id)]]
 fn tie_step(st,e) map^ {
     if (e.rest) st else {
@@ -134,7 +134,7 @@ pub fn build(score,options = {}) map^ {
     let notes=tl.ordered(note_rows(score,path,instruments,dirs)^)
     let tied=c.fold(notes,{pending:{},notes:[]},tie_step)^
     let complete=c.require(all([for (key,n in tied.pending) n==null]),"unclosed performed tie")^
-    let collisions=c.require(all([for (i,a in tied.notes) all([for (b in slice(tied.notes,i+1,len(tied.notes)) where
+    let collisions=c.require(all([for (i,a in tied.notes) all([for (b in ((slice(tied.notes,i+1,len(tied.notes))) ^ { [] }) where
         a.channel==b.channel and a.key==b.key) t.compare(t.add(a.at,a.duration)^,b.at)<=0 or t.compare(t.add(b.at,b.duration)^,a.at)<=0])]),
         "same-key overlaps require independent MIDI channels")^
     let changes=if (options.tempo!=null) [bpm_tempo(t.ZERO,options.tempo)^] else [for (dir in dirs)

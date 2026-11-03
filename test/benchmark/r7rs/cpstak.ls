@@ -4,7 +4,7 @@
 // we run the direct tak variant twice to approximate cpstak workload.
 // Adapted from r7rs-benchmarks/src/cpstak.scm
 
-pn tak(x, y, z) {
+fn tak(x, y, z) any^ {
     if (y >= x) {
         return z
     }
@@ -14,7 +14,7 @@ pn tak(x, y, z) {
     return tak(a, b, c)
 }
 
-pn benchmark() {
+fn benchmark() any^ {
     var result = tak(18, 12, 6)
     result = tak(18, 12, 6)
     return result
@@ -24,7 +24,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 7) {
+    if ((result == 7)^) {
         print("cpstak: PASS\n")
     } else {
         print("cpstak: FAIL result=")

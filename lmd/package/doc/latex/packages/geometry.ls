@@ -4,31 +4,31 @@ import util: ~~.util
 let DIMENSION_KEYS = ["margin", "left", "right", "top", "bottom", "inner", "outer",
     "paperwidth", "paperheight"]
 
-fn invalid_dimension(raw) {
+fn invalid_dimension(raw) any^ {
     let css = util.css_dimension(raw)
     if (css == null) true
     else ends_with(css, "%") or ends_with(css, "em") or ends_with(css, "ex")
 }
 
-pub fn invalid_options(opts) {
+pub fn invalid_options(opts) any^ {
     let dimensions = [for (key in DIMENSION_KEYS
-        where opts[key] != null and invalid_dimension(opts[key])) key]
+        where ((opts[key] != null and invalid_dimension(opts[key])) ^ { false })) key]
     let papers = [for (key in ["a4paper", "a5paper", "letterpaper", "legalpaper"]
-        where util.option_enabled(opts[key])) key]
+        where ((util.option_enabled(opts[key])) ^ { false })) key]
     dimensions ++
         (if (len(papers) > 1) ["paper"] else []) ++
         (if (util.option_enabled(opts.landscape) and util.option_enabled(opts.portrait))
             ["orientation"] else [])
 }
 
-fn paper_size(opts) {
+fn paper_size(opts) any^ {
     if (util.option_enabled(opts.a5paper)) ["148mm", "210mm"]
     else if (util.option_enabled(opts.letterpaper)) ["8.5in", "11in"]
     else if (util.option_enabled(opts.legalpaper)) ["8.5in", "14in"]
     else ["210mm", "297mm"]
 }
 
-pub fn stylesheet(opts) {
+pub fn stylesheet(opts) any^ {
     if (opts == null) ""
     else if (len(invalid_options(opts)) > 0) ""
     else {

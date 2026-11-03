@@ -9,13 +9,13 @@ pn tune31_shared_increment(var values: int[]) any {
 
 pn tune31_share_then_increment(var counter: Counter) any {
     let snapshot = counter
-    tune31_shared_increment(counter.values)
+    tune31_shared_increment(counter.values)^
     print(counter.values[0]); print(" ")
     print(snapshot.values[0]); print("\n")
 }
 
 pn main() {
     var counter: Counter = {values: [0]}
-    tune31_share_then_increment(counter)
+    tune31_share_then_increment(counter)^
     print(counter.values[0]); print("\n")
 }

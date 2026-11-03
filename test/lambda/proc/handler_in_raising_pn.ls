@@ -14,7 +14,7 @@ pn stored(url) map^ {
 pn both_arms() map^ {
     var failure = null
     var value = null
-    boom() ^ { failure = ^ } ~ { value = ~ }
+    { let __error_outcome_1 = boom() ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { value = ~ } } }
     {caught: failure is error, value: value}
 }
 pn block_body() map^ {
@@ -29,9 +29,9 @@ pn fresh() int^ {
     0
 }
 pn main() {
-    let a: map | error = stored("test/no/such/file.css")
-    let b: map | error = both_arms()
-    let c: map | error = block_body()
-    let d: int | error = fresh();
+    let a: map^ = stored("test/no/such/file.css")
+    let b: map^ = both_arms()
+    let c: map^ = block_body()
+    let d: int^ = fresh();
     [a, b, c, if (d is error) d.message else d]
 }

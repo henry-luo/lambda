@@ -68,7 +68,7 @@ let t8 = counter_base(1) + counter_base(2) + counter_base(3)
 // expect: 306 (101 + 102 + 103)
 
 // Test 9: Closure passed to higher-order function
-fn apply_twice(f, x) => f(f(x))
+fn apply_twice(f, x) any^ => f(f(x))
 let add3 = make_adder(3)
 let t9 = apply_twice(add3, 10)
 // expect: 16 (10 + 3 + 3)

@@ -10,16 +10,16 @@ import text: lambda.chart.text
 import time_map: .time_map
 import series: .series
 
-fn unsupported(value) => if (value is element or value is map or value is fn) true
+fn unsupported(value) any^ => if (value is element or value is map or value is fn) true
     else if (value is array) any(value |> unsupported(~)) else false
 
-fn range_path(plan, item, offset = 0.0) {
+fn range_path(plan, item, offset = 0.0) any^ {
     let start=if (item.start!=null) time_map.fraction(plan.time_map,item.start.value) else 0.0;
     let end=if (item.end!=null) time_map.fraction(plan.time_map,item.end.value) else 1.0;
     svg.line_path([for (index in 0 to 64) coordinate.project(plan.path,util.lerp(max(0,start),min(1,end),index/64.0),offset).point])
 }
 fn label(x,y,value,font,attrs = {}) => <text x:x,y:y,*:text.attributes(font),*:attrs,c.text(value)>
-fn lane_path(plan, offset) => svg.line_path([for (index in 0 to 64) coordinate.project(plan.path,index/64.0,offset).point])
+fn lane_path(plan, offset) any^ => svg.line_path([for (index in 0 to 64) coordinate.project(plan.path,index/64.0,offset).point])
 fn group_offset(plan, group) {
     let row=(plan.lanes |: ~.group==group)[0];
     if (group==null or row==null) 0.0 else row.offset
@@ -61,7 +61,7 @@ fn chronology_axis(plan, model, skin) {
     >
 }
 
-pub fn render(plan, snapshot = null, options = {}) {
+pub fn render(plan, snapshot = null, options = {}) any^ {
     let spec=plan.spec;
     let skin=theme.tokens(spec,snapshot);
     let policy=c.text(c.option(options,"unsupported","error"));
@@ -78,7 +78,7 @@ pub fn render(plan, snapshot = null, options = {}) {
         <defs <clipPath id:clip,<rect x:plan.box.x,y:plan.box.y,width:plan.box.width,height:plan.box.height>>>,
         <rect x:0,y:0,width:plan.width,height:plan.height,fill:skin.background>,
         <g class:"lambda-timeline-plot",
-            *[for (row in plan.lanes where len(plan.groups)>0) <path class:"lambda-timeline-lane",d:lane_path(plan,row.offset),
+            *[for (row in plan.lanes where ((len(plan.groups)>0) ^ { false })) <path class:"lambda-timeline-lane",d:lane_path(plan,row.offset),
                 'data-timeline-group':row.group,'data-timeline-subgroup':row.subgroup,fill:"none",stroke:skin.border,'stroke-width':1,opacity:0.6>];
             *[for (group in plan.groups,
                 let point=coordinate.project(plan.path,0,group.offset).point)

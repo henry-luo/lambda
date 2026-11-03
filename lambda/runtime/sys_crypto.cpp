@@ -7,11 +7,11 @@
 // unguessable (a PKCE verifier or an OAuth state may rest on it).
 
 #include "io_file_search.hpp"
+#include "sys_crypto.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uuid.h"
+#include "../../lib/digest.h"
 
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/entropy.h>
 #include <mbedtls/md.h>
 #include <string.h>
 
@@ -58,25 +58,15 @@ extern "C" Item fn_hash(Item value, Item algorithm) {
     return result ? (Item){.item = x2it(result)} : ItemError;
 }
 
-// n unguessable bytes; false when the OS gives no entropy
-static bool crypto_random(unsigned char* out, size_t n) {
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context drbg;
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&drbg);
-    static const char personal[] = "lambda uuid";
-    bool ok = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
-                                    (const unsigned char*)personal, sizeof(personal) - 1) == 0 &&
-              mbedtls_ctr_drbg_random(&drbg, out, n) == 0;
-    mbedtls_ctr_drbg_free(&drbg);
-    mbedtls_entropy_free(&entropy);
-    return ok;
+// use the shared entropy provider so restricted builds fail closed too
+bool crypto_random(unsigned char* out, size_t n) {
+    return crypto_random_bytes(out, n);
 }
 
 // uuid(): a random (version 4) UUID; a procedure, since each call differs
 extern "C" Item pn_uuid(void) {
     uint8_t bytes[16];
-    if (!crypto_random(bytes, sizeof(bytes))) {
+    if (!crypto_random_bytes(bytes, sizeof(bytes))) {
         return io_fs_error(ERR_INTERNAL_ERROR, "uuid: no entropy source");
     }
     char text[UUID_STR_LEN];

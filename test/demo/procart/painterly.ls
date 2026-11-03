@@ -42,8 +42,8 @@ pn repaint(st) map^ {
             {label:"Directions",value:if (plan.recipe.oriented) P.ANGLES else 1}]}}
 }
 
-pn painted(st) map {
-    let next: map | error = repaint(st)
+pn painted(st) map^ {
+    let next: map^ = repaint(st)
     if (next is error) {*:st,note:"Cannot paint this photo: " ++ next.message} else next
 }
 

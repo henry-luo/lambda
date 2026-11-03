@@ -3,11 +3,11 @@ import archive: lambda.archive
 // M1 acceptance: pages archive over file: URLs into snapshot.zip with their
 // resources, a readable page, Markdown and search text; the record is the
 // truth and the index a cache (AR5v2, AR7, AR10).
-fn member(zip, name) {
+fn member(zip, name) any^ {
     let hits = [for (m in content(zip)^ where m.name == name) m];
     if (len(hits) == 0) null else hits[0]
 }
-fn text_member(zip, name) => (let m = member(zip, name), if (m == null) null else input(m, 'text')^)
+fn text_member(zip, name) any^ => (let m = member(zip, name), if (m == null) null else input(m, 'text')^)
 
 pn collect() {
     var stages = []

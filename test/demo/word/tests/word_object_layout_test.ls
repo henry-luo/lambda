@@ -34,8 +34,8 @@ let rotated = model.execute(flipped,"object.transform",{width:160,height:100,rot
 contains(attrs_get(image.selected(rotated).node.attrs,'style'),"rotate(30deg) scale(-1,1)")
 let inline = model.execute(rotated,"object.layout",{values:{wrap:"inline"}})^
 css.css_get(attrs_get(image.selected(inline).node.attrs,'style'),"left")==null
-model.execute(shape,"object.layout",{values:{distance:-1}}) ^ {true} ~ {false}
-model.execute(base,"object.position",{preset:"top-left",frame:frame}) ^ {true} ~ {false}
+match (model.execute(shape,"object.layout",{values:{distance:-1}}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"object.position",{preset:"top-left",frame:frame}) ^ { ^ }) { case error: true default: false }
 let source = image.selected(shape).node
 let pair = model.open_editor(node('doc',[node('p',[source,text("First anchor stays")]),node('p',[source,text("Second anchor stays")])]))
 let boxes = [{path:[0,0],x:20,y:30,width:160,height:100,object_width:160,object_height:100},
@@ -50,15 +50,15 @@ files.restore(files.archive(grouped.doc,"Group"))^.doc==grouped.doc
 let resized = model.execute(grouped,"object.transform",{width:510,height:300,rotation:90})^
 let ungrouped = model.execute(resized,"object.ungroup")^
 len(image.images(ungrouped.doc))==2
-all([for (e in image.images(ungrouped.doc)) shapes.settings(e.node).width==240 and shapes.settings(e.node).height==150])
-all([for (e in image.images(ungrouped.doc)) transform.rotation(e.node)==90])
+all([for (e in image.images(ungrouped.doc)^) shapes.settings(e.node).width==240 and shapes.settings(e.node).height==150])
+all([for (e in image.images(ungrouped.doc)^) transform.rotation(e.node)==90])
 model.execute(ungrouped,"edit.undo")^.doc==resized.doc
-model.execute(grouped,"object.transform",{width:510,height:200,rotation:0}) ^ {true} ~ {false}
-model.execute(pair,"object.group",{paths:[[0,0]],boxes:boxes}) ^ {true} ~ {false}
-model.execute(shape,"object.ungroup") ^ {true} ~ {false}
+match (model.execute(grouped,"object.transform",{width:510,height:200,rotation:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(pair,"object.group",{paths:[[0,0]],boxes:boxes}) ^ { ^ }) { case error: true default: false }
+match (model.execute(shape,"object.ungroup") ^ { ^ }) { case error: true default: false }
 let flipped_group = model.execute(grouped,"object.flip",{axis:"x"})^
 let unflipped = model.execute(flipped_group,"object.ungroup")^
-all([for (e in image.images(unflipped.doc)) layout.settings(e.node).flip_x])
+all([for (e in image.images(unflipped.doc)^) layout.settings(e.node).flip_x])
 let raised = model.execute(edit_set_selection(pair,node_selection([0,0])),"object.layer",{action:"front"})^;
 (layout.settings(node_at(raised.doc,[0,0])).z>layout.settings(node_at(raised.doc,[1,0])).z)
 let lowered = model.execute(raised,"object.layer",{action:"back"})^;
@@ -90,11 +90,11 @@ let back_front = model.execute(both_back,"object.layer",{action:"front"})^;
 (layout.layer(layout.settings(node_at(back_front.doc,[1,0])))>layout.layer(layout.settings(node_at(back_front.doc,[0,0]))))
 let copy_layout = controller.clipboard_result(placed,"copy",outcome.model_applied(false,false,false,"",placed.selection,placed.model_revision))
 layout.settings(image.images(edit_exec(base,edit_cmd_paste_html(copy_layout.clipboard_html,"" )).doc)[0].node)==layout.settings(image.selected(placed).node)
-model.execute(placed,"object.layer",{action:"bogus"}) ^ {true} ~ {false}
-model.execute(placed,"object.flip",{axis:"bogus"}) ^ {true} ~ {false}
-model.execute(shape,"object.position",{preset:"bogus",frame:frame}) ^ {true} ~ {false}
+match (model.execute(placed,"object.layer",{action:"bogus"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(placed,"object.flip",{axis:"bogus"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(shape,"object.position",{preset:"bogus",frame:frame}) ^ { ^ }) { case error: true default: false }
 layout.settings(node_attrs('img',[{name:layout.key,value:"{\"wrap\":\"bogus\"}"}],[]))==layout.defaults
 groups.settings(node_attrs('img',[{name:groups.key,value:"{\"items\":[{},{}]}"}],[]))==null
-model.execute(grouped,"object.transform",{width:34,height:20,rotation:0}) ^ {true} ~ {false}
+match (model.execute(grouped,"object.transform",{width:34,height:20,rotation:0}) ^ { ^ }) { case error: true default: false }
 let smallest = transform.gesture_value({*:transform.settings(image.selected(grouped).node),handle:"se",x:0,y:0,zoom:1},-10000,-10000)
 len(image.images(model.execute(model.execute(grouped,"object.transform",smallest)^,"object.ungroup")^.doc))==2

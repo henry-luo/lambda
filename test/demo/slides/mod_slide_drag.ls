@@ -34,11 +34,11 @@ pub pn preview(owner,st,x,y,tick=false) {
     let target = if (inside) slot-(if (slot>drag.from) 1 else 0) else null
     let line = if (slot<len(boxes)) boxes[slot].y else boxes[last].y+boxes[last].height
     let panel = dom.bounding_box(node(owner,"slide-navigator"))
-    u.style(node(owner,"slide-drop-marker"),"top",c.px(max(box.y,min(box.y+box.height-3.0,line))-panel.y))
-    u.show(owner,"slide-drop-marker",inside)
-    u.attr(thumbnail(owner,drag.from),"data-slide-dragging",true)
+    u.style(node(owner,"slide-drop-marker"),"top",c.px(max(box.y,min(box.y+box.height-3.0,line))-panel.y))^
+    u.show(owner,"slide-drop-marker",inside)^
+    u.attr(thumbnail(owner,drag.from),"data-slide-dragging",true)^
     u.attr(owner,"data-slide-reordering",true)
-    u.attr(owner,"data-slide-drop",c.value(target,-1))
+    u.attr(owner,"data-slide-drop",c.value(target,-1))^
     u.text(owner,"status",if (inside) "Move slide " ++ string(drag.from+1) ++ " to position " ++ string(target+1) ++ ". Escape cancels."
         else "Release outside the Slides panel to cancel.")
     var token = drag.token
@@ -57,17 +57,17 @@ pub pn finish(owner,st,cancel=false) {
     let drag = st.slide_drag
     if (drag==null) { return st }
     if (drag.token>0) dom.cancel_frame(owner,drag.token)
-    u.show(owner,"slide-drop-marker",false)
+    u.show(owner,"slide-drop-marker",false)^
     u.attr(owner,"data-slide-reordering",false)
     u.attr(owner,"data-slide-drop",-1)
-    u.attr(thumbnail(owner,drag.from),"data-slide-dragging",false)
-    capture.release(node(owner,"thumbnails"),drag)
+    u.attr(thumbnail(owner,drag.from),"data-slide-dragging",false)^
+    capture.release(node(owner,"thumbnails"),drag)^
     var next = {*:st,slide_drag:null}
     if (cancel or (drag.active and drag.to==null)) { return next }
     if (not drag.active or drag.to==drag.from) { return m.select_slide(next,drag.from) }
-    m.reorder_slide(next,drag.from,drag.to) ^ { next = {*:next,error:^.message} } ~ {
+    { let __error_outcome_1 = m.reorder_slide(next,drag.from,drag.to) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,error:__error_outcome_1.message} } else match __error_outcome_1 { case any {
         next = {*:~,status:"Slide moved to position " ++ string(drag.to+1) ++ "."}
-    }
+    } } }
     return next
 }
 

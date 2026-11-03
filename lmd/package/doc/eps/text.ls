@@ -18,13 +18,13 @@ pub pn dispatch(var m, op, args) int^ {
     let bytes = obj.values(m, args[len(args) - 1])^
     let glyphs = [for (byte in bytes) character(m, byte)^]
     let prefix = string(font.dictionary.FID.id) ++ ":"
-    let missing = unique([for (byte in bytes where not (prefix ++ string(byte) at m.text_metrics)) byte])
+    let missing = unique([for (byte in bytes where ((not (prefix ++ string(byte) at m.text_metrics)) ^ { false })) byte])
     if (len(missing) > 0) {
         let metrics = radiant.measure_text([for (byte in missing)
             {text: character(m, byte)^, font: {font_family: font.resource.family, font_size: 1000,
                 font_weight: if (font.resource.weight == "bold") 700 else 400, font_style: font.resource.style}}], null)
         let measured = obj.require(m, metrics is array and len(metrics) == len(missing), "invalidfont: glyph measurement failed")^
-        for (i in 0 to (len(missing) - 1)) { m.text_metrics[prefix ++ string(missing[i])] = metrics[i].width }
+        for (i in 0 to (len(missing) - 1)) ({ m.text_metrics[(prefix ++ string(missing[i]))^] = metrics[i].width })^
     }
     var positions = []
     var advance = 0.0
@@ -32,7 +32,7 @@ pub pn dispatch(var m, op, args) int^ {
     var dy = 0.0
     let extra = if (op == "ashow") [args[0], args[1]] else if (op == "awidthshow") [args[3], args[4]] else [0.0, 0.0]
     for (i in 0 to (len(bytes) - 1)) {
-        push(positions, {x: advance, dx: dx, dy: dy})
+        push(positions, {x: advance, dx: dx, dy: dy})^
         advance = advance + m.text_metrics[prefix ++ string(bytes[i])]
         dx = dx + extra[0]; dy = dy + extra[1]
         if ((op == "widthshow" or op == "awidthshow") and bytes[i] == args[2]) {
@@ -41,7 +41,7 @@ pub pn dispatch(var m, op, args) int^ {
     }
     let matrix = font.matrix
     let width = [matrix[0] * advance + dx, matrix[1] * advance + dy]
-    if (op == "stringwidth") { obj.push_operand(m, width[0]); obj.push_operand(m, width[1]); return 0 }
+    if (op == "stringwidth") { obj.push_operand(m, width[0])^; obj.push_operand(m, width[1])^; return 0 }
     let origin = gfx.current_point(m)^
     if (len(glyphs) > 0) {
         // explicit per-glyph origins prevent SVG kerning/ligatures from changing PostScript advances.
@@ -52,7 +52,7 @@ pub pn dispatch(var m, op, args) int^ {
                 font.resource.family, 1000, m.graphics.path.fill_color, glyphs[i],
                 {'font-weight': font.resource.weight, 'font-style': font.resource.style,
                  'xml:space': "preserve", style: "font-kerning:none;font-variant-ligatures:none"})]
-        push(m.draws, {node: <g for (node in nodes) node>, matrix: m.graphics.ctm, clips: m.graphics.clips})
+        push(m.draws, {node: <g for (node in nodes) node>, matrix: m.graphics.ctm, clips: m.graphics.clips})^
     }
     let moved = gfx.build_path(m, "moveto", [origin[0] + width[0], origin[1] + width[1]])^
     return 0

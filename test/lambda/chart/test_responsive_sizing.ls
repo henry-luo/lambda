@@ -1,10 +1,10 @@
 import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 
-fn descendants(node, tag) {
+fn descendants(node, tag) any^ {
     if (not (node is element)) [] else [
         for (item in [node] where name(item) == tag) item,
-        for (child in content(node)) for (item in descendants(child, tag)) item]
+        for (child in ((content(node)) ^ { [] })) for (item in ((descendants(child, tag)) ^ { [] })) item]
 }
 let points = {padding: 0, mark: {kind: "point"}, data: [{x: 0, y: 0}, {x: 10, y: 10}], encoding: {
     x: {field: "x", dtype: "quantitative", axis: null}, y: {field: "y", dtype: "quantitative", axis: null}}};

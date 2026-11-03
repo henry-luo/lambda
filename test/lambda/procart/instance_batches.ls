@@ -4,7 +4,7 @@ import s: lambda.scene3d
 let identity=[1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0];
 fn parts(size) array => [for (i in 0 to (size-1))
     {id:"leaf-"++string(i),geometry:"shared",color:"#ffffff",opacity:1.0,kind:"tree",role:"leaf",surface:null,matrix:identity}];
-fn check(size) bool {
+fn check(size) bool^ {
     let original=if (size==0) [] else parts(size);
     let meshes=scene.meshes({parts:original},{'cast-shadow':false});
     len(meshes)==int(ceil(float(size)/float(model.INSTANCE_LIMIT))) and

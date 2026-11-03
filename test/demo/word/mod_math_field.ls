@@ -17,7 +17,7 @@ let operators = "+-=<>,;:!|"
 
 // --- source → tokens --------------------------------------------------------
 // tokens keep character spans so environments can be copied verbatim.
-fn scan_step(s,x) {
+fn scan_step(s,x) any^ {
     if (s.name!=null and is_letter(x.c)) {*:s,name:s.name ++ x.c}
     else if (s.name=="") {*:s,name:null,word:false,out:[*s.out,{kind:"sym",v:"\\" ++ x.c,s:s.at,e:x.j+1}]}
     else {
@@ -38,11 +38,11 @@ fn scan(chars) {
 // --- tokens → tree ----------------------------------------------------------
 fn is_tok(t,kind,v) => t!=null and t.kind==kind and t.v==v
 fn skip_spaces(tok,i) => if (i<len(tok) and tok[i].kind=="space") skip_spaces(tok,i+1) else i
-fn env_end(tok,i,depth) => if (i>=len(tok)) null
+fn env_end(tok,i,depth) any^ => if (i>=len(tok)) null
     else if (is_tok(tok[i],"cmd","begin")) env_end(tok,i+1,depth+1)
     else if (is_tok(tok[i],"cmd","end")) (if (depth==1) close_brace(tok,i+1) else env_end(tok,i+1,depth-1))
     else env_end(tok,i+1,depth)
-fn close_brace(tok,i) => if (i>=len(tok)) null else if (is_tok(tok[i],"char","}")) i else close_brace(tok,i+1)
+fn close_brace(tok,i) any^ => if (i>=len(tok)) null else if (is_tok(tok[i],"char","}")) i else close_brace(tok,i+1)
 fn delimiter_text(t) => if (t.kind=="cmd") "\\" ++ t.v else t.v
 
 // a mandatory argument: a braced row or one item.
@@ -141,12 +141,12 @@ fn valid(row,i) => i==0 or i>=len(row) or row[i].k!="script"
 fn letter_command(t) => len(t)>1 and (starts_with(t,"\\") ^ { false }) and is_letter(slice(t,1,2) ^ { "" })
 fn rows_of(item) => item.rows or []
 fn key(path,index) => join([for (p in path) string(p)],",") ++ ":" ++ string(index)
-fn marker(path,i,opts) =>
+fn marker(path,i,opts) any^ =>
     if (opts.caret!=null and opts.caret.index==i and opts.caret.path==path) caret_mark
     else if (opts.marks!=null and valid(opts.row_of(path),i)) "\\lambdamark{" ++ string(opts.marks[key(path,i)]) ++ "}"
     else ""
-fn ser_item(item,row,i,path,opts) {
-    let r = (k) => ser_row(item.rows[k],[*path,i,k],opts);
+fn ser_item(item,row,i,path,opts) any^ {
+    let r = (k) any^ => ser_row(item.rows[k],[*path,i,k],opts);
     if (item.k=="char") item.t
     else if (item.k=="cmd") item.t ++ (if (letter_command(item.t)) " " else "")
     else if (item.k=="pending") "\\mathrm{\\backslash " ++ item.t ++ "}"
@@ -166,13 +166,13 @@ pub fn source(root) => ser_row(root,[],{caret:null,marks:null})
 pub fn source_with_caret(root,caret) => ser_row(root,[],{caret:caret,marks:null})
 
 // --- caret slots --------------------------------------------------------------
-pub fn row_at(root,path) => if (len(path)==0) root else row_at(root[path[0]].rows[path[1]],slice(path,2,len(path)))
+pub fn row_at(root,path) any^ => if (len(path)==0) root else row_at(root[path[0]].rows[path[1]],slice(path,2,len(path)))
 // slots in reading order: before item i, inside its rows, then after it.
 pub fn positions(row,path=[]) => [for (i in 0 to len(row)) for (p in [
     *(if (valid(row,i)) [{path:path,index:i}] else []),
-    *(if (i<len(row)) [for (k,sub in rows_of(row[i])) for (q in positions(sub,[*path,i,k])) q] else [])]) p]
+    *(if (i<len(row)) [for (k,sub in ((rows_of(row[i])) ^ { [] })) for (q in ((positions(sub,[*path,i,k])) ^ { [] })) q] else [])]) p]
 fn same(a,b) => a.index==b.index and a.path==b.path
-fn rank(ps,caret) => [for (k,p in ps where same(p,caret)) k][0]
+fn rank(ps,caret) => [for (k,p in ps where ((same(p,caret)) ^ { false })) k][0]
 // a caret produced by an edit may sit before a script; move it to the next real slot.
 pub fn settle(root,caret) {
     let ps = positions(root)
@@ -180,7 +180,7 @@ pub fn settle(root,caret) {
     if (exact!=null) caret else [for (p in ps where p.path==caret.path and p.index>caret.index) p][0] or ps[last]
 }
 // left/right/home/end; null means the caret leaves the equation.
-pub fn move(root,caret,dir) {
+pub fn move(root,caret,dir) any^ {
     let ps = positions(root)
     let k = rank(ps,caret);
     if (dir=="left") (if (k==0) null else ps[k-1])
@@ -191,8 +191,8 @@ pub fn move(root,caret,dir) {
 }
 
 // --- geometry -------------------------------------------------------------------
-fn numbers(text) => [for (part in split(replace(replace(text,","," "),")"," ")," ") where trim(part)!="") float(part) ^ { 0 }]
-fn transform_of(text,f) {
+fn numbers(text) => [for (part in ((split(replace(replace(text,","," "),")"," ")," ")) ^ { [] }) where trim(part)!="") float(part) ^ { 0 }]
+fn transform_of(text,f) any^ {
     let t = trim(text or "");
     if (starts_with(t,"translate(")) (let v=numbers(slice(t,10,len(t))), {*:f,x:f.x+f.sx*v[0],y:f.y+f.sy*(v[1] or 0)})
     else if (starts_with(t,"scale(")) (let v=numbers(slice(t,6,len(t))), {*:f,sx:f.sx*v[0],sy:f.sy*(v[1] or v[0])})
@@ -201,24 +201,24 @@ fn transform_of(text,f) {
 fn marks_in(el,f) => if (not (el is element)) []
     else if (name(el)=='line' and el.class=="math-edit-mark")
         [{id:int(el["data-mark"]),x:f.x,top:f.y+f.sy*float(el.y1),bottom:f.y+f.sy*float(el.y2)}]
-    else (let g=transform_of(el.transform,f), [for (c in el) for (m in marks_in(c,g)) m])
+    else (let g=transform_of(el.transform,f), [for (c in el) for (m in ((marks_in(c,g)) ^ { [] })) m])
 // every slot's caret line, in CSS px from the formula's top-left corner.
 pub fn geometry(root,options) array^ {
     let ps = positions(root)
     let ids = map([for (k,p in ps) for (part in [key(p.path,p.index),k]) part])
-    let src = ser_row(root,[],{caret:null,marks:ids,row_of:(path)=>row_at(root,path)})
+    let src = ser_row(root,[],{caret:null,marks:ids,row_of:(path)any^ =>row_at(root,path)})
     let measured = mathdoc.render_box(parse(src,{type:"math",flavor:"latex"})^,options)^
     let px = options.font_size/1000.0
     let found = marks_in(measured.element,{x:0,y:0,sx:1,sy:1});
     [for (m in found) {caret:ps[m.id],x:m.x*px,top:m.top*px+measured.height*options.font_size,
         bottom:m.bottom*px+measured.height*options.font_size}]
 }
-pub fn caret_box(geometry,caret) => [for (g in geometry where same(g.caret,caret)) g][0]
+pub fn caret_box(geometry,caret) => [for (g in geometry where ((same(g.caret,caret)) ^ { false })) g][0]
 fn outside(v,lo,hi) => if (v<lo) lo-v else if (v>hi) v-hi else 0
-pub fn nearest(geometry,x,y) => sort(geometry,(g)=>abs(g.x-x)+2*outside(y,g.top,g.bottom))[0].caret
+pub fn nearest(geometry,x,y) any^ => sort(geometry,(g)any^ =>abs(g.x-x)+2*outside(y,g.top,g.bottom))[0].caret
 // the row an enclosing structure stacks above or below this one: numerator/denominator,
 // superscript/subscript, root index/body.
-fn stacked_row(root,path,down) {
+fn stacked_row(root,path,down) any^ {
     if (len(path)==0) null else {
         let owner = slice(path,0,len(path)-2)
         let i = path[len(path)-2]
@@ -230,10 +230,10 @@ fn stacked_row(root,path,down) {
     }
 }
 // up/down follow the structure first, then the nearest slot wholly above or below.
-pub fn vertical(root,geometry,caret,down) {
+pub fn vertical(root,geometry,caret,down) any^ {
     let at = caret_box(geometry,caret)
     let target = stacked_row(root,caret.path,down)
-    let pool = if (at==null) [] else if (target!=null) [for (g in geometry where g.caret.path==target) g]
+    let pool = if (at==null) [] else if (target!=null) [for (g in geometry where ((g.caret.path==target) ^ { false })) g]
         else [for (g in geometry where if (down) g.top>at.top+1 and g.bottom>at.bottom+1 else g.top<at.top-1 and g.bottom<at.bottom-1) g];
     if (len(pool)==0) null else sort(pool,(g)=>abs(g.x-at.x)*4+abs(g.top-at.top))[0].caret
 }
@@ -241,22 +241,22 @@ pub fn vertical(root,geometry,caret,down) {
 // --- edits ----------------------------------------------------------------------
 fn splice(row,at,remove,items) => [*slice(row,0,at),*items,*slice(row,at+remove,len(row))]
 // every edit replaces a span of one row.
-fn edit_row(root,path,at,remove,items) => if (len(path)==0) splice(root,at,remove,items) else
+fn edit_row(root,path,at,remove,items) any^ => if (len(path)==0) splice(root,at,remove,items) else
     [for (i,item in root) if (i!=path[0]) item else {*:item,rows:[for (k,r in item.rows)
         if (k==path[1]) edit_row(r,slice(path,2,len(path)),at,remove,items) else r]}]
 fn text_mode(root,path) => len(path)>0 and (let item=row_at(root,slice(path,0,len(path)-2))[path[len(path)-2]], item.k=="arg" and item.text)
-fn escape(ch,text) =>
+fn escape(ch,text) any^ =>
     if (contains("{}#$%&",ch)) "\\" ++ ch
     else if (ch=="~") (if (text) "\\textasciitilde " else "\\sim ")
     else if (text and (ch=="^" or ch=="_")) "\\" ++ ch ++ "{}"
     else if (ch=="\\") "\\backslash "
     else null
-fn atom(ch,text) => (let e=escape(ch,text), if (e==null) {k:"char",t:ch} else {k:"cmd",t:trim(e)})
+fn atom(ch,text) any^ => (let e=escape(ch,text), if (e==null) {k:"char",t:ch} else {k:"cmd",t:trim(e)})
 fn insert(root,caret,items,inside=null) {
     let next = edit_row(root,caret.path,caret.index,0,items);
     {row:next,caret:if (inside!=null) inside else {path:caret.path,index:caret.index+len(items)}}
 }
-fn operand(item) => item!=null and not (item.k=="char" and contains(operators,item.t)) and
+fn operand(item) any^ => item!=null and not (item.k=="char" and contains(operators,item.t)) and
     not (item.k=="cmd" and contains(["\\pm","\\mp","\\times","\\cdot","\\div","\\le","\\ge","\\leq","\\geq","\\ne","\\neq","\\to","\\approx","\\equiv"],item.t))
 // a finished \name becomes its structure: \frac, \sqrt and one-argument commands take the caret inside.
 fn resolve(root,caret) {
@@ -270,7 +270,7 @@ fn resolve(root,caret) {
     let next = edit_row(root,caret.path,at,1,[item]);
     {row:next,caret:if (item.rows==null) {path:caret.path,index:at+1} else {path:[*caret.path,at,0],index:0}}
 }
-fn script(root,caret,slot) {
+fn script(root,caret,slot) any^ {
     let row = row_at(root,caret.path)
     let prev = row[caret.index-1]
     let depth = len(caret.path)
@@ -302,7 +302,7 @@ fn fraction(root,caret) {
         caret:{path:[*caret.path,i-take,if (take>0) 1 else 0],index:0}}
 }
 // typing: letters extend a pending \name; any other key first resolves it.
-pub fn type_text(root,caret,ch) {
+pub fn type_text(root,caret,ch) any^ {
     let row = row_at(root,caret.path)
     let prev = row[caret.index-1]
     let text = text_mode(root,caret.path);

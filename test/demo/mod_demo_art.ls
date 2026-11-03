@@ -5,8 +5,8 @@
 // art. Every gradient/clip id carries the demo name, since all the scenes
 // share one document.
 
-fn n(x: any) => string(round(x * 10) / 10)
-fn pt(x: any, y: any) => n(x) ++ " " ++ n(y)
+fn n(x: any) any^ => string(round(x * 10) / 10)
+fn pt(x: any, y: any) any^ => n(x) ++ " " ++ n(y)
 
 // slate inks, darkest first
 let INK = "#1e293b"
@@ -177,8 +177,8 @@ fn doom_image(path: any, x: any, y: any, w: any, h: any, more: any = {}) => <ima
 let EYE_X = 160
 let EYE_Y = 74
 let FAR = 4
-fn wall_top(z: any) => EYE_Y - 160 / z
-fn wall_bottom(z: any) => EYE_Y + 160 / z
+fn wall_top(z: any) any^ => EYE_Y - 160 / z
+fn wall_bottom(z: any) any^ => EYE_Y + 160 / z
 // one 6-pixel strip of wall between screen columns xa and xb at depths za and zb
 fn wall_strip(xa: any, za: any, zb: any) => (let zm = (za + zb) / 2, let ua = za * 64, let ub = zb * 64,
     let top = wall_top(zm), let h = wall_bottom(zm) - top, <g
@@ -214,7 +214,7 @@ fn imp() => <g (shift(join([for (z in IMP_Z) n(EYE_X) ++ " " ++ n(wall_bottom(z)
 fn digit(glyph: any, x: any, y: any) => <svg x:x, y:y, width:14, height:16, viewBox:string(glyph * 14) ++ " 0 14 16",
     (doom_image("hud/DIGITS_SHEET", 0, 0, 168, 16))>
 fn counter(caption: any, right: any, y: any) => <g
-    for (i, ch in split(caption, "")) digit(if (ch == "%") 10 else int(ch), right - (len(caption) - i) * 14, y)>
+    for (i, ch in ((split(caption, "")) ^ { [] })) digit(if (ch == "%") 10 else int(ch), right - (len(caption) - i) * 14, y)>
 fn status_bar() => <g transform:"translate(0 148)",
     (doom_image("hud/STBAR", 0, 0, 320, 32));
     (doom_image("hud/STARMS", 104, 0, 40, 32));
@@ -340,6 +340,7 @@ let GLYPHS = {
     finder: "M3 6h6l2 2h10v11H3z M3 11h18",
     music: "M9 18V5l11-2v13 M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
     soundflow: "M6 3v18 M11 5v14 M16 7v10 M20.5 9v6 M2.5 15c4-7 8 3 11-2.5s6-3.5 8-1.5",
+    chat: "M4 4h16v12H9l-5 4z M8 8h8 M8 12h5",
     mail: "M3 6h18v12H3z M3 7l9 6 9-6",
     archive: "M3 4h18v5H3z M5 9v11h14V9 M10 13h4",
     book: "M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3z M21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z",
@@ -368,7 +369,7 @@ let HUES = {hamster: ["#ddbf8e", "#aa744e"], aquarium: ["#78bda3", "#174c50"], c
     greetings: ["#f9a8d4", "#db2777"], dreamhome: ["#93c5fd", "#1d4ed8"], word: ["#60a5fa", "#1e40af"], note: ["#fef9c3", "#facc15", "#854d0e"],
     sheet: ["#86cba2", "#217346"], slides: ["#fca5a5", "#b91c1c"], finder: ["#93c5fd", "#2563eb"], music: ["#fda4af", "#be123c"],
     soundflow: ["#3f4448", "#0b0b0c", "#5cb8ad"],
-    mail: ["#7dd3fc", "#0369a1"], book: ["#fdba74", "#c2410c"], archive: ["#d6d3d1", "#78716c"], readability: ["#5eead4", "#0f766e"]}
+    chat: ["#8ed8b4", "#08775a"], mail: ["#7dd3fc", "#0369a1"], book: ["#fdba74", "#c2410c"], archive: ["#d6d3d1", "#78716c"], readability: ["#5eead4", "#0f766e"]}
 
 // a rounded square in two shades of the app's hue, with a light inner edge
 fn icon_frame(key: any, body: any) => <svg class:"icon-art", viewBox:"0 0 64 64", 'aria-hidden':"true",
@@ -397,7 +398,7 @@ pub fn icon(key) => icon_frame(key, if (ICON_ART[key] != null) ICON_ART[key]
 
 // sampled positions around a tilted ellipse, for an orbit SMIL can follow,
 // z runs from -1 on the far side of the orbit to 1 on the near side
-fn orbit(cx: any, cy: any, rx: any, ry: any, tilt: any, steps: any) => [for (i in 0 to steps)
+fn orbit(cx: any, cy: any, rx: any, ry: any, tilt: any, steps: any) => [for (i in ((0 to steps) ^ { [] }))
     (let a = i * 2 * math.pi / steps, let x = rx * math.cos(a), let y = ry * math.sin(a),
      {x: cx + x * math.cos(tilt) - y * math.sin(tilt), y: cy + x * math.sin(tilt) + y * math.cos(tilt), z: math.sin(a)})]
 
@@ -463,12 +464,27 @@ fn procart(t) => window("procart", t, <g
     <circle cx:175, cy:143, r:5, fill:"#b85042">;
     (text(185, 148, 12, "#263d32", "One seed. A world."))>)
 
-let LIVE = {procart: procart, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
+fn chat(t) => window("chat", t, <g
+    <rect x:26, y:22, width:320, height:172, fill:"#f1eee7">;
+    <rect x:26, y:22, width:90, height:172, fill:"#fff">;
+    (text(36, 45, 13, "#315744", "Chats"));
+    for (i in 0 to 2) <g <circle cx:43, cy:66 + i * 32, r:9, fill:t.pale>;
+        <rect x:60, y:61 + i * 32, width:42, height:4, rx:2, fill:t.soft>;
+        <rect x:60, y:69 + i * 32, width:31, height:3, rx:1.5, fill:"#dde5dc">>;
+    <rect x:129, y:54, width:111, height:30, rx:8, fill:"#fff">;
+    (text(140, 73, 10, "#53705c", "Hey, how's your day?"));
+    <rect x:171, y:96, width:120, height:31, rx:8, fill:"#dceecf">;
+    (text(182, 115, 10, "#53705c", "Better with a little hello."));
+    <rect x:129, y:149, width:157, height:23, rx:7, fill:"#fff">;
+    <circle cx:303, cy:160, r:12, fill:"#148665">;
+    <path d:"M299 155l9 5-9 5 2-5z", fill:"#fff">>)
+
+let LIVE = {chat: chat, procart: procart, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
 
 let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber", superlambda: "sky", doom: "clay", midtown: "slate",
     procart: "sage",
     hamster: "amber", aquarium: "sage", scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
     draw: "clay", sketch: "violet", word: "blue", sheet: "sage", note: "gold", slides: "rose", chart: "indigo",
-    finder: "blue", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}
+    finder: "blue", chat: "sage", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}
 
-pub fn of(key) => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))
+pub fn of(key) any^ => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))

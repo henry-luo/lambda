@@ -281,7 +281,7 @@ pub fn large_symbols() => [for (key, value at big_operators) value]
 pub fn closed_integral_base(ch) => if (ch == "∯") "∬" else if (ch == "∰") "∭" else null
 
 // classify a symbol command into atom type
-pub fn classify_symbol(cmd) {
+pub fn classify_symbol(cmd) any^ {
     let name = util.command_name(cmd)
 
     if (name == "neg" or name == "lnot") "mrel"
@@ -299,7 +299,7 @@ pub fn get_operator_name(name) {
 }
 
 // check if a command name is a limit-style operator (limits above/below in display)
-pub fn is_limit_op(cmd) {
+pub fn is_limit_op(cmd) any^ {
     let name = util.command_name(cmd)
     big_operators[name] != null or
     name == "lim" or name == "limsup" or name == "liminf" or

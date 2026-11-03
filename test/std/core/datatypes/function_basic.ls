@@ -27,7 +27,7 @@ let add10 = make_adder(10)
 add10(5)
 
 // ===== Higher-order function =====
-fn apply_twice(f, x) => f(f(x))
+fn apply_twice(f, x) any^ => f(f(x))
 fn inc(x) => x + 1
 apply_twice(inc, 5)
 

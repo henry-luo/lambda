@@ -15,7 +15,7 @@ pn ordered() {
 }
 pn sliced() {
     var a: i8[] = [1i8, 2i8, 3i8]
-    var part: i8[] = slice(a, 1, 3)
+    var part: i8[] = slice(a, 1, 3)^
     part[0] = 9i8
     return [a, part]
 }

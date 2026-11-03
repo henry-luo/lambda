@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of awfy/storage2.ls.  Each node allocation is retained for the run. */
 extern int printf(const char *, ...);
 extern void *malloc(unsigned long);
@@ -27,9 +28,12 @@ static void *build_tree_depth(int depth, int *seed, int *count) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int seed = 74755;
     int count = 0;
     build_tree_depth(7, &seed, &count);
+    BENCH_KERNEL_END();
     printf(count == 5461 ? "Storage: PASS\n" : "Storage: FAIL result=%d\n", count);
+    BENCH_KERNEL_REPORT();
     return count != 5461;
 }

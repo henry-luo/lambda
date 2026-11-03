@@ -4,7 +4,7 @@ Lambda procedures run concurrently as **tasks**: lightweight children started wi
 
 > **Related Documentation**:
 > - [Lambda Procedural](Lambda_Procedural.md) — `pn`, `var`, `while`, and the rule that concurrency lives in procedures
-> - [Lambda Error Handling](Lambda_Error_Handling.md) — `T^E`, postfix `^`, and the statement handler used below
+> - [Lambda Error Handling](Lambda_Error_Handling.md) — `T^`, postfix `^`, and the statement handler used below
 > - [Lambda System Functions](Lambda_Sys_Func.md) — the other built-in functions
 > - [LambdaJS](JS_DOM_Support.md) — the JavaScript engine that shares the event loop
 
@@ -55,7 +55,7 @@ pn main() {
 42
 ```
 
-`sleep(ms)` parks the current task on the shared timer queue. Every operation that can fail — `wait`, `sleep`, `send`, `receive`, `select` — returns `T^E`, so the caller engages the error with `^` or one of the other forms in [Timeouts and Cancellation](#timeouts-and-cancellation).
+`sleep(ms)` parks the current task on the shared timer queue. Every operation that can fail — `wait`, `sleep`, `send`, `receive`, `select` — returns `T^`, so the caller engages the error with `^` or one of the other forms in [Timeouts and Cancellation](#timeouts-and-cancellation).
 
 ## Colorless Calls
 
@@ -361,8 +361,8 @@ See [Lambda_Modules.md](Lambda_Modules.md) for importing JavaScript modules and 
 | Function | Result | Behavior |
 |----------|--------|----------|
 | `start(target, args = [], options = {})` | handle | Start a child procedure without blocking. `target` is a `pn`, `args` an array. `options.mode` is `'task'` (default); `'thread'` and `'process'` are compile error E501, *not implemented yet*. `options.owner: 'document'` (S13.3.1v2) makes the running document the owner; outside a document it is error 312. |
-| `wait(handle)` | `T^E` | Park until the task finishes; yield its value or its error. |
-| `wait(handle, timeout: ms)` | `T^E` | As above, but give up after `ms` with error 310; the task keeps running. |
+| `wait(handle)` | `T^` | Park until the task finishes; yield its value or its error. |
+| `wait(handle, timeout: ms)` | `T^` | As above, but give up after `ms` with error 310; the task keeps running. |
 | `select(h1, h2, …, timeout: ms)` | `handle^E` | Park until one handle completes and yield it. |
 | `send(handle, value)` | `null^E` | Append to the task's mailbox; error 320 when the mailbox (1024 messages) is full. |
 | `receive()` | `item^E` | Remove the oldest message from the current task's mailbox, parking while it is empty. |

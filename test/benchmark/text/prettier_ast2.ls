@@ -26,7 +26,8 @@ let print_width = 80
 let iterations = 256
 let large_length = 1000000000
 // the one empty part list every non-concat document shares
-let no_parts: Doc[] = []
+let _admitted_no_parts_29: Doc[] = []
+let no_parts: Doc[] = _admitted_no_parts_29
 
 fn doc_leaf(kind: int) Doc =>
     {kind: kind, text: "", parts: no_parts, first: null, second: null,
@@ -52,12 +53,12 @@ fn group_doc(contents: Doc, break_threshold: int = large_length) Doc =>
     {kind: DOC_GROUP, text: "", parts: no_parts, first: contents, second: null,
      threshold: break_threshold}
 
-fn if_break_doc(broken: Doc, flat: Doc = text_doc("")) Doc =>
+fn if_break_doc(broken: Doc, flat: Doc = text_doc("")^) Doc^ =>
     {kind: DOC_IF_BREAK, text: "", parts: no_parts, first: broken, second: flat,
      threshold: large_length}
 
 fn join_docs_at(separator: Doc, parts: Doc[], index: int, count: int,
-        acc: Doc[]) Doc {
+        acc: Doc[]) Doc^ {
     if (index >= count) concat_docs(acc)
     else {
         let next = if (index == 0) acc ++ [parts[index]]
@@ -66,13 +67,13 @@ fn join_docs_at(separator: Doc, parts: Doc[], index: int, count: int,
     }
 }
 
-fn join_docs(separator: Doc, parts: Doc[]) Doc =>
+fn join_docs(separator: Doc, parts: Doc[]) Doc^ =>
     join_docs_at(separator, parts, 0, len(parts), [])
 
 // Like the C port, stop summing once the total can no longer fit: every
 // consumer only compares the result against a width below large_length, so a
 // capped total decides the same way as the full sum.
-fn flat_length_at(parts: Doc[], index: int, count: int, acc: int) int {
+fn flat_length_at(parts: Doc[], index: int, count: int, acc: int) int^ {
     if (index >= count) acc
     else {
         let child = flat_length(parts[index])
@@ -81,7 +82,7 @@ fn flat_length_at(parts: Doc[], index: int, count: int, acc: int) int {
     }
 }
 
-fn flat_length(doc: Doc?) int {
+fn flat_length(doc: Doc?) int^ {
     if (doc == null) 0
     else {
         let kind = doc.kind
@@ -95,7 +96,7 @@ fn flat_length(doc: Doc?) int {
     }
 }
 
-fn fits(doc: Doc?, remaining: int) bool => flat_length(doc) <= remaining
+fn fits(doc: Doc?, remaining: int) bool^ => flat_length(doc) <= remaining
 
 fn indent_string(level: int) string {
     if (level <= 0) ""
@@ -106,7 +107,7 @@ fn render_result(value: string, column: int) RenderResult =>
     {value: value, column: column}
 
 fn render_parts_at(parts: Doc[], index: int, count: int, ctx: RenderContext,
-        mode: string, acc: string) RenderResult {
+        mode: string, acc: string) RenderResult^ {
     if (index >= count) render_result(acc, ctx.column)
     else {
         let rendered = render_doc(parts[index], ctx, mode)
@@ -116,7 +117,7 @@ fn render_parts_at(parts: Doc[], index: int, count: int, ctx: RenderContext,
     }
 }
 
-fn render_doc(doc: Doc?, ctx: RenderContext, mode: string) RenderResult {
+fn render_doc(doc: Doc?, ctx: RenderContext, mode: string) RenderResult^ {
     if (doc == null) render_result("", ctx.column)
     else {
         let kind = doc.kind
@@ -150,7 +151,7 @@ fn render_doc(doc: Doc?, ctx: RenderContext, mode: string) RenderResult {
     }
 }
 
-fn render_doc_root(doc: Doc) string =>
+fn render_doc_root(doc: Doc) string^ =>
     render_doc(doc, {column: 0, indent: 0}, "break").value
 
 fn json_quote(value: string) string {
@@ -162,7 +163,7 @@ fn json_quote(value: string) string {
     "\"" ++ escaped_tab ++ "\""
 }
 
-fn literal_doc(node: any) Doc {
+fn literal_doc(node: any) Doc^ {
     if (node.type == "StringLiteral") text_doc(json_quote(node.value))
     else if (node.type == "NumericLiteral") text_doc(node.value)
     else if (node.type == "BooleanLiteral") text_doc(if (node.value) "true" else "false")
@@ -170,30 +171,30 @@ fn literal_doc(node: any) Doc {
     else text_doc("/" ++ node.pattern ++ "/" ++ node.flags)
 }
 
-fn print_nodes_at(nodes: array, index: int, count: int, acc: Doc[]) Doc[] {
+fn print_nodes_at(nodes: array, index: int, count: int, acc: Doc[]) Doc[]^ {
     if (index >= count) acc
     else {
         print_nodes_at(nodes, index + 1, count, acc ++ [print_node(nodes[index])])
     }
 }
 
-fn print_nodes(nodes: array) Doc[] => print_nodes_at(nodes, 0, len(nodes), [])
+fn print_nodes(nodes: array) Doc[]^ => print_nodes_at(nodes, 0, len(nodes), [])
 
 fn print_statements_at(nodes: array, index: int, count: int,
-        acc: Doc[]) Doc[] {
+        acc: Doc[]) Doc[]^ {
     if (index >= count) acc
     else print_statements_at(nodes, index + 1, count, acc ++ [print_statement(nodes[index])])
 }
 
-fn print_statements(nodes: array) Doc[] =>
+fn print_statements(nodes: array) Doc[]^ =>
     print_statements_at(nodes, 0, len(nodes), [])
 
-fn node_key(node: any) Doc {
+fn node_key(node: any) Doc^ {
     if (node.computed) concat_docs([text_doc("["), print_node(node.key), text_doc("]")])
     else print_node(node.key)
 }
 
-fn parameter_list(params: array) Doc {
+fn parameter_list(params: array) Doc^ {
     let printed = print_nodes(params)
     group_doc(concat_docs([
         text_doc("("),
@@ -204,13 +205,13 @@ fn parameter_list(params: array) Doc {
     ]))
 }
 
-fn has_object_argument(args: array, index: int, count: int) bool {
+fn has_object_argument(args: array, index: int, count: int) bool^ {
     if (index >= count) false
     else if (args[index].type == "ObjectExpression") true
     else has_object_argument(args, index + 1, count)
 }
 
-fn argument_list(args: array) Doc {
+fn argument_list(args: array) Doc^ {
     if (len(args) == 0) text_doc("()")
     else if (has_object_argument(args, 0, len(args)))
         concat_docs([text_doc("("), join_docs(text_doc(", "), print_nodes(args)), text_doc(")")])
@@ -223,7 +224,7 @@ fn argument_list(args: array) Doc {
     ]))
 }
 
-fn array_doc(elements: array) Doc {
+fn array_doc(elements: array) Doc^ {
     if (len(elements) == 0) text_doc("[]")
     else group_doc(concat_docs([
         text_doc("["),
@@ -234,7 +235,7 @@ fn array_doc(elements: array) Doc {
     ]))
 }
 
-fn object_doc(properties: array) Doc {
+fn object_doc(properties: array) Doc^ {
     if (len(properties) == 0) text_doc("{}")
     else group_doc(concat_docs([
         text_doc("{"),
@@ -244,7 +245,7 @@ fn object_doc(properties: array) Doc {
     ]))
 }
 
-fn block_doc(body: array) Doc {
+fn block_doc(body: array) Doc^ {
     if (len(body) == 0) text_doc("{}")
     else concat_docs([
         text_doc("{"),
@@ -254,7 +255,7 @@ fn block_doc(body: array) Doc {
     ])
 }
 
-fn variable_doc(node: any, terminator: bool) Doc {
+fn variable_doc(node: any, terminator: bool) Doc^ {
     let declaration = concat_docs([
         text_doc(node.kind ++ " "),
         join_docs(concat_docs([text_doc(","), line_doc]), print_nodes(node.declarations))
@@ -262,7 +263,7 @@ fn variable_doc(node: any, terminator: bool) Doc {
     if (terminator) concat_docs([declaration, text_doc(";")]) else declaration
 }
 
-fn print_property(node: any) Doc {
+fn print_property(node: any) Doc^ {
     if (node.type == "SpreadElement") concat_docs([text_doc("..."), print_node(node.argument)])
     else {
         let key = node_key(node)
@@ -271,7 +272,7 @@ fn print_property(node: any) Doc {
     }
 }
 
-fn expression_precedence(node: any) int {
+fn expression_precedence(node: any) int^ {
     if (node == null) 100
     else if (node.type == "AssignmentExpression" or node.type == "ArrowFunctionExpression") 1
     else if (node.type == "LogicalExpression") if (node.operator == "&&") 3 else 2
@@ -284,27 +285,27 @@ fn expression_precedence(node: any) int {
     } else 20
 }
 
-fn print_expression(node: any, parent_precedence: int = 0) Doc {
+fn print_expression(node: any, parent_precedence: int = 0) Doc^ {
     let doc = print_node(node)
     if (expression_precedence(node) < parent_precedence)
         concat_docs([text_doc("("), doc, text_doc(")")])
     else doc
 }
 
-fn flatten_additive(node: any, acc: array) array {
+fn flatten_additive(node: any, acc: array) array^ {
     if (node.type == "BinaryExpression" and node.operator == "+")
         flatten_additive(node.left, acc) ++ [node.right]
     else acc ++ [node]
 }
 
 fn additive_tail_at(operands: array, index: int, count: int,
-        acc: Doc[]) Doc[] {
+        acc: Doc[]) Doc[]^ {
     if (index >= count) acc
     else additive_tail_at(operands, index + 1, count,
         acc ++ [text_doc(" +"), line_doc, print_expression(operands[index], 12)])
 }
 
-fn additive_chain_doc(node: any) Doc {
+fn additive_chain_doc(node: any) Doc^ {
     let operands = flatten_additive(node, [])
     group_doc(concat_docs([
         print_expression(operands[0], 11),
@@ -312,7 +313,7 @@ fn additive_chain_doc(node: any) Doc {
     ]), 60)
 }
 
-fn print_node(node: any) Doc {
+fn print_node(node: any) Doc^ {
     if (node == null) text_doc("")
     else if (node.type == "Identifier") text_doc(node.name)
     else if (node.type == "ThisExpression") text_doc("this")
@@ -378,7 +379,7 @@ fn print_node(node: any) Doc {
     else print_statement(node)
 }
 
-fn print_statement(node: any) Doc {
+fn print_statement(node: any) Doc^ {
     if (node.type == "VariableDeclaration") variable_doc(node, true)
     else if (node.type == "ReturnStatement") concat_docs([text_doc("return"), if (node.argument == null) text_doc("") else concat_docs([text_doc(" "), print_node(node.argument)]), text_doc(";")])
     else if (node.type == "ExpressionStatement") concat_docs([print_node(node.expression), text_doc(";")])
@@ -408,7 +409,7 @@ fn print_statement(node: any) Doc {
     else text_doc("")
 }
 
-pn print_program(program: any) string {
+pn print_program(program: any) string^ {
     render_doc_root(concat_docs([
         join_docs(hardline_doc, print_statements(program.body)), hardline_doc
     ]))
@@ -426,7 +427,8 @@ pn main() {
     let t1 = clock()
     var checksum: int = 0
     for index of formatted {
-        checksum = (checksum * 31 + ord(formatted[index])) % 1000000007
+        let _admitted_checksum_429: int = (checksum * 31 + ord(formatted[index])) % 1000000007
+        checksum = _admitted_checksum_429^
     }
     print(formatted)
     if (checksum == 56483873) {

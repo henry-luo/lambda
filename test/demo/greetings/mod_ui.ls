@@ -29,7 +29,7 @@ let EFFECT_TOOLS = [
     {key: "popup", name: "Pop-up", icon: "book", choices: P.DESIGNS, command: "popup-design",
      hint: "Paper layers rise on the inside left as the card opens. Print exports show the flat illustration."}]
 fn effect_tool(key) => [for (tool in EFFECT_TOOLS where tool.key == key) tool][0]
-fn effect_value(card, tool) => if (tool.key == "popup") P.of(card).design else E.of(card)[tool.key]
+fn effect_value(card, tool) any^ => if (tool.key == "popup") P.of(card).design else E.of(card)[tool.key]
 fn effect_name(tool, value) => [for (entry in tool.choices where entry.key == value) entry.name][0]
 
 // text presets for the Text panel: button label, sample text, font and size
@@ -47,7 +47,7 @@ fn section(title, children) => <section class:"pane-section", <h3 title>; for (c
 fn swatches(verb, current) => <div class:"swatches", for (c in A.PALETTE)
     act(verb, c, if (lower(current) == c) "swatch on" else "swatch", [], {style:"background:" ++ c, title:c})>
 
-pub fn scale_for(st) {
+pub fn scale_for(st) any^ {
     let f = T.format_of(st.card.format)
     let wide = float(f.w) * (if (st.view == "inside") 2.0 else 1.0)
     // The spread gap is in screen pixels; only the two paper widths scale.
@@ -87,7 +87,7 @@ fn occasion_chips(current) => <div class:"chips",
     for (o in T.OCCASIONS) chip("occasion", o.key, o.name, current == o.key)>
 
 // the gallery's cards are assembled once; thumbnails are live renders of each front
-fn design_tile(g, current) {
+fn design_tile(g, current) any^ {
     let f = T.format_of(g.card.format)
     let s = 118.0 / max(f.w, f.h)
     let fx = E.of(g.card);
@@ -108,8 +108,8 @@ fn designs_panel(st, gallery) => <div class:"pane",
     (occasion_chips(st.occasion));
     <div class:"chips", (chip("occasion", "popup", "Pop-up cards", st.occasion == "popup"))>;
     <div class:"design-legend", for (tool in EFFECT_TOOLS) <span (icons.icon(tool.icon, 12)); " " ++ tool.name>>;
-    <div class:"designs", for (g in gallery where st.occasion == "all" or g.t.occasion == st.occasion
-        or (st.occasion == "popup" and P.of(g.card).design != "none")) design_tile(g, st.card.template)>>
+    <div class:"designs", for (g in gallery where ((st.occasion == "all" or g.t.occasion == st.occasion
+        or (st.occasion == "popup" and P.of(g.card).design != "none")) ^ { false })) design_tile(g, st.card.template)>>
 
 fn verse_occasion(st) => if (st.occasion == "all" or st.occasion == "popup") st.card.occasion else st.occasion
 fn text_panel(st) {
@@ -188,7 +188,7 @@ fn effects_inspector(st) {
         <div class:"effect-tabs", for (tool in EFFECT_TOOLS) act("effect-settings", tool.key,
             if (kind == tool.key) "effect-tab on" else "effect-tab", [icons.icon(tool.icon, 15), tool.name],
             {'aria-pressed':if (kind == tool.key) "true" else "false"})>;
-        <div class:"effect-choices", for (entry in tool.choices) effect_choice(tool.command, entry, value)>;
+        <div class:"effect-choices", for (entry in ((tool.choices) ^ { [] })) effect_choice(tool.command, entry, value)>;
         if (kind == "popup" and value != "none") <div
             (section("Depth", [<div class:"chips", for (d in P.DEPTHS) chip("popup-depth", d.key, d.name, popup.depth == d.key)>]));
             (section("Colour", [swatches("popup-color", popup.color)]))>;
@@ -203,7 +203,7 @@ fn panel(st, gallery, samples) => if (st.panel == "text") text_panel(st) else if
 // ---- canvas ----------------------------------------------------------------------
 
 // These controls describe the edited card, including effects added after choosing a template.
-fn canvas_effect(st, tool) {
+fn canvas_effect(st, tool) any^ {
     let value = effect_value(st.card, tool)
     let active = value != "none"
     let caption = (if (active) "Edit " else "Add ") ++ lower(tool.name)
@@ -259,12 +259,12 @@ fn photo_inspector(it, samples) => [
     section("Photo", [stepper("Zoom", "zoom", 0.1, string(int(round(it.zoom * 100))), "%"),
         <div class:"photo-grid small", for (p in samples) act("add-photo", p.key, "photo-tile", [<span class:"photo-thumb", style:"background-image:url('" ++ p.url ++ "')">])>])]
 
-fn layer_label(it) => if (it.kind == "text") (let line = join(split(it.text, "\n"), " "), if (len(line) > 26) slice(line, 0, 26) ++ "…" else line)
+fn layer_label(it) any^ => if (it.kind == "text") (let line = join(split(it.text, "\n"), " "), if (len(line) > 26) slice(line, 0, 26) ++ "…" else line)
     else if (it.kind == "art") A.art_of(it.art).name else "Photo"
 fn layer_icon(it) => if (it.kind == "text") "wordart" else if (it.kind == "art") "star" else "album"
 fn layers(st) => section("On this page", [
     if (len(M.items(st.card, st.page)) == 0) <p class:"hint", "Nothing yet. Add text, art or a photo from the left.">
-    else <div class:"layers", for (it in reverse(M.items(st.card, st.page)))
+    else <div class:"layers", for (it in ((reverse(M.items(st.card, st.page))) ^ { [] }))
         act("select", it.id, if (it.id == st.sel) "layer on" else "layer", [icons.icon(layer_icon(it), 15), <span layer_label(it)>])>])
 
 fn inspector(st, samples) {
@@ -278,7 +278,7 @@ fn inspector(st, samples) {
             <header class:"pane-head inspector-head",
                 <h2 if (it.kind == "text") "Text" else if (it.kind == "art") A.art_of(it.art).name else "Photo">;
                 (icon_btn("deselect", "", "close", "Done"))>;
-            for (s in (if (it.kind == "text") text_inspector(it) else if (it.kind == "art") art_inspector(it) else photo_inspector(it, samples))) s;
+            for (s in (((if (it.kind == "text") text_inspector(it) else if (it.kind == "art") art_inspector(it) else photo_inspector(it, samples))) ^ { [] })) s;
             (section("Arrange", [
                 stepper("Rotation", "rot", 5.0, A.n(it.rot), "°"),
                 stepper("Opacity", "opacity", 0.1, string(int(round(it.opacity * 100))), "%"),

@@ -1,5 +1,5 @@
 // Shared untyped scalar workloads; SUITE.md defines counts, loop order and checks.
-pn decimal_text(value) {
+fn decimal_text(value) any^ {
     let negative = value < 0
     var remaining = if (negative) -value else value
     var divisor = 1
@@ -33,7 +33,7 @@ pn parse_integers() {
         let value = if (index % 8 == 0) 0 else if (index % 8 == 1) -seed else seed
         let text = decimal_text(value)
         let parsed = decimal_value(text)
-        if (parsed != value) { errors = errors + 1 }
+        if ((parsed != value)^) { errors = errors + 1 }
         size = size + len(text)
         checksum = (checksum * 31 + parsed + 2147483647) % 1000000007
         index = index + 1
@@ -130,15 +130,15 @@ pn matrix_statistics() {
             }
             block = block + 1
         }
-        v[iteration] = trace_fourth(p, 5, 20)
-        w[iteration] = trace_fourth(q, 10, 10)
+        v[iteration] = trace_fourth(p, 5, 20)^
+        w[iteration] = trace_fourth(q, 10, 10)^
         digest = (digest * 31 + int(floor(v[iteration] * 1000.0))) % 1000000007
         digest = (digest * 31 + int(floor(w[iteration] * 1000.0))) % 1000000007
         iteration = iteration + 1
     }
     return [int(floor(variation(v) * 1e9)), int(floor(variation(w) * 1e9)), digest, seed]
 }
-pn iteration_pi_sum() {
+fn iteration_pi_sum() {
     var values = fill(500, 0.0)
     var iteration = 0
     while (iteration < 500) {
@@ -172,8 +172,8 @@ pn formatted_output() {
         buffer = buffer ++ line
         if (i % 256 == 0 or i == 100000) {
             // retain the byte count as data; a sink error must fail the output oracle.
-            let written: any | error = output(buffer, sink)
-            if (type(written) == error or written != len(buffer)) { return [-1, digest, writes, i] }
+            let written: any^ = output(buffer, sink)
+            if ((type(written) == error or written != len(buffer))^) { return [-1, digest, writes, i] }
             writes = writes + 1
             buffer = ""
         }
@@ -188,7 +188,7 @@ pn micro_workload(bench_name) {
     if (bench_name == "formatted_output") { return formatted_output() }
     return [-1, -1, -1, -1]
 }
-pn micro_verify(bench_name, result) {
+fn micro_verify(bench_name, result) {
     var expected = [0, 0, 0, 0]
     if (bench_name == "parse_integers") { expected = [592470661, 854479, 1966931148, 0] }
     if (bench_name == "matrix_statistics") { expected = [464726438, 486656926, 47509838, 1966931148] }
@@ -198,11 +198,11 @@ pn micro_verify(bench_name, result) {
 }
 pub pn run_micro_benchmark(bench_name) {
     let warm = micro_workload(bench_name)
-    if (not micro_verify(bench_name, warm)) { print(bench_name ++ ": FAIL warmup " ++ string(warm) ++ "\n"); return null }
+    if ((not micro_verify(bench_name, warm))^) { print(bench_name ++ ": FAIL warmup " ++ string(warm) ++ "\n"); return null }
     let started = clock()
     let result = micro_workload(bench_name)
     let elapsed = (clock() - started) * 1000.0
-    if (not micro_verify(bench_name, result)) { print(bench_name ++ ": FAIL " ++ string(result) ++ "\n"); return null }
+    if ((not micro_verify(bench_name, result))^) { print(bench_name ++ ": FAIL " ++ string(result) ++ "\n"); return null }
     print(bench_name ++ ": PASS " ++ result[0] ++ " " ++ result[1] ++ " " ++ result[2] ++ " " ++ result[3] ++ "\n")
     print("__TIMING__:" ++ elapsed ++ "\n")
 }

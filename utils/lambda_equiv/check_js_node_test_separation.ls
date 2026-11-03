@@ -25,7 +25,7 @@ fn is_word(ch: string) bool =>
 
 pn skip_space(source: string, start: int) {
     var pos = start
-    while (pos < len(source) and is_space(slice(source, pos, pos + 1))) {
+    while ((pos < len(source) and is_space(slice(source, pos, pos + 1)))^) {
         pos = pos + 1
     }
     return pos
@@ -38,9 +38,9 @@ pn has_import_after(source: string, marker: string) {
         let quote = slice(source, quote_pos, quote_pos + 1)
         if (quote == "'" or quote == "\"") {
             var start = quote_pos + 1
-            if (starts_with(slice(source, start), "node:")) { start = start + 5 }
+            if (starts_with(slice(source, start), "node:")^) { start = start + 5 }
             var stop = start
-            while (stop < len(source) and slice(source, stop, stop + 1) != quote) {
+            while ((stop < len(source) and slice(source, stop, stop + 1) != quote)^) {
                 stop = stop + 1
             }
             if (stop < len(source) and is_node_specifier(slice(source, start, stop))) {
@@ -70,7 +70,7 @@ pn main() {
             not is_fixture(name) and not is_browser_driver(name)) {
             let rel = string(path)
             let source = input(path, "text")^
-            if (starts_with(name, "jube_")) {
+            if (starts_with(name, "jube_")^) {
                 print(rel ++ ": Jube tests exercise Node modules and belong in test/node\n")
                 failures = failures + 1
             }

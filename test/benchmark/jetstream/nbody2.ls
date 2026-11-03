@@ -23,9 +23,9 @@ pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[],
         pz = pz + bvz[i] * bmass[i]
         i = i + 1
     }
-    bvx[0] = 0.0 - px / SOLAR_MASS
-    bvy[0] = 0.0 - py / SOLAR_MASS
-    bvz[0] = 0.0 - pz / SOLAR_MASS
+    bvx[0] = (0.0 - px / SOLAR_MASS)^
+    bvy[0] = (0.0 - py / SOLAR_MASS)^
+    bvz[0] = (0.0 - pz / SOLAR_MASS)^
 }
 
 pn advance(var bx: float[], var by: float[], var bz: float[],
@@ -41,12 +41,12 @@ pn advance(var bx: float[], var by: float[], var bz: float[],
             var d_squared: float = dx * dx + dy * dy + dz * dz
             var distance: float = math.sqrt(d_squared)
             var mag: float = dt / (d_squared * distance)
-            bvx[i] = bvx[i] - dx * bmass[j] * mag
-            bvy[i] = bvy[i] - dy * bmass[j] * mag
-            bvz[i] = bvz[i] - dz * bmass[j] * mag
-            bvx[j] = bvx[j] + dx * bmass[i] * mag
-            bvy[j] = bvy[j] + dy * bmass[i] * mag
-            bvz[j] = bvz[j] + dz * bmass[i] * mag
+            bvx[i] = (bvx[i] - dx * bmass[j] * mag)^
+            bvy[i] = (bvy[i] - dy * bmass[j] * mag)^
+            bvz[i] = (bvz[i] - dz * bmass[j] * mag)^
+            bvx[j] = (bvx[j] + dx * bmass[i] * mag)^
+            bvy[j] = (bvy[j] + dy * bmass[i] * mag)^
+            bvz[j] = (bvz[j] + dz * bmass[i] * mag)^
             j = j + 1
         }
         i = i + 1
@@ -60,9 +60,9 @@ pn advance(var bx: float[], var by: float[], var bz: float[],
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[],
+fn energy(bx: float[], by: float[], bz: float[],
           bvx: float[], bvy: float[], bvz: float[],
-          bmass: float[]) float {
+          bmass: float[]) float^ {
     var e: float = 0.0
     var i: int = 0
     while (i < 5) {
@@ -81,7 +81,7 @@ pn energy(bx: float[], by: float[], bz: float[],
     return e
 }
 
-pn run_nbody_system(n_steps: int) float {
+pn run_nbody_system(n_steps: int) float^ {
     var bx: float[] = [0.0, 4.84143144246472090e+00, 8.34336671824457987e+00,
                         1.28943695621391310e+01, 1.53796971148509165e+01]
     var by: float[] = [0.0, -1.16032004402742839e+00, 4.12479856412430479e+00,
@@ -107,17 +107,17 @@ pn run_nbody_system(n_steps: int) float {
 
     offset_momentum(bvx, bvy, bvz, bmass)
     // Original JetStream: accumulate BOTH initial and final energy
-    var ret: float = energy(bx, by, bz, bvx, bvy, bvz, bmass)
+    var ret: float = energy(bx, by, bz, bvx, bvy, bvz, bmass)^
     var k: int = 0
     while (k < n_steps) {
-        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
+        advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)^
         k = k + 1
     }
     ret = ret + energy(bx, by, bz, bvx, bvy, bvz, bmass)
     return ret
 }
 
-pn run() float {
+pn run() float^ {
     var ret: float = 0.0
     var n: int = 3
     while (n <= 24) {

@@ -48,11 +48,11 @@ pub fn sky(options = {}) element^ {
     let size = options["sun-size"] or 0.04, glow = options["sun-intensity"] or 40.0
     let radius = 50.0
     let dome = shape.sphere(24, 48)
-    let colors = [for (i in 0 to len(dome.normals) / 3 - 1, let y = dome.normals[i * 3 + 1])
+    let colors = [for (i in ((0 to len(dome.normals) / 3 - 1) ^ { [] }), let y = dome.normals[i * 3 + 1])
         *(if (y < 0.0) ground else mix3(horizon, zenith, math.sqrt(y)))]
     let sun = shape.sphere(8, 16)
     let distance = radius * 0.9, diameter = 2.0 * distance * math.tan(size)
-    let rest = map([for (k, v in options where not contains(SKY_KEYS, string(k))) (string(k), v)])
+    let rest = map([for (k, v in options where ((not contains(SKY_KEYS, string(k))) ^ { false })) (string(k), v)])
     let sky_dome = <mesh scale: [radius * 2.0, radius * 2.0, radius * 2.0],
         <geometry type: 'buffer', positions: dome.positions, normals: dome.normals, colors: colors, indices: dome.indices>
         <material type: 'basic', color: "#ffffff", side: 'back'>>

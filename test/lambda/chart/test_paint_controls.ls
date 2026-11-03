@@ -2,15 +2,15 @@ import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 import svg: lambda.chart.svg
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn tags(tree, tag) => elements(tree) |: name(~) == tag
-fn with_class(tree, cls) => elements(tree) |: ~.class == cls
-fn resources(tree) => elements(tree) |: name(~) in ['linearGradient', 'radialGradient', 'pattern']
-fn references(tree) => [for (el in elements(tree)) for (value in [el.fill, el.stroke]
-    where value is string and starts_with(value, "url(#")) slice(value, 5, len(value) - 1)]
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(tree, tag) any^ => elements(tree) |: name(~) == tag
+fn with_class(tree, cls) any^ => elements(tree) |: ~.class == cls
+fn resources(tree) any^ => elements(tree) |: name(~) in ['linearGradient', 'radialGradient', 'pattern']
+fn references(tree) => [for (el in ((elements(tree)) ^ { [] })) for (value in [el.fill, el.stroke]
+    where ((value is string and starts_with(value, "url(#")) ^ { false })) slice(value, 5, len(value) - 1)]
 fn resolved(tree) {
     let ids = resources(tree) |> ~.id;
-    len([for (id in references(tree) where len(ids |: ~ == id) != 1) id]) == 0
+    len([for (id in references(tree) where ((len(ids |: ~ == id) != 1) ^ { false })) id]) == 0
 }
 fn drawable(tree, kind) array | error => content(with_class(tree, "marks " ++ kind)[0])
 

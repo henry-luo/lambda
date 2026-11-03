@@ -21,7 +21,7 @@ pub let IDLE = {throttle: 0.0, brake: 0.0, steer: 0.0, handbrake: false}
 pub fn forward_speed(car) => car.vx * sin(car.heading) + car.vz * cos(car.heading)
 pub fn speed(car) => sqrt(car.vx * car.vx + car.vz * car.vz)
 // R while rolling backwards, otherwise the engaged forward gear
-pub fn gear_label(car) => if (forward_speed(car) < -0.3) "R" else if (speed(car) < 0.3 and car.rpm < SPEC.idle_rpm + 50.0) "N" else string(car.gear)
+pub fn gear_label(car) any^ => if (forward_speed(car) < -0.3) "R" else if (speed(car) < 0.3 and car.rpm < SPEC.idle_rpm + 50.0) "N" else string(car.gear)
 
 // ---- oriented boxes and the separating-axis test (2D, in x/z)
 pub fn box(x: any, z: any, heading: any, half_length: any, half_width: any) => {x: x, z: z, f: u.forward(heading), r: u.right(heading), hl: half_length, hw: half_width}
@@ -38,7 +38,7 @@ pub fn separate(a, b) {
 }
 
 // thrust the car out of one obstacle and reflect the closing part of its velocity
-fn collide(car, other: any, id: any) {
+fn collide(car, other: any, id: any) any^ {
     let m = separate(car_box(car), other)
     if (m == null) car
     else {
@@ -51,12 +51,12 @@ fn collide(car, other: any, id: any) {
          impact: max(car.impact, 0.0 - closing), hits: if (id == null) car.hits else [*car.hits, id]}
     }
 }
-fn collide_all(car, boxes, i) => if (i >= len(boxes)) car
+fn collide_all(car, boxes, i) any^ => if (i >= len(boxes)) car
     else collide_all(collide(car, boxes[i].box, boxes[i].id), boxes, i + 1)
 // world boxes tall enough to meet the car, plus the traffic around it
-pub fn obstacles_near(car, traffic) => [
-    *[for (o in city.near_obstacles(car.x, car.z, 4.0) where o[4] > car.y + 0.25) {box: aabb(o), id: null}],
-    *[for (t in traffic where u.dist2(t.x, t.z, car.x, car.z) < 64.0) {box: box(t.x, t.z, t.heading, t.hl, t.hw), id: t.id}]]
+pub fn obstacles_near(car, traffic) any^ => [
+    *[for (o in city.near_obstacles(car.x, car.z, 4.0)^ where o[4] > car.y + 0.25) {box: aabb(o), id: null}],
+    *[for (t in traffic where u.dist2(t.x, t.z, car.x, car.z)^ < 64.0) {box: box(t.x, t.z, t.heading, t.hl, t.hw), id: t.id}]]
 
 // ---- one integration step of at most 1/60 s
 fn gearbox(car, vf, throttle, dt) {
@@ -82,7 +82,7 @@ fn longitudinal(car, vf, pedals, box) {
         (if (pedals.handbrake) 7.0 else 0.0);
     {thrust: thrust, resist: resist}
 }
-fn ground_step(car, dt) {
+fn ground_step(car, dt) any^ {
     let g = city.ground(car.x, car.z)
     if (car.grounded) {
         // a sharp drop under a moving car (a ramp lip) launches it with its climbing speed
@@ -99,7 +99,7 @@ fn ground_step(car, dt) {
         else {*: car, y: y, vy: vy, air: car.air + dt}
     }
 }
-fn integrate(car, pedals, dt, boxes) {
+fn integrate(car, pedals, dt, boxes) any^ {
     let h = car.heading
     let f = u.forward(h), r = u.right(h)
     let vf = car.vx * f[0] + car.vz * f[1]
@@ -144,7 +144,7 @@ pub fn step(car, pedals, dt, traffic = []) {
     let boxes = obstacles_near(car, traffic)
     let n = max(1, int(ceil(max(speed(car) * dt / 0.45, dt * 60.0))) ^ { 1 })
     let h = dt / n
-    let after = reduce([fresh, *[for (i in 1 to n) i]], (c, i) => integrate(c, pedals, h, boxes))
+    let after = reduce([fresh, *[for (i in 1 to n) i]], (c, i) any^ => integrate(c, pedals, h, boxes))
     let hurt = max(0.0, after.impact - 5.0) * 1.6;
     attitude({*: after, damage: min(100.0, after.damage + hurt)}, dt)
 }

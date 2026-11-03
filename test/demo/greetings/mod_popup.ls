@@ -36,7 +36,7 @@ pub fn configure(card, field, value) {
     {*:card, popup: of({popup: next})}
 }
 
-pub fn camera_style() => "--popup-pitch:" ++ A.n(CAMERA.pitch) ++ "deg;--popup-yaw:" ++ A.n(CAMERA.yaw)
+pub fn camera_style() any^ => "--popup-pitch:" ++ A.n(CAMERA.pitch) ++ "deg;--popup-yaw:" ++ A.n(CAMERA.yaw)
     ++ "deg;--popup-half-yaw:" ++ A.n(CAMERA.half_yaw) ++ "deg"
 pub fn fold_pose(progress) => {lift: progress, opacity: min(1.0, progress * 3.0),
     angle: if (progress <= .5) -88.0 + progress * 80.0 else -48.0 + (progress - .5) * 72.0}
@@ -71,7 +71,7 @@ pub fn preview_scale(card, w, h, available_w, available_h) {
              min(fit_axis(p.x, p.z, available_w), fit_axis(p.y, p.z, available_h)))])))
 }
 
-fn placed_art(it, ink) {
+fn placed_art(it, ink) any^ {
     let a = A.art_of(it.art);
     <svg x:it.x, y:it.y, width:it.w, height:it.w * A.ratio(it.art), viewBox:"0 0 " ++ string(a.box[0]) ++ " " ++ string(a.box[1]),
         (a.draw)(if (it.color == null) ink else it.color)>
@@ -86,7 +86,7 @@ fn plane_svg(p, config, i) => <svg class:"popup-art", viewBox:"0 0 400 440", wid
         <text x:200, y:357, fill:if (A.is_dark(config.color)) "#ffffff" else "#3f3a33", 'text-anchor':"middle",
             'font-family':"Helvetica, Arial, sans-serif", 'font-size':16, 'font-weight':700, 'letter-spacing':1, p.label>>>
 
-pub fn scene(card, w, h, live = false) {
+pub fn scene(card, w, h, live = false) any^ {
     let config = of(card)
     let p = design(config.design)
     let lift = depth(config.depth).scale;

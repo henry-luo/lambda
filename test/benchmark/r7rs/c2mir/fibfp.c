@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of r7rs/fibfp2.ls. */
 extern int printf(const char *, ...);
 
@@ -7,7 +8,10 @@ static double fibfp(double n) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     double result = fibfp(27.0);
+    BENCH_KERNEL_END();
     printf(result == 196418.0 ? "fibfp: PASS\n" : "fibfp: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return result != 196418.0;
 }

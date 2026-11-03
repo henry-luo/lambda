@@ -20,25 +20,25 @@ pub fn layout(parent, children, ctx) {
   }
 }
 
-pub fn to_html(graph, opts = null) {
+pub fn to_html(graph, opts = null) any^ {
   let canonical = normalize.normalize(graph).graph;
   if (canonical is element and canonical.flavor == "mermaid" and
       canonical.kind == "sequence") sequence.to_html(canonical, opts)
   else html.to_html(canonical, opts)
 }
 
-pub fn render_svg(graph, width: int, height: int, opts = null) {
+pub fn render_svg(graph, width: int, height: int, opts = null) any^ {
   // the transform module owns the Radiant import, avoiding duplicate retained
   // module registrations when callers use the complete graph render pipeline.
   radiant.render_svg(format(to_html(graph, opts), 'html'), width, height)
 }
 
-pub fn scene_from_svg(svg) => scene.from_svg(svg)
+pub fn scene_from_svg(svg) any^ => scene.from_svg(svg)
 
 pub fn render_scene(graph, width: int, height: int, opts = null) {
   let svg = render_svg(graph, width, height, opts);
   {svg: svg, scene: scene.from_svg(svg)}
 }
 
-pub fn compare_scenes(actual, expected, policy = null) =>
+pub fn compare_scenes(actual, expected, policy = null) any^ =>
   scene.compare_scenes(actual, expected, policy)

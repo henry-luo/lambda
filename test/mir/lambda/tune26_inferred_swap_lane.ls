@@ -2,9 +2,9 @@
 // temporaries preserve a declared int[] lane without repeated representation
 // guards on the successful store path.
 
-pn tune26_inferred_swap_lane(n: int) int {
-    var target: int[] = fill(n, 0)
-    var source = fill(n, 0)
+pn tune26_inferred_swap_lane(n: int) int^ {
+    var target: int[] = fill(n, 0)^
+    var source = fill(n, 0)^
     source[0] = 3
     source[1] = 7
     target[0] = source[0]

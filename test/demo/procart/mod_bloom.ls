@@ -34,7 +34,7 @@ pub fn point(u,v,kind="petal") array {
     else [u,0.12*u*u+0.08*(1.0-v*v)*sin(math.pi*u),v*(0.04+0.96*sin(math.pi*u))]
 }
 
-pub fn normal(u,v,kind="petal") array {
+pub fn normal(u,v,kind="petal") array^ {
     // graph normals remain defined at the rounded petal's collapsed end vertices.
     if (kind == "oak-leaf") camera.unit([-0.1*u,1.0,-0.06*point(u,v,kind)[2]])
     else if (kind == "fan-leaf") (let p = point(u,v,kind),camera.unit([-0.06*p[0],1.0,-0.06*p[2]]))

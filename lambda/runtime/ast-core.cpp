@@ -1,4 +1,6 @@
 #include "ast-core.hpp"
+#include "ast.hpp"
+#include "transpiler.hpp"
 #include "type_contract.hpp"
 #include "../lambda-data.hpp"
 
@@ -49,7 +51,44 @@ extern "C" bool ast_type_is_array_contract(Type* type) {
     return lambda_array_contract_info(type, &info);
 }
 
+// D4.4.4v4: an outcome/occurrence wrapper can retain a mutable member.
+// Unresolved binders stay conservative; scalar-only unions need no mark.
+static bool ast_type_may_be_container_inner(Type* type, int depth) {
+    if (!type || depth > 32) return true;
+    type = unwrap_simple_type_type(type);
+    if (!type) return true;
+    if (ast_type_needs_mutable_clone(type->type_id)) return true;
+    if (type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type)) return false;
+    if (lambda_type_is_union(type)) {
+        TypeBinary* choice = (TypeBinary*)type;
+        return ast_type_may_be_container_inner(choice->left, depth + 1) ||
+            ast_type_may_be_container_inner(choice->right, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_CONSTRAINED) {
+        return ast_type_may_be_container_inner(((TypeConstrained*)type)->base, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* occurrence = (TypeUnary*)type;
+        return occurrence->op != OPERATOR_OPTIONAL ||
+            ast_type_may_be_container_inner(occurrence->operand, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        return ast_type_may_be_container_inner(parameter->contract_type
+            ? parameter->contract_type : parameter->full_type, depth + 1);
+    }
+    return type->kind == TYPE_KIND_BINDER || type->kind == TYPE_KIND_BOUND_REF ||
+        type->kind == TYPE_KIND_BINARY;
+}
+
+extern "C" bool ast_type_may_be_container(Type* type) {
+    return ast_type_may_be_container_inner(type, 0);
+}
+
 static bool ast_nonnull_array_type(Type* type) {
+    // S9.1.2: a join's error outcome is immutable; its array success still
+    // owns a fresh root and must retain snapshot capture on later aliases.
+    type = lambda_type_remove_error(NULL, type);
     return type && !lambda_type_accepts_null(type) &&
         ast_type_is_array_contract(type);
 }
@@ -291,6 +330,9 @@ static NameEntry* ast_index_node_entry(AstNode* node) {
     case AST_NODE_IDENT: return ((AstIdentNode*)node)->entry;
     case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
     case AST_NODE_FOR_INDEX: return ((AstNamedNode*)node)->entry;
+    // publish the iterator even when the body never reads it; code generation
+    // still needs its binding to advance the range.
+    case AST_NODE_FOR_CLAUSE: return ((AstLoopNode*)node)->entry;
     case AST_NODE_VARIABLE_DECLARATOR: return ((AstDeclaratorNode*)node)->entry;
     // A Lambda assignment carries its resolved target directly. Publishing it
     // makes a captured write a first-class index fact even without a target
@@ -1045,7 +1087,7 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstFuncNode*)node)->param); AST_VISIT(((AstFuncNode*)node)->body); break;
         case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
             AST_VISIT(((AstHandlerNode*)node)->operand); AST_VISIT(((AstHandlerNode*)node)->body);
-            AST_VISIT(((AstHandlerNode*)node)->value_body); break;
+            AST_VISIT(((AstHandlerNode*)node)->filter); break;
         case AST_NODE_START: AST_VISIT(((AstStartNode*)node)->call); break;
         case AST_NODE_METHOD:
             AST_VISIT(((AstMethodNode*)node)->key); AST_VISIT(((AstMethodNode*)node)->param);
@@ -1581,4 +1623,75 @@ extern "C" Type* ast_map_path_leaf_contract(Type* root_contract,
         if (open_leaf) return current;
     }
     return current;
+}
+
+// recognize a closed owner cycle; each lowering checks its own storage and boundary proofs.
+extern "C" bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first, AstOwnerPermutationPlan* plan) {
+    if (!index || !first || (first->node_type != AST_NODE_VAR_STAM &&
+            first->node_type != AST_NODE_LET_STAM)) return false;
+    AstNode* declared = ((AstLetNode*)first)->declare;
+    if (!declared || declared->next || declared->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    AstDeclaratorNode* scratch = (AstDeclaratorNode*)declared;
+    AstNode* initial = ast_unwrap_primary_to_leaf(scratch->init);
+    if (!initial || initial->node_type != AST_NODE_IDENT || !scratch->entry ||
+            scratch->declared_type || scratch->is_type_definition) return false;
+    NameEntry* next_owner = ((AstIdentNode*)initial)->entry;
+    *plan = {}; plan->temporary = scratch;
+    for (AstNode* move = first->next; move && plan->count < 8; move = move->next) {
+        if (move->node_type != AST_NODE_ASSIGN_STAM) return false;
+        AstAssignStamNode* assignment = (AstAssignStamNode*)move;
+        if (!next_owner || assignment->target_entry != next_owner || assignment->object || assignment->key) return false;
+        for (int i = 0; i < plan->count; i++) if (plan->owners[i] == next_owner) return false;
+        plan->owners[plan->count++] = next_owner;
+        AstNode* source = ast_unwrap_primary_to_leaf(assignment->value);
+        if (!source || source->node_type != AST_NODE_IDENT) return false;
+        next_owner = ((AstIdentNode*)source)->entry;
+        if (next_owner == scratch->entry) { plan->last = move; break; }
+    }
+    if (!plan->last || plan->count < 2) return false;
+    // an observable scratch is a snapshot, not an owner transfer (S9.1.2).
+    for (AstNodeId i = 0; i < index->count; i++) {
+        AstNode* use = index->nodes[i];
+        if (use->node_type != AST_NODE_IDENT || ((AstIdentNode*)use)->entry != scratch->entry) continue;
+        AstNodeId parent = ast_index_parent_id(index, i);
+        while (parent < index->count && index->nodes[parent]->node_type == AST_NODE_PRIMARY)
+            parent = ast_index_parent_id(index, parent);
+        if (parent >= index->count || (index->nodes[parent] != declared && index->nodes[parent] != plan->last)) return false;
+    }
+    return true;
+}
+
+extern "C" TypeString* ast_string_literal_type(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_PRIMARY ||
+            ((AstPrimaryNode*)node)->expr || !node->type ||
+            !node->type->is_literal || node->type->type_id != LMD_TYPE_STRING) {
+        return NULL;
+    }
+    TypeString* literal = (TypeString*)node->type;
+    return literal->string ? literal : NULL;
+}
+
+// bounded source-order leaves; preserves the original AST for fallback replay.
+extern "C" bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count) {
+    AstNode* pending[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    int waiting = 0;
+    pending[waiting++] = node;
+    while (waiting) {
+        AstNode* leaf = pending[--waiting];
+        AstNode* value = ast_unwrap_primary_to_leaf(leaf);
+        if (value && value->node_type == AST_NODE_BINARY &&
+                ((AstBinaryNode*)value)->op == OPERATOR_JOIN) {
+            if (waiting + 2 > LAMBDA_STRING_CONCAT_MAX_PARTS) return false;
+            pending[waiting++] = ((AstBinaryNode*)value)->right;
+            pending[waiting++] = ((AstBinaryNode*)value)->left;
+        } else {
+            if (*count >= LAMBDA_STRING_CONCAT_MAX_PARTS) return false;
+            leaves[(*count)++] = leaf;
+        }
+    }
+    return true;
 }

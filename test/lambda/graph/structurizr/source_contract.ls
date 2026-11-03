@@ -7,7 +7,7 @@ let workspace = structurizr.normalize(source)
 let invalid_root = structurizr.validate_source(<model>)
 
 {
-  source: [for (value in model.diagnostics(workspace))
+  source: [for (value in ((model.diagnostics(workspace)) ^ { [] }))
     [value.code, value.path, value["source-line"], value["source-column"]]],
   root: [for (value in invalid_root) [value.code, value.path]]
 }

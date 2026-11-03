@@ -55,8 +55,8 @@ let HS_CHARS: string[] = ["a", "c", "g", "t"]
 let HS_PROBS: float[] = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
 // build cumulative probability table
-pn make_cumulative(probs: float[]) float[] {
-    var cum: float[] = fill(len(probs), 0.0)
+pn make_cumulative(probs: float[]) float[]^ {
+    var cum: float[] = fill(len(probs), 0.0)^
     var total: float = 0.0
     for i of probs {
         total = total + probs[i]
@@ -83,12 +83,12 @@ pn random_fasta(id: string, desc: string, chars: string[], probs: float[],
         while (j < line_len) {
             // `%` has a flexible numeric result; convert it at the int[]
             // boundary so the PRNG state keeps its declared element contract.
-            seed_arr[0] = int((seed_arr[0] * IA + IC) % IM)
+            seed_arr[0] = int((seed_arr[0] * IA + IC) % IM)^
             var r: float = float(seed_arr[0]) / float(IM)
 
             // lookup character by cumulative probability
             var k: int = 0
-            while (k < num_chars - 1 and cum[k] < r) {
+            while ((k < num_chars - 1 and cum[k] < r)^) {
                 k = k + 1
             }
             line = line ++ chars[k]
@@ -104,9 +104,9 @@ pn main() {
     // seed is shared across calls, stored in mutable array
     var seed_arr: int[] = [42]
 
-    repeat_fasta("ONE", "Homo sapiens alu", ALU, N_COUNT * 2)
-    random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)
-    random_fasta("THREE", "Homo sapiens frequency", HS_CHARS, HS_PROBS, N_COUNT * 5, seed_arr)
+    repeat_fasta("ONE", "Homo sapiens alu", ALU, N_COUNT * 2)^
+    random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)^
+    random_fasta("THREE", "Homo sapiens frequency", HS_CHARS, HS_PROBS, N_COUNT * 5, seed_arr)^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

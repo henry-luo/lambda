@@ -27,7 +27,7 @@ fn run(test_case) {
       actual.styles == expected.styles],
     counts: [len(actual.elements), len(actual.relationships),
       len(actual.views), len(actual.styles)],
-    diagnostics: [for (value in model.diagnostics(workspace)) value.code]
+    diagnostics: [for (value in ((model.diagnostics(workspace)) ^ { [] })) value.code]
   }
 }
 

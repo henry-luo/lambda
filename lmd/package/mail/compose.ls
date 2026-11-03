@@ -14,20 +14,20 @@ pub fn blank() => {to: "", cc: "", subject: "", text: "", in_reply_to: null, ref
 pub fn person_label(a) => if (a.name != null and a.name != "") a.name ++ " <" ++ a.address ++ ">" else a.address
 pub fn people_label(people) => join([for (a in people) person_label(a)], ", ")
 
-fn prefixed(subject, prefix) => lower(slice(trim(subject or ""), 0, len(prefix))) == prefix
-pub fn reply_subject(subject) => if (prefixed(subject, "re:")) trim(subject) else "Re: " ++ trim(subject or "")
-pub fn forward_subject(subject) => if (prefixed(subject, "fwd:") or prefixed(subject, "fw:")) trim(subject)
+fn prefixed(subject, prefix) any^ => lower(slice(trim(subject or ""), 0, len(prefix))) == prefix
+pub fn reply_subject(subject) any^ => if (prefixed(subject, "re:")) trim(subject) else "Re: " ++ trim(subject or "")
+pub fn forward_subject(subject) any^ => if (prefixed(subject, "fwd:") or prefixed(subject, "fw:")) trim(subject)
     else "Fwd: " ++ trim(subject or "")
 
 // ---- quoting ----
 
 // one more quote level on every line ("> " on new ones, ">" on quoted ones)
-pub fn quote(text) => join([for (line in split(replace(text or "", "\r\n", "\n"), "\n"))
+pub fn quote(text) any^ => join([for (line in ((split(replace(text or "", "\r\n", "\n"), "\n")) ^ { [] }))
     if (starts_with(line, ">")) ">" ++ line else "> " ++ line], "\n")
 
-fn quote_depth(line) => (let marks = [for (ch in split(replace(line, " ", ""), "")) ch], let n = [for (i, ch in marks where ch != ">") i],
+fn quote_depth(line) any^ => (let marks = [for (ch in ((split(replace(line, " ", ""), "")) ^ { [] })) ch], let n = [for (i, ch in marks where ch != ">") i],
     if (len(n) == 0) len(marks) else n[0])
-fn unquoted(line, depth) => if (depth == 0) line else (let rest = [for (i, ch in split(line, "")) {i: i, ch: ch}],
+fn unquoted(line, depth) any^ => if (depth == 0) line else (let rest = [for (i, ch in ((split(line, "")) ^ { [] })) {i: i, ch: ch}],
     let seen = [for (r in rest where r.ch == ">") r.i], if (len(seen) < depth) line
     else (let cut = slice(line, seen[depth - 1] + 1), if (starts_with(cut, " ")) slice(cut, 1) else cut))
 
@@ -40,18 +40,18 @@ pub fn quote_runs(text) {
         {depth: tagged[s].depth, text: join([for (i in range(s, end, 1)) unquoted(tagged[i].line, tagged[s].depth)], "\n")})]
 }
 
-fn escaped(text) => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+fn escaped(text) any^ => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
 fn repeated(n, tag) => join([for (i in range(0, n, 1)) tag], "")
 
 // The HTML alternative of a plain-text body, as mail clients send it: line
 // breaks kept, and quote levels as nested <blockquote type="cite">. Each run
 // opens or closes only the levels its depth differs from the previous one by.
-pub fn html_of_text(text) {
+pub fn html_of_text(text) any^ {
     let cite = "<blockquote type=\"cite\" style=\"margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378\">"
     let runs = quote_runs(text)
     let depths = [0, *[for (r in runs) r.depth]]
     let body = join([for (k, r in runs) repeated(max(0, r.depth - depths[k]), cite) ++ repeated(max(0, depths[k] - r.depth), "</blockquote>") ++
-        join([for (line in split(r.text, "\n")) escaped(line)], "<br>\n")], "") ++ repeated(depths[len(runs)], "</blockquote>");
+        join([for (line in ((split(r.text, "\n")) ^ { [] })) escaped(line)], "<br>\n")], "") ++ repeated(depths[len(runs)], "</blockquote>");
     "<!DOCTYPE html><html><body><div style=\"font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f\">" ++
         body ++ "</div></body></html>"
 }
@@ -61,7 +61,7 @@ pub fn html_of_text(text) {
 fn unique_people(people, except) => [for (i, a in people where not (lower(a.address) in except) and
     len([for (j, b in people where j < i and lower(b.address) == lower(a.address)) b]) == 0) a]
 
-pub fn attribution(m) => "On " ++ (m.date or "an earlier date") ++ ", " ++ people_label(m.from) ++ " wrote:"
+pub fn attribution(m) any^ => "On " ++ (m.date or "an earlier date") ++ ", " ++ people_label(m.from) ++ " wrote:"
 
 // A reply to `m` from `me` ({name, address}); `all` adds the other recipients.
 // A reply to one's own message goes to its recipients instead.
@@ -84,7 +84,7 @@ pub fn forward(m) => {*: blank(), subject: forward_subject(m.subject), attachmen
 // ---- sending ----
 
 // "Sat, 24 Oct 2026 02:53:07 +0000" for a Unix time in milliseconds, in UTC
-pub fn rfc5322_date(unix_ms) => datetime(unix_ms).format("ddd, D MMM YYYY hh:mm:ss") ++ " +0000"
+pub fn rfc5322_date(unix_ms) any^ => datetime(unix_ms).format("ddd, D MMM YYYY hh:mm:ss") ++ " +0000"
 
 // The addresses typed in a To or Cc field, as [{name, address}]; the eml
 // reader's address parser reads them, quoting and encoded words included.
@@ -95,16 +95,16 @@ pub fn recipients(typed) {
 }
 
 // why the draft cannot be sent yet, or null
-pub fn problem(draft) {
+pub fn problem(draft) any^ {
     let people = [*recipients(draft.to), *recipients(draft.cc)]
-    let bad = [for (a in people where not contains(a.address or "", "@")) a];
+    let bad = [for (a in people where ((not contains(a.address or "", "@")) ^ { false })) a];
     if (len(people) == 0) "Add at least one recipient."
     else if (len(bad) > 0) "“" ++ (bad[0].address or bad[0].name) ++ "” is not an email address."
     else null
 }
 
 // lines a mail server accepts as 8bit are at most 998 octets (RFC 5322 §2.1.1)
-pub fn transfer_encoding(text) => if (len([for (line in split(text, "\n") where len(binary(line)) > 900) line]) > 0) "quoted-printable" else "8bit"
+pub fn transfer_encoding(text) any^ => if (len([for (line in ((split(text, "\n")) ^ { [] }) where ((len(binary(line)) > 900) ^ { false })) line]) > 0) "quoted-printable" else "8bit"
 
 // The RFC 5322 text of `draft` sent by `from` ({name, address}) at `sent_at`
 // (an RFC 5322 date) as `id` (a Message-ID): multipart/alternative of the

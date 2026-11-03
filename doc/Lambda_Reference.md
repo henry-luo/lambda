@@ -61,7 +61,7 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic and vector arithmetic, comparisons, pipes (`\|>` `\|:` `that`), queries (`?` `.?` `[T]`), `if`/`for`/`match`, operators and precedence |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — `fn` and `pn` declarations, parameters, closures, higher-order and colour-polymorphic functions, method-style calls |
 | **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — `var`, assignment, value semantics, `while`, `return`, file output, the `io` module, `main()`, concurrency |
-| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^E` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
+| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
 | **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String and Symbol Patterns** — The pattern language inside `\(…)`: quoted character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
 | **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript modules |
 | **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
@@ -294,7 +294,7 @@ A relative import `.a.b` resolves beside the importing file and `~~.a` one direc
 
 ## Error Handling
 
-Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors with the `^` propagation operator or the `^ { … }` handler. Ignoring an error is a **compile-time error**.
+Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare outcomes with `T^` (`T | error`) or particular error unions. `raise` returns an error early. Callers acknowledge an outcome by retaining it in an inferred/error-admitting binding, handling or classifying it, or propagating it with `^` (S7.4.2v3, S7.5.1v6). A fallible result cannot be silently overwritten.
 
 ```lambda
 // Function that may fail

@@ -8,7 +8,7 @@ fn estimate(node,depth=0) int^ {
     else if (node is element and name(node) == 'raster') node.width*node.height*len(node.channels)*2+256
     else if (node is binary) len(node)*2+16
     else if (node is string) len(node)*6+16
-    else if (node is element) 256+estimate(map(node),depth+1)^+sum([0,*[for (child in content(node)) estimate(child,depth+1)^]])
+    else if (node is element) 256+estimate(map(node),depth+1)^+sum([0,*[for (child in ((content(node)) ^ { [] })) estimate(child,depth+1)^]])
     else if (node is map) 32+sum([0,*[for (key,value in node) estimate(string(key),depth+1)^+estimate(value,depth+1)^]])
     else if (node is array) 32+sum([0,*[for (value in node) estimate(value,depth+1)^]])
     else 24
@@ -17,21 +17,21 @@ fn packed(node,depth=0) any^ {
     if (depth>64) raise error("image.project: nesting limit exceeded")
     else if (node is element and name(node) == 'raster') <raster_bytes width:node.width,height:node.height,
         channels:len(node.channels),color_space:node.color,bytes:img.to_bytes(node)^>
-    else if (node is element) img.with_children(node,[for (child in content(node)) packed(child,depth+1)^])^
+    else if (node is element) img.with_children(node,[for (child in ((content(node)) ^ { [] })) packed(child,depth+1)^])^
     else node
 }
 fn decoded_bytes(node,depth=0) int^ {
     if (depth>64) raise error("image.project: nesting limit exceeded")
     else if (node is element and name(node) == 'raster_bytes') (
         if (not (node.bytes is binary)) raise error("image.project: missing raster bytes") else len(node.bytes))
-    else if (node is element) sum([0,*[for (child in content(node)) decoded_bytes(child,depth+1)^]])
+    else if (node is element) sum([0,*[for (child in ((content(node)) ^ { [] })) decoded_bytes(child,depth+1)^]])
     else 0
 }
 fn unpacked(node,depth=0) any^ {
     if (depth>64) raise error("image.project: nesting limit exceeded")
     else if (node is element and name(node) == 'raster_bytes') img.from_bytes(node.bytes,
         {width:node.width,height:node.height,channels:node.channels,color_space:node.color_space})^
-    else if (node is element) img.with_children(node,[for (child in content(node)) unpacked(child,depth+1)^])^
+    else if (node is element) img.with_children(node,[for (child in ((content(node)) ^ { [] })) unpacked(child,depth+1)^])^
     else node
 }
 pub fn encode(document) string^ {

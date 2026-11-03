@@ -21,7 +21,7 @@ let committed = interaction.update(preview,{kind:'commit',x:250,y:195,point:{x:2
 len(committed.hist.undo) == 1 and committed.drag == null
 model.step_history(committed).doc == drawing
 codec.decode(parse(format(codec.encode(committed.doc)^,'json'),'json')^)^ == committed.doc
-codec.encode(committed.doc,{version:3}) ^ { true } ~ { false }
+match (codec.encode(committed.doc,{version:3}) ^ { ^ }) { case error: true default: false }
 model.valid_node(model.lookup(committed.doc,"e").shape,[])
 let reversed = model.reverse_edge(committed)^;
 model.route(reversed.doc,model.lookup(reversed.doc,"e").shape) == reverse(moved)

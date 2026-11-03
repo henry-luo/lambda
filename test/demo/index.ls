@@ -66,6 +66,8 @@ let DEMOS = [
      blurb: "Play engraved sheet music, notes and lyrics lit as they sound."},
     {name: "soundflow", title: "Soundflow", cat: "media", sub: "Visual instrument",
      blurb: "Draw across the strings; every stroke loops and sings."},
+    {name: "chat", title: "Chat", cat: "utilities", sub: "One-to-one messaging",
+     blurb: "Send messages, switch profiles and see delivery and read receipts."},
     {name: "mail", title: "Mail", cat: "utilities", sub: "Email",
      blurb: "An IMAP mail client, passwords kept in the Keychain."},
     {name: "archive", title: "Archive", cat: "utilities", sub: "Web archiver",
@@ -189,8 +191,8 @@ fn category_page(c, running) => (let apps = in_category(c.key), <div class:"stor
     <div class:"cards", for (d in apps) card(d, running)>>)
 
 // the first error a demo logged on its way out, without the log timestamp
-fn first_error(stderr) => if (stderr == null) null else (let text = parse(stderr, "text") ^ { "" },
-    let lines = [for (l in split(text, "\n") where contains(l, "[ERR!] ")) l],
+fn first_error(stderr) any^ => if (stderr == null) null else (let text = parse(stderr, "text") ^ { "" },
+    let lines = [for (l in ((split(text, "\n")) ^ { [] }) where ((contains(l, "[ERR!] ")) ^ { false })) l],
     if (len(lines) == 0) null else trim(split(lines[0], "[ERR!] ")[1]))
 
 // Each demo runs as its own `lambda demo` process and so gets its own window:
@@ -199,7 +201,7 @@ fn first_error(stderr) => if (stderr == null) null else (let text = parse(stderr
 pn launch(root, id, key) {
     var code = -1
     var reason = null
-    io.exec(EXE, ["demo", key], {timeout_ms: 0}) ^ { code = -1 } ~ { code = ~.exit_code; reason = first_error(~.stderr) }
+    { let __error_outcome_1 = io.exec(EXE, ["demo", key], {timeout_ms: 0}) ^ { ^ }; if (__error_outcome_1 is error) { code = -1 } else match __error_outcome_1 { case any { code = ~.exit_code; reason = first_error(~.stderr) } } }
     let owner = dom.get_element_by_id(root, "demo-index")
     if (owner != null) dom.dispatch(owner, {type: "demoexit", bubbles: false,
         detail: {id: id, name: key, code: code, reason: reason}})

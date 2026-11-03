@@ -71,6 +71,8 @@ void cookie_jar_import_curl(CookieJar* jar, void* curl_handle);
 
 // Build the script-visible cookie string. HttpOnly entries are excluded.
 char* cookie_jar_build_document_cookie(CookieJar* jar, const char* request_url);
+// network requests include HttpOnly cookies; callers free the returned header.
+char* cookie_jar_build_request_cookie(CookieJar* jar, const char* request_url);
 
 // Maintenance
 void cookie_jar_clear_expired(CookieJar* jar);

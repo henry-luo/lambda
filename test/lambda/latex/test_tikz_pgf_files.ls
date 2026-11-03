@@ -3,7 +3,7 @@ import tikz: lambda.doc.tikz.tikz
 import expr: lambda.doc.tikz.expression
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 let segmented = input("test/input/tikz/segmentada.pgf")^
 let polar = input("test/input/tikz/polar.pgf")^
@@ -70,7 +70,7 @@ let regression_html = format(tikz.render_document(regression, null)^, 'xml');
     parametric_plot.input_kind == "parametric" and
         len(children_named(parametric_plot, "x_expression")) == 1 and
         len(children_named(parametric_plot, "y_expression")) == 1,
-    len([for (option in children_named(parametric_axis, "option")
+    len([for (option in ((children_named(parametric_axis, "option")) ^ { [] })
         where option.key == "axis x line" and option.value == "middle") option]) == 1,
     contains(parametric_html, "tikz-axis") and contains(parametric_html, "stroke=\"blue\""),
     len(regression_plots) == 2 and

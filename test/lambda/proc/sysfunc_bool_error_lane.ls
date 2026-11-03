@@ -11,6 +11,10 @@ fn masks(m: bool[], s: string) { [any(m), all(m), is_view(m), starts_with(s, "a"
 // boxed result -- a raw Bool lane there was read as an Item pointer
 fn has_a(x) bool^ { contains(x, "a")^ }
 fn some(x) bool^ { any(x)^ }
+fn prefix(x) bool^ { starts_with(x, "a")^ }
+fn suffix(x) bool^ { ends_with(x, "c")^ }
+fn typed_prefix(x: string) bool^ { starts_with(x, "a")^ }
+fn typed_suffix(x: string) bool^ { ends_with(x, "c")^ }
 
 pn main() {
     let e = dyn([1, 4, 5]) > 2
@@ -44,6 +48,9 @@ pn main() {
     // propagation and handlers discharge the error channel
     print([has_a(dyn("abc")) ^ { ^ }, has_a(dyn(5)) ^ { ^ } is error,
         some(dyn([0])) ^ { ^ }, some(dyn(1)) ^ { ^ } is error,
-        contains(dyn(5), "a") ^ { "handled" }, all(dyn(5)) ^ { "handled" } ~ { ~ }])
+        contains(dyn(5), "a") ^ { "handled" }, all(dyn(5)) ^ { "handled" },
+        [prefix(dyn("abc")), prefix(dyn(5)) is error, suffix(dyn("abc")),
+         suffix(dyn(5)) is error, typed_prefix("abc"), typed_prefix("xyz"),
+         typed_suffix("abc"), typed_suffix("xyz")]])
     print("\n")
 }

@@ -26,28 +26,28 @@ import text_policy: lambda.dom.edit_text_policy
 // Selection helpers
 // ---------------------------------------------------------------------------
 
-fn sel_collapsed(sel) =>
+fn sel_collapsed(sel) any^ =>
   sel.kind == 'text' and pos_equal(sel.anchor, sel.head) or false
 
-fn sel_lo(sel) => pos_min(sel.anchor, sel.head)
-fn sel_hi(sel) => pos_max(sel.anchor, sel.head)
+fn sel_lo(sel) any^ => pos_min(sel.anchor, sel.head)
+fn sel_hi(sel) any^ => pos_max(sel.anchor, sel.head)
 
 // Build a collapsed text selection at `p`.
-fn caret(p) => text_selection(p, p)
+fn caret(p) any^ => text_selection(p, p)
 
 // True iff `sel` is a text selection both endpoints of which lie in the same
 // text leaf. Most commands here only handle this simple case; cross-leaf
 // editing is deferred to the same layer that handles HTML paste.
-fn sel_single_leaf(sel) =>
+fn sel_single_leaf(sel) any^ =>
   sel.kind == 'text' and path_equal(sel.anchor.path, sel.head.path) or false
 
-fn sel_same_parent_leaves(sel) =>
+fn sel_same_parent_leaves(sel) any^ =>
   sel.kind == 'text' and path_equal(parent_path(sel.anchor.path), parent_path(sel.head.path)) or false
 
 fn state_schema(st) =>
   if (st.schema == null) { md_schema } else { st.schema }
 
-fn state_default_block(st) =>
+fn state_default_block(st) any^ =>
   if (st.default_block != null) { st.default_block } else { schema_default_block(state_schema(st)) }
 
 // Schema and document values originate at the editor boundary; preserve a
@@ -57,16 +57,16 @@ fn state_hard_break(st) symbol | error => schema_hard_break(state_schema(st))
 // True iff a block's schema content permits inline content (text leaves) — e.g.
 // p/heading/li/td. Used so typing into an empty []-block inserts a text leaf
 // there (never among block children / at the doc root). Recurses into `any:[…]`.
-fn term_allows_inline(t) =>
+fn term_allows_inline(t) any^ =>
   if (t.role != null) { t.role == 'inline' or t.role == 'text' }
   else if (t.any != null) { any_allows_inline(t.any, 0, len(t.any)) }
   else { false }
-fn any_allows_inline(terms, i, n) {
+fn any_allows_inline(terms, i, n) any^ {
   if (i >= n) { false }
   else if (term_allows_inline(terms[i])) { true }
   else { any_allows_inline(terms, i + 1, n) }
 }
-fn block_allows_inline(st, tag) {
+fn block_allows_inline(st, tag) any^ {
   let schema = st.schema
   if (schema == null) {
     tag == 'p' or tag == 'paragraph' or tag == 'li' or tag == 'list_item' or tag == 'heading' or
@@ -99,13 +99,13 @@ fn insert_marks_for_leaf(st, leaf) =>
 fn replacement_block(st, txt) map | error =>
   node(state_default_block(st), [text_marked(txt, replacement_marks(st))])
 
-fn replace_all_with_text(st, txt) {
+fn replace_all_with_text(st, txt) any^ {
   let tx0 = tx_begin(st.doc, st.selection)
   let tx1 = tx_step(tx0, step_replace([], 0, len(st.doc.content), [replacement_block(st, txt)]))
   tx_set_selection(tx1, caret(pos([0, 0], len(txt))))
 }
 
-fn last_caret_pos_in(n, path) {
+fn last_caret_pos_in(n, path) any^ {
   if (is_text(n)) { pos(path, len(n.text)) }
   // atomic images have no internal caret; continue at their parent's child boundary.
   else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)+1) }
@@ -113,14 +113,14 @@ fn last_caret_pos_in(n, path) {
   else { pos(path, 0) }
 }
 
-fn first_caret_pos_in(n, path) {
+fn first_caret_pos_in(n, path) any^ {
   if (is_text(n)) { pos(path, 0) }
   else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)) }
   else if (is_node(n) and len(n.content) > 0) { first_caret_pos_in(n.content[0], [*path, 0]) }
   else { pos(path, 0) }
 }
 
-fn text_caret_near_pos(doc, p) {
+fn text_caret_near_pos(doc, p) any^ {
   let n = node_at(doc, p.path)
   if (n == null) { null }
   else if (is_text(n)) { p }
@@ -129,15 +129,15 @@ fn text_caret_near_pos(doc, p) {
   else { last_caret_pos_in(n.content[len(n.content) - 1], [*p.path, len(n.content) - 1]) }
 }
 
-fn selection_after_blocks(blocks) =>
+fn selection_after_blocks(blocks) any^ =>
   if (len(blocks) == 0) { caret(pos([], 0)) }
   else { caret(last_caret_pos_in(blocks[len(blocks) - 1], [len(blocks) - 1])) }
 
-fn selection_after_inserted_blocks(start_index, blocks) =>
+fn selection_after_inserted_blocks(start_index, blocks) any^ =>
   if (len(blocks) == 0) { caret(pos([], start_index)) }
   else { caret(last_caret_pos_in(blocks[len(blocks) - 1], [start_index + len(blocks) - 1])) }
 
-fn replace_all_with_blocks(st, blocks) {
+fn replace_all_with_blocks(st, blocks) any^ {
   if (len(blocks) == 0) { null }
   else {
     let tx0 = tx_begin(st.doc, st.selection)
@@ -146,13 +146,13 @@ fn replace_all_with_blocks(st, blocks) {
   }
 }
 
-fn valid_selected_node(st) {
+fn valid_selected_node(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'node' or len(sel.path) == 0) { false }
   else { node_at(st.doc, sel.path) != null }
 }
 
-fn replace_node_with_slice(st, slice_nodes, next_selection) {
+fn replace_node_with_slice(st, slice_nodes, next_selection) any^ {
   let sel = st.selection
   let selected_parent_path = parent_path(sel.path)
   let selected_index = last_index(sel.path)
@@ -161,7 +161,7 @@ fn replace_node_with_slice(st, slice_nodes, next_selection) {
   tx_set_selection(tx1, next_selection)
 }
 
-fn replace_node_with_text(st, txt) {
+fn replace_node_with_text(st, txt) any^ {
   if (not valid_selected_node(st)) { null }
   else {
     let selected_parent_path = parent_path(st.selection.path)
@@ -174,7 +174,7 @@ fn replace_node_with_text(st, txt) {
   }
 }
 
-fn delete_node_selection(st) {
+fn delete_node_selection(st) any^ {
   if (not valid_selected_node(st)) { null }
   else {
     let selected_parent_path = parent_path(st.selection.path)
@@ -189,7 +189,7 @@ fn delete_node_selection(st) {
   }
 }
 
-fn replace_node_with_blocks(st, blocks) {
+fn replace_node_with_blocks(st, blocks) any^ {
   if (not valid_selected_node(st) or len(blocks) == 0) { null }
   else {
     let selected_parent_path = parent_path(st.selection.path)
@@ -206,12 +206,12 @@ fn replace_node_with_blocks(st, blocks) {
   }
 }
 
-fn text_leaf_or_null(doc, path) {
+fn text_leaf_or_null(doc, path) any^ {
   let leaf = node_at(doc, path)
   if (leaf != null and is_text(leaf)) { leaf } else { null }
 }
 
-fn replace_same_parent_text_selection(st, txt) {
+fn replace_same_parent_text_selection(st, txt) any^ {
   let sel = st.selection
   if (sel == null or not sel_same_parent_leaves(sel)) { null }
   else {
@@ -244,7 +244,7 @@ fn replace_same_parent_text_selection(st, txt) {
   }
 }
 
-fn inline_prefix_before_pos(node0, rel_path, offset) {
+fn inline_prefix_before_pos(node0, rel_path, offset) any^ {
   if (is_text(node0)) {
     if (len(rel_path) == 0) { nonempty_text_leaf(slice(node0.text, 0, offset), node0.marks) } else { [] }
   } else if (is_node(node0) and len(rel_path) > 0) {
@@ -258,7 +258,7 @@ fn inline_prefix_before_pos(node0, rel_path, offset) {
   } else { [] }
 }
 
-fn inline_suffix_after_pos(node0, rel_path, offset) {
+fn inline_suffix_after_pos(node0, rel_path, offset) any^ {
   if (is_text(node0)) {
     if (len(rel_path) == 0) { nonempty_text_leaf(slice(node0.text, offset, len(node0.text)), node0.marks) } else { [] }
   } else if (is_node(node0) and len(rel_path) > 0) {
@@ -272,19 +272,19 @@ fn inline_suffix_after_pos(node0, rel_path, offset) {
   } else { [] }
 }
 
-fn content_term_allows_inline(term) {
+fn content_term_allows_inline(term) any^ {
   if (term.role == 'inline' or term.role == 'mark') { true }
   else if (term.any != null) { content_terms_allow_inline(term.any, 0, len(term.any)) }
   else { false }
 }
 
-fn content_terms_allow_inline(terms, i, n) {
+fn content_terms_allow_inline(terms, i, n) any^ {
   if (i >= n) { false }
   else if (content_term_allows_inline(terms[i])) { true }
   else { content_terms_allow_inline(terms, i + 1, n) }
 }
 
-fn node_accepts_inline_children(schema, n) {
+fn node_accepts_inline_children(schema, n) any^ {
   if (not is_node(n)) { false }
   else {
     let entry = schema[n.tag]
@@ -292,7 +292,7 @@ fn node_accepts_inline_children(schema, n) {
   }
 }
 
-fn find_inline_container_path(doc, schema, leaf_path, depth) {
+fn find_inline_container_path(doc, schema, leaf_path, depth) any^ {
   if (depth >= len(leaf_path)) { null }
   else {
     let path0 = slice(leaf_path, 0, depth)
@@ -302,7 +302,7 @@ fn find_inline_container_path(doc, schema, leaf_path, depth) {
   }
 }
 
-fn same_block_nested_text_selection(st) {
+fn same_block_nested_text_selection(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'text' or sel_collapsed(sel)) { null }
   else {
@@ -342,7 +342,7 @@ fn list_take_range(arr, start, end, i, acc) {
 
 fn list_slice(arr, start, end) => list_take_range(arr, start, end, start, [])
 
-fn same_parent_text_span_parts(st) {
+fn same_parent_text_span_parts(st) any^ {
   let sel = st.selection
   if (sel == null or not sel_same_parent_leaves(sel)) { null }
   else {
@@ -364,7 +364,7 @@ fn same_parent_text_span_parts(st) {
   }
 }
 
-fn insert_line_break_same_parent_selection(st) {
+fn insert_line_break_same_parent_selection(st) any^ {
   let span = same_parent_text_span_parts(st)
   if (span == null or len(span.parent_path) < 1) { null }
   else {
@@ -375,17 +375,17 @@ fn insert_line_break_same_parent_selection(st) {
   }
 }
 
-fn sel_top_block_range(sel) =>
+fn sel_top_block_range(sel) any^ =>
   sel.kind == 'text' and not sel_single_leaf(sel) and len(sel_lo(sel).path) == 2 and len(sel_hi(sel).path) == 2 and sel_lo(sel).path[0] < sel_hi(sel).path[0]
 
-fn selected_top_block_end(sel) {
+fn selected_top_block_end(sel) any^ {
   let lo = sel_lo(sel)
   let hi = sel_hi(sel)
   if (len(hi.path) == 2 and hi.offset == 0 and hi.path[0] > lo.path[0]) { hi.path[0] - 1 }
   else { hi.path[0] }
 }
 
-fn cross_block_text_span_parts(st) {
+fn cross_block_text_span_parts(st) any^ {
   let sel = st.selection
   if (sel == null or not sel_top_block_range(sel)) { null }
   else {
@@ -415,7 +415,7 @@ fn cross_block_text_span_parts(st) {
 fn replacement_nodes_or_empty(nodes, marks) =>
   if (len(nodes) == 0) { [text_marked("", marks)] } else { nodes }
 
-fn replace_cross_block_text_selection_with_inline(st, inline_nodes, caret_kind) {
+fn replace_cross_block_text_selection_with_inline(st, inline_nodes, caret_kind) any^ {
   let span = cross_block_text_span_parts(st)
   if (span == null) { null }
   else {
@@ -436,11 +436,11 @@ fn replace_cross_block_text_selection_with_inline(st, inline_nodes, caret_kind) 
   }
 }
 
-fn prepend_content_to_block(block, prefix) =>
+fn prepend_content_to_block(block, prefix) any^ =>
   if (len(prefix) == 0 or not is_node(block)) { block }
   else { node_attrs(block.tag, block.attrs, list_concat(prefix, block.content)) }
 
-fn append_content_to_block(block, suffix) =>
+fn append_content_to_block(block, suffix) any^ =>
   if (len(suffix) == 0 or not is_node(block)) { block }
   else { node_attrs(block.tag, block.attrs, list_concat(block.content, suffix)) }
 
@@ -454,7 +454,7 @@ fn apply_cross_block_edges(blocks, prefix, suffix) {
   }
 }
 
-fn replace_cross_block_text_selection_with_blocks(st, blocks) {
+fn replace_cross_block_text_selection_with_blocks(st, blocks) any^ {
   let span = cross_block_text_span_parts(st)
   if (span == null or len(blocks) == 0) { null }
   else if (len(blocks) == 1 and blocks[0].tag == state_default_block(st)) {
@@ -476,7 +476,7 @@ fn replace_cross_block_text_selection_with_blocks(st, blocks) {
 // caret immediately after the inserted text. Returns null if the selection
 // straddles multiple leaves (caller should split it first).
 
-pub fn cmd_insert_text(st, txt) {
+pub fn cmd_insert_text(st, txt) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (sel.kind == 'all') { replace_all_with_text(st, txt) }
@@ -523,7 +523,7 @@ pub fn cmd_insert_text(st, txt) {
   }
 }
 
-pub fn cmd_paste_text(st, txt) => cmd_insert_text(st, txt)
+pub fn cmd_paste_text(st, txt) any^ => cmd_insert_text(st, txt)
 
 pub fn cmd_select_all(st) map | error =>
   tx_set_meta(tx_set_selection(tx_begin(st.doc, st.selection), all_selection()), "addToHistory", false)
@@ -531,13 +531,13 @@ pub fn cmd_select_all(st) map | error =>
 fn nonempty_text_leaf(s, marks) =>
   if (len(s) == 0) { [] } else { [text_marked(s, marks)] }
 
-fn last_text_offset_in(node) {
+fn last_text_offset_in(node) any^ {
   if (is_text(node)) { len(node.text) }
   else if (not is_node(node) or len(node.content) == 0) { 0 }
   else { last_text_offset_in(node.content[len(node.content) - 1]) }
 }
 
-fn insert_inline_nodes_select_first(st, inline_nodes) {
+fn insert_inline_nodes_select_first(st, inline_nodes) any^ {
   let sel = st.selection
   if (sel == null or len(inline_nodes) == 0) { null }
   else if (sel.kind == 'all') {
@@ -597,7 +597,7 @@ fn insert_inline_nodes_select_first(st, inline_nodes) {
 
 fn text_leaf_with_marks(s, marks) => text_marked(s, marks)
 
-fn selected_inline_content(span, label, fallback_marks) {
+fn selected_inline_content(span, label, fallback_marks) any^ {
   if (span.lo_index == span.hi_index) {
     let selected_text = slice(span.lo_leaf.text, span.lo.offset, span.hi.offset)
     if (len(selected_text) == 0) { [text_leaf_with_marks(label, fallback_marks)] }
@@ -619,10 +619,10 @@ fn link_attrs(href, title) =>
 fn image_attrs(src, alt) =>
   [{name: 'src', value: src}, {name: 'alt', value: if (alt == null) { "" } else { alt }}]
 
-pub fn cmd_insert_image(st, src, alt) =>
+pub fn cmd_insert_image(st, src, alt) any^ =>
   insert_inline_nodes_select_first(st, [node_attrs(state_image_tag(st), image_attrs(src, alt), [])])
 
-pub fn cmd_insert_link(st, href, title, label) {
+pub fn cmd_insert_link(st, href, title, label) any^ {
   let sel = st.selection
   let label2 = link_label(label, href)
   if (sel == null) { null }
@@ -658,7 +658,7 @@ fn fnl_attrs_without_at(attrs, name, i, n, acc) {
 }
 fn fnl_attrs_without(attrs, name) => fnl_attrs_without_at(attrs, name, 0, len(attrs), [])
 
-fn fnl_split_item(content, i, n, own, subs) {
+fn fnl_split_item(content, i, n, own, subs) any^ {
   if (i >= n) { {own: own, subs: subs} }
   else {
     let c = content[i]
@@ -669,12 +669,12 @@ fn fnl_split_item(content, i, n, own, subs) {
 
 fn fnl_flatten_list(lst, base) map | error => node_attrs(lst.tag, lst.attrs, fnl_flatten_items(lst.content, base, 0, len(lst.content), []))
 
-fn fnl_append_subs(subs, level, i, n, acc) {
+fn fnl_append_subs(subs, level, i, n, acc) any^ {
   if (i >= n) { acc }
   else { fnl_append_subs(subs, level, i + 1, n, list_concat(acc, fnl_flatten_list(subs[i], level + 1).content)) }
 }
 
-fn fnl_flatten_items(items, base, i, n, acc) {
+fn fnl_flatten_items(items, base, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let item = items[i]
@@ -699,7 +699,7 @@ pub fn flatten_nested_lists(children) =>
      else if (is_node(c)) { node_attrs(c.tag, c.attrs, flatten_nested_lists(c.content)) }
      else { c })]
 
-pub fn cmd_paste_fragment(st, fragment) {
+pub fn cmd_paste_fragment(st, fragment) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (sel.kind == 'all') { replace_all_with_blocks(st, coerce_children(state_schema(st), fragment, 'block')) }
@@ -781,7 +781,7 @@ pub fn cmd_paste_fragment(st, fragment) {
   }
 }
 
-pub fn cmd_paste_html(st, html, fallback_text) =>
+pub fn cmd_paste_html(st, html, fallback_text) any^ =>
   if (type(html) == string) {
     let parsed = parse_html_fragment(html)
     if (parsed == null) { cmd_paste_text(st, fallback_text) }
@@ -793,14 +793,14 @@ pub fn cmd_paste_html(st, html, fallback_text) =>
 // cmd_insert_at / cmd_move_node — structural drop commands
 // ---------------------------------------------------------------------------
 
-fn valid_insert_index(parent, index) =>
+fn valid_insert_index(parent, index) any^ =>
   parent != null and is_node(parent) and index >= 0 and index <= len(parent.content)
 
-fn insert_selection(parent_path, index, count) =>
+fn insert_selection(parent_path, index, count) any^ =>
   if (count == 1) { node_selection([*parent_path, index]) }
   else { text_selection(pos(parent_path, index + count), pos(parent_path, index + count)) }
 
-pub fn cmd_insert_at(st, target_parent_path, target_index, slice) {
+pub fn cmd_insert_at(st, target_parent_path, target_index, slice) any^ {
   let parent = node_at(st.doc, target_parent_path)
   if (not valid_insert_index(parent, target_index)) { null }
   else if (len(slice) == 0) { null }
@@ -818,11 +818,11 @@ pub fn cmd_insert_at(st, target_parent_path, target_index, slice) {
 fn same_parent_move_is_noop(source_index, target_index) =>
   target_index == source_index or target_index == source_index + 1
 
-fn adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index) =>
+fn adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index) any^ =>
   if (path_equal(source_parent_path, target_parent_path) and source_index < target_index) { target_index - 1 }
   else { target_index }
 
-pub fn cmd_move_node(st, source_path, target_parent_path, target_index) {
+pub fn cmd_move_node(st, source_path, target_parent_path, target_index) any^ {
   if (len(source_path) == 0) { null }
   else if (path_is_prefix(source_path, target_parent_path)) { null }
   else {
@@ -844,7 +844,7 @@ pub fn cmd_move_node(st, source_path, target_parent_path, target_index) {
   }
 }
 
-pub fn cmd_move_inline_node(st, source_path, target_pos) {
+pub fn cmd_move_inline_node(st, source_path, target_pos) any^ {
   let moved = node_at(st.doc,source_path)
   let target = if (target_pos==null) null else node_at(st.doc,target_pos.path)
   let entry = if (is_node(moved)) state_schema(st)[moved.tag] else null
@@ -864,7 +864,7 @@ pub fn cmd_move_inline_node(st, source_path, target_pos) {
   }
 }
 
-fn pos_inside_text_selection(sel, p) {
+fn pos_inside_text_selection(sel, p) any^ {
   if (sel == null or sel.kind != 'text' or p == null) { false }
   else {
     let lo = sel_lo(sel)
@@ -875,7 +875,7 @@ fn pos_inside_text_selection(sel, p) {
   }
 }
 
-pub fn cmd_move_text_selection(st, source_selection, target_pos) {
+pub fn cmd_move_text_selection(st, source_selection, target_pos) any^ {
   if (source_selection == null or source_selection.kind != 'text' or sel_collapsed(source_selection)) { null }
   else if (target_pos == null or pos_inside_text_selection(source_selection, target_pos)) { null }
   else {
@@ -914,7 +914,7 @@ pub fn cmd_move_text_selection(st, source_selection, target_pos) {
 // boundaries, merge with the adjacent sibling block when the caret is in the
 // edge text child.
 
-fn delete_range(st, lo, hi) {
+fn delete_range(st, lo, hi) any^ {
   let leaf = node_at(st.doc, lo.path)
   // container offsets index children; replace_text would turn the container into a leaf.
   if (leaf != null and is_node(leaf)) {
@@ -945,9 +945,9 @@ fn delete_range(st, lo, hi) {
   }
 }
 
-fn delete_all(st) => replace_all_with_text(st, "")
+fn delete_all(st) any^ => replace_all_with_text(st, "")
 
-fn delete_selection(st) {
+fn delete_selection(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (sel.kind == 'all') { delete_all(st) }
@@ -961,12 +961,12 @@ fn delete_selection(st) {
 
 // A blank inline-content block (e.g. an empty <p> after Enter) has no text leaf;
 // its caret sits on the block itself.
-fn is_blank_block(st, n) =>
+fn is_blank_block(st, n) any^ =>
   is_node(n) and block_allows_inline(st, n.tag) and
   (len(n.content) == 0 or (len(n.content) == 1 and is_text(n.content[0]) and n.content[0].text == ""))
 
 // Caret at the start/end of `n`: its first/last text leaf, or a blank block itself.
-fn edge_caret_at(st, n, path, at_end) {
+fn edge_caret_at(st, n, path, at_end) any^ {
   if (is_text(n)) { pos(path, if (at_end) len(n.text) else 0) }
   else if (is_blank_block(st, n)) { pos(path, 0) }
   else if (not is_node(n) or len(n.content) == 0) { null }
@@ -977,7 +977,7 @@ fn edge_caret_at(st, n, path, at_end) {
 }
 
 // The inline block whose end (or start) `p` sits at, else null.
-fn edge_block_path(st, p, at_end) {
+fn edge_block_path(st, p, at_end) any^ {
   let n = node_at(st.doc, p.path)
   if (is_node(n) and block_allows_inline(st, n.tag)) {
     if (p.offset == (if (at_end) len(n.content) else 0)) p.path else null
@@ -995,7 +995,7 @@ fn edge_block_path(st, p, at_end) {
 // Native Backspace/Delete target ranges cross only the seam between two sibling
 // blocks (e.g. [2,0]:93 → [3]:0 around a blank <p>); like the JS editor's
 // resolvePos, such a range is a join, not a content deletion.
-fn block_seam(st, sel) {
+fn block_seam(st, sel) any^ {
   let lo_block = edge_block_path(st, sel_lo(sel), true)
   let hi_block = edge_block_path(st, sel_hi(sel), false)
   if (lo_block == null or hi_block == null or len(lo_block) != len(hi_block) or
@@ -1004,7 +1004,7 @@ fn block_seam(st, sel) {
   else { {lo: lo_block, hi: hi_block} }
 }
 
-fn remove_block(st, parent, index, caret_pos) {
+fn remove_block(st, parent, index, caret_pos) any^ {
   if (caret_pos == null) { null }
   else {
     let tx1 = tx_step(tx_begin(st.doc, st.selection), step_replace(parent, index, index + 1, []))
@@ -1017,7 +1017,7 @@ fn block_merge_allowed(a, b) =>
 
 // Merge adjacent same-mark text leaves (keeps the joined block's inline content
 // canonical, e.g. ["a","b"] → ["ab"] at a merge seam) — matches JS mergeInlines.
-fn merge_adjacent_text_at(content, i, n, acc) {
+fn merge_adjacent_text_at(content, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let c = content[i]
@@ -1029,15 +1029,15 @@ fn merge_adjacent_text_at(content, i, n, acc) {
     }
   }
 }
-fn merge_adjacent_text(content) => merge_adjacent_text_at(content, 0, len(content), [])
+fn merge_adjacent_text(content) any^ => merge_adjacent_text_at(content, 0, len(content), [])
 
 fn jlist_is_list_tag(tag) => tag == 'ul' or tag == 'ol' or tag == 'list'
-fn jlist_is_list(n) => is_node(n) and jlist_is_list_tag(n.tag) or false
+fn jlist_is_list(n) any^ => is_node(n) and jlist_is_list_tag(n.tag) or false
 
 // Join `list_path` with its previous-sibling list (the earlier list's kind wins),
 // placing the caret at the start of the first item carried over from the second
 // list. Returns null when there's no previous list sibling.
-fn join_lists(st, list_path) {
+fn join_lists(st, list_path) any^ {
   let lst = node_at(st.doc, list_path)
   if (lst == null or not jlist_is_list(lst)) { null }
   else {
@@ -1066,7 +1066,7 @@ fn join_lists(st, list_path) {
 // Backspace at the very start of the FIRST item of a list, when that list is
 // preceded by another list, joins the two. Walks up through first-child wrappers
 // (e.g. li > p) to find the enclosing first list item.
-fn join_first_list_item_backward(st, p) {
+fn join_first_list_item_backward(st, p) any^ {
   if (len(p) < 1 or last_index(p) != 0) { null }
   else {
     let parent = node_at(st.doc, parent_path(p))
@@ -1078,7 +1078,7 @@ fn join_first_list_item_backward(st, p) {
 
 // A blank block on either side of the seam is removed rather than merged, so
 // the surviving neighbour keeps its own tag and attrs (Word's Backspace/Delete).
-fn merge_blocks_backward(st, block_path) {
+fn merge_blocks_backward(st, block_path) any^ {
   let block_index = if (len(block_path) < 1) { -1 } else { last_index(block_path) }
   let parent = if (block_index < 0) { null } else { node_at(st.doc, parent_path(block_path)) }
   let block = node_at(st.doc, block_path)
@@ -1107,7 +1107,7 @@ fn merge_blocks_backward(st, block_path) {
   }
 }
 
-fn merge_blocks_forward(st, block_path, p) {
+fn merge_blocks_forward(st, block_path, p) any^ {
   let block = node_at(st.doc, block_path)
   if (len(block_path) < 1 or block == null or not is_node(block)) { null }
   else {
@@ -1131,7 +1131,7 @@ fn merge_blocks_forward(st, block_path, p) {
   }
 }
 
-pub fn cmd_delete_backward(st) {
+pub fn cmd_delete_backward(st) any^ {
   let sel = st.selection
   let seam = if (sel != null and sel.kind == 'text' and not sel_collapsed(sel)) block_seam(st, sel) else null
   let joined = if (seam == null) null else merge_blocks_backward(st, seam.hi)
@@ -1153,7 +1153,7 @@ pub fn cmd_delete_backward(st) {
 // Forward-delete at the end of a leaf: if a sibling follows within the block,
 // delete it (first char of next leaf, or the next inline node like <br>, merging
 // now-adjacent same-mark leaves); otherwise join the next block.
-fn delete_forward_at_leaf_end(st, p) {
+fn delete_forward_at_leaf_end(st, p) any^ {
   let block_path = parent_path(p.path)
   let block = node_at(st.doc, block_path)
   let leaf_idx = last_index(p.path)
@@ -1172,7 +1172,7 @@ fn delete_forward_at_leaf_end(st, p) {
   }
 }
 
-pub fn cmd_delete_forward(st) {
+pub fn cmd_delete_forward(st) any^ {
   let sel = st.selection
   let seam = if (sel != null and sel.kind == 'text' and not sel_collapsed(sel)) block_seam(st, sel) else null
   let joined = if (seam == null) null else merge_blocks_forward(st, seam.lo, sel_lo(sel))
@@ -1194,7 +1194,7 @@ pub fn cmd_delete_forward(st) {
 // cmd_delete_word_backward / cmd_insert_line_break
 // ---------------------------------------------------------------------------
 
-pub fn cmd_delete_word_backward(st) {
+pub fn cmd_delete_word_backward(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (sel.kind != 'text' or not sel_collapsed(sel)) { delete_selection(st) }
@@ -1211,7 +1211,7 @@ pub fn cmd_delete_word_backward(st) {
   }
 }
 
-pub fn cmd_insert_line_break(st) {
+pub fn cmd_insert_line_break(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { insert_line_break_same_parent_selection(st) }
@@ -1240,7 +1240,7 @@ pub fn cmd_insert_line_break(st) {
 // cmd_indent_list_item / cmd_outdent_list_item
 // ---------------------------------------------------------------------------
 
-fn ancestor_tag_at(doc, path, tag, depth) {
+fn ancestor_tag_at(doc, path, tag, depth) any^ {
   if (depth < 0) { null }
   else {
     let p = list_take(path, depth)
@@ -1250,17 +1250,17 @@ fn ancestor_tag_at(doc, path, tag, depth) {
   }
 }
 
-pub fn ancestor_tag(doc, path, tag) => ancestor_tag_at(doc, path, tag, len(path))
+pub fn ancestor_tag(doc, path, tag) any^ => ancestor_tag_at(doc, path, tag, len(path))
 
 fn state_list_item_tag(st) =>
   if (state_schema(st).li != null and state_schema(st).list_item == null) { 'li' } else { 'list_item' }
 
 fn is_list_tag(tag) => tag == 'list' or tag == 'ul' or tag == 'ol'
-fn is_list_node(n) => is_node(n) and is_list_tag(n.tag) or false
+fn is_list_node(n) any^ => is_node(n) and is_list_tag(n.tag) or false
 
-fn same_list_kind(a, b) => is_list_node(a) and is_list_node(b) and a.tag == b.tag or false
+fn same_list_kind(a, b) any^ => is_list_node(a) and is_list_node(b) and a.tag == b.tag or false
 
-fn append_to_sublist(prev_item, list_node, item) {
+fn append_to_sublist(prev_item, list_node, item) any^ {
   let kids = prev_item.content
   if (len(kids) > 0 and same_list_kind(kids[len(kids) - 1], list_node)) {
     let sub = kids[len(kids) - 1]
@@ -1273,21 +1273,21 @@ fn append_to_sublist(prev_item, list_node, item) {
 
 // After a list item moves (indent/outdent), keep the caret where it was inside
 // that item (its subtree moves intact); a node selection stays a node selection.
-fn reselect_moved_item(sel, old_item_path, new_item_path) {
+fn reselect_moved_item(sel, old_item_path, new_item_path) any^ {
   if (sel.kind == 'text') {
     let rel = list_drop(sel.anchor.path, len(old_item_path))
     caret(pos(list_concat(new_item_path, rel), sel.anchor.offset))
   } else { node_selection(new_item_path) }
 }
 
-fn list_item_indent(item) {
+fn list_item_indent(item) any^ {
   let v = attrs_get(item.attrs, 'indent')
   if (type(v) == int) { v } else { 0 }
 }
 
 // Markdown-style list autoformat: a space typed after a line that is exactly a
 // list marker turns the block into a list. "-"/"*"/"+" -> bullet, "N." -> ordered.
-fn af_all_digits_at(s, i, n) {
+fn af_all_digits_at(s, i, n) any^ {
   if (i >= n) { (n > 0) }
   else {
     let c = slice(s, i, i + 1)
@@ -1296,7 +1296,7 @@ fn af_all_digits_at(s, i, n) {
   }
 }
 
-fn af_marker_kind(marker) {
+fn af_marker_kind(marker) any^ {
   if (marker == "-" or marker == "*" or marker == "+") { 0 }
   else {
     let n = len(marker)
@@ -1305,7 +1305,7 @@ fn af_marker_kind(marker) {
   }
 }
 
-pub fn cmd_autoformat_list(st) {
+pub fn cmd_autoformat_list(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'text' or not sel_collapsed(sel)) { null }
   else {
@@ -1347,7 +1347,7 @@ pub fn cmd_autoformat_list(st) {
 // style). The level is an `indent` attribute rendered with margin; no nesting is
 // created. Works from any caret position and on the first item; repeats up to 8.
 // The caret is untouched (only an attribute changes).
-pub fn cmd_indent_list_item(st) {
+pub fn cmd_indent_list_item(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else {
@@ -1366,14 +1366,14 @@ pub fn cmd_indent_list_item(st) {
   }
 }
 
-fn replace_or_remove_sublist(parent_item, sub_index, sublist) {
+fn replace_or_remove_sublist(parent_item, sub_index, sublist) any^ {
   if (len(sublist.content) == 0) { list_splice(parent_item.content, sub_index, 1, []) }
   else { list_set(parent_item.content, sub_index, sublist) }
 }
 
 // Lift a structurally-nested list item out to its grandparent list (legacy
 // nested-list outdent). Used only for items that came from nested HTML input.
-fn outdent_nested_item(st, sel, item_path) {
+fn outdent_nested_item(st, sel, item_path) any^ {
   let list_path = parent_path(item_path)
   let item_index = last_index(item_path)
   let parent_item_path = parent_path(list_path)
@@ -1399,7 +1399,7 @@ fn outdent_nested_item(st, sel, item_path) {
 
 // Outdent: drop one indent level (flat); at level 0 fall back to structural
 // un-nesting so nested lists from HTML input can still be lifted out.
-pub fn cmd_outdent_list_item(st) {
+pub fn cmd_outdent_list_item(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else {
@@ -1435,7 +1435,7 @@ pub fn cmd_outdent_list_item(st) {
 // (Multi-leaf selections will gain a true range-based add/remove pair once
 // SourcePos resolution across leaves is wired through; this scaffolding holds.)
 
-fn state_marks_at(st, path) {
+fn state_marks_at(st, path) any^ {
   if (st.stored_marks != null) { st.stored_marks }
   else {
     let leaf = node_at(st.doc, path)
@@ -1443,31 +1443,31 @@ fn state_marks_at(st, path) {
   }
 }
 
-fn has_text_leaf(n) {
+fn has_text_leaf(n) any^ {
   if (is_text(n)) { true }
   else if (is_node(n)) { has_text_leaf_children(n.content, 0, len(n.content)) }
   else { false }
 }
 
-fn has_text_leaf_children(children, i, n) {
+fn has_text_leaf_children(children, i, n) any^ {
   if (i >= n) { false }
   else if (has_text_leaf(children[i])) { true }
   else { has_text_leaf_children(children, i + 1, n) }
 }
 
-fn any_unmarked_text(n, mark) {
+fn any_unmarked_text(n, mark) any^ {
   if (is_text(n)) { not has_mark(n.marks, mark.name) }
   else if (is_node(n)) { any_unmarked_text_children(n.content, mark, 0, len(n.content)) }
   else { false }
 }
 
-fn any_unmarked_text_children(children, mark, i, n) {
+fn any_unmarked_text_children(children, mark, i, n) any^ {
   if (i >= n) { false }
   else if (any_unmarked_text(children[i], mark)) { true }
   else { any_unmarked_text_children(children, mark, i + 1, n) }
 }
 
-fn collect_mark_steps(n, path, mark, adding, acc) {
+fn collect_mark_steps(n, path, mark, adding, acc) any^ {
   if (is_text(n)) {
     if (adding and not has_mark(n.marks, mark.name)) { [*acc, step_add_mark(path, mark.name, mark.value)] }
     else if (not adding and has_mark(n.marks, mark.name)) { [*acc, step_remove_mark(path, mark.name)] }
@@ -1477,7 +1477,7 @@ fn collect_mark_steps(n, path, mark, adding, acc) {
   else { acc }
 }
 
-fn collect_mark_steps_children(children, path, mark, adding, i, n, acc) {
+fn collect_mark_steps_children(children, path, mark, adding, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let next = collect_mark_steps(children[i], [*path, i], mark, adding, acc)
@@ -1485,7 +1485,7 @@ fn collect_mark_steps_children(children, path, mark, adding, i, n, acc) {
   }
 }
 
-fn range_any_unmarked_leaf(doc, parent_path0, mark, i, end_i) {
+fn range_any_unmarked_leaf(doc, parent_path0, mark, i, end_i) any^ {
   if (i > end_i) { false }
   else {
     let leaf = text_leaf_or_null(doc, [*parent_path0, i])
@@ -1494,7 +1494,7 @@ fn range_any_unmarked_leaf(doc, parent_path0, mark, i, end_i) {
   }
 }
 
-fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) {
+fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) any^ {
   if (i > end_i) { acc }
   else {
     let path = [*parent_path0, i]
@@ -1507,13 +1507,13 @@ fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) {
   }
 }
 
-fn mark_list_for(marks, mark, adding) =>
+fn mark_list_for(marks, mark, adding) any^ =>
   if (adding) { with_mark(marks, mark.name, mark.value) } else { without_mark(marks, mark.name) }
 
 fn mark_text_leaf_node(leaf, mark, adding) map | error =>
   text_marked(leaf.text, mark_list_for(leaf.marks, mark, adding))
 
-fn mark_text_leaf_range(leaf, from, to, mark, adding) {
+fn mark_text_leaf_range(leaf, from, to, mark, adding) any^ {
   let before = nonempty_text_leaf(slice(leaf.text, 0, from), leaf.marks)
   let middle_text = slice(leaf.text, from, to)
   let middle = if (len(middle_text) == 0) { [] } else { [text_marked(middle_text, mark_list_for(leaf.marks, mark, adding))] }
@@ -1521,7 +1521,7 @@ fn mark_text_leaf_range(leaf, from, to, mark, adding) {
   list_concat(list_concat(before, middle), after)
 }
 
-fn mark_node_tree(n, mark, adding) {
+fn mark_node_tree(n, mark, adding) any^ {
   if (is_text(n)) { mark_text_leaf_node(n, mark, adding) }
   else if (is_node(n)) { node_attrs(n.tag, n.attrs, mark_node_children(n.content, mark, adding, 0, len(n.content), [])) }
   else { n }
@@ -1532,18 +1532,18 @@ fn mark_node_children(children, mark, adding, i, n, acc) {
   else { mark_node_children(children, mark, adding, i + 1, n, [*acc, mark_node_tree(children[i], mark, adding)]) }
 }
 
-fn selected_leaf_range_any_unmarked(leaf, from, to, mark) =>
+fn selected_leaf_range_any_unmarked(leaf, from, to, mark) any^ =>
   leaf != null and is_text(leaf) and to > from and not has_mark(leaf.marks, mark.name)
 
-fn selected_node_any_unmarked(n, mark) => any_unmarked_text(n, mark)
+fn selected_node_any_unmarked(n, mark) any^ => any_unmarked_text(n, mark)
 
-fn selected_children_any_unmarked(children, mark, i, end_i) {
+fn selected_children_any_unmarked(children, mark, i, end_i) any^ {
   if (i > end_i) { false }
   else if (selected_node_any_unmarked(children[i], mark)) { true }
   else { selected_children_any_unmarked(children, mark, i + 1, end_i) }
 }
 
-fn same_parent_selection_any_unmarked(span, mark) {
+fn same_parent_selection_any_unmarked(span, mark) any^ {
   if (span.lo_index == span.hi_index) { selected_leaf_range_any_unmarked(span.lo_leaf, span.lo.offset, span.hi.offset, mark) }
   else if (selected_leaf_range_any_unmarked(span.lo_leaf, span.lo.offset, len(span.lo_leaf.text), mark)) { true }
   else if (selected_children_any_unmarked(span.parent.content, mark, span.lo_index + 1, span.hi_index - 1)) { true }
@@ -1555,7 +1555,7 @@ fn mark_selected_children(children, mark, adding, i, end_i, acc) {
   else { mark_selected_children(children, mark, adding, i + 1, end_i, [*acc, mark_node_tree(children[i], mark, adding)]) }
 }
 
-fn marked_same_parent_slice(span, mark, adding) {
+fn marked_same_parent_slice(span, mark, adding) any^ {
   if (span.lo_index == span.hi_index) { mark_text_leaf_range(span.lo_leaf, span.lo.offset, span.hi.offset, mark, adding) }
   else {
     let first = mark_text_leaf_range(span.lo_leaf, span.lo.offset, len(span.lo_leaf.text), mark, adding)
@@ -1565,7 +1565,7 @@ fn marked_same_parent_slice(span, mark, adding) {
   }
 }
 
-fn marked_same_parent_selection(span, slice_nodes) {
+fn marked_same_parent_selection(span, slice_nodes) any^ {
   let before_count = len(nonempty_text_leaf(slice(span.lo_leaf.text, 0, span.lo.offset), span.lo_leaf.marks))
   if (span.lo_index == span.hi_index) {
     let selected_text = slice(span.lo_leaf.text, span.lo.offset, span.hi.offset)
@@ -1580,7 +1580,7 @@ fn marked_same_parent_selection(span, slice_nodes) {
   }
 }
 
-fn toggle_mark_same_parent_range(st, mark) {
+fn toggle_mark_same_parent_range(st, mark) any^ {
   let sel = st.selection
   if (sel == null or not sel_same_parent_leaves(sel) or sel_collapsed(sel)) { null }
   else {
@@ -1596,7 +1596,7 @@ fn toggle_mark_same_parent_range(st, mark) {
   }
 }
 
-fn block_range_any_unmarked_leaf(doc, mark, block_i, end_block_i) {
+fn block_range_any_unmarked_leaf(doc, mark, block_i, end_block_i) any^ {
   if (block_i > end_block_i) { false }
   else {
     let block = node_at(doc, [block_i])
@@ -1605,7 +1605,7 @@ fn block_range_any_unmarked_leaf(doc, mark, block_i, end_block_i) {
   }
 }
 
-fn collect_block_range_mark_steps(doc, mark, adding, block_i, end_block_i, acc) {
+fn collect_block_range_mark_steps(doc, mark, adding, block_i, end_block_i, acc) any^ {
   if (block_i > end_block_i) { acc }
   else {
     let block = node_at(doc, [block_i])
@@ -1614,7 +1614,7 @@ fn collect_block_range_mark_steps(doc, mark, adding, block_i, end_block_i, acc) 
   }
 }
 
-fn toggle_mark_top_block_range(st, mark) {
+fn toggle_mark_top_block_range(st, mark) any^ {
   let sel = st.selection
   if (sel == null or not sel_top_block_range(sel) or sel_collapsed(sel)) { null }
   else {
@@ -1627,17 +1627,17 @@ fn toggle_mark_top_block_range(st, mark) {
   }
 }
 
-fn toggle_mark_nodes(st, mark) {
+fn toggle_mark_nodes(st, mark) any^ {
   // disjoint selections share one add/remove decision and one transaction.
   let paths = if (st.selection.kind=='all') [[]] else selection_paths(st.selection)
-  let chosen = [for (path in paths where (len(path)>0 or st.selection.kind=='all') and
-      has_text_leaf(node_at(st.doc,path))) path]
+  let chosen = [for (path in paths where (((len(path)>0 or st.selection.kind=='all') and
+      has_text_leaf(node_at(st.doc,path))) ^ { false })) path]
   let adding = any([for (path in chosen) any_unmarked_text(node_at(st.doc,path),mark)])
-  let steps = reduce([[],*chosen],(steps,path)=>collect_mark_steps(node_at(st.doc,path),path,mark,adding,steps))
+  let steps = reduce([[],*chosen],(steps,path)any^ =>collect_mark_steps(node_at(st.doc,path),path,mark,adding,steps))
   if (len(steps)==0) null else tx_apply_steps(tx_begin(st.doc,st.selection),steps,0,len(steps))
 }
 
-pub fn cmd_toggle_stored_mark(st, name, value) {
+pub fn cmd_toggle_stored_mark(st, name, value) any^ {
   let sel = st.selection
   if (sel == null or not sel_collapsed(sel)) { null }
   else {
@@ -1647,7 +1647,7 @@ pub fn cmd_toggle_stored_mark(st, name, value) {
   }
 }
 
-pub fn cmd_toggle_mark(st, name, value) {
+pub fn cmd_toggle_mark(st, name, value) any^ {
   let mark = {name: name, value: value}
   let sel = st.selection
   if (sel == null) { null }
@@ -1679,7 +1679,7 @@ pub fn cmd_toggle_mark(st, name, value) {
 // `replacement`. Each changed leaf becomes one replace_text step, keeping the
 // edit invertible and mappable through the normal transaction machinery.
 
-fn replace_all_text_at(txt, needle, replacement, i, n, acc) {
+fn replace_all_text_at(txt, needle, replacement, i, n, acc) any^ {
   if (len(needle) == 0) { txt }
   else if (i > n - len(needle)) { acc ++ slice(txt, i, n) }
   else {
@@ -1692,10 +1692,10 @@ fn replace_all_text_at(txt, needle, replacement, i, n, acc) {
   }
 }
 
-fn replace_all_text(txt, needle, replacement) =>
+fn replace_all_text(txt, needle, replacement) any^ =>
   replace_all_text_at(txt, needle, replacement, 0, len(txt), "")
 
-fn collect_replace_steps_children(children, path, needle, replacement, i, n, acc) {
+fn collect_replace_steps_children(children, path, needle, replacement, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child_steps = collect_replace_steps(children[i], [*path, i], needle, replacement, acc)
@@ -1703,7 +1703,7 @@ fn collect_replace_steps_children(children, path, needle, replacement, i, n, acc
   }
 }
 
-fn collect_replace_steps(n, path, needle, replacement, acc) {
+fn collect_replace_steps(n, path, needle, replacement, acc) any^ {
   if (is_text(n)) {
     let next = replace_all_text(n.text, needle, replacement)
     if (next == n.text) { acc }
@@ -1713,12 +1713,12 @@ fn collect_replace_steps(n, path, needle, replacement, acc) {
   else { acc }
 }
 
-pub fn tx_apply_steps(tx, steps, i, n) {
+pub fn tx_apply_steps(tx, steps, i, n) any^ {
   if (i >= n) { tx }
   else { tx_apply_steps(tx_step(tx, steps[i]), steps, i + 1, n) }
 }
 
-pub fn cmd_replace_all(st, needle, replacement) {
+pub fn cmd_replace_all(st, needle, replacement) any^ {
   if (needle == null or len(needle) == 0) { null }
   else {
     let steps = collect_replace_steps(st.doc, [], needle, replacement, [])
@@ -1727,11 +1727,11 @@ pub fn cmd_replace_all(st, needle, replacement) {
   }
 }
 
-pub fn cmd_format_bold(st) => cmd_toggle_mark(st, 'strong', true)
+pub fn cmd_format_bold(st) any^ => cmd_toggle_mark(st, 'strong', true)
 
-pub fn cmd_format_italic(st) => cmd_toggle_mark(st, 'em', true)
+pub fn cmd_format_italic(st) any^ => cmd_toggle_mark(st, 'em', true)
 
-pub fn cmd_format_underline(st) => cmd_toggle_mark(st, 'u', true)
+pub fn cmd_format_underline(st) any^ => cmd_toggle_mark(st, 'u', true)
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type — re-tag the immediate block ancestor of the caret
@@ -1741,7 +1741,7 @@ pub fn cmd_format_underline(st) => cmd_toggle_mark(st, 'u', true)
 // command targets the parent path of the caret leaf. Use this for
 // "Heading 1", "Paragraph", etc.
 
-fn block_path_from_path(doc, path) {
+fn block_path_from_path(doc, path) any^ {
   if (len(path) == 0) { null }
   else {
     let n = node_at(doc, path)
@@ -1750,20 +1750,20 @@ fn block_path_from_path(doc, path) {
   }
 }
 
-fn block_path_from_selection(st) {
+fn block_path_from_selection(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind == 'all') { null }
   else if (sel.kind == 'node') { block_path_from_path(st.doc, sel.path) }
   else { block_path_from_path(st.doc, sel_lo(sel).path) }
 }
 
-fn collect_top_block_type_steps(children, tag, i, n, acc) {
+fn collect_top_block_type_steps(children, tag, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (is_node(children[i])) { collect_top_block_type_steps(children, tag, i + 1, n, [*acc, step_set_node_type([i], tag)]) }
   else { collect_top_block_type_steps(children, tag, i + 1, n, acc) }
 }
 
-fn set_all_block_type(st, tag) {
+fn set_all_block_type(st, tag) any^ {
   if (st.doc == null or not is_node(st.doc)) { null }
   else {
     let steps = collect_top_block_type_steps(st.doc.content, tag, 0, len(st.doc.content), [])
@@ -1772,7 +1772,7 @@ fn set_all_block_type(st, tag) {
   }
 }
 
-fn collect_top_block_type_steps_between(doc, tag, i, end_i, acc) {
+fn collect_top_block_type_steps_between(doc, tag, i, end_i, acc) any^ {
   if (i > end_i) { acc }
   else {
     let n = node_at(doc, [i])
@@ -1781,7 +1781,7 @@ fn collect_top_block_type_steps_between(doc, tag, i, end_i, acc) {
   }
 }
 
-fn set_top_block_range_type(st, tag) {
+fn set_top_block_range_type(st, tag) any^ {
   let sel = st.selection
   if (sel == null or not sel_top_block_range(sel)) { null }
   else {
@@ -1793,7 +1793,7 @@ fn set_top_block_range_type(st, tag) {
   }
 }
 
-pub fn cmd_set_block_type(st, tag) {
+pub fn cmd_set_block_type(st, tag) any^ {
   let sel = st.selection
   if (sel != null and sel.kind == 'all') { set_all_block_type(st, tag) }
   else if (sel != null and sel_top_block_range(sel)) { set_top_block_range_type(st, tag) }
@@ -1816,7 +1816,7 @@ pub fn cmd_set_block_type(st, tag) {
 // Block structure commands — atomic blocks, code blocks, and blockquotes
 // ---------------------------------------------------------------------------
 
-fn wrap_top_blocks(st, start_index, end_index) {
+fn wrap_top_blocks(st, start_index, end_index) any^ {
   if (start_index < 0 or end_index < start_index) { null }
   else {
     let wrapped = list_slice(st.doc.content, start_index, end_index + 1)
@@ -1843,7 +1843,7 @@ fn list_attrs_for_kind(st, kind) {
   else { [] }
 }
 
-fn list_item_from_block(st, block) =>
+fn list_item_from_block(st, block) any^ =>
   if (state_list_item_tag(st) == 'li') { node('li', [block]) }
   else if (block.tag == state_default_block(st)) { node('list_item', [block]) }
   else { node('list_item', [node(state_default_block(st), []), block]) }
@@ -1853,7 +1853,7 @@ fn list_items_from_blocks(st, blocks, i, n, acc) {
   else { list_items_from_blocks(st, blocks, i + 1, n, [*acc, list_item_from_block(st, blocks[i])]) }
 }
 
-fn wrap_top_blocks_in_list(st, start_index, end_index, kind) {
+fn wrap_top_blocks_in_list(st, start_index, end_index, kind) any^ {
   if (start_index < 0 or end_index < start_index) { null }
   else {
     let wrapped = list_slice(st.doc.content, start_index, end_index + 1)
@@ -1866,7 +1866,7 @@ fn wrap_top_blocks_in_list(st, start_index, end_index, kind) {
   }
 }
 
-pub fn cmd_wrap_list(st, kind) {
+pub fn cmd_wrap_list(st, kind) any^ {
   let tag = state_list_tag_for_kind(st, kind)
   if (state_schema(st)[tag] == null) { null }
   else {
@@ -1884,12 +1884,12 @@ pub fn cmd_wrap_list(st, kind) {
   }
 }
 
-pub fn cmd_insert_horizontal_rule(st) {
+pub fn cmd_insert_horizontal_rule(st) any^ {
   if (state_schema(st).hr == null) { null }
   else { insert_block_after_selection(st, node('hr', [])) }
 }
 
-pub fn cmd_insert_code_block(st, txt) {
+pub fn cmd_insert_code_block(st, txt) any^ {
   let tag = state_code_block_tag(st)
   if (state_schema(st)[tag] == null) { null }
   else {
@@ -1900,7 +1900,7 @@ pub fn cmd_insert_code_block(st, txt) {
   }
 }
 
-pub fn cmd_wrap_blockquote(st) {
+pub fn cmd_wrap_blockquote(st) any^ {
   if (state_schema(st).blockquote == null) { null }
   else {
     let sel = st.selection
@@ -1917,7 +1917,7 @@ pub fn cmd_wrap_blockquote(st) {
   }
 }
 
-pub fn cmd_lift_blockquote(st) {
+pub fn cmd_lift_blockquote(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else {
@@ -1960,7 +1960,7 @@ fn make_table_rows(rows: int, cols: int, header: bool, i: int, acc: array) array
 fn make_table_node(rows: int, cols: int, header: bool) =>
   node('table', make_table_rows(rows, cols, header, 0, []))
 
-fn insert_block_after_selection(st, block) {
+fn insert_block_after_selection(st, block) any^ {
   let sel = st.selection
   if (sel == null or st.doc == null or not is_node(st.doc)) { null }
   else if (sel.kind == 'all') {
@@ -1995,12 +1995,12 @@ fn insert_block_after_selection(st, block) {
   }
 }
 
-pub fn cmd_insert_table(st, rows, cols, header) {
+pub fn cmd_insert_table(st, rows, cols, header) any^ {
   if (not table_supported(st) or rows <= 0 or cols <= 0) { null }
   else { insert_block_after_selection(st, make_table_node(rows, cols, header)) }
 }
 
-fn selected_table_cell_path(st) {
+fn selected_table_cell_path(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind == 'all') { null }
   else {
@@ -2010,7 +2010,7 @@ fn selected_table_cell_path(st) {
   }
 }
 
-pub fn selected_table_context(st) {
+pub fn selected_table_context(st) any^ {
   let cell_path = selected_table_cell_path(st)
   if (cell_path == null) { null }
   else {
@@ -2034,7 +2034,7 @@ fn empty_cell_like(cell) =>
   else { node('td', [text("")]) }
 
 // both insertion directions share the cell context and history shape.
-pub fn cmd_add_table_row(st, before=false) {
+pub fn cmd_add_table_row(st, before=false) any^ {
   let ctx = selected_table_context(st)
   if (ctx == null) { null }
   else {
@@ -2046,7 +2046,7 @@ pub fn cmd_add_table_row(st, before=false) {
   }
 }
 
-pub fn cmd_delete_table_row(st) {
+pub fn cmd_delete_table_row(st) any^ {
   let ctx = selected_table_context(st)
   if (ctx == null or len(ctx.row_container.content) <= 1) { null }
   else {
@@ -2057,7 +2057,7 @@ pub fn cmd_delete_table_row(st) {
   }
 }
 
-fn collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i, row_count, acc) {
+fn collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i, row_count, acc) any^ {
   if (row_i >= row_count) { acc }
   else {
     let row = rows.content[row_i]
@@ -2069,7 +2069,7 @@ fn collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i, row_
   }
 }
 
-fn collect_add_col_steps_table(table_path, table, col_index, insert_at, i, n, acc) {
+fn collect_add_col_steps_table(table_path, table, col_index, insert_at, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child = table.content[i]
@@ -2083,7 +2083,7 @@ fn collect_add_col_steps_table(table_path, table, col_index, insert_at, i, n, ac
   }
 }
 
-pub fn cmd_add_table_column(st, before=false) {
+pub fn cmd_add_table_column(st, before=false) any^ {
   let ctx = selected_table_context(st)
   if (ctx == null) { null }
   else {
@@ -2094,7 +2094,7 @@ pub fn cmd_add_table_column(st, before=false) {
   }
 }
 
-fn collect_delete_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc) {
+fn collect_delete_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc) any^ {
   if (row_i >= row_count) { acc }
   else {
     let row = rows.content[row_i]
@@ -2105,7 +2105,7 @@ fn collect_delete_col_steps_rows(rows_path, rows, col_index, row_i, row_count, a
   }
 }
 
-fn collect_delete_col_steps_table(table_path, table, col_index, i, n, acc) {
+fn collect_delete_col_steps_table(table_path, table, col_index, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child = table.content[i]
@@ -2118,7 +2118,7 @@ fn collect_delete_col_steps_table(table_path, table, col_index, i, n, acc) {
   }
 }
 
-pub fn cmd_delete_table_column(st) {
+pub fn cmd_delete_table_column(st) any^ {
   let ctx = selected_table_context(st)
   if (ctx == null or len(ctx.row.content) <= 1) { null }
   else {
@@ -2145,34 +2145,34 @@ fn is_non_repeating_block(tag) =>
   tag == 'heading' or tag == 'title' or
   tag == 'h1' or tag == 'h2' or tag == 'h3' or tag == 'h4' or tag == 'h5' or tag == 'h6'
 
-fn split_right_tag(st, block, cut, text_len) =>
+fn split_right_tag(st, block, cut, text_len) any^ =>
   if (is_non_repeating_block(block.tag)) { state_default_block(st) } else { block.tag }
 
 // identity and schema-declared boundary attributes belong only to the original block.
 fn split_right_attrs(st, block, right_tag) {
   let excluded = ['id', *[for (a in state_schema(st)[block.tag].attrs where a.keep_on_split == false) a.name]]
-  if (right_tag == block.tag) { [for (a in block.attrs where not contains(excluded,a.name)) a] } else { [] }
+  if (right_tag == block.tag) { [for (a in block.attrs where ((not contains(excluded,a.name)) ^ { false })) a] } else { [] }
 }
 
-fn first_text_marks_in(n) {
+fn first_text_marks_in(n) any^ {
   if (is_text(n)) { n.marks }
   else if (is_node(n) and len(n.content) > 0) { first_text_marks_in(n.content[0]) }
   else { [] }
 }
 
-fn last_text_marks_in(n) {
+fn last_text_marks_in(n) any^ {
   if (is_text(n)) { n.marks }
   else if (is_node(n) and len(n.content) > 0) { last_text_marks_in(n.content[len(n.content) - 1]) }
   else { [] }
 }
 
-fn block_boundary_marks(block, offset) {
+fn block_boundary_marks(block, offset) any^ {
   if (offset > 0 and offset <= len(block.content)) { last_text_marks_in(block.content[offset - 1]) }
   else if (offset < len(block.content)) { first_text_marks_in(block.content[offset]) }
   else { [] }
 }
 
-fn split_block_text_selection(st) {
+fn split_block_text_selection(st) any^ {
   let span = same_parent_text_span_parts(st)
   if (span == null or len(span.parent_path) < 1) { null }
   else {
@@ -2200,7 +2200,7 @@ fn split_block_text_selection(st) {
 fn split_inline_wrapper_tag(tag) =>
   tag == 'strong' or tag == 'em' or tag == 'u' or tag == 'code' or tag == 'a' or tag == 'span'
 
-fn split_block_path_for_leaf_at(doc, path) {
+fn split_block_path_for_leaf_at(doc, path) any^ {
   let parent = parent_path(path)
   let n = node_at(doc, parent)
   if (n != null and is_node(n) and split_inline_wrapper_tag(n.tag)) { split_block_path_for_leaf_at(doc, parent) }
@@ -2216,7 +2216,7 @@ fn split_block_path_for_leaf_at(doc, path) {
 fn split_nonempty_node(n, content) =>
   if (len(content) == 0) { [] } else { [with_content(n, content)] }
 
-fn split_inline_at(node, rel_path, offset) {
+fn split_inline_at(node, rel_path, offset) any^ {
   if (is_text(node)) {
     {left: nonempty_text_leaf(slice(node.text, 0, offset), node.marks),
      right: nonempty_text_leaf(slice(node.text, offset, len(node.text)), node.marks)}
@@ -2234,7 +2234,7 @@ fn split_inline_at(node, rel_path, offset) {
   }
 }
 
-fn split_block_collapsed_selection(st) {
+fn split_block_collapsed_selection(st) any^ {
   let sel = st.selection
   let leaf_path = sel.anchor.path
   if (len(leaf_path) < 2) { null }
@@ -2267,7 +2267,7 @@ fn split_block_collapsed_selection(st) {
   }
 }
 
-fn split_block_node_selection(st) {
+fn split_block_node_selection(st) any^ {
   let sel = st.selection
   let p = sel.anchor
   let block_path = p.path
@@ -2292,7 +2292,7 @@ fn split_block_node_selection(st) {
 
 // True iff a block's content is "empty" — nothing, a single empty text leaf,
 // or a single empty wrapper block (e.g. <li></li>, <li><p></p></li>).
-fn is_empty_block_content(content) {
+fn is_empty_block_content(content) any^ {
   if (len(content) == 0) { true }
   else if (len(content) == 1) {
     let c = content[0]
@@ -2310,7 +2310,7 @@ fn is_empty_block_content(content) {
 //                      if items follow), caret placed in that block.
 // Returns null when the caret is not in an empty list item. Mirrors
 // cmdEnterEmptyListItem in test/editor-js/src/commands/structural-commands.ts.
-fn cmd_enter_empty_list_item(st) {
+fn cmd_enter_empty_list_item(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'text') { null }
   else {
@@ -2350,7 +2350,7 @@ fn cmd_enter_empty_list_item(st) {
   }
 }
 
-pub fn cmd_split_block(st) {
+pub fn cmd_split_block(st) any^ {
   let sel = st.selection
   if (sel == null) { null }
   else if (sel.kind == 'text' and not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { split_block_text_selection(st) }
@@ -2361,7 +2361,7 @@ pub fn cmd_split_block(st) {
   else { split_block_collapsed_selection(st) }
 }
 
-fn code_block_path_for_ancestor(st, path) {
+fn code_block_path_for_ancestor(st, path) any^ {
   if (len(path) == 0) { null }
   else {
     let block = node_at(st.doc, path)
@@ -2373,13 +2373,13 @@ fn code_block_path_for_ancestor(st, path) {
   }
 }
 
-fn code_block_path_for_selection(st) {
+fn code_block_path_for_selection(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'text' or not sel_single_leaf(sel)) { null }
   else { code_block_path_for_ancestor(st, parent_path(sel.anchor.path)) }
 }
 
-pub fn cmd_insert_paragraph(st) {
+pub fn cmd_insert_paragraph(st) any^ {
   if (code_block_path_for_selection(st) != null) { cmd_insert_text(st, "\n") }
   else { cmd_split_block(st) }
 }
@@ -2393,18 +2393,18 @@ pub fn cmd_insert_paragraph(st) {
 // collapses to an empty multi-node selection (every target removed).
 // ---------------------------------------------------------------------------
 
-fn mn_insert_desc(sorted, p, i, n, acc) {
+fn mn_insert_desc(sorted, p, i, n, acc) any^ {
   if (i >= n) { [*acc, p] }
   else if (path_compare(p, sorted[i]) > 0) { list_concat([*acc, p], list_drop(sorted, i)) }
   else { mn_insert_desc(sorted, p, i + 1, n, [*acc, sorted[i]]) }
 }
 
-fn mn_sort_desc_at(ps, i, n, acc) {
+fn mn_sort_desc_at(ps, i, n, acc) any^ {
   if (i >= n) { acc }
   else { mn_sort_desc_at(ps, i + 1, n, mn_insert_desc(acc, ps[i], 0, len(acc), [])) }
 }
 
-fn mn_delete_at(tx, paths, i, n) {
+fn mn_delete_at(tx, paths, i, n) any^ {
   if (i >= n) { tx }
   else {
     let p = paths[i]
@@ -2419,7 +2419,7 @@ fn mn_delete_at(tx, paths, i, n) {
   }
 }
 
-pub fn cmd_delete_multi_node(st) {
+pub fn cmd_delete_multi_node(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'multi-node' or len(sel.paths) == 0) { null }
   else {
@@ -2436,7 +2436,7 @@ pub fn cmd_delete_multi_node(st) {
 // Mirrors PM's `chainCommands`. Used by callers to fall back across handlers
 // (e.g. Backspace tries delete-selection, then merge-blocks, then no-op).
 
-fn chain_at(st, cmds, i, n) {
+fn chain_at(st, cmds, i, n) any^ {
   if (i >= n) { null }
   else {
     let r = cmds[i](st)
@@ -2444,4 +2444,4 @@ fn chain_at(st, cmds, i, n) {
   }
 }
 
-pub fn chain(st, cmds) => chain_at(st, cmds, 0, len(cmds))
+pub fn chain(st, cmds) any^ => chain_at(st, cmds, 0, len(cmds))

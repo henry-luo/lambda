@@ -4,11 +4,11 @@ import tikz: lambda.doc.tikz.tikz
 import plots: lambda.doc.tikz.pgfplots
 import latex: lambda.doc.latex.latex
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn option_text(node) => [for (child in node
-    where child is element and string(name(child)) == "option")
+fn option_text(node) any^ => [for (child in node
+    where ((child is element and string(name(child)) == "option") ^ { false }))
     if (child.value == "") child.key else child.key ++ "=" ++ child.value]
 
 fn failure(source) => tikz.render(source) ^ { ^.message }
@@ -28,7 +28,7 @@ let tree = children_named(parse(source, {type: "tikz"})^, "tikzpicture")[0]
 let group = children_named(tree, "groupplot")[0]
 let members = children_named(group, "axis")
 let html = format(tikz.render(source)^, 'xml')
-let domains = [for (part in split(html, "data-x-domain=\"") where not starts_with(part, "<"))
+let domains = [for (part in ((split(html, "data-x-domain=\"")) ^ { [] }) where ((not starts_with(part, "<")) ^ { false }))
     slice(part, 0, index_of(part, "\""))]
 
 let document = latex.render_to_html(parse("\\documentclass{article}\\usepackage{pgfplots}" ++

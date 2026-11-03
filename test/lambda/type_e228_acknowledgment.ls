@@ -1,10 +1,11 @@
+// S7.4.2v3/S7.5.1v6: deliberately retain an ordinary-union binding to test the long spelling.
 // E228 accepts only immediate, explicit destinations for an enforcing result.
 fn risky(value: int) int^ {
   if (value < 0) raise error("expected")
   else value
 }
 
-fn accept_error(value: int | error) int {
+fn accept_error(value: int | error) int^ {
   match value {
     case error: 3
     case int: value
@@ -12,7 +13,7 @@ fn accept_error(value: int | error) int {
 }
 
 fn binding_acknowledgment() int^ {
-  let binding: int | error = risky(0 - 1)
+  let binding: int^ = risky(0 - 1)
   binding
 }
 
@@ -20,7 +21,7 @@ fn handler_default_acknowledgment() int {
   (risky(0 - 1) ^ { null }) or 2
 }
 
-fn parameter_acknowledgment() int {
+fn parameter_acknowledgment() int^ {
   accept_error(risky(0 - 1))
 }
 

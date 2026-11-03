@@ -8,7 +8,7 @@ pub let INSET = city.ROAD + 2.5                  // the loop runs mid-sidewalk
 pub let SIDE = city.PITCH - 2.0 * INSET
 pub let LOOP = 4.0 * SIDE
 let KEY = rng.key([city.SEED, "peds"])
-let HOMES = [for (b in city.BLOCKS where contains(["R", "O", "T", "X"], b.kind)) b]
+let HOMES = [for (b in city.BLOCKS where contains(["R", "O", "T", "X"], b.kind)^) b]
 
 // clockwise on the map (x east, z south): north side eastward, east side southward, and so on
 pub fn on_loop(b, s) {

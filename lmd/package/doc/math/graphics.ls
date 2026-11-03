@@ -5,7 +5,7 @@ import util: .util
 import latex_util: lambda.doc.latex.util
 import graphicx: lambda.doc.latex.packages.graphicx
 
-fn length(raw, dimension) {
+fn length(raw, dimension) any^ {
     let text = trim(string(raw))
     let parsed = util.dimension_from_string(text)
     let explicit = ends_with(text, parsed.unit)
@@ -16,7 +16,7 @@ fn length(raw, dimension) {
     else dimension(if (explicit) text else text ++ "bp")
 }
 
-pub fn render(n, base_uri, dimension) {
+pub fn render(n, base_uri, dimension) any^ {
     let opts = latex_util.parse_kv_options(n.options or "")
     let unknown = [for (key, value at opts where not contains(["width", "height", "totalheight", "alt"], string(key))) string(key)]
     if (len(unknown) > 0) error("math: unsupported image option " ++ unknown[0])

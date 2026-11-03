@@ -5,9 +5,9 @@ import interaction: .interaction
 import numbers: lambda.chart.numbers
 import frames: .frame
 
-fn pixels(text) => if (text == null or text == "" or text == "auto") 0.0 else
+fn pixels(text) any^ => if (text == null or text == "" or text == "auto") 0.0 else
     float(if (ends_with(text,"px")) slice(text,0,len(text)-2) else text)
-fn edge(node, side) {
+fn edge(node, side) any^ {
     pixels(dom.computed_style(node,"border-" ++ side ++ "-width")) + pixels(dom.computed_style(node,"padding-" ++ side))
 }
 
@@ -38,7 +38,7 @@ pub pn dispatch(spec, previous, evt, options = {}) {
         }
         else if (evt.type == "pointerdown" and (evt.button == null or evt.button == 0)) {
             dom.focus_set(host,false)
-            if (evt.pointerId != null) { host.set_pointer_capture(evt.pointerId) }
+            if (evt.pointerId != null) { host.set_pointer_capture(evt.pointerId)^ }
             {*:current,drag:{point:point,camera:camera,pointer_id:evt.pointerId,moved:false}}
         } else if (evt.type == "pointermove" and current.drag != null and
             (current.drag.pointer_id == null or current.drag.pointer_id == evt.pointerId)) {
@@ -54,10 +54,10 @@ pub pn dispatch(spec, previous, evt, options = {}) {
                 let hits=if (queried is error) [] else queried;
                 let detail={node:host,features:hits,point:point,lnglat:cameras.unproject(camera,point)};
                 if (evt.type=="click") {
-                    if (options.on_select!=null) { options.on_select(detail) }
+                    if (options.on_select!=null) { options.on_select(detail)^ }
                     {*:current,selection:hits,suppress_click:false}
                 } else {
-                    if (options.on_hover!=null) { options.on_hover(detail) }
+                    if (options.on_hover!=null) { options.on_hover(detail)^ }
                     {*:current,hover:hits}
                 }
             }
@@ -83,8 +83,8 @@ pub pn dispatch(spec, previous, evt, options = {}) {
             {*:current,camera:next,drag:null,selection:if (key=="Escape") [] else current.selection}
         } else current
     };
-    if (options.on_camera!=null and next.camera!=initial.camera) {
-        options.on_camera({node:host,camera:next.camera})
+    if ((options.on_camera!=null and next.camera!=initial.camera)^) {
+        options.on_camera({node:host,camera:next.camera})^
     }
     next
 }

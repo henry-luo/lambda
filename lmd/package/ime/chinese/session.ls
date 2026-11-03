@@ -11,9 +11,9 @@ fn checked_settings(value) map^ {
 
 fn valid_session(value) bool^ => c.require(value is map and value.kind == "lambda.ime.chinese.session",
     "expected an IME session")^
-fn active(s) bool => len(s.raw) > 0 or len(s.chosen) > 0
+fn active(s) bool^ => len(s.raw) > 0 or len(s.chosen) > 0
 fn preedit(s) string => join([for (item in s.chosen) item.text],"") ++ s.raw
-fn pages(s) int => (len(s.items) + s.settings.page_size - 1) div s.settings.page_size
+fn pages(s) int^ => (len(s.items) + s.settings.page_size - 1) div s.settings.page_size
 fn absolute(s) int => s.page * s.settings.page_size + s.highlight
 // hosts reuse the reducer's frame when resuming presentation without changing the session.
 pub fn frame(s) map => {type:"candidates",items:if (s.expanded) s.items else slice(s.items,s.page * s.settings.page_size,

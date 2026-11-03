@@ -23,7 +23,7 @@ pub pn print_catalog(prefix, violations_only: bool, show_void: bool) bool^ {
             print("  " ++ pad(effect, 22) ++ ": " ++ string(count) ++ "\n")
         }
         print("\nrows with an explicit non-default effect:\n")
-        for (row in rows_by_name(report.selected)) {
+        for (row in rows_by_name(report.selected)^) {
             if (row.effect != "MAY_SET(default)") {
                 print("  " ++ pad(row.effect, 10) ++ " " ++ row.name ++ "\n")
             }
@@ -32,7 +32,7 @@ pub pn print_catalog(prefix, violations_only: bool, show_void: bool) bool^ {
 
     print("\nD8.4.3 tier A -- raw-scalar helper lacking a PRESERVES contract: " ++
           string(len(report.tier_a)) ++ "\n")
-    if (len(report.tier_a) > 0) {
+    if ((len(report.tier_a) > 0)^) {
         print("  " ++ pad("registry name", 44) ++ pad("target", 40) ++
               pad("C return", 12) ++ "catalog effect\n")
         for (finding in report.tier_a) {
@@ -44,7 +44,7 @@ pub pn print_catalog(prefix, violations_only: bool, show_void: bool) bool^ {
 
     print("\nD8.4.3 tier B -- void helper whose row still claims MAY_SET: " ++
           string(len(report.tier_b)) ++ "\n")
-    if (len(report.tier_b) > 0) {
+    if ((len(report.tier_b) > 0)^) {
         if (show_void) { for (finding in report.tier_b) {
             print("  " ++ finding.name ++ "\n")
         } }
@@ -56,7 +56,7 @@ pub pn print_catalog(prefix, violations_only: bool, show_void: bool) bool^ {
 
     let tier_c_header = "\nD8.4.3 tier C -- boxed-Item helper cataloged as a raw scalar: " ++
                         string(len(report.tier_c))
-    if (len(report.tier_c) > 0) {
+    if ((len(report.tier_c) > 0)^) {
         print(tier_c_header ++ "\n")
         print("  " ++ pad("registry name", 44) ++ pad("target", 40) ++
               pad("C return", 12) ++ "catalog class\n")

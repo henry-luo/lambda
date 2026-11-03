@@ -1,9 +1,9 @@
 import chart: lambda.chart.chart
 import scale: lambda.chart.scale
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn tags(node, tag) => elements(node) |: name(~) == tag
-fn classes(node, class_name) => elements(node) |: ~.class == class_name
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(node, tag) any^ => elements(node) |: name(~) == tag
+fn classes(node, class_name) any^ => elements(node) |: ~.class == class_name
 let data = [for (index, category in ["a", "b", "c", "d"]) {category: category, score: index + 1}];
 let base = {width: 200, height: 200, padding: 0, data: data, mark: {kind: "radar", labels: false, grid: false}, encoding: {
     theta: {field: "category", dtype: "nominal", scale: {domain: ["a", "b", "c", "d"]}}, radius: {field: "score", dtype: "quantitative", scale: {domain: [0, 4], range: [0, 80]}}}};

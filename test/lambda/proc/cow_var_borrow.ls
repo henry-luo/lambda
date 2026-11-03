@@ -38,7 +38,7 @@ pn main() {
 
     // CW25 path borrow: the PLACE is borrowed, the spine updated in place
     var m = {rows: [{mark: "clean"}, {mark: "clean"}]}
-    set_row(m.rows[1])
+    set_row(m.rows[1])^
     print(m.rows[0].mark); print(" "); print(m.rows[1].mark);
     print(" (path borrow: ruled clean written)\n")
 

@@ -11,30 +11,30 @@ pub fn places() => [{id:"home",name:"Home",icon:"home",path:sys.home#},
         {id:string(id),name:caption,icon:string(id),path:browser.absolute(caption,sys.home#)}],
     {id:"project",name:"Project",icon:"folder",path:sys.proc.self.cwd#},
     {id:"computer",name:"Computer",icon:"computer",path:"/"}]
-pub fn selectable(entry) => entry!=null and (entry.dir or storage.supported_path(entry.path))
-pub fn rows(d) => browser.visible(d.browser)
-pub fn selected(d) => browser.focused(d.browser)
+pub fn selectable(entry) any^ => entry!=null and (entry.dir or storage.supported_path(entry.path))
+pub fn rows(d) any^ => browser.visible(d.browser)
+pub fn selected(d) any^ => browser.focused(d.browser)
 // selected paths come from Finder's snapshot; trimming their display names would change leading spaces.
-pub fn target(d) => selected(d).path or (if (trim(d.path)!="") browser.absolute(trim(d.path),d.browser.path,sys.home#) else null)
-pub fn can_open(d) => d.loading!=true and (if (trim(d.path)!="") storage.supported_path(d.path) else selectable(selected(d)))
+pub fn target(d) any^ => selected(d).path or (if (trim(d.path)!="") browser.absolute(trim(d.path),d.browser.path,sys.home#) else null)
+pub fn can_open(d) any^ => d.loading!=true and (if (trim(d.path)!="") storage.supported_path(d.path) else selectable(selected(d)))
 
 pub fn navigate(d,path,cursor=-1) {
     let absolute = browser.absolute(path,d.browser.path,sys.home#)
-    let loaded = filesystem.read_folder(absolute) ^ { {error:^.message} } ~ { {entries:~} };
+    let loaded = { let __error_outcome_1 = filesystem.read_folder(absolute) ^ { ^ }; if (__error_outcome_1 is error) { {error:__error_outcome_1.message} } else match __error_outcome_1 { case any { {entries:~} } } };
     if (loaded.error!=null) {*:d,error:loaded.error,open_path:null}
     else {*:d,browser:browser.listing(d.browser,absolute,loaded.entries,cursor),path:"",error:null,go:false,open_path:null}
 }
-pub fn initial(path="",last_folder=null) {
+pub fn initial(path="",last_folder=null) any^ {
     let documents = browser.absolute("Documents",sys.home#)
     let start = last_folder or (if (path!="") browser.parent(browser.absolute(path,sys.proc.self.cwd#))
         else if (exists(documents)) documents else sys.proc.self.cwd#)
     let d = {kind:"open",browser:browser.initial(start),path:"",error:null,go:false,open_path:null};
     navigate(d,start)
 }
-pub fn choose(d,path) => if (not selectable([for (e in d.browser.entries where e.path==path) e][0])) d else (
+pub fn choose(d,path) any^ => if (not selectable([for (e in d.browser.entries where e.path==path) e][0])) d else (
     let next = browser.choose(d.browser,path), let e = browser.focused(next),
     {*:d,browser:next,path:if (e.dir) "" else e.name,error:null,open_path:null})
-pub fn command(d,action,params={}) {
+pub fn command(d,action,params={}) any^ {
     if (action=="navigate") navigate(d,params.path)
     else if (action=="back" or action=="forward") {
         let cursor = d.browser.cursor+(if (action=="back") -1 else 1);
@@ -46,7 +46,7 @@ pub fn command(d,action,params={}) {
     else if (action=="location") navigate(d,params.path)
     else if (action=="select") choose(d,params.path)
     else if (action=="move") {
-        let eligible = {*:d.browser,entries:[for (e in d.browser.entries where selectable(e)) e]}
+        let eligible = {*:d.browser,entries:[for (e in d.browser.entries where ((selectable(e)) ^ { false })) e]}
         let ordered = browser.visible(eligible)
         let path = if (params.edge=="first") ordered[0].path else if (params.edge=="last") ordered[last].path
             else browser.move(eligible,params.delta).focus;
@@ -61,7 +61,7 @@ pub fn command(d,action,params={}) {
         let activated = [for (e in d.browser.entries where e.path==params.path) e][0]
         let picked = if (action=="activate") choose(d,params.path) else d
         let path = target(picked)
-        let entry = [for (e in picked.browser.entries where e.path==path) e][0];
+        let entry = [for (e in ((picked.browser.entries) ^ { [] }) where ((e.path==path) ^ { false })) e][0];
         if (action=="activate" and not selectable(activated)) {*:d,open_path:null,error:"This file type cannot be opened in Word."}
         else if (entry.dir==true) navigate(picked,path)
         else if (path!=null and storage.supported_path(path)) {*:picked,open_path:path,error:null}
@@ -73,7 +73,7 @@ pub fn command(d,action,params={}) {
 fn tool(id,label,graphic,disabled=false,active=false) => <button id:"word-picker-" ++ id,type:"button",class:"picker-tool",
     'data-picker-action':id,'aria-label':label,title:label,'aria-pressed':string(active),
     *:(if (disabled) {disabled:""} else {}),finder.icon(graphic)>
-fn contents(d) {
+fn contents(d) any^ {
     let entries = rows(d);
     if (d.loading==true) <div id:"word-picker-loading",class:"picker-empty",role:"status",finder.icon("documents");
         <strong "Opening document…"><span d.path><span "You can cancel while the document is being imported.">>
@@ -88,7 +88,7 @@ fn contents(d) {
             <span class:"picker-kind",if (e.dir) "Folder" else if (storage.supported_path(e.path)) "Document" else e.kind>
             <span class:"picker-size",if (e.dir) "—" else browser.size_label(e.size)>>]>
 }
-fn tree(d) => <div class:"edit-dialog-layer",
+fn tree(d) any^ => <div class:"edit-dialog-layer",
     <div class:"edit-dialog-backdrop">;
     <section id:"word-file-picker",class:"edit-dialog edit-dialog-open",role:"dialog",'aria-modal':"true",'aria-label':"Open document",
         'data-path':d.browser.path,'data-mode':d.browser.mode,'aria-busy':string(d.loading==true),
@@ -106,7 +106,7 @@ fn tree(d) => <div class:"edit-dialog-layer",
                     tool("list","List view","list",false,d.browser.mode=="list")>
                 <div class:"picker-folder",finder.icon("folder");<strong browser.basename(d.browser.path)>>
                 <label class:"picker-search",finder.icon("search");<input id:"word-picker-search",type:"search",placeholder:"Search",value:d.browser.query,'aria-label':"Search this folder">>>
-            <div class:"picker-location-bar",<nav class:"picker-crumbs",'aria-label':"Folder path",*[for (i,c in browser.crumbs(d.browser.path))
+            <div class:"picker-location-bar",<nav class:"picker-crumbs",'aria-label':"Folder path",*[for (i,c in ((browser.crumbs(d.browser.path)) ^ { [] }))
                 <span (if (i>0) <span class:"picker-chevron","›"> else null);
                     <button type:"button",'data-picker-location':c.path,title:c.path,c.name>>]>
                 tool("go","Go to folder…","go");tool("refresh","Refresh folder","refresh")>;
@@ -131,7 +131,7 @@ fn tree(d) => <div class:"edit-dialog-layer",
     >>
 
 pn send(evt,action,params={}) { emit("word_command",{id:"picker." ++ action,params:params,node:evt.target,event:evt}) }
-view <word_file_picker> { tree(~.dialog) }
+view <word_file_picker> () any^ { tree(~.dialog) }
 on click(evt) {
     let row = dom.closest(evt.target,"[data-picker-path]")
     let location = dom.closest(evt.target,"[data-picker-location]")
@@ -140,7 +140,7 @@ on click(evt) {
     else if (location!=null) send(evt,"navigate",{path:dom.get_attribute(location,"data-picker-location")})
     else if (action=="location") send(evt,"location",{path:dom.get_state(dom.get_element_by_id(dom.root_node(evt.target),"word-picker-location"),"value")})
     else if (action=="icons" or action=="list") send(evt,"mode",{value:action})
-    else if (action!=null) send(evt,action)
+    else if (action!=null) send(evt,action)^
     return 'handled'
 }
 on dblclick(evt) {
@@ -151,7 +151,7 @@ on dblclick(evt) {
 on input(evt) {
     let id = dom.get_attribute(evt.target,"id")
     if (id=="word-picker-search" or id=="word-file-path")
-        send(evt,if (id=="word-picker-search") "search" else "filename",{value:dom.get_state(evt.target,"value")})
+        send(evt,if (id=="word-picker-search") "search" else "filename",{value:dom.get_state(evt.target,"value")})^
     return 'handled'
 }
 on change(evt) {
@@ -176,19 +176,19 @@ on keydown(evt) {
     if (evt.key=="Escape") { send(evt,"cancel"); return 'prevent-default' }
     if (primary and evt.shiftKey and lower(evt.key)=="g") { send(evt,"go"); return 'prevent-default' }
     if ((evt.altKey or primary) and evt.key=="ArrowUp") { send(evt,"up"); return 'prevent-default' }
-    if (evt.altKey and contains(["ArrowLeft","ArrowRight"],evt.key)) {
-        send(evt,if (evt.key=="ArrowLeft") "back" else "forward"); return 'prevent-default'
+    if ((evt.altKey and contains(["ArrowLeft","ArrowRight"],evt.key))^) {
+        send(evt,if (evt.key=="ArrowLeft") "back" else "forward")^; return 'prevent-default'
     }
     if (evt.key=="Enter" and id=="word-picker-location") {
         send(evt,"location",{path:dom.get_state(evt.target,"value")}); return 'prevent-default'
     }
     let listing = dom.closest(evt.target,"#word-picker-files")!=null
     if (evt.key=="Enter" and (id=="word-file-path" or listing)) { send(evt,"open"); return 'prevent-default' }
-    if (not control and listing and contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key)) {
+    if ((not control and listing and contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key))^) {
         let files = dom.get_element_by_id(dom.root_node(evt.target),"word-picker-files")
         let rows = dom.query_selector_all(files,".picker-file")
         let y = if (len(rows)>0) dom.bounding_box(rows[0]).y else 0
-        let columns = max(1,len([for (r in rows where abs(dom.bounding_box(r).y-y)<1) r]))
+        let columns = max(1,len([for (r in rows where (abs(dom.bounding_box(r).y-y)<1)^) r]))
         send(evt,"move",{delta:if (evt.key=="ArrowUp") -columns else if (evt.key=="ArrowDown") columns else if (evt.key=="ArrowLeft") -1 else 1,
             edge:if (evt.key=="Home") "first" else if (evt.key=="End") "last" else null})
         return 'prevent-default'

@@ -43,6 +43,7 @@
   #include <unistd.h>
   #include <sys/types.h>
   #include <utime.h>
+  #include <dirent.h>
   #include <fcntl.h>
   #define mkdir_compat(p, m) mkdir(p, m)
 #endif
@@ -54,6 +55,31 @@ extern char *strdup(const char *s);
 #include "host_paths.h"
 #include "log.h"
 #include "str.h"
+#include "digest.h"
+#include "hex.h"
+#include "path_str.h"
+#include "utf.h"
+#ifdef __linux__
+#include <sys/syscall.h>
+#include <linux/fs.h>
+#endif
+
+#ifndef _WIN32
+static int file_publish_new_at(int source_dir, const char* source, int destination_dir, const char* destination) {
+    // a crash must not leave a canonical record hard-linked to its staging name
+#ifdef __APPLE__
+    return renameatx_np(source_dir, source, destination_dir, destination, RENAME_EXCL);
+#elif defined(__linux__) && defined(SYS_renameat2)
+    int status = (int)syscall(SYS_renameat2, source_dir, source, destination_dir, destination, RENAME_NOREPLACE);
+    if (status != 0 && errno == ENOSYS) errno = ENOTSUP;
+    return status;
+#else
+    (void)source_dir; (void)source; (void)destination_dir; (void)destination;
+    errno = ENOTSUP;
+    return -1;
+#endif
+}
+#endif
 
 FILE* file_open_regular_read(const char* filename) {
     if (!filename) return NULL;
@@ -412,9 +438,11 @@ int write_text_file_atomic(const char* filename, const char* content) {
     return content ? write_binary_file_atomic(filename, content, strlen(content)) : -1;
 }
 
-int write_binary_file_atomic(const char* filename, const void* content, size_t content_len) {
+static int write_binary_file_atomic_mode(const char* filename, const void* content,
+        size_t content_len, bool overwrite) {
     if (!filename || !content) {
         log_error("write_text_file_atomic: NULL argument");
+        errno = EINVAL;
         return -1;
     }
 
@@ -488,17 +516,41 @@ int write_binary_file_atomic(const char* filename, const void* content, size_t c
         return -1;
     }
 
-    // file_rename replaces an existing target on Windows; plain rename does not.
-    if (file_rename(tmp, filename) != 0) {
+    int published;
+    if (overwrite) {
+        published = file_rename(tmp, filename);
+    } else {
+        // D7.5.6: no existence-check/rename gap, and no replacement fallback.
+#ifdef _WIN32
+        published = MoveFileExA(tmp, filename, MOVEFILE_WRITE_THROUGH) ? 0 : -1;
+        if (published != 0) {
+            DWORD error = GetLastError();
+            errno = (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) ? EEXIST : EACCES;
+        }
+#else
+        published = file_publish_new_at(AT_FDCWD, tmp, AT_FDCWD, filename);
+#endif
+    }
+    if (published != 0) {
+        int publish_errno = errno;
         log_error("write_text_file_atomic: rename '%s' -> '%s' failed",
                   tmp, filename);
         remove(tmp);
         mem_free(tmp);
+        errno = publish_errno;
         return -1;
     }
 
     mem_free(tmp);
     return 0;
+}
+
+int write_binary_file_atomic(const char* filename, const void* content, size_t content_len) {
+    return write_binary_file_atomic_mode(filename, content, content_len, true);
+}
+
+int write_binary_file_atomic_new(const char* filename, const void* content, size_t content_len) {
+    return write_binary_file_atomic_mode(filename, content, content_len, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -848,25 +900,51 @@ bool file_is_executable(const char* path) {
 #endif
 }
 
-FileRevision file_revision(const char* path) {
-    FileRevision revision;
-    memset(&revision, 0, sizeof(revision));
+static FileRevision file_revision_from_stat(const struct stat* st) {
+    FileRevision revision = {0};
     FileStat* fs = &revision.stat;
     fs->size = -1;
-
-    if (!path) return revision;
-
-    struct stat st;
-    if (stat(path, &st) != 0) return revision;
-
+    if (!st) return revision;
     fs->exists = true;
-    fs->size = (int64_t)st.st_size;
-    fs->modified = st.st_mtime;
-    fs->is_file = S_ISREG(st.st_mode);
-    fs->is_dir = S_ISDIR(st.st_mode);
+    fs->size = (int64_t)st->st_size;
+    fs->modified = st->st_mtime;
+    fs->created = st->st_ctime;
+    fs->is_file = S_ISREG(st->st_mode);
+    fs->is_dir = S_ISDIR(st->st_mode);
+#ifndef _WIN32
+    revision.device = (uint64_t)st->st_dev;
+    revision.inode = (uint64_t)st->st_ino;
+#ifdef __APPLE__
+    revision.modified_nsec = (uint32_t)st->st_mtimespec.tv_nsec;
+#else
+    revision.modified_nsec = (uint32_t)st->st_mtim.tv_nsec;
+#endif
+    fs->mode = (uint16_t)(st->st_mode & 07777);
+#endif
+    return revision;
+}
+
+bool file_revision_equal(const FileRevision* left, const FileRevision* right) {
+    return left && right && left->device == right->device && left->inode == right->inode &&
+        left->modified_nsec == right->modified_nsec &&
+        left->stat.exists == right->stat.exists && left->stat.size == right->stat.size &&
+        left->stat.modified == right->stat.modified && left->stat.created == right->stat.created &&
+        left->stat.mode == right->stat.mode && left->stat.is_file == right->stat.is_file &&
+        left->stat.is_dir == right->stat.is_dir && left->stat.is_symlink == right->stat.is_symlink;
+}
+
+FileRevision file_revision_stream(FILE* stream) {
+    struct stat st;
+    return file_revision_from_stat(stream && fstat(fileno(stream), &st) == 0 ? &st : NULL);
+}
+
+FileRevision file_revision(const char* path) {
+    struct stat st;
+    FileRevision revision = file_revision_from_stat(path && stat(path, &st) == 0 ? &st : NULL);
+    if (!revision.stat.exists) return revision;
 
 #ifdef _WIN32
-    fs->created = st.st_ctime; // on Windows, st_ctime is creation time
+    FileStat* fs = &revision.stat;
     WIN32_FILE_ATTRIBUTE_DATA attributes;
     if (GetFileAttributesExA(path, GetFileExInfoStandard, &attributes)) {
         ULARGE_INTEGER ticks;
@@ -875,25 +953,14 @@ FileRevision file_revision(const char* path) {
         fs->modified = (time_t)(ticks.QuadPart / 10000000ULL - 11644473600ULL);
         revision.modified_nsec = (uint32_t)((ticks.QuadPart % 10000000ULL) * 100);
     }
-    fs->mode = 0;
-    fs->is_symlink = false;
     DWORD attrs = GetFileAttributesA(path);
     if (attrs != INVALID_FILE_ATTRIBUTES)
         fs->is_symlink = (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 #else
-    fs->created = st.st_ctime; // best approximation on POSIX (status change)
-    revision.device = (uint64_t)st.st_dev;
-    revision.inode = (uint64_t)st.st_ino;
-#ifdef __APPLE__
-    revision.modified_nsec = (uint32_t)st.st_mtimespec.tv_nsec;
-#else
-    revision.modified_nsec = (uint32_t)st.st_mtim.tv_nsec;
-#endif
-    fs->mode = (uint16_t)(st.st_mode & 07777);
     // check symlink via lstat
     struct stat lst;
     if (lstat(path, &lst) == 0) {
-        fs->is_symlink = S_ISLNK(lst.st_mode);
+        revision.stat.is_symlink = S_ISLNK(lst.st_mode);
     }
 #endif
 
@@ -902,6 +969,601 @@ FileRevision file_revision(const char* path) {
 
 FileStat file_stat(const char* path) {
     return file_revision(path).stat;
+}
+
+// Anchors keep acquisition relative to a held directory, with no path fallback.
+struct FileAnchor {
+    int fd;
+    char* path;
+    char* guard_prefix;
+    FileRevision identity;
+    FileAnchorOptions options;
+};
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static bool file_anchor_flags_valid(uint32_t flags) {
+    return !(flags & ~(FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_PRIVATE | FILE_ANCHOR_SAME_DEVICE));
+}
+
+static bool file_anchor_component_valid(const char* name) {
+    return name && *name && strcmp(name, ".") && strcmp(name, "..");
+}
+
+static bool file_anchor_directory_stat(const struct stat* st, uint32_t flags, bool final) {
+    if (!S_ISDIR(st->st_mode) ||
+        ((flags & (FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_PRIVATE)) &&
+            ((st->st_uid != geteuid() && st->st_uid != 0) || (st->st_mode & 0022))) ||
+        (final && (flags & FILE_ANCHOR_PRIVATE) &&
+            (st->st_uid != geteuid() || (st->st_mode & 0077)))) {
+        errno = EACCES;
+        return false;
+    }
+    return true;
+}
+
+static bool file_anchor_namespace(const FileAnchorOptions* options, int parent, const char* name) {
+    if (!options->namespace_guard) return true;
+    struct stat st;
+    if (fstat(parent, &st) != 0) return false;
+    FileRevision revision = file_revision_from_stat(&st);
+    if (options->namespace_guard(options->guard_context, &revision, name)) return true;
+    errno = EACCES; return false;
+}
+
+static int file_anchor_open_absolute(const char* path, const FileAnchorOptions* options) {
+    char copy[PATH_MAX];
+    size_t length = path ? strnlen(path, sizeof(copy)) : 0;
+    if (!length || length >= sizeof(copy) || path[0] != '/') { errno = EINVAL; return -1; }
+    memcpy(copy, path, length + 1);
+    int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return -1;
+    char* component = copy + 1;
+    for (;;) {
+        struct stat st;
+        if (fstat(fd, &st) != 0 || !file_anchor_directory_stat(&st, options->flags, !*component)) break;
+        FileRevision revision = file_revision_from_stat(&st);
+        if (options->ancestor_guard && !options->ancestor_guard(options->guard_context, &revision)) {
+            errno = EACCES; break;
+        }
+        if (!*component) return fd;
+        char* slash = strchr(component, '/');
+        if (slash) *slash = '\0';
+        if (!file_anchor_component_valid(component)) { errno = EINVAL; break; }
+        if (!file_anchor_namespace(options, fd, component)) break;
+        int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (next < 0) break;
+        close(fd);
+        fd = next;
+        component = slash ? slash + 1 : component + strlen(component);
+    }
+    int error = errno;
+    close(fd);
+    errno = error;
+    return -1;
+}
+
+static bool file_anchor_guard(FileAnchor* anchor, const char* relative,
+        FileAnchorAction action, const FileRevision* object) {
+    if (!anchor->options.guard) return true;
+    char scoped[PATH_MAX];
+    if (path_str_join_posix_into(scoped, sizeof(scoped), anchor->guard_prefix, relative) < 0) {
+        errno = ENAMETOOLONG; return false;
+    }
+    if (anchor->options.guard(anchor->options.guard_context, scoped, action, object)) return true;
+    errno = EACCES;
+    return false;
+}
+
+static bool file_anchor_object_stat(FileAnchor* anchor, const struct stat* st) {
+    if ((!S_ISREG(st->st_mode) && !S_ISDIR(st->st_mode)) ||
+        (S_ISREG(st->st_mode) && st->st_nlink != 1) ||
+        ((anchor->options.flags & FILE_ANCHOR_PRIVATE) &&
+            (st->st_uid != geteuid() || (st->st_mode & 0077)))) {
+        errno = EACCES;
+        return false;
+    }
+    if (S_ISDIR(st->st_mode) && !file_anchor_directory_stat(st, anchor->options.flags, true)) return false;
+    if ((anchor->options.flags & FILE_ANCHOR_SAME_DEVICE) &&
+        (uint64_t)st->st_dev != anchor->identity.device) { errno = EXDEV; return false; }
+    return true;
+}
+
+static int file_anchor_walk(FileAnchor* anchor, char* copy, bool parent_only, bool create, uint32_t flags) {
+    if (!file_anchor_validate(anchor)) return -1;
+    int fd = fcntl(anchor->fd, F_DUPFD_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    char* component = copy;
+    for (;;) {
+        char* slash = strchr(component, '/');
+        if (slash) *slash = '\0';
+        if (!file_anchor_component_valid(component)) { errno = EINVAL; break; }
+        if (!file_anchor_namespace(&anchor->options, fd, component)) break;
+        if (parent_only && !slash) return fd;
+        int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (next < 0 && errno == ENOENT && create) {
+            if (!file_anchor_guard(anchor, copy, FILE_ANCHOR_CREATE, NULL)) break;
+            if (mkdirat(fd, component, 0700) != 0 && errno != EEXIST) break;
+            next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        }
+        if (next < 0) break;
+        struct stat st;
+        bool valid = fstat(next, &st) == 0 && file_anchor_object_stat(anchor, &st) &&
+            file_anchor_directory_stat(&st, flags, true);
+        FileRevision revision = file_revision_from_stat(valid ? &st : NULL);
+        if (valid) valid = file_anchor_guard(anchor, copy, FILE_ANCHOR_TRAVERSE, &revision);
+        if (!valid) { int error = errno; close(next); errno = error; break; }
+        close(fd);
+        fd = next;
+        if (!slash) return fd;
+        *slash = '/';
+        component = slash + 1;
+    }
+    int error = errno;
+    close(fd);
+    errno = error;
+    return -1;
+}
+
+static char* file_anchor_copy_relative(const char* relative) {
+    size_t length = relative ? strnlen(relative, PATH_MAX) : 0;
+    if (!length || length >= PATH_MAX || relative[0] == '/') { errno = EINVAL; return NULL; }
+    // validate the entire request before a directory-creation side effect
+    const char* start = relative;
+    for (const char* p = start;; p++) {
+        if (*p && *p != '/') continue;
+        size_t part = (size_t)(p - start);
+        if (!part || (part == 1 && start[0] == '.') ||
+            (part == 2 && start[0] == '.' && start[1] == '.')) { errno = EINVAL; return NULL; }
+        if (!*p) break;
+        start = p + 1;
+    }
+    return mem_dup_n(relative, length, MEM_CAT_TEMP);
+}
+
+static int file_anchor_parent(FileAnchor* anchor, const char* relative, char** copy, const char** leaf) {
+    *copy = file_anchor_copy_relative(relative);
+    if (!*copy) return -1;
+    int fd = file_anchor_walk(anchor, *copy, true, false, anchor ? anchor->options.flags : 0);
+    char* slash = strrchr(*copy, '/');
+    *leaf = slash ? slash + 1 : *copy;
+    return fd;
+}
+#endif
+
+FileAnchor* file_anchor_open(const char* path, const FileAnchorOptions* options) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)path; (void)options; errno = ENOTSUP; return NULL;
+#else
+    FileAnchorOptions selected = options ? *options : (FileAnchorOptions){0};
+    if (!path || !*path || !file_anchor_flags_valid(selected.flags)) { errno = EINVAL; return NULL; }
+    char absolute[PATH_MAX];
+    if (path[0] == '/') {
+        if (path_str_copy(absolute, sizeof(absolute), path) < 0) { errno = ENAMETOOLONG; return NULL; }
+    } else {
+        char cwd[PATH_MAX];
+        if (!file_getcwd_into(cwd, sizeof(cwd))) return NULL;
+        if (path_str_join_posix_into(absolute, sizeof(absolute), cwd, !strcmp(path, ".") ? "" : path) < 0) {
+            errno = ENAMETOOLONG; return NULL;
+        }
+    }
+    size_t length = strlen(absolute);
+    while (length > 1 && absolute[length - 1] == '/') absolute[--length] = '\0';
+    int fd = file_anchor_open_absolute(absolute, &selected);
+    if (fd < 0) return NULL;
+    FileAnchor* anchor = (FileAnchor*)mem_calloc(1, sizeof(FileAnchor), MEM_CAT_SYSTEM);
+    if (!anchor) { close(fd); return NULL; }
+    anchor->fd = fd;
+    anchor->path = mem_dup_n(absolute, length, MEM_CAT_SYSTEM);
+    anchor->guard_prefix = mem_dup_n("", 0, MEM_CAT_SYSTEM);
+    anchor->options = selected;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !anchor->path || !anchor->guard_prefix) { file_anchor_close(anchor); return NULL; }
+    anchor->identity = file_revision_from_stat(&st);
+    if (!file_anchor_guard(anchor, "", FILE_ANCHOR_TRAVERSE, &anchor->identity)) {
+        file_anchor_close(anchor); return NULL;
+    }
+    return anchor;
+#endif
+}
+
+void file_anchor_close(FileAnchor* anchor) {
+    if (!anchor) return;
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    close(anchor->fd);
+#endif
+    mem_free(anchor->path);
+    mem_free(anchor->guard_prefix);
+    mem_free(anchor);
+}
+
+bool file_anchor_validate(FileAnchor* anchor) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; errno = ENOTSUP; return false;
+#else
+    if (!anchor) { errno = EINVAL; return false; }
+    int current = file_anchor_open_absolute(anchor->path, &anchor->options);
+    if (current < 0) return false;
+    struct stat st;
+    bool valid = fstat(current, &st) == 0 &&
+        (uint64_t)st.st_dev == anchor->identity.device && (uint64_t)st.st_ino == anchor->identity.inode;
+    close(current);
+    if (!valid) { errno = ESTALE; return false; }
+    FileRevision revision = file_revision_from_stat(&st);
+    return file_anchor_guard(anchor, "", FILE_ANCHOR_TRAVERSE, &revision);
+#endif
+}
+
+FileRevision file_anchor_identity(const FileAnchor* anchor) {
+    return anchor ? anchor->identity : file_revision_from_stat(NULL);
+}
+
+static char* file_descriptor_path(int fd) {
+#if defined(__APPLE__)
+    char path[PATH_MAX];
+    if (fcntl(fd, F_GETPATH, path) != 0) return NULL;
+    return mem_dup_n(path, strnlen(path, sizeof(path)), MEM_CAT_SYSTEM);
+#elif defined(__linux__)
+    char descriptor[64], path[PATH_MAX];
+    int count = snprintf(descriptor, sizeof(descriptor), "/proc/self/fd/%d", fd);
+    if (count < 0 || (size_t)count >= sizeof(descriptor)) { errno = EINVAL; return NULL; }
+    ssize_t length = readlink(descriptor, path, sizeof(path));
+    if (length < 0) return NULL;
+    if ((size_t)length == sizeof(path)) { errno = ENAMETOOLONG; return NULL; }
+    return mem_dup_n(path, (size_t)length, MEM_CAT_SYSTEM);
+#else
+    (void)fd; errno = ENOTSUP; return NULL;
+#endif
+}
+
+char* file_stream_path(FILE* stream) {
+    if (!stream) { errno = EINVAL; return NULL; }
+    return file_descriptor_path(fileno(stream));
+}
+
+char* file_anchor_path(FileAnchor* anchor) {
+    return file_anchor_validate(anchor) ? file_descriptor_path(anchor->fd) : NULL;
+}
+
+FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative, bool create, uint32_t flags) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)parent; (void)relative; (void)create; (void)flags; errno = ENOTSUP; return NULL;
+#else
+    if (!parent || !file_anchor_flags_valid(flags) || (parent->options.flags & ~flags)) {
+        errno = EINVAL; return NULL;
+    }
+    char* copy = file_anchor_copy_relative(relative);
+    if (!copy) return NULL;
+    int fd = file_anchor_walk(parent, copy, false, create, flags);
+    mem_free(copy);
+    if (fd < 0) return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !file_anchor_directory_stat(&st, flags, true)) {
+        int error = errno; close(fd); errno = error; return NULL;
+    }
+    FileAnchor* child = (FileAnchor*)mem_calloc(1, sizeof(FileAnchor), MEM_CAT_SYSTEM);
+    if (!child) { close(fd); return NULL; }
+    child->fd = fd;
+    child->path = file_path_join(parent->path, relative);
+    child->guard_prefix = file_path_join(parent->guard_prefix, relative);
+    child->identity = file_revision_from_stat(&st);
+    child->options = parent->options;
+    child->options.flags = flags;
+    if (!child->path || !child->guard_prefix || !file_anchor_validate(child)) { file_anchor_close(child); return NULL; }
+    return child;
+#endif
+}
+
+bool file_anchor_stat(FileAnchor* anchor, const char* relative, FileRevision* out) {
+    if (out) *out = file_revision_from_stat(NULL);
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; errno = ENOTSUP; return false;
+#else
+    if (!out) { errno = EINVAL; return false; }
+    if (relative && !*relative) {
+        struct stat st;
+        bool valid = file_anchor_validate(anchor) && fstat(anchor->fd, &st) == 0;
+        if (valid) {
+            *out = file_revision_from_stat(&st);
+            valid = file_anchor_guard(anchor, "", FILE_ANCHOR_METADATA, out);
+        }
+        if (!valid) *out = file_revision_from_stat(NULL);
+        return valid;
+    }
+    char* copy = NULL; const char* leaf = NULL;
+    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
+    struct stat st;
+    bool valid = parent >= 0 && fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
+        file_anchor_object_stat(anchor, &st);
+    if (valid) {
+        *out = file_revision_from_stat(&st);
+        valid = file_anchor_guard(anchor, relative, FILE_ANCHOR_METADATA, out);
+    }
+    int error = errno;
+    if (parent >= 0) close(parent);
+    mem_free(copy);
+    if (!valid) *out = file_revision_from_stat(NULL);
+    errno = error;
+    return valid;
+#endif
+}
+
+bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
+        FileAnchorVisitor visitor, void* context) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)directory; (void)max_entries; (void)visitor; (void)context;
+    errno = ENOTSUP; return false;
+#else
+    if (!visitor || !max_entries) { errno = EINVAL; return false; }
+    FileRevision before;
+    if (!file_anchor_stat(directory, "", &before)) return false;
+    // A fresh description avoids sharing a directory offset with other calls.
+    int fd = openat(directory->fd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return false;
+    DIR* stream = fdopendir(fd);
+    if (!stream) { int error = errno; close(fd); errno = error; return false; }
+    bool valid = true;
+    uint32_t visited = 0;
+    for (;;) {
+        errno = 0;
+        struct dirent* entry = readdir(stream);
+        if (!entry) { valid = errno == 0; break; }
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        if (visited++ == max_entries) { errno = EFBIG; valid = false; break; }
+        if (!file_anchor_namespace(&directory->options, fd, entry->d_name)) {
+            if (errno == EACCES) continue;
+            valid = false; break;
+        }
+        struct stat st;
+        if (fstatat(fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+            valid = false; break;
+        }
+        if (!file_anchor_object_stat(directory, &st)) {
+            if (errno == EACCES || errno == EXDEV) continue;
+            valid = false; break;
+        }
+        FileRevision revision = file_revision_from_stat(&st);
+        if (!file_anchor_guard(directory, entry->d_name, FILE_ANCHOR_METADATA, &revision)) {
+            if (errno == EACCES) continue;
+            valid = false; break;
+        }
+        if (!visitor(context, entry->d_name, &revision)) { valid = false; break; }
+    }
+    int error = errno;
+    closedir(stream);
+    FileRevision after;
+    if (valid) {
+        if (!file_anchor_stat(directory, "", &after)) { error = errno; valid = false; }
+        else if (!file_revision_equal(&before, &after)) { error = ESTALE; valid = false; }
+    }
+    errno = error;
+    return valid;
+#endif
+}
+
+static FILE* file_anchor_open_stream(FileAnchor* anchor, const char* relative, bool create) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; (void)create; errno = ENOTSUP; return NULL;
+#else
+    char* copy = NULL; const char* leaf = NULL;
+    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
+    int fd = -1;
+    if (parent >= 0 && (!create || file_anchor_guard(anchor, relative, FILE_ANCHOR_CREATE, NULL)))
+        fd = openat(parent, leaf, O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK |
+            (create ? O_RDWR | O_CREAT | O_EXCL : O_RDONLY), 0600);
+    struct stat st;
+    bool valid = fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+        file_anchor_object_stat(anchor, &st);
+    if (fd >= 0 && !valid) errno = EACCES;
+    if (valid && !create) {
+        FileRevision revision = file_revision_from_stat(&st);
+        valid = file_anchor_guard(anchor, relative, FILE_ANCHOR_READ, &revision);
+    }
+    FILE* stream = valid ? fdopen(fd, create ? "w+b" : "rb") : NULL;
+    int error = errno;
+    if (!stream && fd >= 0) close(fd);
+    if (parent >= 0) close(parent);
+    mem_free(copy);
+    errno = error;
+    return stream;
+#endif
+}
+
+FILE* file_anchor_open_read(FileAnchor* anchor, const char* relative) {
+    return file_anchor_open_stream(anchor, relative, false);
+}
+
+FILE* file_anchor_create_regular(FileAnchor* anchor, const char* relative) {
+    return file_anchor_open_stream(anchor, relative, true);
+}
+
+bool file_anchor_read_all(FileAnchor* anchor, const char* relative, uint64_t limit,
+        MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision) {
+    return file_anchor_read_all_named(anchor, relative, limit, category, out_data,
+        out_size, out_revision, NULL);
+}
+
+bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64_t limit,
+        MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision,
+        char** out_path) {
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
+    if (out_path) *out_path = NULL;
+    if (out_revision) *out_revision = file_revision_from_stat(NULL);
+    if (!out_data) { errno = EINVAL; return false; }
+    FILE* stream = file_anchor_open_read(anchor, relative);
+    if (!stream) return false;
+    FileRevision before = file_revision_stream(stream);
+    uint64_t size = before.stat.size < 0 ? UINT64_MAX : (uint64_t)before.stat.size;
+    char* data = size <= limit && size < SIZE_MAX ? (char*)mem_alloc((size_t)size + 1, category) : NULL;
+    if (!data) { fclose(stream); errno = size > limit || size >= SIZE_MAX ? EFBIG : ENOMEM; return false; }
+    bool valid = fread(data, 1, (size_t)size, stream) == size && !ferror(stream);
+    FileRevision after = file_revision_stream(stream);
+    char* actual = out_path ? file_stream_path(stream) : NULL;
+    if (out_path && !actual) valid = false;
+    if (fclose(stream) != 0) valid = false;
+    if (valid && out_path) {
+        FileRevision named;
+        valid = file_anchor_stat(anchor, relative, &named) && file_revision_equal(&after, &named);
+    }
+    if (!valid || !file_revision_equal(&before, &after) || !file_anchor_validate(anchor)) {
+        mem_free(actual); mem_free(data); errno = ESTALE; return false;
+    }
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_READ, &after)) {
+        mem_free(actual); mem_free(data); return false;
+    }
+#endif
+    data[size] = '\0';
+    *out_data = data;
+    if (out_size) *out_size = (size_t)size;
+    if (out_revision) *out_revision = after;
+    if (out_path) *out_path = actual;
+    return true;
+}
+
+int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
+        const void* content, size_t size, const FileRevision* expected) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; (void)content; (void)size; (void)expected; errno = ENOTSUP; return -1;
+#else
+    if (!content || (expected && (!expected->stat.exists || !expected->stat.is_file))) {
+        errno = EINVAL; return -1;
+    }
+    char* copy = NULL; const char* leaf = NULL;
+    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
+    if (parent < 0) { mem_free(copy); return -1; }
+    struct stat st;
+    bool exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+    FileRevision actual = file_revision_from_stat(exists ? &st : NULL);
+    int result = -1;
+    if (!exists && errno != ENOENT) goto done;
+    if (!expected && exists) { errno = EEXIST; goto done; }
+    if (expected && (!exists || !file_anchor_object_stat(anchor, &st) ||
+        !file_revision_equal(expected, &actual))) { errno = ESTALE; goto done; }
+    if (!file_anchor_guard(anchor, relative, expected ? FILE_ANCHOR_REPLACE : FILE_ANCHOR_CREATE,
+            exists ? &actual : NULL)) goto done;
+    uint8_t random[16];
+    char stage[48];
+    int fd = -1;
+    for (int retry = 0; retry < 8; retry++) {
+        if (!crypto_random_bytes(random, sizeof(random))) { errno = EIO; goto done; }
+        memcpy(stage, FILE_ATOMIC_STAGE_PREFIX, sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
+        hex_encode(random, sizeof(random), stage + sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
+        fd = openat(parent, stage, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
+    if (fd < 0) goto done;
+    FILE* stream = fdopen(fd, "wb");
+    if (!stream) { close(fd); unlinkat(parent, stage, 0); goto done; }
+    bool written = fwrite(content, 1, size, stream) == size && fflush(stream) == 0 && fsync(fd) == 0;
+    if (fclose(stream) != 0) written = false;
+    if (!written || !file_anchor_validate(anchor)) { unlinkat(parent, stage, 0); goto done; }
+    if (expected) {
+        exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+        actual = file_revision_from_stat(exists ? &st : NULL);
+        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(expected, &actual)) {
+            unlinkat(parent, stage, 0); errno = ESTALE; goto done;
+        }
+        if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_REPLACE, &actual)) {
+            int error = errno; unlinkat(parent, stage, 0); errno = error; goto done;
+        }
+        result = renameat(parent, stage, parent, leaf);
+    } else {
+        if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_CREATE, NULL)) {
+            int error = errno; unlinkat(parent, stage, 0); errno = error; goto done;
+        }
+        result = file_publish_new_at(parent, stage, parent, leaf);
+    }
+    {
+        int publish_error = errno;
+        if (result != 0) unlinkat(parent, stage, 0);
+        // publication has committed even if directory durability cannot be confirmed
+        if (result == 0 && fsync(parent) != 0) {
+            publish_error = errno;
+            log_error("FILE-ANCHOR: publication committed but directory sync failed");
+            result = 1;
+        }
+        errno = publish_error;
+    }
+done:
+    {
+        int error = errno;
+        close(parent);
+        mem_free(copy);
+        errno = error;
+    }
+    return result;
+#endif
+}
+
+static bool file_path_has_atomic_stage_folded(const char* path) {
+    for (const char* part = path; *part;) {
+        size_t prefix_size = sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1;
+        // APFS commonly resolves ASCII case aliases to the same staging object.
+        if (strnlen(part, prefix_size) == prefix_size &&
+            !str_icmp(part, prefix_size, FILE_ATOMIC_STAGE_PREFIX, prefix_size)) return true;
+        const char* slash = strchr(part, '/');
+        if (!slash) break;
+        part = slash + 1;
+    }
+    return false;
+}
+
+bool file_path_has_atomic_stage(const char* path) {
+    if (!path) return false;
+    bool ascii = true;
+    for (const unsigned char* byte = (const unsigned char*)path; *byte; byte++)
+        if (*byte >= 128) { ascii = false; break; }
+    if (ascii) return file_path_has_atomic_stage_folded(path);
+    // Reserve a superset of filesystem aliases; this is never path resolution.
+    char* folded = utf8_normalize(path, strlen(path), UTF_NORMALIZE_NFKC_CASEFOLD, NULL);
+    if (!folded) return true;
+    bool reserved = file_path_has_atomic_stage_folded(folded);
+    raw_free(folded); // RAWALLOC_OK: utf8_normalize returns utf8proc storage
+    return reserved;
+}
+
+int file_anchor_write_existing(FileAnchor* anchor, const char* relative,
+        const void* content, size_t size, const FileRevision* expected, bool append) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; (void)content; (void)size; (void)expected; (void)append;
+    errno = ENOTSUP; return -1;
+#else
+    if (!content || !expected || !expected->stat.is_file) { errno = EINVAL; return -1; }
+    char* copy = NULL; const char* leaf = NULL;
+    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
+    int fd = parent >= 0 ? openat(parent, leaf, O_WRONLY | O_NOFOLLOW | O_NONBLOCK |
+        O_CLOEXEC | (append ? O_APPEND : 0)) : -1;
+    struct stat held, named;
+    bool valid = fd >= 0 && fstat(fd, &held) == 0 && S_ISREG(held.st_mode) &&
+        file_anchor_object_stat(anchor, &held) &&
+        fstatat(parent, leaf, &named, AT_SYMLINK_NOFOLLOW) == 0;
+    FileRevision actual = file_revision_from_stat(valid ? &held : NULL);
+    FileRevision current = file_revision_from_stat(valid ? &named : NULL);
+    if (valid) valid = file_revision_equal(expected, &actual) && file_revision_equal(expected, &current);
+    if (!valid && fd >= 0) errno = ESTALE;
+    if (valid) valid = file_anchor_validate(anchor) && file_anchor_guard(anchor, relative,
+        append ? FILE_ANCHOR_APPEND : FILE_ANCHOR_REPLACE, &actual);
+    bool touched = false;
+    if (valid && !append) { valid = ftruncate(fd, 0) == 0; touched = valid; }
+    size_t offset = 0;
+    while (valid && offset < size) {
+        size_t chunk = size - offset;
+        if (chunk > (size_t)SSIZE_MAX) chunk = (size_t)SSIZE_MAX;
+        ssize_t written = write(fd, (const char*)content + offset, chunk);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) { valid = false; break; }
+        touched = true;
+        offset += (size_t)written;
+    }
+    if (valid) valid = fsync(fd) == 0;
+    int error = errno;
+    if (fd >= 0 && close(fd) != 0) { valid = false; error = errno; }
+    if (parent >= 0) close(parent);
+    mem_free(copy);
+    errno = error;
+    return valid ? 0 : touched ? 1 : -1;
+#endif
 }
 
 int64_t file_size(const char* path) {

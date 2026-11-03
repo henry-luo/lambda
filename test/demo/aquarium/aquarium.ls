@@ -30,7 +30,7 @@ pn command(owner,st,action) any^ {
     }
     if (action == "open" or action == "save") {
         let path = trim(dom.get_state(present.node(owner,"tank-file"),"value"))
-        if (path == "" or not ends_with(lower(path),".json")) raise error("Aquarium: choose a .json tank file.")
+        if ((path == "" or not ends_with(lower(path),".json"))^) raise error("Aquarium: choose a .json tank file.")
         if (action == "open") { return model.restore(st,input(path,'json')^)^ }
         io.mkdir("temp") ^ { null }
         output(model.archive(st),path,{format:'json',atomic:true})^
@@ -40,7 +40,7 @@ pn command(owner,st,action) any^ {
 }
 pn dispatch(owner,st,action) {
     var next = model.finish(st)
-    command(owner,next,action) ^ { next = {*:next,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_1 = command(owner,next,action) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     return publish(owner,next)
 }
 
@@ -52,7 +52,7 @@ on aquarium_activate(evt) {
 }
 on click(evt) {
     let button = dom.closest(evt.target,"button")
-    if (button == null or session.drag != null) { return 'pass' }
+    if ((button == null or session.drag != null)^) { return 'pass' }
     let owner = owner_of(evt)
     let added = dom.get_attribute(button,"data-add")
     let selected = dom.get_attribute(button,"data-select")
@@ -99,21 +99,21 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let owner = owner_of(evt)
     let drag = session.drag
-    if (drag.mode == "camera") {
+    if ((drag.mode == "camera")^) {
         session = {*:session,camera:camera.control(drag.camera,{type:"orbit",yaw:(drag.x-evt.clientX)*0.006,pitch:(drag.y-evt.clientY)*0.006})}
-        present.camera_sync(owner,session)
+        present.camera_sync(owner,session)^
     } else {
         let point = model.drag_point(drag.camera,evt.clientX-drag.bounds.x,evt.clientY-drag.bounds.y,drag.object.position,drag.ground)
         session = model.preview(session,{*:drag.object,position:camera.add(drag.object.position,camera.subtract(point,drag.start))})
-        present.sync(owner,session)
+        present.sync(owner,session)^
     }
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let owner = owner_of(evt)
     dom.release_pointer_capture(present.node(owner,"tank-scene"),evt.pointerId)
     let next = if (session.drag.mode == "object") model.record(session,session.drag.before,session.doc) else session
@@ -121,7 +121,7 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     session = publish(owner_of(evt),{*:session,doc:session.drag.before,drag:null})
     return 'handled'
 }
@@ -143,14 +143,14 @@ on keydown(evt) {
     return 'pass'
 }
 on aquarium_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.token or not session.playing) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.token or not session.playing)^) { return 'pass' }
     let elapsed = if (session.last_ms == null) 0.0 else model.clamp((evt.time_stamp-session.last_ms)/1000.0,0.0,0.1)
     session = {*:session,time:session.time+elapsed,last_ms:evt.time_stamp,token:dom.request_frame(evt.target,"aquarium_frame")}
     present.animate(evt.target,session)
     return 'handled'
 }
 on closerequest(evt) {
-    if (session.token > 0) dom.cancel_frame(owner_of(evt),session.token)
+    if ((session.token > 0)^) dom.cancel_frame(owner_of(evt),session.token)^
     session = {*:session,token:0,playing:false,drag:null}
     return 'pass'
 }

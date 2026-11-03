@@ -20,9 +20,9 @@ fn begin_level(st,id) {
     {*:st,level:id,play:play,sessions:{*:st.sessions,[string(id)]:play}}
 }
 fn keep(st,play) => {*:st,play:play,seed:play.seed,sessions:{*:st.sessions,[string(st.level)]:play}}
-pub fn action(st,command,value="") => if (command == "levels") {*:st,level:0}
+pub fn action(st,command,value="") any^ => if (command == "levels") {*:st,level:0}
     else if (command == "level" and contains(["1","2","3"],value)) begin_level(st,int(value))
     else if (st.level == 0) st
     else keep(st,engine(st.level).action(st.play,command,value))
-pub fn shortcut(st,key) => if (st.level == 0 or st.play.phase != "build") st
+pub fn shortcut(st,key) any^ => if (st.level == 0 or st.play.phase != "build") st
     else keep(st,engine(st.level).shortcut(st.play,key))

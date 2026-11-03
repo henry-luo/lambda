@@ -3,4 +3,4 @@
 import resources: ~~.~~.demo.mod_resources
 import app: ~~.~~.demo.book.mod_app
 
-app.document(url_resolve(resources.entry_uri()^, "../../demo/book/"), false)
+app.document(url_resolve(resources.entry_uri()^, "../../demo/book/"), false)^

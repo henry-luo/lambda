@@ -20,9 +20,10 @@ run() {
   # error": a script can parse and analyse fine and still fail at run time — an
   # unresolved import, say — which must not read as a rejection. E103 is the
   # type-pattern parser's syntax error (`int??`), the type sublanguage's E100.
+  # E119 identifies retired typed-caret syntax in a type annotation.
   # E201 is S16.10.1v2's keyword-binding bar, which the reference grammar
   # enforces as a syntax error through its reserved words.
-  if echo "$out" | grep -qE 'error\[E(100|103|201|312)\]'; then got=R; else got=A; fi
+  if echo "$out" | grep -qE 'error\[E(100|103|119|201|312)\]'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
@@ -374,7 +375,7 @@ run A "fn type return takes a count"       'fn h(f: fn (x: int) int{2}) { 1 }\nh
 run A "return type rank chain"             'fn f() int[][] { [[1]] }\nf()\n'
 run A "return type array of nullables"     'fn g() int?[] { [1] }\ng()\n'
 run A "return type nullable array"         'fn h() int[]? { null }\nh()\n'
-run A "error arm after a chained return"   'fn e() int[]? ^ error { null }\ne()\n'
+run A "broad error suffix after a chained return" 'fn e() int[]? ^ { null }\ne()\n'
 run R "no run suffix after a return array" 'fn f() int[]+ { [1] }\nf()\n'
 
 echo "--- S2.5.1v2 / S2.5.4 / S2.5.5v2 list literals (LR02-18) ---"
@@ -489,6 +490,9 @@ run A "keyword method names"               'type T { a: int, fn if() => 1, fn st
 run A "keyword module segment"             'import .lib.string\n1\n'
 run A "base-type loop index type"          'let a = [1]\nlet z = for (i: int, x in a) x\nz\n'
 
+# S12.1.2v3: callable block bodies admit local imperative syntax.
+run A "fn local while and return" 'fn f(n) { var x = 0; while (x < n) { x = x + 1 }; return x }\nf(3)\n'
+run A "pure arrow local control" 'let f = (n) => { var x = n; while (x < 3) { x = x + 1 }; return x }; f(0)\n'
 echo "--- S16.6.7v2 the arrow is the one anonymous function ---"
 run A "procedure arrow"                     'pn main() {\nlet p = pn (x) => { print(x) }\np(1)\n}\n'
 run A "procedure arrow at top level"        'let p = pn (x) => { x }\np\n'
@@ -551,4 +555,28 @@ run A 'decimal literal type' 'type T = 1.5m\n'
 run A 'datetime literal type' "type T = t'2025-01-01'\n"
 run A 'binding error union suffix' 'let v: int^ = 1\n'
 run A 'parameter error union suffix' 'fn f(x: int^) int | error => x\n'
+
+# S7.6.2v5/S7.6.8/S7.6.9: single-body handlers and combined fallback.
+run A "combined fallback" 'null or^ { 1 }\n'
+run A "fallback line continuation" 'null\nor^ { 1 }\n'
+run R "fallback brace next line" 'null or^\n{ 1 }\n'
+run A "filtered handler chain" '1 ^error { 2 } ^error { 3 }\n'
+run R "filter brace next line" '1 ^error\n{ 2 }\n'
+run R "filter selector next line" '1 ^\nerror { 2 }\n'
+run R "retired success arm" '1 ^ { 2 } ~ { 3 }\n'
+run R "retired multiline success arm" '1 ^ { 2 }\n~ { 3 }\n'
+
+cp "$ROOT/test/lambda/mod_handler_error_types.ls" "$WORK/mod_handler_error_types.ls"
+run A "qualified error filter" 'import types: .mod_handler_error_types\n1 ^types.Failure { 2 }\n'
+run R "qualified filter crosses line" '1 ^types.\nFailure { 2 }\n'
+run A "propagation divided by block" 'fn f() int^ => 4\nf()^ / { 2 }\n'
+# S7.4.2v3: only broad T^ survives; particular outcomes are unions.
+run R "retired typed return caret" 'fn f() int^error => 1\n'
+run R "retired typed procedure caret" 'pn f() int^error { 1 }\n'
+run R "retired typed binding caret" 'let value: int^error = 1\n'
+run R "retired typed parameter caret" 'fn f(value: int^error) => value\n'
+run R "retired typed callable caret" 'type F = fn () int^error\n'
+run R "retired grouped error caret" 'fn f() int^(error | null) => 1\n'
+run A "broad callable outcome" 'type F = fn () int^\n'
+run A "union callable outcome" 'type F = fn () int | error\n'
 echo "pass=$pass fail=$fail"

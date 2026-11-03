@@ -5,32 +5,32 @@ import .mod_step
 import .mod_source_pos
 import .mod_transaction
 
-pub fn leaves(n,path=[]) => [for (entry in descendants(n,path) where is_text(entry.node)) {path:entry.path,leaf:entry.node}]
+pub fn leaves(n,path=[]) => [for (entry in descendants(n,path) where ((is_text(entry.node)) ^ { false })) {path:entry.path,leaf:entry.node}]
 
 pub fn selection_path(sel) => if (sel.kind == 'text') sel.head.path else selection_paths(sel)[0] or []
 
-pub fn current_marks(editor) array => if (editor.stored_marks != null) editor.stored_marks
+pub fn current_marks(editor) array^ => if (editor.stored_marks != null) editor.stored_marks
     else node_at(editor.doc,selection_path(editor.selection)).marks or []
-pub fn css_get(css,key) => [for (decl in split(css or "",";"),let pair=split(decl,":")
+pub fn css_get(css,key) => [for (decl in ((split(css or "",";")) ^ { [] }),let pair=split(decl,":")
     where lower(trim(pair[0])) == key) trim(join(drop(pair,1),":"))][last]
-pub fn css_set(css,key,value) => join([*[for (decl in split(css or "",";") where trim(decl) != "" and
-    lower(trim(split(decl,":")[0])) != key) trim(decl)],
+pub fn css_set(css,key,value) => join([*[for (decl in ((split(css or "",";")) ^ { [] }) where ((trim(decl) != "" and
+    lower(trim(split(decl,":")[0])) != key) ^ { false })) trim(decl)],
     *if (value == null or value == "") [] else [key ++ ": " ++ value]],"; ")
-fn css_properties(css,properties,i) => if (i>=len(properties)) css else
+fn css_properties(css,properties,i) any^ => if (i>=len(properties)) css else
     css_properties(css_set(css,properties[i].key,properties[i].value),properties,i+1)
-pub fn css_set_many(css,values) => css_properties(css,[for (key,value in values) {key:string(key),value:value}],0)
-pub fn span_css(marks) string {
+pub fn css_set_many(css,values) any^ => css_properties(css,[for (key,value in values) {key:string(key),value:value}],0)
+pub fn span_css(marks) string^ {
     let attrs = mark_value(marks,'span')
     if (attrs is array) attrs_get(attrs,'style') or "" else ""
 }
-pub fn char_value(editor,key,fallback) => css_get(span_css(current_marks(editor)),key) or fallback
-pub fn styled_marks(marks,key,value) {
+pub fn char_value(editor,key,fallback) any^ => css_get(span_css(current_marks(editor)),key) or fallback
+pub fn styled_marks(marks,key,value) any^ {
     let attrs = mark_value(marks,'span')
     let old = if (attrs is array) attrs else []
     with_mark(marks,'span',attrs_set(old,'style',css_set(attrs_get(old,'style'),key,value)))
 }
 
-pub fn leaf_segment(entry,sel) {
+pub fn leaf_segment(entry,sel) any^ {
     if (sel.kind == 'all' or any([for (path in selection_paths(sel)) path_is_prefix(path,entry.path)])) {from:0,to:len(entry.leaf.text)}
     else if (sel.kind != 'text') null
     else {
@@ -45,7 +45,7 @@ fn fragment(words,marks) => if (words == "") [] else [text_marked(words,marks)]
 
 // A split preserves the selected characters, including a backward selection.
 // Generic replace-step mapping collapses positions inside a replaced leaf.
-fn split_pos(p,entry,segment,step) {
+fn split_pos(p,entry,segment,step) any^ {
     if (not path_equal(p.path,entry.path)) step_map(step,p)
     else {
         let before = if (segment.from > 0) 1 else 0
@@ -54,7 +54,7 @@ fn split_pos(p,entry,segment,step) {
         pos([*parent_path(entry.path),last_index(entry.path)+index],offset)
     }
 }
-fn format_leaf(tx,entry,segment,transform) {
+fn format_leaf(tx,entry,segment,transform) any^ {
     let leaf = entry.leaf
     let marks = transform(leaf.marks)
     if (marks == leaf.marks) tx else {
@@ -68,14 +68,14 @@ fn format_leaf(tx,entry,segment,transform) {
         else tx_set_selection(next,text_selection(split_pos(sel.anchor,entry,segment,step),split_pos(sel.head,entry,segment,step)))
     }
 }
-fn format_leaves(tx,entries,sel,transform,i) {
+fn format_leaves(tx,entries,sel,transform,i) any^ {
     if (i < 0) tx else {
         let segment = leaf_segment(entries[i],sel)
         let next = if (segment == null or segment.to <= segment.from) tx else format_leaf(tx,entries[i],segment,transform)
         format_leaves(next,entries,sel,transform,i-1)
     }
 }
-pub fn transaction(editor,transform) {
+pub fn transaction(editor,transform) any^ {
     let sel = editor.selection
     let tx = tx_begin(editor.doc,sel)
     if (sel.kind == 'text' and pos_equal(sel.anchor,sel.head))

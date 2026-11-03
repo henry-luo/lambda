@@ -1,6 +1,6 @@
 // Held controls and edges are values owned by the session (S9.1.7).
 pub fn empty() => {keys: [], held: [], edges: [], mouse_x: 0.0, mouse_y: 0.0}
-pub fn command(key, camera_mode = "player") {
+pub fn command(key, camera_mode = "player") any^ {
     let k = lower(key)
     if (camera_mode != "player" and k == "q") "camera_left"
     else if (camera_mode != "player" and k == "e") "camera_right"
@@ -21,7 +21,7 @@ pub fn command(key, camera_mode = "player") {
     else if (contains(["1", "2", "3", "4", "5", "6"], k)) "weapon_" ++ k
     else ""
 }
-pub fn set_key(controls, key, down, camera_mode = "player") {
+pub fn set_key(controls, key, down, camera_mode = "player") any^ {
     let action = command(key, camera_mode)
     let physical = lower(key)
     let was_down = contains(controls.keys, physical)
@@ -33,6 +33,6 @@ pub fn set_key(controls, key, down, camera_mode = "player") {
         edges: if (down and not contains(controls.held, action)) [*controls.edges, action] else controls.edges}
 }
 pub fn consume(controls) => {*: controls, edges: [], mouse_x: 0.0, mouse_y: 0.0}
-pub fn axis(controls, positive, negative) =>
+pub fn axis(controls, positive, negative) any^ =>
     (if (contains(controls.held, positive)) 1 else 0) - (if (contains(controls.held, negative)) 1 else 0)
 pub fn mouse(controls, dx, dy) => {*: controls, mouse_x: controls.mouse_x + dx, mouse_y: controls.mouse_y + dy}

@@ -6,7 +6,7 @@
 let NUM_DIGITS = 30
 
 // integer division for decimals: floor(a/b) = (a - a % b) / b
-pn idiv(a: decimal, b: decimal) decimal {
+fn idiv(a: decimal, b: decimal) decimal {
     return (a - a % b) / b
 }
 
@@ -57,9 +57,9 @@ pn main() {
     }
 
     // handle last partial line (fewer than 10 digits)
-    if (len(digits) > 0) {
+    if ((len(digits) > 0)^) {
         // pad with spaces to 10 characters
-        while (len(digits) < 10) {
+        while ((len(digits) < 10)^) {
             digits = digits ++ " "
         }
         print(digits ++ "\t:" ++ i ++ "\n")

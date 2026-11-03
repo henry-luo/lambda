@@ -50,6 +50,10 @@ uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechO
     const char** error);
 bool radiant_speech_command(DomDocument* doc, uint64_t token, const char* command);
 bool radiant_speech_info(DomDocument* doc, uint64_t token, SpeechInfo* info);
+struct AudioProviderInfo;
+bool radiant_speech_route(DomDocument* doc, uint64_t token, uint64_t expected, uint64_t route, const char** error);
+bool radiant_speech_routing(DomDocument* doc, uint64_t token, AudioProviderInfo* info);
+bool radiant_speech_graph_audible(DomDocument* doc, uint64_t graph);
 const char* radiant_speech_state_name(SpeechState state);
 // voices of the active engine (the fake engine under LAMBDA_SPEECH_ENGINE=fake).
 size_t radiant_speech_voices(RdtSpeechVoice* out, size_t capacity);

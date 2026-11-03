@@ -789,8 +789,9 @@ InputScriptLease* input_script_cache_acquire_file(InputCacheScope* scope,
         const InputScriptRequest* request, const char* path) {
     if (!scope || !request || !path) return NULL;
     size_t source_length = 0;
-    char* source = read_binary_file(path, &source_length);
-    if (!source) {
+    char* source = NULL;
+    if (!security_io_read_bytes(request->io, path, true, UINT64_MAX,
+            MEM_CAT_CACHE_OTHER, &source, &source_length, NULL)) {
         pthread_mutex_lock(&scope->cache->mutex);
         scope->cache->stats.source_lookups++;
         scope->cache->stats.source_misses++;
@@ -932,8 +933,9 @@ char* input_script_cache_copy_file_source(InputScriptCache* cache,
     if (!cache || !request || !path || !path[0]) return NULL;
 
     size_t source_length = 0;
-    char* source = read_binary_file(path, &source_length);
-    if (!source) {
+    char* source = NULL;
+    if (!security_io_read_bytes(request->io, path, true, UINT64_MAX,
+            MEM_CAT_CACHE_OTHER, &source, &source_length, NULL)) {
         pthread_mutex_lock(&cache->mutex);
         cache->stats.source_lookups++;
         cache->stats.source_misses++;
@@ -1044,13 +1046,17 @@ bool input_script_cache_record_dependency_by_unit(InputScriptCache* cache,
 }
 
 bool input_script_cache_refresh_file_unit(InputScriptCache* cache,
-        uint32_t compilation_unit_id, const char* path, bool* out_changed) {
+        uint32_t compilation_unit_id, const char* path, bool* out_changed,
+        const SecurityIOClient* io, SecurityIOResult* out_result) {
     if (out_changed) *out_changed = false;
     if (!cache || !compilation_unit_id || !path || !path[0]) return false;
 
     size_t source_length = 0;
-    char* source = read_binary_file(path, &source_length);
-    if (!source) {
+    char* source = NULL;
+    if (!security_io_read_bytes(io, path, true, UINT64_MAX,
+            MEM_CAT_CACHE_OTHER, &source, &source_length, out_result)) {
+        // A principal's denial does not make immutable bytes stale for others.
+        if (io) return false;
         pthread_mutex_lock(&cache->mutex);
         ScriptInput* input = cache_find_input_by_unit_locked(cache,
             compilation_unit_id);
@@ -1058,7 +1064,7 @@ bool input_script_cache_refresh_file_unit(InputScriptCache* cache,
         pthread_mutex_unlock(&cache->mutex);
         if (out_changed) *out_changed = invalidated > 0;
         log_error("script-cache: failed to refresh source %s", path);
-        return invalidated > 0;
+        return !io && invalidated > 0;
     }
 
     pthread_mutex_lock(&cache->mutex);
@@ -1189,7 +1195,7 @@ bool input_script_cache_refresh_file_dependencies(InputScriptCache* cache,
             (InputScriptFileRefresh*)refreshes->data[i];
         bool changed = false;
         bool refreshed = input_script_cache_refresh_file_unit(cache,
-            refresh->compilation_unit_id, refresh->path, &changed);
+            refresh->compilation_unit_id, refresh->path, &changed, NULL, NULL);
         if (changed) {
             cache_destroy_file_refreshes(refreshes);
             if (out_changed) *out_changed = true;

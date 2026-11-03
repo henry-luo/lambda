@@ -2,7 +2,7 @@
 import util: ~~.util
 import math: lambda.doc.math.math
 
-fn skip_space(source, at) =>
+fn skip_space(source, at) any^ =>
     if (at >= len(source)) at
     else if (slice(source, at, at + 1) == " " or
              slice(source, at, at + 1) == "\n" or
@@ -53,7 +53,7 @@ fn formula(source, predicate_mode) any^ {
 }
 
 fn render_rule(premises, conclusion, rule_name, narrow, predicate_mode) any^ {
-    let entries = [for (raw in util.split_top_level(premises, "&")
+    let entries = [for (raw in ((util.split_top_level(premises, "&")) ^ { [] })
         where trim(raw) != "") formula(raw, predicate_mode)^]
     let result = formula(conclusion, predicate_mode)^
     let label = if (rule_name == null) null else math_fragment(rule_name)^;
@@ -204,7 +204,7 @@ fn parse_diagram(raw) map^ {
     } else {kind: "text", label: label_text(source)^, children: []}
 }
 
-fn max_height(nodes, at, current) {
+fn max_height(nodes, at, current) any^ {
     if (at >= len(nodes)) current
     else {
         let height = dimensions(nodes[at]).height
@@ -212,7 +212,7 @@ fn max_height(nodes, at, current) {
     }
 }
 
-fn sum_width(nodes, at, total) {
+fn sum_width(nodes, at, total) any^ {
     if (at >= len(nodes)) total
     else sum_width(nodes, at + 1, total + dimensions(nodes[at]).width)
 }
@@ -235,7 +235,7 @@ fn svg_text(x, y, content) {
         'font-family': "serif", 'font-size': "16", fill: "black", content>
 }
 
-fn draw_children(nodes, at, x, y, acc) {
+fn draw_children(nodes, at, x, y, acc) any^ {
     if (at >= len(nodes)) acc
     else {
         let child = nodes[at]
@@ -246,7 +246,7 @@ fn draw_children(nodes, at, x, y, acc) {
     }
 }
 
-fn draw_diagram(node, x, y) {
+fn draw_diagram(node, x, y) any^ {
     let size = dimensions(node)
     let mid = x + size.width / 2.0
     if (node.kind == "text") svg_text(mid, y + 18.0, node.label)
@@ -275,7 +275,7 @@ fn draw_diagram(node, x, y) {
     }
 }
 
-pub fn contains_diagram(node) {
+pub fn contains_diagram(node) any^ {
     util.find_descendant(node, "compiler") != null or
     util.find_descendant(node, "program") != null or
     util.find_descendant(node, "interpreter") != null
@@ -283,8 +283,8 @@ pub fn contains_diagram(node) {
 
 pub fn render_tdiagram_picture(node) any^ {
     let paragraph = if (len(node) > 0 and node[0] is element) node[0] else node
-    let puts = [for (child in paragraph where child is element and
-        string(name(child)) == "put") child]
+    let puts = [for (child in paragraph where ((child is element and
+        string(name(child)) == "put") ^ { false })) child]
     if (len(puts) != 1)
         raise error("semantic T-diagram profile expects one picture put")
     else {

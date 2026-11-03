@@ -21,7 +21,7 @@ pub fn expand(effect, targets, begin, path) map^ {
         else if (effect.kind in ['highlight','line-color']) ["color"] else if (effect.kind == 'transparency') ["opacity"] else if (effect.kind == 'keyframes') ["channel", "stops", "from"] else []
     let checked_1 = c.attributes(effect, ["id", "target", "kind", "duration", "delay", "easing", "repeat", *extras], path)^;
     let checked_2 = c.numbers(effect, ["duration", "delay", "distance", "angle", "scale", "repeat", "opacity"], false, path)^;
-    let matching = [for (obj in targets where obj.id == c.as_text(effect.target)) obj]
+    let matching = [for (obj in targets where ((obj.id == c.as_text(effect.target)) ^ { false })) obj]
     let guard_1 = if (len(matching) != 1) raise c.fail(path, "unknown target " ++ c.as_text(effect.target))
     let target = matching[0]
     let checked_id = if (effect.id != null and not c.text_id(effect.id)) raise c.fail(path, "effect ID must be nonempty text")

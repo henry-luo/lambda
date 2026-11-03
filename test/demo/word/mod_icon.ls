@@ -14,8 +14,8 @@ pub let emojis = [
     {label:"Gestures & symbols",chars:["👍","👋","👏","🙏","❤️","⭐","✅","💡"]},
     {label:"Nature & objects",chars:["🌱","🌸","🌞","🌈","🐱","🚀","🎨","📚"]}]
 pub let defaults = {name:"star",color:"#2563eb",width:64,height:64,rotation:0}
-fn valid(p) => contains([for (entry in catalog) entry.id],p.name) and colors.hex_color(p.color) and objects.dimensions_valid(p)
-pub fn settings(n) {
+fn valid(p) any^ => contains([for (entry in catalog) entry.id],p.name) and colors.hex_color(p.color) and objects.dimensions_valid(p)
+pub fn settings(n) any^ {
     let p = objects.settings(n,"data-word-icon",defaults);
     if (p!=null and valid(p)) p else null
 }

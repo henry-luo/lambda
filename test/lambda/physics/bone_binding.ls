@@ -14,12 +14,12 @@ let checks={
     copied_pose:trace.frames[1].bones[0].id=="bone" and trace.frames[1].bones[0].body=="limb" and abs(trace.frames[1].bones[0].position[1]-1.4)<1e-10,
     no_false_pose:not disabled.frames[1].bones[0].enabled and disabled.frames[1].bones[0].position==null,
     disabled:physics.validate(scene([<bone *:bound,'physics-enabled':false>]))^,
-    kind:physics.bind_bone(<group id:"bad">,"limb") ^ { true } ~ { false },
-    missing:physics.validate(scene([<bone id:"bone",'physics-body':"missing">])) ^ { true } ~ { false },
-    non_body:physics.validate(scene([<bone id:"bone",'physics-body':"rig">])) ^ { true } ~ { false },
-    one_owner:physics.validate(scene([bound,<bone id:"second",'physics-body':"limb">])) ^ { true } ~ { false },
-    offset:physics.validate(scene([<bone *:bound,'physics-quaternion':[0.0,0.0,0.0,0.0]>])) ^ { true } ~ { false },
-    rigid:physics.validate(scene([<bone *:bound,scale:[2.0,1.0,1.0]>])) ^ { true } ~ { false },
-    identified:physics.validate(scene([<bone 'physics-body':"limb">])) ^ { true } ~ { false }
+    kind:match (physics.bind_bone(<group id:"bad">,"limb") ^ { ^ }) { case error: true default: false },
+    missing:match (physics.validate(scene([<bone id:"bone",'physics-body':"missing">])) ^ { ^ }) { case error: true default: false },
+    non_body:match (physics.validate(scene([<bone id:"bone",'physics-body':"rig">])) ^ { ^ }) { case error: true default: false },
+    one_owner:match (physics.validate(scene([bound,<bone id:"second",'physics-body':"limb">])) ^ { ^ }) { case error: true default: false },
+    offset:match (physics.validate(scene([<bone *:bound,'physics-quaternion':[0.0,0.0,0.0,0.0]>])) ^ { ^ }) { case error: true default: false },
+    rigid:match (physics.validate(scene([<bone *:bound,scale:[2.0,1.0,1.0]>])) ^ { ^ }) { case error: true default: false },
+    identified:match (physics.validate(scene([<bone 'physics-body':"limb">])) ^ { ^ }) { case error: true default: false }
 };
 [for (key,passed in checks where passed!=true) string(key)]

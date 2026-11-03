@@ -14,7 +14,7 @@ pn main() {
     sleep(20)^
     cancel(task)
     var cancelled = null
-    wait(task) ^ { cancelled = ^ } ~ { cancelled = ~ };
+    { let __error_outcome_1 = wait(task) ^ { ^ }; if (__error_outcome_1 is error) { cancelled = __error_outcome_1 } else match __error_outcome_1 { case any { cancelled = ~ } } };
     [exact.stdout == b'\x6100620A0A',exact.stderr == binary("err\n"),exact.exit_code == 7,
      len(large.stdout) == 100000 and len(large.stderr) == 100000,
      limited.truncated and len(limited.stdout) == 32,timeout.timed_out,

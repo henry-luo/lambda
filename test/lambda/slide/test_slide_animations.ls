@@ -22,7 +22,7 @@ let timed_mid = sample.scene(timing.slides[0],0,300.0)
 let trigger_plan = compile([
     <cue trigger:"button",<effect target:"box",kind:'fade-in',duration:200.0>>,
     <cue <effect target:"button",kind:'spin',duration:1000.0>>])^
-fn event(ps,command,at) => slide.reduce(trigger_plan,ps,{command:command,time_ms:at})^
+fn event(ps,command,at) any^ => slide.reduce(trigger_plan,ps,{command:command,time_ms:at})^
 let initial = slide.initial_state(trigger_plan)
 let fired = slide.reduce(trigger_plan,initial,{command:"trigger",target:"button",time_ms:0.0})^
 let halfway = event(fired,"frame",100.0)
@@ -83,7 +83,7 @@ let after_active = slide.reduce(after_plan,slide.initial_state(after_plan),{comm
 let after_fired = slide.reduce(after_plan,after_active,{command:"trigger",target:"button",time_ms:100.0})^
 let after_done = slide.reduce(after_plan,after_fired,{command:"frame",time_ms:200.0})^
 let after_advanced = slide.reduce(after_plan,after_done,{command:"frame",time_ms:1200.0})^
-fn invalid(items) => compile(items) ^ {true} ~ {false};
+fn invalid(items) => match (compile(items) ^ { ^ }) { case error: true default: false };
 {
     catalog:choices,
     timing:[len(timing.slides[0].cues)==1,timing.slides[0].cues[0].duration_ms==350.0,
@@ -114,7 +114,7 @@ fn invalid(items) => compile(items) ^ {true} ~ {false};
         invalid([<cue <effect id:"duplicate",target:"box",kind:'spin'><effect id:"duplicate",target:"button",kind:'spin'>>]),
         invalid([<cue <effect target:"box",kind:'spin',duration:100.0>>,
             <cue start:'with-previous',<effect target:"box",kind:'spin',duration:100.0>>]),
-        a.property(added,"duration","-1") ^ {true} ~ {false},
-        a.property(added,"repeat","1.5") ^ {true} ~ {false},
-        a.property(colored,"color","not-a-color") ^ {true} ~ {false}]
+        match (a.property(added,"duration","-1") ^ { ^ }) { case error: true default: false },
+        match (a.property(added,"repeat","1.5") ^ { ^ }) { case error: true default: false },
+        match (a.property(colored,"color","not-a-color") ^ { ^ }) { case error: true default: false }]
 }

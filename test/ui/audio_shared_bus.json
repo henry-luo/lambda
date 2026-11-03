@@ -1,0 +1,29 @@
+{
+  "name": "Decoded audio shares the offline document clock across copied host calls",
+  "html": "test/ui/audio_shared_bus.html",
+  "viewport": {"width": 320, "height": 120},
+  "env": [{"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "script", "js": "audioRequest('open')"},
+    {"type": "assert_script", "js": "audioToken>0n&&audioPacket.state==='ready'&&audioPacket.clock===0"},
+    {"type": "script", "js": "audioRequest('play',0.25)"},
+    {"type": "assert_script", "js": "audioPacket.result===true&&audioPacket.state==='playing'"},
+    {"type": "script", "js": "audioRequest('pause')"},
+    {"type": "assert_script", "js": "audioPacket.result===true&&audioPacket.state==='paused'"},
+    {"type": "script", "js": "audioRequest('play',0.5)"},
+    {"type": "advance_time", "ms": 50, "steps": 1},
+    {"type": "script", "js": "audioRequest('inspect')"},
+    {"type": "assert_script", "js": "audioPacket.state==='playing'&&audioPacket.clock>0&&audioPacket.clock<0.1"},
+    {"type": "advance_time", "ms": 100, "steps": 2},
+    {"type": "script", "js": "audioRequest('inspect')"},
+    {"type": "assert_script", "js": "audioPacket.state==='ended'&&audioPacket.clock>=0.1"},
+    {"type": "script", "js": "audioRequest('play',1)"},
+    {"type": "assert_script", "js": "audioPacket.result===true&&audioPacket.state==='playing'"},
+    {"type": "script", "js": "audioRequest('close')"},
+    {"type": "assert_script", "js": "audioPacket.result===true&&audioPacket.state===null"},
+    {"type": "script", "js": "audioRequest('play',1)"},
+    {"type": "assert_script", "js": "audioPacket.result===false&&audioPacket.state===null"}
+  ]
+}

@@ -1,6 +1,6 @@
 import c: .common
 
-fn files(node) => [for (child in content(node)^)
+fn files(node) any^ => [for (child in ((((content(node)^) ^ { [] })) ^ { [] }))
     if (child.kind == 'dir') *files(child) else (child.entry_path,child)]
 pub fn source_text(book,path) string^ {
     let member = book.resources[path];
@@ -41,7 +41,7 @@ fn nav_tree(book,entry) map^ {
     let root = xml(book,entry.href)^
     let navs = c.descendants(root,"nav",c.XHTML);
     map([for (kind in ["toc","landmarks","page-list"],let node = c.first([for (nav in navs
-        where kind in split(c.value(c.attr(nav,"type",c.EPUB),"")," ")) nav]))
+        where ((kind in split(c.value(c.attr(nav,"type",c.EPUB),"")," ")) ^ { false })) nav]))
         (if (kind == "page-list") "page_list" else kind,nav_items(c.child(node,"ol",c.XHTML),entry.href)^)])
 }
 fn ncx_items(node,owner) array^ => [for (point in c.children(node,"navPoint",c.NCX))
@@ -58,7 +58,7 @@ fn navigation(book,manifest,spine) map^ {
 fn metadata(node) {
     let values = c.children(node,null,c.DC)
     let entries = c.children(node,"meta",c.OPF)
-    let layout = c.first([for (entry in entries where c.attr(entry,"property") == "rendition:layout") c.text(entry)]);
+    let layout = c.first([for (entry in entries where ((c.attr(entry,"property") == "rendition:layout") ^ { false })) c.text(entry)]);
     {titles:[for (value in values where value.tag == "title") c.text(value)],
         creators:[for (value in values where value.tag == "creator") c.text(value)],
         identifiers:[for (value in values where value.tag == "identifier") c.text(value)],
@@ -75,7 +75,7 @@ pub fn parse_archive(archive,options) map^ {
     let validation_2 = if (container.tag != "container" or container.uri != c.OCF)
         raise c.fail("invalid-package","Invalid EPUB container","META-INF/container.xml") else true
     let roots = c.children(c.child(container,"rootfiles",c.OCF),"rootfile",c.OCF)
-    let candidates = [for (root in roots where c.attr(root,"media-type") == "application/oebps-package+xml") root]
+    let candidates = [for (root in roots where ((c.attr(root,"media-type") == "application/oebps-package+xml") ^ { false })) root]
     let selected = c.get(options,"rendition",0);
     let validation_3 = if (selected < 0 or selected >= len(candidates)) raise c.fail("invalid-package","Missing selected EPUB package") else true
     let part = c.target("",c.attr(candidates[selected],"full-path"))^.href
@@ -106,8 +106,8 @@ pub fn parse_archive(archive,options) map^ {
     let protected_text = [for (entry in restrictions where
         any([for (item in order) item.href == entry.href])) entry];
     let validation_7 = if (len(protected_text) > 0) raise c.fail("protected","Required book content is encrypted",protected_text[0].href) else true
-    let cover_id = c.first([for (entry in c.children(c.child(root,"metadata",c.OPF),"meta",c.OPF)
-        where c.attr(entry,"name") == "cover") c.attr(entry,"content")])
+    let cover_id = c.first([for (entry in ((c.children(c.child(root,"metadata",c.OPF),"meta",c.OPF)) ^ { [] })
+        where ((c.attr(entry,"name") == "cover") ^ { false })) c.attr(entry,"content")])
     let cover = c.first([for (entry in manifest where "cover-image" in entry.properties or entry.id == cover_id) entry]);
     {*:book,version:1,format:"epub",source_identity:archive.sha256,package:part,rendition:selected,metadata:{*:meta,cover:cover},
         reading_order:order,manifest:manifest,restrictions:restrictions,

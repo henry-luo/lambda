@@ -33,9 +33,9 @@ let n = src.width * src.height;
     [len(plan.layers) == r.layers, plan == P.plan(field, 2026, r.id, 2),
      plan.layers[0].pixels != P.plan(field, 2027, r.id, 2).layers[0].pixels,
      len(plan.layers[0].pixels) == P.DENSITY[1], len(plan.layers[0].colors) == 3 * P.DENSITY[1],
-     all([for (p in plan.layers[0].pixels) p >= 0 and p < n]),
-     all([for (l in plan.layers) all([for (k in l.bins) k >= 0 and k < (if (r.oriented) P.ANGLES else 1)])]),
-     all([for (l in plan.layers) finite(l.colors) and min(l.colors) >= 0.0 and max(l.colors) <= 1.15])])];
+     all([for (p in ((plan.layers[0].pixels) ^ { [] })) p >= 0 and p < n])^,
+     all([for (l in ((plan.layers) ^ { [] })) all([for (k in l.bins) k >= 0 and k < (if (r.oriented) P.ANGLES else 1)])])^,
+     all([for (l in ((plan.layers) ^ { [] })) finite(l.colors) and min(l.colors) >= 0.0 and max(l.colors) <= 1.15])^])];
 
 let detail = P.plan(field, 2026, "painterly", 2).layers[1]
 let mean = sum(field.sharpness) / float(n);

@@ -11,7 +11,7 @@ import plotdata: .plotdata
 import kinds: .plotkinds
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 fn plotted_points(plot) => children_named(plot, "point")
 
@@ -97,9 +97,9 @@ pub fn plot_points(plot, axis_node = null, program_data = null, base_uri = null)
                 }
             } else {
                 let trees = [for (child in plot
-                    where child is element and string(name(child)) != "option" and
+                    where ((child is element and string(name(child)) != "option" and
                         string(name(child)) != "point" and
-                        string(name(child)) != "node") child]
+                        string(name(child)) != "node") ^ { false })) child]
                 if (len(trees) == 1)
                     sample_curve(trees[0], null, domain[0], domain[1],
                         count, 0, [], pgfmath.for_expression(program_data, trees[0]),
@@ -151,7 +151,7 @@ fn series_color(plot, index) string^ {
     opts.color(plot, fallback)^
 }
 
-fn point_marker(point, color, mark) {
+fn point_marker(point, color, mark) any^ {
     if (mark == "x") <path d: svg.M(point[0] - 3.0, point[1] - 3.0) ++ " " ++
             svg.L(point[0] + 3.0, point[1] + 3.0) ++ " " ++
             svg.M(point[0] - 3.0, point[1] + 3.0) ++ " " ++
@@ -181,7 +181,7 @@ fn clip_bound(p, q, interval) {
     }
 }
 
-fn clipped_segment(a, b, width, height) {
+fn clipped_segment(a, b, width, height) any^ {
     let dx = b[0] - a[0]
     let dy = b[1] - a[1]
     let left = clip_bound(0.0 - dx, a[0], [0.0, 1.0])
@@ -237,15 +237,15 @@ fn smooth_points(points, index, acc) any^ =>
     if (index >= len(points) - 1) acc
     else acc ++ flattened_points(smooth_segments(points, index)^)
 
-fn polyline(points, closed) =>
+fn polyline(points, closed) any^ =>
     svg.line_path(points) ++ (if (closed) " Z" else "")
 
-fn error_bars_svg(series, anchors, color, xs, ys, width, height) =>
+fn error_bars_svg(series, anchors, color, xs, ys, width, height) any^ =>
     if (series.errors == null) []
     else [for (index, point in series.points,
-        segment in (if (anchors[index] == null) []
+        segment in (((if (anchors[index] == null) []
             else kinds.error_segments(series.errors, point, anchors[index], xs, ys,
-                width, height)))
+                width, height))) ^ { [] }))
         <path class: "tikz-error-bar", d: polyline(segment, false), fill: "none",
             stroke: color, 'stroke-width': 1.0>]
 
@@ -307,12 +307,12 @@ fn bar_series_svg(series, bars, ordinal, total, color, xs, ys, width, height) an
 }
 
 fn named_path_points(name_path, series_list, definitions) any^ {
-    let plots = [for (series in series_list where series.kind != "fill_between" and
-        opts.value(series.source, "name path", null) == name_path) series.points]
+    let plots = [for (series in series_list where ((series.kind != "fill_between" and
+        opts.value(series.source, "name path", null) == name_path) ^ { false })) series.points]
     let paths = [for (path in definitions where
-        opts.value(path, "name path", null) == name_path) path]
+        ((opts.value(path, "name path", null) == name_path) ^ { false })) path]
     if (len(plots) > 0) plots[len(plots) - 1]
-    else if (len(paths) > 0) [for (point in children_named(paths[len(paths) - 1], "point"))
+    else if (len(paths) > 0) [for (point in ((children_named(paths[len(paths) - 1], "point")) ^ { [] }))
         axis_data_point(point)^]
     else raise error("PGFPlots fill between has no path named " ++ name_path)
 }
@@ -346,7 +346,7 @@ fn fill_between_svg(series, series_list, paths, color, xs, ys, width, height) an
 // Cycle colors and legend slots skip fill between plots, which consume no cycle entry.
 fn series_styles(series_list) any^ {
     let ordinals = [for (index, series in series_list)
-        len([for (earlier in slice(series_list, 0, index)
+        len([for (earlier in ((slice(series_list, 0, index)) ^ { [] })
             where earlier.kind != "fill_between") earlier])];
     [for (index, series in series_list)
         {*:series, ordinal: ordinals[index],
@@ -356,7 +356,7 @@ fn series_styles(series_list) any^ {
 fn render_series(styled, axis_node, bars, paths, xs, ys, width, height) any^ {
     let bar_count = len([for (series in styled where series.kind == "bar") series])
     let bar_ordinals = [for (index, series in styled)
-        len([for (earlier in slice(styled, 0, index) where earlier.kind == "bar") earlier])];
+        len([for (earlier in ((slice(styled, 0, index)) ^ { [] }) where earlier.kind == "bar") earlier])];
     [for (index, series in styled, part in
         if (series.kind == "fill_between")
             fill_between_svg(series, styled, paths, series.color, xs, ys, width, height)^
@@ -376,12 +376,12 @@ fn label_at(raw, x, y, extra = "") any^ {
     else labels.positioned(labels.prepare(raw)^, x, y, extra)
 }
 
-fn legend_nodes(axis_node) {
+fn legend_nodes(axis_node) any^ {
     let explicit = [for (child in axis_node
-        where child is element and string(name(child)) == "legend_entry") child]
+        where ((child is element and string(name(child)) == "legend_entry") ^ { false })) child]
     let raw = opts.value(axis_node, "legend entries", null)
     if (raw == null) explicit
-    else [*explicit, *[for (entry in util.split_top_level(raw, ",")
+    else [*explicit, *[for (entry in ((util.split_top_level(raw, ",")) ^ { [] })
         where trim(entry) != "") {source: trim(entry), from_list: true}]]
 }
 
@@ -459,17 +459,17 @@ fn minor_tick_count(axis_node) int^ {
     }
 }
 
-fn minor_ticks(axis_scale, count, horizontal, limit) {
+fn minor_ticks(axis_scale, count, horizontal, limit) any^ {
     if (count == 0) null
     else {
         let major = scale.scale_ticks(axis_scale, 5);
         <g class: "minor-ticks",
-            for (at in 0 to (len(major) - 2), between in 1 to count,
+            for (at in ((0 to (len(major) - 2)) ^ { [] }), between in 1 to count,
                  let value = major[at] +
                      (major[at + 1] - major[at]) * float(between) /
                      float(count + 1),
                  let position = float(scale.scale_apply(axis_scale, value))
-                 where position >= 0.0 and position <= limit)
+                 where ((position >= 0.0 and position <= limit) ^ { false }))
                 if (horizontal)
                     <line x1: position, y1: 0, x2: position, y2: 3,
                         stroke: "#888", 'stroke-width': 0.8>
@@ -601,8 +601,8 @@ fn annotation_label(node, point, left, top, tangent = null) any^ {
 }
 
 fn axis_definitions(axis_node) => [for (child in axis_node
-    where child is element and
-        (string(name(child)) == "node" or string(name(child)) == "coordinate")) child]
+    where ((child is element and
+        (string(name(child)) == "node" or string(name(child)) == "coordinate")) ^ { false })) child]
 
 fn axis_path_point(point, definitions, xs, ys, pw, ph) any^ {
     if (point.coord_system != null) axis_position(point, xs, ys, pw, ph)^
@@ -691,14 +691,14 @@ fn plot_annotations(series_list, index, xs, ys, left, top, acc) any^ {
     }
 }
 
-fn value_domain(values, low, high) {
+fn value_domain(values, low, high) any^ {
     let lo = if (low != null) float(low) else float(min(values))
     let hi = if (high != null) float(high) else float(max(values))
     if (lo == hi) [lo - 1.0, hi + 1.0] else [lo, hi]
 }
 
 // Data extents along one axis: bars span base to top; errors widen points.
-fn data_extents(series, point, axis, bars) {
+fn data_extents(series, point, axis, bars) any^ {
     if (series.kind == "bar" and bars.direction == axis) {
         let top_point = if (axis == "y") {*:point, y: point.top} else {*:point, x: point.top};
         [point.base, *kinds.point_extents(series.errors, top_point, axis)]
@@ -752,7 +752,7 @@ fn tick_scale(numeric_scale, symbol_list, tick_option, used, axis) any^ {
     }
 }
 
-fn invisible_named_path(path) =>
+fn invisible_named_path(path) any^ =>
     path.action == "path" and not opts.has(path, "draw") and
         opts.value(path, "name path", null) != null
 
@@ -793,9 +793,9 @@ pub fn resolve_axis(axis_node, options = null, picture = null, extra_keys = []) 
     let valid_symbols = if ((symbols_x != null and xlog) or (symbols_y != null and ylog))
         raise error("PGFPlots symbolic coordinates need a linear axis") else true
     let x_values = [for (series in data_series, point in series.points,
-        value in data_extents(series, point, "x", bars)) value]
+        value in ((data_extents(series, point, "x", bars)) ^ { [] })) value]
     let y_values = [for (series in data_series, point in series.points,
-        value in data_extents(series, point, "y", bars)) value]
+        value in ((data_extents(series, point, "y", bars)) ^ { [] })) value]
     let invalid_log = [for (value in x_values where xlog and value <= 0.0) value] ++
         [for (value in y_values where ylog and value <= 0.0) value]
     let valid_log = if (len(invalid_log) > 0)
@@ -846,8 +846,8 @@ fn render_cartesian_axis(axis_node, options, picture, extra_keys = []) any^ {
         raise error("unsupported PGFPlots x tick label style") else true
     let styled = series_styles(series_list)^
     // Legend entries follow plots in order; fill between and forget plot take none.
-    let legend_series = [for (series in styled where series.kind != "fill_between" and
-        not opts.has(series.source, "forget plot")) series]
+    let legend_series = [for (series in styled where ((series.kind != "fill_between" and
+        not opts.has(series.source, "forget plot")) ^ { false })) series]
     let legend_entries = legend_nodes(axis_node)
     let surplus_explicit = [for (index, entry in legend_entries
         where index >= len(legend_series) and entry.from_list != true) entry]
@@ -894,13 +894,13 @@ fn render_cartesian_axis(axis_node, options, picture, extra_keys = []) any^ {
     } else ph
     let raw_axis_style = opts.value(axis_node, "axis line style", null)
     let axis_parts = if (raw_axis_style == null) []
-        else [for (part in split(raw_axis_style, ",")) trim(part)]
+        else [for (part in ((split(raw_axis_style, ",")) ^ { [] })) trim(part)]
     let unsupported_axis_parts = [for (part in axis_parts
-        where part != "<->" and not starts_with(part, "color=")) part]
+        where ((part != "<->" and not starts_with(part, "color=")) ^ { false })) part]
     let valid_axis_style = if (len(unsupported_axis_parts) > 0)
         raise error("unsupported PGFPlots axis line style: " ++ unsupported_axis_parts[0])
         else true
-    let axis_colors = [for (part in axis_parts where starts_with(part, "color="))
+    let axis_colors = [for (part in axis_parts where ((starts_with(part, "color=")) ^ { false }))
         slice(part, len("color="), len(part))]
     let axis_color = if (len(axis_colors) == 0) "#888"
         else opts.color_value(axis_colors[len(axis_colors) - 1])^
@@ -917,9 +917,9 @@ fn render_cartesian_axis(axis_node, options, picture, extra_keys = []) any^ {
     let paths = children_named(axis_node, "path")
     let plot_elements = render_series(styled, axis_node, bars, paths, xs, ys, pw, ph)^
     let definitions = axis_definitions(axis_node)
-    let annotation_paths = [for (path in paths where not invisible_named_path(path))
+    let annotation_paths = [for (path in paths where ((not invisible_named_path(path)) ^ { false }))
         axis_path_geometry(path, definitions, xs, ys, pw, ph)^]
-    let direct_labels = [for (node in definitions where string(name(node)) == "node")
+    let direct_labels = [for (node in definitions where ((string(name(node)) == "node") ^ { false }))
         annotation_label(node, axis_position(node, xs, ys, pw, ph)^, left, top)^]
     let path_labels = [for (item in annotation_paths where item.label != null)
         annotation_label(item.label.node, item.label.point, left, top)^]
@@ -1002,7 +1002,7 @@ fn group_layout(group_node) any^ {
     let valid = if (len(invalid) > 0)
         raise error("unsupported PGFPlots group style: " ++ invalid[0]) else true
     let size = if (style["group size"] == null) null
-        else [for (part in split(" " ++ trim(style["group size"]) ++ " ", " by ")) trim(part)]
+        else [for (part in ((split(" " ++ trim(style["group size"]) ++ " ", " by ")) ^ { [] })) trim(part)]
     let valid_size = if (size == null or len(size) != 2)
         raise error("PGFPlots groupplot needs group size=<columns> by <rows>") else true
     let columns = opts.numeric_value(size[0])^

@@ -2,8 +2,8 @@ import ui: lambda.ui.dtna
 let items = [{key:1,label:"One",icon:<svg width:14,height:14>},{key:2,label:"Two",disabled:true},{key:3,label:"Three"}]
 let rendered = ui.render(ui.segmented({id:"choices",items:items,orientation:'vertical',size:'large',block:true,shape:'round',name:"choice"})^)
 let choice_list = content(rendered)[0]
-let buttons = [for (child in content(choice_list) where child is element and name(child) == 'button') child]
-let hidden = [for (child in content(rendered) where child is element and name(child) == 'input') child];
+let buttons = [for (child in ((content(choice_list)) ^ { [] }) where ((child is element and name(child) == 'button') ^ { false })) child]
+let hidden = [for (child in ((content(rendered)) ^ { [] }) where ((child is element and name(child) == 'input') ^ { false })) child];
 [
     ["group semantics",rendered.role == "radiogroup" and rendered["aria-orientation"] == "vertical"],
     ["size and shape",contains(rendered.class,"dtna-size-large") and contains(rendered.class,"dtna-segmented-round")],
@@ -13,7 +13,7 @@ let hidden = [for (child in content(rendered) where child is element and name(ch
     ["disabled option",'disabled' at buttons[1] and not ('disabled' at buttons[0])],
     ["icon slot",name(content(content(buttons[0])[0])[0]) == 'svg'],
     ["native form entry",len(hidden) == 1 and hidden[0].name == "choice" and hidden[0].value == "1"],
-    ["disabled form omission",'disabled' at [for (child in content(ui.render(ui.segmented({id:"off",items:items,name:"ignored",disabled:true})^)) where child is element and name(child) == 'input') child][0]],
+    ["disabled form omission",'disabled' at [for (child in ((content(ui.render(ui.segmented({id:"off",items:items,name:"ignored",disabled:true})^))) ^ { [] }) where ((child is element and name(child) == 'input') ^ { false })) child][0]],
     ["typed controlled value",(ui.segmented({id:"typed",items:items,value:3})^).value is int],
     ["invalid size",((ui.segmented({id:"bad",items:items,size:'huge'}) ^ { null }) or null) == null],
     ["invalid shape",((ui.segmented({id:"bad",items:items,shape:'square'}) ^ { null }) or null) == null],

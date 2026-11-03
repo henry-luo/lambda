@@ -3126,6 +3126,7 @@ is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
 | `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact or animation cues. |
 | `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
 | `animation_commands(node, batch)` | Queue copied tick-targeted native playback commands; return acceptance metadata without stepping. |
+| `particle_commands(node, batch)` | Queue copied, bounded particle spawn requests for an unsampled future tick; return shared command acceptance metadata. |
 | `replay_animation_events(node, from, to, deliver = true)` | Reconstruct an authored cue window privately; return copied records and optionally admit deferred host delivery. |
 | `animation_snapshot(node)` | Return copied command identities/counters, mixer time, plan revision, automatic mode and per-clip identities, playheads, weights/rates, loop counts, activation/pause/schedule and fade/warp flags, plus copied translation/quaternion root motion and completed controller feedback. |
 | `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
@@ -3147,13 +3148,378 @@ Seek/reset replays authored input; it does not restore later commands or a saved
 solver checkpoint. The remaining gaming features and qualification limits are
 tracked in the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
 
+### Shared decoded audio foundation
+
+The first M7 provider component connects existing `dom.audio_open`,
+`audio_play`, `audio_pause`, `audio_close` and `audio_state` procedures to the
+same document submix as MIDI and speech. `dom.audio_clock(owner)` counts rendered
+frames on that submix. The scene integration below adds sources/listeners,
+Doppler, bounded bus/DSP graphs, native sample-time cues and explicit offline
+PCM/WAV jobs and named MIDI/speech routes. Shared video-track output and microphone input remain subsequent M7 work
+(**D7.5.3v2 / D7.5.4**).
+
+Opening encoded bytes prepares owned 48000-Hz interleaved stereo float PCM
+without opening an output device. The portable decoder supports PCM WAV, MP3
+and FLAC; macOS retains platform decoding, including AAC/M4A, through Core Audio.
+Codec availability remains platform-dependent. Source bytes may be released
+after open. Invalid, unsupported or over-budget input returns `null` and leaves
+existing clips intact. Decoding and channel/rate conversion happen before the
+audio callback (**D4.5.2**).
+
+Native limits are 256 MiB of encoded input and 256 MiB of retained PCM per clip,
+512 MiB of decoded-player storage and 128 open decoded clips per document.
+Ready, paused and ended clips retain their PCM until explicit close or document
+teardown. Only playing clips occupy a voice in the existing global 96-voice
+table, shared with MIDI and speech; exhaustion rejects the new play without
+retiring accepted peers. PCM storage is bounded; full streaming and peak-memory/
+release-performance qualification remain separate work.
+
+Play accepts a finite gain from zero to one, resumes a paused cursor and restarts
+an ended clip. Pause removes its callback voice while retaining the cursor.
+Ended voices retire during ordinary host polling; they cannot keep offline
+frames pending indefinitely. Close invalidates the document-scoped token and
+releases callback readers before freeing PCM. Device retirement sets affected
+clips to `error`; a fresh open/play can join the recovered output service.
+
+Offline output (`LAMBDA_AUDIO_OUTPUT=offline`) uses the same native mixer without
+a device. Idle-to-active transitions anchor to the requesting document's clock,
+so the first frame includes elapsed playback time and does not consume earlier
+idle time. A document's own realm supplies its clock even when another realm is
+thread-active.
+The mixer only adds prepared samples; it allocates nothing, fetches no resources
+and enters neither DOM/GC nor script. Numeric conversion/resampling can differ
+from the previous platform player's output.
+
+Local documents retain ordinary audible starts. Network documents require their
+own sticky activation or the host grant; muted playback and decoding retain
+**D7.5.4** behavior. These existing play rows keep their start gate with the
+host's offline output backend; explicit buffer/file render jobs remain M7 work.
+Video-track audio remains on its existing
+platform path; shared output integration beyond these decoded clips remains
+part of M7. See the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md)
+for qualification and remaining scope.
+
+### Native Scene3D clips and spatial sources
+
+The `scene3d/runtime` procedures `audio_snapshot(node)`, `audio_clip(node,
+request)`, `audio_clip_drop(node, request)` and `audio_command(node, request)`
+use the existing procedural host boundary (**D7.5.3v2**). Acquiring an encoded
+clip is explicit; a pure `audio-source` description does not fetch or decode.
+Every mutation requires the snapshot's opaque `session`; preserve native u64
+values (JS BigInts) or exact decimal strings rather than converting through JS
+Number (**S4.9.1**).
+
+Acquire with `{session, id, expected: 0, bytes}` (use `0n` in JS). Replace with the current clip's
+`identity` as `expected`; an absent/stale identity or failed decode preserves the
+old asset. Drop with `{session, id, identity}`. A scene admits 16 assets and 32
+sources; assets and source players share the document's 128-player/512-MiB
+limits and global 96-voice bound. Each source has an independent cursor/filter/
+meter over immutable shared PCM, charged once per sample owner. Replacing or
+dropping an asset leaves already playing readers on their retained samples
+until stop/restart or teardown (**D4.5.2**).
+
+Declare a leaf `audio-source` with `id`, `clip` and ordinary transform attributes
+beneath the scene or a transformed group, body or bone. IDs must be unique
+within that scene. `spatial` accepts `none` (preserves stereo), `2d` (world XY)
+or the default `3d`. Positional modes average the two input channels to mono
+before applying spatial gains. A scene selects a camera/listener with `audio_listener`;
+otherwise its one explicit `audio-listener` wins, then the active camera.
+Listener orientation uses the renderer's target/up and world-pose rules. A
+positional source needs a valid listener. Audio ignores visual visibility/
+culling and survives graphics-context recovery.
+
+Source controls are finite `gain` [0,1], `pitch` [0.125,8], `smoothing` seconds
+[0,10] (default 0.01), and `lowpass` Hz [20,24000]. The mixer smooths stereo
+gains, pitch and the one-pole filter coefficient per output sample. A `loop`
+source wraps its sample cursor. `distance_model` is `inverse` (default),
+`linear`, or `none`; `ref_distance` defaults to 1, `max_distance` to 1000 and
+`rolloff` to 1. Distances clamp to the reference/maximum interval. Inverse gain
+is `ref/(ref+rolloff*(distance-ref))`; linear gain is
+`max(0,1-rolloff*(distance-ref)/(max-ref))`. Equal-power stereo panning follows
+the listener's world right vector. Cone half-angles `cone_inner`/`cone_outer`
+are radians [0,pi] (default pi), with `cone_gain` [0,1] outside the outer cone;
+the source forward axis is local -Z in 3D and +X in 2D.
+
+World `velocity` on a source/listener, or `audio_velocity` on a camera, overrides
+native motion estimation. `doppler` defaults true; `audio_speed_of_sound` on
+the scene defaults to 343 world units/second. Doppler uses
+`(c+listener_radial)/(c+source_radial)`, radial clamps of +/-0.95c and the pitch
+limits above. Positions/velocities are bounded to +/-1e6 per component. Fixed
+physics ticks and selected animation-only frames supply poses in scene seconds;
+repeated reads do not erase estimated velocity. Authored same-time jumps reset
+estimation. The `teleport` command also skips the next positive-time estimate.
+Selected animation snapshots retain **D2.11.4** timing.
+
+Commands use `{session, source, identity, action}` with the source snapshot's
+identity and `play`, `pause`, `resume`, `stop` or `teleport`. Play starts a fresh
+cursor on the selected asset; pause/resume retain the cursor, while stop releases
+the source player. Rejected starts preserve existing audio. Invalid authored
+edits preserve admitted targets and still permit explicit pause/stop/drop.
+Scene pause/time scale affect pose sampling; source transport and pitch remain
+explicit. A successful scene seek/reset stops sources and resets their velocity
+estimators, retaining acquired assets. Compatible template rebuilds preserve
+identities/cursors; removed sources, scenes and documents retire callback
+readers before freeing native storage (**D4.5.2 / D5.3.3**).
+
+Snapshots copy clips, source transport/pose/target and current gain/pitch,
+cursor/duration, rendered-frame count and peak/RMS meters, listener metadata,
+scene time, document audio clock and native storage accounting. They expose no
+DOM, graphics or player tokens. Network playback and audible gain changes use
+authored gain for **D7.5.4**, including distant/attenuated sources and the host
+offline backend. Device loss marks active players `error`; explicit play can
+prepare a new reader from the retained asset. The cue and explicit render-job
+contracts below define their additional behavior. Shared video-track routing,
+HRTF/surround and ratified capture remain separate components. Music/voice/
+occlusion policy remains deferred M13.
+
+### Native Scene3D bus routing and DSP
+
+Declare `audio-bus` nodes under a scene, with unique `id` names. A source's
+`bus` selects one of them; its default is `master`. Once a scene declares buses,
+its implicit `master` routes into the existing document submix. An explicit
+`audio-bus id="master"` controls that scene's master. Other documents and default
+MIDI/speech/decoded voices retain their document routes. Definitions prepare
+native storage without opening an output device; source play retains **D7.5.4**.
+Use existing procedural DOM attribute/child edits for live bus controls, and
+`runtime.audio_snapshot(node)` to inspect the admitted plan (**D7.5.3v2**).
+
+A scene admits 16 buses including master, four sends and four ordered inserts
+per bus, with at most 8 MiB retained graph storage. Each document has eight scene
+graph owners under its one submix; all sources still share the existing global
+96-voice bound. Nodes default to `parent="master"`, `gain="1"`,
+`smoothing="0.01"`, `mute="false"`, `solo="false"`; master has no parent.
+Gain is [0,4] and smoothing is [0,10] seconds. Add leaf `audio-send` children
+with `bus="target"` and `gain` [0,1] (default 1). Parent and explicit sends sum
+after inserts and the bus fader. Bus/send gain edits smooth per output sample.
+Solo selects direct inputs beneath soloed parents and permits their downstream
+send/parent paths; mute silences the bus fader. Shared return histories remain
+shared. Unknown names, duplicate IDs, cycles (including sidechain dependencies),
+invalid parameters and storage/connection limits reject the candidate while
+preserving the admitted graph and source targets.
+
+Leaf `audio-effect` children run in declaration order before the bus fader:
+
+| `type` | Controls and native profile |
+|---|---|
+| `lowpass`, `highpass` | Stereo biquad; `frequency` [20,22000] Hz, default 1000, and `q` [0.1,20], default approximately 0.7071. |
+| `eq` | Peaking biquad with the same frequency/Q controls and `gain_db` [-24,24], default 0. |
+| `delay` | Stereo sample ring; `seconds` [1/48000,2], default 0.1 (rounded to whole frames), `feedback` [0,0.95], default 0.3, and `wet` [0,1], default 0.5. |
+| `reverb` | Reuses the shared Freeverb room; `wet` [0,1], default 0.5. |
+| `compressor` | Stereo peak detector, hard knee; `threshold` [-96,0] dB, default -18, `ratio` [1,20], default 4, `attack` [0,2] seconds, default 0.01, `release` [0.001,10], default 0.1, and `makeup` [0,24] dB, default 0. An optional `sidechain="bus"` reads that earlier bus's post-fader signal. |
+| `limiter` | Instant stereo-linked peak ceiling; `ceiling` [0.001,1], default 0.98. The window's final mixed output also retains its existing [-1,1] safety clamp. Lookahead/oversampling are separate quality profiles. |
+
+Compilation, storage and filter coefficient preparation occur on the main
+owner; publication and source routes change under the existing submix boundary.
+The callback uses fixed scratch and native DSP state, with no allocation,
+blocking, resource IO, DOM/GC or script. Retained bus names preserve opaque
+identities; admitted removal invalidates a route, and re-addition gets a new
+identity. Matching insert positions/kinds retain history across parameter
+changes; changing delay length or insert kind starts fresh state. Compatible
+template rebuilds and graphics recovery preserve routing and histories.
+Removed/stale routes stay silent rather than falling through to the dry output
+(**D4.5.2 / D5.3.3 / S4.9.1**).
+
+Actual delay/filter/reverb work keeps the submix alive after its final source
+voice retires. Delay/filter activity uses a 1e-12 quiet floor; the reused reverb
+retains its existing 1e-20 denormal flush. Main-owner polling continues for
+online and offline transports, and inactive documents do not consume device
+clock frames. Explicit native offline capture can request silent intervals.
+Source stop permits existing graph tails to finish; scene seek/reset clears
+them. Device loss resets histories and work, and requires explicit source play
+to recover. Nonfinite graph output marks it faulted and silences that graph;
+scene reset clears the fault. Physical hotplug and callback deadlines remain
+separate qualification work.
+
+MIDI preparation now retains its synth without a voice/device. Play admits a
+voice; pause/end removes it while retaining cursor and reverb-send controls.
+Reverb tails continue after MIDI voice retirement. A muted MIDI transport may
+play without activation; positive audible starts and live gain changes retain
+**D7.5.4**. Graph/source snapshots copy ordered insert parameters, send target/
+current gains, bus peak/RMS/frame meters, routing generation/storage/activity and
+fault state. Additional provider route adapters, video-track output and ratified microphone
+capture remain native M7 work. Routing factories and music/voice/occlusion
+policy remain deferred M13.
+
+### Native Scene3D sample-time cues
+
+`runtime.audio_schedule(node, request)` admits copied transport commands through
+the existing host waist (**D7.5.3v2**, proposal §9.2). Read `audio_snapshot(node)`
+first. A request contains its `session`, `cue_epoch` as `epoch`, the next
+`cue_sequence + 1` as `sequence`, and an `events` array of 1–32 maps:
+
+| Field | Contract |
+|-------|----------|
+| `source`, `identity` | Source ID and exact current source identity. |
+| `op` | `play`, `pause`, `resume` or `stop`. Resume requires a paused player at delivery. Stop rewinds to ready. |
+| `clip_identity` | Required only for play; identifies the current asset named by the source's authored `clip`. |
+| `clock` | `audio` (default) or `scene`. |
+| `frame` | Audio clock: exact nonnegative document sample index, below `UINT64_MAX`, at 48000 Hz. |
+| `seconds` | Scene clock: finite nonnegative scene timestamp. Supply either this or `frame`, according to `clock`. |
+| `late` | `reject` (default), `now` (next available sample boundary) or `drop` (completed `dropped_late` receipt). |
+
+All peers are validated and readers prepared before publication. Rejection
+preserves earlier admitted commands and source transports. A scene retains at
+most 64 pending/retiring records; each source with pending work reserves one of
+the existing 96 shared native voices. Prepared readers count toward the ordinary
+128 document players and shared PCM budget. Overflow rejects the whole batch.
+Matching sample deadlines execute in event-ID order. A contended voice produces
+`dropped_busy`; the callback never waits or delivers that command later.
+
+An identical retry of the last admitted sequence returns the same event IDs,
+including after delivery, cancellation or clip removal. A changed canonical
+payload at that sequence, an older sequence, a gap, or a stale session/epoch is
+rejected. This is a bounded last-batch retry contract. IDs and sample frames
+remain exact through the foreign membrane (**S4.9.1**); JavaScript callers use
+BigInt for wide identifiers and sample counters.
+
+Scene timestamps map from a sampled scene/document-clock anchor, rounding the
+computed positive sample offset upward. Scene pause, zero time scale and scene
+faults hold future scene cues; play/scale changes remap them, and an explicit
+paused step can release a reached cue. Pending scene cues wake the existing
+coordinator without adding a solver phase. Direct audio-frame cues follow the
+document sample clock independently of scene pause/scale. Source playback also
+continues independently. Pitch follows authored pitch and Doppler by default;
+`pitch_follow="true"` additionally multiplies it by scene time scale, clamped to
+the source's 0.125–8 range. Selected animation sampling retains **D2.11.4**.
+
+Queued play retains its admitted PCM across asset replacement/drop, and uses
+the source's latest published spatial/gain/pitch parameters at delivery.
+Positive authored-gain play/resume and raising an armed muted source's gain
+require the existing document activation (**D7.5.4**). Template and graphics
+recovery retain cues. Immediate source transport cancels its remaining cues;
+source removal cancels that source, device loss cancels pending delivery, and
+successful scene seek/reset cancels all pending cues and advances `cue_epoch`.
+No implicit replay follows those operations.
+
+`runtime.audio_cues_cancel(node, {session, epoch, event})` cancels one pending
+event; omit `event` or pass zero to cancel all. Cancellation remains available
+after invalid authored edits. Snapshots copy `audio_frame`, `cue_epoch`,
+`cue_sequence`, `cue_next_id`, last-batch `cue_receipt` IDs, `cue_pending` and
+the most recent 256 `cue_history` rows plus `cue_history_dropped`. Rows include
+event/source/clip identities, operation/clock, effective `requested` sample,
+`actual` completion sample, `held` and `status`. Pending `actual` is zero.
+Delivery, admission and cancellation are distinct observations; history can
+overwrite old rows. Source rows add `armed` and `pitch_follow`.
+
+Native readers and commands have explicit ownership (**D4.5.2 / D5.3.3**).
+Preparation and retired-reader cleanup occur on the main owner; the callback
+only applies copied commands and swaps retained PCM readers at split-buffer
+deadlines. Shared video-track output, microphone acquisition and release
+callback/memory qualification remain M7/M12
+work; cue selection and voice policy remain deferred M13.
+
+### Native Scene3D MIDI and speech routes
+
+Existing document MIDI sessions and speech utterances can explicitly join an
+admitted scene bus through `runtime.audio_provider_route(node, request)`.
+This reuses their native transports and the document submix; it creates no
+second mixer or playback clock (**D7.5.3v2 / D4.5.2**).
+
+| Procedure | Request and behavior |
+|-----------|----------------------|
+| `audio_provider_read(node, request)` | `{session, provider, token}` reads a copied provider routing snapshot. `provider` is `midi` or `speech`; `token` identifies an existing provider in this document. |
+| `audio_provider_route(node, request)` | Adds `expected`, the provider's current route, plus `bus` and that bus's exact `identity` from `audio_snapshot`. Returns the new snapshot after atomic publication. Omit `bus` or pass null, with zero/omitted `identity`, to select the ordinary document dry route. |
+
+Snapshots contain `session`, `provider`, `token`, `route`, `route_valid`,
+`state`, `position` in seconds, authored `gain`, and `loss` (`none`,
+`route_lost` or `device_lost`). Session/provider/bus identities and the expected
+route use exact counters; JavaScript uses BigInt (**S4.9.1**). Stale session,
+provider, bus and expected-route tickets reject without changing the transport.
+Providers are document-owned and may route between that document's scenes.
+Each submix admits at most 128 retained provider route references.
+
+MIDI retains its route while ready, paused or ended so a later explicit play
+uses the same bus. Speech retains its route while queued, rendering or paused,
+including before its voice exists; each utterance selects its own route when
+the shared speech voice starts it. Speech end/cancel/error releases the route
+reference. MIDI close and explicit detach release theirs. Detaching does not
+restart a transport. Named routes use the bus's gain/mute/solo, sends and ordered
+inserts. Named MIDI inputs omit the old document reverb send, which would bypass
+the bus fader; returning to the default route restores that send. Already
+generated document reverb tails retain their ordinary lifetime.
+
+Removing a retained bus from a replacement graph rejects before source controls
+publish. Detach or rebind its providers first. Removing the graph owner instead
+silences its routed voices atomically and makes retained providers fail with
+`route_lost`; it does not fall back to audible default output. Failed providers
+remain queryable through their ordinary document rows and require a new session
+or utterance for playback. Read/default-detach remains available after invalid
+authored scene edits (**D4.5.2 / D5.3.3**).
+
+Route preparation for inactive/paused providers opens no device. Audible
+play/resume, active positive-gain rewiring (including default detach), and
+authored bus edits affecting active positive-gain providers retain **D7.5.4**
+activation. These checks use provider state as well as DSP tail state, so a dry
+MIDI/speech input cannot evade the gate. Muted preparation/playback and bus
+edits with paused providers remain allowed.
+This profile routes existing providers; offline jobs still select decoded scene
+sources, and provider export, shared video-track output and ratified capture
+remain native M7 work. Music/voice policy remains deferred M13.
+
+### Native Scene3D offline audio render jobs
+
+`runtime.audio_render_open(node, request)` creates an explicit output-free native
+job (**D7.5.4 / D7.5.3v2**, proposal §9.2). Supply the current scene `session`,
+an output length `frames`, and 1–64 `events` using the cue schema above. Source
+and clip identities come from `audio_snapshot`. Optional `scene_time` (default
+0) and positive finite `time_scale` (default 1) define the private scene-clock
+anchor. Audio-frame events count from zero; scene events map through that anchor.
+Deadlines must fit within the selected interval, including its final boundary.
+
+Opening copies the referenced authored audio descriptions and current selected
+native poses, listener and bus/insert/send graph into private readers and fresh
+DSP histories. It publishes no live source/graph edits. In particular, a network
+document may export a positive-gain authored edit while its admitted live player
+remains muted and unactivated. Job cue timing and opt-in pitch-following use
+the job's virtual scale. Source/clip identity changes before admission reject
+the plan. Later authored edits, asset replacement/drop, live pause/seek/reset,
+device mixing and device retirement do not alter admitted job output. Source
+and listener poses/parameters remain frozen for that job; future scene-motion
+replay is not part of this profile.
+
+| Procedure | Request and behavior |
+|-----------|----------------------|
+| `audio_render_open(node, request)` | Returns a job snapshot in `ready` state. |
+| `audio_render_step(node, request)` | `{session, job, frames}` advances at most 4096 frames; omitted `frames` means 4096. Stops at the selected output length. A completed job stays complete on another step. |
+| `audio_render_snapshot(node, request)` | `{session, job}` reads copied progress, bounds, diagnostics and cue receipts. |
+| `audio_render_read(node, request)` | `{session, job, offset, frames}` copies up to 4096 produced stereo frames as little-endian float32 `data`; offset defaults to zero. `format:"wav_header"` instead returns a 58-byte IEEE-float WAV header with its `fact` count. |
+| `audio_render_file(node, request, target)` | Streams a completed job's header and bounded PCM chunks through ordinary `output` write/append operations (**S12.1.1v3**). It adds no filesystem authority. |
+| `audio_render_cancel(node, request)` | Releases readers, DSP, clock and output storage, retaining a `cancelled` snapshot until close. |
+| `audio_render_close(node, request)` | Releases the handle and all remaining job storage; later use fails. |
+
+Step/read requests contain exact bounded integral counts; JavaScript Number
+integers are accepted within those bounds. Session/job identities retain the
+exact counter/BigInt rules (**S4.9.1**). A snapshot contains `session`, `job`,
+`state`, `frames`, `rendered`, reserved `bytes`, `sample_rate:48000`, `channels:2`,
+`diagnostic`, `pending` and `history`. States are `ready`, `running`, `complete`,
+`cancelled` and `error`. Read packets contain copied `job`, `offset`, `frames`
+and `data`; a header packet reports zero PCM frames. Result buffers survive
+job close. Reads reject ranges beyond produced frames.
+
+Each document retains at most four job handles, 64 MiB of output per job and
+128 MiB across jobs. The existing 128 decoded-player/512-MiB PCM limits, 96
+shared voice records, submix table and 8-MiB graph bound also apply. Admission
+is atomic; quota failure preserves live playback and earlier jobs. Each plan
+references at most 32 sources. Completion retires readers/DSP while retaining
+output; cancellation also releases output, and close releases the handle slot.
+Scene removal or document teardown closes its jobs. No job advances from the
+device callback or ordinary frame polling; callers explicitly step it. The
+host-wide offline playback backend retains audible-output gating.
+
+Native jobs reuse the submix, cue and DSP kernel with explicit reader ownership
+(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; capture and
+provider export and shared video-track output remain separate native M7 work. Release
+deadlines/peak memory, cross-platform execution and broader combined-scene
+qualification remain M12 work.
+
 ### Native CPU/GPU mesh particles
 
 `runtime.particle_snapshot(node)` reads the native emitter service through
 `radiant-dom`. Declare `particle-emitter` directly under a scene, group or rigid
-body. The bounded CPU and GPU profiles render opaque basic meshes using the
-existing instance renderer; geometry/material references and inline definitions work as for meshes.
-Shader, lit, transparent and deformed particle meshes reject. Builders/presets
+body. The bounded CPU and GPU profiles render basic meshes or planar billboards using native
+instanced vertex fetch; geometry/material references and inline definitions work
+as for meshes. Opaque, masked and center-sorted transparent presentation are
+supported. Shader, lit and deformed particle meshes reject. Builders/presets
 remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
 
 ```html
@@ -3164,12 +3530,14 @@ remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
   <material type="basic" color="#ffcc33"></material>
   <particle-size-curve times="0 .5 1" values="1 .5 0"></particle-size-curve>
   <particle-rotation-curve times="0 1" values="0 0 0 0 0 6.2831853"></particle-rotation-curve>
+  <particle-noise strength=".5 1 .5" frequency="2"></particle-noise>
 </particle-emitter>
 ```
 
 | Field | Native profile |
 |---|---|
 | `backend`, `space` | `cpu` (default) or `gpu`; `space="local"` (default) follows the current emitter transform, while `world` retains each birth frame. |
+| `presentation` | `mesh` (default) or `billboard`; billboard geometry lies in its local XY plane and faces the current viewing camera. |
 | `id`, `seed` | Unique nonempty ID, at most 127 bytes; exact unsigned seed (default 0). String seeds use complete unsigned decimals, including all 64 bits. |
 | `capacity`, `overflow` | Default 256, range 1–16384; `drop-new` (default), `recycle-oldest`, or `error`. At most 32 emitters and 65536 stored particles per scene. |
 | `rate`, `burst` | Births per second (default 10) with carried fractional credit; initial/per-cycle burst (default 0, at most 4096). |
@@ -3182,6 +3550,383 @@ remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
 | `gravity`, `drag` | Acceleration in simulation space (default `0 -9.81 0`) and nonnegative exponential velocity drag (default 0); shared fixed ticks use the analytical drag/gravity integral. |
 | `size`, `particle-size-curve` | Positive initial uniform mesh scale (default 1), multiplied by the current linear over-life curve. At most one curve with 2–16 strictly increasing times from 0 to 1 and matching nonnegative values; default multiplier 1. Zero-sized particles remain alive but draw no instance. |
 | `particle-rotation-curve` | Optional linear Euler XYZ rotation in radians, default zero. One curve with 2–16 strictly increasing normalized times from 0 to 1, and three signed values per key (absolute value at most 1000000). Values interpolate directly without angle wrapping; `0` to `6.2831853` makes one full turn. The mesh transform is birth basis × `Rx * Ry * Rz` × uniform size; particle position, velocity and sphere collision radius are unaffected. |
+| `particle-velocity-curve` | Optional three-axis velocity offset in simulation-space units per second, default zero; one curve with 2–16 strictly increasing normalized times from 0 to 1, with three signed values per key in [-1000000,1000000]. See the integration contract below. |
+
+#### Particle billboard presentation
+
+`presentation="billboard"` gives CPU/GPU planar geometry a camera-facing world
+matrix. Geometry/material references, vertex colors, UV0/UV1, material UV
+transforms, texture sheets and color/opacity curves retain the shared mesh
+paths. Native positions, velocities, age, spawn sequence and collision radii
+are unchanged (**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**). For example:
+
+```html
+<particle-emitter id="cutouts" backend="gpu" presentation="billboard"
+    capacity="256" burst="20" rate="0" lifetime="2" gravity="0 0 0" size=".1">
+  <geometry type="plane" size="1 1 1"></geometry>
+  <material type="basic" color="#ffffff" alpha-mode="mask" side="double"></material>
+  <particle-rotation-curve times="0 1" values="0 0 0 0 0 3.1415927"></particle-rotation-curve>
+</particle-emitter>
+```
+
+Primitive planes and planar buffer triangles work; all source Z coordinates
+must be zero. The basic-material/deformation/instancing restrictions above
+still apply. Dimensions are world units: inherited X/Y axis lengths multiply
+sampled particle size and the geometry's coordinates. Local particles use the
+current emitter basis lengths; world particles retain their birth basis
+lengths. Mirrored bases retain unsigned dimensions and camera-facing winding.
+The committed rotation curve's Z component supplies in-plane roll; X/Y values
+remain in copied rotation samples without tilting the billboard. The current
+look-at camera provides an orthonormal view, including under transformed
+camera parents. Perspective distance affects projected size normally.
+
+Compatible presentation switches apply upon admission, retaining simulation
+and adding no GPU checkpoint. Size/rotation/color/atlas curve edits keep their
+existing next-successful-tick publication rules. Camera edits update the draw
+without advancing the native clock. Templates, authored replay and context
+recovery preserve the admitted presentation and committed pose. Emitter
+snapshots copy `presentation` as `mesh` or `billboard`.
+
+Camera-independent sphere bounds enclose roll and camera reorientation, even
+under nonuniform emitter scale. Authored bounds retain their explicit override
+and must cover the camera-facing footprint. Opaque/masked billboards use the viewing
+camera's orientation in shadow draws, with shared atlas/alpha sampling; camera
+edits invalidate their shadow maps. Double-sided materials cover both faces of
+thin planar casters. Transparent billboards retain per-emitter center ordering
+and the existing no-shadow profile.
+
+CPU native storage reserves three floats per capacity slot for committed
+scale/roll. Rendering packs these into spare affine components of the retained
+80-byte palette record and restores the matrix components before use. GPU
+draws read scale/roll from existing birth and pose texels; update targets stay
+288 bytes per padded slot. Camera-only attribute edits do not rebuild geometry, add ordinary
+particle readback or create a computed CPU GPU-motion mirror
+(**D4.5.2 / D7.5.3v2**).
+
+#### Native particle spawn commands
+
+`runtime.particle_commands(node, batch)` queues explicit CPU/GPU births through
+the existing shared scene command queue. Native payloads own their copied
+numbers and identities; later edits to the submitted map cannot change them.
+There is no script callback inside the particle update. Event-to-effect rules
+and preset composition remain M13 (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Take `session`, `generation` and `service_generation` from
+`runtime.particle_snapshot(node)`, and the target's `id`/`identity` from its
+emitter row. Supply a strictly increasing shared command `sequence` and an
+unsampled future `tick` within 100000 ticks. The ordinary runtime snapshot
+provides `command_sequence` and the current tick. Keep opaque identities as
+exact Lambda integers or the JavaScript BigInts returned by the bridge.
+The batch shape is:
+
+```lambda
+{
+  session: particles.session, generation: particles.generation,
+  service_generation: particles.service_generation,
+  sequence: next_sequence, tick: target_tick,
+  commands: [{op: "spawn", emitter: target.id, identity: target.identity,
+              count: 12, depth: 1, position: [0, 1, 0], velocity: [0, 2, 0]}]
+}
+```
+
+A batch contains 1–128 `spawn` records. `count` is a whole number from 1 to 4096;
+`depth` defaults to zero and must be a whole number from 0 to 8. Optional
+`position` replaces this request's birth origin in the target's simulation
+space; shape offsets still use the emitter's birth basis. Omission preserves
+the authored origin. Optional `velocity` adds simulation-space initial dynamic
+velocity after that basis, defaulting to zero. Each vector has three finite
+float coordinates in [-1000000,1000000]. World emitters therefore accept copied
+world contact positions directly; local emitters use local origins and axes.
+These overrides affect new births only. Sampled over-life velocity remains a
+separate transport component.
+
+Explicit requests can spawn while authored `emitting` is false or its duration
+has ended. They do not unpause the shared clock. The queue can wake an otherwise
+idle automatic particle service. Due records preserve target-tick order and
+submission order within a tick. Authored rate/burst attempts come first within
+each emitter, followed by its explicit records in queue order. All attempts
+retain the emitter's seeded sequence, including drop/recycle behavior.
+
+The scene shares the existing 32 pending command-batch limit. All due particle
+records together admit at most 128 requests and 4096 authored-plus-explicit
+spawn attempts for the next fixed tick. A due batch that exceeds these limits
+rejects atomically, retaining earlier accepted requests. Existing emitter
+capacity policies apply during simulation. A later `error` capacity policy,
+collision limit or failed peer can fault that phase without publishing births
+or consuming admitted requests. Shared command receipts describe admission,
+rather than completed simulation; particle snapshots expose
+`pending_spawn_requests` and `pending_spawn_count` separately.
+
+Native owner/source generation changes invalidate future tickets. Emitter-
+description changes also discard admitted requests; structural emitter changes
+replace their native identities. Equivalent
+templates and graphics loss preserve compatible identities and queued work.
+Authored seek/reset discards command-created births and pending requests.
+Copied particle samples, trail queries and CPU contacts expose birth `depth` for
+later package rules. Depth is caller-supplied bounded provenance; no recursive
+rule evaluator or automatic event mapping runs natively. GPU origins and added
+velocity remain in immutable birth recipes, with no ordinary particle readback
+or CPU motion mirror. Timing follows the Scene3D proposal's §3.2/M6; copied
+ownership and template authority retain **D4.5.2 / D5.3.3 / D7.5.3v2 /
+S12.1.5v2**. Capabilities report `particles_spawn_commands` and
+`particles_child_queues` for this bounded profile.
+
+#### Bounded native CPU/GPU particle trails
+
+Add one leaf `particle-trail` to a CPU or GPU emitter for camera-facing ribbon history.
+The head keeps its mesh/billboard and simulation contract. A successful fixed
+update appends one post-collision sample per living particle, including an
+age-zero birth sample. A zero-size living head can keep a visible trail.
+Expiry, collision kill and recycling end that head's trail; retired tails and
+effect composition remain outside this profile. Capabilities report
+`particles_cpu_trails=true`, `particles_gpu_trails=true` and `particles_trails=true`
+(**D2.11.4 / D4.5.2 / D7.5.3v2**).
+
+```html
+<particle-trail segments="16" lifetime=".5" width=".05" fade="true"></particle-trail>
+```
+
+`segments` is a whole number from 1 to 63 (default 16), reserving 2–64 points
+per physical particle slot. `lifetime` is the visible time window and `width`
+is the full ribbon width; both are positive finite floats at most 1000000,
+defaulting to `.5` and `.05`. `fade` defaults true and multiplies each endpoint's
+alpha by `1 - sample_age / lifetime`. The oldest segment clips to the exact
+window boundary; near-plane clipping and width expansion share the line renderer.
+Local trails use simulation coordinates and follow the current emitter frame;
+world trails retain sampled world positions and a width in world units.
+Local width scales by the largest current emitter basis-column length.
+
+Ribbons use the head's committed color, opacity and atlas frame with the same
+basic material and UV transforms. Generated U is relative sample age divided
+by the window, V spans the width, and UV0/UV1 match. Head styles update at the
+next successful tick. Transparent ribbons sort by head centers within their
+emitter; segment intersections retain the existing transparency limits.
+Ribbons neither cast nor receive shadows; heads retain their shadow behavior.
+Historical centers and the camera-facing width participate in culling.
+GPU bounds retain a bounded ring of conservative native center envelopes,
+including zero-size heads, without copying device positions. Authored bounds
+override these bounds and must enclose the entire ribbon.
+
+Width/window/fade edits preserve retained points. Changing `segments`, adding
+or removing the child resets derived trail history while preserving head
+position, velocity, age and sequence. Whole-particle-phase failure publishes
+neither new head state nor trail samples. Templates and graphics recovery
+retain native history; seek/reset reconstruct it from admitted authored input
+(**S12.1.5v2 / D4.5.2 / D5.3.3**).
+
+`runtime.particle_trail(node, emitter_id, index=0)` copies one living particle's
+newest-first history, with at most 64 `{position, age}` records. `age` is time
+since the sample, rather than the head's birth age. The result includes emitter,
+sequence, simulation space, configuration and generation metadata. It includes
+retained points outside the current window, so increasing the window can reveal
+them; changing the returned values cannot edit native history. Whole JavaScript
+numbers are accepted as bounded indices. Missing emitters, disabled trails and
+nonliving indices return errors (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+At most 1048576 padded point slots are admitted per scene. Storage rounds
+capacity up to rows of 64 heads (or one shorter row), with at most 4096 point
+texels per row. CPU point rings cost 32 native bytes plus 16 device bytes per
+padded point;
+GPU point rings cost 32 device bytes plus 32 native bytes of immutable checkpoint
+anchors per padded point. Bounded style/order/slot/template storage is additional.
+`storage_bytes` includes native trail ownership; GPU `gpu_bytes` also includes
+both device point images. Emitter snapshots copy `trail_segments` and
+`trail_point_slots`. This is a storage/work bound, not a release-performance or
+peak-memory qualification claim.
+
+GPU updates append candidate positions in a third fragment pass alongside the
+existing pose/velocity passes. Head poses and trail rings publish together after
+whole-phase admission. Ordinary updates, draws and context recovery perform no
+particle readback and keep no computed CPU motion mirror. Explicit trail queries
+read one bounded device row; explicit motion-control edits checkpoint immutable
+trail anchors along with head motion. Width/window/fade/segment edits add no
+motion checkpoint. Analytical motion retains at most the configured point count
+of actual tick partitions; stateful noise/velocity/collision keeps its existing
+4096-tick motion journal. Its exhaustion faults the clock while preserving
+committed trails. Recovery replays retained partitions and ring heads over the
+anchors, including births, recycled slots and mixed row layouts. CPU/GPU point
+precision follows their existing float profiles (**D2.11.4 / D4.5.2 / D4.5.3v2 /
+D5.3.3 / D7.5.3v2**).
+
+#### Particle velocity-over-life curves
+
+`particle-velocity-curve` adds authored transport to native dynamic velocity;
+it neither accumulates its full value every tick nor replaces force-driven
+motion or collision impulses (**D2.11.4 / D4.5.2 / D5.3.3**). For example:
+
+```html
+<particle-velocity-curve times="0 .25 1" values="0 0 0 2 0 0 -1 0 0"></particle-velocity-curve>
+```
+
+The vector curve interpolates linearly at normalized age `age/lifetime`.
+Every fixed update holds its starting-age value `C` through free motion and
+collision remainder. With no collision, displacement is the existing
+gravity/noise/drag integral of dynamic velocity plus `C*dt`; only dynamic
+velocity decays under drag. At the committed age, copied `velocity` is dynamic
+velocity plus the curve sampled at that age. New births report the age-zero
+offset immediately. Consequently transport displacement depends on the fixed
+tick partition; it does not integrate across intervening keys continuously.
+The recovery journal retains that actual partition.
+
+Offsets use the selected simulation-space axes: local emitters use local axes,
+and world emitters use world axes independently of frozen affine birth bases.
+Collision sweeps and contact velocities use the combined motion. Bounce/slide
+impulses change retained dynamic velocity; the curve does not erase those
+impulses on the next update. Resting/sliding contact removes inward force and
+transport for the remainder of that update. GPU analytic stopped states report
+zero velocity. Conservative bounds include the curve envelope and its full
+variation when impacts redirect motion. Stateful position accumulation adds
+roundoff padding derived from the retained update count; its bound does not
+assume a single closed-form float evaluation.
+
+Compatible curve edits/removal apply at the next successful fixed tick,
+retaining position and dynamic velocity. GPU edits checkpoint dynamic device
+motion once through the explicit-edit path. Before that tick, copied samples
+and context recovery retain committed controls; authored replay uses current
+admitted controls, and equivalent templates retain state. Nonzero GPU offsets
+use the same bounded 4096-tick native recovery journal as noise/analytic
+collision; exhausted history rejects publication. All-zero curves retain the
+ordinary analytical path. GPU velocity targets store dynamic velocity;
+explicit copied queries add the committed authored offset through the shared
+native sampler. No ordinary-tick particle readback, computed CPU GPU-motion
+mirror or target growth is added: padded update storage stays 288 bytes per
+slot. The two native record arrays retain an additional three-float dynamic
+velocity per slot; `storage_bytes` includes actual padding and history cost
+(**D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+`particle-noise` adds bounded smooth temporal value-noise acceleration in
+simulation-space axes (**D2.11.4 / D4.5.2 / D5.3.3**). At most one child is
+accepted. `strength` gives three nonnegative acceleration amplitudes (default
+`1 1 1`, each at most 1000000); `frequency` gives lattice intervals per second
+of particle age (default 1, range 0–1024). Frequency times the maximum lifetime,
+including retained particles from before a compatible lifetime edit, must not
+exceed 65535. Frequency zero gives a constant keyed acceleration per particle.
+An absent child or zero strength disables noise.
+
+The kernel keys draws by seed, attempted spawn sequence, lattice interval and
+axis channels 9–11, using the shared SplitMix fold. It interpolates signed draws
+with cubic smoothstep, samples at each fixed update's starting age, and holds
+that acceleration through gravity/drag integration and collision remainder.
+CPU and GPU noise draws both use the top 24 bits; float age/interpolation and
+integration differences remain observable. This temporal field has no spatial
+or curl dependency. Changing an emitter transform does not rotate world-space
+noise. Conservative GPU bounds include the full acceleration envelope.
+
+Noise edits take effect on the next update without restarting live particles.
+GPU insertion, removal, strength or frequency edits checkpoint device motion
+once through the existing explicit-edit path. Noise-only GPU motion uses the
+same 4096-tick native recovery journal as analytic collision, with no ordinary
+tick readback or computed CPU motion mirror. Context recovery replays the
+retained tick partition; expired/recycled slots release old history. Exhausted
+history rejects the whole particle phase without publishing a partial tick.
+The existing `gpu_history_ticks` and storage snapshots expose these costs.
+
+#### Particle color, opacity and presentation ordering
+
+`particle-color-curve` contains three linear RGB multipliers per normalized
+lifetime key; `particle-opacity-curve` contains one opacity multiplier. Both
+accept 2–16 strictly increasing `times` from 0 to 1, matching `values` in [0,1],
+and at most one child of each kind. Defaults are white RGB and opacity one.
+They reuse the same linear sampling as size/rotation curves. For example:
+
+```html
+<particle-color-curve times="0 .5 1" values="1 0 0 0 1 0 0 0 1"></particle-color-curve>
+<particle-opacity-curve times="0 1" values="1 0"></particle-opacity-curve>
+```
+
+The sampled RGBA multiplies material, vertex and texture factors. RGB values
+are linear-light multipliers; the ordinary display target handles sRGB
+encoding after blending. Material `alpha-mode="opaque"` ignores final alpha;
+`mask` discards below its cutoff and draws surviving fragments opaquely,
+including alpha-tested shadows. Otherwise an opacity curve containing a value
+below one selects transparent presentation. Color/opacity edits retain motion,
+sequence and age, taking effect on the next successful fixed tick without a
+GPU motion checkpoint. Copied sample `color` is RGBA before material factors
+(**D2.11.4 / D4.5.2 / D5.3.3**).
+
+Transparent particles sort back-to-front by simulated center in the current
+view, separately inside each emitter. Equal depths use current palette/device
+slot order. Sorting changes presentation indices only. Cross-emitter and
+particle/ordinary-mesh intersections retain draw-record ordering; this profile
+does not globally interleave individual particles or sort intersecting
+fragments. Transparent particles do not cast shadows; use masked coverage for
+shadowed cutouts. Ordinary opaque depth and existing tone/output behavior are
+preserved.
+
+The same device bitonic network reads native CPU matrix/color palettes or GPU
+poses. It performs no particle readback and retains no computed GPU motion
+mirror. With `N` the next power of two of capacity, sorting a visible emitter
+with at least two drawn particles uses `1 + log2(N)*(log2(N)+1)/2` fragment
+passes: at most 106 at capacity 16384. Two RGBA32F index targets use `32*N`
+bytes. CPU presentation also uploads one retained five-texel matrix/RGBA
+palette (80 bytes per padded slot); the instance stream stores a physical and
+draw index (eight bytes per slot). These renderer resources are separate from
+native simulation storage. `Scene3dStats.particle_sort_passes` counts device
+ordering passes; particle snapshot `gpu_passes` continues to count update
+kernels. Built-in ordering uses the scene context's native program ownership,
+not the authored shader quota (**D4.5.2 / D7.5.3v2**).
+
+Sort targets and palettes are preallocated at projection and reused across
+ordinary frames. Context loss rebuilds them from retained native state; camera
+changes reorder presentation without advancing simulation. Capacity bounds
+live-particle overdraw and network work, but does not promise release frame
+time for high overdraw or complex geometry. Presets and effect policy remain
+M13.
+
+#### Particle texture sheets
+
+One optional `particle-sheet` child selects atlas cells on CPU/GPU from fixed
+particle age (**D2.11.4 / D4.5.2 / D5.3.3**). Cells use top-left row-major
+indices, starting at zero. The default grid is one cell, preserving ordinary
+material UVs.
+
+| Attribute | Contract |
+|---|---|
+| `columns`, `rows` | Integers 1–256, default 1; at most 65536 cells. |
+| `first`, `count` | First cell (default 0) and positive contiguous range length (default all remaining cells); the range must fit the grid. |
+| `mode` | `lifetime` (default) or `fps`. |
+| `cycles` | Lifetime mode only: cycles through the range per lifetime, default 1. |
+| `fps` | FPS mode only: frames advanced per second of particle age, default 10. |
+| `loop` | Wrap inside the range (default true); false clamps at its final cell. |
+| `random-start` | Choose a keyed starting offset inside the range, default false. |
+| `inset` | Cell-relative inset on all four sides, in [0,.5), default 0. |
+
+For example, this visits a 2×2 atlas at ten frames per second:
+
+```html
+<particle-sheet columns="2" rows="2" mode="fps" fps="10"></particle-sheet>
+```
+
+Rates are finite in [0,1024]; explicitly supplying the other mode's rate
+attribute rejects. In the float arithmetic shared by CPU/GPU, lifetime mode
+requires `cycles*count <= 16777215`, and FPS mode requires
+`fps*lifetime <= 16777215` for both new and retained particles. An advancing
+multi-cell lifetime sheet also requires a lifetime that remains positive as
+a float. Static/single-cell sheets preserve existing CPU sub-float lifetimes.
+
+The frame is `first + floor(age*fps)` or
+`first + floor((age/lifetime)*(cycles*count))`, with a keyed offset added before
+wrapping/clamping within `count`. Zero rate holds that offset. Random starts
+use the seed, attempted birth sequence and channel 9 with the same top-24-bit
+SplitMix draw on both backends; dropped/recycled slots do not shift later
+keys. Float age and phase rounding remain observable at frame boundaries.
+
+The common material UV helper selects UV0/UV1 and applies its material
+transform before mapping into the chosen atlas cell and applying inset.
+Visible and alpha-tested shadow draws share that mapping. Texture wrapping
+still applies to the complete atlas: transformed UVs outside a cell may reach
+another cell. Inset or authored gutters control filtering bleed; automatic
+tile/mipmap isolation and cross-frame blending are outside this profile.
+
+Compatible sheet edits publish frame and grid at the next successful fixed
+tick, preserving motion and adding no GPU checkpoint. Before then, rendering
+and context recovery retain committed controls. Authored replay uses current
+admitted controls; equivalent templates retain state. CPU native storage adds
+one frame integer per capacity slot; its existing 80-byte rendering palette
+packs frame into an unused affine lane restored before transformation. GPU
+poses use the rotation texel's unused fourth component, keeping update storage
+at 288 bytes per padded slot. Ordinary GPU ticks and rendering add no particle
+readback (**D4.5.2 / D5.3.3 / D7.5.3v2**).
 
 Scalar controls are finite and bounded by 1000000, with the stricter ranges
 above. Each scene tick admits at most 4096 attempted births, including drops and
@@ -3206,7 +3951,7 @@ maximum curve scale in motion bounds, or uses authored `bounds`.
 
 Compatible edits retain particles, local time, fractional credit and sequences;
 rate/shape/velocity/lifetime/initial-size edits affect subsequent births.
-Gravity/drag, size and rotation curves apply on the next live update. GPU gravity/drag edits
+Gravity/drag, size, rotation, color, opacity and velocity curves and texture sheets apply on the next live update. GPU gravity/drag and velocity-curve edits
 checkpoint existing device positions/velocities once, preserving continuity; this
 explicit source-edit readback is separate from ordinary ticks. Capacity, seed, simulation-space or
 backend changes restart that emitter. Equivalent template rebuilds follow existing
@@ -3222,12 +3967,15 @@ Recorded control history remains separate M13 work.
 Snapshots copy scene/session/service generations, snapshot generation, tick,
 automatic mode, diagnostics and emitter counts/counters/storage, local time,
 center bounds and at most 64 samples per emitter. `samples_truncated` reports
-omission. Emitter snapshots include `space`. Samples contain sequence, age, lifetime,
-position/velocity in that simulation space, size and local `rotation` radians. Unsigned counters remain exact (BigInts in JS, **S4.9.1**); e.g. use
+omission. Emitter snapshots include `space`, admitted `presentation` and committed `sheet_grid` as
+`[columns, rows, inset]`. Samples contain sequence, age, lifetime,
+position/velocity in that simulation space, size, local `rotation` radians and
+RGBA `color` multipliers before material factors, plus numeric atlas `frame`
+(0–65535, an ordinary integer in JS). Unsigned counters remain exact (BigInts in JS, **S4.9.1**); e.g. use
 `String(snapshot.emitters[0].sequence)`. Returned data owns its values and can be
 edited without changing the native owner (**D4.5.2 / D5.3.3**).
 
-GPU spawning, analytical gravity/drag integration, size and rotation curves execute in
+GPU spawning, analytical gravity/drag integration, all five curve kinds and texture-sheet sampling execute in
 GLSL 330 fragment passes on RGBA32F targets; compute shaders are unnecessary.
 CPU metadata determines birth attempts, admission, lifetime expiry and exact
 unsigned sequence keys. It retains no computed GPU motion mirror. Device draws
@@ -3241,17 +3989,18 @@ active row. Snapshots include `backend`, `gpu_readbacks` (pose/velocity row
 transfers), `gpu_passes`, `gpu_recoveries` and `gpu_bytes`, with zero GPU counters
 for CPU emitters. `storage_bytes` includes native metadata and readback scratch.
 Each GPU emitter uses six float targets: metadata, nine-texel birth descriptions,
-and two pose outputs (two texels each: position/scale and rotation) plus two velocity
-outputs. Padded device storage is 256
+and two pose outputs (three texels each: position/scale, rotation and RGBA) plus two velocity
+outputs. Padded device storage is 288
 bytes per slot; native and mesh buffers are accounted separately. Private replay
 stages its own device state before publication, so peak usage includes that
 candidate. Functional quotas do not imply a release frame-time qualification.
 
 Capabilities `particles_cpu_mesh`, `particles_gpu`, `particles_gpu_mesh`,
 `particles_seeded`, `particles_size_curves`, `particles_rotation_curves`,
-`particles_world_space` and `particles_mesh_surface` identify
-the bounded profiles. Color/opacity, velocity curves, noise, texture sheets, billboards,
-GPU collision, trails and child-spawn queues remain M6. `particles_collision` and
+`particles_world_space`, `particles_mesh_surface`, `particles_noise`,
+`particles_color_curves`, `particles_opacity_curves`, `particles_depth_ordering`,
+`particles_texture_sheet`, `particles_velocity_curves` and `particles_billboards` identify the bounded profiles.
+GPU depth collision, trails and child-spawn queues remain M6. `particles_collision` and
 `particles_trails` remain false. See the
 [GPU component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-gpu-mesh-emitter-kernels--2026-10-31).
 
@@ -3445,8 +4194,54 @@ that timeline; collision candidates cannot publish through a particle-only
 native handoff. Live legacy physics stepping/reset also uses the coordinator
 when collision particles depend on it. Recorded control-history replay remains
 M13. Capabilities `particles_cpu_scene_collision` and `particles_contact_batches`
-identify this profile; GPU collision descriptions still reject. See the
+identify this profile; GPU emitters use the separate analytic profile below. See the
 [collision component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpu-scene-collision-and-contact-batches--2026-10-31).
+
+### Native GPU analytic particle collisions
+
+A GPU mesh emitter accepts one `particle-collision profile="analytic"` with
+1–8 explicit planes/spheres in simulation coordinates. Local emitters use local
+coordinates; world emitters use world coordinates independently of later emitter
+movement. These volumes are separate from physics bodies and camera depth.
+Device motion remains native-owned (**S12.1.5v2 / D2.11.4 / D4.5.2 / D7.5.3v2**).
+
+```html
+<particle-collision profile="analytic" response="bounce" radius=".05"
+    skin=".001" restitution=".8" friction=".1" max-impacts="4">
+  <particle-plane normal="0 1 0" offset="-1"></particle-plane>
+  <particle-sphere center="2 0 0" radius=".5"></particle-sphere>
+</particle-collision>
+```
+
+Planes keep the particle center on the side `dot(normal,position) >= offset +
+radius`; nonzero normals normalize on admission, and offset measures distance
+along that normalized normal. Spheres exclude their interior plus particle
+radius. Each fixed tick sweeps the analytically integrated displacement, chooses
+the earliest hit and integrates remaining time after response. Acceleration is
+approximated by each swept chord, as in the CPU scene-query profile. Volumes are
+static for the tick; their motion contributes no surface velocity.
+
+`bounce` and `slide` share CPU radius/skin/restitution/friction/bounce-threshold
+and 1–16 impact limits. Defaults are radius `.01`, skin `min(.001,radius*.1)`,
+restitution `.5`, friction `0`, threshold `.1` and four impacts. Initial overlap
+stops a visual particle; exhausted impact work freezes its last valid position.
+Copied samples expose `collision_status`: `running`, `initial-overlap` or
+`impact-limit`. Stopped slots remain occupied and visible until expiry/reset;
+GPU collision produces no gameplay contact packets or authoritative collision
+counts. `kill`, scene filters/query options, enabled events and overlap policies
+other than `stop` reject.
+
+Ordinary ticks keep pose/velocity on the device without particle readback.
+Compatible gravity/drag/volume/response edits checkpoint device motion through
+the existing explicit-edit path. Context recovery replays bounded native tick
+timestamps and current birth recipes without advancing the scene. Expired/reused
+births retire old history; `gpu_history_ticks` exposes the retained count.
+Exceeding 4096 retained ticks rejects the particle phase before publication with
+a diagnostic. Seek/reset reconstruct current authored descriptions; release
+frame-time/peak-memory qualification remains open. Capabilities
+`particles_gpu_analytic_collision` and `particles_gpu_collision_replay` identify
+this profile. Depth-buffer collision remains outstanding. See the
+[implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-gpu-analytic-particle-collision--2026-11-02).
 
 ### Points, sprites, lines and picking
 

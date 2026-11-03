@@ -399,7 +399,7 @@ TEST(LambdaOptStrings, TypedFastDiffPrecodesStaticTextBeforeLcsLoop) {
     if (!source_text) return;
     std::string source(source_text);
     free(source_text);
-    EXPECT_NE(source.find("pn score_diff(left: int[], right: int[]) int"), std::string::npos);
+    EXPECT_NE(source.find("fn score_diff(left: int[], right: int[]) int"), std::string::npos);
     EXPECT_NE(source.find("pn text_codes(text: string) int[]"), std::string::npos);
     EXPECT_NE(source.find("score_diff(left_codes[index], right_codes[index])"),
         std::string::npos);
@@ -549,8 +549,8 @@ static const char* kShapeIdentitySource =
     "    print(acc)\n"
     "}\n";
 
-// The union field classifies ANY, so mir_map_contract_storage_valid refuses
-// the contract and every declared crossing must take the reify path.
+// The dynamic union field classifies ANY, so neither storage adoption nor
+// the all-values-proven construction path can bypass its declared crossing.
 static const char* kAnyBearingSource =
     "type Person = {name: string, choice: int | string}\n"
     "\n"
@@ -561,7 +561,7 @@ static const char* kAnyBearingSource =
     "pn main() {\n"
     "    var out = \"\"\n"
     "    for (i in 1 to 5) {\n"
-    "        let p: Person = {name: \"n\" ++ i, choice: i}\n"
+    "        let p: Person = {name: \"n\" ++ i, choice: parse(string(i), \"json\")}\n"
     "        out = describe(p)\n"
     "    }\n"
     "    print(out)\n"
@@ -847,8 +847,9 @@ TEST(LambdaOptProfile, FieldGuardDistinguishesFastAndFallback) {
     ASSERT_NE(profile, nullptr);
     EXPECT_NE(strstr(profile, "field_attempt\t_total_"), nullptr);
     EXPECT_NE(strstr(profile, "field_fast\t_total_"), nullptr);
-    EXPECT_NE(strstr(profile, "@160.value\t31\n"), nullptr);
-    EXPECT_NE(strstr(profile, "@160.value\t1\n"), nullptr);
+    // S7.4.2v3's added return caret shifts tree.value's source site by one.
+    EXPECT_NE(strstr(profile, "@161.value\t31\n"), nullptr);
+    EXPECT_NE(strstr(profile, "@161.value\t1\n"), nullptr);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
 }
@@ -1178,7 +1179,7 @@ static const char* kTypedPathSource =
     "pn main() {\n"
     "    var world: World = {rows: [{value: 0, values: [0]}, null]}\n"
     "    var i = 0\n"
-    "    while (i < 100) { update(world, 0); i = i + 1 }\n"
+    "    while (i < 100) { update(world, 0)^; i = i + 1 }\n"
     "    print([world.rows[0].value, world.rows[0].values[0]])\n"
     "}\n";
 
@@ -1200,11 +1201,9 @@ TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
     EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 1u);
 }
 
-// The refusal control: an ANY-bearing contract must keep reifying at declared
-// crossings on BOTH tiers. A zero here without concrete storage classification
-// for the union field means the adoption gate started admitting a shape whose
-// direct reads would misaddress (Tune19 §11.3) — a memory-safety regression,
-// not an optimization.
+// The refusal control: dynamic fields in an ANY-bearing layout must reify at
+// declared crossings on both tiers. Fully proven literal values may instead
+// use descriptor-aware construction; this control must not prove those values.
 TEST(LambdaOptAdmission, AnyBearingContractRefusedJit) {
     FixtureRun run = run_fixture("any_bearing", "jit", kAnyBearingSource, true);
     ASSERT_TRUE(run.ok);
@@ -1254,9 +1253,9 @@ static const char* kUnadoptedRecursiveSource =
     "    return e\n"
     "}\n"
     "\n"
-    "pn sum_chain(node: Node?) int {\n"
+    "pn sum_chain(node: Node?) int^ {\n"
     "    if (node == null) { return 0 }\n"
-    "    return node.val + sum_chain(node.next)\n"
+    "    return node.val + sum_chain(node.next)^\n"
     "}\n"
     "\n"
     "pn walk_len(node: Node?) int {\n"
@@ -1439,7 +1438,8 @@ TEST(LambdaOptAdmission, TypedConstructionPlanPreservesContainmentAndSnapshots) 
         FixtureRun run = run_fixture_script("typed_construction_plan", tier,
             "test/mir/lambda/typed_construction_plan.ls", true);
         ASSERT_TRUE(run.ok);
-        EXPECT_EQ(run.std_out, "[2, 3, 2, 5][7, 5]error4\n");
+        // S7.7.2v2: a failed binding retains its error and still writes the trace.
+        EXPECT_EQ(run.std_out, "[2, 3, 2, 5][7, 5]error99\n");
     }
 }
 

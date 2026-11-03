@@ -18,7 +18,7 @@ pub fn words(value) => if (value == null) [] else
 
 pub fn has(values, value) => any([for (item in values) item == value])
 
-pub fn text(value) {
+pub fn text(value) any^ {
     if (value == null) ""
     else if (value is string) value
     else if (value is element) text(content(value))
@@ -39,12 +39,12 @@ pub fn tag(node) {
 pub fn namespace_uri(node, bindings = {}) =>
     xml_names.expanded(name(node),xml_names.bindings(node,bindings)).uri
 
-pub fn children(node, wanted = null) => if (not (node is element)) [] else [for (child in content(node)
-    where child is element and not starts_with(string(name(child)), "!") and
+pub fn children(node, wanted = null) => if (not (node is element)) [] else [for (child in ((content(node)) ^ { [] })
+    where ((child is element and not starts_with(string(name(child)), "!") and
         not starts_with(string(name(child)), "?") and
-        (wanted == null or tag(child) == wanted)) child]
+        (wanted == null or tag(child) == wanted)) ^ { false })) child]
 
-pub fn child(node, wanted) {
+pub fn child(node, wanted) any^ {
     let found = children(node, wanted)
     if (len(found) == 0) null else found[0]
 }
@@ -60,11 +60,11 @@ pub fn dictionary(pairs, index = 0, result = {}) {
         {*:result, [pairs[index].key]: pairs[index].value})
 }
 
-pub fn root(value) {
+pub fn root(value) any^ {
     if (tag(value) == "document") {
-        let found = [for (child in content(value) where child is element and
+        let found = [for (child in ((content(value)) ^ { [] }) where ((child is element and
             not starts_with(string(name(child)), "?") and
-            not starts_with(string(name(child)), "!")) child]
+            not starts_with(string(name(child)), "!")) ^ { false })) child]
         if (len(found) == 1) found[0] else null
     } else value
 }
@@ -90,4 +90,4 @@ pub fn as_int(value, fallback = 0) => if (value == null) fallback
 
 pub fn truth(value) => value == true or value == "true"
 
-pub fn nonempty(value) => value != null and text(value) != ""
+pub fn nonempty(value) any^ => value != null and text(value) != ""

@@ -1,7 +1,7 @@
 // S8.2.2v6: namespace scope, default reset, aliases and detached XML serialization.
 import n: 'urn:lambda:one'
 import two: 'urn:lambda:two'
-fn root(source) => (parse(source, 'xml')^)[0]
+fn root(source) any^ => (parse(source, 'xml')^)[0]
 let r = root("<r xmlns=\"urn:lambda:one\" xmlns:p=\"urn:lambda:one\"><p:a p:k=\"one\" k=\"plain\"/><r xmlns=\"\"><x/></r><p:a xmlns:p=\"urn:lambda:two\" p:k=\"two\"/></r>")
 let detached = root(format(r[0], 'xml')^)
 let roundtrip = root(format(r, 'xml')^);

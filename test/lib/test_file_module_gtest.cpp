@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <climits>
+#include <errno.h>
 #include <pthread.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -48,6 +49,296 @@ extern "C" {
 #include "../../lib/log.h"
 #include "../../lib/path_str.h"
 }
+
+#ifndef _WIN32
+class FileAnchorTest : public ::testing::Test {
+protected:
+    char* fixture = nullptr;
+    char* root = nullptr;
+    char* project = nullptr;
+    FileAnchor* handles[16] = {};
+    size_t handle_count = 0;
+
+    void SetUp() override {
+        log_init(nullptr);
+        fixture = dir_temp_create("file_anchor");
+        ASSERT_NE(fixture, nullptr);
+        root = file_realpath(fixture);
+        ASSERT_NE(root, nullptr);
+        project = file_path_join(root, "project");
+        ASSERT_NE(project, nullptr);
+        ASSERT_EQ(mkdir(project, 0700), 0);
+    }
+
+    void TearDown() override {
+        for (size_t i = 0; i < handle_count; i++) file_anchor_close(handles[i]);
+        if (fixture) dir_delete(fixture);
+        mem_free(project); mem_free(root); mem_free(fixture);
+    }
+
+    FileAnchor* keep(FileAnchor* anchor) {
+        if (anchor && handle_count < 16) handles[handle_count++] = anchor;
+        return anchor;
+    }
+
+    FileAnchor* open(uint32_t flags = FILE_ANCHOR_SAME_DEVICE,
+            FileAnchorGuard guard = nullptr, void* context = nullptr) {
+        FileAnchorOptions options = {flags, guard, context};
+        return keep(file_anchor_open(project, &options));
+    }
+
+    void seed(const char* relative, const char* content) {
+        char* path = file_path_join(root, relative);
+        ASSERT_NE(path, nullptr);
+        EXPECT_EQ(write_binary_file(path, content, strlen(content)), 0);
+        mem_free(path);
+    }
+
+    void expect_text(FileAnchor* anchor, const char* relative, const char* expected) {
+        char* data = nullptr;
+        size_t size = 0;
+        ASSERT_TRUE(file_anchor_read_all(anchor, relative, 1024, MEM_CAT_TEMP, &data, &size, nullptr));
+        EXPECT_EQ(size, strlen(expected));
+        EXPECT_STREQ(data, expected);
+        mem_free(data);
+    }
+};
+
+TEST_F(FileAnchorTest, ReadCreateAndRevisionUseHeldObjects) {
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    FILE* created = file_anchor_create_regular(anchor, "new");
+    ASSERT_NE(created, nullptr);
+    EXPECT_NE(fcntl(fileno(created), F_GETFD) & FD_CLOEXEC, 0);
+    ASSERT_EQ(fwrite("created", 1, 7, created), 7U);
+    ASSERT_EQ(fclose(created), 0);
+    EXPECT_EQ(file_anchor_create_regular(anchor, "new"), nullptr);
+    EXPECT_EQ(errno, EEXIST);
+    FileRevision revision;
+    ASSERT_TRUE(file_anchor_stat(anchor, "new", &revision));
+    EXPECT_TRUE(revision.stat.is_file);
+    EXPECT_NE(revision.inode, 0U);
+    FILE* reader = file_anchor_open_read(anchor, "new");
+    ASSERT_NE(reader, nullptr);
+    FileRevision held = file_revision_stream(reader);
+    EXPECT_TRUE(file_revision_equal(&revision, &held));
+    fclose(reader);
+    expect_text(anchor, "new", "created");
+    char* data = (char*)1;
+    size_t size = 99;
+    EXPECT_FALSE(file_anchor_read_all(anchor, "new", 2, MEM_CAT_TEMP, &data, &size, nullptr));
+    EXPECT_EQ(errno, EFBIG);
+    EXPECT_EQ(data, nullptr);
+    EXPECT_EQ(size, 0U);
+}
+
+TEST_F(FileAnchorTest, BoundedEnumerationRevalidatesBeforeDelivery) {
+    seed("project/one", "1"); seed("project/two", "2");
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    auto count_entry = [](void* context, const char*, const FileRevision* revision) -> bool {
+        EXPECT_TRUE(revision->stat.is_file);
+        (*(unsigned*)context)++;
+        return true;
+    };
+    unsigned count = 0;
+    ASSERT_TRUE(file_anchor_visit(anchor, 8, count_entry, &count)); EXPECT_EQ(count, 2U);
+    count = 0;
+    ASSERT_TRUE(file_anchor_visit(anchor, 8, count_entry, &count)); EXPECT_EQ(count, 2U);
+    EXPECT_FALSE(file_anchor_visit(anchor, 1, count_entry, &count)); EXPECT_EQ(errno, EFBIG);
+    auto mutate_entry = [](void* context, const char*, const FileRevision*) -> bool {
+        char* path = file_path_join((const char*)context, "created-during-listing");
+        bool ok = path && write_binary_file(path, "x", 1) == 0;
+        mem_free(path); return ok;
+    };
+    EXPECT_FALSE(file_anchor_visit(anchor, 8, mutate_entry, project)); EXPECT_EQ(errno, ESTALE);
+}
+
+TEST_F(FileAnchorTest, InvalidRequestsCannotCreatePartialDirectories) {
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    const char* paths[] = {"", "/outside", "../outside", "part/../outside", "part/./file", "part//file", "part/"};
+    for (const char* path : paths) {
+        EXPECT_EQ(file_anchor_create_regular(anchor, path), nullptr) << path;
+        EXPECT_EQ(file_anchor_directory(anchor, path, true, FILE_ANCHOR_SAME_DEVICE), nullptr) << path;
+    }
+    char* path = file_path_join(project, "part");
+    EXPECT_FALSE(file_exists(path));
+    mem_free(path);
+    FileAnchorOptions invalid = {UINT32_MAX, nullptr, nullptr};
+    EXPECT_EQ(file_anchor_open(project, &invalid), nullptr);
+    EXPECT_FALSE(file_anchor_validate(nullptr));
+}
+
+TEST_F(FileAnchorTest, IntermediateFinalAndHardLinkAliasesAreRejected) {
+    char* private_dir = file_path_join(root, "private");
+    ASSERT_EQ(mkdir(private_dir, 0700), 0);
+    seed("private/secret", "secret");
+    char* escape = file_path_join(project, "escape");
+    ASSERT_EQ(symlink("../private", escape), 0);
+    char* alias = file_path_join(project, "alias");
+    ASSERT_EQ(symlink("../private/secret", alias), 0);
+    char* hard = file_path_join(project, "hard");
+    char* secret = file_path_join(private_dir, "secret");
+    ASSERT_EQ(link(secret, hard), 0);
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    EXPECT_EQ(file_anchor_open_read(anchor, "escape/secret"), nullptr);
+    EXPECT_EQ(file_anchor_create_regular(anchor, "escape/new"), nullptr);
+    EXPECT_EQ(file_anchor_open_read(anchor, "alias"), nullptr);
+    EXPECT_EQ(file_anchor_open_read(anchor, "hard"), nullptr);
+    FileRevision revision;
+    EXPECT_FALSE(file_anchor_stat(anchor, "alias", &revision));
+    EXPECT_FALSE(file_anchor_stat(anchor, "hard", &revision));
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "alias", "wrong", 5, nullptr), -1);
+    EXPECT_TRUE(file_is_symlink(alias));
+    mem_free(secret); mem_free(hard); mem_free(alias); mem_free(escape); mem_free(private_dir);
+}
+
+TEST_F(FileAnchorTest, ReplacedRootAndAncestorSymlinksCannotRedirectAccess) {
+    seed("project/old", "original");
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    char* moved = file_path_join(root, "moved");
+    ASSERT_EQ(rename(project, moved), 0);
+    ASSERT_EQ(mkdir(project, 0700), 0);
+    seed("project/old", "replacement");
+    EXPECT_FALSE(file_anchor_validate(anchor));
+    EXPECT_EQ(file_anchor_open_read(anchor, "old"), nullptr);
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "new", "x", 1, nullptr), -1);
+    char* fresh = file_path_join(moved, "new");
+    EXPECT_FALSE(file_exists(fresh));
+    char* link_path = file_path_join(root, "parent-link");
+    ASSERT_EQ(symlink("moved", link_path), 0);
+    char* child = file_path_join(link_path, "child");
+    char* actual_child = file_path_join(moved, "child");
+    ASSERT_EQ(mkdir(actual_child, 0700), 0);
+    EXPECT_EQ(file_anchor_open(child, nullptr), nullptr);
+    mem_free(actual_child); mem_free(child); mem_free(link_path); mem_free(fresh); mem_free(moved);
+}
+
+TEST_F(FileAnchorTest, PrivatePermissionsAndUnsafeAncestorsFailClosed) {
+    FileAnchor* anchor = open(FILE_ANCHOR_PRIVATE | FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE);
+    ASSERT_NE(anchor, nullptr);
+    seed("project/public", "private bytes");
+    char* public_file = file_path_join(project, "public");
+    ASSERT_EQ(chmod(public_file, 0644), 0);
+    EXPECT_EQ(file_anchor_open_read(anchor, "public"), nullptr);
+    ASSERT_EQ(chmod(public_file, 0600), 0);
+    expect_text(anchor, "public", "private bytes");
+    char* shared = file_path_join(project, "shared");
+    ASSERT_EQ(mkdir(shared, 0755), 0);
+    EXPECT_EQ(file_anchor_directory(anchor, "shared/child", true,
+        FILE_ANCHOR_PRIVATE | FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE), nullptr);
+    char* child = file_path_join(shared, "child");
+    EXPECT_FALSE(file_exists(child));
+    ASSERT_EQ(chmod(project, 0777), 0);
+    EXPECT_FALSE(file_anchor_validate(anchor));
+    EXPECT_EQ(open(FILE_ANCHOR_TRUSTED_PARENTS), nullptr);
+    ASSERT_EQ(chmod(project, 0700), 0);
+    mem_free(child); mem_free(shared); mem_free(public_file);
+}
+
+struct AnchorGuardState {
+    uint64_t protected_device;
+    uint64_t protected_inode;
+    char read_path[PATH_MAX];
+    const char* external_change;
+    bool revoke_after_dispatch;
+    unsigned create_checks;
+    unsigned read_checks;
+};
+
+static bool protect_anchor_object(void* context, const char* relative,
+        FileAnchorAction action, const FileRevision* object) {
+    AnchorGuardState* state = (AnchorGuardState*)context;
+    if (state->revoke_after_dispatch &&
+        ((action == FILE_ANCHOR_CREATE && ++state->create_checks > 1) ||
+         (action == FILE_ANCHOR_READ && ++state->read_checks > 1))) return false;
+    if (object && object->device == state->protected_device && object->inode == state->protected_inode)
+        return false;
+    if (action == FILE_ANCHOR_CREATE && !strcmp(relative, "denied")) return false;
+    if (action == FILE_ANCHOR_READ) path_str_copy(state->read_path, sizeof(state->read_path), relative);
+    if (action == FILE_ANCHOR_REPLACE && state->external_change)
+        return write_binary_file(state->external_change, "external changed bytes", 22) == 0;
+    return true;
+}
+
+TEST_F(FileAnchorTest, GuardChecksEveryDirectoryAndKeepsChildScope) {
+    AnchorGuardState guard = {};
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, protect_anchor_object, &guard);
+    ASSERT_NE(anchor, nullptr);
+    FileAnchor* child = keep(file_anchor_directory(anchor, "safe/deep", true, FILE_ANCHOR_SAME_DEVICE));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(child, "file", "ok", 2, nullptr), 0);
+    expect_text(child, "file", "ok");
+    EXPECT_STREQ(guard.read_path, "safe/deep/file");
+    EXPECT_EQ(file_anchor_directory(anchor, "denied/child", true, FILE_ANCHOR_SAME_DEVICE), nullptr);
+    char* denied = file_path_join(project, "denied");
+    EXPECT_FALSE(file_exists(denied));
+    char* safe = file_path_join(project, "safe");
+    FileRevision protected_dir = file_revision(safe);
+    guard.protected_device = protected_dir.device;
+    guard.protected_inode = protected_dir.inode;
+    EXPECT_EQ(file_anchor_open_read(anchor, "safe/deep/file"), nullptr);
+    char* renamed = file_path_join(project, "renamed");
+    ASSERT_EQ(rename(safe, renamed), 0);
+    EXPECT_EQ(file_anchor_open_read(anchor, "renamed/deep/file"), nullptr);
+    mem_free(renamed); mem_free(safe); mem_free(denied);
+}
+
+TEST_F(FileAnchorTest, AtomicPublicationRequiresUnchangedAdmittedRevision) {
+    AnchorGuardState guard = {};
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, protect_anchor_object, &guard);
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(anchor, "file", "before", 6, nullptr), 0);
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "file", "wrong", 5, nullptr), -1);
+    EXPECT_EQ(errno, EEXIST);
+    FileRevision version;
+    ASSERT_TRUE(file_anchor_stat(anchor, "file", &version));
+    ASSERT_EQ(file_anchor_write_atomic(anchor, "file", "after", 5, &version), 0);
+    expect_text(anchor, "file", "after");
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "file", "stale", 5, &version), -1);
+    EXPECT_EQ(errno, ESTALE);
+    ASSERT_TRUE(file_anchor_stat(anchor, "file", &version));
+    char* target = file_path_join(project, "file");
+    guard.external_change = target;
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "file", "unapproved", 10, &version), -1);
+    EXPECT_EQ(errno, ESTALE);
+    guard.external_change = nullptr;
+    expect_text(anchor, "file", "external changed bytes");
+    mem_free(target);
+}
+
+TEST_F(FileAnchorTest, SpecialFilesAreNeverOpenedAsContent) {
+    char* fifo = file_path_join(project, "fifo");
+    ASSERT_EQ(mkfifo(fifo, 0600), 0);
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    EXPECT_EQ(file_anchor_open_read(anchor, "fifo"), nullptr);
+    FileRevision revision;
+    EXPECT_FALSE(file_anchor_stat(anchor, "fifo", &revision));
+    EXPECT_EQ(file_anchor_open_read(anchor, "missing"), nullptr);
+    EXPECT_EQ(errno, ENOENT);
+    mem_free(fifo);
+}
+
+TEST_F(FileAnchorTest, RevocationBeforePublicationOrReadDeliveryDiscardsResults) {
+    AnchorGuardState guard = {};
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, protect_anchor_object, &guard);
+    ASSERT_NE(anchor, nullptr);
+    seed("project/readable", "private bytes");
+    guard.revoke_after_dispatch = true;
+    EXPECT_EQ(file_anchor_write_atomic(anchor, "new", "private bytes", 13, nullptr), -1);
+    EXPECT_EQ(errno, EACCES);
+    char* path = file_path_join(project, "new");
+    EXPECT_FALSE(file_exists(path));
+    char* bytes = nullptr;
+    EXPECT_FALSE(file_anchor_read_all(anchor, "readable", 1024, MEM_CAT_TEMP, &bytes, nullptr, nullptr));
+    EXPECT_EQ(errno, EACCES);
+    EXPECT_EQ(bytes, nullptr);
+    mem_free(path);
+}
+#endif
 
 // Test directory root — all tests write under this
 static const char* TEST_DIR = "temp/test_file_module";
@@ -181,6 +472,49 @@ TEST_F(FileWriteTest, AtomicWriteNew) {
 TEST_F(FileWriteTest, AtomicWriteNull) {
     EXPECT_EQ(write_text_file_atomic(NULL, "data"), -1);
     EXPECT_EQ(write_text_file_atomic("test.txt", NULL), -1);
+}
+
+TEST_F(FileWriteTest, AtomicNewPreservesExistingAndPublishesEmptyOrBinaryFiles) {
+    char path[256];
+    ASSERT_GT(path_str_join_posix_into(path, sizeof(path), TEST_DIR, "exclusive.bin"), 0);
+    const char bytes[] = {'A', '\0', 'B'};
+    ASSERT_EQ(write_binary_file_atomic_new(path, bytes, sizeof(bytes)), 0);
+    errno = 0;
+    EXPECT_EQ(write_binary_file_atomic_new(path, "replacement", 11), -1);
+    EXPECT_EQ(errno, EEXIST);
+    char* content = nullptr;
+    size_t size = 0;
+    ASSERT_TRUE(file_read_all(path, MEM_CAT_TEMP, &content, &size));
+    EXPECT_EQ(size, sizeof(bytes));
+    if (size == sizeof(bytes)) EXPECT_EQ(memcmp(content, bytes, sizeof(bytes)), 0);
+    mem_free(content);
+    ASSERT_EQ(file_delete(path), 0);
+    ASSERT_EQ(write_binary_file_atomic_new(path, "", 0), 0);
+    EXPECT_EQ(file_size(path), 0);
+    EXPECT_EQ(write_binary_file_atomic_new(nullptr, "x", 1), -1);
+    EXPECT_EQ(write_binary_file_atomic_new(path, nullptr, 0), -1);
+}
+
+TEST_F(FileWriteTest, AtomicNewCannotReplaceDirectoryOrSymlink) {
+    char path[256];
+    ASSERT_GT(path_str_join_posix_into(path, sizeof(path), TEST_DIR, "directory"), 0);
+    ASSERT_TRUE(create_dir(path));
+    EXPECT_EQ(write_binary_file_atomic_new(path, "x", 1), -1);
+    EXPECT_TRUE(file_is_dir(path));
+#ifndef _WIN32
+    char target[256];
+    ASSERT_GT(path_str_join_posix_into(target, sizeof(target), TEST_DIR, "target"), 0);
+    ASSERT_EQ(write_binary_file_atomic_new(target, "original", 8), 0);
+    ASSERT_GT(path_str_join_posix_into(path, sizeof(path), TEST_DIR, "link"), 0);
+    ASSERT_EQ(symlink("target", path), 0);
+    EXPECT_EQ(write_binary_file_atomic_new(path, "replacement", 11), -1);
+    EXPECT_EQ(errno, EEXIST);
+    EXPECT_TRUE(file_is_symlink(path));
+    char* content = nullptr;
+    ASSERT_TRUE(file_read_all(target, MEM_CAT_TEMP, &content, nullptr));
+    EXPECT_STREQ(content, "original");
+    mem_free(content);
+#endif
 }
 
 /* ================================================================== *
@@ -1232,17 +1566,96 @@ struct ConcurrentDirectoryJob {
     bool success;
 };
 
-static void* create_directory_together(void* argument) {
-    ConcurrentDirectoryJob* job = (ConcurrentDirectoryJob*)argument;
-    ConcurrentDirectoryGate* gate = job->gate;
+static void await_concurrent_path_start(ConcurrentDirectoryGate* gate) {
     pthread_mutex_lock(&gate->mutex);
     gate->ready++;
     pthread_cond_broadcast(&gate->changed);
     while (!gate->start) pthread_cond_wait(&gate->changed, &gate->mutex);
     pthread_mutex_unlock(&gate->mutex);
+}
+
+static void* create_directory_together(void* argument) {
+    ConcurrentDirectoryJob* job = (ConcurrentDirectoryJob*)argument;
+    ConcurrentDirectoryGate* gate = job->gate;
+    await_concurrent_path_start(gate);
     job->success = create_dir(gate->path);
     return nullptr;
 }
+
+struct ConcurrentPublicationJob {
+    ConcurrentDirectoryGate* gate;
+    FileAnchor* anchor;
+    char content[128];
+    int result;
+    int error;
+};
+
+static void* publish_file_together(void* argument) {
+    ConcurrentPublicationJob* job = (ConcurrentPublicationJob*)argument;
+    await_concurrent_path_start(job->gate);
+    job->result = job->anchor
+        ? file_anchor_write_atomic(job->anchor, job->gate->path, job->content, sizeof(job->content), nullptr)
+        : write_binary_file_atomic_new(job->gate->path, job->content, sizeof(job->content));
+    job->error = errno;
+    return nullptr;
+}
+
+static void expect_single_publication_winner(FileAnchor* anchor, const char* path) {
+    constexpr size_t count = 8;
+    ConcurrentDirectoryGate gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, false, path};
+    pthread_t threads[count];
+    ConcurrentPublicationJob jobs[count] = {};
+    size_t created = 0;
+    for (; created < count; created++) {
+        jobs[created].gate = &gate;
+        jobs[created].anchor = anchor;
+        memset(jobs[created].content, 'A' + created, sizeof(jobs[created].content));
+        if (pthread_create(&threads[created], nullptr, publish_file_together, &jobs[created]) != 0) break;
+    }
+    pthread_mutex_lock(&gate.mutex);
+    while (gate.ready < created) pthread_cond_wait(&gate.changed, &gate.mutex);
+    gate.start = true;
+    pthread_cond_broadcast(&gate.changed);
+    pthread_mutex_unlock(&gate.mutex);
+    size_t winners = 0;
+    const char* winner = nullptr;
+    for (size_t i = 0; i < created; i++) {
+        pthread_join(threads[i], nullptr);
+        if (jobs[i].result == 0) { winners++; winner = jobs[i].content; }
+        else EXPECT_EQ(jobs[i].error, EEXIST);
+    }
+    pthread_cond_destroy(&gate.changed);
+    pthread_mutex_destroy(&gate.mutex);
+    ASSERT_EQ(created, count);
+    ASSERT_EQ(winners, 1U);
+    char* content = nullptr;
+    size_t size = 0;
+    ASSERT_TRUE(anchor ? file_anchor_read_all(anchor, path, 1024, MEM_CAT_TEMP, &content, &size, nullptr)
+        : file_read_all(path, MEM_CAT_TEMP, &content, &size));
+    EXPECT_EQ(size, sizeof(jobs[0].content));
+    if (size == sizeof(jobs[0].content)) EXPECT_EQ(memcmp(content, winner, size), 0);
+    mem_free(content);
+}
+
+TEST_F(FileEdgeTest, AtomicNewConcurrentPublishersPreserveExactlyOneWinner) {
+    for (size_t round = 0; round < 4; round++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/publication_%zu", TEST_DIR, round);
+        expect_single_publication_winner(nullptr, path);
+    }
+}
+
+#ifndef _WIN32
+TEST_F(FileAnchorTest, ConcurrentPublicationCannotReplaceAnotherCreator) {
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    for (size_t round = 0; round < 4; round++) {
+        char relative[64];
+        snprintf(relative, sizeof(relative), "publication_%zu", round);
+        expect_single_publication_winner(anchor, relative);
+    }
+}
+#endif
 
 TEST_F(FileEdgeTest, CreateDirAcceptsConcurrentCreators) {
     // release creators together so the stat/mkdir race reaches both parents and leaves.

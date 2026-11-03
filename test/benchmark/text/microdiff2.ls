@@ -10,26 +10,26 @@ fn make_create(path: array, value: any) map =>
 fn make_change(path: array, value: any, old_value: any) map =>
     {type: "CHANGE", path: path, value: value, oldValue: old_value}
 
-pn is_rich_leaf(value: any) bool {
+fn is_rich_leaf(value: any) bool^ {
     if (value is map) {
         return "__microdiff_rich_type" at value
     }
     return false
 }
 
-pn rich_leaf_equal(old_value: any, fresh_value: any) bool {
-    if (not is_rich_leaf(old_value) or not is_rich_leaf(fresh_value)) {
+fn rich_leaf_equal(old_value: any, fresh_value: any) bool^ {
+    if ((not is_rich_leaf(old_value) or not is_rich_leaf(fresh_value))^) {
         return false
     }
     return old_value.__microdiff_rich_type == fresh_value.__microdiff_rich_type and
         old_value.value == fresh_value.value
 }
 
-pn both_nan(left: any, right: any) bool {
+fn both_nan(left: any, right: any) bool^ {
     return left is nan and right is nan
 }
 
-pn diff_array(old: array, fresh: array, prefix: array) array {
+pn diff_array(old: array, fresh: array, prefix: array) array^ {
     var changes: array = []
     var index: int = 0
     while (index < len(old)) {
@@ -48,7 +48,7 @@ pn diff_array(old: array, fresh: array, prefix: array) array {
     return changes
 }
 
-pn diff_map(old: map, fresh: map, prefix: array) array {
+pn diff_map(old: map, fresh: map, prefix: array) array^ {
     var changes: array = []
     for (key, old_value at old) {
         let path: array = prefix ++ [string(key)]
@@ -66,7 +66,7 @@ pn diff_map(old: map, fresh: map, prefix: array) array {
     return changes
 }
 
-pn diff_value(old_value: any, fresh_value: any, path: array) array {
+pn diff_value(old_value: any, fresh_value: any, path: array) array^ {
     if (old_value is map and fresh_value is map) {
         if (is_rich_leaf(old_value) or is_rich_leaf(fresh_value)) {
             if (rich_leaf_equal(old_value, fresh_value)) []
@@ -117,7 +117,7 @@ fn make_microdiff_snapshot(revised: bool) map => {
     value: if (revised) 42 else 41
 }
 
-pn valid_snapshot_diffs(pairs: array) bool {
+pn valid_snapshot_diffs(pairs: array) bool^ {
     let removed = diff_map(pairs[0][0], pairs[0][1], [])
     let created = diff_map(pairs[1][0], pairs[1][1], [])
     return len(removed) == 10 and len(created) == 10 and
@@ -134,7 +134,7 @@ pn main() {
         [make_microdiff_snapshot(true), make_microdiff_snapshot(false)],
         [make_microdiff_snapshot(false), make_microdiff_snapshot(true)]
     ]
-    if (not valid_snapshot_diffs(pairs)) {
+    if ((not valid_snapshot_diffs(pairs))^) {
         print("microdiff: FAIL fixture verification\n")
         return
     }
@@ -152,7 +152,7 @@ pn main() {
         }
         round = round + 1
     }
-    if (checksum == 3278848) {
+    if ((checksum == 3278848)^) {
         print("microdiff: CHECKSUM:" ++ checksum ++ "\n")
     } else {
         print("microdiff: FAIL checksum=" ++ checksum ++ "\n")

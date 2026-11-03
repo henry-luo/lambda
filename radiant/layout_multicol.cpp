@@ -1827,7 +1827,7 @@ static void multicol_finalize_fragmented_inline_continuations(View* view) {
         }
         // CSS Ruby: an annotation inline box owns its line box; an atomic
         // annotation child may overflow it and must not resize the box.
-        if (span->tag() != MARKUP_NAME_RT &&
+        if (!layout_ruby_annotation_node(span) &&
             containing_block && is_multicol_container(containing_block)) {
             span->set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, false);
             bool used_block_geometry = false;
@@ -2234,14 +2234,7 @@ static float multicol_line_advance_from_items(InlineFragmentItem* items, int ite
 }
 
 static bool multicol_is_ruby_annotation_text(View* view) {
-    if (!view || view->view_type != RDT_VIEW_TEXT) return false;
-    for (DomNode* ancestor = view->parent; ancestor; ancestor = ancestor->parent) {
-        if (!ancestor->is_element()) continue;
-        NameId tag = ancestor->as_element()->tag();
-        if (tag == MARKUP_NAME_RT) return true;
-        if (tag == MARKUP_NAME_RUBY) break;
-    }
-    return false;
+    return view && view->view_type == RDT_VIEW_TEXT && layout_ruby_annotation_content(view);
 }
 
 template <typename Callback>
@@ -11176,8 +11169,10 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.given_height = column_width;
         lycon->available_space.height = AvailableSize::make_definite(column_width);
     }
-    // Layout children normally within column width
+    // completed outer lines retain their own geometry while parallel annotation IFCs are formatted.
+    LayoutLineBoxScope source_lines(lycon, block);
     multicol_layout_children(lycon, block);
+    source_lines.finish();
     // containment formatting contexts already include their child margins.
     float total_content_height = lycon->block.advance_y;
     // Restore original widths (for container sizing)
@@ -11368,28 +11363,37 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // inline content can be nested in spans; collect the laid-out leaves in source order.
         struct LineRect {
             TextRect* rect;
-            float line_y;        // original y
-            float new_y;         // redistributed y
-            float line_height;   // height of this rect
+            int source_line;
+            float line_y, new_y, line_height, offset_x;
         };
-        LineRect lines[512];
+        lam::ArrayList<LineRect> lines{MEM_CAT_LAYOUT, 0};
         int line_count = 0;
-
-        multicol_for_each_inline_leaf(block->first_placed_child(), [&](View* leaf) {
-            if (leaf->view_type != RDT_VIEW_TEXT) return;
+        bool completed_lines = !source_lines.failed && !source_lines.lines.empty() &&
+            !multicol_has_vertical_inline_axis(block);
+        bool collection_failed = false;
+        if (completed_lines) {
+            for (const LayoutLineBox& line : source_lines.lines) {
+                if (!lines.append({nullptr, line.number, line.block_start, line.block_start,
+                        line.block_extent, 0.0f})) { collection_failed = true; break; }
+                line_count++;
+            }
+        } else multicol_for_each_inline_leaf(block->first_placed_child(), [&](View* leaf) {
+            if (leaf->view_type != RDT_VIEW_TEXT || collection_failed) return;
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(leaf);
-            for (TextRect* rect = text->rect; rect && line_count < 512; rect = rect->next) {
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (layout_text_rect_content_kind(text, rect) ==
-                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-                    continue;
+                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) continue;
+                if (!lines.append({rect, rect->line_number, rect->y, rect->y, rect->height, 0.0f})) {
+                    collection_failed = true; break;
                 }
-                lines[line_count].rect = rect;
-                lines[line_count].line_y = rect->y;
-                lines[line_count].new_y = rect->y;
-                lines[line_count].line_height = rect->height;
                 line_count++;
             }
         });
+        if (collection_failed) {
+            log_error("multicol line projection: cannot retain source line geometry");
+            flow_scratch.release(&lycon->scratch);
+            return;
+        }
         if (line_count == 0) {
             int break_line_count = 0;
             float break_line_advance = 0.0f;
@@ -11489,7 +11493,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         if (max_line_height <= 0.0f) max_line_height = line_advance;
         float first_line_height = lines[0].line_height > 0.0f
             ? lines[0].line_height : line_advance;
-        float normal_line_offset = multicol_normal_line_offset(
+        float normal_line_offset = completed_lines ? 0.0f : multicol_normal_line_offset(
             line_advance, first_line_height);
         float first_line_box_y = lines[0].line_y -
             multicol_content_start_y(block) - normal_line_offset;
@@ -11517,10 +11521,22 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         float max_col_height = 0;
         int used_column_count = 0;
         bool wraps_rows = multicol_group_wraps_rows(block);
+        bool overflow_columns = completed_lines && multicol_allows_overflow_columns(block);
         float row_gap = multicol_row_gap(block);
         if (row_gap < 0.0f) row_gap = 0.0f;
         int orphans = block->blk && block->block_mut()->orphans > 0 ? block->block_mut()->orphans : 2;
         int widows = block->blk && block->block_mut()->widows > 0 ? block->block_mut()->widows : 2;
+        auto can_fit_orphans = [&](int first, float available) {
+            if (!completed_lines) return true;
+            int last = min(first + orphans, line_count) - 1;
+            return lines[last].line_y + lines[last].line_height - lines[first].line_y <=
+                available + kTextLayoutSubpixelEpsilon;
+        };
+        auto project_line = [&](LineRect& line, float offset_x, float y) {
+            line.offset_x = offset_x;
+            line.new_y = y;
+            if (!completed_lines) { line.rect->x += offset_x; line.rect->y = y; }
+        };
         int current_fragment = 0;
         float fragment_start_offset = first_line_box_y;
         int line_slot = 0;
@@ -11551,13 +11567,15 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                     line_slot, visual_bottom, target_height, li, line_count,
                     widows, orphans, fragment_start_offset +
                     (line_slot + 1) * line_advance + line_offset +
-                    lines[li + 1].line_height);
-                if (should_break && line_slot < orphans) should_break = false;
+                    (li + 1 < line_count ? lines[li + 1].line_height : 0.0f));
+                if (should_break && line_slot < orphans &&
+                        can_fit_orphans(li - line_slot, target_height - fragment_start_offset))
+                    should_break = false;
                 if (should_break &&
-                    (current_fragment < column_count - 1 || wraps_rows)) {
+                    (current_fragment < column_count - 1 || wraps_rows || overflow_columns)) {
                     current_fragment++;
-                    current_col = current_fragment % column_count;
-                    current_row = current_fragment / column_count;
+                    current_col = wraps_rows ? current_fragment % column_count : current_fragment;
+                    current_row = wraps_rows ? current_fragment / column_count : 0;
                     fragment_start_offset = 0.0f;
                     line_slot = 0;
                     line_offset = 0.0f;
@@ -11567,10 +11585,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 float row_y = current_row * (target_height + row_gap);
                 float new_y = row_y + fragment_start_offset +
                     line_slot * line_advance + line_offset;
-                lr.rect->x += multicol_inline_column_index(block, current_col, column_count, true) *
-                    (column_width + gap);
-                lr.rect->y = new_y;
-                lr.new_y = new_y;
+                project_line(lr, multicol_inline_column_index(block, current_col, column_count, true) *
+                    (column_width + gap), new_y);
                 float used_height = row_y + fragment_start_offset +
                     line_slot * line_advance + line_offset + lr.line_height;
                 if (used_height > max_col_height) max_col_height = used_height;
@@ -11590,7 +11606,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // This matches browser behavior of preferring more content
             // in earlier columns when lines are indivisible.
             bool should_break = false;
-            if (col_started && (current_col < column_count - 1 || wraps_rows)) {
+            if (col_started && (current_col < column_count - 1 || wraps_rows || overflow_columns)) {
                 float col_h_with = rel_y - col_start_y + lr.line_height;
                 if (col_h_with > target_height) {
                     float col_h_without = rel_y - col_start_y;
@@ -11611,7 +11627,9 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                         should_break = next_col_h_with > target_height;
                     }
                 }
-                if (should_break && li - col_start_line < orphans) {
+                // CSS Break §4.4 relaxes orphans when the requested lines cannot fit a fragment.
+                if (should_break && li - col_start_line < orphans &&
+                        can_fit_orphans(col_start_line, target_height)) {
                     should_break = false;
                 }
                 if (should_break) {
@@ -11633,10 +11651,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             col_started = true;
             // Reposition: shift x by column offset, reset y within column
             float col_x_offset = multicol_inline_column_index(block, current_col, column_count, true) * (column_width + gap);
-            lr.rect->x += col_x_offset;
-            lr.new_y = lines[0].line_y + current_row * (target_height + row_gap) +
-                (rel_y - col_start_y);
-            lr.rect->y = lr.new_y;
+            project_line(lr, col_x_offset, lines[0].line_y + current_row * (target_height + row_gap) +
+                (rel_y - col_start_y));
 
             col_y = (rel_y - col_start_y) + lr.line_height;
             if (current_col + 1 > used_column_count) used_column_count = current_col + 1;
@@ -11647,7 +11663,17 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         float final_height = max_col_height;
         // Direct text rects were already moved with their line records; only
         // break views need the corresponding line-coordinate projection.
-        child = block->first_child;
+        if (completed_lines) {
+            // the paragraph's inline origin is its first column, including RTL progression.
+            float break_offset_x = multicol_inline_column_index(block, 0, column_count, true) *
+                (column_width + gap);
+            // one source-line translation includes bases, readings, breaks and inline atomic boxes.
+            for (const LineRect& line : lines)
+                for (View* root = block->first_placed_child(); root; root = root->next())
+                    layout_shift_inline_fragment(root, line.source_line, line.offset_x, line.new_y - line.line_y,
+                        break_offset_x);
+        }
+        child = completed_lines ? nullptr : block->first_child;
         while (child) {
             if (child->view_type == RDT_VIEW_BR) {
                 View* br = (View*)child;

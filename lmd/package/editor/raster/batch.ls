@@ -26,7 +26,7 @@ pub fn preflight(action,jobs,base,options={}) any^ {
 }
 pn run_job(action,job) any^ {
     let loaded = files.open_document(job.source)^
-    let chosen = if (job.layer != null) job.layer else [for (row in editor.layers(loaded.doc) where name(row.node) == 'layer') row.id][0]
+    let chosen = if (job.layer != null) job.layer else [for (row in ((editor.layers(loaded.doc)) ^ { [] }) where ((name(row.node) == 'layer') ^ { false })) row.id][0]
     let selected = editor.exec(loaded,{id:"layer.select",ids:[chosen]})^
     let changed = editor.exec(selected,{id:"action.replay",action:action})^
     let saved = files.write_document(changed,job.target,job.format)^;
@@ -39,8 +39,7 @@ pub pn run(action,jobs,options={}) any^ {
     var results = []
     for (job in ready) {
         var outcome = null
-        run_job(action,job) ^ { outcome = {source:job.source,target:job.target,ok:false,error:^.message} }
-            ~ { outcome = {*:~,ok:true} }
+        { let __error_outcome_1 = run_job(action,job) ^ { ^ }; if (__error_outcome_1 is error) { outcome = {source:job.source,target:job.target,ok:false,error:__error_outcome_1.message} } else match __error_outcome_1 { case any { outcome = {*:~,ok:true} } } }
         results = [*results,outcome]
         if (not outcome.ok and options.continue_on_error == false) { break }
     }

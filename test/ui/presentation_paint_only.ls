@@ -27,7 +27,7 @@ on click(evt) {
     else if (id == "move") dom.presentation_style_set_property(dom.get_element_by_id(probe, "moved"), "transform", "translate(100px,0px)")
     else if (id == "hide" or id == "show") dom.presentation_style_set_property(dom.get_element_by_id(probe, "leaf"), "visibility", if (id == "hide") "hidden" else "visible")
     else if (id == "hide-group") dom.presentation_style_set_property(dom.get_element_by_id(probe, "group"), "visibility", "hidden")
-    else if (starts_with(id, "filter-")) dom.presentation_style_set_property(dom.get_element_by_id(probe, "filtered"),
+    else if (starts_with(id, "filter-")^) dom.presentation_style_set_property(dom.get_element_by_id(probe, "filtered"),
         "filter", if (id == "filter-color") "brightness(calc(var(--dim) * 1))"
             else if (id == "filter-spatial") "blur(2px)" else "none")
     else dom.set_attribute(probe, "data-hit", id)

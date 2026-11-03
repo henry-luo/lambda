@@ -22,4 +22,4 @@ pub fn natural(value,offset = null) int^ {
     parsed
 }
 pub fn kind(node) => string(name(node))
-pub fn count_of(interval) => if (interval.count == null) 1 else natural(interval.count,interval.start)^
+pub fn count_of(interval) any^ => if (interval.count == null) 1 else natural(interval.count,interval.start)^

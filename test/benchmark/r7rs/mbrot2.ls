@@ -3,7 +3,7 @@
 // Adapted from r7rs-benchmarks/src/mbrot.scm: 1 iteration on 75x75 grid
 // Expected: count at (0,0) = 5
 
-pn count(r: float, i: float, step: float, x: float, y: float) int {
+fn count(r: float, i: float, step: float, x: float, y: float) int {
     var max_count: int = 64
     var radius2: float = 16.0
     var cr: float = r + x * step
@@ -37,15 +37,15 @@ pn mbrot(var matrix: (int*)*, r: float, i: float, step: float, n: int) any {
     }
 }
 
-pn test(n: int) int {
+pn test(n: int) int^ {
     var matrix: (int*)* = [for (idx in 0 to n - 1) fill(n, 0)]
     mbrot(matrix, -1.0, -0.5, 0.005, n)
     var row0 = matrix[0]
     return row0[0]
 }
 
-pn benchmark() int {
-    var result: int = test(75)
+pn benchmark() int^ {
+    var result: int = test(75)^
     return result
 }
 
@@ -53,7 +53,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 5) {
+    if ((result == 5)^) {
         print("mbrot: PASS\n")
     } else {
         print("mbrot: FAIL result=")

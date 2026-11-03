@@ -34,9 +34,9 @@ fn markup(nodes) => join([for (child in nodes) format(child,'xml')],"")
 pub pn publish(owner,st) any^ {
     let previous_dialog = dom.get_attribute(owner,"data-dialog")
     let painted = surface.publish(owner,st)^
-    dom.set_close_guard(owner,editor.dirty(st))
+    dom.set_close_guard(owner,editor.dirty(st)^)
     if (st.painted_doc == null or st.histogram_raster != painted.painted_raster) {
-        dom.set_inner_html(node(owner,"histogram"),format(scene.histogram_chart(img.histogram(painted.painted_raster)^),'xml'))
+        dom.set_inner_html(node(owner,"histogram"),format(scene.histogram_chart(img.histogram(painted.painted_raster)^),'xml')^)
     }
     let rows = editor.layers(st.doc)
     let active = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null
@@ -89,7 +89,7 @@ pub pn publish(owner,st) any^ {
         'data-selection':if (st.selection == null) "none" else "active",
         'data-drag':if (st.gesture == null) "" else st.gesture.mode})
         dom.set_attribute(owner,string(key),requested)
-    let guide_html = markup([for (g in guides.items(st.doc)) <button type:"button",'data-action':"guide-remove",'data-guide':g.id,*:if (st.guides_locked) ({disabled:""}) else ({}),
+    let guide_html = markup([for (g in guides.items(st.doc)^) <button type:"button",'data-action':"guide-remove",'data-guide':g.id,*:if (st.guides_locked) ({disabled:""}) else ({}),
         (if (g.axis == "x") "Vertical " else "Horizontal ") ++ string(g.position) ++ " px · Remove">])
     if (dom.get_attribute(node(owner,"guide-list"),"data-items") != guide_html) {
         dom.set_inner_html(node(owner,"guide-list"),guide_html)
@@ -110,41 +110,41 @@ pub pn publish(owner,st) any^ {
     dom.set_text_content(node(owner,"guide-show"),if (st.guides_visible) "Hide guides" else "Show guides")
     dom.set_text_content(node(owner,"guide-snap"),if (st.snap_enabled) "Disable snapping" else "Enable snapping")
     dom.set_text_content(node(owner,"guide-layers"),if (st.snap_layers) "Layer snapping on" else "Layer snapping off")
-    dom.set_text_content(node(owner,"crop-size"),if (st.crop == null) "Drag to crop" else string(st.crop.width) ++ " × " ++ string(st.crop.height))
+    dom.set_text_content(node(owner,"crop-size"),if (st.crop == null) "Drag to crop" else string(st.crop.width)^ ++ " × " ++ string(st.crop.height)^)
     let layer_html = markup(scene.layer_rows(st))
     if (dom.get_attribute(node(owner,"layers"),"data-rows") != layer_html) {
         dom.set_inner_html(node(owner,"layers"),layer_html)
         dom.set_attribute(node(owner,"layers"),"data-rows",layer_html)
     }
     let effect_html = markup(scene.effect_rows(st))
-    if (dom.get_attribute(node(owner,"effects"),"data-items") != effect_html) {
+    if ((dom.get_attribute(node(owner,"effects"),"data-items") != effect_html)^) {
         dom.set_inner_html(node(owner,"effects"),effect_html)
         dom.set_attribute(node(owner,"effects"),"data-items",effect_html)
     }
-    if (tone_changed or st.painted_doc == null) for (control in tone.levels)
+    if ((tone_changed or st.painted_doc == null)^) for (control in tone.levels)
         set_value(node(owner,"levels-" ++ control.key),string(model.value(active_effect.options[control.key],control.value)*control.scale))
-    if (st.painted_doc == null or curves != st.painted_curves or curve_mode != st.painted_curve_mode or st.curve_channel != st.painted_curve_channel or st.curve_point != st.painted_curve_point) {
-        dom.set_inner_html(node(owner,"curve-graph"),format(scene.curve_chart(curves,st.curve_channel,st.curve_point,curve_mode)^,'xml'))
-        if (st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel)
-            set_value(node(owner,"curve-points"),format(tone.points(curves,st.curve_channel),'mark'))
+    if ((st.painted_doc == null or curves != st.painted_curves or curve_mode != st.painted_curve_mode or st.curve_channel != st.painted_curve_channel or st.curve_point != st.painted_curve_point)^) {
+        dom.set_inner_html(node(owner,"curve-graph"),format(scene.curve_chart(curves,st.curve_channel,st.curve_point,curve_mode)^,'xml')^)
+        if ((st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel)^)
+            set_value(node(owner,"curve-points"),format(tone.points(curves,st.curve_channel),'mark'))^
     }
     if (dom.get_state(node(owner,"curve-channel"),"value") != st.curve_channel)
-        set_value(node(owner,"curve-channel"),st.curve_channel)
-    if (dom.get_state(node(owner,"curve-mode"),"value") != curve_mode) set_value(node(owner,"curve-mode"),curve_mode)
-    set_disabled(node(owner,"curve-remove"),st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)
+        set_value(node(owner,"curve-channel"),st.curve_channel)^
+    if ((dom.get_state(node(owner,"curve-mode"),"value") != curve_mode)^) set_value(node(owner,"curve-mode"),curve_mode)^
+    set_disabled(node(owner,"curve-remove"),st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)^
     let style_html = markup(scene.style_rows(st))
-    if (dom.get_attribute(node(owner,"styles"),"data-items") != style_html) {
+    if ((dom.get_attribute(node(owner,"styles"),"data-items") != style_html)^) {
         dom.set_inner_html(node(owner,"styles"),style_html)
         dom.set_attribute(node(owner,"styles"),"data-items",style_html)
     }
-    let channel_html = markup([for (channel in channels.items(st.doc)) <option value:channel.id,channel.name>])
+    let channel_html = markup([for (channel in channels.items(st.doc)^) <option value:channel.id,channel.name>])
     if (dom.get_attribute(node(owner,"saved-channel"),"data-items") != channel_html) {
         let chosen = dom.get_state(node(owner,"saved-channel"),"value")
         dom.set_inner_html(node(owner,"saved-channel"),channel_html)
         dom.set_attribute(node(owner,"saved-channel"),"data-items",channel_html)
-        set_value(node(owner,"saved-channel"),if (channels.lookup(st.doc,chosen) != null) chosen else channels.items(st.doc)[0].id)
+        set_value(node(owner,"saved-channel"),if (channels.lookup(st.doc,chosen) != null) chosen else channels.items(st.doc)[0].id)^
     }
-    if (primary != st.artwork_node and name(primary) in ['text','vector']) {
+    if ((primary != st.artwork_node and name(primary) in ['text','vector'])^) {
         for (id,requested in {'art-width':primary.width,'art-height':primary.height,'art-fill':colors.css(model.value(primary.fill,[0,0,0,1])),
             'art-stroke':colors.css(model.value(primary.stroke,[0,0,0,0])),'art-stroke-width':model.value(primary.stroke_width,0),
             'art-shape':model.value(primary.shape,"rectangle"),'art-radius':model.value(primary.radius,0),
@@ -178,10 +178,10 @@ pub pn publish(owner,st) any^ {
         if (not dom.matches(control,":focus") and dom.get_state(control,"value") != string(requested))
             set_value(control,string(requested))
     }
-    dom.set_text_content(node(owner,"action-status"),if (st.recording != null) "Recording · " ++ string(len(st.recording.steps)) ++ " steps"
-        else if (len(st.actions)>0) st.actions[last].name ++ " · " ++ string(len(st.actions[last].steps)) ++ " steps" else "Record edits on one selected layer")
+    dom.set_text_content(node(owner,"action-status"),if (st.recording != null) "Recording · " ++ string(len(st.recording.steps))^ ++ " steps"
+        else if ((len(st.actions)>0)^) st.actions[last].name ++ " · " ++ string(len(st.actions[last].steps))^ ++ " steps" else "Record edits on one selected layer")
     dom.set_text_content(node(owner,"retouch-source"),if (st.retouch.source == null) "No source selected" else
-        "Source: " ++ string(st.retouch.source.point[0]) ++ ", " ++ string(st.retouch.source.point[1]))
+        "Source: " ++ string(st.retouch.source.point[0])^ ++ ", " ++ string(st.retouch.source.point[1])^)
     for (tool in tools.catalog) dom.set_attribute(node(owner,"tool-" ++ tool.id),"class",if (st.tool == tool.id) "active" else "")
     dom.set_text_content(node(owner,"tool-label"),[for (tool in tools.catalog where tool.id == st.tool) tool.label][0])
     for (entry in [{id:"undo",disabled:not editor.can_undo(st)^},{id:"redo",disabled:not editor.can_redo(st)^}]) {

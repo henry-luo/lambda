@@ -1,6 +1,6 @@
 // A complete ASCII PDF authored in Lambda. This MVP measures ASCII fragments;
 // general byte-offset APIs and Radiant projection remain separate work.
-fn xref_entry(offset) {
+fn xref_entry(offset) any^ {
     let digits = string(offset);
     slice("0000000000", 0, 10 - len(digits)) ++ digits ++ " 00000 n \n"
 }
@@ -21,7 +21,7 @@ pn main() {
     let file = <file format:'pdf',
         header catalog pages page stream paint endstream
         "xref\n0 5\n0000000000 65535 f \n"
-        xref_entry(first) xref_entry(second) xref_entry(third) xref_entry(fourth)
+        xref_entry(first)^ xref_entry(second)^ xref_entry(third)^ xref_entry(fourth)^
         "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n"
         string(xref) "\n%%EOF\n"
     >;

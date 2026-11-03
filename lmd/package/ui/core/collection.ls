@@ -14,7 +14,7 @@ pub fn key_props(items, props, name, default_name, owner) bool^ {
     if (c.has(props,name) and c.has(props,default_name)) raise c.fail(owner,name ++ " and " ++ default_name ++ " are mutually exclusive") else true
 }
 pub fn toggle(keys, key, multiple = true) => if (contains(keys,key) ^ { false }) [for (old in keys where old != key) old] else if (multiple) [*keys,key] else [key]
-pub fn set_keys(keys, candidates, checked) => if (checked) unique([*keys,*candidates]) else [for (key in keys where not contains(candidates,key)) key]
+pub fn set_keys(keys, candidates, checked) => if (checked) unique([*keys,*candidates]) else [for (key in keys where ((not contains(candidates,key)) ^ { false })) key]
 pub fn validate(items, owner) bool^ {
     if (not (items is array)) raise c.fail(owner, "items must be an array")
     else (
@@ -27,7 +27,7 @@ pub fn validate(items, owner) bool^ {
         else true
     )
 }
-pub fn initial(items, props) => c.option(props, "value", c.option(props, "default_value", enabled(items)[0].key))
+pub fn initial(items, props) any^ => c.option(props, "value", c.option(props, "default_value", enabled(items)[0].key))
 pub fn move(items: array, key, direction) {
     let choices = enabled(items)
     let found = [for (index, item in choices where item.key == key) index]
@@ -37,8 +37,8 @@ pub fn move(items: array, key, direction) {
     else if (direction == "End") choices[len(choices) - 1].key
     else choices[(here + (if (direction == "ArrowLeft" or direction == "ArrowUp") len(choices) - 1 else 1)) % len(choices)].key
 }
-pub fn page_count(total, page_size) => max(1, int(ceil(total / page_size)))
+pub fn page_count(total, page_size) any^ => max(1, int(ceil(total / page_size)))
 // a pager's work is bounded even when the dataset has millions of pages.
 pub fn page_window(page, total) => sort(unique([1,*[for (candidate in (page - 2) to (page + 2) where candidate > 1 and candidate < total) candidate],total]))
 pub fn page_rows(rows: array, current: int, page_size: int) array^ => slice(rows, (current - 1) * page_size, current * page_size)^
-pub fn order_rows(rows: array, key, direction) => if (key == null) rows else sort(rows, {dir:direction, by:(row) => row[key]})
+pub fn order_rows(rows: array, key, direction) any^ => if (key == null) rows else sort(rows, {dir:direction, by:(row) => row[key]})

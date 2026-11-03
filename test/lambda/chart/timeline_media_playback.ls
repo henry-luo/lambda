@@ -3,7 +3,7 @@ import native: lambda.chart.timeline.native_media
 let raw={id:"media-story",view:"story",spacing:"sequence",source:{revision:"r1"},
     slideshow:{duration:100,media_end:true,media_timeout:200},
     events:[{id:"a",title:"A",media:[{id:"film",kind:"video",src:"film.mp4"},{id:"voice",kind:"audio",src:"voice.wav"}]},{id:"b",title:"B"}]}
-fn act(current, action, now, spec = raw) => t.update(current,action,{spec:spec,revision:spec.source.revision,now:now})
+fn act(current, action, now, spec = raw) any^ => t.update(current,action,{spec:spec,revision:spec.source.revision,now:now})
 fn completion(current, id, status = "ended") => {type:"media_event",event_id:"a",id:id,status:status,
     token:current.media_session.token,revision:"r1"}
 let played=act(t.initial_state(raw),{type:"play"},0)

@@ -21,7 +21,7 @@ let COUNTERS = {'1': "arabic", a: "alph", A: "Alph", i: "roman", I: "Roman"}
 // The label template [(a)] or [Step 1.]: the first of 1, a, A, i, I outside braces
 // is the counter and the rest prints as written, with its braces removed. Null
 // when the template has no counter.
-pub fn template(option) {
+pub fn template(option) any^ {
     let chars = split(option or "", "")
     let at = counter_at(chars, 0, 0);
     (if (at == null) null else {
@@ -40,7 +40,7 @@ fn counter_at(chars, i, depth) {
 fn literal(chars) => join([for (ch in chars where ch != "{" and ch != "}") ch], "")
 
 // item n's label under a template (n counts from 1)
-pub fn label(tpl, n) {
+pub fn label(tpl, n) any^ {
     let counter = match tpl.style {
         case "alph": lower(util.upper_alph(n))
         case "Alph": util.upper_alph(n)

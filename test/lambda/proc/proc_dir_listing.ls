@@ -2,7 +2,7 @@
 // Validates: string conversion, name/path/extension/size/is_dir/scheme/depth/modified
 
 pn main() {
-    var entries: any | error = input("test/input/test_dir_listing", "dir")
+    var entries: any^ = input("test/input/test_dir_listing", "dir")
     if (entries is error) {
         print("error")
         return null
@@ -16,7 +16,7 @@ pn main() {
     var csv_entry = null
     var dir_entry = null
     var i = 0
-    while (i < len(entries)) {
+    while ((i < len(entries))^) {
         let e = entries[i]
         if (e.name == "hello.txt") { txt_entry = e }
         else if (e.name == "data.csv") { csv_entry = e }

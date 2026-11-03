@@ -2,7 +2,7 @@
 import dom
 import t: lambda.scene3d.transform
 
-fn layers(depth,day) element => if (depth==0)
+fn layers(depth,day) element^ => if (depth==0)
  <mesh geometry:"blade",material:"leaf",instances:[for (i in 0 to (if (day==0) 0 else 399))
   t.matrix([float(i%20)*0.13-1.25,0.0,float(int(i/20))*0.13-1.25],
    [0.0,float(day)*0.15,0.0],[1.0,1.0+float(day)*0.1,1.0])^]>

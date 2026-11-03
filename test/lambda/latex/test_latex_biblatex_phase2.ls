@@ -62,10 +62,10 @@ let order_entries = [
     {key: "b", fields: {author: "Ada Alpha", title: "Beta", year: "2022"}},
     {key: "c", fields: {author: "Bea Beta", title: "Alpha", year: "2020"}}
 ]
-"sorting none:"; [for (entry in bib_style.sort_entries(order_entries, "none")) entry.key]
-"sorting nty:"; [for (entry in bib_style.sort_entries(order_entries, "nty")) entry.key]
-"sorting nyt:"; [for (entry in bib_style.sort_entries(order_entries, "nyt")) entry.key]
-"sorting ynt:"; [for (entry in bib_style.sort_entries(order_entries, "ynt")) entry.key]
+"sorting none:"; [for (entry in ((bib_style.sort_entries(order_entries, "none")) ^ { [] })) entry.key]
+"sorting nty:"; [for (entry in ((bib_style.sort_entries(order_entries, "nty")) ^ { [] })) entry.key]
+"sorting nyt:"; [for (entry in ((bib_style.sort_entries(order_entries, "nyt")) ^ { [] })) entry.key]
+"sorting ynt:"; [for (entry in ((bib_style.sort_entries(order_entries, "ynt")) ^ { [] })) entry.key]
 
 let mixed_source = replace(source, "style=numeric", "style=authoryear,citestyle=numeric,bibstyle=authoryear")
 let mixed_ast = parse(mixed_source, {type: "latex"}) ^ { null }

@@ -12,7 +12,7 @@ fn escape(x: int) Pair {
     pair
 }
 
-fn checked(x: any) int {
+fn checked(x: any) int^ {
     let pair: Pair = {left: x, right: true}
     pair.left
 }

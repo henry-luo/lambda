@@ -37,7 +37,7 @@ fn class_content(node, members) =>
     member_section("method", members)
   >
 
-pub fn adapt(graph) {
+pub fn adapt(graph) any^ {
   if (config.options(graph).hide_empty_members)
     compartment.adapt(graph, "class-member", class_content)
   else compartment.adapt_all(graph, "class-member", class_content)

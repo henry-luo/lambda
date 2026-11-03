@@ -1,523 +1,283 @@
 # Lambda Error Handling
 
-This document covers Lambda's error handling system — how errors are created, returned, propagated, and enforced at compile time.
+Errors are values. A handler recovers locally, postfix `^` forwards an error,
+and an error-admitting receiver retains the outcome.
 
-> **Related Documentation**:
-> - [Lambda Reference](Lambda_Reference.md) — Language overview
-> - [Lambda Functions](Lambda_Func.md) — Function declarations and return types
-> - [Lambda Sys Func Reference](Lambda_Sys_Func.md) — Built-in system functions
-> - [Lambda Type System](Lambda_Type.md) — Type annotations
+**Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v3 in
+[Formal Semantics](Lambda_Formal_Semantics.md).
 
----
+**Implementation status, 2026-11-03:** M1–M8 implement the ratified rules,
+including ordinary-error unification, binding acknowledgement, deferred
+initializer/reassignment outcomes, normal admission through error unions, and
+handler syntax/results. Authored package/demo migration and the Lambda, MIR,
+GC, input and Test262 gates are qualified. The user waived the complete parity
+sweep and interpreter-manifest refresh on 2026-11-03; the manifests retain their
+last qualified contents, and no final parity pass is claimed. Exact results and
+limits are in the
+[production qualification record](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
+Experimental Lambda MIR MVP adaptation is deferred separately
+([LR01-22](../vibe/Lambda_Issue_Ledger.md#lr01-22)).
+General `fn`-local control, including explicit `return` in `fn`, is qualified
+separately in the [completed extension](<../vibe/impl/Lambda_Impl_Function_Local_State (done).md>).
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [The `error` Type](#the-error-type)
-3. [Creating Errors](#creating-errors)
-4. [The `raise` Keyword](#the-raise-keyword)
-5. [Error Return Types (`T^E`)](#error-return-types-te)
-6. [Error Handling at Call Sites](#error-handling-at-call-sites)
-7. [Error Propagation (`^` Operator)](#error-propagation--operator)
-8. [Error Handling (`e ^ { … }`)](#error-handling-e----)
-9. [Procedure-Call Statement Handler (`pn_call() ^ { … }`)](#procedure-call-statement-handler-pn_call----)
-10. [Compile-Time Enforcement](#compile-time-enforcement)
-11. [System Functions That Can Raise](#system-functions-that-can-raise)
-12. [Error Code Categories](#error-code-categories)
-13. [Checking for Errors](#checking-for-errors)
-14. [Error Truthiness and Defaults](#error-truthiness-and-defaults)
-15. [Examples](#examples)
-
----
-
-## Overview
-
-Lambda has returned error values and an explicit raised-error channel. There is
-no `try`/`throw`/`catch` exception handling. Instead:
-
-- Errors are explicit values that flow through the type system.
-- `T | error` returns an error as ordinary data, with no must-handle obligation.
-- `T^E` declares an enforcing raised channel; callers must engage it immediately.
-- `raise` originates an error only on a declared `T^E` channel. A
-  `T | error` function returns `error(...)` as an ordinary value.
-- The one-arm `e ^ { … }`, two-arm `e ^ { … } ~ { … }`, and postfix `e^`
-  forms are channel-agnostic: they discharge both returned error values and
-  raised errors through one surface.
-- A procedure call may use `pn_call() ^ { … }` as a statement handler that
-  remains valid across suspension.
-
-This approach is inspired by Rust's `Result<T, E>` and Zig's `T!E`, but with lighter syntax.
-
----
+Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
+[Expressions](Lambda_Expr_Stam.md), and [System functions](Lambda_Sys_Func.md).
 
 ## The `error` Type
 
-Lambda has a built-in `error` type with the following fields:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `code` | `int` | Error code (see [Error Code Categories](#error-code-categories)) |
-| `message` | `string` | Human-readable error message |
-| `file` | `string?` | Source file where the error occurred |
-| `line` | `int` | 1-based line number |
-| `column` | `int` | 1-based column number |
-| `source` | `error?` | Wrapped/chained inner error |
-
-### Accessing Error Fields
-
-```lambda
-pn main() {                     // print is a pn: logging needs a procedure
-    let result = divide(10, 0) ^ {
-        print("code: " ++ str(^.code))
-        print("message: " ++ ^.message)
-        if (^.source is error)
-            print("caused by: " ++ ^.source.message)
-        0                       // the handler's value becomes `result`
-    }
-}
-```
-
----
+An error is a first-class value carrying `code`, `message`, source coordinates,
+and an optional wrapped `source` (S7.4.4). `error` alone names the type;
+`error("message")` constructs a value. Test with `value is error`, then inspect
+fields such as `value.message` or `value.code`.
 
 ## Creating Errors
 
-The `error()` function constructs error values:
-
 ```lambda
-// Simple error with message (code defaults to 318 = user_error)
-error("something went wrong")
-
-// Error wrapping another error (for error chaining)
-error("failed to load config", inner_err)
-
-// Error with parameter map (full control)
-error({
-    code: 304,
-    message: "division by zero"
-})
+let original = error("invalid input")
+let wrapped = error("cannot load document", original);
+[original is error, wrapped.message, wrapped.source.message]
 ```
 
-**Constructor signatures:**
-
-| Signature | Description |
-|-----------|-------------|
-| `error(message: string)` | Creates user error with message |
-| `error(message: string, source: error)` | Creates error wrapping another error |
-| `error(params: map)` | Creates error with explicit fields |
-
----
+`error({...})` also accepts the diagnostic record form. Constructing an error
+produces a value and continues evaluation. Returning it or using it as a final
+result makes it the enclosing callable's outcome, subject to its return contract.
 
 ## The `raise` Keyword
 
-`raise` originates an error on the enforcing `^E` channel. It is distinct from
-returning an `error(...)` value from a function declared `T | error`.
+`raise err` completes the enclosing callable early. An existing error is
+forwarded unchanged; a non-error operand is normalized by `error(...)` first
+(S7.4.6v3). In a procedure this has the same error outcome as returning the
+normalized error. The same early error completion applies in a pure function.
 
 ```lambda
-fn divide(a, b) int^ {
-    if (b == 0) raise error("division by zero")
-    else a / b
+fn checked(fail: bool) int^ {
+    if (fail) raise error("failed")
+    else 21
 }
+checked(true) ^ { ^.message }
 ```
 
-**Key properties:**
+`raise` is permitted whenever the return contract admits that error, including
+an ordinary union. Raising and returning an error have the same admission and
+acknowledgement requirements.
 
-- `raise` immediately returns the error value to the caller.
-- `raise v` with a value that is not an error is shorthand for
-  `raise error(v)`: `raise "division by zero"` raises the error that
-  `error("division by zero")` builds. The error constructor decides the code
-  and message.
-- A function must declare an error return type (`T^` or `T^E`) to use `raise`.
-- Using `raise` in a function with a plain `T` or `T | error` return type is a
-  compile error; the union form returns its error value normally.
+<a id="error-return-types-te"></a>
 
-```lambda error=E208
-// ❌ Compile error: function does not declare error return
-fn pure_add(a, b) int {
-    raise error("oops")
-}
-```
+## Outcome Types
 
----
+S7.4.2v4 uses ordinary unions for particular error outcomes:
 
-## Error Return Types (`T^E`)
+| Type | Admitted outcome |
+|---|---|
+| Successful `T` | Values of `T`. |
+| `T^` / `T \| error` | Values of `T` or any ordinary error. |
+| `T \| E` | Values of `T` or the specified error type/pattern `E`. |
+| `T \| E1 \| E2` | Values of `T` or either specified error alternative. |
+| `E`, where `E` classifies errors | Only those error values. |
 
-Functions declare whether they can fail using the `^` suffix on their return type:
+`T^` has the same meaning in bindings, parameters, and returns. `any` includes
+errors. Aliases preserve admission: naming `error` does not create a nominal
+error subtype. An ordinary map alternative stays a map.
 
-| Syntax | Meaning |
-|--------|---------|
-| `T` | Always succeeds — no error possible |
-| `T \| error` | May return `T` or an error value; no caller obligation |
-| `T^` | May return `T` or any error (shorthand for `T^error`) |
-| `T^E` | May return `T` or a specific error type `E` |
-| `T^E1 \| E2` | May return `T` or one of multiple error types |
+The typed-caret form `T^E` is rejected; use `T | E` or broad `T^`.
 
-```lambda
-// Always succeeds
-fn add(a: int, b: int) int => a + b
-
-// Error is returned as ordinary data
-fn parse_soft(s: string) int | error {
-    if (s == "") error("empty integer") else int(s)
-}
-
-// May fail with any error
-fn parse(s: string) int^ { ... }
-
-// May fail with a specific error type
-fn divide(a: int, b: int) int^DivisionError { ... }
-
-// May fail with multiple error types
-fn load(path: string) Config ^ ParseError | IOError { ... }
-
-// the named types above; a type may follow its first use (S11.4.12)
-type Config = {name: string}
-type DivisionError = error
-type ParseError = error
-type IOError = error
-```
-
-> **Note:** The error type after `^` is restricted to `error`, identifiers, or unions of these. Complex type expressions (maps, arrays) are not allowed — define a named type instead.
+Adding an error arm preserves the normal type's admission (S11.4.6v4).
+`let x: float^ = 7` therefore binds `7.0`, just as `float` does. Arrays still
+receive their full certificates, named records their required layout, and
+admitted errors retain their original payload. The same rule applies to
+particular-error unions and to arguments, reassignment and returns.
+There is no implicit broad ordinary-error allowance in a particular union.
+A function must handle, convert, or disclose ordinary errors outside its
+contract (S11.4.2v3). Exceptional system faults retain S7.11.
+Constrained annotations currently enforce their base only (S11.4.6v4);
+full predicate enforcement remains separate. Filtered handlers use the ordinary
+runtime type/pattern test to select recovery.
 
 ### Error Forms in Parameters and Let Bindings
 
-In value positions, `T^` and `T | error` both describe a value-or-error
-outcome (S7.4.2). The `^` spelling is distinctive on function returns because
-it adds the caller obligation and licenses `raise`.
-
-> **Not yet implemented.** The parser currently accepts `T^` only on a
-> function's return type. In a parameter or `let` annotation, write the
-> equivalent `T | error` for now.
-
-```lambda no-run
-// no-run: `T^` in parameter and let position is not yet accepted by the parser
-// Parameter that accepts a value-or-error
-fn process(input: int^) int { ... }
-
-// Let binding that may hold a value-or-error
-let result: int^ = may_fail(x)
-
-// Equivalent value-position spelling — use this today
-let result: int | error = may_fail(x)
+```lambda
+fn risky() int^ => raise error("failed")
+fn message(value: any^) string => if (value is error) value.message else "ok"
+let outcome: int^ = risky();
+message(outcome)
 ```
 
----
+Capturing an outcome acknowledges it without proving success or requiring an
+immediate inspection. Under S7.5.2v4/S7.7.4v2, initialization and whole-variable
+reassignment share the same admission decision:
+
+| Admission | Required behavior |
+|---|---|
+| Proven compatible | Retain the admitted outcome and continue. |
+| Proven incompatible | Static error; handle, propagate, or change the receiving contract. |
+| Explicit contract undecidable | Warn, validate at runtime, and bind/store the admitted value or validation error. |
+
+An inferred receiver retains possible errors; inference imprecision alone does
+not require a warning. A deferred failure keeps the declared target strict,
+while the effective type includes error. Reassignment replaces the old value.
+Typed element/field stores retain their own contract.
+
+```lambda
+fn opaque(value) => value
+let value: int = opaque("bad") // E241 warning; runtime check binds an error
+let recovered = value ^ { 42 };
+[value is error, recovered]    // [true, 42]
+```
+
+A handler on the initializer runs before annotation validation. To recover
+that later failure, handle the bound outcome as above (S7.7.7v4).
 
 ## Error Handling at Call Sites
 
-When calling a function that returns `T^`, the caller must immediately engage
-the error possibility. Channel-agnostic forms are allowed:
+| Form | Purpose |
+|---|---|
+| `let outcome = f()` / `let outcome: T^ = f()` | Retain the success/error outcome. |
+| `f() ^ { fallback }` | Recover from an error and preserve non-errors. |
+| `f() or^ { fallback }` | Recover from an error or a falsy value. |
+| `f() ^E { recovery }` | Handle matching ordinary errors; retain unmatched ones. |
+| `f()^` | Forward an error to the enclosing callable; otherwise yield success. |
+| `outcome is error` | Classify an error explicitly. |
+| `outcome is (error \| null)` | Classify either error or null. |
+| `match outcome { ... }` | Branch on the original outcome. |
 
-| Pattern | Meaning | Allowed? |
-|---------|---------|----------|
-| `let a = F()^` | Propagate error, bind unwrapped value | ✅ |
-| `let a = F() ^ { … ^ … }` | Handle the error here; `^` is the current error | ✅ |
-| `F() ^ { error_arm } ~ { value_arm }` | Branch immediately; `^` is the error and `~` the non-error result | ✅ |
-| `let a: T \| error = F()` | Receive the outcome as an explicit union | ✅ |
-| `let a: T^ = F()` | Same, in the enforcing spelling | ✅ |
-| `F() or default` | Defaults ordinary falsy values; preserves errors | ❌ |
-| `match (F()) { case error: ... }` | Explicitly branch on the error | ✅ |
-| `P() ^ { … ^ … }` where `P` is a `pn` | Handle a procedure error and continue | ✅ |
-| `F()^` | Propagate error, discard value | ✅ |
-| `let a = F()` | **Ignoring error** | ❌ Compile error |
-| `F()` | **Ignoring error and value** | ❌ Compile error |
-
-A function returning `T | error` does not impose this must-handle rule.
-`let a = soft_F()` simply infers `a: T | error`.
-
-**Automatic containment is not acknowledgement.** An annotated binding whose
-runtime type check fails skips to the end of the enclosing block, which becomes
-that error — but that mechanism is fail-stop and blind (it cannot tell you an
-error occurred or let you inspect it). It never satisfies the must-handle rule
-for a raised `T^` channel; use one of the ✅ forms above.
-
----
+The design applies one acknowledgement discipline regardless of whether an
+error was raised, returned, or produced by validation. An unacknowledged fallible
+result cannot be overwritten by a later result (S7.5.5). Retaining a captured
+outcome does not require mandatory inspection.
 
 ## Error Propagation (`^` Operator)
 
-Postfix `^` unwraps the error-free success value or propagates the error to the
-caller. It is channel-agnostic: it handles an error returned in the value lane,
-an error delivered through `^E`, or both.
+Postfix `e^` evaluates `e` once. On error it completes the enclosing callable
+with that error; otherwise it yields the non-error value (S7.6.3v3). The
+receiving return contract must admit the forwarded error.
 
 ```lambda
-fn compute(x: int) int^ {
-    let a = parse(input)^      // if error, return it immediately
-    let b = divide(a, x)^      // if error, return it immediately
-    a + b                       // normal return
+fn step(fail: bool) int^ {
+    if (fail) raise error("step failed")
+    else 20
 }
+fn total(fail: bool) int^ => step(fail)^ + 1
+total(false) ^ { 0 }
 ```
-
-**Semantics:**
-- If the expression produces any error outcome, `^` immediately propagates it
-  from the enclosing function.
-- If it succeeds, the expression evaluates to the success value with all error
-  constituents removed from its type. An `any` success becomes
-  `any \ error`.
-
-**Rules:**
-- `^` is valid on expressions whose returned union or raised channel may
-  contain error.
-- Using `^` on an operand whose explicit type excludes error is a compile error:
-  ```lambda
-  let x = add(1, 2)^  // ❌ Compile error: 'add' does not return errors
-  ```
-- The enclosing function must admit propagation: a declared `T^E` channel
-  receives the combined error set, while an undeclared return may infer
-  `T | error`. A declared plain-`T` return rejects propagation.
-
----
 
 ## Error Handling (`e ^ { … }`)
 
-The postfix placement and handler-local bindings follow **S7.6.1v4/S7.6.2v3**;
-the retired destructuring and prefix error-test forms are removed under
-**S7.6.5v2**.
-
-The `^ { … }` handler deals with an error where it happens, instead of
-propagating it. Inside the error arm, **`^` is the current error**. In the
-one-arm form, `~` retains any enclosing match, pipe, constraint, or view
-meaning. In the optional two-arm form, `~` is rebound inside the second arm to
-the non-error operand result. As in a `that` body or a match arm, that `~` may
-be left implicit: `find(id) ^ { 0 } ~ { total + tax }` reads `~.total` and
-`~.tax` of the found record (S10.1.7v2). In the wrapper form `e ^ { ^ }`, the handler
-explicitly acknowledges a hard raised error and wraps that current error into
-a soft `error` value, changing the result from a raised channel into
-`T | error` data.
+A handler evaluates its operand once. Non-errors pass through unchanged,
+including `null`, `false`, and empty text. On error, its body runs with `^`
+bound to that error; the body's normal result becomes the handler result
+(S7.6.1v9). A fresh body error remains an outcome for the actual receiver.
+`e ^ { ^ }` preserves the error; it does not soften it or prove success.
 
 ```lambda
+fn choose_number(fail: bool) int^ {
+    if (fail) raise error("number failed")
+    else 21
+}
+let success = choose_number(false) ^ { 0 }
+let recovered = choose_number(true) ^ { 0 };
+[success, recovered]
+```
+
+The handler does not bind `~`; an enclosing pipe, match, constraint, or view
+keeps its current-value context. The opening brace belongs on the introducer's
+line. The optional success arm has been removed; use `match` for distinct
+success/error transformations, evaluating the original operand once.
+
+```lambda
+fn choose_number(fail: bool) int^ {
+    if (fail) raise error("number failed")
+    else 21
+}
+let outcome: int^ = choose_number(false)
+match outcome {
+    case error: "failed: " ++ ~.message
+    default: "value: " ++ ~
+}
+```
+
+### Procedure Handlers
+
+Procedure handlers produce the same success/recovery values as pure-function
+handlers, including after suspension (S7.6.7v5). They can appear in a binding
+or become the final normal result of a procedure.
+
+```lambda
+pn value() int { 21 }
+pn failed() int^ { raise error("failed") }
 pn main() {
-    let result = divide(10, x) ^ {
-        print("error: " ++ ^.message)
-        0                       // handler value becomes `result`
-    }
-    print(result * 2)
+    let a = value() ^ { 0 }
+    let b = failed() ^ { 7 };
+    [a, b]
 }
 ```
 
-Direct `pn` call flows can branch without an intermediate union binding:
+An explicit `return` inside the handler exits the enclosing callable. Ordinary
+`raise`, propagation, and permitted loop-control transfers keep their targets.
+A final normal result replaces earlier results, including with `null`;
+declarations produce no result and leave the previous result intact
+(S12.1.2v3). Scope cleanup and native system faults retain their separate rules.
+
+### Combined Error and Falsy Fallback
+
+`e or^ { body }` evaluates its body for errors, `null`, `false`, and `""`.
+Zero, NaN, and empty collections pass through. The local `^` is the exact
+triggering value, so it is not necessarily an error (S7.6.8).
 
 ```lambda
-pn_func(inner, options) ^ {
-    diagnostic(^)
-} ~ {
-    transform(~)
-}
+let missing = null or^ { 7 }
+let empty_text = "" or^ { "fallback" }
+let zero = 0 or^ { 99 };
+[missing, empty_text, zero]
 ```
 
-**Semantics:**
-- It is channel-agnostic: it catches an error returned in the value lane, an
-  error delivered through a raised `^E` channel, or both.
-- The handler either **produces a value** of the expected type, or **diverges**
-  — `raise`, `return`, or letting the enclosing block end. Either way the
-  binding is statically clean: on failure the code after it is not reached, so
-  `result` never holds a stand-in value for "it failed".
-- Typing mirrors `or`: the success type has all error constituents removed, then
-  unions with the handler's type. `let a: T = e ^ { … }` therefore requires the
-  handler to yield `T` or diverge.
-- The two-arm form evaluates its operand once. Errors select the first arm;
-  every non-error value, including `null` and `false`, selects the `~` arm. Its
-  expression type is `type(error_arm) | type(value_arm)`, replacing one-arm
-  success pass-through. Errors produced by either selected arm are fresh
-  outcomes and are not consumed again by the same handler.
-- The handler **must be braced**. `^` followed by `{` is a handler; `^`
-  followed by anything else is the propagation operator, so `f()^ - 1`
-  propagates and then subtracts.
+The operator has ordinary `or` precedence and left association. The body runs
+once and its result passes through even when that result is another error or
+falsy value. Ordinary `or` only defaults falsy values and preserves errors.
 
-Use `x is error` to test whether a value is an error (see
-[Checking for Errors](#checking-for-errors)).
+### Filtered Handlers and Chains
 
-### Procedure-call statement handler (`pn_call() ^ { … }`)
-
-A `pn` call can use the postfix braced handler directly as a statement:
+A named selector uses the same type/pattern classification as `is` or `match`.
+A matching ordinary error runs the body; a non-error or unmatched error passes
+through unchanged. Only matched alternatives are discharged (S7.6.9).
 
 ```lambda
-pn submit(job) int^ {
-    if (job is null) raise error("missing job")
-    return 1
-}
-
-pn main() {
-    submit(null) ^ {
-        print("submit failed: " ++ ^.message)
-    }
-    print("main continues")
-}
+type First = error that ~.message == "first"
+type Second = error that ~.message == "second"
+let recovered: any^ = error("first") ^First {
+    error("second")
+} ^Second {
+    7
+};
+recovered
 ```
 
-This is a statement, not a value-producing expression:
-
-- The complete procedure call is evaluated exactly once.
-- On success, its result is discarded, the handler body is skipped, and the
-  next statement runs.
-- On an ordinary returned or raised error, the body runs with `^` bound to the
-  error. If the body completes normally, the next statement runs.
-- `return`, `raise`, `break`, and `continue` inside the body keep their normal
-  control-flow meaning. A new error from the body is not caught again by the
-  same handler.
-- In this statement interpretation the static callee must be a `pn`. A
-  value-producing `fn` call uses the expression form instead; a `pn` handler
-  cannot be used in a binding or another value context.
-- The call may suspend. The task parks with the call in place and resumes
-  it there, so the call's error reaches the handler exactly as a
-  non-suspending call's does (S7.6.7v4).
-
-Ordinary Lambda errors, including cancellation delivered as the procedure's
-error completion, always reach the handler through explicit return or resume
-state. They never use `setjmp`/`longjmp`. Native S7.11 system faults retain a
-temporary separate path: a live synchronous handler may receive the recovered
-fault directly, while a fault after suspension is materialized at the task
-fault boundary and delivered to the durable handler state.
-
-### Choosing a form
-
-| Form | Catches | Error accessible? |
-|------|---------|-------------------|
-| `e or default` | `null`, `false`, `""`; errors pass through | no |
-| `e ^ { … ^ … }` | errors only | yes, as `^` |
-| `e ^ { error_arm } ~ { value_arm }` | explicit error/non-error split | yes, as `^`; value as `~` |
-| statement `pn_call() ^ { … ^ … }` | procedure-call errors; success discarded | yes, as `^` |
-| `e^` | errors only | no — propagates to the caller |
-| `match e { case error: … }` | errors only, with a full success arm | yes, as `~` |
-
-`or` is the terse default when you do not care *why* it failed; `^ { }` is the
-precise instrument when you do — and unlike `or`, it will not silently swallow
-a legitimate `null` or `""`.
-
-> **Migrating from `let a^err = e`.** The destructure form has been retired: it
-> left `a` as `null` on failure while its static type claimed `T`, so unchecked
-> use produced silent null-contaminated results. Rewrite
-> `let a^err = e; if (^err) { H } else { B }` as `e ^ { H } ~ { B }` when the
-> branches are local, or use `match` for wider or multi-way branching. The prefix test
-> `if (^err)` is likewise retired in favour of `if (err is error)`.
-
----
+Chains associate left to right. The next handler sees the preceding result,
+including a new error made by recovery. Use one `match` when each branch should
+classify only the original outcome. The named selector and opening brace stay
+on the introducer's line. Reified system-fault filtering remains a separate
+design question.
 
 ## Compile-Time Enforcement
 
-Lambda refuses to compile code that ignores an explicit `^E` obligation. This
-is a language rule, not a warning. An ordinary `T | error` union has no such
-obligation; it flows as data until the program chooses a boundary at which to
-inspect, default, validate, or destructure it.
+Declared types are admission contracts (S11.4.1v5). A known error-capable source
+cannot enter a clean receiver without recovery or valid narrowing. A declared
+return must admit its possible ordinary outcomes; unannotated pure functions
+retain their non-error default (S11.4.2v3).
 
-### Understanding “function may return error” (E208)
+A view body is a pure transformation (S12.1.3v2) and follows the same return
+rules. An unannotated view excludes error; an explicit `any^` or `T^` admits
+it. An `on` handler has its own procedure outcome and does not acknowledge
+errors in the enclosing view body.
 
-An unannotated `fn` has an implicit `any \ error` return contract. If a call's
-result is known to include error, returning it requires containment or an
-error-admitting return declaration (S11.4.3, D3.3.2v2).
+If return admission is deferred, the call also carries its possible validation
+error (S11.4.1v5), as it does for failed parameter admission (S7.7.3). Capture
+that outcome or propagate it before using a clean value. The annotation still
+rejects the invalid value; it does not admit that value as its declared type.
 
-The diagnostic points at the call, or at an argument that may supply its error.
-For example:
-
-```lambda error=E208
-fn render(title: string) string => title
-fn wrapper(title: any) => render(title)
-```
-
-Here `render` itself returns `string`. However, `any` includes error, and
-`render`'s parameter excludes it. An incoming error becomes the call's value
-before `render` runs (S7.7.3). E208 explains this boundary:
-
-```text
-function 'wrapper' may return error from call to 'render': argument 1 ('title') has type any, which may contain error; parameter requires string
-```
-
-Use `title: string` when the wrapper accepts strings, or handle the argument's
-error before calling. Alternatively, recover with `render(title) ^ { "fallback" }`,
-declare `string | error` to return errors as data, or declare `string^` and
-propagate with `render(title)^` (S7.4.1–S7.4.2, S7.5.3, S7.6).
-
-For a callee with a raised channel, E208 identifies its `^` declaration instead.
-For other error-producing calls, it shows the call's result type. The help text
-also names the enclosing function's declared or implicit return contract.
-
-### Why?
-
-Go's lack of enforcement is widely criticized — ignored errors cause production bugs. Rust's `#[must_use]` is a warning that can be suppressed. Lambda and Zig take the strongest stance: the compiler enforces it.
-
-### Rules
-
-1. **Calls with a raised `^E` channel must be engaged immediately**
-   ```lambda
-   divide(10, 0)           // ❌ compile error: unhandled error return
-   let x = divide(10, 0)   // ❌ compile error: unhandled error return
-   ```
-
-2. **Functions without a declared `^E` return cannot contain `raise`**
-```lambda error=E208
-   fn pure_add(a, b) int {
-       raise error("oops")  // ❌ compile error
-   }
-   ```
-
-3. **`^` is valid only when the operand can produce error**
-   ```lambda
-   let x = add(1, 2)^  // ❌ compile error: 'add' does not return errors
-   ```
-
-### Comparison Across Languages
-
-| Aspect | **Go** | **Rust** | **Zig** | **Lambda** |
-|--------|--------|----------|---------|------------|
-| **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | `^E`: ❌; `T \| error`: flows as data |
-| **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()^` |
-| **Handle error locally** | `val, err := f()` | `match` / `let … else` | `catch \|err\|` | `f() ^ { … ^ … }` or `f() ^ { error_arm } ~ { value_arm }` |
-| **Value valid when it failed?** | ⚠️ zero value in scope | ❌ not bound | ❌ not bound | ❌ not reached |
-| **Error type** | `(T, error)` tuple | `Result<T, E>` enum | `T!E` error union | `T^E` |
-| **Type preserved?** | ⚠️ Interface (erased) | ✅ Static | ✅ Static | ✅ Static |
-| **Enforcement** | Convention only | Lint attribute | Language rule | Language rule |
-
----
-
-## System Functions That Can Raise
-
-The following built-in functions perform I/O and may fail. They enforce the same error handling rules as user-defined `T^` functions:
-
-### Pure I/O Functions
-
-| Function | Description |
-|----------|-------------|
-| `input(source)` | Read and parse data from file or URL |
-| `input(source, format)` | Read with explicit format |
-
-### Procedural I/O Functions
-
-| Function | Description |
-|----------|-------------|
-| `output(data, target)` | Write data to file |
-| `output(data, target, options)` | Write with format/options |
-| `cmd(command)` | Execute shell command |
-| `io.copy(src, dst)` | Copy a file |
-| `io.move(src, dst)` | Move/rename file or directory |
-| `io.delete(path)` | Delete file or directory |
-| `io.mkdir(path)` | Create directory (recursive) |
-| `io.touch(path)` | Create file or update timestamp |
-| `io.symlink(target, link)` | Create symbolic link |
-| `io.chmod(path, mode)` | Change file permissions |
-| `io.rename(old, new)` | Rename file or directory |
-| `io.fetch(url)` | Fetch content from URL |
-| `io.fetch(url, options)` | Fetch with options |
-
-### Example: Handling System Function Errors
-
-```lambda error=E228
-// ❌ Compile error: unhandled error from 'input'
-let unhandled = input("file.json")
-
-// ✅ Propagate error
-let propagated = input("file.json")^
-
-// ✅ Handle error explicitly
-let handled = input("file.json") ^ { log_warn(^.message); {} }
-
-pn main() {                      // io.mkdir writes the filesystem: a pn
-    // ❌ Compile error: unhandled error from 'io.mkdir'
-    io.mkdir("output")
-
-    // ✅ Propagate error
-    io.mkdir("output")^
-}
-```
-
----
+E228 diagnoses an unacknowledged ordinary-error outcome, E208 an incompatible
+function return, and E241 deferred local admission. An inferred binding accepts
+and retains its complete outcome. A handler never grants acknowledgement to
+unrelated calls in its body or scope.
 
 ## Error Code Categories
 
@@ -558,186 +318,20 @@ User-created errors (via `error("message")`) default to code 318 (`user_error`).
 
 ## Checking for Errors
 
-### `expr is error` — Type Check
-
-`is error` is the way to test whether a value is an error:
-
-```lambda
-pn main() {
-    let result = some_operation()      // soft: infers T | error
-    if (result is error) {
-        print("Error occurred: " ++ result.message)
-    }
-}
-```
-
-This applies to values that *flow* as data — a soft `T | error` result, or an
-element of a batch. When an error must be engaged rather than inspected, reach
-for `^ { }`, `^`, or `match` instead:
-
-```lambda
-let data = input("file.json") ^ { raise error("failed to load", ^) }
-```
-
-> The prefix form `^expr` has been retired. It existed mainly to test the `err`
-> variable created by `let a^err = …`, which is retired as well. Write
-> `expr is error`.
-
----
+`value is error` tests for an error value. `value is (error | null)` tests
+either outcome once; `false`, empty text, and zero do not match that union.
+A user can declare `type empty = error | null;` as an ordinary alias; no
+`empty` keyword or predefined alias exists (S7.5.7).
 
 ## Error Truthiness and Defaults
 
-Errors have **no truth value** (**S3.1v2, S3.4–S3.5**). When a logical
-operation needs to inspect an error, the result is that same error, with its
-diagnostic payload intact. `if (err) a else b` returns `err` and evaluates
-neither arm. This yields an expression value; it does not return from the
-enclosing function.
+Errors have no Boolean truth value (S3). Ordinary `or` preserves an error;
+`or^` is the explicit combined fallback. Use `e ^ { ... }` when only errors
+should select recovery, and explicit classification when absence also matters.
 
-```lambda
-let err = error("bad input");
-[err or 0, not err, if (err) 1 else 2]   // [error, error, error]
-```
+## Error Wrapping
 
-`or` defaults only `null`, `false`, and `""`. Use an explicit handler to
-recover an error (**S7.5.3v2**):
-
-```lambda
-int("bad") ^ { 0 };                   // 0
-(int("bad") ^ { null }) or 10         // 10: recover errors and ordinary falsy values
-```
-
-An unevaluated operand contributes no error: `true or error("unused")` is
-`true`, and `false and error("unused")` is `false`. Classify a value with
-`err is error` or `match`; ordinary `==`, `!=`, and magnitude comparisons
-preserve error operands (**S5.1.1v2, S6.1.2v2**). Deep equality applies the
-same rule to visited content and stops at a decisive mismatch:
-
-```lambda
-let err = error("bad input");
-[[err] == [err], [1, err] == [2, err]]  // [error, false]
-```
-
-Total sorting retains its separate order (**S6.2**). Errors in collection
-comparison consumers and element-wise masks remain subject to the pending
-policies in **SO50**.
-
-### Pitfall: Bare `error` Is the Type, Not an Error Value
-
-Types are first-class values in Lambda, and the bare identifier `error` in expression position denotes the **`error` type** — not an error value. The type is an ordinary (truthy, non-error) value, which produces three results that can trip users:
-
-```lambda
-error or 0          // → error   (the TYPE — truthy, so `or` selects it)
-error("msg") or 0   // → error   (the error VALUE is preserved)
-
-error is error      // → false!  (the type is a type, not an error value)
-error("msg") is error  // → true (values classify normally)
-error is type       // → true    (what bare `error` actually is)
-
-if (error) "yes" else "no"   // → "yes" — and the condition lint warns:
-                             //   "condition has container type type, which is always truthy"
-```
-
-**Rules of thumb:**
-
-- Only `error(...)` (the constructor), values returned/raised by failing functions, and values that test `is error` are error *values*. Bare `error` is only meaningful in **type positions** — annotations (`int | error`), `is`/`match` right-hand sides, and schemas.
-- `x is error` is the classification test, operating on `x`'s *value*. Writing the type on the left (`error is error`) asks whether the type itself is an error value — it is not.
-- The `if (error)` case is caught by the condition lint; `error or 0` currently is not, so a stray bare `error` in an `or` chain silently yields the type. If an `or` chain unexpectedly produces the literal output `error`, look for a missing constructor call.
-
----
-
-## Examples
-
-### Basic Error Handling
-
-```lambda
-fn may_fail(x) int^ {
-    if (x < 0) raise error("negative input")
-    else x * 2
-}
-
-pn main() {
-    // Propagate with ^
-    may_fail(5)^
-
-    // Handle locally with ^ { }
-    let result = may_fail(-1) ^ {
-        print("Got error: " ++ ^.message)    // "negative input"
-        0                                     // fallback value
-    }
-}
-```
-
-### Chaining Calls with `^`
-
-```lambda
-fn compute(x) int^ {
-    let doubled = may_fail(x)^    // propagate if error
-    doubled + 10                   // normal return
-}
-
-compute(5)^   // 20
-```
-
-### File Processing
-
-```lambda
-fn process_file(path: string) ProcessedData^ {
-    let content = input(path, 'text')^
-    let lines = split(content, "\n")
-    let parsed = (for (line in lines) parse_line(line)^)
-    aggregate(parsed)
-}
-type ProcessedData = {rows: int}
-```
-
-### Error Wrapping
-
-```lambda
-fn load_config(path: string) Config^ {
-    let content = input(path, 'text') ^ {
-        raise error("failed to read config file", ^)
-    }
-    let parsed = input(content, 'json') ^ {
-        raise error("invalid JSON in config", ^)
-    }
-    parsed
-}
-type Config = map
-```
-
-### Procedural Script with Error Handling
-
-```lambda
-pn main() {
-    let config = input("config.json", 'json')^
-
-    for item in config.items {
-        let result = process(item) ^ {
-            print("Warning: " ++ ^.message)
-            continue                       // handler may diverge
-        }
-        output(result, "output/" ++ item.name ++ ".json")^
-    }
-
-    print("Done")
-}
-```
-
----
-
-## Summary
-
-| Concept | Syntax | Purpose |
-|---------|--------|---------|
-| Return error as data | `fn F() T \| error` | Error flows without must-handle obligation |
-| Declare error return | `fn F() T^` or `fn F() T^E` | Function may fail |
-| Create error | `error("message")` | Construct error value |
-| Raise error | `raise error("...")` | Originate error on a declared `^E` channel |
-| Propagate error | `e^` | Strip success errors or propagate any error outcome |
-| Handle error | `e ^ { … ^ … }` | Handle returned and raised errors; `^` is the current error |
-| Branch on outcome | `e ^ { error_arm } ~ { value_arm }` | Bind the error to `^` or the non-error result to `~` |
-| Handle procedure statement | `pn_call() ^ { … ^ … }` | Handle a procedure error and continue; may suspend |
-| Check for error | `x is error` | Test if a value is an error |
-| Default on error | `expr ^ { default }` | Explicitly recover a returned or raised error |
-
-Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`^` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.
+`error("context", ^)` inside a handler constructs a fresh error wrapping the
+current one. Use `raise error("context", ^)` for early completion, or make the
+wrapped error the handler result and retain/forward it under the receiving
+contract. The original error stays available through `.source` (S7.4.4).

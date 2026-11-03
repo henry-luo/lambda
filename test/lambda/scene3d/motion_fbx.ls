@@ -14,37 +14,37 @@ let rig = motion.load(dir ++ "rig.fbx")^
 let expect = input(dir ++ "expected-fbx.json")^
 
 fn origin(m) => [m[12], m[13], m[14]];
-fn mm(x) => string(int(round(x * 1000)));
-fn key_of(p) => mm(p[0]) ++ "," ++ mm(p[1]) ++ "," ++ mm(p[2]);
-fn meshes(c, label) => [for (m in content(motion.body_of(c)) where name(m) == 'mesh' and m.name == label) m];
+fn mm(x) any^ => string(int(round(x * 1000)));
+fn key_of(p) any^ => mm(p[0]) ++ "," ++ mm(p[1]) ++ "," ++ mm(p[2]);
+fn meshes(c, label) => [for (m in ((content(motion.body_of(c))) ^ { [] }) where ((name(m) == 'mesh' and m.name == label) ^ { false })) m];
 fn vertex(g, v) => [g.positions[3 * v], g.positions[3 * v + 1], g.positions[3 * v + 2]];
 // largest world-position difference over joints, between two characters at one key
-fn drift(a, b, clip_name, key) {
+fn drift(a, b, clip_name, key) any^ {
     let wa = motion.pose(a, clip_name, key)^
     let wb = motion.pose(b, clip_name, key)^;
     max([for (k, m in wa) max([for (i in 0 to 2) abs(origin(m)[i] - origin(wb[k])[i])])])
 }
-fn joint_drift(c, clip_name, key, want) {
+fn joint_drift(c, clip_name, key, want) any^ {
     let world = motion.pose(c, clip_name, key)^;
     max([for (k, p in want) max([for (i in 0 to 2) abs(origin(world[string(k)])[i] - p[i])])])
 }
 // linear blend skinning from the schema: each joint's world pose times its inverse bind
-fn skinned(c, g, world, v) {
+fn skinned(c, g, world, v) any^ {
     let js = motion.joints(c)
     let parts = [for (k in 0 to 3 where g["skin-weights"][4 * v + k] > 0)
         (let j = js[int(g["skin-indices"][4 * v + k])],
          t.point(t.multiply(world[j.name], j.inverse_bind)^, vertex(g, v))^ * g["skin-weights"][4 * v + k])];
     [sum([for (x in parts) x[0]]), sum([for (x in parts) x[1]]), sum([for (x in parts) x[2]])]
 }
-fn skin_drift(c, label, clip_name, key, want) {
+fn skin_drift(c, label, clip_name, key, want) any^ {
     let world = motion.pose(c, clip_name, key)^;
-    max([for (m in meshes(c, label)) for (g in content(m)) for (v in 0 to len(g.positions) / 3 - 1)
+    max([for (m in meshes(c, label)) for (g in ((content(m)) ^ { [] })) for (v in ((0 to len(g.positions) / 3 - 1) ^ { [] }))
         (let s = skinned(c, g, world, v), let w = want[key_of(vertex(g, v))],
          max([abs(s[0] - w[0]), abs(s[1] - w[1]), abs(s[2] - w[2])]))])
 }
 fn key_at(c, clip_name, seconds) {
     let k = [for (x in motion.clips_of(c) where x.name == clip_name) x][0];
-    [for (i in 0 to len(k.times) - 1 where abs(k.times[i] - seconds) < 1e-9) i][0]
+    [for (i in ((0 to len(k.times) - 1) ^ { [] }) where abs(k.times[i] - seconds) < 1e-9) i][0]
 }
 
 "1 one conversion from binary 7.4, binary 7.5 and ASCII FBX";
@@ -58,11 +58,11 @@ fn key_at(c, clip_name, seconds) {
 let body = motion.body_of(hero)
 let resources = content(body)[0]
 let face = meshes(hero, "Body")[1]
-let weights = [for (m in meshes(hero, "Body")) for (g in content(m)) for (v in 0 to len(g.positions) / 3 - 1)
+let weights = [for (m in meshes(hero, "Body")) for (g in ((content(m)) ^ { [] })) for (v in ((0 to len(g.positions) / 3 - 1) ^ { [] }))
     sum([for (k in 0 to 3) g["skin-weights"][4 * v + k]])];
 [for (m in meshes(hero, "Body")) [m.material, len(content(m)[0].positions) / 3, len(content(m)[0].indices) / 3]];
-[for (r in content(resources)) [name(r), r.id, r.color, r.texture]];
-[starts_with([for (r in content(resources) where name(r) == 'texture') r.src][0], "data:image/png;base64,"),
+[for (r in ((content(resources)) ^ { [] })) [name(r), r.id, r.color, r.texture]];
+[starts_with([for (r in ((content(resources)) ^ { [] }) where ((name(r) == 'texture') ^ { false })) r.src][0], "data:image/png;base64,"),
     len(content(face)[0].uvs), max([for (w in weights) abs(w - 1)]) < 1e-9];
 
 "4 skinned vertices match the reference";
@@ -78,10 +78,10 @@ let weights = [for (m in meshes(hero, "Body")) for (g in content(m)) for (v in 0
 
 "6 rest differs from bind, five influences keep four, a prop rides the hand";
 let names = [for (j in motion.joints(rig)) j.name]
-let crowded = [for (m in meshes(rig, "Body")) for (g in content(m)) for (v in 0 to len(g.positions) / 3 - 1
+let crowded = [for (m in meshes(rig, "Body")) for (g in ((content(m)) ^ { [] })) for (v in ((0 to len(g.positions) / 3 - 1) ^ { [] })
     where g["skin-weights"][4 * v + 3] > 0) [for (k in 0 to 3) names[int(g["skin-indices"][4 * v + k])]]]
 let prop = content(meshes(rig, "Prop")[0])[0]
-fn prop_drift(clip_name, key, want) {
+fn prop_drift(clip_name, key, want) any^ {
     let world = motion.pose(rig, clip_name, key)^;
     max([for (v in 0 to 3) (let s = skinned(rig, prop, world, v), max([for (i in 0 to 2) abs(s[i] - want[v][i])]))])
 }
@@ -93,7 +93,7 @@ fn prop_drift(clip_name, key, want) {
 
 "7 the scene names bones, prefixes body resources and skins each mesh";
 let group = motion.scene(hero, {id: "hero", autoplay: "jump"})^;
-[for (x in content(group)) [name(x), x.id, x.skeleton, x.material]];
+[for (x in ((content(group)) ^ { [] })) [name(x), x.id, x.skeleton, x.material]];
 
 "8 malformed FBX is rejected with a specific diagnostic";
 let head = "; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n FBXVersion: 7400\n}\n"
@@ -103,22 +103,22 @@ fn fbx_with(settings, objects, links) => head ++ "GlobalSettings:  {\n Propertie
 fn p(name, value) => "  P: \"" ++ name ++ "\", \"enum\", \"\", \"\"," ++ value ++ "\n";
 fn limb(id, label, props) => " Model: " ++ string(id) ++ ", \"Model::" ++ label ++ "\", \"LimbNode\" {\n Properties70:  {\n" ++ props ++ " }\n }\n";
 fn oo(child, parent) => " C: \"OO\"," ++ string(child) ++ "," ++ string(parent) ++ "\n";
-fn floats(values) => "*" ++ string(len(values)) ++ " {\n a: " ++ join([for (v in values) string(v)], ",") ++ "\n }";
+fn floats(values) any^ => "*" ++ string(len(values)) ++ " {\n a: " ++ join([for (v in values) string(v)], ",") ++ "\n }";
 // a one-triangle mesh skinned to joint 1 with a joint bind translated by `x`,
 // its cluster matrices given inline or left to the BindPose
-fn skinned_mesh(id, x, inline = true) => " Geometry: " ++ string(id) ++ ", \"Geometry::G\", \"Mesh\" {\n  Vertices: " ++ floats([0, 0, 0, 1, 0, 0, 0, 1, 0]) ++
+fn skinned_mesh(id, x, inline = true) any^ => " Geometry: " ++ string(id) ++ ", \"Geometry::G\", \"Mesh\" {\n  Vertices: " ++ floats([0, 0, 0, 1, 0, 0, 0, 1, 0]) ++
     "\n  PolygonVertexIndex: " ++ floats([0, 1, -3]) ++ "\n }\n Model: " ++ string(id + 1) ++ ", \"Model::M" ++ string(id) ++ "\", \"Mesh\" {\n }\n" ++
     " Deformer: " ++ string(id + 2) ++ ", \"Deformer::Skin\", \"Skin\" {\n }\n Deformer: " ++ string(id + 3) ++ ", \"SubDeformer::A\", \"Cluster\" {\n" ++
     "  Indexes: " ++ floats([0, 1, 2]) ++ "\n  Weights: " ++ floats([1, 1, 1]) ++
     (if (inline) "\n  Transform: " ++ floats([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) ++
         "\n  TransformLink: " ++ floats([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1]) else "") ++ "\n }\n";
-fn bind_pose(x) => " Pose: 30, \"Pose::BIND_POSES\", \"BindPose\" {\n  Type: \"BindPose\"\n" ++
+fn bind_pose(x) any^ => " Pose: 30, \"Pose::BIND_POSES\", \"BindPose\" {\n  Type: \"BindPose\"\n" ++
     "  PoseNode:  {\n   Node: 1\n   Matrix: " ++ floats([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1]) ++ "\n  }\n" ++
     "  PoseNode:  {\n   Node: 11\n   Matrix: " ++ floats([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) ++ "\n  }\n }\n";
 fn mesh_links(id) => oo(id, id + 1) ++ oo(id + 1, 0) ++ oo(id + 2, id) ++ oo(id + 3, id + 2) ++ oo(1, id + 3);
 let posed = parse(fbx(limb(1, "A", "") ++ skinned_mesh(10, 2, false) ++ bind_pose(2), oo(1, 0) ++ mesh_links(10)),
     {type: 'character', flavor: 'fbx'})^
-fn rejects(source, diagnostic) => parse(source, {type: 'character', flavor: 'fbx'}) ^ { contains(string(^.message), diagnostic) ^ { false } } ~ { "accepted" };
+fn rejects(source, diagnostic) => { let __error_outcome_1 = parse(source, {type: 'character', flavor: 'fbx'}) ^ { ^ }; if (__error_outcome_1 is error) { contains(string(__error_outcome_1.message), diagnostic) ^ { false } } else match __error_outcome_1 { case any { "accepted" } } };
 [motion.validate(parse(fbx(limb(1, "A", ""), oo(1, 0)), {type: 'character', flavor: 'fbx'})^)^,
  motion.validate(posed)^ and abs(motion.joints(posed)[0].inverse_bind[12] + 0.02) < 1e-12,
  rejects(fbx(limb(1, "A", p("Lcl Scaling", "1,2,1")) ++ limb(2, "B", p("InheritType", "2")), oo(1, 0) ++ oo(2, 1)),

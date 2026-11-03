@@ -62,6 +62,9 @@ enum TokenType {
     OCCURRENCE_LBRACE,
     MEMBER_DOT,
     POSTFIX_CARET,
+    HANDLER_CARET,
+    HANDLER_LBRACE,
+    HANDLER_RBRACE,
     STMT_BOUNDARY,
     // S16.5.1: inside an element, `<` is never an operator — it always opens a
     // child — so it starts a juxtaposed content item where at statement level
@@ -82,6 +85,7 @@ enum TokenType {
     // S11.1.5v2 / S16.2.3v3: zero-width, emitted right after a signature's `)`
     // when its return type opens on the same line.
     FN_RETURN,
+    TYPE_CARET,
     FORCE_FRAGMENT_START,
     FORCE_END,
     TYPE_END,
@@ -236,6 +240,31 @@ static bool is_statement_keyword(const char *w, unsigned n) {
         if (strlen(words[i]) == n && memcmp(words[i], w, n) == 0) { return true; }
     }
     return false;
+}
+
+// Handler introducers and the retired suffix need the same trivia-aware lookahead.
+static bool skip_handler_trivia(TSLexer *lexer, bool *newline) {
+    for (;;) {
+        while (is_space(lexer->lookahead)) {
+            if (lexer->lookahead == '\n') *newline = true;
+            lexer->advance(lexer, false);
+        }
+        if (lexer->lookahead != '/') return true;
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '/') {
+            while (!lexer->eof(lexer) && lexer->lookahead != '\n')
+                lexer->advance(lexer, false);
+        } else if (lexer->lookahead == '*') {
+            lexer->advance(lexer, false);
+            while (!lexer->eof(lexer)) {
+                if (lexer->lookahead == '\n') *newline = true;
+                if (lexer->lookahead == '*') {
+                    lexer->advance(lexer, false);
+                    if (lexer->lookahead == '/') { lexer->advance(lexer, false); break; }
+                } else lexer->advance(lexer, false);
+            }
+        } else return false;
+    }
 }
 
 // Reads the word at the lookahead into `word`, NUL-terminated when it fits
@@ -468,6 +497,46 @@ bool tree_sitter_lambda_external_scanner_scan(
         break;
     }
 
+    if (!slash_pending && lexer->lookahead == '^' && valid_symbols[TYPE_CARET]) {
+        if (saw_newline) return false;
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        bool after_newline = false;
+        bool trivia = skip_handler_trivia(lexer, &after_newline);
+        if (trivia && !after_newline) {
+            // S7.4.2v3: T^E must not become T^ plus an unrelated statement.
+            if (lexer->lookahead == '(') return false;
+            if (is_identifier_start(lexer->lookahead)) {
+                char word[16];
+                unsigned n = read_word(lexer, word);
+                if (n != 2 || memcmp(word, "as", 2) != 0) return false;
+            }
+        }
+        lexer->result_symbol = TYPE_CARET;
+        return true;
+    }
+    if (!slash_pending && lexer->lookahead == '{' && valid_symbols[HANDLER_LBRACE]) {
+        if (saw_newline) return false;
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = HANDLER_LBRACE;
+        return true;
+    }
+    if (!slash_pending && lexer->lookahead == '}' && valid_symbols[HANDLER_RBRACE]) {
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        bool suffix_newline = false;
+        bool suffix = skip_handler_trivia(lexer, &suffix_newline);
+        if (suffix && lexer->lookahead == '~') {
+            lexer->advance(lexer, false);
+            suffix = skip_handler_trivia(lexer, &suffix_newline);
+            // S7.6.2v5: the retired arm must not become a separate tilde/block.
+            if (suffix && lexer->lookahead == '{') return false;
+        }
+        lexer->result_symbol = HANDLER_RBRACE;
+        return true;
+    }
+
     // NOT_PAREN gates the bare spelling of `if`/`while` heads (S16.6.2) and the
     // bare `apply` statement (§7.7). It is only valid where the parser is
     // choosing between a parenthesized form and a bare one, so it never
@@ -615,16 +684,27 @@ bool tree_sitter_lambda_external_scanner_scan(
                 // through to propagate-plus-a-block-statement, which is the
                 // silent split S16.1.1 forbids. A `{` on a later line yields
                 // NEITHER token, so the parse fails loudly.
-                if (valid_symbols[POSTFIX_CARET]) {
+                if (valid_symbols[POSTFIX_CARET] || valid_symbols[HANDLER_CARET]) {
                     lexer->advance(lexer, false);
                     lexer->mark_end(lexer);
                     bool brace_newline = false;
-                    while (is_space(lexer->lookahead)) {
-                        if (lexer->lookahead == '\n') { brace_newline = true; }
-                        lexer->advance(lexer, false);
+                    bool body_ahead = skip_handler_trivia(lexer, &brace_newline);
+                    if (body_ahead && is_identifier_start(lexer->lookahead)) {
+                        for (;;) {
+                            while (is_identifier_continue(lexer->lookahead))
+                                lexer->advance(lexer, false);
+                            body_ahead = skip_handler_trivia(lexer, &brace_newline);
+                            if (!body_ahead || lexer->lookahead != '.') break;
+                            lexer->advance(lexer, false);
+                            body_ahead = skip_handler_trivia(lexer, &brace_newline);
+                            if (!body_ahead || !is_identifier_start(lexer->lookahead)) break;
+                        }
                     }
-                    if (lexer->lookahead == '{' && brace_newline) { return false; }
-                    lexer->result_symbol = POSTFIX_CARET;
+                    bool handler = body_ahead && lexer->lookahead == '{';
+                    if (handler && brace_newline) return false;
+                    enum TokenType token = handler ? HANDLER_CARET : POSTFIX_CARET;
+                    if (!valid_symbols[token]) return false;
+                    lexer->result_symbol = token;
                     return true;
                 }
                 break;

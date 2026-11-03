@@ -2,7 +2,7 @@
 import util: .util
 import geometry: .geometry
 
-pub fn valid_position(point) => point is array and len(point) >= 2 and
+pub fn valid_position(point) any^ => point is array and len(point) >= 2 and
     util.finite_number(point[0]) and util.finite_number(point[1]) and abs(point[0]) <= 180 and abs(point[1]) <= 90
 
 fn natural(longitude, latitude) {
@@ -22,7 +22,7 @@ pub fn vector(point, model) {
         math.sin(origin) * math.sin(latitude) + math.cos(origin) * math.cos(latitude) * math.cos(longitude)]
 }
 
-pub fn raw(point, model) {
+pub fn raw(point, model) any^ {
     let longitude = util.deg_to_rad(point[0] - model.center[0]);
     let latitude = util.deg_to_rad(point[1]);
     let origin = util.deg_to_rad(model.center[1]);
@@ -39,7 +39,7 @@ pub fn raw(point, model) {
 }
 
 pub fn screen(point, model) => [model.translate[0] + model.scale * point[0], model.translate[1] - model.scale * point[1]]
-pub fn project(point, model) {
+pub fn project(point, model) any^ {
     let longitude = point[0] - model.center[0];
     let aligned = [model.center[0] + longitude - 360.0 * floor((longitude + 180.0) / 360.0), point[1]];
     if (not valid_position(point)) error("chart: geographic positions require finite longitude/latitude within ±180/±90 degrees")
@@ -48,7 +48,7 @@ pub fn project(point, model) {
     else screen(raw(aligned, model), model)
 }
 
-pub fn configure(width, height, options = {}) {
+pub fn configure(width, height, options = {}) any^ {
     let kind = if (options is string) options else if (options.type != null) options.type else "mercator";
     let normalized = if (contains(["naturalEarth1", "natural-earth", "naturalEarth"], kind)) "natural_earth" else kind;
     let center = if (options.center != null) options.center else [0.0, 0.0];
@@ -59,7 +59,7 @@ pub fn configure(width, height, options = {}) {
     if (not contains(["mercator", "equirectangular", "albers", "orthographic", "natural_earth"], normalized)) error("chart: unsupported geographic projection")
     else if (not valid_position(center) or abs(center[1]) > limit) error("chart: projection center lies outside its geographic extent")
     else if (not (parallels is array) or len(parallels) != 2 or
-        len([for (parallel in parallels where not util.finite_number(parallel) or abs(parallel) >= 90) true]) > 0)
+        len([for (parallel in parallels where ((not util.finite_number(parallel) or abs(parallel) >= 90) ^ { false })) true]) > 0)
         error("chart: Albers parallels must be two latitudes strictly between the poles")
     else if (not util.finite_number(precision) or precision <= 0 or not util.finite_number(padding) or padding < 0 or
         width <= 2.0 * padding or height <= 2.0 * padding) error("chart: projection precision and available size must be positive")
@@ -79,7 +79,7 @@ pub fn configure(width, height, options = {}) {
         let offset = if (options.translate != null) options.translate else if (options.center != null) [width / 2.0, height / 2.0] else
             [width / 2.0 - factor * (bounds[0] + bounds[2]) / 2.0, height / 2.0 + factor * (bounds[1] + bounds[3]) / 2.0];
         if (not util.finite_number(factor) or factor <= 0 or not (offset is array) or len(offset) != 2 or
-            len([for (value in offset where not util.finite_number(value)) true]) > 0) error("chart: projection scale and translation must be finite, with positive scale")
+            len([for (value in offset where ((not util.finite_number(value)) ^ { false })) true]) > 0) error("chart: projection scale and translation must be finite, with positive scale")
         else {*:base, scale: factor, translate: offset, step: math.sqrt(2.0 * precision / factor) * 180.0 / util.PI}
     }
 }
@@ -87,7 +87,7 @@ pub fn configure(width, height, options = {}) {
 pub fn span(a, b) => abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 // Navigation adjusts projection parameters using local angular sensitivity, never x/y data scales.
-pub fn navigate(model,dx,dy,factor=1.0) {
+pub fn navigate(model,dx,dy,factor=1.0) any^ {
     let origin=raw(model.center,model);
     let east=raw([model.center[0]+0.01,model.center[1]],model);
     let north=raw([model.center[0],model.center[1]+0.01],model);
@@ -115,7 +115,7 @@ pub fn segment(a, b, model) {
 }
 
 // Clip a finely subdivided spherical triangle before its orthographic projection.
-pub fn triangle(points, model) {
+pub fn triangle(points, model) any^ {
     let lengths = [for (index, point in points) span(point, points[(index + 1) % 3])];
     let longest = max(lengths);
     let vectors = [for (point in points) vector(point, model)];

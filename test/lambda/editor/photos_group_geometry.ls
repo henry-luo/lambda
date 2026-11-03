@@ -30,17 +30,17 @@ let rb = model.bounds(model.lookup(rotated.doc,"group").node)
 check(close(rb.x,6) and close(rb.y,0) and close(rb.width,2) and close(rb.height,10))
 check(img.to_bytes(img.render_frame(editor.exec(scaled,{id:"layer.ungroup"})^.doc)^)^ == img.to_bytes(img.render_frame(scaled.doc)^)^)
 check(img.to_bytes(img.render_frame(project.decode(project.encode(scaled.doc)^)^)^)^ == img.to_bytes(img.render_frame(scaled.doc)^)^)
-check(editor.exec(st,{id:"layer.transform",matrix:transform.identity}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"layer.transform",delta:[1,0,0,1,3,2],angle:5}) ^ { true } ~ { false })
-check(editor.exec(st,{id:"layer.transform",delta:[0,0,0,1,0,0]}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"layer.transform",matrix:transform.identity}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"layer.transform",delta:[1,0,0,1,3,2],angle:5}) ^ { ^ }) { case error: true default: false })
+check(match (editor.exec(st,{id:"layer.transform",delta:[0,0,0,1,0,0]}) ^ { ^ }) { case error: true default: false })
 let locked = editor.exec(editor.exec(st,{id:"layer.select",ids:["b"]})^,{id:"layer.lock",locked:true})^
 let locked_group = editor.exec(locked,{id:"layer.select",ids:["group"]})^
 check(not transform.available(locked_group))
-check(editor.exec(locked_group,{id:"layer.transform",scale_x:2}) ^ { true } ~ { false })
+check(match (editor.exec(locked_group,{id:"layer.transform",scale_x:2}) ^ { ^ }) { case error: true default: false })
 let masked_group = img.with_children(model.lookup(st.doc,"group").node,[*content(model.lookup(st.doc,"group").node),mask])^
 let masked = editor.open_session(model.replace(st.doc,"group",masked_group)^)^
 check(not transform.available(masked))
-check(editor.exec(masked,{id:"layer.transform",angle:10}) ^ { true } ~ { false })
+check(match (editor.exec(masked,{id:"layer.transform",angle:10}) ^ { ^ }) { case error: true default: false })
 let filtered = editor.exec(st,{id:"effect.add",options:{gamma:1.1}})^
 check(not transform.available(filtered))
 let tool = editor.exec(st,{id:"tool.configure",tool:"transform"})^
@@ -58,7 +58,7 @@ let vm = model.lookup(vertical.doc,"a").node.transform
 check(close(vm[0]+vm[2],0) and vm[1]+vm[3]>1)
 check(editor.exec(st,{id:"layer.straighten",start:{x:10,y:10},end:{x:0,y:0}})^.doc == straight.doc)
 check(editor.exec(st,{id:"layer.straighten",start:{x:2,y:2},end:{x:2,y:2}})^.hist == st.hist)
-check(editor.exec(st,{id:"layer.straighten",start:{x:nan,y:0},end:{x:10,y:10}}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"layer.straighten",start:{x:nan,y:0},end:{x:10,y:10}}) ^ { ^ }) { case error: true default: false })
 let straight_tool = editor.exec(st,{id:"tool.configure",tool:"straighten"})^
 let preview = interaction.preview(interaction.begin(straight_tool,pointer(0,0))^,pointer(10,10))^
 check(preview.doc == straight.doc and preview.hist == st.hist)

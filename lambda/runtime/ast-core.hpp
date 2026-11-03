@@ -28,6 +28,10 @@ bool ast_join_produces_fresh_array(AstNode* node);
 extern "C"
 #endif
 bool ast_type_is_array_contract(Type* type);
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_type_may_be_container(Type* type);
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -332,6 +336,8 @@ struct NameEntry {
     // an ordinary `var` declaration of the same name clears it.
     bool is_annex_b_companion;
     bool is_mutable;
+    // S9.1.4v2: this fn-local binding owns one traced home shared by confined pns.
+    bool lambda_shared_local;
     bool is_var_param;
     bool is_parameter;
     // JS var declarations may reuse a parameter identity but own a separate body cell.
@@ -382,6 +388,9 @@ struct NameEntry {
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
     InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
+    // S7.5.1v6/S7.7.2v2/S7.7.4v2: a stored error remains an outcome fact,
+    // including when deferred admission or an any join hides it in the type.
+    bool admission_may_fail;
     bool type_widened;
     bool is_lexical;
     // loop-head bindings need a distinct capture-analysis fact; this used to
@@ -499,6 +508,9 @@ struct NameScope {
     uint32_t name_index_count;
     uint32_t entry_count;
     bool is_proc;
+    // local mutation belongs to this callable, independently of effect colour.
+    struct AstFuncNode* lambda_function;
+    bool lambda_comprehension;
     NameScope* parent;
     ScopeKind kind;
     bool strict;
@@ -835,12 +847,16 @@ typedef struct AstCallNode : AstNode {
     // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
     // yields that error as its value; set when an argument may be one (its
     // type admits error, or it may carry a defect), so the call is lowered as
-    // a join. It occupies the padding before the guard bits, so the node
-    // keeps its size.
+    // a join. These flags share the padding before the colour guard bits.
     bool rejected_error_flows;
+    // S7.7.3: deferred parameter admission adds an error to this call's
+    // outcome, independently of the callee's declared return contract.
+    bool parameter_admission_may_fail;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
+    // S7.6.3: propagation's early outcome survives success-type narrowing.
+    Type* propagated_error_type;
 } AstCallNode;
 
 // D8.2.4: call argument shape belongs to the immutable AST definition. Both
@@ -872,8 +888,9 @@ static inline bool ast_plan_call_shape(AstCallNode* call) {
 typedef struct AstHandlerNode : AstNode {
     AstNode* operand;
     AstNode* body;
-    AstNode* value_body; // optional non-error arm, with `~` bound to the operand
-    bool is_statement;
+    AstNode* filter; // named error type/pattern; unmatched outcomes pass through
+    bool catches_falsy;
+    bool is_statement; // procedure operand requires the existing fault regime
 } AstHandlerNode;
 
 typedef enum StartMode {
@@ -1230,6 +1247,15 @@ static inline int ast_member_wildcard(AstFieldNode* member) {
     return name->len == 2 && name->chars[1] == '*' ? 2 : 0;
 }
 
+// shared with both MIR emitters; ast.hpp also includes this header inside extern C.
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count);
+
+struct TypeString;
+extern "C" TypeString* ast_string_literal_type(AstNode* node);
+
 // Like ast_unwrap_primary, but a primary that carries its value itself (a
 // literal: `expr` is NULL) is returned instead of NULL.
 static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
@@ -1301,12 +1327,23 @@ static inline bool ast_collect_cow_path(AstCowPath* path, AstNode* node) {
     return true;
 }
 
+// S7.6.3v3: successful propagation preserves the observed container owner.
+static inline AstNode* ast_cow_value_source(AstNode* expr) {
+    AstNode* source = ast_unwrap_primary(expr);
+    while (source && source->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)source)->op == OPERATOR_PROPAGATE) {
+        source = ast_unwrap_primary(((AstUnaryNode*)source)->operand);
+    }
+    return source;
+}
+
 // The shape half of "does this initializer hand back a freshly-owned
 // container": literals, calls and `new` produce a new owner, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
 // resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
 static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
+    root_expr = ast_cow_value_source(root_expr);
     if (!root_expr) return false;
     switch (root_expr->node_type) {
     case AST_NODE_ARRAY:
@@ -1338,7 +1375,7 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
 // detached copy while element reads still borrow (the open C4.1 half) -- turning
 // a conservative mark into lost updates.
 static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return false;
     if (root_expr->node_type == AST_NODE_IDENT) {
         NameEntry* source = ((AstIdentNode*)root_expr)->entry;
@@ -1367,20 +1404,19 @@ static inline bool ast_parameter_needs_snapshot(const NameEntry* parameter) {
 static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
         TypeId target_tid) {
     if (ast_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
-    if (expr && ast_type_is_array_contract(expr->type)) return true;
+    if (expr && (ast_type_is_array_contract(expr->type) ||
+            (expr_tid == LMD_TYPE_TYPE && ast_type_may_be_container(expr->type)))) return true;
     if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
 
-    AstNode* root_expr = ast_unwrap_primary(expr);
+    AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return target_tid == LMD_TYPE_ANY;
+    // S7.7.4v2/S9.1.2: a fallible object constructor still owns its successful
+    // container. Use the shared producer classification for boxed outcomes too.
+    if (ast_expr_produces_owned_container(root_expr)) return true;
     switch (root_expr->node_type) {
-    case AST_NODE_ARRAY:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT:
-    case AST_NODE_LIST:
     case AST_NODE_IDENT:
     case AST_NODE_INDEX_EXPR:
     case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_CALL_EXPR:
     case AST_NODE_IF_EXPR:
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_FOR_EXPR:
@@ -1388,8 +1424,7 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_PIPE:
         return true;
     case AST_NODE_BINARY:
-        return ast_join_produces_fresh_array(root_expr) ||
-            ((AstBinaryNode*)root_expr)->op == OPERATOR_OR ||
+        return ((AstBinaryNode*)root_expr)->op == OPERATOR_OR ||
             ((AstBinaryNode*)root_expr)->op == OPERATOR_AND ||
             ((AstBinaryNode*)root_expr)->op == OPERATOR_THAT;
     default:
@@ -1529,6 +1564,8 @@ typedef struct FnCapture {
     bool is_const;
     bool is_nfe_binding;
     bool force_env_capture;
+    // proven parent-local access; any potentially escaping use stays a snapshot.
+    bool lambda_live_local;
     struct FnCapture* next;
 } FnCapture;
 
@@ -1850,6 +1887,9 @@ typedef struct FnAnalysis {
     int capture_count;
     int evidence_count;
     bool may_await;
+    // value-flow proof keeps this procedure inside its parent fn activation.
+    bool lambda_confined_proc;
+    bool lambda_uses_shared_homes;
     // The body starts a non-escaping child, so its blocks enter task scopes
     // that join children on exit (both tiers read this syntactic fact).
     bool owns_task_scopes;
@@ -1918,19 +1958,19 @@ typedef struct FnAnalysis {
     FnPromotionCell promotion;
 } FnAnalysis;
 
+static inline int ast_capture_count(const FnCapture* captures) {
+    int count = 0;
+    for (const FnCapture* capture = captures; capture; capture = capture->next)
+        count++;
+    return count;
+}
+
 static inline int ast_function_capture_count(const AstFuncNode* fn_node) {
     if (!fn_node) return 0;
     if (fn_node->analysis) return fn_node->analysis->capture_count;
-
-    // Synthetic functions can reach lowering before analysis publication. Their
-    // capture chain is FnCapture::next, not AstNode::next, so it must never use
-    // an AST-list utility for this fallback.
-    int count = 0;
-    for (const FnCapture* capture = fn_node->captures; capture;
-            capture = capture->next) {
-        count++;
-    }
-    return count;
+    // synthetic definitions may precede analysis publication; captures use
+    // FnCapture::next, never an AST-list utility.
+    return ast_capture_count(fn_node->captures);
 }
 
 static inline FnVariantAnalysis* fn_analysis_variant(
@@ -1993,3 +2033,15 @@ extern "C"
 #endif
 Type* ast_map_path_leaf_contract(Type* root_contract, const AstCowPath* path,
     AstNode* terminal, bool terminal_is_member, int64_t* index_mask);
+
+struct AstOwnerPermutationPlan {
+    AstDeclaratorNode* temporary;
+    AstNode* last;
+    NameEntry* owners[8];
+    int count;
+};
+
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first, AstOwnerPermutationPlan* plan);

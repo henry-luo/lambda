@@ -7,14 +7,14 @@ import scene_dom: lambda.scene3d.dom
 import geometry: ~~.scene3d._geometry
 import solids: .mod_plant_solids
 
-pub fn pose(position=[6.8,4.8,8.2]) map => camera.prepare({position:position,target:[0.0,2.0,0.0],fov:38.0})
+pub fn pose(position=[6.8,4.8,8.2]) map^ => camera.prepare({position:position,target:[0.0,2.0,0.0],fov:38.0})
 
 // batch shared shapes across a composition while retaining semantic category selectors.
-pub fn meshes(parts,options={}) array => drawing.meshes({parts:[for (i,p in parts)
+pub fn meshes(parts,options={}) array^ => drawing.meshes({parts:[for (i,p in parts)
     {id:string(i),geometry:p.shape,matrix:solids.matrix(p),color:p.color,opacity:1.0,
      kind:if (p.category != null) p.category else "",role:p.role}]},options)
 
-pub fn viewport(parts,resources,options) element {
+pub fn viewport(parts,resources,options) element^ {
     let box = solids.bounds(if (options.fit != null) options.fit else parts)
     let center = [(box.lo[0]+box.hi[0])/2.0,box.lo[1],(box.lo[2]+box.hi[2])/2.0]
     let lens = options.camera;
@@ -38,7 +38,7 @@ pn publish(owner,next,action=null) {
     if (event!=null) dom.dispatch(owner,{type:event,bubbles:true,detail:{camera:next,action:action}})
     return next
 }
-fn moved(current,action,reset_pose) map {
+fn moved(current,action,reset_pose) map^ {
     let delta = camera.subtract(current.position,current.target)
     let distance = sqrt(camera.dot(delta,delta))
     let home_delta = camera.subtract(reset_pose.position,reset_pose.target)
@@ -116,9 +116,9 @@ pub fn controls(labels={}) element =>
             {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
             <button type:"button",'data-camera':item.id,if (labels[item.id]==null) item.title else labels[item.id]>>
 
-pub fn source(scene,lens,initial=null,labels={},chrome=true) element {
+pub fn source(scene,lens,initial=null,labels={},chrome=true) element^ {
     // camera readback must keep full precision when the author later snapshots the live pose.
-    let rendered=<scene3d *:map(scene),*[for (child in content(scene)) if (name(child)=='camera')
+    let rendered=<scene3d *:map(scene),*[for (child in ((content(scene)) ^ { [] })) if (name(child)=='camera')
         <camera *:map([for (key,value in map(child)) (key,scene_dom.attribute(value))])> else child]>;
     <orbit camera:lens,initial:(if (initial==null) lens else initial),rendered:
     <div class:"three-dimensional",
@@ -128,7 +128,7 @@ pub fn source(scene,lens,initial=null,labels={},chrome=true) element {
 }
 
 // retain source() in a binding when a parent changes; apply it inside that author view.
-pub fn interactive(scene,lens,initial=null,labels={},chrome=true) element => apply(source(scene,lens,initial,labels,chrome))
+pub fn interactive(scene,lens,initial=null,labels={},chrome=true) element^ => apply(source(scene,lens,initial,labels,chrome))
 
 // promote the live camera into author state before that author replaces the scene descriptor.
 pub pn snapshot(owner,id,fallback) map^ {

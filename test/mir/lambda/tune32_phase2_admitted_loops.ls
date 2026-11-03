@@ -7,7 +7,7 @@ pn tune32_phase2_admitted_store(var values: float[], count: int) {
     }
 }
 
-pn tune32_phase2_admitted_read(values: float[], count: int) float {
+pn tune32_phase2_admitted_read(values: float[], count: int) float^ {
     var total: float = 0.0
     var index: int = 0
     while (index < count) {
@@ -28,7 +28,7 @@ pn main() {
     tune32_phase2_admitted_store(values, 0)
     tune32_phase2_admitted_store(values, -1)
     print(tune32_phase2_admitted_read(values, 4) == 18.0); print("\n")
-    var empty: float[] = fill(0, 0.0)
+    var empty: float[] = fill(0, 0.0)^
     tune32_phase2_admitted_store(empty, 0)
     print(len(empty)); print("\n")
     print(values[4] == null); print("\n")

@@ -8,7 +8,7 @@ pn oob_var(var dst: float[], src: float[]) any^ {
     dst[i] = dst[i] + src[i + 1]
 }
 pn oob_local(src: float[]) any^ {
-    var dst: float[] = fill(2, 1.0)
+    var dst: float[] = fill(2, 1.0)^
     var i: int = 1
     dst[i] = dst[i] * src[i + 5]
     return dst

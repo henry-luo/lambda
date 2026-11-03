@@ -31,10 +31,10 @@ files.restore(files.archive(lettering_changed.doc,"Art"))^.doc==lettering_change
 let imported = files.import_html_document(files.html_document(lettering_changed.doc,"Art")^)^
 art.settings(imported.content[0].content[0]).rotation==30
 transform.rotation(imported.content[0].content[0])==30
-model.execute(picture,"object.transform",{width:15,height:100,rotation:0}) ^ { true } ~ { false }
-model.execute(picture,"object.transform",{width:160,height:100,rotation:181}) ^ { true } ~ { false }
-model.execute(empty,"object.transform",{width:160,height:100,rotation:0}) ^ { true } ~ { false }
-model.execute(picture,"object.transform",{width:160,height:100,rotation:0,path:[99]}) ^ { true } ~ { false }
+match (model.execute(picture,"object.transform",{width:15,height:100,rotation:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(picture,"object.transform",{width:160,height:100,rotation:181}) ^ { ^ }) { case error: true default: false }
+match (model.execute(empty,"object.transform",{width:160,height:100,rotation:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(picture,"object.transform",{width:160,height:100,rotation:0,path:[99]}) ^ { ^ }) { case error: true default: false }
 let drag = {kind:"picture",handle:"se",x:100,y:100,cx:100,cy:100,width:160,height:100,zoom:2,rotation:90}
 transform.gesture_value(drag,50,180)=={width:200,height:125,rotation:90}
 transform.gesture_value({*:drag,handle:"rotate",x:100,y:0,rotation:0},200,100).rotation==90

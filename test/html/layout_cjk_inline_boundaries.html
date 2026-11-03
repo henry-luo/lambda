@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8">
+<style>
+body { margin:0; font:20px/60px "Times New Roman"; font-kerning:none; }
+.row { width:10px; }
+.nowrap { white-space:nowrap; }
+.keep { word-break:keep-all; }
+.owner span { white-space:normal; }
+</style>
+<body id="page"><div id="result" lang="ja">
+<div class="row" id="punct"><span>「</span><span>な</span><span>に</span><span>、</span><span>誰</span><span>？</span><span>」</span><span>「</span><span>私</span><span>です</span><span>」</span></div>
+<div class="row" id="punct-control">「なに、誰？」「私です」</div>
+<div class="row" id="closed"><span>あ、</span><span>い</span></div>
+<div class="row" id="closed-control">あ、い</div>
+<div class="row" id="opening"><span>あ</span><span>」</span><span>「</span><span>い</span></div>
+<div class="row" id="opening-control">あ」「い</div>
+<div class="row" id="latin-before"><span>A</span><span>い</span></div>
+<div class="row" id="latin-before-control">Aい</div>
+<div class="row" id="latin-after"><span>あ</span><span>B</span></div>
+<div class="row" id="latin-after-control">あB</div>
+<div class="row nowrap" id="nowrap"><span>あ、</span><span>い</span></div>
+<div class="row nowrap" id="nowrap-control">あ、い</div>
+<div class="row keep" id="keep"><span>あ、</span><span>い</span></div>
+<div class="row keep" id="keep-control">あ、い</div>
+<div class="row nowrap owner" id="owner"><span>あ、</span><span>い</span></div>
+<div class="row nowrap" id="owner-control">あ、い</div>
+<div class="row" id="ruby"><ruby id="ruby-group"><rb>「</rb><rb>な</rb><rb>に</rb><rb>、</rb><rb>誰</rb><rb>？</rb><rb>」</rb><rb>「</rb><rb>私</rb><rb>です</rb><rb>」</rb><rtc><rt></rt></rtc></ruby></div>
+<div class="row" id="ruby-control">「なに、誰？」「私です」</div>
+</div>

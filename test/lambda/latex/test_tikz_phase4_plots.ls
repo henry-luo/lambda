@@ -4,15 +4,15 @@
 import tikz: lambda.doc.tikz.tikz
 import plots: lambda.doc.tikz.pgfplots
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
 fn axis_of(source) any^ => parse(source, {type: "tikz"})^[0]
 
 fn plan_of(source) any^ => plots.resolve_axis(axis_of(source)^)^
 
-fn failure(source) => tikz.render(source) ^ { ^.message }
+fn failure(source) any^ => tikz.render(source) ^ { ^.message }
 
-fn attr_number(tag, key) {
+fn attr_number(tag, key) any^ {
     let at = index_of(tag, " " ++ key ++ "=\"")
     if (at == null) null
     else (let rest = slice(tag, at + len(key) + 3, len(tag)),
@@ -20,15 +20,15 @@ fn attr_number(tag, key) {
 }
 
 // Rendered marks of one class, in source order.
-fn tags(html, class_name) => [for (part in split(html, "<")
-    where starts_with(part, "rect class=\"" ++ class_name ++ "\"") or
-        starts_with(part, "path class=\"" ++ class_name ++ "\"")) part]
+fn tags(html, class_name) => [for (part in ((split(html, "<")) ^ { [] })
+    where ((starts_with(part, "rect class=\"" ++ class_name ++ "\"") or
+        starts_with(part, "path class=\"" ++ class_name ++ "\"")) ^ { false })) part]
 
 fn rects(html) => [for (tag in tags(html, "tikz-bar"))
     [attr_number(tag, "x"), attr_number(tag, "y"), attr_number(tag, "width"),
      attr_number(tag, "height")]]
 
-fn path_data(tag) {
+fn path_data(tag) any^ {
     let at = index_of(tag, " d=\"")
     let rest = slice(tag, at + 4, len(tag));
     slice(rest, 0, index_of(rest, "\""))
@@ -84,17 +84,17 @@ summary(stacked);
 rects(stacked_html);
 summary(errors);
 [for (series in errors.series) series.errors];
-[for (tag in tags(errors_html, "tikz-error-bar")) path_data(tag)];
+[for (tag in ((tags(errors_html, "tikz-error-bar")) ^ { [] })) path_data(tag)];
 // One-sided explicit offsets: `+=` sets only the plus error, `-=` only the minus error.
 (let sided = plan_of("\\begin{axis}\\addplot+[error bars/.cd, y dir=both, y explicit]" ++
     " coordinates {(0,1) += (0,0.5) (1,2) -= (0,0.25)};\\end{axis}")^,
     [sided.ydomain, [for (series in sided.series, point in series.points)
         [point.errors.plus_y, point.errors.minus_y]]]);
 summary(area);
-[for (tag in tags(area_html, "tikz-area")) path_data(tag)];
+[for (tag in ((tags(area_html, "tikz-area")) ^ { [] })) path_data(tag)];
 [len(split(area_html, "tikz-legend-entry")) - 1, contains(area_html, "background:blue")];
 summary(between);
-[for (tag in tags(between_html, "tikz-fill-between")) path_data(tag)];
+[for (tag in ((tags(between_html, "tikz-fill-between")) ^ { [] })) path_data(tag)];
 [failure("\\begin{axis}[ybar, xbar]\\addplot coordinates {(1,1)};\\end{axis}"),
     failure("\\begin{semilogyaxis}[ybar]\\addplot coordinates {(1,1)};\\end{semilogyaxis}"),
     failure("\\begin{axis}\\addplot+[error bars/.cd, y dir=both] coordinates {(0,1)};\\end{axis}"),

@@ -166,6 +166,8 @@ Input* input_from_source_with_options(const char* source, Url* url,
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_directory_with_name_parent(const char* directory_path,
     const char* original_url, bool recursive, int max_depth, NamePool* name_parent);
+Input* input_from_directory_with_io(const char* directory_path,
+    const char* original_url, NamePool* name_parent, const struct SecurityIOClient* io);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 // Target-based input (unified I/O target handling)
@@ -174,6 +176,8 @@ struct Target;  // forward declaration
 Input* input_from_target(struct Target* target, String* type, String* flavor);
 Input* input_from_target_with_name_parent(struct Target* target, String* type,
     String* flavor, NamePool* name_parent);
+Input* input_from_target_with_io(struct Target* target, String* type,
+    String* flavor, NamePool* name_parent, const struct SecurityIOClient* io);
 
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
@@ -300,7 +304,8 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor);
 void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
 void parse_graph_structurizr(Input* input, const char* structurizr_string);
-void resolve_graph_structurizr_local_includes(Input* input, const char* root_path);
+void resolve_graph_structurizr_local_includes(Input* input, const char* root_path,
+    const struct SecurityIOClient* io = nullptr);
 const char* input_detect_structurizr_flavor(const char* pathname,
                                             const char* source,
                                             size_t source_len);

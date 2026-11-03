@@ -2,8 +2,8 @@
 import latex: lambda.doc.latex.latex
 import tikz: lambda.doc.tikz.tikz
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
 let calibration = input("test/input/tikz_calibration_report.tex", {type: "latex"})^
 let latency = input("test/input/tikz_service_latency.tex", {type: "latex"})^

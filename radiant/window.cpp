@@ -24,6 +24,7 @@
 #include "devtools_adapter.hpp"
 #include "rdt_video.h"
 #include "speech.hpp"
+#include "document_clock.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -179,18 +180,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
 // the thread-active realm may belong to another document (e.g. an iframe whose
 // scripts ran last), which has its own clock setting.
 bool radiant_document_virtual_clock(UiContext* uicon, double* now_ms) {
-    if (now_ms) *now_ms = 0.0;
-    DomDocument* doc = uicon ? uicon->document : nullptr;
-    Runtime* runtime = dom_document_script_runtime(doc);
-    if (!runtime) {
-        // no document realm: the thread's loop is the only clock there is
-        if (now_ms && js_event_loop_virtual_clock_enabled()) *now_ms = js_event_loop_virtual_clock_now_ms();
-        return js_event_loop_virtual_clock_enabled();
-    }
-    JsRuntimeState* state = js_runtime_state_for(runtime_get_eval_context(runtime));
-    if (!state || !state->event_loop || !state->event_loop->virtual_clock_enabled) return false;
-    if (now_ms) *now_ms = state->event_loop->virtual_clock_ms;
-    return true;
+    return radiant_document_clock(uicon ? uicon->document.get() : nullptr, now_ms);
 }
 
 bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
@@ -1314,10 +1304,6 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
-    view_cleanup_js_batch_state();
-    if (timing) timing->cleanup_js_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
-
-    phase_start = time_now_ns();
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
     if (timing) timing->cleanup_network_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
@@ -1347,8 +1333,17 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
 
     phase_start = time_now_ns();
     ui_context_cleanup(&ui_context);
-    view_cleanup_input_manager();
     if (timing) timing->cleanup_ui_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    // document cancellation resumes parked tasks; keep their JS realm/capsule
+    // ambient slots alive until ui_context_cleanup has joined them (S13.3.1v2).
+    phase_start = time_now_ns();
+    view_cleanup_js_batch_state();
+    if (timing) timing->cleanup_js_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
+    view_cleanup_input_manager();
+    if (timing) timing->cleanup_ui_ms += view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
     lambda_uv_set_host_owned(false);

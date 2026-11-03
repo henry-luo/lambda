@@ -33,7 +33,7 @@ let s3 = deco_concat(s1, s2)
 
 // deco_map — translate every position through a step
 let step = step_replace_text([0, 0], 0, 0, "XXX")    // insert 3 chars at offset 0
-fn map_p(p) => step_map(step, p)
+fn map_p(p) any^ => step_map(step, p)
 let s_mapped = deco_map(s1, map_p)
 let d0_after = s_mapped.items[0]   // d_hit shifted
 "mapped from:"; d0_after.from.offset

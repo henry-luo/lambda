@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/paraffins.ls. */
 extern int printf(const char *, ...);
 static int ms2(int r) { return r * (r + 1) / 2; }
@@ -21,8 +22,11 @@ static int nb(int n) {
     return bcp + count_ccp(counts, n);
 }
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int iteration; int result = 0;
     for (iteration = 0; iteration < 10; iteration++) { int n; for (n = 1; n <= 23; n++) result = nb(n); }
+    BENCH_KERNEL_END();
     printf(result == 5731580 ? "paraffins: nb(23) = 5731580\nparaffins: PASS\n" : "paraffins: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return result != 5731580;
 }

@@ -13,7 +13,7 @@ pub fn clip(points, distance) {
         if (db >= 0) b)] |: ~ != null
 }
 
-pub fn clip_segment(a, b, distance) {
+pub fn clip_segment(a, b, distance) any^ {
     let da = distance(a);
     let db = distance(b);
     if (da < 0 and db < 0) []
@@ -54,18 +54,18 @@ pub fn contains_point(points, point) => len([for (i, a in points, let b=points[(
         (b[0]-a[0])*(point[1]-a[1])/(b[1]-a[1])+a[0]) true]) % 2 == 1
 
 pub fn simple_ring(points) => len([for (index in 0 to (len(points) - 2))
-    for (other in (index + 2) to (len(points) - 2) where not (index == 0 and other == len(points) - 2) and
-        intersects(points[index], points[index + 1], points[other], points[other + 1])) true]) == 0
+    for (other in (index + 2) to (len(points) - 2) where ((not (index == 0 and other == len(points) - 2) and
+        intersects(points[index], points[index + 1], points[other], points[other + 1])) ^ { false })) true]) == 0
 
-fn ears(points) {
+fn ears(points) any^ {
     if (len(points) < 3) []
     else if (len(points) == 3) if (cross(points[0], points[1], points[2]) == 0) [] else [points]
     else {
         let candidates = [for (index, b in points,
             let ai = (index + len(points) - 1) % len(points), let ci = (index + 1) % len(points),
             let a = points[ai], let c = points[ci]
-            where cross(a, b, c) >= 0 and (cross(a, b, c) == 0 or
-                len([for (other, p in points where other != ai and other != index and other != ci and in_triangle(p, a, b, c)) p]) == 0)) index];
+            where ((cross(a, b, c) >= 0 and (cross(a, b, c) == 0 or
+                len([for (other, p in points where ((other != ai and other != index and other != ci and in_triangle(p, a, b, c)) ^ { false })) p]) == 0)) ^ { false })) index];
         if (len(candidates) == 0) error("chart: geographic ring must be simple and non-self-intersecting")
         else {
             let index = candidates[0];
@@ -76,14 +76,14 @@ fn ears(points) {
     }
 }
 
-pub fn triangulate(ring) {
+pub fn triangulate(ring) any^ {
     let outline = if (len(ring) > 1 and ring[0] == ring[len(ring) - 1]) slice(ring, 0, len(ring) - 1) else ring;
     let points = [for (index, point in outline where index == 0 or point != outline[index - 1]) point];
     ears(if (area(points) < 0) reverse(points) else points)
 }
 
 // Properties remain directly addressable by ordinary chart encodings; GeoJSON metadata wins collisions.
-pub fn records(value) {
+pub fn records(value) any^ {
     if (value.type == "FeatureCollection") if (not (value.features is array)) error("chart: GeoJSON FeatureCollection requires a features array")
         else [for (feature in value.features) {*:if (feature.properties is map) feature.properties else {}, *:feature}]
     else if (value.type == "Feature") [{*:if (value.properties is map) value.properties else {}, *:value}]

@@ -1,11 +1,11 @@
 import c: .common
 import paths: lambda.io.path
 
-pub fn references(model) => unique([for (node in model.nodes where node.uri == c.DB and
-    node.tag in ["imagedata","audiodata","videodata"] and c.attr(node,"fileref") != null)
+pub fn references(model) => unique([for (node in model.nodes where ((node.uri == c.DB and
+    node.tag in ["imagedata","audiodata","videodata"] and c.attr(node,"fileref") != null) ^ { false }))
     c.resolve_uri(node.base_uri,c.attr(node,"fileref"))])
 
-pub fn mime(path) {
+pub fn mime(path) any^ {
     let parts = split(lower(path),".")
     let suffix = parts[len(parts)-1];
     c.get({png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",svg:"image/svg+xml",
@@ -21,6 +21,6 @@ pub fn plan(model) {
             {path:entry.path,media_type:mime(entry.uri),bytes:entry.resource.bytes,source_uri:entry.uri}],
         diagnostics:[for (entry in entries where entry.resource.bytes == null)
             c.issue("missing-resource","Media was not captured: " ++ entry.uri,
-                c.first([for (node in model.nodes where c.attr(node,"fileref") != null and
-                    c.resolve_uri(node.base_uri,c.attr(node,"fileref")) == entry.uri) node]))]}
+                c.first([for (node in model.nodes where ((c.attr(node,"fileref") != null and
+                    c.resolve_uri(node.base_uri,c.attr(node,"fileref")) == entry.uri) ^ { false })) node]))]}
 }

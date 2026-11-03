@@ -20,6 +20,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/dom/dom_events.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/concurrency.h"
@@ -566,6 +567,9 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // Module-owned DOM wrappers are non-owning; unroot wrappers before the
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
+    // the realm can outlive this arena; retire its listener pins while the
+    // document registry and precise-root owner are still valid (D4.5.2).
+    dom_events_release_document(doc);
 
     if (timer_owner && js_runtime_state_for(timer_owner)) {
         if (script_runner_js_batch_cleanup_unsafe()) {

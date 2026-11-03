@@ -70,7 +70,7 @@ fn test_type_of_error() {
 }
 test_type_of_error()
 
-fn test_string_of_error() {
+fn test_string_of_error() any^ {
     let a = fail() ^ { ^ }
     string(a)
 }

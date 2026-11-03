@@ -9,7 +9,7 @@ import lambda.editor.mod_commands
 import lambda.editor.mod_input_intent
 
 fn st(d, sel, sch) => {doc: d, selection: sel, schema: sch, stored_marks: null}
-fn caret_at(path, off) => text_selection(pos(path, off), pos(path, off))
+fn caret_at(path, off) any^ => text_selection(pos(path, off), pos(path, off))
 
 // html schema: "- " -> ul/li
 let h1 = st(node('doc', [node('p', [text("-")])]), caret_at([0,0], 1), html5_subset_schema)
