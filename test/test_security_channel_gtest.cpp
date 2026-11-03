@@ -3,6 +3,7 @@
 #include "../lambda/host/safety/file_broker.h"
 #include "../lib/endian.h"
 #include "../lib/file_utils.h"
+#include "../lib/ipc_stream.h"
 #include "../lib/log.h"
 #include "safety/channel_wire_fixture.h"
 #include <errno.h>
@@ -17,7 +18,7 @@
 #include <unistd.h>
 
 struct ChannelServer {
-    int fd;
+    SecurityChannel* channel;
     SecurityChannelConfig config;
     SecurityIOClient client;
     SecurityChannelReport report;
@@ -25,7 +26,8 @@ struct ChannelServer {
 };
 static void* serve_channel(void* data) {
     ChannelServer* server = (ChannelServer*)data;
-    server->success = security_channel_serve(server->fd, &server->config, &server->client, &server->report);
+    server->success = security_channel_dispatch(server->channel, &server->client, &server->report);
+    security_channel_destroy(server->channel); server->channel = nullptr;
     return nullptr;
 }
 static uint64_t channel_test_clock(void*) { return 100; }
@@ -57,13 +59,22 @@ protected:
         root_id = security_file_broker_admit_root(broker, &spec); ASSERT_NE(root_id, 0U);
         local = security_file_broker_client(broker);
     }
+    int start_server(int fd, SecurityChannelConfig config, SecurityIOClient client) {
+        server = {nullptr, config, client, {}, false};
+        // adopt before the peer can close; Darwin getpeername then rejects the
+        // disconnected socket, while production also constructs before resume.
+        server.channel = security_channel_create(fd, &server.config);
+        if (!server.channel) { close(fd); return -1; }
+        if (pthread_create(&thread, nullptr, serve_channel, &server)) {
+            security_channel_destroy(server.channel); server.channel = nullptr; return -1;
+        }
+        running = true; return 0;
+    }
     int start(bool raw = false, uint32_t timeout = 1000, uint32_t requests = 1024,
             uint64_t bytes = 8 * 1024 * 1024) {
         int pair[2];
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair)) return -1;
-        server = {pair[0], {1051, bytes, 16384, requests, timeout}, local, {}, false};
-        if (pthread_create(&thread, nullptr, serve_channel, &server)) { close(pair[0]); close(pair[1]); return -1; }
-        running = true;
+        if (start_server(pair[0], {1051, bytes, 16384, requests, timeout}, local)) { close(pair[1]); return -1; }
         if (raw) return pair[1];
         channel = security_channel_create(pair[1], &server.config);
         if (!channel) { close(pair[1]); return -1; }
@@ -118,6 +129,23 @@ TEST_F(SecurityChannelTest, MissingOrInvalidChannelsCannotSelectAmbientAuthority
     seed("data", "private");
     int fd = open("/dev/null", O_RDONLY); ASSERT_GE(fd, 0);
     SecurityChannelConfig config = {1051, 1024 * 1024, 16384, 128, 1000};
+    EXPECT_EQ(security_channel_create(fd, &config), nullptr);
+    EXPECT_GE(fcntl(fd, F_GETFD), 0); close(fd);
+    const int kinds[] = {SOCK_STREAM, SOCK_DGRAM};
+    for (unsigned i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+        int pair[2]; ASSERT_EQ(socketpair(AF_UNIX, kinds[i], 0, pair), 0);
+        int flags = fcntl(pair[0], F_GETFL), descriptor_flags = fcntl(pair[0], F_GETFD);
+        EXPECT_EQ(ipc_stream_is_connected_local(pair[0]), kinds[i] == SOCK_STREAM);
+        EXPECT_EQ(fcntl(pair[0], F_GETFL), flags);
+        EXPECT_EQ(fcntl(pair[0], F_GETFD), descriptor_flags);
+        // Bootstrap inspection borrows the endpoint; subsequent IPC still owns it.
+        EXPECT_EQ(write(pair[0], "x", 1), 1);
+        char byte = 0; EXPECT_EQ(read(pair[1], &byte, 1), 1); EXPECT_EQ(byte, 'x');
+        if (kinds[i] == SOCK_DGRAM) EXPECT_EQ(security_channel_create(pair[0], &config), nullptr);
+        close(pair[0]); close(pair[1]);
+    }
+    fd = socket(AF_UNIX, SOCK_STREAM, 0); ASSERT_GE(fd, 0);
+    EXPECT_FALSE(ipc_stream_is_connected_local(fd));
     EXPECT_EQ(security_channel_create(fd, &config), nullptr);
     EXPECT_GE(fcntl(fd, F_GETFD), 0); close(fd);
     SecurityIOClient unavailable = security_channel_client(nullptr);
@@ -343,8 +371,7 @@ TEST_F(SecurityChannelTest, LostWriteResponseHasAnUnknownOutcomeAndNeverRetries)
     int pair[2]; ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), 0);
     LostWrite lost = {local, pair[0]};
     SecurityIOClient broken = local; broken.context = &lost; broken.write = lose_write_response;
-    server = {pair[0], {1051, 1024 * 1024, 16384, 128, 1000}, broken, {}, false};
-    ASSERT_EQ(pthread_create(&thread, nullptr, serve_channel, &server), 0); running = true;
+    ASSERT_EQ(start_server(pair[0], {1051, 1024 * 1024, 16384, 128, 1000}, broken), 0);
     channel = security_channel_create(pair[1], &server.config); ASSERT_NE(channel, nullptr);
     remote = security_channel_client(channel);
     SecurityIOResult result = remote.write(remote.context, "new", "payload", 7, false, true);

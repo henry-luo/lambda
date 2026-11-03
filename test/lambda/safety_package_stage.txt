@@ -1,0 +1,1 @@
+["data/hello world.txt", ['denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied', 'denied'], "data", true, "main.ls", "data/message.txt", false, true, "data/empty", 0, 'done', 4, 16, 'denied']

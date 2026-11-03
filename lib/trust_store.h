@@ -25,6 +25,9 @@ struct mbedtls_x509_crt;
  * logged). The chain is shared: callers must neither modify nor free it.
  */
 struct mbedtls_x509_crt* trust_store_roots(void);
+// Security services use OS roots regardless of SSL_CERT_FILE, including when
+// the ordinary TLS profile was already initialized with an override.
+struct mbedtls_x509_crt* trust_store_system_roots(void);
 
 /** Number of roots in trust_store_roots(); 0 when none loaded. */
 int trust_store_root_count(void);

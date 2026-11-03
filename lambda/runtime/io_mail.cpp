@@ -18,6 +18,7 @@
 #include "transpiler.hpp"
 #include "../network/curl_trust.h"
 #include "../../lib/file.h"
+#include "../../lib/curl_runtime.h"
 #include "../../lib/log.h"
 #include "../../lib/mail_imap.h"
 #include "../../lib/memtrack.h"
@@ -258,6 +259,7 @@ static size_t mail_discard_cb(char* data, size_t size, size_t count, void* user)
 }
 
 static CURL* mail_curl_new(const MailTarget* target, const MailAuth* auth) {
+    if (!curl_runtime_initialize()) return NULL;
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
     curl_easy_setopt(curl, CURLOPT_URL, target->url);

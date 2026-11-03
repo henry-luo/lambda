@@ -69,6 +69,9 @@ void security_update_snapshot_free(SecurityUpdateSnapshot* snapshot);
 // change requires explicit trusted revalidation and retains user preferences.
 SecurityUpdateResult security_update_admit(SecurityUpdateControl* control,
     const SecurityUpdatePackageSpec* spec, bool revalidate);
+// Canonical public HTTPS URL within the authenticated package's exact origin
+// set. This admits a destination, not a network capability or artifact trust.
+bool security_update_url_allowed(const SecurityUpdatePackageSpec* spec, const char* url);
 SecurityUpdateResult security_update_set_mode(SecurityUpdateControl* control,
     const char* package, SecurityUpdateMode mode, uint64_t pause_until); // NULL = global
 SecurityUpdateResult security_update_set_offline(SecurityUpdateControl* control, bool offline);

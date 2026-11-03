@@ -1,14 +1,15 @@
 # Lambda App Safety
 
 **Status:** script/app defaults, protected grant storage, and package-update
-policy ratified by the user on 2026-11-02 (**D7.5.5–D7.5.8**). Remaining
+policy ratified by the user on 2026-11-02 (**D7.5.5–D7.5.8**), with private-data
+retention on uninstall ratified on 2026-11-03 (**D7.5.9**). Remaining
 architecture and delivery details are proposals. Policy, anchored I/O,
 grant-store/file-broker and scoped Lambda source/input/parser-resource/path/task
 components, host ad-hoc admission/source manifests and grant restoration,
 context-owned transactions, unsupported-adapter refusals, bounded
 broker IPC, an experimental signed T0 worker, a verified macOS supervisor,
 once-only terminal consent, resource monitoring, guarded IPC response publication
-and protected updater controls
+and protected updater controls, plus broker-owned per-principal persistent data,
 are implemented; update delivery and full production enforcement remain pending,
 tracked in the
 [implementation plan](impl/Lambda_Impl_App_Safety.md#6-implementation-progress).
@@ -24,8 +25,33 @@ This design develops **D7.5.1–D7.5.2 / DO19**, continuing
 [JA10 and JA16](Lambda_Design_Jube_Architecture.md). The approved defaults map
 to **D7.5.5** (execution root and loading), **D7.5.6** (create versus overwrite),
 **D7.5.7** (protected settings), and **D7.5.8** (network denial and package
-updates). Other recommendations remain proposed requirements unless identified
+updates), and **D7.5.9** (retention on uninstall). Other recommendations remain proposed requirements unless identified
 as existing rulings. This document does not allocate a competing security ledger.
+
+**Current platform investigation (2026-11-03):** the shared App Sandbox helper
+and an ad-hoc per-principal re-signing spike do not establish distinct Lambda
+principals. The latter failed a same-ID/valid-parent native cross-container read
+control. An experimental deny-native-IO process policy now runs before runtime
+initialization, with host readback before broker callbacks. It uses private
+Darwin APIs, is qualified only by the recorded macOS 26.5.2 arm64 component
+probes, and was approved by the user on 2026-11-03 as an **experimental backend**.
+It must be qualified before any default rollout. The launcher now clears inherited
+user Mach ports before startup, and the worker rejects ptrace at the syscall
+filter. Before source acquisition, the worker also checks for one bootstrap
+thread and the exact descriptor roles, refusing leaked handles or redirected
+stdio: native file descriptors and mappings survive sandbox installation.
+The direct-linked worker also fails native-constructor qualification: mappings
+can outlive closed descriptors. An opt-in minimal bootstrap now installs policy
+before loading the separate T0 runtime, following the delayed-runtime model in
+[Chromium's sandbox design](https://chromium.googlesource.com/chromium/src/+/main/sandbox/mac/seatbelt_sandbox_design.md).
+Its local composition controls do not qualify hardened publisher loading.
+Signing-identity setup is skipped by the user; kernel task-access/debug and
+publisher/deployment gates remain open. No ordinary CLI default has changed. The
+backend-independent private-data service uses a channel-bound virtual
+`/.lambda/app-data` mount, stored beneath protected `~/.lambda/app-data`,
+with no source authority and bounded writes. Details and remaining gates are in
+the [implementation progress](impl/Lambda_Impl_App_Safety.md#6-implementation-progress)
+(**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
 
 ## 1. Recommended direction
 
@@ -429,7 +455,8 @@ sandbox. An unrestricted host-compatibility session cannot claim this protection
 | App/project source and resource root | Read/import and create new files by default; existing-file modification requires user approval (§7.3). Protected descendants remain excluded. |
 | Managed Lambda runtime and shared dependency images | Read-only to app/script workers, integrity-checked; the trusted install/update service replaces them. This protection does not make every ordinary project file immutable. |
 | App data | Private to the app principal, mutable under quota; separate from executable code. |
-| App cache/temp | Private, bounded, non-executable storage with cleanup; no shared predictable temporary names. |
+| App cache | Private, bounded, non-executable storage; the trusted host may evict it without changing persistent app data. |
+| App temporary files | Private per admission, under a per-principal aggregate quota; unpredictable physical session names and cleanup after exit/crash, with abandoned-session recovery. |
 | User-selected file | Only granted operations on that object; read-only by default. |
 | User-selected directory | Explicit recursive scope and operation set, with protected descendants still excluded. |
 | OS/runtime resources needed to execute | Minimal read-only runtime view, not general access to host configuration. |
@@ -448,6 +475,63 @@ directory being writable must not let an app replace code that later executes
 with a stronger principal. Code acquisition/import from user data, downloaded
 content, archives, or caches remains subject to explicit executable-source
 admission; setting a directory `noexec` does not constrain an interpreter.
+
+The experimental broker implements data/cache/temp through channel-bound
+virtual mounts (`/.lambda/app-data`, `/.lambda/app-cache`, `/.lambda/app-temp`)
+under **D7.5.2, D7.5.5–D7.5.7**. Temp files are isolated between concurrent
+admissions; the quota counts all of that principal's sessions. A held lease,
+not a PID or age threshold, distinguishes live temp trees from abandoned ones.
+Joined teardown and trusted cache eviction use bounded, identity-checked
+removal; cleanup failure is visible to the host.
+
+Uninstall retains persistent app data by default (**D7.5.9**, USER,
+2026-11-03). Deletion is a separate explicit action in trusted Lambda management;
+neither uninstall nor permission revocation silently erases it. Retained data
+grants no permission to reinstall or execute code. Cache/temp remain discardable.
+The experimental host exposes usage/quota inspection and an explicit data-reset
+command. Reset refuses live admissions, records a principal/object-bound random
+intent before deletion and keeps new admissions blocked until bounded cleanup
+finishes. An interrupted reset requires trusted resumption with that intent's
+ID; ordinary script launch never resumes deletion. Cache, grants, updater state
+and other principals are preserved. This resets valid persistent storage; it
+does not adopt or repair an unverified data owner record. Installed-app uninstall
+integration, corrupt-state repair, full power-loss qualification and graphical quota UI
+remain pending. See the
+[storage component](../lambda/host/safety/README.md#broker-owned-private-data-cache-and-temporary-files).
+
+Persistent security/private state uses ordered namespace publication under
+**D7.5.2, D7.5.7**. Creating a directory syncs its inode and its parent's name
+before returning; create-mode retries also sync retained directories. A new
+lock/lease stream is returned only after the empty file and parent have synced.
+Protected settings and private mounts additionally require `F_FULLFSYNC` on
+macOS for writes, creation and removal, with no weaker fallback on error.
+An error can follow a created or committed object; exclusive retries do not
+authorize replacement, and unverified persistent state is never silently adopted.
+These barriers address OS/device write ordering, not proof against every device,
+filesystem corruption or physical power-loss scenario.
+[Apple fsync](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html),
+[Apple F_FULLFSYNC](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html),
+[Linux directory syncing](https://man7.org/linux/man-pages/man2/fsync.2.html).
+
+Trusted quota management stores per-principal overrides under the protected
+`~/.lambda/setting` namespace (**D7.5.2, D7.5.7**). Missing overrides use the
+trusted host's defaults. Saved records bind the principal kind/digest and account
+profile, retain a monotonically increasing generation and survive app-code
+revalidation and data reset. Corrupt or copied records refuse admission;
+restoring defaults never silently replaces a corrupt record. No worker request
+can edit this policy.
+
+The host loads policy while holding the same owner lock that serializes quota
+edits and admission creation. Editing requires no live admission or pending data
+reset and an exact inspected generation. Default restoration persists a new
+generation. Lowering limits retains all data and reports over-quota state;
+replacement can shrink a file when the resulting class fits both byte and entry
+limits. Other writes continue to enforce the full class budget. Entry limits
+remain bounded at 4,096 per class, with at least three internal temp entries
+required for an admission. Request/session budgets and source denial remain
+independent. Trusted CLI quota inspection/edit/default restoration are available
+in the experimental host; graphical controls and installed-app integration
+remain pending.
 
 Normal pickers cannot override protected-resource policy. An editor needing a
 sensitive configuration change should use a dedicated, narrowly reviewed host
@@ -669,6 +753,94 @@ already transmitted requests cannot be recalled.
 Default polling cadence, installation-time presentation, and update schema
 remain implementation choices. Use bounded downloads and retry backoff; an
 update server cannot cause unbounded polling, storage growth, or grant changes.
+
+**Current transport component (D7.5.2, D7.5.7–D7.5.8; 2026-11-03):**
+`host/safety/update_download` constructs a GET for a public repository-relative
+name from the admitted package record. It permits at most three redirects,
+checking the exact admitted origin and canonical public HTTPS syntax on every
+hop. Queries, fragments, credentials, noncanonical escapes, literal dot segments and local
+hostnames are refused before dispatch. The mechanism in `lib/https_pull` checks
+each resolved socket address before connecting; private, link-local, multicast,
+mapped/translated and other special-use address ranges are excluded by its
+conservative public-unicast profile. DNS resolution is not itself authority.
+
+Every hop uses a fresh handle without browser cache/cookies, proxy, netrc,
+credentials, TLS sessions, compression or persistent server tokens. Requests
+have a fixed User-Agent and identity encoding. TLS verifies the hostname against
+OS roots independently of ordinary `SSL_CERT_FILE` overrides; the current
+adapter requires libcurl 8.10.1+, mbedTLS and asynchronous DNS. Ambient TLS key
+logging, including retained initialization history, refuses this service.
+There is one body-byte budget across a download's hops (maximum 256 MiB), a
+16 KiB aggregate header limit per hop, a 4,096-byte URL buffer and an overall
+deadline no longer than the live job. Policy is rechecked during transfer and
+under a short final handoff lease; no network wait holds a settings lock.
+Already transmitted bytes cannot be recalled.
+
+This is a trusted-host component, with no app builtin, worker opcode or URL
+fetch command. Successful downloads are explicitly **unverified bytes**. Signed
+metadata/freshness, trust-root rotation, safe staging/extraction, activation and
+installed-package catalog integration remain required before update delivery
+is available. Transport tests do not qualify M2 or enable default rollout.
+
+**Selected verifier implementation (USER, 2026-11-03; D7.5.8):** implement
+TUF metadata parsing, canonical signing bytes, threshold verification, root
+rotation, rollback/freshness checks, delegated lookup and refresh sequencing
+in Lambda Script. Use native primitives for public-key signature math and
+trusted host mechanisms for admitted downloads, protected checkpoints and
+staging. No Python/Rust client runtime or package-executed updater is required.
+The reusable verifier functions carry no IO or installation authority.
+
+The current implementation under `lmd/package/security/tuf*` emits fetch and
+durable-checkpoint actions. The dedicated `update_refresh` host adapter executes them; it
+must bind state to the live package job, immutable verifier code and protected
+cache. Accepted roots and metadata are persisted before later fetches. Root
+rotation that changes timestamp/snapshot keys atomically drops both cached
+roles. The host cache stores opaque signed bytes with profile/authority binding,
+generation comparison and a persisted observed-clock watermark under D7.5.7.
+This is not a hardware-backed counter or an app-callable state store.
+
+Under **D7.5.2, D7.5.7–D7.5.8**, role labels remain opaque UTF-8 values inside
+that record, with exact identity and a 128-byte ceiling. They never select
+settings filenames. The verifier percent-encodes whole role components;
+target references preserve canonical existing escapes exactly once. Native
+transport checks canonical escapes, UTF-8, controls and literal dot segments
+before parsing. Encoded separators remain URL data. Exact plain origins/bases,
+origin/peer rechecks and the default app-network denial remain in force.
+
+The offline verifier uses the interpreter and an immutable embedded source
+closure in a separate early-confined process. A dedicated bounded, sequence-bound
+channel carries actions; the app channel exposes no updater call. Native code
+enforces process budgets, live policy, aggregate transfer limits and atomic
+checkpoints. The final opaque artifact binds the random job reservation and
+requires revalidation on each handoff. Equal timestamp metadata resumes target
+verification from the old trusted envelope, allowing interrupted downloads to
+retry without accepting new same-version expiry/references.
+
+The initial **D7.5.2, D7.5.8** offline decoder implements its ZIP namespace and
+streaming policy in Lambda Script, using the existing native bounded reader.
+It validates all paths before emission and sends one exact member at a time,
+requiring host acknowledgement between members. It writes no files and runs no
+package hooks. The initial image-member profile admits printable ASCII names,
+rejects case collisions and reserved/device names, and caps archive/expanded
+bytes at 64 MiB, members at 16 MiB, entries at 4,096 and path depth at 32.
+Unicode image names require a qualified filesystem alias policy; signed TUF
+role/target UTF-8 support is unaffected. See the [decoder contract](../lmd/package/security/Stage.md).
+The native host adapter now consumes only the live reservation-bound opaque
+artifact and independently validates output before writing an inactive image
+under strict protected anchors. A single pending stage, random identity,
+checksummed intent and exact per-file receipt bound storage and cleanup. Each
+write rechecks policy; ready publication follows clean decoder exit and a final
+lease. Identity-bound bounded cleanup works offline/paused and never deletes
+retained app data. Managed-image admission/publication, activation and installed
+catalog coordination remain pending; a staging receipt does not authorize them.
+
+The [initial verifier profile](../lmd/package/security/tuf/README.md) documents
+supported algorithms, paths, delegation forms and bounds. Bracket patterns and
+succinct-role delegations currently fail closed. Focused signed fixtures do not
+establish TUF conformance. Owned TLS/offline-worker composition passes with an
+explicitly unhardened fixture. Successful hardened publisher launch, full conformance,
+managed-image admission/publication, crash-safe activation and deployed qualification remain
+open; delivery and default sandbox rollout stay disabled.
 
 ## 9. Jube and executable-code admission
 
@@ -931,7 +1103,7 @@ guarantees across systems.
 
 | Platform | Candidate enforcement | Qualification requirement |
 |---|---|---|
-| macOS | Signed sandboxed worker/helper targets, restricted entitlements, brokered file pickers and scoped bookmarks, appropriate hardened-runtime/JIT configuration. | Prove workers cannot access the host app's union of selected files, containers, entitlements, or secrets. Confirm a supported packaging/process model before choosing APIs; do not base the design on private sandbox APIs. |
+| macOS | Signed sandboxed worker/helper targets, restricted entitlements, brokered file pickers and scoped bookmarks, appropriate hardened-runtime/JIT configuration. | Prove workers cannot access the host app's union of selected files, containers, entitlements, or secrets. USER 2026-11-03 permits the private-Darwin process backend as an experiment; qualify the actual OS/signing/process profile before any default rollout. API availability or a compiled profile is not an isolation proof. |
 | Linux | Namespaces and restricted mounts, `no_new_privs`, seccomp, and Landlock/other supported mandatory controls; broker all unrestricted networking and external resources. | Probe kernel features and block launch when required controls are unavailable. Landlock's available rights vary by ABI; seccomp alone is not a complete sandbox. |
 | Windows | AppContainer/restricted tokens and ACLs, constrained handles and IPC, process mitigations; job objects for lifetime/resource management. | Test filesystem/registry/device/network and child-process containment, not just job termination. No implicit inherited handles or unqualified network exemptions. |
 | iOS / iPadOS, if targeted | OS app sandbox and approved entitlements/services; interpreter execution when runtime code generation is unavailable. | Desktop-style process spawning, arbitrary DSOs, and JIT must not be assumed available. A mobile profile may initially support only a narrower extension set. |

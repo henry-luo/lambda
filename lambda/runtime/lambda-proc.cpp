@@ -1309,7 +1309,10 @@ Item pn_cmd2(Item cmd, Item args) {
 // Returns StrBuf* that caller must free with strbuf_free()
 // Returns NULL if item cannot be converted to local path (e.g., http:// URLs)
 extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
-    Target* target = item_to_target(item.item, NULL);
+    // Match input/output resolution, including a confined host's lexical base.
+    // NULL here would query ambient getcwd and lose task-relative targets.
+    Url* cwd = context ? context->cwd : nullptr;
+    Target* target = item_to_target(item.item, cwd);
     if (!target) {
         return NULL;
     }
@@ -1321,7 +1324,7 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
         return NULL;
     }
 
-    StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
+    StrBuf* path_buf = (StrBuf*)target_to_local_path(target, cwd);
     target_free(target);
     return path_buf;
 }

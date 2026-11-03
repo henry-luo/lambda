@@ -22,6 +22,7 @@ typedef struct SecuritySupervisorReport {
     bool launched;
     bool served;
     int system_error;
+    int cleanup_error;
 } SecuritySupervisorReport;
 
 // D7.5.1-2, D7.5.5-7. Trusted host assembles publisher, installation, catalog,

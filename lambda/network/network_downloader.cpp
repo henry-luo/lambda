@@ -16,6 +16,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/curl_runtime.h"
 #include <time.h>
 #include <pthread.h>
 
@@ -141,20 +142,6 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
     return total;
 }
 
-// Initialize curl (one-time setup)
-static bool curl_initialized = false;
-
-static bool init_curl() {
-    if (!curl_initialized) {
-        if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-            log_error("network: failed to initialize libcurl");
-            return false;
-        }
-        curl_initialized = true;
-    }
-    return true;
-}
-
 // Check if HTTP error is retryable
 bool is_http_error_retryable(long http_code) {
     // 5xx errors (server errors) are retryable
@@ -178,7 +165,7 @@ bool network_download_resource(NetworkResource* res) {
         return false;
     }
     
-    if (!init_curl()) {
+    if (!curl_runtime_initialize()) {
         if (res->error_message) mem_free(res->error_message);
         res->error_message = mem_strdup("Failed to initialize libcurl", MEM_CAT_NETWORK);
         return false;

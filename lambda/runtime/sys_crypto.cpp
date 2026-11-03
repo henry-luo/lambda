@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/uuid.h"
 #include "../../lib/digest.h"
+#include "../../lib/signature.h"
 
 #include <mbedtls/md.h>
 #include <string.h>
@@ -22,6 +23,39 @@ static mbedtls_md_type_t hash_algorithm(Item algorithm) {
     if (n == 6 && !memcmp(name, "sha384", 6)) return MBEDTLS_MD_SHA384;
     if (n == 6 && !memcmp(name, "sha512", 6)) return MBEDTLS_MD_SHA512;
     return MBEDTLS_MD_NONE;
+}
+
+static bool signature_bytes(Item item, const uint8_t** bytes, size_t* size) {
+    if (get_type_id(item) == LMD_TYPE_NULL) { *bytes = nullptr; *size = 0; return true; }
+    if (get_type_id(item) == LMD_TYPE_BINARY) {
+        Binary* binary = item.get_safe_binary(); *bytes = binary ? binary_data(binary) : nullptr;
+        *size = binary ? binary_length(binary) : 0; return true;
+    }
+    if (is_text_type_id(get_type_id(item))) {
+        *bytes = (const uint8_t*)item.get_chars(); *size = item.get_len(); return true;
+    }
+    return false;
+}
+extern "C" Item fn_verify_signature(Item key, Item message, Item signature, Item scheme) {
+    Item arguments[] = {key, message, signature, scheme};
+    for (Item argument : arguments) if (get_type_id(argument) == LMD_TYPE_ERROR) return argument;
+    if (!is_text_type_id(get_type_id(scheme))) return io_fs_error(ERR_TYPE_MISMATCH, "verify_signature: scheme must be text");
+    static const struct { const char* name; SignatureScheme scheme; } schemes[] = {
+        {"ed25519", SIGNATURE_ED25519}, {"rsassa-pss-sha256", SIGNATURE_RSA_PSS_SHA256},
+        {"ecdsa-sha2-nistp256", SIGNATURE_ECDSA_P256_SHA256}};
+    const char* name = scheme.get_chars(); size_t length = scheme.get_len();
+    SignatureScheme algorithm = SIGNATURE_ED25519; bool found = false;
+    for (const auto& entry : schemes) if (length == strlen(entry.name) && !memcmp(name, entry.name, length)) {
+        algorithm = entry.scheme; found = true; break;
+    }
+    if (!found) return io_fs_error(ERR_INVALID_OPERATION, "verify_signature: unsupported signature scheme");
+    const uint8_t *key_bytes, *message_bytes, *signature_data; size_t key_size, message_size, signature_size;
+    if (!signature_bytes(key, &key_bytes, &key_size) || !signature_bytes(message, &message_bytes, &message_size) ||
+            !signature_bytes(signature, &signature_data, &signature_size))
+        return io_fs_error(ERR_TYPE_MISMATCH, "verify_signature: key, message and signature must be bytes or text");
+    SignatureResult result = signature_verify(algorithm, key_bytes, key_size, message_bytes, message_size, signature_data, signature_size);
+    return result == SIGNATURE_ERROR ? io_fs_error(ERR_INTERNAL_ERROR, "verify_signature: cryptographic provider unavailable") :
+        (Item){.item = b2it(result == SIGNATURE_VALID)};
 }
 
 // hash(value, algorithm): the digest of binary, or of text's UTF-8 bytes, as binary

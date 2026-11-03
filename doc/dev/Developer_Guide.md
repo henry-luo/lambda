@@ -88,6 +88,7 @@ These libraries and tools are required on every platform.
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
 | **mbedTLS** | System package | TLS/SSL for libcurl |
+| **OpenSSL 3** | `openssl@3` on macOS; `libssl-dev` on Linux; toolchain OpenSSL on Windows | Public-key signature verification in a private built-in provider context; the updater transport continues to use mbedTLS |
 | **zlib** | System package | Gzip compression (HTTP, PDF, etc.) |
 | **bzip2** | System package | bzip2-compressed tar input |
 | **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |

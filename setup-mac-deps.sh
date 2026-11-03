@@ -805,6 +805,7 @@ HOMEBREW_DEPS=(
     "openjpeg"   # JPEG 2000 image samples in PDFs
     "coreutils"  # For timeout command needed by test suite
     "mbedtls"    # For SSL/TLS support - replaced OpenSSL with mbedTLS
+    "openssl@3"  # Public-key signature verification; curl still uses mbedTLS
 )
 
 # Note: libcurl will be rebuilt with mbedTLS support (see build_curl_with_http2_for_mac)

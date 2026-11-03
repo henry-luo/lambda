@@ -347,6 +347,32 @@ def expect_macos_ime_profile(module) -> None:
         fail('macos-ime generated host contains CLI/JS/WebKit inputs')
 
 
+def expect_safety_early_profiles(module) -> None:
+    for variant, name, entry in [('safety-runtime', 'LambdaSafetyRuntime', 'worker_module.cpp'),
+                                  ('update-runtime', 'LambdaUpdateRuntime', 'update_verifier_worker.cpp')]:
+        generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'mac', variant=variant)
+        generator.premake_content = []
+        generator.generate_main_program()
+        emitted = '\n'.join(generator.premake_content)
+        if 'kind "SharedLib"' not in emitted or f'targetname "{name}"' not in emitted or \
+                'targetextension ".dylib"' not in emitted or 'targetprefix ""' not in emitted or \
+                f'"lambda/host/safety/{entry}"' not in emitted or \
+                '"lambda/host/safety/worker_main.cpp"' in emitted:
+            fail(f'{variant} lost its module entry or inherited an executable main')
+        if variant == 'update-runtime':
+            for excluded in ['worker.cpp', 'worker_module.cpp', 'update_controls.cpp', 'update_metadata.cpp',
+                             'update_refresh.cpp', 'update_stage.cpp', 'update_process.cpp', 'storage_tree.cpp',
+                             'grant_store.cpp', 'host_main.cpp']:
+                if f'"lambda/host/safety/{excluded}"' in emitted:
+                    fail(f'offline verifier inherited host/app authority: {excluded}')
+    target = next(t for t in generator.config['targets'] if t['name'] == 'lambda-safety-bootstrap')
+    generator.premake_content = []
+    generator._generate_complex_library(target)
+    emitted = '\n'.join(generator.premake_content)
+    if '-framework ' in emitted or '"c++"' in emitted or target['libraries']:
+        fail('minimal safety bootstrap acquired framework or C++ startup dependencies')
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -356,6 +382,7 @@ def main() -> int:
     expect_re2_source_build(module)
     expect_image_source_build(module)
     expect_macos_ime_profile(module)
+    expect_safety_early_profiles(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")

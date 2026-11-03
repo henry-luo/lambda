@@ -45,7 +45,8 @@ typedef struct ConfinedProcessResult {
 } ConfinedProcessResult;
 
 // macOS mechanism. Other platforms return ENOTSUP. Strict signature/resource
-// validation, exact app-sandbox-only entitlements and hardened runtime required.
+// validation, no entitlements and hardened runtime required. The trusted worker
+// bootstrap installs the fixed process sandbox before requesting broker IO.
 // Either a publisher team or an exact image pin is mandatory. No user code runs.
 ConfinedCode* confined_code_open(const ConfinedCodeSpec* spec);
 void confined_code_close(ConfinedCode* code);
@@ -55,11 +56,17 @@ bool confined_code_self(char* executable, size_t capacity, char team[64]);
 // Starts suspended, in a new session, with clean env and exactly fd 0..3. Static
 // and kernel-selected child identities must agree before this returns. The host
 // endpoint is taken exactly once; caller owns it. No ambient terminal is inherited.
+// Registered Mach send rights, task exception ports and bootstrap access are
+// cleared by spawn actions before child startup. Kernel security ports still
+// require the separate platform audit; fd closure does not cover Mach rights.
 ConfinedProcess* confined_process_spawn(ConfinedCode* code, const char* entry,
     const char* cwd, uint64_t session);
 int confined_process_take_channel(ConfinedProcess* process);
 void confined_process_close_channel(int descriptor);
 bool confined_process_resume(ConfinedProcess* process);
+// Kernel label readback, not policy authentication. The verified bootstrap owns
+// the fixed policy; call only while the supervisor still owns this child.
+bool confined_process_is_sandboxed(ConfinedProcess* process);
 // Thread-safe request; the monitor owns signalling/reaping to avoid PID races.
 void confined_process_cancel(ConfinedProcess* process);
 // Dedicated monitor thread; captures output, samples CPU/physical footprint and
@@ -68,6 +75,13 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
     ConfinedProcessResult* result);
 void confined_process_destroy(ConfinedProcess* process);
 void confined_process_result_free(ConfinedProcessResult* result);
+// Single-threaded trusted bootstrap only: exactly stdin=/dev/null, output pipes
+// and one AF_UNIX stream broker endpoint. Refuse constructor-created/leaked fds;
+// installing a sandbox does not revoke existing descriptors or mappings.
+bool confined_process_worker_handles(int broker_fd);
+// Resolve one sealed-bundle image relative to the kernel-selected executable;
+// capture cwd before confinement. Refuse symlink redirection of the image path.
+bool confined_process_worker_paths(const char* relative_image, char image[4096], char directory[4096]);
 // Trusted worker bootstrap: irreversible kernel CPU/file/descriptor/process caps.
 bool confined_process_worker_limits(void);
 // Trusted terminal mechanism: bounded confirmation, using /dev/tty exclusively.

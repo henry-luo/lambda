@@ -402,8 +402,7 @@ uint64_t security_file_broker_admit_root(SecurityFileBroker* broker, const Secur
             root->path = mem_strdup(spec->path, MEM_CAT_SYSTEM);
             root->leaf = spec->leaf ? mem_strdup(spec->leaf, MEM_CAT_SYSTEM) : nullptr;
             root->spec.path = root->path; root->spec.leaf = root->leaf;
-            root->anchor_flags = FILE_ANCHOR_SAME_DEVICE | (spec->scope == SECURITY_SCOPE_PRIVATE
-                ? FILE_ANCHOR_PRIVATE | FILE_ANCHOR_TRUSTED_PARENTS : 0);
+            root->anchor_flags = spec->scope == SECURITY_SCOPE_PRIVATE ? FILE_ANCHOR_STRICT_STORAGE : FILE_ANCHOR_SAME_DEVICE;
             FileAnchorOptions options = {root->anchor_flags, security_file_guard, root,
                 security_file_ancestor, security_file_namespace};
             root->anchor = root->path ? file_anchor_open(root->path, &options) : nullptr;

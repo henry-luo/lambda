@@ -36622,6 +36622,7 @@ static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call_node,
     MirValue value = {};
     // emit_call_value consumes the tail flag, so read it first (LR12-11 below)
     const bool call_in_tail_position = mt->in_tail_position;
+    const bool block_was_returned = mt->block_returned;
     value = emit_call_value(mt, call_node, injected);
     mt->parameter_guard = guard.parent;
     if (guard.error) {
@@ -36634,6 +36635,10 @@ static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call_node,
         emit_label(mt, done);
         value = mir_value_from_reg(mt, (AstNode*)call_node, guard.result,
             VALUE_REP_ITEM, &TYPE_ANY, LMD_TYPE_ANY);
+        // a successful TCO backedge terminates its arm, but rejected arguments
+        // reach this local join. Its enclosing expression must retain that
+        // boxed error rather than treating the whole call as unreachable (S7.7.3).
+        mt->block_returned = block_was_returned;
     }
 
     if (call_node->propagate) {

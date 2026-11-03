@@ -824,6 +824,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_hash", FPTR(fn_hash), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
+    {SYSFUNC_VERIFY_SIGNATURE, "verify_signature", 4, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_verify_signature", FPTR(fn_verify_signature), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
+
     // uuid(): a random UUID; a procedure, since each call differs
     {SYSPROC_UUID, "uuid", 0, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_uuid", FPTR(pn_uuid), NULL, NULL, false, 0},

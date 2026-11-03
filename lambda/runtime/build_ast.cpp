@@ -2862,9 +2862,15 @@ static bool lambda_flow_calls(LambdaClosureFlow* flow) {
                 changed |= lambda_flow_edge(flow, flow->rest_base + owner, id);
         }
         JitImportMetadata metadata = {};
+        // T0-only builds omit MIR's audited import table. Retain the conservative
+        // escape proof there rather than linking a backend into the sandbox.
+#ifndef LAMBDA_NO_MIR
         bool audited = info && info->c_func_name &&
             jit_import_get_metadata(info->c_func_name, &metadata) &&
             metadata.reentry_effect == JIT_REENTRY_NO;
+#else
+        bool audited = false;
+#endif
         if (!info) {
             // an unknown callable can return or retain itself as well as args.
             changed |= lambda_flow_edge(flow, lambda_flow_node(flow,

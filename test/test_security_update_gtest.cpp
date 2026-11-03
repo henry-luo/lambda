@@ -1,31 +1,28 @@
 #include <gtest/gtest.h>
 #include "../lambda/host/safety/update_controls.h"
+#include "../lambda/host/safety/update_metadata.h"
+#include "../lambda/host/safety/update_records.h"
+#include "../lambda/host/safety/update_wire.h"
 #include "../lambda/host/safety/state_store.h"
 #include "../lib/digest.h"
 #include "../lib/endian.h"
+#include "../lib/hex.h"
 #include "../lib/file_utils.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/atomic.h"
+#include "../lib/time_util.h"
 #include "safety/async_fixture.h"
+#include "safety/update_fixture.h"
 #include <errno.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-
-static SecurityUpdatePackageSpec update_fixture_spec(const char* name) {
-    SecurityUpdatePackageSpec value = {};
-    strcpy(value.package, name); strcpy(value.metadata_base, "https://updates.example.org/repository/");
-    strcpy(value.channel, "stable"); value.origin_count = 2;
-    strcpy(value.origins[0], "https://updates.example.org"); strcpy(value.origins[1], "https://cdn.example.org");
-    memset(value.publisher, 0x31, 32); memset(value.root, 0x42, 32);
-    value.poll_seconds = 3600; value.job_seconds = 120; value.max_download_bytes = 1024 * 1024;
-    return value;
-}
 
 class SecurityUpdateTest : public ::testing::Test {
 protected:
@@ -82,6 +79,27 @@ protected:
     void close(SecurityUpdateControl* control) {
         for (SecurityUpdateControl*& slot : controls) if (slot == control) slot = nullptr;
         security_update_close(control);
+    }
+    static constexpr const char* metadata_root = "opaque pinned root fixture";
+    void initialize_metadata(SecurityUpdateControl* control) {
+        SecurityUpdatePackageSpec value = spec();
+        ASSERT_TRUE(digest_sha256(metadata_root, strlen(metadata_root), value.root));
+        ASSERT_EQ(security_update_admit(control, &value, false), SECURITY_UPDATE_OK);
+        ASSERT_EQ(security_update_metadata_initialize(control, value.package, metadata_root, strlen(metadata_root)), SECURITY_UPDATE_OK);
+    }
+    SecurityUpdateResult metadata_replace(SecurityUpdateJob* job, uint64_t generation, const char* role,
+            const char* bytes, uint64_t* next) {
+        SecurityUpdateMetadata entries[2] = {};
+        strcpy(entries[0].role, "root"); entries[0].bytes = (uint8_t*)metadata_root; entries[0].size = strlen(metadata_root);
+        strcpy(entries[1].role, role); entries[1].bytes = (uint8_t*)bytes; entries[1].size = strlen(bytes);
+        return security_update_metadata_replace(job, generation, entries, 2, next);
+    }
+    char* metadata_path(const char* package = "lambda.fixture") {
+        uint8_t digest[32]; char name[81] = "update-";
+        if (!digest_sha256(package, strlen(package), digest)) return nullptr;
+        hex_encode(digest, 32, name + 7); strcpy(name + 71, ".metadata");
+        char* directory = file_path_join(home, ".lambda/setting");
+        char* path = file_path_join(directory, name); mem_free(directory); return path;
     }
 };
 
@@ -434,6 +452,275 @@ TEST_F(SecurityUpdateTest, CopyingTheCatalogToAnotherProfileDoesNotAdmitItsPacka
     EXPECT_EQ(security_update_open(stores[1], clock, &now, &result), nullptr);
     EXPECT_EQ(result, SECURITY_UPDATE_IDENTITY_CHANGED);
     mem_free(copied); mem_free(other_home);
+}
+
+TEST_F(SecurityUpdateTest, MetadataBootstrapRequiresPinnedBytesAndNeverResetsExistingState) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control);
+    EXPECT_EQ(security_update_metadata_initialize(control, "lambda.fixture", metadata_root, strlen(metadata_root)), SECURITY_UPDATE_CONFLICT);
+    SecurityUpdateJob* job = begin(control); SecurityUpdateMetadataSnapshot snapshot = {};
+    ASSERT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_OK);
+    EXPECT_EQ(snapshot.generation, 1U); EXPECT_EQ(snapshot.observed_time, now); ASSERT_EQ(snapshot.count, 1U);
+    EXPECT_STREQ(snapshot.entries[0].role, "root"); EXPECT_EQ(snapshot.entries[0].size, strlen(metadata_root));
+    EXPECT_EQ(memcmp(snapshot.entries[0].bytes, metadata_root, strlen(metadata_root)), 0);
+    security_update_metadata_free(&snapshot);
+    SecurityUpdatePackageSpec value = spec("lambda.other"); ASSERT_EQ(security_update_admit(control, &value, false), SECURITY_UPDATE_OK);
+    EXPECT_EQ(security_update_metadata_initialize(control, value.package, metadata_root, strlen(metadata_root)), SECURITY_UPDATE_IDENTITY_CHANGED);
+}
+
+TEST_F(SecurityUpdateTest, MetadataReplacementIsAtomicGenerationCheckedAndDropsRotatedRoles) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    uint64_t next = 0;
+    ASSERT_EQ(metadata_replace(job, 1, "timestamp", "signed metadata is opaque to this store", &next), SECURITY_UPDATE_OK);
+    EXPECT_EQ(next, 2U);
+    EXPECT_EQ(metadata_replace(job, 1, "timestamp", "stale", &next), SECURITY_UPDATE_CONFLICT); EXPECT_EQ(next, 0U);
+    ASSERT_EQ(security_update_metadata_observe(job, 2, &next), SECURITY_UPDATE_OK); EXPECT_EQ(next, 3U);
+    SecurityUpdateMetadata root = {}; strcpy(root.role, "root"); root.bytes = (uint8_t*)"rotated root"; root.size = 12;
+    ASSERT_EQ(security_update_metadata_replace(job, 3, &root, 1, &next), SECURITY_UPDATE_OK); EXPECT_EQ(next, 4U);
+    SecurityUpdateMetadataSnapshot snapshot = {}; ASSERT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_OK);
+    EXPECT_EQ(snapshot.count, 1U); EXPECT_EQ(security_update_metadata_find(&snapshot, "timestamp"), nullptr);
+    security_update_metadata_free(&snapshot);
+}
+
+TEST_F(SecurityUpdateTest, MetadataNamesDuplicatesAndLimitsCannotSelectOtherProtectedRecords) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    uint64_t next = 0;
+    for (const char* role : {"", "bad\nname", "\xC0\xAF", "root"})
+        EXPECT_EQ(metadata_replace(job, 1, role, "bytes", &next), SECURITY_UPDATE_INVALID) << role;
+    EXPECT_EQ(metadata_replace(job, 1, "delegated/project", "bytes", &next), SECURITY_UPDATE_OK);
+    SecurityUpdateMetadata root = {}; strcpy(root.role, "root"); root.bytes = (uint8_t*)metadata_root;
+    root.size = SECURITY_UPDATE_METADATA_ROOT_BYTES + 1;
+    EXPECT_EQ(security_update_metadata_replace(job, 2, &root, 1, &next), SECURITY_UPDATE_INVALID);
+    EXPECT_EQ(security_update_job_check(job), SECURITY_UPDATE_OK);
+}
+
+TEST_F(SecurityUpdateTest, OpaqueMetadataLabelsNeverSelectPathsAndPreserveUnicodeIdentity) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    char* canary = file_path_join(home, ".lambda/setting/opaque-canary.state"); ASSERT_NE(canary, nullptr);
+    ASSERT_EQ(write_binary_file(canary, "protected", 9), 0);
+    uint64_t generation = 1, next = 0;
+    for (const char* role : {"../opaque-canary.state", "/root", "a//b", "a/../b", "a?label=x", "名/😀", "%2F"}) {
+        ASSERT_EQ(metadata_replace(job, generation, role, "opaque metadata", &next), SECURITY_UPDATE_OK); generation = next;
+        SecurityUpdateMetadataSnapshot snapshot = {}; ASSERT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_OK);
+        ASSERT_EQ(snapshot.count, 2U); EXPECT_STREQ(snapshot.entries[1].role, role); security_update_metadata_free(&snapshot);
+    }
+    SecurityUpdateMetadata rows[3] = {};
+    const char* names[] = {"root", "é", "e\xCC\x81"};
+    for (unsigned i = 0; i < 3; i++) { strcpy(rows[i].role, names[i]); rows[i].bytes = (uint8_t*)metadata_root; rows[i].size = strlen(metadata_root); }
+    ASSERT_EQ(security_update_metadata_replace(job, generation, rows, 3, &next), SECURITY_UPDATE_OK);
+    ASSERT_EQ(security_update_job_finish(job, true), SECURITY_UPDATE_OK); close(control);
+    control = open(); job = begin(control, SECURITY_UPDATE_OK, true);
+    SecurityUpdateMetadataSnapshot snapshot = {}; ASSERT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_OK);
+    ASSERT_EQ(snapshot.count, 3U); EXPECT_NE(security_update_metadata_find(&snapshot, names[1]), nullptr);
+    EXPECT_NE(security_update_metadata_find(&snapshot, names[2]), nullptr); security_update_metadata_free(&snapshot);
+    char* bytes = nullptr; size_t size = 0; ASSERT_TRUE(file_read_all(canary, MEM_CAT_SYSTEM, &bytes, &size));
+    EXPECT_EQ(size, 9U); EXPECT_EQ(memcmp(bytes, "protected", 9), 0); mem_free(bytes); mem_free(canary);
+}
+
+TEST_F(SecurityUpdateTest, MetadataPauseAcknowledgementPreventsCheckpointsAndRestoreDoesNotReviveTicket) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    ASSERT_EQ(security_update_set_mode(control, nullptr, SECURITY_UPDATE_PAUSED, 0), SECURITY_UPDATE_OK);
+    uint64_t next = 0;
+    EXPECT_EQ(metadata_replace(job, 1, "timestamp", "bytes", &next), SECURITY_UPDATE_REVOKED);
+    ASSERT_EQ(security_update_set_mode(control, nullptr, SECURITY_UPDATE_ENABLED, 0), SECURITY_UPDATE_OK);
+    EXPECT_EQ(security_update_metadata_observe(job, 1, &next), SECURITY_UPDATE_REVOKED);
+}
+
+TEST_F(SecurityUpdateTest, MetadataClockWatermarkSurvivesControllerRestart) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    uint64_t next = 0; now += 10;
+    ASSERT_EQ(security_update_metadata_observe(job, 1, &next), SECURITY_UPDATE_OK);
+    EXPECT_EQ(security_update_job_finish(job, true), SECURITY_UPDATE_OK); close(control);
+    now -= 5; control = open(); job = begin(control, SECURITY_UPDATE_OK, true);
+    SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_REVOKED);
+    now += 5; EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_REVOKED);
+}
+
+TEST_F(SecurityUpdateTest, MetadataMissingOrCorruptStateInvalidatesCapturedJobAndIsNeverInitializedByRead) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    char* path = metadata_path(); ASSERT_NE(path, nullptr);
+    char* bytes = nullptr; size_t size = 0; ASSERT_TRUE(file_read_all(path, MEM_CAT_SYSTEM, &bytes, &size));
+    bytes[size - 1] ^= 1; ASSERT_EQ(write_binary_file(path, bytes, size), 0);
+    SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_CORRUPT);
+    EXPECT_EQ(snapshot.entries, nullptr);
+    EXPECT_EQ(security_update_metadata_initialize(control, "lambda.fixture", metadata_root, strlen(metadata_root)), SECURITY_UPDATE_CORRUPT);
+    ASSERT_EQ(unlink(path), 0);
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_REVOKED);
+    mem_free(bytes); mem_free(path);
+}
+
+TEST_F(SecurityUpdateTest, MetadataObservedBackupRollbackInvalidatesEntireController) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    char* path = metadata_path(); ASSERT_NE(path, nullptr);
+    char* bytes = nullptr; size_t size = 0; ASSERT_TRUE(file_read_all(path, MEM_CAT_SYSTEM, &bytes, &size));
+    uint64_t next = 0; ASSERT_EQ(security_update_metadata_observe(job, 1, &next), SECURITY_UPDATE_OK);
+    ASSERT_EQ(write_binary_file(path, bytes, size), 0);
+    SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_IDENTITY_CHANGED);
+    begin(control, SECURITY_UPDATE_IDENTITY_CHANGED, true);
+    mem_free(bytes); mem_free(path);
+}
+
+TEST_F(SecurityUpdateTest, MetadataAuthorityChangesCannotReuseExistingTrustCache) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control);
+    SecurityUpdatePackageSpec value = spec(); ASSERT_TRUE(digest_sha256(metadata_root, strlen(metadata_root), value.root));
+    strcpy(value.channel, "next"); ASSERT_EQ(security_update_admit(control, &value, true), SECURITY_UPDATE_OK);
+    SecurityUpdateJob* job = begin(control); SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_IDENTITY_CHANGED);
+    EXPECT_EQ(snapshot.entries, nullptr);
+}
+
+TEST_F(SecurityUpdateTest, MetadataCopiedToAnotherAdmittedPackageCannotEstablishItsTrust) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); admit(control, "lambda.other");
+    char* path = metadata_path(); char* copied = metadata_path("lambda.other");
+    ASSERT_NE(path, nullptr); ASSERT_NE(copied, nullptr);
+    char* bytes = nullptr; size_t size = 0; ASSERT_TRUE(file_read_all(path, MEM_CAT_SYSTEM, &bytes, &size));
+    ASSERT_EQ(write_binary_file(copied, bytes, size), 0); ASSERT_EQ(chmod(copied, 0600), 0);
+    SecurityUpdateJob* job = begin(control, SECURITY_UPDATE_OK, false, "lambda.other");
+    SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_IDENTITY_CHANGED);
+    mem_free(bytes); mem_free(path); mem_free(copied);
+}
+
+TEST_F(SecurityUpdateTest, MetadataSameGenerationReplacementWithValidChecksumInvalidatesController) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    char* path = metadata_path(); ASSERT_NE(path, nullptr);
+    char* bytes = nullptr; size_t size = 0; ASSERT_TRUE(file_read_all(path, MEM_CAT_SYSTEM, &bytes, &size));
+    ASSERT_GT(size, 33U); bytes[size - 33] ^= 1;
+    ASSERT_TRUE(digest_sha256(bytes, size - 32, (uint8_t*)bytes + size - 32));
+    ASSERT_EQ(write_binary_file(path, bytes, size), 0);
+    SecurityUpdateMetadataSnapshot snapshot = {};
+    EXPECT_EQ(security_update_metadata_read(job, &snapshot), SECURITY_UPDATE_IDENTITY_CHANGED);
+    begin(control, SECURITY_UPDATE_IDENTITY_CHANGED, true);
+    mem_free(bytes); mem_free(path);
+}
+
+TEST_F(SecurityUpdateTest, MetadataObservedHistoryCannotBeResetByReinitializingAMissingRecord) {
+    SecurityUpdateControl* control = open(nullptr, true); initialize_metadata(control); SecurityUpdateJob* job = begin(control);
+    uint64_t next = 0; ASSERT_EQ(security_update_metadata_observe(job, 1, &next), SECURITY_UPDATE_OK);
+    char* path = metadata_path(); ASSERT_NE(path, nullptr); ASSERT_EQ(unlink(path), 0);
+    EXPECT_EQ(security_update_metadata_initialize(control, "lambda.fixture", metadata_root, strlen(metadata_root)), SECURITY_UPDATE_IDENTITY_CHANGED);
+    EXPECT_EQ(access(path, F_OK), -1); EXPECT_EQ(errno, ENOENT);
+    mem_free(path);
+}
+
+TEST_F(SecurityUpdateTest, VerifiedReservationBindingsCannotSurviveFinishAndRebegin) {
+    SecurityUpdateControl* control = open(nullptr, true); admit(control);
+    SecurityUpdateJob* first = begin(control); uint8_t original[32], repeated[32], next[32];
+    ASSERT_TRUE(security_update_job_binding(first, original)); ASSERT_TRUE(security_update_job_binding(first, repeated));
+    EXPECT_EQ(memcmp(original, repeated, 32), 0);
+    ASSERT_EQ(security_update_job_finish(first, true), SECURITY_UPDATE_OK);
+    EXPECT_FALSE(security_update_job_binding(first, repeated));
+    SecurityUpdateJob* second = begin(control, SECURITY_UPDATE_OK, true);
+    ASSERT_TRUE(security_update_job_binding(second, next)); EXPECT_NE(memcmp(original, next, 32), 0);
+    ASSERT_EQ(security_update_set_offline(control, true), SECURITY_UPDATE_OK);
+    EXPECT_FALSE(security_update_job_binding(second, next));
+}
+
+TEST_F(SecurityUpdateTest, RoundedUtcReservationDoesNotExpireAtTheNextClockTick) {
+    SecurityUpdateControl* control = open(nullptr, true);
+    SecurityUpdatePackageSpec value = spec(); value.job_seconds = 1;
+    ASSERT_EQ(security_update_admit(control, &value, false), SECURITY_UPDATE_OK);
+    SecurityUpdateJob* job = begin(control); now++;
+    EXPECT_EQ(security_update_job_check(job), SECURITY_UPDATE_OK);
+    begin(control, SECURITY_UPDATE_BUSY, true);
+    now++; EXPECT_EQ(security_update_job_check(job), SECURITY_UPDATE_REVOKED);
+}
+
+class SecurityUpdateWireTest : public ::testing::Test {
+protected:
+    UpdateWire peers[2] = {}; int writer = -1;
+    void SetUp() override {
+        int pair[2]; ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), 0); writer = pair[0];
+        for (unsigned i = 0; i < 2; i++) {
+            peers[i] = {ipc_stream_adopt(pair[i]), 7, 0, 0, time_now_ms() + 2000, nullptr, nullptr};
+            ASSERT_NE(peers[i].stream, nullptr);
+        }
+    }
+    void TearDown() override { for (auto& peer : peers) ipc_stream_close(peer.stream); }
+    void header(uint32_t kind, uint64_t sequence, uint32_t length, uint64_t session = 7) {
+        uint8_t bytes[36] = {'L','M','T','U','F','I','P','1'};
+        write_le32(bytes + 8, 1); write_le32(bytes + 12, kind); write_le64(bytes + 16, session);
+        write_le64(bytes + 24, sequence); write_le32(bytes + 32, length);
+        ASSERT_EQ(write(writer, bytes, sizeof(bytes)), sizeof(bytes));
+    }
+    void refused() {
+        UpdateWireMessage message = {};
+        EXPECT_FALSE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_READY), &message));
+        EXPECT_TRUE(peers[1].failed); EXPECT_EQ(message.entries, nullptr); EXPECT_EQ(message.bytes, nullptr);
+        EXPECT_FALSE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_READY), &message));
+    }
+};
+TEST_F(SecurityUpdateWireTest, ReadyAndMetadataUseSeparateMonotonicDirections) {
+    UpdateWireMessage ready = {}; ready.kind = UPDATE_WIRE_READY;
+    ASSERT_TRUE(security_update_wire_send(&peers[0], &ready));
+    UpdateWireMessage received = {};
+    ASSERT_TRUE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_READY), &received));
+    EXPECT_EQ(peers[0].sent, 1U); EXPECT_EQ(peers[1].received, 1U);
+    SecurityUpdateMetadata row = {}; strcpy(row.role, "root"); row.bytes = (uint8_t*)"opaque"; row.size = 6;
+    UpdateWireMessage init = {}; init.kind = UPDATE_WIRE_INIT; init.count = 1; init.entries = &row;
+    strcpy(init.path, "lambda.pkg"); strcpy(init.utc, "2026-11-03T00:00:00Z"); init.limit = 20000;
+    ASSERT_TRUE(security_update_wire_send(&peers[1], &init));
+    ASSERT_TRUE(security_update_wire_receive(&peers[0], update_wire_kind_mask(UPDATE_WIRE_INIT), &received));
+    ASSERT_EQ(received.count, 1U); EXPECT_STREQ(received.entries[0].role, "root");
+    EXPECT_EQ(memcmp(received.entries[0].bytes, "opaque", 6), 0); security_update_wire_free(&received);
+}
+TEST_F(SecurityUpdateWireTest, WrongSessionPoisonsTheConnectionBeforeAllocation) {
+    header(UPDATE_WIRE_READY, 1, UPDATE_WIRE_FIXED_BYTES, 8); refused();
+}
+TEST_F(SecurityUpdateWireTest, ReplayPoisonsTheConnectionBeforeAllocation) {
+    header(UPDATE_WIRE_READY, 0, UPDATE_WIRE_FIXED_BYTES); refused();
+}
+TEST_F(SecurityUpdateWireTest, OversizedHeaderPoisonsTheConnectionBeforeAllocation) {
+    header(UPDATE_WIRE_READY, 1, UINT32_MAX); refused();
+}
+TEST_F(SecurityUpdateWireTest, UnexpectedKindCannotCrossTheHandshake) {
+    header(UPDATE_WIRE_RESPONSE, 1, UPDATE_WIRE_FIXED_BYTES); refused();
+}
+TEST_F(SecurityUpdateWireTest, UnknownKindCannotBecomeAnUndefinedMaskShift) {
+    header(64, 1, UPDATE_WIRE_FIXED_BYTES); refused();
+}
+TEST_F(SecurityUpdateWireTest, StageTrafficCannotCrossTheVerifierHandshake) {
+    header(UPDATE_WIRE_STAGE_INIT, 1, UPDATE_WIRE_FRAME_LIMIT); refused();
+}
+TEST_F(SecurityUpdateWireTest, StageMemberHeaderLimitPrecedesPayloadAllocation) {
+    header(UPDATE_WIRE_STAGE_ENTRY, 1, UPDATE_WIRE_FIXED_BYTES + UPDATE_WIRE_STAGE_MEMBER_LIMIT + 1);
+    UpdateWireMessage received = {};
+    EXPECT_FALSE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_STAGE_ENTRY), &received));
+    EXPECT_TRUE(peers[1].failed); EXPECT_EQ(received.bytes, nullptr);
+}
+TEST_F(SecurityUpdateWireTest, StageDirectoryCannotCarryBytesOrExecutionFlags) {
+    UpdateWireMessage message = {}; message.kind = UPDATE_WIRE_STAGE_ENTRY; strcpy(message.path, "data");
+    message.artifact = 1; message.status = 1;
+    EXPECT_FALSE(security_update_wire_send(&peers[0], &message));
+    message.status = 0; message.size = 1; message.bytes = (uint8_t*)"x";
+    EXPECT_FALSE(security_update_wire_send(&peers[0], &message));
+    message.size = 0; message.bytes = nullptr;
+    ASSERT_TRUE(security_update_wire_send(&peers[0], &message));
+    UpdateWireMessage received = {};
+    ASSERT_TRUE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_STAGE_ENTRY), &received));
+    EXPECT_EQ(received.artifact, 1U); EXPECT_STREQ(received.path, "data"); security_update_wire_free(&received);
+}
+TEST_F(SecurityUpdateWireTest, StageCompletionBindsTheArchiveAndBoundedCounts) {
+    UpdateWireMessage message = {}; message.kind = UPDATE_WIRE_STAGE_END;
+    EXPECT_FALSE(security_update_wire_send(&peers[0], &message));
+    message.digest[0] = 1; message.status = 4097;
+    EXPECT_FALSE(security_update_wire_send(&peers[0], &message));
+    message.status = 4; message.limit = UPDATE_WIRE_BODY_LIMIT + 1ULL;
+    EXPECT_FALSE(security_update_wire_send(&peers[0], &message));
+    message.limit = 16;
+    ASSERT_TRUE(security_update_wire_send(&peers[0], &message));
+    UpdateWireMessage received = {};
+    ASSERT_TRUE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_STAGE_END), &received));
+    EXPECT_EQ(received.status, 4U); EXPECT_EQ(received.limit, 16U); EXPECT_EQ(received.digest[0], 1U);
+    security_update_wire_free(&received);
+}
+TEST_F(SecurityUpdateWireTest, StageAcknowledgementCannotAllocateABody) {
+    header(UPDATE_WIRE_STAGE_ACK, 1, UPDATE_WIRE_FIXED_BYTES + 1);
+    UpdateWireMessage received = {};
+    EXPECT_FALSE(security_update_wire_receive(&peers[1], update_wire_kind_mask(UPDATE_WIRE_STAGE_ACK), &received));
+    EXPECT_TRUE(peers[1].failed); EXPECT_EQ(received.bytes, nullptr);
 }
 
 static uint64_t update_seed_clock(void*) { return (uint64_t)time(nullptr); }

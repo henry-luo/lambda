@@ -2519,6 +2519,13 @@ TEST_F(NegativeScriptTest, MutualRecursionOverflowIsE308) {
         "error[E308]: Stack overflow");
 }
 
+TEST_F(NegativeScriptTest, TailArgumentErrorRetainsItsLocalJoinOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/tco_argument_error_join.ls", false,
+        "error[E318]: tail argument rejected");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/tco_argument_error_destination.ls", false,
+        "failed: expected string, got int 1");
+}
+
 // S7.7.2: a typed declaration rejects a non-conforming initializer at the binding
 TEST_F(NegativeScriptTest, TypedArrayDeclarationRejectsWrongElement) {
     ExpectErrorMessage("test/lambda/negative/runtime/typed_array_type_error.ls",

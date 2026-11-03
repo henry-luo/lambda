@@ -72,41 +72,9 @@ RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant 
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
 PDF_TEST_CONFIG ?= debug_native
-# These are the native projects selected by test-lambda-baseline. Keep this
-# list aligned with the runner's non-extended config projects; otherwise a
-# clean baseline run reports a missing executable. The concurrency and Node
-# preliminary projects remain excluded by that runner.
-LAMBDA_BASELINE_TEST_PROJECTS := \
-	test_serve_gtest \
-	test_zip_gtest \
-	test_lambda_gtest \
-	test_input_script_cache_gtest \
-	test_lambda_parser_poc_gtest \
-	test_mir_gc_stress_gtest \
-	test_mir_ratchet_gtest \
-	test_mir_emission_gtest \
-	test_js_mir_emission_gtest \
-	test_js_mvp_lmd_gtest \
-	test_item_repr_gtest \
-	test_lambda_typed \
-	test_scalar_compare_gtest \
-	test_binary_storage_gtest \
-	test_lambda_runtime_gtest \
-	test_lambda_repl_gtest \
-	test_lambda_proc_gtest \
-	test_js_gtest \
-	test_js_c_parser_gtest \
-	test_js_script_gtest \
-	test_js_opt_gtest \
-	test_lambda_opt_gtest \
-	test_js_test262_gtest \
-	test_compiler_pass_gtest \
-	test_js_bt_regex_gtest \
-	test_js_regex_router_poc_gtest \
-	test_js_coerce_gtest \
-	test_lambda_std_gtest \
-	test_io_terminal_gtest \
-	test_ts_gtest
+# Derive builds from the execution selection so newly added suites cannot run
+# stale binaries. The concurrency and Node preliminary suites stay excluded.
+LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --list-build-targets)
 # test-input-baseline invokes these five binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.
 INPUT_BASELINE_TEST_PROJECTS := \
@@ -889,12 +857,27 @@ lambda-cli: build-cli
 lambda-safety-worker: build-safety-worker
 
 build-safety-worker:
-	@echo "Building the broker-bound T0 worker (OS confinement is installed by its launcher)..."
+	@echo "Building the broker-bound T0 worker with experimental native confinement..."
 	$(PYTHON) utils/generate_premake.py --variant safety-worker --output premake5.safety-worker.lua
 	$(PREMAKE5) gmake --file=premake5.safety-worker.lua
 	$(MAKE) -C build_safety_worker/premake config=release_native lambda-safety-worker -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 
+.PHONY: build-safety-early-worker
+build-safety-early-worker:
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=release_native lambda-safety-bootstrap -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	$(PYTHON) utils/generate_premake.py --variant safety-runtime --output premake5.safety-runtime.lua
+	$(PREMAKE5) gmake --file=premake5.safety-runtime.lua
+	$(MAKE) -C build_safety_runtime/premake config=release_native LambdaSafetyRuntime -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+
 .PHONY: build-safety-host
+.PHONY: build-update-verifier
+build-update-verifier:
+	$(PYTHON) utils/generate_premake.py --variant update-runtime --output premake5.update-runtime.lua
+	$(PREMAKE5) gmake --file=premake5.update-runtime.lua
+	$(MAKE) -C build_update_runtime/premake config=release_native LambdaUpdateRuntime -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+
 build-safety-host: build-lambda-data
 	$(MAKE) -C build/premake config=release_native lambda-safety-host -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 

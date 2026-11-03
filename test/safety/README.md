@@ -43,7 +43,51 @@ before `io.exec` creates a process. These run in both execution tiers, with
 focused forced-GC/poison and cache-disabled qualification recorded in the plan.
 See the [loading inventory](Loading_IO_Inventory.md) and
 [host component contracts](../../lambda/host/safety/README.md).
+
+The **D7.5.8** Lambda Script verifier is exercised by the `safety_signature`
+and `safety_tuf*` goldens, including independent signed fixtures for all three
+supported signature schemes, root thresholds/rotation, expiry/rollback,
+checkpoint ordering and delegated lookup. See [fixture provenance](tuf/README.md)
+and the [verifier contract](../../lmd/package/security/tuf/README.md).
+`test_security_update_gtest` also exercises the protected opaque checkpoint
+store: bootstrap fingerprint, generation conflict, atomic role deletion,
+names/bounds, pause invalidation, clock persistence, corruption, observed
+rollback and authority changes. Native store tests use opaque inert bytes and
+do not claim signature validation. The dedicated host bridge now has an owned
+TLS/offline-worker composition control; hardened publisher launch, full TUF
+conformance and staging/activation remain open.
+The pinned independent runner and its deliberately nonzero 112/119 result are
+documented in [tuf/Conformance.md](tuf/Conformance.md). A deterministic 688-input
+strict-JSON differential corpus runs in interpreter and JIT modes through
+`python3 -O test/safety/test_tuf_json.py`.
+`python3 -O test/safety/test_tuf_paths.py` checks 728 URI cases against an
+independent standard-library codec on the native gate, interpreter and JIT.
+Opaque cache-name tests preserve Unicode identity and a protected canary;
+the TLS fixture records exact encoded request bytes and reuses a signed
+traversal-shaped Unicode role from the protected cache after restart.
 It is a bound-client integration test; ordinary CLI launches remain unconfined.
+
+The **D7.5.8** [offline package decoder](../../lmd/package/security/Stage.md)
+has a paired `safety_package_stage` golden and 53 owned archive/IPC controls in
+`python3 -O test/safety/test_package_stage.py`. The actual early-confined Lambda
+interpreter emits bounded member bytes and requires per-entry acknowledgements;
+it has no file-write authority. [Fixture provenance](stage/README.md) distinguishes
+this decoder component from the separate protected staging adapter and pending
+managed-image publication, activation and hardened deployment pipeline.
+
+`test_security_update_stage_gtest` now checks the native **D7.5.8** inactive
+staging adapter: independent worker-path/parent/collision gates, exact receipts,
+reservation invalidation, single-stage admission, live claims, bounded cleanup,
+interrupted initialization and corruption/substitution refusal. The 14 checks
+use a test-only opaque-artifact factory that is absent from production images.
+`python3 -O test/safety/test_update_stage.py` adds 13 owned composition checks:
+ten use the real early-confined Lambda decoder with that factory; three use
+fresh signed ZIP repositories over owned TLS and the actual Lambda TUF verifier.
+Valid signed bytes stage correctly, tampering creates no stage, and signed
+traversal archives remain inactive. Receipts are decoded independently and
+cleanup preserves user-file and retained app-data canaries across host restarts.
+These checks do not qualify managed-image admission, activation or hardened
+publisher deployment.
 
 After the build configuration has been generated:
 
@@ -61,12 +105,97 @@ selection with `--exclude-test=test_avl_tree_perf`. That runner measures
 performance and requires a release build under AGENTS.md rule 10; it is not
 part of this debug correctness gate.
 
-## macOS platform probe
+## Host updater HTTPS transport
+
+Under **D7.5.2, D7.5.7–D7.5.8**, `test_security_update_pull_gtest` checks numeric
+IPv4/IPv6 special-use boundaries, exact origin/canonical URL admission and
+refusal before network initialization. `test_update_pull.py` owns a local TLS
+server, temporary CA/server certificates and pinned native executables under
+`temp/`. It captures headers/body, checks admitted/denied redirects, private-peer
+refusal, valid and invalid certificate chains/hostnames, oversized and malformed
+responses, body/header/redirect budgets, deadline and cross-process policy edits
+while a transfer stalls. Its checks remain active under Python `-O`.
+
+```sh
+python3 test/safety/test_update_pull.py
+python3 -O test/safety/test_update_pull.py --verifier
+# Use --no-build after the corresponding release host/test targets are built.
+```
+
+The runner needs owned loopback sockets and macOS system-root read access. It
+never installs certificates or signing identities, contacts remote servers or
+opens real user settings. Resolution/CA/loopback overrides exist only in the
+separately compiled fixture binary. Transport alone returns unverified bytes.
+`--verifier` additionally builds/pins the immutable offline Lambda Script
+interpreter and composes it with the protected checkpoint store and host
+coordinator. It verifies saved-cache retry, tampered/expired/malformed data,
+aggregate transfer limits, reservation-bound artifact views and cross-process
+pause/disable/offline during artifact verification. The minimal bootstrap
+applies the native policy before loading that runtime. Its unhardened ad-hoc
+bundle is explicitly a composition control; hardened publisher admission,
+conformance, staging/extraction, activation/recovery and full M3u stay open.
+Default app network denial and worker IPC are unchanged.
+
+## Anchored storage durability
+
+`FileAnchorTest` in `test_file_module_gtest` checks child-before-parent syncs for
+exclusive and nested directory creation, resync on create-mode retry, no sync on
+read-only acquisition, and syncing a new lock/lease before publishing its stream.
+Injected failures at each sync refuse publication and preserve the possibility
+of an unacknowledged created object; an exclusive retry never replaces it.
+macOS cases additionally reject dropping full-sync flags on child derivation and
+prove that a full-sync error after atomic publication returns committed-but-not-
+durable status, rather than success (**D7.5.2, D7.5.7**).
+
+The test executable alone interposes `fsync`; ordinary calls still reach the
+real kernel. A positive atomic-publication control verifies the instrumentation.
+Production binaries contain no injection hook. The macOS full-sync failure
+closes an operation's temporary parent descriptor after successful `fsync`, so
+the actual `F_FULLFSYNC` fails; the held root remains valid. These are operation-
+ordering and error-path controls, not simulated physical power loss.
+
+## Trusted private-storage management
+
+Under **D7.5.2, D7.5.5–D7.5.7, D7.5.9**, the admission suite covers read-only
+management inspection (including over-quota and abandoned-session state),
+live-session reset refusal, bounded persistent-data reset, stale and
+cross-principal intent rejection, alias preflight, corrupt-record refusal and
+a killed host after an acknowledged partial reset. Restarted admissions stay
+blocked until explicit trusted resumption. Cache and other principals survive.
+The test does not emulate physical power loss or prove corrupt-owner repair.
+
+Quota cases cover saved limits across host restart/code revalidation, all three
+mounts, byte/entry accounting after reduction, a compliant shrinking replacement,
+live-session and stale-generation refusal, competing editors, generation
+exhaustion, data-reset preservation, corrupt/cross-principal/profile records and
+typed state-slot isolation (**D7.5.2, D7.5.7**). The console runner also verifies
+edits/default restoration, numeric validation, unchanged grant records and a
+separate live host's lease followed by process death. The signed supervisor
+matrix reuses one real admitted script/image: a lowered quota must refuse its
+write and preserve existing bytes, then default restoration must let it finish.
+These management operations are absent from worker IPC.
+
+```sh
+python3 test/safety/test_storage_controls.py
+```
+
+This runner uses isolated test-profile seeding and the actual trusted host CLI.
+It checks explicit deletion flags, usage/status, restart/resume, replay refusal,
+unchanged grant records and cache, plus the production signature gate and
+rejection of test-only path overrides. `--no-build` requires current host,
+fixture-host and admission-test binaries. Results and binary hashes remain in
+`temp/app_safety_storage_controls/result.json`. The normal worker protocol has
+no management operation. Signing-identity setup is skipped per user instruction;
+these controls do not qualify installed publisher deployment or full M2.
+
+## Historical macOS App Sandbox probe
 
 ```sh
 python3 test/safety/test_macos_sandbox.py
 ```
 
+This earlier mechanism probe is retained as historical evidence. The current
+worker uses the experimental process policy described below.
 The runner compiles two copies of the same raw-syscall C probe, stages app
 bundles under `./temp/app_safety_macos_probe/`, and signs a control and an
 App Sandbox worker. The default identity is ad hoc; `--sign-identity` can name
@@ -169,7 +298,8 @@ python3 test/safety/test_macos_worker.py
 
 The worker target is a T0-only runtime bootstrap under **D7.1.6 / D7.5.5**.
 The test builds a separate native-probe variant and the host's channel fixture,
-then signs both worker entrypoints in App Sandbox bundles. Neither worker
+then signs both worker entrypoints without entitlements. The experimental
+native process policy is installed before runtime initialization. Neither worker
 links the grant store, file-broker management or policy-management code. The
 trusted Python launcher sanitizes the environment and inherits only explicit
 stdio and the private channel. Session numbers identify the admitted channel;
@@ -204,10 +334,12 @@ checks verify the real management symbol prefixes, including
 `security_grant_store_*` and `security_admission_*`, are absent from both workers.
 
 Artifacts and exact executable/dependency/signature metadata remain under
-`temp/app_safety_macos_worker/`. `--no-build` reuses binaries already built
-from the current source; use the default for a complete build/run. Signing,
+`temp/app_safety_macos_worker/`. `--no-build` requires current binaries, including
+debug admission/channel fixtures with symbols retained for the positive host
+control. A release library build replaces these fixtures with stripped binaries;
+rebuild those two debug targets first, or use the default complete build/run. Signing,
 launch, control or expected-output failures return nonzero. The original
-`test_macos_sandbox.py` retains its standalone native-syscall control and
+`test_macos_sandbox.py` retains its historical standalone App Sandbox control and
 shares the bundle-signing mechanism.
 
 `test_security_channel_gtest` is in the library baseline. It covers all seven
@@ -242,10 +374,14 @@ This runner calls the actual `security_supervisor_run`, not Python's worker
 launcher. It stages signed bundles below `./temp/app_safety_macos_supervisor/`
 and runs real Lambda imports, input and create/overwrite output. The host
 verifies the static bundle and suspended child's identity before resume. Cases
-reject missing/extra entitlements, wrong identifiers/digests and tampered code
+reject incompatible/extra entitlements, wrong identifiers/digests and tampered code
 or resources before launch. A native probe checks inherited handles, environment,
 new session, terminal denial, raw project reads, egress and process creation.
-Separate probes force wall/CPU/memory/output limits and malformed IPC.
+Separate probes force wall/CPU/memory/output limits and malformed IPC. A
+non-reaping wait fixture establishes that the child has exited with unread
+chunks in both pipes, then requires complete capture without a second reap.
+Consent expiry is observed after the actual prompt and configured wall deadline,
+with enough bootstrap time to exercise consent rather than startup latency.
 
 A pseudo-terminal belongs only to the trusted host. Tests type yes/no after
 reading its concrete prompt, change the target while consent is pending and
@@ -264,10 +400,12 @@ hashes, concrete outcomes and OS version in `result.json`; it does not qualify
 an installed certificate-backed distribution.
 
 Physical-footprint and CPU gates are sampled, not zero-overshoot kernel caps.
-macOS supplies a sandbox-container HOME after exec. A helper identifier still
-shares that OS container, so per-principal private storage, complete catalogs,
-persistent UI/root bookmarks and remaining M2 gates
-stay open. Passing this runner does not enable the default CLI sandbox.
+The current experimental worker receives no HOME and installs a fixed native
+process policy before runtime initialization. A source request before that
+bootstrap is denied by the actual host dispatcher. Private-data create, prompt-free
+replacement and input run through the broker. Complete catalogs, persistent
+UI/root bookmarks, deployed signing, inherited Mach rights and remaining M2
+gates stay open. Passing this runner does not enable the default CLI sandbox.
 
 
 ## Host package-update controls
@@ -313,3 +451,109 @@ supervisor runner also exercises guarded dispatch and long human consent waits.
 `async_fixture.h`, `grant_fixture.h` and `channel_wire_fixture.h` share joined
 worker lifetimes, saved-grant revocation and fixed wire-header construction
 across the native component tests. All artifacts remain under `temp/`.
+
+## Native process-policy and private-data qualification
+
+```sh
+python3 test/safety/test_macos_process_sandbox.py
+python3 test/safety/test_macos_inheritance.py
+python3 test/safety/test_macos_bootstrap.py
+python3 test/safety/test_macos_constructors.py
+python3 test/safety/test_macos_early_bootstrap.py
+./test/test_security_admission_gtest.exe
+```
+
+The native runner compiles/signs a small static-libuv probe under `./temp/`,
+with unsandboxed positive controls for each attack. It exercises raw file read,
+write/create, another app's fixture data, symlink/hardlink aliases, live loopback
+connect/bind, Mach preferences lookup, fork/exec and process inspection. It
+also tests IOKit model/unique-ID properties and user-client opens through fresh
+and pre-held service rights; actual identifier values are never serialized. A
+permissive second policy must not restore access. Pre-held file descriptors are
+different: native controls retain reads and shared writable mappings after
+policy installation. The real signed worker's bootstrap gate separately rejects
+extra low/high descriptors, redirected stdio, named output FIFOs and an already
+running native thread before any broker request. Its positive control reaches
+broker IO with the expected handles. The thread fixture shares `SafetyAsync`
+and confirms thread creation without extra descriptors. Read-only OS runtime resources,
+kqueue/libuv initialization, inherited AF_UNIX IPC and captured output remain
+usable. Native policy evidence currently covers macOS 26.5.2 arm64 only; the
+private Darwin API is an experimental backend approved by the user on
+2026-11-03, with qualification required before any default rollout.
+The original `test_macos_sandbox.py` is historical App Sandbox mechanism evidence.
+
+The native policy probe also has a successful `PT_TRACE_ME` control and requires
+the confined syscall to fail. XNU authorizes that request using the parent label;
+the child profile therefore denies `SYS_ptrace` at the `syscall-unix` filter.
+The inheritance runner plants actual registered send rights, an exception port
+and a writable memory entry. It compares unfiltered control, sandboxed unfiltered
+control and the real suspended launcher. The latter must expose no inherited
+user rights before bootstrap, send no fixture messages and leave the parent page
+unchanged. It also compares parent task-name acquisition with its control.
+`mach_fixture.hpp` owns/restores every planted fixture resource.
+
+The inheritance runner deliberately remains **unqualified/nonzero** while
+`TASK_ACCESS_PORT` is available; its JSON records the independently passing user
+capability and ptrace checks. OS task-control acquisition also lacks a successful
+positive control here. The self-target control now succeeds without the profile
+and is denied with it, recorded separately from foreign-task qualification.
+Do not count either partial result as a completed M2 debug gate.
+
+The inheritance, process-policy, supervisor and updater-console runners use the
+shared `require_qualification()` helper. Their controls and checks execute under
+both normal Python and `python3 -O`; do not replace them with removable assertions.
+An optimized invocation previously produced a false passing inheritance report
+despite a live task-access port. The fixed runner preserves the nonzero gate.
+The updater runner invalidates a prior passing report before any build/fixture
+work, checkpoints failed commands, and records success only after every check.
+
+The constructor gate currently remains **unqualified/nonzero** for the
+direct-linked worker: a real native initializer maps a fixture file and closes
+its fd before `main`, then retains its contents after policy installation with
+no unexpected descriptor. Its private dirty mapping reports no external pager
+on this OS, so a pager-bit scan cannot prove absence of acquired user data.
+
+`make build-safety-early-worker` builds an opt-in minimal bootstrap and separate
+`LambdaSafetyRuntime.dylib`. The early runner checks that the bootstrap directly
+links only libSystem, applies policy before loading the runtime image, and
+rejects constructor file access. It keeps unhardened composition controls
+separate from hardened package admission; the production host never accepts an
+unhardened image. Hardened ad-hoc dylib loading refuses without a matching
+Apple-issued publisher identity. Identity setup is skipped at the user's request;
+publisher and default-rollout qualification remain open. No library-validation
+exception or weaker launch fallback is added.
+
+The admission suite checks virtual data/cache/temp mounts across principal
+changes, restart/revalidation, protected physical namespaces, source denial,
+aliases, corrupt owner records and persisted authority revocation. Direct service
+cases use small byte/entry limits, charge missing parents, and cover concurrent
+temp isolation, shared quotas, host-only cache eviction and observable busy-lock
+cleanup failure. A real child host is killed after acknowledged temp/data/cache
+writes: recovery reclaims its temp files while preserving a live session,
+persistent data and cache. Incomplete session setup and the live-session cap
+are also checked. The shared `child_fixture.h` bounds observation/reaping and
+ensures a failed assertion does not leave a live fixture child.
+
+The signed supervisor exercises data/cache/temp IO with no overwrite prompt,
+checks no temp trees remain after ordinary runs, native worker faults or
+watchdog termination, and injects an alias during trusted consent to require an
+observable cleanup failure without touching its target. These are process-death
+and namespace controls, not a complete power-loss or OS-malicious-worker matrix.
+Current data/cache/temp byte quotas are 64/32/16 MiB; entry quotas are
+1,024/1,024/512, with temp quota shared across up to 16 live sessions. Persistent
+data repair, quota UI and remaining M2 gates stay open
+(**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
+
+An ad-hoc per-principal bundle re-signing spike was rejected after a same-ID
+copy with a valid actual-parent constraint read another container's fixture
+file. Retired source and the counterexample are retained under
+`temp/app-safety-rejected-container-design/`. A claimed local signature/bundle
+name is not a Lambda app principal. Earlier passing results for that spike
+must not be treated as per-app isolation qualification.
+
+The signed supervisor also checks relative import/input/output against its
+launcher-selected directory. `HostDirectoryResolvesRelativeDataAndTaskPathsWithoutChangingProcessCwd`
+executes relative data input, task reads and file output in both interpreter
+and MIR JIT, with an immutable context-owned directory and unchanged process CWD.
+The directory is lexical metadata; broker roots still determine authority
+(**D5.4.2–D5.4.4, D7.5.2, D7.5.5**).

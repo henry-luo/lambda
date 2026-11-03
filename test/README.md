@@ -96,10 +96,46 @@ worker, host broker and native syscall control across the private channel.
 suspended child/signature admission, native handle/environment/terminal/process
 probes, resource limits and once-only trusted terminal consent. It uses a
 separately compiled fixture host, preserves real grant settings, and retains
-full M2 qualification as pending (including per-principal OS containers).
+full M2 qualification as pending. `test_macos_process_sandbox.py` qualifies
+the experimental native policy; the user approved this private-Darwin experiment
+on 2026-11-03, with default rollout gated on qualification.
+`test/safety/test_macos_bootstrap.py` verifies the signed worker refuses extra
+descriptors, unsafe stdio and a native startup thread before broker IO; pre-held
+file capabilities survive installing the sandbox and require this separate gate.
+The direct-linked worker's native-constructor gate is separately unqualified;
+`test_macos_early_bootstrap.py` exercises the opt-in minimal-bootstrap/runtime
+split with explicit composition controls and hardened refusal cases. Successful
+publisher loading/deployment remains unqualified; identity setup is skipped.
+Admission tests also cover broker-owned data/cache/temp mounts, principal and
+live-session separation, shared quotas, generation revocation, trusted cache
+eviction, observable cleanup failure and temp recovery after a killed host.
+It also covers bounded host inspection, live-session reset refusal, stale and
+cross-principal reset records, alias/corrupt-state refusal and trusted resumption
+after a killed host's partial persistent-data reset. The actual host console is
+qualified by `test/safety/test_storage_controls.py`; no management opcode reaches
+the worker. Uninstall retains data by default (**D7.5.9**); installer integration
+and full power-loss qualification remain pending.
+Saved private-quota tests cover restart/revalidation, all mounts, retained
+over-quota data and shrinking replacement, stale/live edits, concurrent managers,
+generation exhaustion and record/profile isolation. The storage console checks
+saved/default policy and a killed live host; the signed supervisor verifies
+quota refusal then default restoration for the same real script/image
+(**D7.5.2, D7.5.7**).
+Signed supervisor cases check worker faults/watchdog cleanup and alias refusal
+(**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
 `test_security_update_gtest` and `test/safety/test_update_controls.py` qualify
-protected package-update state and the trusted host console. Delivery/verification/
+protected package-update state and the trusted host console. Delivery/deployment/
 activation remain pending; no updater or management call is exposed to workers.
+`test_security_update_pull_gtest` and `test/safety/test_update_pull.py` qualify
+the host's bounded HTTPS pull component, exact-origin redirects, numeric peers,
+request privacy, TLS verification and cancellation. Its successful bytes remain
+unverified. `test_update_pull.py --verifier` composes the real embedded Lambda
+Script verifier, protected cache and owned TLS host coordinator; it covers retry,
+tampering, budgets and policy cancellation during verification. Hardened publisher
+launch, conformance, staging/extraction and activation remain pending
+(**D7.5.2, D7.5.7–D7.5.8**). Test roots/resolution/loopback overrides exist only
+in the fixture binary; the recorder uses pinned executables and an owned TLS
+server under `temp/`.
 `SecurityDeliveryTest.*` in `test_security_admission_gtest` checks captured
 authority through response publication, buffered-response revocation/expiry,
 committed write status and bounded leases when the peer stops reading.

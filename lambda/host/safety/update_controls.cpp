@@ -1,10 +1,13 @@
 #include "update_controls.h"
 #include "state_store.h"
+#include "state_wire.h"
+#include "update_records.h"
 #include "../../../lib/digest.h"
 #include "../../../lib/endian.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/time_util.h"
 #include "../../../lib/url.h"
+#include "../../../lib/https_url.h"
 #include <pthread.h>
 
 struct UpdateRow { SecurityUpdatePackageInfo info; uint64_t nonce; };
@@ -28,6 +31,8 @@ struct SecurityUpdateControl {
     bool closed;
     bool invalidated;
     uint64_t observed_generation, observed_epoch;
+    uint32_t metadata_count;
+    struct { uint8_t package[32], digest[32]; uint64_t generation; } metadata[SECURITY_UPDATE_MAX_PACKAGES];
 };
 struct SecurityUpdateJob {
     SecurityUpdateControl* owner;
@@ -42,7 +47,7 @@ struct UpdateOperation {
     SecurityUpdateResult result;
     bool locked;
 };
-struct SecurityUpdateLease { UpdateOperation operation; };
+struct SecurityUpdateLease { UpdateOperation operation; SecurityUpdateJob* job; uint8_t package_record[32]; };
 
 static const uint8_t update_magic[8] = {'L','M','D','U','P','D','0','1'};
 enum { UPDATE_HEADER_BYTES = 104, UPDATE_ROW_BYTES = 129 + 1025 + 33 + 8 * 257 + 64 + 6 * 4 + 5 * 8,
@@ -97,25 +102,25 @@ static bool update_public_hostname(const char* name) {
     return true;
 }
 
-static bool update_endpoint(const char* text, size_t capacity, bool origin, char* out_origin = nullptr) {
+static bool update_endpoint(const char* text, size_t capacity, bool origin, char* out_origin = nullptr, bool directory = true) {
+    if (!https_url_reference_valid_ex(text, capacity, !origin && !directory) || strncmp(text, "https://", 8)) return false;
     size_t length = strnlen(text, capacity);
-    if (!length || length == capacity || strncmp(text, "https://", 8)) return false;
-    for (size_t i = 0; i < length; i++) {
-        unsigned char c = text[i];
-        if (c <= 32 || c >= 127 || c == '\\' || c == '%' || c == '@' || c == '?' || c == '#') return false;
-    }
     Url* url = url_parse(text);
     bool valid = url && url_is_valid(url) && url_get_scheme(url) == URL_SCHEME_HTTPS &&
         url_get_origin(url) && url_get_href(url) &&
         update_public_hostname(url_get_hostname(url)) &&
         !strcmp(text, origin ? url_get_origin(url) : url_get_href(url));
     // Optional WHATWG components are NULL when absent, not empty allocations.
-    const char* optional[] = {url_get_username(url), url_get_password(url), url_get_search(url), url_get_hash(url)};
-    for (const char* value : optional) if (value && *value) valid = false;
+    if (url) {
+        const char* optional[] = {url_get_username(url), url_get_password(url), url_get_search(url), url_get_hash(url)};
+        for (const char* value : optional) if (value && *value) valid = false;
+    }
     // The shared parser preserves dot segments in href. This authority profile
     // rejects them rather than letting a later HTTP client reinterpret the base.
-    if (valid && !origin) valid = text[length - 1] == '/' && url_get_pathname(url) &&
-        !strstr(url_get_pathname(url), "/../") && !strstr(url_get_pathname(url), "/./") && strlen(url_get_origin(url)) < 257;
+    if (valid && !origin) {
+        const char* path = url_get_pathname(url);
+        valid = (!directory || text[length - 1] == '/') && path && strlen(url_get_origin(url)) < 257;
+    }
     if (valid && out_origin) strcpy(out_origin, url_get_origin(url));
     url_destroy(url); return valid;
 }
@@ -136,6 +141,12 @@ static bool update_spec_valid(const SecurityUpdatePackageSpec* spec) {
         for (uint32_t j = 0; j < i; j++) if (!strcmp(spec->origins[i], spec->origins[j])) return false;
     }
     return includes_base;
+}
+bool security_update_url_allowed(const SecurityUpdatePackageSpec* spec, const char* url) {
+    char origin[257];
+    if (!update_spec_valid(spec) || !update_endpoint(url, 4096, false, origin, false)) return false;
+    for (uint32_t i = 0; i < spec->origin_count; i++) if (!strcmp(origin, spec->origins[i])) return true;
+    return false;
 }
 static void update_spec_copy(SecurityUpdatePackageSpec* out, const SecurityUpdatePackageSpec* in) {
     memset(out, 0, sizeof(*out));
@@ -159,40 +170,36 @@ static bool update_mode_valid(uint32_t mode, uint64_t pause) {
         (mode == SECURITY_UPDATE_PAUSED || !pause);
 }
 
-struct UpdateWire { uint8_t* data; size_t capacity, offset; bool writing, valid; };
-static void update_wire_bytes(UpdateWire* wire, void* bytes, size_t count) {
-    if (!wire->valid || count > wire->capacity - wire->offset) { wire->valid = false; return; }
-    if (wire->writing) memcpy(wire->data + wire->offset, bytes, count);
-    else memcpy(bytes, wire->data + wire->offset, count);
-    wire->offset += count;
+static void update_authority_wire(SecurityStateWire* wire, SecurityUpdatePackageSpec* spec) {
+    security_state_wire_text(wire, spec->package, sizeof(spec->package));
+    security_state_wire_text(wire, spec->metadata_base, sizeof(spec->metadata_base));
+    security_state_wire_text(wire, spec->channel, sizeof(spec->channel));
+    for (uint32_t j = 0; j < SECURITY_UPDATE_MAX_ORIGINS; j++) security_state_wire_text(wire, spec->origins[j], sizeof(spec->origins[j]));
+    security_state_wire_u32(wire, &spec->origin_count); security_state_wire_bytes(wire, spec->publisher, 32); security_state_wire_bytes(wire, spec->root, 32);
 }
-static void update_wire_u32(UpdateWire* wire, uint32_t* value) {
-    uint8_t bytes[4]; if (wire->writing) write_le32(bytes, *value);
-    update_wire_bytes(wire, bytes, sizeof(bytes));
-    if (!wire->writing && wire->valid) *value = read_le32(bytes);
-}
-static void update_wire_u64(UpdateWire* wire, uint64_t* value) {
-    uint8_t bytes[8]; if (wire->writing) write_le64(bytes, *value);
-    update_wire_bytes(wire, bytes, sizeof(bytes));
-    if (!wire->writing && wire->valid) *value = read_le64(bytes);
-}
-static void update_wire_text(UpdateWire* wire, char* text, size_t capacity) {
-    update_wire_bytes(wire, text, capacity);
-    size_t length = strnlen(text, capacity);
-    if (length == capacity) { wire->valid = false; return; }
-    for (size_t i = length; i < capacity; i++) if (text[i]) wire->valid = false;
+bool security_update_authority_digest(const SecurityUpdatePackageSpec* spec, uint8_t out[32]) {
+    if (!out || !update_spec_valid(spec)) return false;
+    SecurityUpdatePackageSpec copy; update_spec_copy(&copy, spec);
+    uint8_t bytes[sizeof(copy.package) + sizeof(copy.metadata_base) + sizeof(copy.channel) +
+        sizeof(copy.origins) + sizeof(copy.origin_count) + sizeof(copy.publisher) + sizeof(copy.root)];
+    SecurityStateWire wire = {bytes, sizeof(bytes), 0, true, true}; update_authority_wire(&wire, &copy);
+    static const char domain[] = "Lambda update public authority v1";
+    DigestCtx* digest = digest_ctx_new(DIGEST_SHA256);
+    bool valid = wire.valid && wire.offset == sizeof(bytes) && digest &&
+        digest_update(digest, domain, sizeof(domain) - 1) && digest_update(digest, bytes, sizeof(bytes)) && digest_finalize(digest, out, 32);
+    digest_ctx_free(digest); return valid;
 }
 static bool update_catalog_wire(UpdateCatalog* catalog, uint8_t* bytes, size_t size, bool writing) {
-    UpdateWire wire = {bytes, size, 0, writing, true};
+    SecurityStateWire wire = {bytes, size, 0, writing, true};
     uint8_t magic[8]; memcpy(magic, update_magic, 8);
     uint32_t version = 1, reserved = 0, mode = catalog->mode, offline = catalog->offline;
-    update_wire_bytes(&wire, magic, 8); update_wire_u32(&wire, &version); update_wire_u32(&wire, &reserved);
-    update_wire_u64(&wire, &catalog->generation); update_wire_u64(&wire, &catalog->epoch);
-    update_wire_bytes(&wire, catalog->instance, 16); update_wire_bytes(&wire, catalog->profile, 32);
-    update_wire_u32(&wire, &mode); update_wire_u32(&wire, &offline);
-    update_wire_u64(&wire, &catalog->pause_until); update_wire_u32(&wire, &catalog->count);
+    security_state_wire_bytes(&wire, magic, 8); security_state_wire_u32(&wire, &version); security_state_wire_u32(&wire, &reserved);
+    security_state_wire_u64(&wire, &catalog->generation); security_state_wire_u64(&wire, &catalog->epoch);
+    security_state_wire_bytes(&wire, catalog->instance, 16); security_state_wire_bytes(&wire, catalog->profile, 32);
+    security_state_wire_u32(&wire, &mode); security_state_wire_u32(&wire, &offline);
+    security_state_wire_u64(&wire, &catalog->pause_until); security_state_wire_u32(&wire, &catalog->count);
     if (reserved) return false;
-    update_wire_u32(&wire, &reserved);
+    security_state_wire_u32(&wire, &reserved);
     uint8_t zero[16] = {};
     if (!wire.valid || memcmp(magic, update_magic, 8) || version != 1 || reserved || offline > 1 ||
             !catalog->generation || !catalog->epoch || catalog->epoch > catalog->generation ||
@@ -203,20 +210,16 @@ static bool update_catalog_wire(UpdateCatalog* catalog, uint8_t* bytes, size_t s
     catalog->mode = (SecurityUpdateMode)mode; catalog->offline = offline != 0;
     for (uint32_t i = 0; i < catalog->count; i++) {
         UpdateRow* row = &catalog->rows[i]; SecurityUpdatePackageSpec* spec = &row->info.spec;
-        update_wire_text(&wire, spec->package, sizeof(spec->package));
-        update_wire_text(&wire, spec->metadata_base, sizeof(spec->metadata_base));
-        update_wire_text(&wire, spec->channel, sizeof(spec->channel));
-        for (uint32_t j = 0; j < SECURITY_UPDATE_MAX_ORIGINS; j++) update_wire_text(&wire, spec->origins[j], sizeof(spec->origins[j]));
-        update_wire_u32(&wire, &spec->origin_count); update_wire_bytes(&wire, spec->publisher, 32); update_wire_bytes(&wire, spec->root, 32);
-        mode = row->info.mode; update_wire_u32(&wire, &mode);
+        update_authority_wire(&wire, spec);
+        mode = row->info.mode; security_state_wire_u32(&wire, &mode);
         // Validate the wire integer before converting to a C++ enum.
         if (mode < SECURITY_UPDATE_ENABLED || mode > SECURITY_UPDATE_DISABLED) return false;
         row->info.mode = (SecurityUpdateMode)mode;
-        update_wire_u64(&wire, &row->info.pause_until); update_wire_u32(&wire, &spec->poll_seconds);
-        update_wire_u32(&wire, &spec->job_seconds); update_wire_u64(&wire, &spec->max_download_bytes);
-        update_wire_u64(&wire, &row->info.next_poll); update_wire_u64(&wire, &row->info.lease_until);
-        update_wire_u64(&wire, &row->nonce); update_wire_u32(&wire, &row->info.failures);
-        update_wire_u32(&wire, &reserved);
+        security_state_wire_u64(&wire, &row->info.pause_until); security_state_wire_u32(&wire, &spec->poll_seconds);
+        security_state_wire_u32(&wire, &spec->job_seconds); security_state_wire_u64(&wire, &spec->max_download_bytes);
+        security_state_wire_u64(&wire, &row->info.next_poll); security_state_wire_u64(&wire, &row->info.lease_until);
+        security_state_wire_u64(&wire, &row->nonce); security_state_wire_u32(&wire, &row->info.failures);
+        security_state_wire_u32(&wire, &reserved);
         if (!wire.valid || reserved || !update_spec_valid(spec) || !update_mode_valid(row->info.mode, row->info.pause_until) ||
                 row->info.failures > 16 || (!!row->nonce != !!row->info.lease_until)) return false;
         for (uint32_t j = spec->origin_count; j < SECURITY_UPDATE_MAX_ORIGINS; j++) if (spec->origins[j][0]) return false;
@@ -428,6 +431,7 @@ SecurityUpdateJob* security_update_begin(SecurityUpdateControl* control, const c
     SecurityUpdateJob* job = nullptr;
     UpdateRow* row = status == SECURITY_UPDATE_OK ? update_find(operation->catalog, package) : nullptr;
     if (status == SECURITY_UPDATE_OK && !row) status = SECURITY_UPDATE_MISSING;
+    uint64_t started_ms = time_now_ms();
     uint64_t now = status == SECURITY_UPDATE_OK ? control->clock(control->clock_context) : 0;
     if (status == SECURITY_UPDATE_OK) status = update_enabled(operation->catalog, row, now, manual);
     if (status == SECURITY_UPDATE_OK && row->nonce && now < row->info.lease_until) status = SECURITY_UPDATE_BUSY;
@@ -438,14 +442,16 @@ SecurityUpdateJob* security_update_begin(SecurityUpdateControl* control, const c
         if (!job || !crypto_random_bytes(&row->nonce, sizeof(row->nonce)) || !row->nonce) status = SECURITY_UPDATE_IO_ERROR;
     }
     if (status == SECURITY_UPDATE_OK) {
-        row->info.lease_until = now + row->info.spec.job_seconds;
+        // round up the persisted seconds so another host cannot steal a live
+        // monotonic reservation at the next clock tick; publication uses its budget.
+        row->info.lease_until = now + row->info.spec.job_seconds + 1;
         uint64_t next = now + (manual ? 300 : row->info.spec.poll_seconds);
         if (next > row->info.next_poll) row->info.next_poll = next;
         status = update_operation_publish(operation);
         if (status == SECURITY_UPDATE_OK) {
             job->owner = control; control->references++;
             strcpy(job->package, row->info.spec.package); job->epoch = operation->catalog->epoch; job->nonce = row->nonce;
-            job->manual = manual; job->deadline_ms = time_now_ms() + (uint64_t)row->info.spec.job_seconds * 1000;
+            job->manual = manual; job->deadline_ms = started_ms + (uint64_t)row->info.spec.job_seconds * 1000;
         }
     }
     if (status != SECURITY_UPDATE_OK) { mem_free(job); job = nullptr; }
@@ -515,6 +521,85 @@ SecurityUpdateLease* security_update_job_enter(SecurityUpdateJob* job, SecurityU
     if (result) *result = status;
     if (status != SECURITY_UPDATE_OK) { update_operation_end(&lease->operation); mem_free(lease); return nullptr; }
     job->owner->references++;
+    lease->job = job;
+    return lease;
+}
+void security_update_record_reject(SecurityUpdateLease* lease) {
+    if (lease && lease->job) lease->job->finished = true;
+}
+bool security_update_job_binding(SecurityUpdateJob* job, uint8_t out[32]) {
+    if (!out) return false;
+    memset(out, 0, 32); SecurityUpdateResult result;
+    SecurityUpdateLease* lease = security_update_job_enter(job, &result);
+    if (!lease) return false;
+    uint8_t bytes[64] = {};
+    memcpy(bytes, lease->operation.catalog->instance, 16);
+    write_le64(bytes + 16, job->nonce); write_le64(bytes + 24, job->epoch);
+    UpdateRow* row = update_find(lease->operation.catalog, job->package);
+    bool valid = row && security_update_authority_digest(&row->info.spec, bytes + 32) && digest_sha256(bytes, sizeof(bytes), out);
+    security_update_job_leave(lease); return valid;
+}
+bool security_update_record_observe(SecurityUpdateLease* lease, uint64_t generation, const uint8_t digest[32]) {
+    if (!lease || !generation || !digest || !security_state_fingerprint_present(lease->package_record)) return false;
+    SecurityUpdateControl* control = lease->operation.control;
+    for (uint32_t i = 0; i < control->metadata_count; i++) {
+        auto* seen = &control->metadata[i];
+        if (memcmp(seen->package, lease->package_record, 32)) continue;
+        if (generation < seen->generation || (generation == seen->generation && memcmp(digest, seen->digest, 32))) {
+            control->invalidated = true; security_update_record_reject(lease); return false;
+        }
+        seen->generation = generation; memcpy(seen->digest, digest, 32); return true;
+    }
+    if (control->metadata_count == SECURITY_UPDATE_MAX_PACKAGES) return false;
+    auto* seen = &control->metadata[control->metadata_count++];
+    memcpy(seen->package, lease->package_record, 32); seen->generation = generation; memcpy(seen->digest, digest, 32);
+    return true;
+}
+SecurityUpdateLease* security_update_record_enter(SecurityUpdateControl* control, const char* package,
+        SecurityUpdateJob* job, SecurityUpdatePackageSpec* out_spec, uint64_t* out_time,
+        SecurityStateTransaction** out_state, SecurityUpdateResult* result) {
+    if (result) *result = SECURITY_UPDATE_INVALID;
+    if (out_state) *out_state = nullptr;
+    if (out_spec) memset(out_spec, 0, sizeof(*out_spec));
+    if (out_time) *out_time = 0;
+    if (!out_spec || !out_time || !out_state || (job ? control || package : !control || !package)) return nullptr;
+    SecurityUpdateResult status;
+    SecurityStateTransaction* state = nullptr;
+    SecurityUpdateLease* lease = security_update_storage_enter(control, job, &state, &status);
+    if (job) { package = job->package; control = job->owner; }
+    if (lease) {
+        UpdateRow* row = update_find(lease->operation.catalog, package);
+        uint8_t key[32];
+        if (!row) status = SECURITY_UPDATE_MISSING;
+        else if (!digest_sha256(package, strlen(package), key) ||
+                !security_state_select_update_metadata(lease->operation.transaction, key)) status = SECURITY_UPDATE_IO_ERROR;
+        if (status == SECURITY_UPDATE_OK) {
+            memcpy(lease->package_record, key, 32);
+            *out_spec = row->info.spec; *out_time = control->clock(control->clock_context);
+            *out_state = lease->operation.transaction;
+        } else { security_update_job_leave(lease); lease = nullptr; }
+    }
+    if (result) *result = status;
+    return lease;
+}
+SecurityUpdateLease* security_update_storage_enter(SecurityUpdateControl* control, SecurityUpdateJob* job,
+        SecurityStateTransaction** out_state, SecurityUpdateResult* result) {
+    if (out_state) *out_state = nullptr;
+    if (result) *result = SECURITY_UPDATE_INVALID;
+    if (!out_state || (job ? control != nullptr : control == nullptr)) return nullptr;
+    SecurityUpdateLease* lease = nullptr;
+    SecurityUpdateResult status = SECURITY_UPDATE_IO_ERROR;
+    if (job) lease = security_update_job_enter(job, &status);
+    else {
+        lease = (SecurityUpdateLease*)mem_calloc(1, sizeof(*lease), MEM_CAT_SYSTEM);
+        if (lease) {
+            update_operation_begin(&lease->operation, control); status = lease->operation.result;
+            if (status == SECURITY_UPDATE_OK) control->references++;
+            else { update_operation_end(&lease->operation); mem_free(lease); lease = nullptr; }
+        }
+    }
+    if (lease) *out_state = lease->operation.transaction;
+    if (result) *result = status;
     return lease;
 }
 void security_update_job_leave(SecurityUpdateLease* lease) {

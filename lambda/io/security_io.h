@@ -68,6 +68,12 @@ typedef struct SecurityIOClient {
     SecurityIOResult (*authority_stamp)(void* context, SecurityAuthorityStamp* stamp);
 } SecurityIOClient;
 
+// Broker-only virtual mount. This is not a host filesystem directory; the
+// admitted channel selects its owner, never a principal encoded in the path.
+#define SECURITY_APP_DATA_PATH "/.lambda/app-data"
+#define SECURITY_APP_CACHE_PATH "/.lambda/app-cache"
+#define SECURITY_APP_TEMP_PATH "/.lambda/app-temp"
+
 // Context-free acquisition seam. NULL client is an explicitly ambient host
 // mechanism; a present but invalid/denying client never falls back to it.
 bool security_io_read_bytes(const SecurityIOClient* client, const char* path,
