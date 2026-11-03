@@ -2239,8 +2239,11 @@ bool lambda_type_comparison_may_error(Type* type, bool deep, bool include_unknow
 }
 
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
-    left = contract_unwrap_type(left);
-    right = contract_unwrap_type(right);
+    bool dependent = lambda_type_contract_has_binder(left, true) ||
+        lambda_type_contract_has_binder(right, true);
+    // S11.4.8v2: normalizing T | error must retain the selected T, not its bound.
+    left = dependent ? type_field_unwrap_simple_decl(left) : contract_unwrap_type(left);
+    right = dependent ? type_field_unwrap_simple_decl(right) : contract_unwrap_type(right);
     if (!left) return right;
     if (!right) return left;
     // S11.1.7: `T | none` is `T`
@@ -2249,7 +2252,7 @@ Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
 
     uint8_t left_top = contract_top_exclusions(left);
     uint8_t right_top = contract_top_exclusions(right);
-    if (left_top != UINT8_MAX || right_top != UINT8_MAX) {
+    if (!dependent && (left_top != UINT8_MAX || right_top != UINT8_MAX)) {
         if (left_top == UINT8_MAX) {
             left_top = 0;
             if (!lambda_type_accepts_error(left)) left_top |= LAMBDA_TYPE_EXCLUDE_ERROR;
@@ -2262,10 +2265,11 @@ Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
         }
         return contract_top_from_exclusions(left_top & right_top);
     }
-    if (contract_same_atomic_type(left, right) || contract_union_contains(left, right)) {
+    if (left == right || (!dependent && (contract_same_atomic_type(left, right) ||
+            contract_union_contains(left, right)))) {
         return left;
     }
-    if (contract_union_contains(right, left)) return right;
+    if (!dependent && contract_union_contains(right, left)) return right;
     if (!pool) return left;
 
     TypeBinary* result = (TypeBinary*)alloc_type_kind(pool, TYPE_KIND_BINARY,
@@ -2276,15 +2280,21 @@ Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
     return (Type*)result;
 }
 
-Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions) {
-    type = contract_unwrap_type(type);
+static Type* contract_remove_exclusions(Pool* pool, Type* type,
+        uint8_t exclusions, bool preserve_refs) {
+    type = preserve_refs ? type_field_unwrap_simple_decl(type) : contract_unwrap_type(type);
     if (!type || exclusions == 0) return type;
+    // admission resolves these against the invocation, never their static bound.
+    if (preserve_refs && type->type_id == LMD_TYPE_TYPE &&
+            (type->kind == TYPE_KIND_BINDER || type->kind == TYPE_KIND_BOUND_REF)) return type;
 
     uint8_t top_exclusions = contract_top_exclusions(type);
     if (top_exclusions != UINT8_MAX) {
         return contract_top_from_exclusions(top_exclusions | exclusions);
     }
-    if ((exclusions & LAMBDA_TYPE_EXCLUDE_ERROR) && type->type_id == LMD_TYPE_ERROR) {
+    if ((exclusions & LAMBDA_TYPE_EXCLUDE_ERROR) &&
+            (type->type_id == LMD_TYPE_ERROR ||
+             (preserve_refs && lambda_type_contract_is_subtype(type, &TYPE_ERROR)))) {
         return NULL;
     }
     if ((exclusions & LAMBDA_TYPE_EXCLUDE_NULL) && type->type_id == LMD_TYPE_NULL) {
@@ -2293,16 +2303,44 @@ Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions) 
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         TypeUnary* unary = (TypeUnary*)type;
         if (unary->op == OPERATOR_OPTIONAL && (exclusions & LAMBDA_TYPE_EXCLUDE_NULL)) {
-            return lambda_type_remove_exclusions(pool, unary->operand, exclusions);
+            return contract_remove_exclusions(pool, unary->operand, exclusions, preserve_refs);
+        }
+        if (preserve_refs && unary->op == OPERATOR_OPTIONAL) {
+            Type* operand = contract_remove_exclusions(pool, unary->operand,
+                exclusions, preserve_refs);
+            if (operand == unary->operand) return type;
+            if (!operand) return &TYPE_NULL;
+            if (!pool) return NULL;
+            TypeUnary* result = (TypeUnary*)alloc_type_kind(pool, TYPE_KIND_UNARY,
+                sizeof(TypeUnary));
+            result->op = unary->op;
+            result->min_count = unary->min_count;
+            result->max_count = unary->max_count;
+            result->operand = operand;
+            return (Type*)result;
         }
     }
     if (!lambda_type_is_union(type)) return type;
 
     TypeBinary* binary = (TypeBinary*)type;
-    Type* left = lambda_type_remove_exclusions(pool, binary->left, exclusions);
-    Type* right = lambda_type_remove_exclusions(pool, binary->right, exclusions);
+    Type* left = contract_remove_exclusions(pool, binary->left, exclusions, preserve_refs);
+    Type* right = contract_remove_exclusions(pool, binary->right, exclusions, preserve_refs);
     if (left == binary->left && right == binary->right) return type;
+    if (preserve_refs) {
+        if (!left) return right;
+        if (!right || left == right) return left;
+        if (!pool) return NULL;
+        return lambda_type_union_normalized(pool, left, right);
+    }
     return lambda_type_union_normalized(pool, left, right);
+}
+
+Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions) {
+    return contract_remove_exclusions(pool, type, exclusions, false);
+}
+
+Type* lambda_type_normal_admission_contract(Pool* pool, Type* type) {
+    return contract_remove_exclusions(pool, type, LAMBDA_TYPE_EXCLUDE_ERROR, true);
 }
 
 static bool contract_numeric_values_match(Item left, Item right) {

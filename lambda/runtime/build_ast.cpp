@@ -1703,6 +1703,14 @@ static bool boundary_type_is_extended(const Type* type, TypeKind kind) {
     return type && !is_global_simple_type(type) && type->kind == kind;
 }
 
+static Type* boundary_binder_bound(Type* type) {
+    if (boundary_type_is_extended(type, TYPE_KIND_BOUND_REF))
+        return ((TypeBoundRef*)type)->bound;
+    if (boundary_type_is_extended(type, TYPE_KIND_BINDER))
+        return ((TypeBinder*)type)->bound;
+    return NULL;
+}
+
 // This is the static half of an annotated boundary.  It intentionally treats
 // `any` and an unproven map shape as deferred rather than silently accepting
 // them: the MIR/runtime boundary supplies the corresponding dynamic check.
@@ -1755,6 +1763,15 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     // S11.1.7: a `none` source has no value: what arrives at run time is the
     // error its own contract produced, which the runtime check handles
     if (source == &TYPE_NONE) return STATIC_BOUNDARY_DEFERRED;
+    Type* source_bound = boundary_binder_bound(source);
+    Type* target_bound = boundary_binder_bound(target);
+    if ((source_bound && source_bound != source) ||
+            (target_bound && target_bound != target)) {
+        // S11.4.8v2: bounds can prove rejection, not the invocation's selection.
+        return static_boundary_relation(source_bound ? source_bound : source,
+            target_bound ? target_bound : target) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
     if (target->type_id == LMD_TYPE_ANY) {
         if (target == &TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
         if ((type_is_any_without_error(target) && lambda_type_accepts_error(source)) ||
@@ -1979,6 +1996,33 @@ static bool ast_boundary_cannot_fail(AstNode* source, Type* target) {
         lambda_ast_boundary_relation(source, target) == STATIC_BOUNDARY_PROVEN;
 }
 
+static StaticBoundaryResult ast_return_boundary_relation(AstFuncNode* function,
+        AstNode* source, Type* target, Type* proof_type = NULL) {
+    AstNode* value = ast_unwrap_primary(source);
+    Type* expected = boundary_unwrap_type(target);
+    if (function && value && value->node_type == AST_NODE_IDENT &&
+            boundary_type_is_extended(expected, TYPE_KIND_BOUND_REF)) {
+        NameEntry* entry = ((AstIdentNode*)value)->entry;
+        for (AstNamedNode* param = function->param; entry && param;
+                param = (AstNamedNode*)param->next) {
+            if (entry->node != (AstNode*)param || entry->is_var_param ||
+                    entry->admission_may_fail) continue;
+            Type* contract = boundary_unwrap_type(parameter_boundary_type((TypeParam*)param->type));
+            if (!boundary_type_is_extended(contract, TYPE_KIND_BINDER)) break;
+            TypeBinder* binder = (TypeBinder*)contract;
+            TypeBoundRef* reference = (TypeBoundRef*)expected;
+            // S11.4.8v2: this unchanged parameter selected this invocation's T.
+            // Parameter identity keeps equal slots in other functions unrelated.
+            if (binder->bound != &TYPE_TYPE && binder->slot == reference->slot &&
+                    binder->bound == reference->bound &&
+                    !ast_body_may_write_entry(function->body, entry, true))
+                return STATIC_BOUNDARY_PROVEN;
+            break;
+        }
+    }
+    return lambda_ast_boundary_relation(source, target, proof_type);
+}
+
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
 static AstNode* boundary_unwrap_primary(AstNode* node);
 bool ast_expr_may_defect(AstNode* node, int depth);
@@ -2075,8 +2119,9 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
     }
     case AST_NODE_RETURN_STAM: {
         AstNode* value = ((AstReturnNode*)node)->value;
-        if (scan->return_contract && value &&
-                !ast_boundary_cannot_fail(value, scan->return_contract)) scan->found = true;
+        if (scan->return_contract && value && ast_return_boundary_relation(
+                scan->self, value, scan->return_contract) != STATIC_BOUNDARY_PROVEN)
+            scan->found = true;
         break;
     }
     case AST_NODE_CALL_EXPR:
@@ -2095,7 +2140,7 @@ static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature) {
     walk_lambda_ast(fn->body, ast_find_defect_origin, &scan, false);
     AstNode* body = boundary_unwrap_primary(fn->body);
     if (!scan.found && scan.return_contract && body && body->node_type != AST_NODE_CONTENT &&
-            !ast_boundary_cannot_fail(body, scan.return_contract)) {
+            ast_return_boundary_relation(fn, body, scan.return_contract) != STATIC_BOUNDARY_PROVEN) {
         scan.found = true;   // the tail is the value the declared return checks
     }
     signature->may_defect = scan.found;
@@ -6330,6 +6375,7 @@ typedef struct ReturnBoundaryScan {
     Transpiler* tp;
     Type* expected;
     String* function_name;
+    AstFuncNode* function;
     bool admission_may_fail;
 } ReturnBoundaryScan;
 
@@ -6555,7 +6601,8 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
     }
     // S11.4.2v3: raised and returned errors cross the same complete contract.
     StaticBoundaryResult relation = node->node_type == AST_NODE_RETURN_STAM
-        ? lambda_ast_boundary_relation(((AstReturnNode*)node)->value, scan->expected, actual)
+        ? ast_return_boundary_relation(scan->function,
+            ((AstReturnNode*)node)->value, scan->expected, actual)
         : static_boundary_relation(actual, scan->expected);
     scan->admission_may_fail |= relation == STATIC_BOUNDARY_DEFERRED &&
         scan->expected != &TYPE_ANY_NO_ERROR;
@@ -6577,7 +6624,7 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
 static bool validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
         Type* expected) {
     if (!fn || !fn->body || !expected || expected == &TYPE_ANY) return false;
-    ReturnBoundaryScan scan = {tp, expected, fn->name, false};
+    ReturnBoundaryScan scan = {tp, expected, fn->name, fn, false};
     // Nested functions own their return contracts.
     walk_lambda_ast(fn->body, validate_declared_return_boundary, &scan, false);
     return scan.admission_may_fail;
@@ -6595,7 +6642,7 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
     // Its aggregate type erases literal evidence and is not another boundary.
     bool checks_tail = !signature->is_proc || !procedural_body_exits(fn->body);
     StaticBoundaryResult body_relation = actual && checks_tail
-        ? lambda_ast_boundary_relation(fn->body, expected, actual) : STATIC_BOUNDARY_PROVEN;
+        ? ast_return_boundary_relation(fn, fn->body, expected, actual) : STATIC_BOUNDARY_PROVEN;
     if (body_relation != STATIC_BOUNDARY_REJECTED &&
             !lambda_type_accepts_error(expected) && ordinary_outcome_has_error(tp, fn->body)) {
         // S7.5.1v6: widening an outcome to any does not erase a known error.

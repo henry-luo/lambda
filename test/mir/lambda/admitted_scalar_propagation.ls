@@ -76,7 +76,7 @@ pn main() {
     let loop_error = accumulate([1.5], 2);
     [type(checked_float(7)) == float, checked_float("bad") is error,
      type(checked_int(1.0)) == int, checked_int(1.5) is error,
-     type(preserved_union(7)) == int, type(preserved_union(7.5)) == float,
+     type(preserved_union(7)) == float, type(preserved_union(7.5)) == float,
      type(captured(7)) == float, captured("bad") is error,
      nullable(null) == null, nullable("bad") is error,
      literal(1) == 1, literal(2) is error, changed(7) is error,

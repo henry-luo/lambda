@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 59.0.2 (2026-11-03)
+**Spec version:** 60.0.0 (2026-11-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -684,7 +684,7 @@ that carries them.
   outcome does not weaken admission or make the rejected value satisfy the
   annotation. Inference must never replace validation or authorize a native
   representation for an error-bearing outcome. [TE-1, TE §8.1, TE-18.1–TE-18.2]
-- **D3.2.4v4*** **A crossing into a named map contract is a reification, not
+- **D3.2.4v5*** **A crossing into a named map contract is a reification, not
   merely a check.** A named contract fixes a *physical* packed layout —
   per-field `byte_offset` and storage class — and the emitter's direct
   field access indexes by that layout. So a boundary may be elided only
@@ -698,7 +698,10 @@ that carries them.
   are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
   self-referential record is necessarily optional, so testing the wrapper
   silently exempts precisely the recursive contracts this rule exists to
-  protect. The open `map` fixes no layout and so needs no reification. For an
+  protect. Error alternatives likewise preserve the normal contract's full
+  reification: `N^` and `N | E` establish N's layout on their normal arm
+  (S11.4.6v4). Errors retain Item storage and never establish that layout.
+  The open `map` fixes no layout and so needs no reification. For an
   open **nominal** instance the contract fixes the **declared prefix**: extra
   fields extend the shape after it and never disturb that prefix (S2.1.4).
   Violating this is a memory-safety defect, not a missed optimization: an
@@ -710,11 +713,11 @@ that carries them.
   verified carrier.** An element read from a certified `T[]`, or a field read
   from an admitted record, *carries* `T`'s declared-prefix layout proof,
   because every write into a certified carrier admits its value before
-  publishing (S11.4.1v3). A reader that holds the carrier's proof therefore
+  publishing (S11.4.1v5). A reader that holds the carrier's proof therefore
   accesses the element or field by offset with no per-access shape-identity
   compare and no certificate re-check; the proof lasts as long as the
   carrier's verification does (D3.2.6). [S11.1.1v3, Tune19 §11.5, Tune20
-  §T20-6a, OB16; v4 2026-09-17, user]
+  §T20-6a, OB16; v4 2026-09-17, v5 TE-13.4 2026-11-03, user]
 - **D3.2.5v2** The surface spelling for the shared subtype relation is the
   binary `<:` operator. It accepts two type values and returns `bool`; it is
   not the magnitude operator `<` and does not perform value membership.
@@ -1070,7 +1073,7 @@ that carries them.
   `let`/`var` hold values, never aliases, and no program can distinguish the
   borrow from the snapshot bind. That invariant is the ruling. A handle
   carries **facts about its place** — identity (the object header, stable
-  under D4.3.1), layout and presence (D3.2.4v4, D3.2.6), and uniqueness
+  under D4.3.1), layout and presence (D3.2.4v5, D3.2.6), and uniqueness
   (the spine test, and S9.2.2's un-share of a shared leaf at a writing
   bind) — and **the facts hold exactly as long as the place and its
   ownership are unchanged**: any event that may replace the place or a
@@ -1249,7 +1252,7 @@ that carries them.
   Typed fallible returns use a proven native success lane with a
   companion error-Item lane. Outcome planning follows the normalized contract:
   `T^` and `T | error` have identical semantics, irrespective of spelling or
-  whether the body uses `raise` or an ordinary error return (S7.4.2v3).
+  whether the body uses `raise` or an ordinary error return (S7.4.2v4).
   A particular error set is derived from ordinary union alternatives (`T | E`),
   never from a separate typed-raise contract or an implicit broad-error addition.
   This does not merge the scalar payload lane with the error lane.
@@ -2807,7 +2810,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
 | D4.4.4v4 | Ruled 2026-09-17 (user). **Implemented (partial scope) 2026-09-17 (Tune29 T29-1, `vibe/impl/Lambda_Impl_Tune29.md` §12):** synthesized handles for record places spelled repeatedly on declared `var` roots, planned once in `build_ast` and ignored by T0; writing binds un-share through `cow_place_leaf_fixed`. Deltablue2 hot functions −35% instructions, −5% time; roots with a CW34 named borrow and `for` statements are excluded. Originally recorded as not implemented (CW37, `vibe/Lambda_Design_Runtime_COW.md` §11.14 + Appendix D). Motivation: the typed lane re-navigates `w.cons[cid]` on every access — ~38 MIR instructions per field read and ~42 per field write against one in the c2m port, the whole deltablue/havlak/richards/splay/cd family (`vibe/impl/Lambda_Impl_Tune29.md`; evidence `temp/r46/`). The star stays: named borrows, `for` loops and non-record places are still outside the implemented scope. **2026-09-17 (Tune29 §20):** a named handle may also be passed as a plain argument to a procedure that keeps no root; MIR joins its may-be-shared binding facts at control-flow merges (LR12-17). |
-| D3.2.4v4 | Corollary ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (T29-2 §11.5):** typed path stores compare no shape pointer at any step below a declared root. The certificate guard is still re-run per access (deltablue2 `c_choose_method`), because the carrier `w.cons` may change between accesses; removing it needs D4.4.4v4's handles (T29-1). **2026-09-17 (Tune29 §20.2):** a `T[]` declaration initialized from an admitted record's field admits any container inline and checks only null. |
+| D3.2.4v5 | Corollary ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (T29-2 §11.5):** typed path stores compare no shape pointer at any step below a declared root. The certificate guard is still re-run per access (deltablue2 `c_choose_method`), because the carrier `w.cons` may change between accesses; removing it needs D4.4.4v4's handles (T29-1). **2026-09-17 (Tune29 §20.2):** a `T[]` declaration initialized from an admitted record's field admits any container inline and checks only null. |
 | D3.2.6 | Ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (Tune29 T29-2, `vibe/impl/Lambda_Impl_Tune29.md` §11.3–§11.5):** required container fields of a trusted record are read with no empty-slot arm, a member read through such a field needs no receiver null test, and typed path stores test only contracts that admit null. The audit of Lambda-side writers found and fixed one hole: the JIT accepted `null` in a required field of a contract-constructed literal (the field proof mistook a declaration wrapper for an optional). Residue: `bool[]` has no native lane (admission still walks elements, T29-5); host-built values are unaudited by design. |
 | D4.4.4v3 | Revised 2026-09-16 (v3, user ruling): the borrow is admitted wherever it is unobservable under S9.1.2; path shape, handle writes, store-back placement, nested handles and handle rebinds are implementation details (CW36, `vibe/Lambda_Design_Runtime_COW.md` §11.13), fixed only by the tier-shared static decision, the runtime spine test, and store-back-or-mark on every writing path. Motivation: JetStream splay `splay_node` stores back inside `if` branches — 826k map copies and 32% GC per run under v2. **Implemented 2026-09-16 (T28-8, `vibe/impl/Lambda_Impl_Tune28.md` §9.16):** `rmw_branch_local` in `build_ast.cpp` tracks per path whether the handle may still hold the unmarked leaf and whether it wrote it unstored; a store-back is final (skips capture) only when nothing after it names the handle; loops naming the handle and plain handle rebinds refuse. The decision now runs in `lambda_ast_finalize_script`, after every procedure signature exists, so a `var` pass to a procedure defined later counts as a write. splay2 map copies 826k→683k; the residue is rotation stores of the caller's `var` root (a call-site move convention, not a store-back shape). |
 | D4.4.4v2 | Revised 2026-09-14 (v2, Tune27 §10.12): sibling-member access to the root and a return that precedes every use of the handle are admitted inside the region; cd's table put (`var keys = t.keys; var vals = t.vals; …; t.keys = keys; t.vals = vals`) now borrows both handles — 2,000 → 2 array copies per 1,000 puts. Fixture `test/lambda/proc/cow_rmw_sibling_borrow.ls`. Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
@@ -2816,7 +2819,7 @@ slice; no formal semantic ruling or document semver changes.
 | D5.1.1v3 | **Implemented 2026-10-05** (Runtime_Async P0–P5): Lambda tasks and JS generator, async and module bodies of both tiers run on activations; the `LambdaAsyncFrame`, the JS MIR state machines and the interpreter replay are deleted. Parked root segments are traced through their carriers; beyond a warm window cold parks are compacted (RA13). Gates: Lambda baseline 6206/6206; test262 MIR with the untouched base's exact failure set, AST 40261/40261. Open: JSCU25 weak registration of JS async activations. ([Runtime_Async §10.1](../vibe/Lambda_Design_Runtime_Async.md)) |
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
 | D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
-| D5.2.1v5 | **2026-11-02: M2/M3 derive ordinary-error and union-only particular-error metadata from the complete outcome contract; focused tier/GC checks pass and aggregate caller qualification is in progress (S7.4.2v3/S11.4.2v3). The following companion-lane qualification predates unification.** LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
+| D5.2.1v5 | **2026-11-03: unified outcome metadata and normal admission through error unions are qualified (S7.4.2v4/S11.4.2v3/S11.4.6v4): Lambda 6,456/6,456, focused tier/GC 288/288, MIR emission 282/282 and MIR GC 352/352. The following companion-lane qualification predates unification.** LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
 | D6.1.2v2, D6.2.3v3 | **Ratified 2026-11-02; implementation pending.** Separate local-control capability, mutable-root ownership and call effects; classify non-escaping shared captures versus immutable snapshots before either tier lowers them. [Implementation plan](../vibe/impl/Lambda_Impl_Function_Local_State.md). |
 | D6.1.3v2 | `may_await` (v2) feeds call metadata and GC planning as a may-park effect, and still gates the MIR region producer/consumer pass. **`may_defect` built 2026-09-27, fail-closed.** build_ast computes a conservative fact per function (`TypeFunc::defect_known`/`may_defect`); it fixes literal slot layouts and the S11.4.3 flag for both tiers and serves imports. The JIT solves the least fixed point per compile (`mir_solve_may_defect`), each origination site judged by the emitter's own gate, and treats anything outside its table as defect-capable. build_ast's fact over-approximates the solve, and the JIT narrows the S11.4.3 flag with its own answer except for an operand whose type admits error. `may_return_error` still carries both meanings in the variant effects. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |

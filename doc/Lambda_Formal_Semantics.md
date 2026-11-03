@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 80.0.2 (2026-11-03)
+**Spec version:** 81.0.0 (2026-11-03)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -945,13 +945,13 @@ poison. [C14c, C17, S7.5.3v2]
 *Ordinary errors have one value model and one acknowledgement discipline.
 System faults retain their separate runtime policy.* [TE-13.2, C14]
 
-- **S7.4.1v2*** **Ordinary errors are values with uniform acknowledgement.**
+- **S7.4.1v2** **Ordinary errors are values with uniform acknowledgement.**
   Constructing, returning, raising, or producing an error through validation
   creates no distinct soft/hard category. Every possible ordinary error
   outcome is subject to S7.5, independently of producer, return spelling,
   or `fn`/`pn` colour. Inference must retain the error possibility.
   *How an error was produced does not change what its receiver owes.* [TE-13.2]
-- **S7.4.2v3*** **`T^` is shorthand for `T | error` in every type position,
+- **S7.4.2v4** **`T^` is shorthand for `T | error` in every type position,
   including function returns.** Ordinary unions are the sole mechanism for
   specifying particular error outcomes: `T | E`, or `T | E1 | E2`, where the
   error alternatives classify error values. `T^E` is removed, not a second
@@ -960,8 +960,10 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   error, or disclosed by widening the contract (S11.4.2v3). Equivalent types
   have identical admission and acknowledgement, irrespective of error origin;
   `raise` requires a return contract admitting its error, not caret spelling.
+  Normal values undergo T's ordinary admission, including conversion and
+  reification (S11.4.6v4); adding an error alternative does not weaken it.
   An ordinary non-error alternative does not become an error type by unioning
-  it with `T`. Exceptional system faults retain S7.11. [TE-13.2–TE-13.3]
+  it with `T`. Exceptional system faults retain S7.11. [TE-13.2–TE-13.4]
 - **S7.4.3** **System faults** — stack exhaustion, out-of-memory, the `==`
   depth limit, compiler-inserted boundary defects. Never in types;
   transparent through `fn` frames; caught only at a `pn` `^ { }` boundary or
@@ -990,7 +992,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
 
 ### S7.5 Acknowledgment
 
-- **S7.5.1v6*** **Acknowledgement follows possible ordinary-error outcomes.**
+- **S7.5.1v6** **Acknowledgement follows possible ordinary-error outcomes.**
   A receiving context acknowledges through an `error` arm in `match`, a
   handler (S7.6), explicit error classification (S7.5.6), postfix `^`, an
   initializer or whole-variable reassignment under S7.5.2v4, or an
@@ -1002,7 +1004,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   inspection, recovery, and proof of success are not mandatory.* Composition
   follows S7.5.4; no binding or return annotation acknowledges unrelated
   expressions throughout its scope. [TE-13.1–TE-13.2, TE-16.3–TE-16.4, TE-18.2]
-- **S7.5.2v4*** **Binding acknowledgement follows type admission.** A
+- **S7.5.2v4** **Binding acknowledgement follows type admission.** A
   `let`/`var` initializer or whole-variable `var` reassignment is acknowledged
   when its declared or inferred receiving type admits the possible error
   outcomes. `any` includes error
@@ -1022,14 +1024,14 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   acknowledges it without mandatory immediate inspection; later uses respect
   its effective type. Other receiving-position rules are unchanged.
   [TE-13.1, TE-18.1–TE-18.2]
-- **S7.5.3v3*** `a or b` defaults only `null`, `false`, and `""`; an error
+- **S7.5.3v3** `a or b` defaults only `null`, `false`, and `""`; an error
   from `a` remains the expression's error and `b` is not evaluated (S3.4).
   Its type must retain that possibility: `or` does not itself acknowledge or
   recover an error. The resulting outcome can be received under S7.5.1v6.
   Recovery is explicit, as in `int(s) ^ { 0 }`; ordinary defaulting after
   propagation is `a()^ or b` where the enclosing return permits propagation.
   [TE-22, TE-13.2]
-- **S7.5.4*** **Acknowledgement composes through error-preserving operations.**
+- **S7.5.4** **Acknowledgement composes through error-preserving operations.**
   When an operand's possible error reaches the enclosing expression's outcome,
   its receiving context may acknowledge that outcome once; inference must
   preserve the error alternative. Thus `let n = int(text) + 1` retains the
@@ -1037,7 +1039,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   This grants no acknowledgement to nested statements or calls whose errors
   do not reach that receiver. An error produced by a handler body is a fresh
   outcome requiring its own receiving context. [TE-13.2]
-- **S7.5.5*** **An unacknowledged fallible result may not be silently
+- **S7.5.5** **An unacknowledged fallible result may not be silently
   overwritten in a procedural sequence.** Statically reject a possible ordinary-error
   outcome whose result is replaced without capture, handling, or propagation;
   a later statement or the function's return annotation does not acknowledge
@@ -1046,7 +1048,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   adds no runtime early exit. A captured but uninspected outcome remains
   legal; an unused-fallible-binding lint is a separate question. [TE-13.2]
 
-- **S7.5.6*** **Explicit error classification acknowledges the tested
+- **S7.5.6** **Explicit error classification acknowledges the tested
   outcome.** `e is (error | null)` evaluates `e` once and tests its value
   against the union; errors and null match, while false, empty text, zero,
   and empty collections do not. The explicit `error` alternative acknowledges
@@ -1094,7 +1096,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   ordinary language error. A handler may protect a procedure call
   that suspends (S7.6.7v5), with the same single-evaluation, result, and
   fresh-outcome rules after resume. [TE-16.1, TE-16.2, REH-D8, REH-D12]
-- **S7.6.2v5*** The unfiltered and filtered handlers are left-associative
+- **S7.6.2v5** The unfiltered and filtered handlers are left-associative
   postfix-primary forms `primary ^ { body }` and `primary ^ErrorType { body }`
   (S7.6.9). They share member/query precedence. `a + b ^ { h }` means
   `a + (b ^ { h })`; handling the sum requires `(a + b) ^ { h }`.
@@ -1146,7 +1148,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   restrictions still apply: this does not permit a `pn` call in `fn` context.
   [TE-16.1, ER-D13, REH-D12, REH-D13, Runtime_Async RA1]
 
-- **S7.6.8*** **`e or^ { h }` combines ordinary-error recovery and falsy
+- **S7.6.8** **`e or^ { h }` combines ordinary-error recovery and falsy
   defaulting.** Evaluate `e` once. An error, `null`, `false`, or `""` selects
   `h`; every other value passes unchanged (S3.1v2). The body binds `^` to
   the actual triggering value and preserves outer `~`. Evaluate the body
@@ -1156,7 +1158,7 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   at ordinary `or` precedence: `a + b or^ { h }` protects the sum. `^or`
   is not an alias; postfix propagation followed by `or` retains its meaning.
   This adds neither a new falsy value nor a system-fault policy. [TE-16.3]
-- **S7.6.9*** **`e ^ErrorType { h }` handles matching ordinary errors.**
+- **S7.6.9** **`e ^ErrorType { h }` handles matching ordinary errors.**
   The selector names an error type/pattern and uses the existing `is`/`match`
   classification rules. Evaluate `e` once; a matching error selects `h`
   with `^` bound to that error. Non-errors and nonmatching errors pass through
@@ -1184,7 +1186,7 @@ do not choose a block to abandon.* [TE-18.1–TE-18.2]
   (`a + e + b`) the error flows as a value and the expression types
   `T | error`. (Strict left-to-right
   evaluation order is *not* normative.) [TE-18.1–TE-18.2]
-- **S7.7.2v2*** **A deferred initializer binds its validation outcome.** For
+- **S7.7.2v2** **A deferred initializer binds its validation outcome.** For
   `let a: T = val` (likewise `var` initialization), proven admission adds no
   validation-error alternative; proven incompatibility is a static error. Undecidable admission
   warns and checks at runtime: `a` receives the admitted value or a rich
@@ -1198,7 +1200,7 @@ do not choose a block to abandon.* [TE-18.1–TE-18.2]
   function is not entered and **the call expression evaluates to that
   error** — call-site contagion, never a hidden early return, never a
   widening of the callee's signature. [TE-18, TE-5]
-- **S7.7.4v2*** **Whole-variable reassignment uses the initializer admission
+- **S7.7.4v2** **Whole-variable reassignment uses the initializer admission
   rules unchanged** (S7.5.2v4, S7.7.2v2). Evaluate the RHS once. Proven
   admission stores its outcome; proven incompatibility is a static error;
   undecidable explicit admission warns and validates at runtime. Store the
@@ -1209,7 +1211,7 @@ do not choose a block to abandon.* [TE-18.1–TE-18.2]
   retain it. An RHS handler does not bypass subsequent annotation validation.
   Explicit RHS control transfer retains its ordinary target and does not
   complete the assignment. [TE-18.2]
-- **S7.7.5v3*** **Initializer or whole-variable reassignment failure inside
+- **S7.7.5v3** **Initializer or whole-variable reassignment failure inside
   a loop does not skip its body or abandon the loop.** Declarations and
   accumulator reassignments follow S7.7.2v2/S7.7.4v2; later statements and
   explicit recovery remain reachable.
@@ -1225,7 +1227,7 @@ do not choose a block to abandon.* [TE-18.1–TE-18.2]
   in a clean element/field. Whole-variable reassignment has no extra
   module/closure failure exit; the restrictions on module state and writes
   through captures remain (S9.1.4). [TE-18, TE-18.2]
-- **S7.7.7v4*** **Validation errors can be handled as ordinary values.**
+- **S7.7.7v4** **Validation errors can be handled as ordinary values.**
   Recovery after a deferred initializer or whole-variable reassignment failure
   is reachable through the bound outcome: `a ^ { … }`. A handler on either
   RHS handles that expression's outcome, not a later failure of the annotation
@@ -2024,7 +2026,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S11.4.2v3*** Signatures spell both failure dimensions: plain successful
   `T` excludes null and error; absence is `T?`, ordinary failure is `T^` or
   equivalent `T | error`, and particular errors use ordinary unions such as
-  `T | E` (S7.4.2v3). **Declared returns enforce admission of every ordinary
+  `T | E` (S7.4.2v4). **Declared returns enforce admission of every ordinary
   outcome**, including builtin and validation errors, whether raised or
   returned. No ordinary errors outside the declared union are implicit:
   handle, convert, or disclose them. A known incompatible error-possible
@@ -2048,12 +2050,18 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   `int 3`); an inexact one fails with the rich error. Poison follows domain
   membership (S4.2.4). Static positions reject the whole class
   (`let x: int = 3.0` is a compile error). [TE-5, TE-6]
-- **S11.4.6v3*** User-defined types are enforced by the validator: deep, on
+- **S11.4.6v4*** User-defined types are enforced by the validator: deep, on
   first crossing, yielding an admitted value or a rich error with a validator
   path. Initializers and whole-variable reassignments retain that outcome
   under S7.7.2v2/S7.7.4v2; a rejected argument does not enter the callee (S7.7.3).
+  **An error union preserves normal admission:** for `T | E`, non-error
+  values undergo the same admission as T, including numeric conversion,
+  array certification and named-record reification. An admitted error is
+  retained unchanged; its alternative does not select a weaker normal check.
+  Thus `let x: float^ = 7` admits `7.0`, just as `float` does. This does not
+  change selection among multiple normal alternatives within T.
   Named map types are **open** — extra fields pass. Constrained types
-  (`T that …`) enforce the base only, for now. [TE-10]
+  (`T that …`) enforce the base only, for now. [TE-10; v4 TE-13.4, 2026-11-03, user]
 - **S11.4.7v3*** Validation and discharge follow §S7.7–S7.8: deferred
   initializer and whole-variable reassignment checks produce bound outcomes
   without implicit block exit; containers retain destination-contract admission; `^ { }` handles an
@@ -3139,13 +3147,13 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.1.1v3, S7.1.3v3 (pre-unification qualification) | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
-| S7.4.2v3, S11.4.2v3 | **Core implemented 2026-11-02; caller qualification in progress.** Production and reference parsers reject typed carets. Ordinary unions specify particular errors; `T^` retains its broad union meaning. Both execution tiers derive error and ABI metadata from the complete ordinary outcome contract. Parser, diagnostic and focused tier/GC checks pass; aggregate package/demo qualification is pending. [TE-13.3 status](../vibe/Lambda_Design_Type_Error_Handling.md#typed-caret-retirement). |
-| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S7.6.1v9, S7.6.3v3, S7.6.5v4–S7.6.6v6, S7.1.3v3, S11.4.2v3, S12.1.4v4, S12.3.4v2 | **Core implemented 2026-11-02; aggregate qualification in progress.** Raised and returned ordinary errors cross the same complete contract. Receiver-based checks retain producer evidence through composition, open joins, callback admission, handlers and bare callable pipes; overwritten outcomes require acknowledgement. The diagnostic gate passes 247/247 cases and the focused matrix passes 128/128 executions across interp/jit/auto and immediate promotion, with ordinary and forced/poisoned GC. Deferred return admission contributes an ordinary checked call outcome without weakening the declared target; JIT tail forwarding preserves that admission. Existing mutation and system-fault boundaries remain. General fn-local explicit control is the separate pending extension recorded above. [TE-13.2 status](../vibe/Lambda_Design_Type_Error_Handling.md#ordinary-error-unification). |
-| S7.5.6, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | **Partial, M1 implemented 2026-11-02.** Both parsers and execution tiers implement combined fallback and named/qualified filtered chains with conservative residual types. Selection, laziness, exact caret subjects, fresh chained errors, and GC are qualified. M2/M3 implement ordinary-error acknowledgement, including classification consumers; aggregate caller qualification is in progress. Filtered system-fault policy remains open. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
+| S7.4.2v4, S11.4.2v3 | **Implemented and callers qualified 2026-11-03.** Both parsers reject typed carets; ordinary unions alone specify particular errors and `T^` retains its broad union meaning. Both tiers derive error/ABI metadata from the complete outcome. S11.4.6v4 normal conversion, array certification and record reification are qualified, including invocation-selected types. Gates: Lambda **6,456/6,456**, diagnostics **321/321**, focused tier/GC **288/288**, MIR emission **282/282**. [TE-13.3 status](../vibe/Lambda_Design_Type_Error_Handling.md#typed-caret-retirement). |
+| S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S7.6.1v9, S7.6.3v3, S7.6.5v4–S7.6.6v6, S7.1.3v3, S11.4.2v3, S12.1.4v4, S12.3.4v2 | **Core implemented and callers qualified 2026-11-03.** Raised and returned ordinary errors cross the same complete contract. Acknowledgement follows receiver admission through composition, joins, callbacks, handlers and callable pipes; overwritten outcomes require acknowledgement. Deferred return checks contribute an ordinary call outcome without weakening the declared target; tail forwarding preserves admission. Gates: Lambda **6,456/6,456**, diagnostics **321/321**, focused tier/GC **288/288**, MIR GC **352/352**. Mutation and system-fault boundaries remain separate. General fn-local explicit control remains the separate pending extension above. [TE-13.2 status](../vibe/Lambda_Design_Type_Error_Handling.md#ordinary-error-unification). |
+| S7.5.6, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | **Partial, M1 implemented 2026-11-02.** Both parsers and execution tiers implement combined fallback and named/qualified filtered chains with conservative residual types. Selection, laziness, exact caret subjects, fresh chained errors, and GC are qualified. M2/M3 implement ordinary-error acknowledgement, including classification consumers; M8 caller qualification passes Lambda 6,456/6,456 (2026-11-03). Filtered system-fault policy remains open. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.6.1v9 | **M1 implemented 2026-11-02.** Procedure success/recovery values are preserved in bindings and block results; fresh recovery errors remain ordinary outcomes. The retired success arm is removed. Normal, suspending, nested, and forced-GC cases are qualified on interp/jit/auto. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 | **M1 implemented 2026-11-02.** Both parsers reject the retired suffix, including across lines. AST/runtime success-arm state is removed, callers migrated, and named-filter/combined-fallback braces follow the introducer-line rule. Reference carets distinguish handler bodies from propagation. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
 | S7.6.7v5 | **M1 implemented 2026-11-02.** Procedure handlers yield values in receiving and final-result positions before and after suspension. Explicit control targets and the existing procedure fault boundary are retained; focused tier/GC qualification and existing concurrency fixtures cover the change. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
-| S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4, S11.4.1v5, S11.4.6v3, S11.4.7v3, S12.2.1v3, SI14v3 | **Core implemented 2026-11-02; aggregate qualification in progress.** Deferred initializer/reassignment checks warn with E241, bind/store the admitted value or validation error, and continue. Effective outcome facts survive writes, joins, aliases, captures and whole-binding borrow publication; MIR boxes outcomes instead of decoding an error through the original native lane. Known incompatible admission remains strict. Field/element store contracts are separate. [M1 qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes). |
+| S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4, S11.4.1v5, S11.4.6v4, S11.4.7v3, S12.2.1v3, SI14v3 | **Core implemented and callers qualified 2026-11-03.** Deferred initializer/reassignment checks warn with E241, bind/store the admitted value or validation error, and continue. Effective outcomes survive writes, joins, aliases, captures and borrow publication; native lanes require discharged error/null and normal-kind proofs. Error unions apply ordinary normal admission. Known incompatibility remains strict; field/element stores keep their contract. Gates: Lambda **6,456/6,456**, focused tier/GC **288/288**, native admission **55/55**, MIR GC **352/352**. Public validation-expression spelling and dedicated typed-loop admission remain separate design follow-ups. [Implementation qualification](../vibe/impl/Lambda_Impl_Type_Error_Handling.md). |
 | S7.7.3–S7.7.4, S7.7.6 (prior containment qualification) | **Historical qualification, 2026-10-31. Initializer/reassignment skipping and retained-old-variable behavior are retired by S7.7.2v2/S7.7.4v2 and replaced by M2/M3 continued outcomes (above).** Deferred declaration/reassignment failures end the declaring block, including iteration-local and comma-separated bindings; parameter admission failures are call values; checked assignments/stores report their skipped tail and retained/partial state. Inferred record calls retain error values, including later caller effects. Fixtures `proc/ledger_containment.ls`, `ledger_parameter_result_site.ls`, prior `proc/defect_value_flow.ls`, and native diagnostic coverage. **Residue:** the complete static diagnostic tiers and `for x: T in e` surface are not complete; independent proof precision and join arithmetic remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24). Qualification: [containment follow-up](<../vibe/impl/Lambda_Impl_Ledger_Containment_Followup (done).md>). |
 | S7.8.1 | **TE-17 lane gating built 2026-09-27** on the D6.1.3 fact: a defect-capable call's value, and a member, element or arithmetic result of one, never enters a native lane, and a literal slot fed by one is boxed on both tiers. **2026-10-31:** checked `int[]` stores reject a mismatched value before publishing it and report retained partial state; inferred record calls and fields preserve error joins (`proc/ledger_containment.ls`, interp/auto/jit and forced/poisoned GC). Independent proof precision and join-arithmetic tuning remain [LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24); this qualification does not audit every raw construction/setter API. |
 | S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
@@ -3169,7 +3177,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.5 | **Conformant (verified 2026-09-23, both tiers):** an ANY-held `3.0` crossing an `int` boundary is admitted as `3`, and `3.5` fails with E201. The type-directional reject this row used to record is gone. |
 | S11.1.6v2, S11.4.5 (native nullable lanes) | **Conformant as of 2026-09-23, both tiers:** a `float?` or `float \| null` contract admits an int as `float` does, re-represented (`5` becomes `5.0`), and `int?` admits an exactly integral float (`2.0` becomes `2`). The JIT had failed MIR verification on `let x: float? = 5`, and T0 had kept the int. A union of several numeric arms still admits by membership (`5` stays an int in `int \| float \| null`). Fixture: `proc/nullable_float_lane_admission.ls`. **Residue:** the sized and wide optionals (`i8?` to `u32?`, `i64?`) still admit by membership on both tiers, so `let t: i32? = 5` is rejected where `let t: i32 = 5` is admitted. |
 | S11.4.6v2 (base admission only; new initializer routing pending) | **Base admission conformant as of 2026-09-25, both tiers.** `fn_is`, the validator, `is` and match arms all admit a constrained type's base as `x is <base>` does. Both tiers had compared the base's TypeId, so a union, occurrence, array, `float`, `any` or `number` base refused every value and a map, element or nominal base took any container of its kind; the generic `fn_is` admitted anything for a union, occurrence or array base; and the validator refused every element of `Pos[]` ([LR03-22](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-22>), [LR13-11](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-11>)). Predicates run where the type is named statically: `is` and match arms, inline, by name, or through an alias chain, innermost predicate first ([LR03-23](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-23>)). Everywhere else the interim holds and only the base is enforced: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). Fixture `constrained_type_base.ls`. How a predicate evaluates is S11.4.11's row. An inline pattern island admits as a base since 2026-09-26, compiled where its type resolves ([LR03-26](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-26>), fixture `pattern_island_type.ls`, three tiers). |
-| S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
+| S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v5 footnotes). |
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S11.4.12 | **Implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
@@ -3359,10 +3367,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-13.1, TE-15–TE-18, TE-16.1–TE-16.4, TE-18.1–TE-18.2; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v5, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3; S7.5.1v6, S7.5.3v3–S7.5.5; S11.4.2v3; S12.1.4v4, S12.3.4v2 | TE-13.2–TE-13.3 | `Lambda_Design_Type_Error_Handling.md` |
+| S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3; S7.5.1v6, S7.5.3v3–S7.5.5; S11.4.2v3; S12.1.4v4, S12.3.4v2 | TE-13.2–TE-13.4 | `Lambda_Design_Type_Error_Handling.md` |
 | S7.5.6–S7.5.7, S7.6.8–S7.6.9; S7.5.1v6, S7.6.1v9–S7.6.2v5, S7.6.5v4–S7.6.6v6; S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | TE-16.3–TE-16.4 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
 | S7.5.1v6, S7.5.2v4 | TE-13.1 | `Lambda_Design_Type_Error_Handling.md` |
-| SI14v3; S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4; S11.4.1v5, S11.4.6v3, S11.4.7v3; S12.2.1v3 | TE-18.1–TE-18.2 | `Lambda_Design_Type_Error_Handling.md` |
+| SI14v3; S7.7.1v3, S7.7.2v2, S7.7.4v2–S7.7.7v4; S11.4.1v5, S11.4.6v4, S11.4.7v3; S12.2.1v3 | TE-18.1–TE-18.2 | `Lambda_Design_Type_Error_Handling.md` |
 | S7.6.1v9, S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 | TE-16.2 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3; S7.6.1v9, S7.6.7v5 | Design_Procedural §2.4; TE-16.1 | `Lambda_Design_Procedural.md`, `Lambda_Design_Type_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |

@@ -1965,7 +1965,8 @@ type Vm = {stv: array, stp: int[], top: int, lim: int, high: int,
     fk_auxi: int[], fk_active: bool[], fk_label: int[], nforks: int,
     fr_env: int[], fr_caller: int[], fr_retpc: int[], fr_fn: int[], fr_base: int[],
     fr_locals: int[], fr_params: int[], nframes: int, locals: array, pfn: int[], penv: int[],
-    fp: int, path: array?, vat: any?, subexp: int, labels: int, outputs: array, err: any?,
+    // jq's error payloads and tracked values are data, excluding Lambda errors.
+    fp: int, path: array?, vat: (any ! error)?, subexp: int, labels: int, outputs: array, err: (any ! error)?,
     frame_limit: int}
 
 pn st_push(var vm: Vm, v) {

@@ -210,6 +210,9 @@ Type* lambda_type_nullable_normalized(Pool* pool, Type* type);
 bool lambda_type_may_hold_list(Type* type);
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right);
 Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);
+// S11.4.6v4: project normal admission without erasing invocation-dependent refs.
+// Unlike the static set projection, a composite result requires its owning pool.
+Type* lambda_type_normal_admission_contract(Pool* pool, Type* type);
 
 // Render a semantic contract for source and runtime diagnostics. Extended
 // Type values use LMD_TYPE_TYPE as an internal carrier, so callers must not

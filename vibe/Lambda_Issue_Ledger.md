@@ -480,6 +480,22 @@ that starts one.
 ---
 
 
+<a id="lr01-21"></a>**LR01-21 · Disabling MIR reuse can recurse on a retained AST hit · OPEN (found 2026-11-03)**
+
+Reproduced on the error-handling branch over `f7ce32b36`: running the complete
+`test_io_terminal_gtest.exe` with `LAMBDA_DISABLE_MIR_CACHE=1` exhausts the
+native stack in `load_script`; normal caching passes all ten cases. An earlier
+interpreter import leaves an AST artifact. A later forced-JIT import skips
+AST lookup (`lambda/runtime/runner.cpp:2224`) but selects an AST build claim
+because MIR reuse is disabled (`:2266`). The READY claim retries the same
+lookup (`:2291`) indefinitely. These selection conditions are unchanged from
+the pre-rework `0452aaabc` source. The claim and hit paths must agree on the
+artifact kind without changing the requested execution tier (D8.1.1v18,
+D8.5.1v3). This is separate from error-union admission. Bounded LLDB trace and
+source comparison: `temp/error-handling/m8-terminal-no-cache-stack.log` and
+`m8-cache-retry-root-review.json`; qualification record:
+[type/error implementation](impl/Lambda_Impl_Type_Error_Handling.md).
+
 ## 2. Parsing & AST construction (LR_02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**

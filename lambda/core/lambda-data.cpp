@@ -1744,6 +1744,10 @@ bool lambda_type_accepts_error(Type* type) {
     type = type_field_unwrap_simple_decl(type);
     if (!type || type_is_any_without_error(type)) return false;
     if (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_ERROR) return true;
+    // an optional error outcome still admits the error, alongside null.
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL)
+        return lambda_type_accepts_error(((TypeUnary*)type)->operand);
     if (!lambda_type_is_union(type)) return false;
     TypeBinary* binary = (TypeBinary*)type;
     return lambda_type_accepts_error(binary->left) || lambda_type_accepts_error(binary->right);

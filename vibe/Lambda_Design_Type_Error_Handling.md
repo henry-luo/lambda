@@ -4,15 +4,20 @@
 outcomes without implicit block exit, procedural results, uniform handler results, removal
 of the optional success arm and `T^E`, ordinary-error unification, combined fallback,
 filtered handlers/chaining, and explicit error-or-null classification are
-ratified (USER, 2026-11-02); implementation is partial. Further
-error-handling design rules will be settled in this document.
+ratified (USER, 2026-11-02); normal admission through error unions is also
+ratified (TE-13.4, USER, 2026-11-03). M1–M8 implementation and authored
+caller migration are qualified by the Lambda, MIR, GC, input and Test262 gates.
+Full parity qualification and interpreter-manifest refresh are waived by USER
+(2026-11-03); no final parity pass is claimed.
+see [Appendix A](#appendix-a--implementation-status). Further design questions
+remain separate from these ratified changes.
 **Formal linkage:** S7.5.6–S7.5.7, S7.6.8–S7.6.9, S7.6.5v4, S16.2.2v3,
 S16.2.6v2 (handler convenience and classification);
-S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3,
+S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3,
 S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3, S12.1.4v4, S12.3.4v2,
 D5.2.1v5 (ordinary-error unification and union-only particular errors);
 S7.5.1v6, S7.5.2v4 (initializer and reassignment acknowledgement);
-S7.7.1v3, S7.7.2v2, S7.7.4v2, S7.7.5v3, S7.7.6v2, S7.7.7v4, S11.4.1v5, S11.4.6v3,
+S7.7.1v3, S7.7.2v2, S7.7.4v2, S7.7.5v3, S7.7.6v2, S7.7.7v4, S11.4.1v5, S11.4.6v4,
 S11.4.7v3, S12.2.1v3, SI14v3 (validation and binding outcomes);
 D2.8.3v3, D3.2.2v3, D3.2.3v3 (representation and recorded type facts);
 S2.5.3v3, S2.5.4v3, S12.1.2v3 (procedural results);
@@ -21,7 +26,7 @@ S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 (single-arm handler surface).
 **Scope:** this is the home for the new error-handling design. Earlier decisions
 remain in [Type Enforcement](Lambda_Design_Type_Enforcement.md), pending their
 move as the remaining design questions settle. This record extends TE-13,
-TE-16, and TE-18 as TE-13.1–TE-13.3, TE-16.1–TE-16.4, and TE-18.1–TE-18.2; it introduces no new ledger
+TE-16, and TE-18 as TE-13.1–TE-13.4, TE-16.1–TE-16.4, and TE-18.1–TE-18.2; it introduces no new ledger
 series. Open questions below are discussion topics, not additional rulings.
 **Related:** [formal semantics](../doc/Lambda_Formal_Semantics.md),
 [procedural design](Lambda_Design_Procedural.md#24-return-and-block-results),
@@ -30,7 +35,7 @@ series. Open questions below are discussion topics, not additional rulings.
 ## TE-13.1 — Initializer acknowledgement by type admission
 
 **Decided 2026-11-02; runtime failure behavior revised by TE-18.1 the same day.
-Authority: S7.5.1v6, S7.5.2v4. Core implemented; caller migration and aggregate qualification in progress.**
+Authority: S7.5.1v6, S7.5.2v4. Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision
 
@@ -95,8 +100,9 @@ failure possibility (S11.4.1v5, S7.7.2v2). There is no substitution of `null`,
 unchecked value, or stale binding, and no implicit exit from the block.
 TE-18.1 replaces the earlier warn-then-skip fallback.
 
-Suggested diagnostic wording (the diagnostic code and final wording remain
-to be chosen):
+E241 identifies undecidable explicit local admission. The following design
+wording describes the diagnostic intent; wording/location ergonomics remain
+a follow-up:
 
 > This initializer may produce an error, but the receiving contract cannot be
 > proven to accept it; runtime validation may bind an error outcome.
@@ -142,10 +148,10 @@ and scope remain open. No new must-inspect rule is introduced here.
 
 ## TE-13.2 — One ordinary error outcome and acknowledgement rule
 
-**Decided 2026-11-02, USER. Authority: S7.4.1v2–S7.4.2v3,
+**Decided 2026-11-02, USER. Authority: S7.4.1v2–S7.4.2v4,
 S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3,
 S12.1.4v4, S12.3.4v2; representation: D1.4v4, D5.2.1v5.
-Core implemented; caller migration and aggregate qualification in progress.**
+Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision and rationale
 
@@ -320,8 +326,8 @@ semantics.
 
 ## TE-13.3 — Particular error outcomes use ordinary unions
 
-**Decided 2026-11-02, USER. Authority: S7.4.2v3, S11.4.2v3;
-representation: D5.2.1v5. Core implemented; aggregate caller qualification in progress.**
+**Decided 2026-11-02, USER. Authority: S7.4.2v4, S11.4.2v3;
+representation: D5.2.1v5. Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision
 
@@ -558,8 +564,8 @@ precedence explicitly.
 
 **Decided 2026-11-02, USER. Authority: S7.6.8, S7.5.6, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2,
-S16.4.3v4. Handler implementation complete in M1; general acknowledgement is implemented
-in M2/M3 and aggregate caller qualification remains in progress. The `empty` keyword is rejected
+S16.4.3v4. Implemented and caller-qualified in M8; full parity is waived by USER
+(2026-11-03; Appendix A). The `empty` keyword is rejected
 below under S7.5.7; ordinary user-defined aliases remain available.**
 
 ### One fallback for an error or ordinary falsy value
@@ -665,8 +671,7 @@ meaning of emptiness or confusing it with no result, `none`, or falsiness.
 
 **Decided 2026-11-02, USER. Authority: S7.6.9, S7.6.2v5, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.6v2, S16.4.3v4.
-Handler implementation complete in M1; M2/M3 acknowledgement implemented,
-with aggregate caller qualification in progress.**
+Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Select an error type or pattern
 
@@ -741,7 +746,7 @@ adds no success arm and gives `~ { ... }` no new meaning.
 ## TE-18.1 — Validation produces an outcome; declarations do not skip
 
 **Decided 2026-11-02, USER. Authority: S7.7.1v3, S7.7.2v2,
-S11.4.1v5, S7.5.2v4, SI14v3. Core implemented; caller migration and aggregate qualification in progress.**
+S11.4.1v5, S7.5.2v4, SI14v3. Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision and rationale
 
@@ -857,7 +862,7 @@ admission retain their own contracts pending follow-up.
 
 **Decided 2026-11-02, USER. Authority: S7.5.2v4, S7.7.4v2–S7.7.7v4,
 S11.4.1v5, S12.2.1v3, SI14v3; representation: D2.8.3v3, D3.2.3v3.
-Core implemented; caller migration and aggregate qualification in progress.**
+Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision
 
@@ -953,6 +958,31 @@ for any error in the effective type.
 The retired rules and their rationale are preserved in
 [Appendix S](#earlier-reassignment-retention-and-exit-rules-retired-2026-11-02).
 
+## TE-13.4 — Error unions retain normal admission
+
+**Decided 2026-11-03, USER. Authority: S7.4.2v4/S11.4.6v4/D3.2.4v5.
+Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
+
+`T | error`, `T^`, and particular-error unions `T | E` apply T's ordinary
+admission to non-error values. Numeric conversion, full array admission and
+certification, and named-record reification are preserved. An admitted error
+passes through unchanged. Initializers, reassignment, arguments and returns
+share this rule; error alternatives do not supply an unchecked normal path.
+For example, `let x: float^ = 7` admits a float, as `float` does. A float
+entering a deferred `int^` boundary converts only when ordinary int admission
+allows its value; a failed admission remains an error outcome.
+
+Two options were considered: preserve an already matching union member, or
+apply normal T admission. The user selected normal T admission. Preserving
+matching members was the legacy runtime behavior; it could retain an integer
+under `float^`, an uncertified empty array, or a record's original field
+layout. It made adding an error alternative change the normal boundary's
+meaning and complicated compiler proofs. That alternative is retired. This
+ruling does not select an order or conversion policy among multiple normal
+alternatives within T; their existing union admission remains in force.
+Dependent type references still resolve against the current invocation before
+admission; the projection must not replace a selected T with its static bound.
+
 ## Open design follow-ups
 
 These topics await further decisions; they do not alter current rulings.
@@ -960,7 +990,6 @@ These topics await further decisions; they do not alter current rulings.
 | Topic | Question to settle |
 |---|---|
 | Other receiving positions | Whole-variable reassignment now shares initializer admission (TE-18.2). Should the inferred admission and warning policy extend to parameters, returns, and container stores under S7.7.3/S7.7.6 and S7.8.1? |
-| Error-union normal admission | S7.4.2v3 and S11.4.5 do not explicitly settle whether `T | error` applies T's normal conversion/reification or preserves a value already matching the union. Pending user ruling: `float^ = 7` and reordered `Record^` members expose tier differences. Apply the decision consistently to `T^` and its ordinary-union spelling. |
 | Validation expression | Choose the surface for value-or-error admission, including runtime-dependent target types; define how it composes with handlers and propagation without a new block-exit mechanism. |
 | Container mutation and loop bindings | Settle field/element-store failures and dedicated typed loop-variable admission; avoid silently treating a retained old element/field as a successful write. |
 | Validation diagnostics | Specify how rejection of an existing error retains or wraps its payload, and how the effective outcome type is displayed when the target is runtime-dependent. |
@@ -969,194 +998,85 @@ These topics await further decisions; they do not alter current rulings.
 | General cleanup | Does scoped-resource cleanup need a separate construct? Revisit S12.4.2–S12.4.3 with concrete cases; do not reuse the retired `~ { ... }` suffix. |
 | Uninspected captured outcomes | Is an optional unused-fallible-binding lint desirable? S7.5.5 already rejects unacknowledged fallible results that would be overwritten. |
 | Diagnostics | E241 identifies undecidable explicit local admission. Review location/suppression ergonomics and proof precision; inferred `any` alone does not warn. |
-| Packages and demos | Review the remaining paired bindings, manual error tests, and handlers for concrete friction; use those cases to guide further convenience rules. |
+| Packages and demos | M8 completes the authored caller migration and source audit. Further ergonomic review of paired bindings, manual error tests and handlers can guide future convenience rules; it is not an unfinished migration. |
 | Design-record migration | Move the remaining error-handling rulings from Type Enforcement with their rationale and superseded alternatives, retaining the TE IDs and formal-spec links. |
 
 ## Appendix A — Implementation status
 
-The phased work and qualification criteria are recorded in
-[Type and Error Handling Implementation Plan](impl/Lambda_Impl_Type_Error_Handling.md).
-M1 completes handler forms/results. M2/M3 implement core admission and
-ordinary outcomes; package/demo migration and aggregate qualification remain
-in progress. It includes the requested `T | error` to `T^`
-binding-annotation cleanup, continued whole-variable reassignment outcomes,
-migration of callers that relied on skips or retained old variable values, and
-success-arm and typed-caret retirement, ordinary-error unification, combined fallback, filtered
-handlers/chaining, explicit classification, and caller migration.
+**Current as of 2026-11-03, M8.** The ratified implementation and authored caller
+migration are complete. The Lambda baseline passes **6,456/6,456**, input
+baselines **2,112/2,112**, Test262 **40,261/40,261**, and the focused tier/GC
+matrix **288/288**. MIR emission **282/282**, size ratchets **20/20**, native
+admission **55/55**, and MIR GC **352/352** pass with their assertions intact.
+The authored-source audit compiles **4,035/4,081** scripts, retaining the same
+**46** reviewed failures with no new failures or timeouts.
+
+**P5 is accepted with a user waiver (2026-11-03):** skip the full official
+parity sweep and the three interpreter-manifest refreshes, and merge the
+implemented changes. Earlier attempts were interrupted by external SIGTERM;
+no final parity pass is claimed, and the manifests remain unchanged.
+The [M8 qualification record](impl/Lambda_Impl_Type_Error_Handling.md#m8-qualification-boundary-2026-11-03)
+is the current evidence and completion boundary. Earlier measurements and
+implementation details are preserved in the
+[historical status notes](impl/Lambda_Impl_Type_Error_Handling.md#historical-design-document-implementation-status-m1m7-superseded).
 
 ### Handler convenience status
 
-**2026-11-02, M1 implemented.** Production/reference parsing, shared AST,
-interpreter, and MIR support `or^`, named/qualified filters, and left-associative
-chains. Runtime selection and conservative residual types are qualified by the
-M1 tests. Explicit `is (error | null)` classification uses the existing operator and
-acknowledges its subject under the M2/M3 receiver checks.
-S7.5.7 needs no keyword implementation: `empty` is an ordinary user alias.
-See the [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+**Implemented and caller-qualified.** Both parsers and execution tiers support
+`or^`, named/qualified filters and left-associative chains, with conservative
+residual outcomes and precise caret subjects (S7.6.8–S7.6.9). Classification
+acknowledges under S7.5.6; S7.5.7 adds no predefined `empty` keyword or alias.
+Wider selector syntax and filtered system-fault policy remain design follow-ups.
 
 ### Typed-caret retirement
 
-**2026-11-02, core implemented.** Production and reference type grammars reject
-`T^E` with migration guidance. Ordinary unions supply the particular error
-alternatives, with broad `T^` retained. Four authored broad contracts were
-migrated; the parser gate passes C 461/461 and Tree-sitter 448/448. General
-package/demo qualification is still in progress. See the
-[M2/M3 record](impl/Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+**Implemented and caller-qualified.** Both parsers reject `T^E`; ordinary unions
+alone specify particular errors, and broad `T^` remains (S7.4.2v4/S11.4.2v3).
+Normal admission applies through either form. Authored contracts and bindings
+are migrated; no additional typed-caret implementation is pending.
 
 ### Ordinary-error unification
 
-**2026-11-02, core implemented; aggregate qualification pending.** Return
-normalization derives error/ABI metadata from the ordinary outcome contract.
-The acknowledgement walk tracks producers through preserving expressions to
-actual receivers, including inferred bindings and collected Item slots.
-Procedural result replacement rejects an unacknowledged overwritten outcome.
-The non-error default of an unannotated `fn` is preserved. S11.4.6v3's base-only
-constraint admission is also preserved; predicate enforcement is not added by
-this change. Current package migration and remaining qualification are in the
-[M2/M3 record](impl/Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+**Implemented and caller-qualified.** Raised and returned ordinary errors obey
+the same complete outcome contract. Admission-based acknowledgement follows
+preserving expressions to their receivers and rejects unacknowledged overwritten
+outcomes (S7.4.1v2–S7.4.2v4/S7.5.1v6/S7.5.3v3–S7.5.5). Deferred return checks
+contribute their possible validation errors. System-fault policy and the
+non-error default of unannotated functions retain their existing contracts.
 
 ### Success-arm retirement
 
-**2026-11-02, M1 implemented.** Both parsers reject the old suffix, even across
-lines; the AST and both execution tiers have no `value_body` storage or lowering.
-510 authored uses were migrated to one-handler expressions, error checks, or
-explicit branching. Parser conformance and existing handler goldens qualify
-single evaluation, result preservation, and restored lexical subjects.
-See the [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+**Implemented and caller-qualified.** Both parsers reject the optional success
+suffix; callers use the single `^ { ... }` handler, explicit checks or branching
+(S7.6.2v5/S7.6.6v6). General cleanup remains a separate design question.
 
 ### Validation and reassignment outcomes
 
-**2026-11-02, core implemented; caller migration and qualification in progress.**
-S7.7.2v2/S7.7.4v2 checks now bind/store their admitted value or validation
-error and continue. Declared targets remain separate from effective outcome
-facts. Captures, loop back edges, borrow publication and native-lane planning
-use those facts; an error never becomes an integer merely because its
-initializer or target had an integer lane. Field/element stores retain their
-own containment. No public validation-expression spelling is added.
-
-**2026-11-03 follow-up (S11.4.1v5/S7.5.4):** a deferred return check
-contributes its possible rich validation error to the call's effective outcome.
-The successful-value admission target remains strict. Inferred/error-admitting
-receivers retain that outcome; a known fallible call cannot initialize a clean
-receiver. JIT pair forwarding must preserve return admission. This does not
-make an unused interior failed binding a returned error, or treat an open
-recursive inference as an ordinary-error producer.
-
-View state setup is part of the view's pure activation (S12.1.3v2). An explicit
-postfix propagation in a state initializer uses that view's error-admitting
-return contract (S7.6.3v3), and exits before rendering the body. A clean return
-contract still rejects it. The propagated outcome crosses the same return
-admission as a body result. This does not change state-slot receiving rules.
-
-**Carrier qualification (2026-11-03, S7.8.1/D2.4.1–D2.4.3):** a propagated
-call consumes its producer's actual Item/native representation. A native tail
-join applies the callable's return admission before opening a success lane;
-an ordinary error is never decoded as an integer or pointer. The full MIR GC
-corpus passes 351/351; aggregate and remaining caller/native-proof qualification
-remain open in the implementation record. Scalar error-union admission reuses
-identity proofs without dropping the native error channel. Current interpreter union admission
-retains an already-conforming numeric member, while plain numeric contracts
-perform their required conversion. Whether an error union should apply T's
-normal admission is pending the ruling listed above (S7.4.2v3/S11.4.5). Native return selection
-therefore requires the actual normal carrier across all returns and branches;
-a success-type name alone is insufficient. The qualified MIR emission count
-is 278/280; remaining checks are recorded without relaxing safety requirements.
-S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
-float literal members and dynamic record fields: optimized admission retains
-the error at the receiving binding and continues. The constructor shares the
-call-admission join without changing field evaluation or procedural store
-containment. The expanded tier/GC matrix and full MIR GC corpus pass.
-S7.6.3v3/S7.7.2v2 counted fill qualification keeps producer propagation before
-destination validation: `let a: int[2] = fill(n, 1)^` retains a length mismatch
-at `a` and continues, while an invalid fill count propagates. Uncounted numeric
-literal fill success has a static membership proof; runtime storage admission
-is still required. The focused tier/GC matrix passes 256/256.
-S7.6.3v3/D2.4.1 dynamic dispatch preserves its boxed outcome until propagation
-checks it, including when a loop continuation calls an existing module
-definition. The deterministic handoff regression checks both normal values
-and errors under forced/poison GC (D8.1.1v18).
-S11.4.6v3/D3.2.4v3 declarations use the same named-record reification gate
-as assignments, arguments and returns, including a record inside `N?`.
-Semantic membership does not establish its packed offsets. The native
-optimization gate passes 55/55 with its original copy/share budgets.
-S11.4.1v5/S11.4.6v3 concrete return values still require full admission when
-their numeric kind differs from the target: `int^ => 1.0` admits an integer,
-while `int^ => 1.5` produces an error under current runtime admission. The
-shared return gate keeps matching scalar lanes and nullable outcomes without
-revalidation. Boxed tails enter that gate as Items, avoiding a second boxing.
-S7.6.3v3 boolean system-call producers also publish whether they boxed their
-outcome before `^`; the normal bool type does not describe that earlier
-physical representation. These fixes retain the pending union-policy question.
-S11.4.8v2/S4.2.2/D8.3.1v2 exact raw scalar value-binder keys use the same semantic type as
-runtime binding, rather than retaining a singleton literal. Selection follows
-parameter admission: conversion-dependent static inference retains an
-approximation, and scalar raw entries require full membership and the admitted
-kind before bypassing the checked entry. S7.7.3/S9.1.2 method preparation also
-keeps an incoming error as the call's outcome when its receiver has a snapshot.
-S7.7.4v2/S9.1.2 boxed constructor outcomes also retain successful container ownership and
-snapshots across procedure-method writes. D8.3.3 forward calls whose native
-plan is not established use the stable public Item entry; a later native
-specialization cannot reinterpret tagged arguments. The full LaTeX corpus
-now matches its JIT golden after this boundary repair. A complete interpreter
-sweep still reports legacy and vendor divergences and has not published new
-manifests; detailed comparisons and qualification limits are in the
-[implementation record](impl/Lambda_Impl_Type_Error_Handling.md).
-S7.7.3/D8.2.6 tail-call rejection retains its ordinary error outcome even when
-the successful path becomes a backedge. D5.1.3/D5.2.3 interpreter publication
-also captures wide scalar payloads before frame teardown, preserving snapshots
-when a later outcome replaces the variable. Qualification and the remaining
-vendor divergence are tracked in the
-[tail-call and ownership record](impl/Lambda_Impl_Type_Error_Handling.md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03).
-S7.6.3v3/S11.4.6v3 validated plain scalar locals also retain their proven
-normal kind after propagation. D5.2.1v5 procedure planning keeps the ordinary
-error companion independently of that success lane. An immediate, sole `^`
-may fuse a local's check without skipping intervening user code or changing its
-error location (S7.7.2v2/S7.4.4); other observations retain the boxed outcome.
-The [scalar qualification record](impl/Lambda_Impl_Type_Error_Handling.md#admitted-scalar-success-lanes-and-immediate-propagation-2026-11-03)
-records the restored libm budget and remaining aggregate work.
-D8.6.1 also requires making intended emission growth explicit. The remaining
-cube/delta/printer comparisons retain validation outcomes and checked argument
-entry rather than relying on the retired declaration exit. Their reviewed
-zero-slack budgets pass 20/20; benchmark output matches the original compiler,
-and invalid-input tier/GC probes pass. The
-[emission review](impl/Lambda_Impl_Type_Error_Handling.md#reviewed-emission-cost-of-retained-outcomes-2026-11-03)
-records the measured cost, conservative proof limits and qualification scope.
-The final complete tier sweep has 1,431 matches, eight exclusions and one
-vendor-loop mismatch among 1,440 scripts, without timeouts (S1.6). That mismatch
-prevents manifest publication. The two ordinary-union admission proof checks
-remain pending the normal-admission ruling; the
-[final qualification boundary](impl/Lambda_Impl_Type_Error_Handling.md#final-independent-qualification-boundary-2026-11-03)
-names the exact checks and required inputs. No assertion is waived.
-
-Return-admission inference publishes resolved declared results before a body
-checks recursive calls (S11.4.1v5). Closed module type results are also available
-to forward calls; parameter defaults and dependent return slots retain their
-declaration scope. A functional branch block with one produced result keeps
-that result's admission proof through nested branches (S2.5.4v3); its open
-execution carrier does not by itself introduce a validation failure. Equality
-against `null` retains direct error propagation without inventing a traversal
-of nested container errors (S5.1.1v2/S5.1.2v2).
+**Implemented and caller-qualified.** Deferred checks bind/store the admitted
+value or rich validation error and continue; no implicit declaration exit or
+stale old variable value remains (S7.7.2v2/S7.7.4v2). Effective outcomes survive
+joins, captures and borrow publication; native lanes require valid normal-kind
+proofs (SI14v3/D2.8.3v3). Error unions apply ordinary conversion, array
+certification and record reification, including invocation-selected targets
+(S11.4.6v4/D3.2.4v5). The approved cross-block PHI optimizer fix and its recorded
+patch are implemented; its regression is part of the passing MIR gate.
+Public validation-expression syntax, dedicated typed-loop admission, and
+field/element-store policy remain separate follow-ups.
 
 ### Initializer acknowledgement
 
-**2026-11-02, core implemented.** Inferred receivers acknowledge their complete
-outcomes; `any` admits error without an acknowledgement warning. E241 reports
-undecidable explicit local admission, retaining the runtime check and its
-failure outcome. A known incompatible source remains a static error. The same
-rule applies to whole-variable reassignment. Focused tier/GC and diagnostic
-qualification is recorded in the
-[M2/M3 record](impl/Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+**Implemented and caller-qualified.** Inferred bindings and whole-variable
+reassignment acknowledge admitted errors. `any` includes error without a warning;
+E241 reports undecidable explicit local admission, retaining runtime validation
+and its outcome. Known incompatible sources remain static errors
+(S7.5.1v6/S7.5.2v4/S7.7.2v2).
 
 ### Handler results
 
-**2026-11-02, M1 implemented.** Procedure handlers preserve operand/recovery
-values in bindings and as final results, including suspension. `null` is a real
-replacement result; declarations still contribute no result. Interpreter and
-MIR use the same sequencing classification. Normal-result erasure and implicit
-return of fresh recovery errors were removed while preserving procedure fault
-protection. Focused tests cover explicit return, chained recovery, nested
-subjects, and forced GC. See the
-[M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+**Implemented and caller-qualified.** Operand and recovery results follow the
+same sequencing rules, including suspension: a produced `null` replaces the
+prior result, while declarations produce no result. Explicit procedural
+`return` exits the callable (S7.6.1v9/S7.6.7v5/S2.5.3v3/S12.1.2v3).
 
 ## Appendix S — Superseded rules
 

@@ -6,13 +6,15 @@ and an error-admitting receiver retains the outcome.
 **Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v3 in
 [Formal Semantics](Lambda_Formal_Semantics.md).
 
-**Implementation status, 2026-11-03:** the error-handling worktree implements
-ordinary-error unification, admission-based binding acknowledgement, deferred
-initializer/reassignment outcomes, and retirement of `T^E`, alongside the M1
-handler changes. The authored package/demo migration has been inventoried;
-aggregate qualification and native proof regressions remain open. Progress
-and current verification limits are in the
-[implementation plan](../vibe/impl/Lambda_Impl_Type_Error_Handling.md).
+**Implementation status, 2026-11-03:** M1–M8 implement the ratified rules,
+including ordinary-error unification, binding acknowledgement, deferred
+initializer/reassignment outcomes, normal admission through error unions, and
+handler syntax/results. Authored package/demo migration and the Lambda, MIR,
+GC, input and Test262 gates are qualified. The user waived the complete parity
+sweep and interpreter-manifest refresh on 2026-11-03; the manifests retain their
+last qualified contents, and no final parity pass is claimed. Exact results and
+limits are in the
+[M8 qualification record](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m8-qualification-boundary-2026-11-03).
 General `fn`-local control, including explicit `return` in `fn`, is a separate
 [extension](../vibe/impl/Lambda_Impl_Function_Local_State.md).
 
@@ -61,7 +63,7 @@ acknowledgement requirements.
 
 ## Outcome Types
 
-S7.4.2v3 uses ordinary unions for particular error outcomes:
+S7.4.2v4 uses ordinary unions for particular error outcomes:
 
 | Type | Admitted outcome |
 |---|---|
@@ -76,10 +78,16 @@ errors. Aliases preserve admission: naming `error` does not create a nominal
 error subtype. An ordinary map alternative stays a map.
 
 The typed-caret form `T^E` is rejected; use `T | E` or broad `T^`.
+
+Adding an error arm preserves the normal type's admission (S11.4.6v4).
+`let x: float^ = 7` therefore binds `7.0`, just as `float` does. Arrays still
+receive their full certificates, named records their required layout, and
+admitted errors retain their original payload. The same rule applies to
+particular-error unions and to arguments, reassignment and returns.
 There is no implicit broad ordinary-error allowance in a particular union.
 A function must handle, convert, or disclose ordinary errors outside its
 contract (S11.4.2v3). Exceptional system faults retain S7.11.
-Constrained annotations currently enforce their base only (S11.4.6v3);
+Constrained annotations currently enforce their base only (S11.4.6v4);
 full predicate enforcement remains separate. Filtered handlers use the ordinary
 runtime type/pattern test to select recovery.
 

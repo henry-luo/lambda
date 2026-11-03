@@ -4842,9 +4842,14 @@ static TypeMap* mir_record_result_contract(AstFuncNode* function) {
     if (!function || function->node_type != AST_NODE_FUNC || function->captures ||
             !function->type || function->type->type_id != LMD_TYPE_FUNC) return NULL;
     TypeFunc* signature = (TypeFunc*)function->type;
-    if (!signature->has_explicit_return_contract || signature->can_raise ||
+    if (!signature->has_explicit_return_contract ||
             signature->is_variadic || signature->param_count > 10) return NULL;
-    TypeMap* shape = mir_scalar_record_shape(signature->return_contract);
+    // a particular error contract still needs its boxed return firewall.
+    if (signature->can_raise && !lambda_boundary_preserves_error(signature->return_contract))
+        return NULL;
+    // S11.4.6v4: the normal arm establishes the same record layout as plain T.
+    Type* normal = lambda_type_normal_admission_contract(NULL, signature->return_contract);
+    TypeMap* shape = mir_scalar_record_shape(normal);
     if (!shape) return NULL;
     for (AstNamedNode* param = function->param; param; param = (AstNamedNode*)param->next) {
         TypeParam* type = (TypeParam*)param->type;
@@ -8216,8 +8221,17 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
 static Type* mir_error_preserving_normal_type(Type* target) {
     Type* wanted = mir_unwrap_decl_type(target);
     if (lambda_type_contract_is_subtype(&TYPE_ERROR, wanted))
-        wanted = mir_unwrap_decl_type(lambda_type_remove_error(NULL, wanted));
+        wanted = mir_unwrap_decl_type(lambda_type_normal_admission_contract(NULL, wanted));
     return wanted;
+}
+
+static bool mir_union_preserves_member_admission(MirTranspiler* mt, Type* target) {
+    Type* normal = lambda_type_normal_admission_contract(mt->script_pool, target);
+    if (!lambda_type_is_union(normal) || lambda_type_contract_has_binder(normal, true))
+        return false;
+    bool nullable = false;
+    // a single nullable payload still owns its conversion or physical layout.
+    return !lambda_type_nullable_lane_base(normal, &nullable);
 }
 
 // proof domain only; constrained and particular-error targets stay checked.
@@ -8234,7 +8248,7 @@ static Type* mir_plain_scalar_contract(Type* target, bool* nullable) {
 }
 
 // S7.6.3v3/S11.4.6v3: ^ removes the error arm of an already admitted local.
-// Its plain contract fixes the normal kind; an error union does not convert it.
+// The admitted normal contract fixes its kind; captures remain outside this proof.
 static TypeId mir_admitted_scalar_propagation_type(MirTranspiler* mt,
         AstUnaryNode* unary) {
     if (!mt || !unary || unary->op != OPERATOR_PROPAGATE ||
@@ -8415,10 +8429,9 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
     // Builtin result types (including split's boxed strings) do not prove a
     // native T[] carrier; only admitted bindings/returns may elide reification.
     Type* expected = mir_unwrap_decl_type(target);
-    // A type predicate proves membership, not record/array reification. Union
-    // admission preserves its member carrier, so the identical union is safe.
+    // A predicate proves membership, not normal admission through T^ (S11.4.6v4).
     if ((expected == &TYPE_ARRAY || expected == &TYPE_MAP ||
-            (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected))) &&
+            mir_union_preserves_member_admission(mt, expected)) &&
             mir_flow_find(mt, source_node, expected, MIR_FLOW_SEMANTIC)) return true;
     TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
     // every raw u64 word already inhabits the complete primitive contract.
@@ -8732,12 +8745,43 @@ static bool mir_return_contract_is_homogeneous_array(Type* contract) {
 static bool mir_map_contract_needs_reification(Type* contract,
     AstNode* value, TypeId value_tid);
 
+static bool mir_boxed_scalar_return_proven(MirTranspiler* mt, AstNode* value,
+        Type* contract, TypeId kind) {
+    if (mir_expr_proves_native_return_lane(mt, value, kind, true)) return true;
+    AstNode* source = ast_unwrap_primary_to_leaf(value);
+    if (source && source->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)source)->op == OPERATOR_PROPAGATE)
+        source = ast_unwrap_primary_to_leaf(((AstUnaryNode*)source)->operand);
+    Type* admitted = mir_call_result_contract(source);
+    if (source && source->node_type == AST_NODE_IDENT &&
+            !mir_argument_is_module_binding(mt, source)) {
+        AstIdentNode* ident = (AstIdentNode*)source;
+        // a checked local keeps its normal kind through retained errors/rebinding.
+        if (ident->entry && !ident->entry->is_var_param && mir_var_for_ident(mt, ident))
+            admitted = ident->entry->declared_type;
+    }
+    if (source && source->node_type == AST_NODE_MEMBER_EXPR) {
+        AstNode* owner = ((AstFieldNode*)source)->object;
+        // a maintained record proves its scalar field; a null receiver does not.
+        if (!mir_argument_is_module_binding(mt, owner) && !mir_expr_may_be_null(mt, owner))
+            admitted = mir_trusted_map_member_contract(source);
+    }
+    return admitted && lambda_boundary_is_redundant(admitted, contract);
+}
+
 static bool mir_return_boundary_applies(MirTranspiler* mt, AstNode* value,
-        TypeId carrier, Type* contract) {
+        TypeId carrier, Type* contract, ValueRep produced_rep = VALUE_REP_NONE) {
     if (!return_contract_needs_checked_boundary(contract)) return false;
     Type* expected = mir_unwrap_decl_type(contract);
+    Type* normal = lambda_type_normal_admission_contract(mt->script_pool, expected);
     bool nullable = false;
-    Type* scalar = mir_plain_scalar_contract(expected, &nullable);
+    Type* scalar = mir_plain_scalar_contract(normal, &nullable);
+    // a boxed branch join may retain int even when its semantic join is float.
+    if (scalar && produced_rep == VALUE_REP_ITEM &&
+            !mir_boxed_scalar_return_proven(mt, value, contract, scalar->type_id)) return true;
+    // S11.4.6v4: a proven widening still has to establish the normal kind.
+    if (scalar && (carrier == LMD_TYPE_INT || carrier == LMD_TYPE_FLOAT) &&
+            carrier != scalar->type_id) return true;
     // a matching scalar lane already meets the normal contract; only a
     // rejected null needs admission. Different numeric kinds stay checked.
     if (scalar && carrier == scalar->type_id &&
@@ -9887,7 +9931,11 @@ struct MirMapContractScope {
           saved_array_contract(owner->array_contract_hint),
           saved_array_node(owner->array_contract_hint_node),
           saved_array_constructed(owner->array_contract_constructed),
-          contract(mir_direct_map_contract(value, target)) {
+          contract(NULL) {
+        // construction is the normal admission boundary under either T or T^.
+        Type* normal = lambda_type_normal_admission_contract(owner->script_pool, target);
+        if (normal) target = normal;
+        contract = mir_direct_map_contract(value, target);
         // Argument construction must not introduce an earlier failing boundary.
         if (contract && require_proven_fields && !mir_map_literal_matches_contract(
                 (AstMapNode*)ast_unwrap_primary(value), (TypeMap*)contract, true, mt)) {
@@ -26322,7 +26370,7 @@ static bool mir_trusted_union_field_matches(MirTranspiler* mt, AstNode* source, 
     expected = mir_unwrap_decl_contract(expected);
     // Optional named maps and typed arrays may require a physical conversion;
     // only a genuine union whose admission preserves an existing member fits.
-    if (!lambda_type_is_union(expected) || lambda_type_nonnull_map_contract(expected))
+    if (!mir_union_preserves_member_admission(mt, expected))
         return false;
     AstNode* primary = ast_unwrap_primary(source);
     if (!primary || primary->node_type != AST_NODE_MEMBER_EXPR) return false;
@@ -37654,7 +37702,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         if (!join_error_arm_only &&
                 !map_contract_constructed && !empty_array_result_admitted &&
                 mir_return_boundary_applies(mt, ret_node->value, val_tid,
-                    mt->current_return_type)) {
+                    mt->current_return_type, value_producer.rep)) {
             MIR_reg_t checked = emit_checked_value_boundary(mt, value_producer,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, checked);
@@ -43845,6 +43893,12 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         node = ((AstPrimaryNode*)node)->expr;
     }
     if (!node) return false;
+    if (exact_kind && (node->node_type == AST_NODE_CONTENT ||
+            node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_BLOCK)) {
+        // a sequence's semantic join does not establish its final value's kind.
+        AstNode* result = mir_single_value_branch_node(node);
+        return result && mir_expr_proves_native_return_lane(mt, result, expected, true);
+    }
     // error-only exits contribute no normal carrier to an ordinary union.
     if (exact_kind && node->type && node->type->type_id == LMD_TYPE_ERROR) {
         return true;
@@ -44613,17 +44667,17 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (lambda_type_is_union(mir_unwrap_decl_type(return_contract)) &&
                     (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
                      ret_tid == LMD_TYPE_INT64 || ret_tid == LMD_TYPE_UINT64)) {
-                // S7.4.2v3: current ordinary union admission preserves a conforming member.
-                // A native return must prove its actual kind, not merely that
-                // numeric admission could convert it to the declared arm.
+                // S11.4.6v4: float lowering admits the lossless int53 promotion.
+                // Other kind changes require a checked boundary before a native lane.
                 MirNativeReturnAnalysisScope analysis(mt, fn_node, ret_tid);
+                bool exact_kind = ret_tid != LMD_TYPE_FLOAT;
                 int returns = 0;
-                bool exact = is_proc
+                bool proven = is_proc
                     ? mir_proc_return_values_prove(mt, fn_node->body, ret_tid,
-                        &returns, false, NULL, true)
+                        &returns, false, NULL, exact_kind)
                     : mir_expr_proves_native_return_lane(mt,
-                        function_body_result_expr(fn_node), ret_tid, true);
-                if (!exact) return LMD_TYPE_ANY;
+                        function_body_result_expr(fn_node), ret_tid, exact_kind);
+                if (!proven) return LMD_TYPE_ANY;
             }
             if (mir_is_native_scalar_value_type(ret_tid) ||
                     (has_native_contract &&
@@ -45010,7 +45064,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
     if (!mt->block_returned) {
         TypeId body_tid = mir_expr_carrier_type(mt, fn_node->body);
         if (mir_return_boundary_applies(mt, fn_node->body, body_tid,
-                mt->current_return_type)) {
+                mt->current_return_type, VALUE_REP_ITEM)) {
             result = emit_checked_boundary(mt, result, LMD_TYPE_ANY,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, result);
@@ -47030,7 +47084,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (join_error_arm_only) emit_return_if_item_error(mt, body_result);
             if (!join_error_arm_only && !body_contract.contract &&
                     mir_return_boundary_applies(mt, fn_node->body, body_tid,
-                        mt->current_return_type)) {
+                        mt->current_return_type, VALUE_REP_ITEM)) {
                 // transpile_box_item already published an Item; using the
                 // source's scalar kind here would box its tag bits again.
                 body_result = emit_checked_boundary(mt, body_result, LMD_TYPE_ANY,

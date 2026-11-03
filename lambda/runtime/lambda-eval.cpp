@@ -15311,6 +15311,16 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         *converted = value;
         return true;
     }
+    if (lambda_type_is_union(expected) && cow_profile_enabled())
+        g_cow_profile.union_admit_calls++;
+    if (get_type_id(value) != LMD_TYPE_ERROR && lambda_type_accepts_error(expected)) {
+        // S11.4.6v4: membership in T | E cannot bypass T's conversion/reification.
+        Type* normal = lambda_type_normal_admission_contract(
+            context ? context->pool : NULL, expected);
+        if (!normal) return false;
+        if (normal != expected)
+            return runtime_type_admit_value_env(value, normal, env, converted);
+    }
     bool binder_dependent = runtime_contract_uses_binder(expected);
     TypeId value_type = get_type_id(value);
     if (!binder_dependent && (value_type == LMD_TYPE_MAP ||
@@ -15331,9 +15341,6 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         *converted = value;
         return true;
     }
-    if (lambda_type_is_union(expected) && cow_profile_enabled())
-        g_cow_profile.union_admit_calls++;
-
     if (!binder_dependent && get_type_id(value) == LMD_TYPE_MAP && value.map &&
             lambda_type_is_union(expected)) {
         TypeMap* candidate = (TypeMap*)value.map->type;

@@ -1,13 +1,19 @@
 # Lambda — Type and Error Handling Implementation Plan
 
-**Status:** M1 handlers, M2/M3 admission/outcome changes, and authored caller
-migration are implemented in `codex/error-handling-20261102`. Final qualification
-has three open checks: two union-policy-dependent emission cases and the
-isolated vendor MIR loop defect. That defect also blocks interpreter manifest
-publication. The full P0–P5 plan is not complete; see the final boundary below.
+**Status:** M1–M8 product changes and authored caller migration are implemented
+and qualified by the Lambda, MIR, GC, input and Test262 gates in
+`codex/error-handling-20261102`. On 2026-11-03 the user waived the final full
+parity sweep and interpreter-manifest refresh and requested merge to remote
+master and worktree removal. P5 is accepted with that explicit waiver; no
+parity pass is claimed and all three manifests remain unchanged. The selected
+normal admission ruling and approved MIR repair are implemented; safety
+assertions remain intact. See the
+[M8 qualification boundary](#m8-qualification-boundary-2026-11-03). Earlier
+progress entries are historical checkpoints; their pending items do not override
+the phase table or M8 record.
 **Date:** 2026-11-02.
 **Design:** [Type and Error Handling](../Lambda_Design_Type_Error_Handling.md),
-TE-13.1–TE-13.3, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
+TE-13.1–TE-13.4, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
 **Source survey:** working tree over `ca3cadb47`, 2026-11-02. Locations below identify
 implementation entry points, not claims of new runtime conformance.
 
@@ -31,15 +37,15 @@ position, including returns and function types.
 
 | Area | Formal authority | Required result |
 |---|---|---|
-| Unified ordinary errors | S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3, S11.4.2v3, S12.3.4v2, D5.2.1v5 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
+| Unified ordinary errors | S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3, S11.4.2v3, S12.3.4v2, D5.2.1v5 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
 | Acknowledgement | S7.5.1v6–S7.5.5 | Inferred initializers and whole-variable reassignments acknowledge; `any` and `any \| error` agree; unresolved explicit admission warns. Error-preserving composition carries outcomes to a receiver; unacknowledged fallible results cannot be overwritten. |
-| Deferred validation | S7.7.1v3, S7.7.2v2, S7.7.5v3, S7.7.7v4, S11.4.1v5, S11.4.6v3, S11.4.7v3 | A deferred initializer binds the admitted value or rich validation error and continues; post-binding recovery is reachable. |
+| Deferred validation | S7.7.1v3, S7.7.2v2, S7.7.5v3, S7.7.7v4, S11.4.1v5, S11.4.6v4, S11.4.7v3 | A deferred initializer binds the admitted value or rich validation error and continues; post-binding recovery is reachable. |
 | Whole-variable reassignment | S7.5.2v4, S7.7.4v2–S7.7.6v2, S12.2.1v3 | Same admission decision as initialization; store the new outcome, including error, and continue. Never retain a stale old value on deferred failure. |
 | Truthful types and storage | SI14v3, S12.2.1v3, D2.8.1, D2.8.3v3, D3.2.2v3, D3.2.3v3 | Keep the declared admission target separate from the effective outcome type; an error never enters a native value slot. |
 | Handler results and surface | S7.6.1v9, S7.6.2v5, S7.6.6v6, S7.6.7v5, S10.1.7v4, S16.4.3v4 | The single error handler preserves results for `fn` and `pn`, including suspension. Reject and migrate the optional success arm; do not reinterpret it as cleanup. |
 | Procedural sequences | S2.5.3v3, S2.5.4v3, S12.1.2v3 | Produced values replace earlier results, including `null`; declarations produce no result; explicit `return` exits the procedure. |
-| Binding shorthand | S7.4.2v3 | `let`/`var` annotations `T^` and `T \| error` are equivalent; return spellings now have identical semantics too. |
-| Particular error outcomes | S7.4.2v3, S11.4.2v3, D5.2.1v5 | Remove `T^E`; ordinary unions specify admitted error alternatives with no implicit broad ordinary errors. Derive type/ABI facts from the normalized contract. |
+| Binding shorthand | S7.4.2v4 | `let`/`var` annotations `T^` and `T \| error` are equivalent; return spellings now have identical semantics too. |
+| Particular error outcomes | S7.4.2v4, S11.4.2v3, D5.2.1v5 | Remove `T^E`; ordinary unions specify admitted error alternatives with no implicit broad ordinary errors. Derive type/ABI facts from the normalized contract. |
 | Handler convenience | S7.6.8–S7.6.9, S7.5.6, S7.6.2v5, S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | `or^` covers errors/falsy values once; filtered handlers pass unmatched errors through and chains see fresh recovery errors. Explicit error-or-null classification acknowledges. |
 
 The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
@@ -511,11 +517,11 @@ result. Keep all artifacts under `temp/`.
 | Phase | Status | Evidence required before completion |
 |---|---|---|
 | P0 | Complete | Starting behavior, fixtures, caller and binding inventories are recorded below. |
-| P1 | Core qualified; aggregate proof checks open | Normalized ordinary outcomes, admission, composition and overwritten-result diagnostics pass focused gates. |
-| P2 | Core qualified; aggregate proof checks open | Retained validation outcomes and physical carriers pass the tier/GC matrix and full MIR GC corpus. |
+| P1 | Complete | Normalized outcomes, admission, composition and overwritten-result diagnostics pass 321/321 diagnostic cases and the 6,456/6,456 Lambda aggregate. |
+| P2 | Complete | Retained outcomes, normal admission through error unions and physical carriers pass 288/288 tier/GC runs, 282/282 MIR checks and 352/352 MIR GC cases. |
 | P3 | Qualified in M1 | Handler/fallback parsing, residual errors, chaining, results and suspension are implemented. |
-| P4 | Source migration reviewed; runtime limits recorded | The final inventory covers all 4,080 tracked non-negative scripts with no new compile failures. Package/demo, UI, scene and utility checks and unrelated host limitations are recorded below. |
-| P5 | In progress | Fresh aggregate gates, documentation and remaining native proof/caller differences are recorded below. Assertions remain intact; intended emission growth receives the explicit D8.6.1 review below. |
+| P4 | Complete within the migration scope | All 4,081 authored non-negative scripts are audited: 4,035 compile, with only the same 46 reviewed failures. Package/demo binding shorthand is migrated; unrelated host limits are recorded separately. |
+| P5 | Accepted with user parity waiver, 2026-11-03 | Lambda 6,456/6,456, Test262 40,261/40,261 and input baselines 2,112/2,112 pass. The user explicitly skipped the final full sweep and three-manifest refresh; the lists remain unchanged, with no final parity claim. Assertions stay intact; emission growth is reviewed under D8.6.1. |
 
 
 <a id="m1-handler-outcomes"></a>
@@ -595,7 +601,13 @@ syntax and filtered system-fault policy still need their separate rulings.
 Do not infer a clean native binding from the annotation, remove remaining
 mutation checks, or mark the full plan complete from the M1 qualification.
 
-## M2/M3 — Admission and ordinary outcomes (in progress, 2026-11-02)
+<a id="m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02"></a>
+
+## M2/M3 — Admission and ordinary outcomes (historical milestones, 2026-11-02–03)
+
+The following progress entries preserve the earlier measurements and unresolved
+questions at each checkpoint. Current decisions and qualification are in
+[M8](#m8-qualification-boundary-2026-11-03).
 
 **Authority:** S7.4.2v3, S7.5.1v6–S7.5.5, S7.7.2v2/S7.7.4v2,
 S7.8.1–S7.8.2, SI14v3, D3.2.3v3, D5.2.1v5. This is an implementation
@@ -1896,7 +1908,9 @@ fixtures since the preceding complete inventory. Evidence:
 `m7-source-compile.{json,log}`. Both checks use the unchanged M6 executable
 (SHA-256 `e5cc8e95a03e71676ee15484e6f3e017e7cb4abdbbcf3183d3e50bf4a561cff8`).
 
-### Final independent qualification boundary (2026-11-03)
+<a id="final-independent-qualification-boundary-2026-11-03"></a>
+
+### M7 independent qualification boundary (2026-11-03; superseded by M8 below)
 
 **S1.6/D8.1.1:** the new complete interpreter/JIT sweep covers **1,440**
 scripts: **1,431 matches**, **8 exclusions**, **1 mismatch**, **0 timeouts**.
@@ -1928,3 +1942,374 @@ The vendor approval and union ruling have remained pending across the previous
 qualification checkpoints. All currently independent implementation and
 qualification work is recorded; completing this plan needs those inputs,
 the affected fixes/gates, and a successful full sweep before manifest publication.
+
+### Normal admission ruling and approved MIR repair (2026-11-03)
+
+The user selected ordinary T admission for `T | error` / `T^` and approved the
+MIR optimizer fix. **S7.4.2v4/S11.4.6v4/D3.2.4v5** capture the ruling;
+TE-13.4 preserves the retired matching-member alternative and its rationale.
+The formal specs receive major version bumps because normal numeric kinds
+and container representations can change under the former union behavior.
+
+The runtime projects the normal contract before membership can bypass numeric
+conversion, array certification or record reification. The shared exclusion
+walk preserves invocation-dependent type references; union normalization must
+also retain those references rather than replacing them with their bounds
+(S11.4.8v2). The static relation defers a selected type unless its bound proves
+rejection. Construction hints and record-result plans reuse normal admission;
+the two previously blocked emission checks pass with their assertions intact.
+Native scalar return planning admits lossless int53-to-float promotion while
+retaining checked narrowing and the independent ordinary-error companion.
+Qualification of these coordinated changes is in progress below.
+
+The approved vendor fix addresses the root availability condition in MIR's
+address folder. Conventional SSA writes PHI registers on incoming edges;
+a move saves their current value. Forwarding that PHI into another block may
+read a later iteration's assignment. The old predicate found only single-block
+cycles, missing the multi-block loop exposed after GVN. The shared guard now
+rejects cross-block PHI forwarding; local PHIs and other stable expressions
+still fold. All optimization passes remain enabled (S1.6, D8.2.6v2).
+The vendor delta is recorded in `patches/mir-phi-address-snapshot.patch` and
+`lambda/mir/VENDOR.md`, under the user's AGENTS.md rule 16 approval. Exact
+upstream-plus-patches verification passes. Standalone original MIR computes
+9,990 / 8,991 / 9,990 at levels 0/1, but the old level 2 computes
+8,991 / -999 / 8,991. The corrected availability guard restores all three
+results with level 2 fully enabled. A 97-line runtime-independent fixture and
+native unit cover levels 0–3, both loop copies, continue, handoff and empty input.
+Evidence: `temp/error-handling/m8-mir-pass-isolation.json`,
+`m8-loop-twice.mir`, `m8-mir-phi-build.log`, and `m8-verify-mir-patches.log`.
+
+#### Reviewed emission cost of normal admission
+
+**D8.6.1:** final module/body counts are cube **19,194 / 11,720**,
+DeltaBlue **14,486 / 3,561**, and printer **21,950 / 5,053**. Only the two
+measured default-profile module ceilings increase from M7; body and platform
+ceilings stay unchanged. No threshold assertion is removed or given slack.
+
+DeltaBlue adds **112** instructions at eight scalar return boundaries:
+`constraint_output` +60 (four validators), `constraint_input` +30 (two),
+`chain_test` and `projection_test` +11 each. The producers are nullable/error
+record accesses or inferred mutable values; semantic numeric membership does
+not establish the actual int kind required by S11.4.6v4. Reusing an already
+checked local/call contract removes redundant checks in the optional-int and
+literal-extent emission fixtures without weakening their assertions.
+
+The printer adds **180** instructions because `RenderResult^` now establishes
+the normal packed record layout (D3.2.4v5). The direct result paths pass fields;
+public boxed adapters still materialize maps: `render_parts_at` +92, its boxed
+adapter +69, and `render_doc`'s boxed adapter +68; `render_doc` itself shrinks
+31 and `render_doc_root` shrinks 18. Eight result-factory calls change to direct
+field transport, pending-result work falls, and the root loses one
+`heap_calloc_class` call. This is a reviewed code-size tradeoff, with no timing
+claim. Exact output/checksum matches the preserved original compiler for all
+three benchmarks, and their 18 invalid-input tier/GC probes pass.
+Evidence: `m8-emission-review.json`, `m8-benchmark-oracles.json`, and
+`m8-error-oracles.json` under `temp/error-handling/`.
+
+#### Qualification environment correction
+
+The first rebuilt 31-suite run inherited `LAMBDA_DISABLE_MIR_CACHE=1`. That
+invalidates the cache-hit assertions in the input-cache and JS-script suites;
+the input-cache suite passes **17/17** with the override removed. The terminal
+suite passes **10/10** normally, but the override exposes the pre-existing
+AST-claim/forced-JIT retry loop recorded as **LR01-21**. Its single JIT case
+passes in isolation; the full disabled-cache sequence exhausts the native
+stack after a prior interpreter import. The bounded LLDB stack identifies
+`load_script:2291`, and both conflicting conditions are unchanged from
+`0452aaabc`. This unrelated opt-out defect is recorded separately rather than
+changing cache tests or the error-handling acceptance boundary. The aggregate
+must be qualified with its normal cache policy; fresh subprocess tier/GC and
+emission probes retain their explicit cache opt-out.
+
+#### Final caller/proof review
+
+The first M8 source inventory found six new failures. Five imported the jq VM:
+its `any?` fields also admit ordinary Lambda errors, while its jq data helpers
+deliberately accept error-free values. Preserve nullable/absent fields while
+stating that contract as `(any ! error)?` for `vat` and `err`. The final five
+modules compile. Source-derived jq probes cover data access, jq try/catch
+payloads, path tracking and labels: **4/4 tier/GC runs** pass, each checking all
+four cases, under JIT and immediate AUTO promotion. Forced interpreter execution
+is explicitly excluded by its existing indexed-assignment planner restriction;
+it is not reported as a semantic pass. Evidence: `m8-jq-final-compile.json` and
+`m8-jq-payload-final-oracles.json`.
+
+The sixth failure was `proc/type_binder_proc_raw.ls`: the conservative dependent
+type relation had lost the proof that an unchanged `B as T` parameter is still
+the value that selected this invocation's T (S11.4.8v2). Shared return admission
+now recognizes that parameter by its current callable's binding identity and
+refuses the proof after writes or for `var` parameters. A slot number alone is
+never compared across invocation domains. This restores the existing raw-binder
+fixture without widening its clean return annotation or removing any check.
+The final focused matrix passes **288/288**, including generic and selected
+normal conversion, branch returns, narrowed values and recoverable record-call
+errors. The final whole-source audit compiles **4,035/4,081**, with exactly the
+same **46 reviewed failures**, **zero new failures** and **zero timeouts**;
+the nullable jq annotation's final form is separately rechecked in all five
+importers. Evidence: `m8-final-focused.log`, `m8-source-compile.json`,
+`m8-final-source-compile.log`, and `m8-binder-proc-fixed.log`.
+
+The source recovery gate also found two stale allowlist entries after earlier
+runtime extraction. Review confirms that `script_run.cpp` carries the script
+execution/module boundaries and `activation.cpp` carries activation-root and
+base-stack execution boundaries, all under S7.11/D5.3.6v2. Adding these files
+restores the intended closed allowlist; no ordinary error implementation gains
+an unwind boundary. `make check-error-recovery` passes. The Test262 baseline
+passes **40,261/40,261** against the repaired MIR with its existing manifest and
+runner unchanged. Its concurrent preflight during the first Lambda aggregate
+correctly refused to share scratch output, so the final aggregate runs after
+that baseline has finished.
+
+The first final three-worker parity sweep was externally terminated after
+750/1,441 completions. It produced no complete classification and did not
+refresh any manifest. A fresh official `make interp-sweep ARGS='--jobs 6'`
+runs after the aggregate gates finish, with the host and script sources fixed.
+Its full result, rather than the interrupted prefix, is required for completion.
+Evidence: `m8-final-interp-sweep.log` and `m8-final-interp-sweep-rerun.log`.
+
+### Historical design-document implementation status (M1–M7; superseded)
+
+The following notes are relocated from the design document's Appendix A.
+They preserve the earlier carrier/proof investigations, counts and pending
+items as history; the subsequent M8 record supersedes their implementation
+status. In particular, the user settled normal admission through error unions
+(S7.4.2v4/S11.4.6v4), approved the MIR repair, and the final aggregate gates pass.
+The complete final parity sweep remains incomplete.
+
+> The phased work and qualification criteria are recorded in
+> [Type and Error Handling Implementation Plan](Lambda_Impl_Type_Error_Handling.md).
+> M1 completes handler forms/results. M2/M3 implement core admission and
+> ordinary outcomes; package/demo migration and aggregate qualification remain
+> in progress. It includes the requested `T | error` to `T^`
+> binding-annotation cleanup, continued whole-variable reassignment outcomes,
+> migration of callers that relied on skips or retained old variable values, and
+> success-arm and typed-caret retirement, ordinary-error unification, combined fallback, filtered
+> handlers/chaining, explicit classification, and caller migration.
+>
+> ### Handler convenience status
+>
+> **2026-11-02, M1 implemented.** Production/reference parsing, shared AST,
+> interpreter, and MIR support `or^`, named/qualified filters, and left-associative
+> chains. Runtime selection and conservative residual types are qualified by the
+> M1 tests. Explicit `is (error | null)` classification uses the existing operator and
+> acknowledges its subject under the M2/M3 receiver checks.
+> S7.5.7 needs no keyword implementation: `empty` is an ordinary user alias.
+> See the [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+>
+> ### Typed-caret retirement
+>
+> **2026-11-02, core implemented.** Production and reference type grammars reject
+> `T^E` with migration guidance. Ordinary unions supply the particular error
+> alternatives, with broad `T^` retained. Four authored broad contracts were
+> migrated; the parser gate passes C 461/461 and Tree-sitter 448/448. General
+> package/demo qualification is still in progress. See the
+> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+>
+> ### Ordinary-error unification
+>
+> **2026-11-02, core implemented; aggregate qualification pending.** Return
+> normalization derives error/ABI metadata from the ordinary outcome contract.
+> The acknowledgement walk tracks producers through preserving expressions to
+> actual receivers, including inferred bindings and collected Item slots.
+> Procedural result replacement rejects an unacknowledged overwritten outcome.
+> The non-error default of an unannotated `fn` is preserved. S11.4.6v3's base-only
+> constraint admission is also preserved; predicate enforcement is not added by
+> this change. Current package migration and remaining qualification are in the
+> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+>
+> ### Success-arm retirement
+>
+> **2026-11-02, M1 implemented.** Both parsers reject the old suffix, even across
+> lines; the AST and both execution tiers have no `value_body` storage or lowering.
+> 510 authored uses were migrated to one-handler expressions, error checks, or
+> explicit branching. Parser conformance and existing handler goldens qualify
+> single evaluation, result preservation, and restored lexical subjects.
+> See the [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+>
+> ### Validation and reassignment outcomes
+>
+> **2026-11-02, core implemented; caller migration and qualification in progress.**
+> S7.7.2v2/S7.7.4v2 checks now bind/store their admitted value or validation
+> error and continue. Declared targets remain separate from effective outcome
+> facts. Captures, loop back edges, borrow publication and native-lane planning
+> use those facts; an error never becomes an integer merely because its
+> initializer or target had an integer lane. Field/element stores retain their
+> own containment. No public validation-expression spelling is added.
+>
+> **2026-11-03 follow-up (S11.4.1v5/S7.5.4):** a deferred return check
+> contributes its possible rich validation error to the call's effective outcome.
+> The successful-value admission target remains strict. Inferred/error-admitting
+> receivers retain that outcome; a known fallible call cannot initialize a clean
+> receiver. JIT pair forwarding must preserve return admission. This does not
+> make an unused interior failed binding a returned error, or treat an open
+> recursive inference as an ordinary-error producer.
+>
+> View state setup is part of the view's pure activation (S12.1.3v2). An explicit
+> postfix propagation in a state initializer uses that view's error-admitting
+> return contract (S7.6.3v3), and exits before rendering the body. A clean return
+> contract still rejects it. The propagated outcome crosses the same return
+> admission as a body result. This does not change state-slot receiving rules.
+>
+> **Historical carrier qualification (2026-11-03, S7.8.1/D2.4.1–D2.4.3; superseded by M8):** a propagated
+> call consumes its producer's actual Item/native representation. A native tail
+> join applies the callable's return admission before opening a success lane;
+> an ordinary error is never decoded as an integer or pointer. The full MIR GC
+> corpus passes 351/351; aggregate and remaining caller/native-proof qualification
+> remain open in the implementation record. Scalar error-union admission reuses
+> identity proofs without dropping the native error channel. At that checkpoint, interpreter union admission
+> retained an already-conforming numeric member, while plain numeric contracts
+> performed their required conversion. The user subsequently ruled that error
+> unions apply T's normal admission (S7.4.2v4/S11.4.6v4). Native return selection
+> therefore requires the actual normal carrier across all returns and branches;
+> a success-type name alone is insufficient. The qualified MIR emission count
+> is 278/280; remaining checks are recorded without relaxing safety requirements.
+> S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
+> float literal members and dynamic record fields: optimized admission retains
+> the error at the receiving binding and continues. The constructor shares the
+> call-admission join without changing field evaluation or procedural store
+> containment. The expanded tier/GC matrix and full MIR GC corpus pass.
+> S7.6.3v3/S7.7.2v2 counted fill qualification keeps producer propagation before
+> destination validation: `let a: int[2] = fill(n, 1)^` retains a length mismatch
+> at `a` and continues, while an invalid fill count propagates. Uncounted numeric
+> literal fill success has a static membership proof; runtime storage admission
+> is still required. The focused tier/GC matrix passes 256/256.
+> S7.6.3v3/D2.4.1 dynamic dispatch preserves its boxed outcome until propagation
+> checks it, including when a loop continuation calls an existing module
+> definition. The deterministic handoff regression checks both normal values
+> and errors under forced/poison GC (D8.1.1v18).
+> S11.4.6v3/D3.2.4v3 declarations use the same named-record reification gate
+> as assignments, arguments and returns, including a record inside `N?`.
+> Semantic membership does not establish its packed offsets. The native
+> optimization gate passes 55/55 with its original copy/share budgets.
+> S11.4.1v5/S11.4.6v3 concrete return values still require full admission when
+> their numeric kind differs from the target: `int^ => 1.0` admits an integer,
+> while `int^ => 1.5` produces an error under current runtime admission. The
+> shared return gate keeps matching scalar lanes and nullable outcomes without
+> revalidation. Boxed tails enter that gate as Items, avoiding a second boxing.
+> S7.6.3v3 boolean system-call producers also publish whether they boxed their
+> outcome before `^`; the normal bool type does not describe that earlier
+> physical representation. These fixes retain the pending union-policy question.
+> S11.4.8v2/S4.2.2/D8.3.1v2 exact raw scalar value-binder keys use the same semantic type as
+> runtime binding, rather than retaining a singleton literal. Selection follows
+> parameter admission: conversion-dependent static inference retains an
+> approximation, and scalar raw entries require full membership and the admitted
+> kind before bypassing the checked entry. S7.7.3/S9.1.2 method preparation also
+> keeps an incoming error as the call's outcome when its receiver has a snapshot.
+> S7.7.4v2/S9.1.2 boxed constructor outcomes also retain successful container ownership and
+> snapshots across procedure-method writes. D8.3.3 forward calls whose native
+> plan is not established use the stable public Item entry; a later native
+> specialization cannot reinterpret tagged arguments. The full LaTeX corpus
+> now matches its JIT golden after this boundary repair. A complete interpreter
+> sweep still reports legacy and vendor divergences and has not published new
+> manifests; detailed comparisons and qualification limits are in the
+> [implementation record](Lambda_Impl_Type_Error_Handling.md).
+> S7.7.3/D8.2.6 tail-call rejection retains its ordinary error outcome even when
+> the successful path becomes a backedge. D5.1.3/D5.2.3 interpreter publication
+> also captures wide scalar payloads before frame teardown, preserving snapshots
+> when a later outcome replaces the variable. Qualification and the remaining
+> vendor divergence are tracked in the
+> [tail-call and ownership record](Lambda_Impl_Type_Error_Handling.md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03).
+> S7.6.3v3/S11.4.6v3 validated plain scalar locals also retain their proven
+> normal kind after propagation. D5.2.1v5 procedure planning keeps the ordinary
+> error companion independently of that success lane. An immediate, sole `^`
+> may fuse a local's check without skipping intervening user code or changing its
+> error location (S7.7.2v2/S7.4.4); other observations retain the boxed outcome.
+> The [scalar qualification record](Lambda_Impl_Type_Error_Handling.md#admitted-scalar-success-lanes-and-immediate-propagation-2026-11-03)
+> records the restored libm budget and remaining aggregate work.
+> D8.6.1 also requires making intended emission growth explicit. The remaining
+> cube/delta/printer comparisons retain validation outcomes and checked argument
+> entry rather than relying on the retired declaration exit. Their reviewed
+> zero-slack budgets pass 20/20; benchmark output matches the original compiler,
+> and invalid-input tier/GC probes pass. The
+> [emission review](Lambda_Impl_Type_Error_Handling.md#reviewed-emission-cost-of-retained-outcomes-2026-11-03)
+> records the measured cost, conservative proof limits and qualification scope.
+> The final complete tier sweep has 1,431 matches, eight exclusions and one
+> vendor-loop mismatch among 1,440 scripts, without timeouts (S1.6). That mismatch
+> prevents manifest publication. At that M7 checkpoint, the two ordinary-union admission proof checks
+> awaited the ruling now settled by TE-13.4; the
+> [final qualification boundary](Lambda_Impl_Type_Error_Handling.md#final-independent-qualification-boundary-2026-11-03)
+> names the exact checks and required inputs. No assertion is waived.
+>
+> Return-admission inference publishes resolved declared results before a body
+> checks recursive calls (S11.4.1v5). Closed module type results are also available
+> to forward calls; parameter defaults and dependent return slots retain their
+> declaration scope. A functional branch block with one produced result keeps
+> that result's admission proof through nested branches (S2.5.4v3); its open
+> execution carrier does not by itself introduce a validation failure. Equality
+> against `null` retains direct error propagation without inventing a traversal
+> of nested container errors (S5.1.1v2/S5.1.2v2).
+>
+> ### Initializer acknowledgement
+>
+> **2026-11-02, core implemented.** Inferred receivers acknowledge their complete
+> outcomes; `any` admits error without an acknowledgement warning. E241 reports
+> undecidable explicit local admission, retaining the runtime check and its
+> failure outcome. A known incompatible source remains a static error. The same
+> rule applies to whole-variable reassignment. Focused tier/GC and diagnostic
+> qualification is recorded in the
+> [M2/M3 record](Lambda_Impl_Type_Error_Handling.md#m2m3--admission-and-ordinary-outcomes-in-progress-2026-11-02).
+>
+> ### Handler results
+>
+> **2026-11-02, M1 implemented.** Procedure handlers preserve operand/recovery
+> values in bindings and as final results, including suspension. `null` is a real
+> replacement result; declarations still contribute no result. Interpreter and
+> MIR use the same sequencing classification. Normal-result erasure and implicit
+> return of fresh recovery errors were removed while preserving procedure fault
+> protection. Focused tests cover explicit return, chained recovery, nested
+> subjects, and forced GC. See the
+> [M1 record](Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+>
+
+### M8 qualification boundary (2026-11-03)
+
+| Gate | Result |
+|---|---|
+| Lambda baseline aggregate | **6,456/6,456**, including **2,007/2,007** runtime cases |
+| Diagnostics / native admission | **321/321** / **55/55** |
+| Focused tier/GC matrix | **288/288** runs |
+| MIR emission / size ratchets / forced-GC corpus | **282/282** / **20/20** / **352/352** |
+| Required input baselines | **2,112/2,112** |
+| Test262 baseline | **40,261/40,261**, existing runner and manifest unchanged |
+| Whole authored-source compile audit | **4,035/4,081**, same **46** reviewed failures; no new failures or timeouts |
+| Full parity / interpreter manifests | **Skipped by USER, 2026-11-03: no final parity claim; all three lists unchanged** |
+
+The host is fixed at SHA256
+`2b931d892ca69e2d941af420a175e81683b2722f22d30bc7fb7f6e5d5d0d6f1d`
+(`temp/error-handling/m8-final-product.json`). The complete aggregate evidence
+is `m8-final-lambda-baseline/test_summary.json`; the independent Test262
+baseline and input evidence are `m8-test262-baseline.log` and
+`m8-input-baseline.json`. Full-runtime, emission, admission and GC checks all
+pass with their safety assertions intact.
+
+Repeated full-sweep interruptions are not test verdicts. A diagnostic-only
+Python signal observer recorded receiver **29987**, sender **35412**, UID
+**501**, signal **SIGTERM**, `si_code=0`. The sender exited before process
+inspection. The observer preserves the prior/default termination behavior;
+neither product code nor test assertions/timeouts are modified. The monitored
+make job also terminated, and no incomplete sweep is used to regenerate lists.
+Evidence: `signal-probe/senders.txt`, `m8-probe-sweep-status.json`,
+`m8-signal-probe-interp-sweep.log`, and the preceding monitored status/log.
+The user subsequently waived the complete official sweep and three-list
+refresh on 2026-11-03 and authorized merge and worktree removal. The interrupted
+attempts are retained as evidence, not passing results. Standalone validation
+spelling and general cleanup remain unratified questions outside this plan.
+
+
+**Documentation and patch cleanup (2026-11-03):** current design/reference status
+now reflects M8, with the complete parity sweep and three-list refresh still
+incomplete. Earlier implementation notes are retained above as history, with
+relocated links rebased and old milestone anchors preserved. No ruling changed.
+The MIR patch was regenerated with Git's `diff.suppressBlankEmpty=true`, removing
+only blank context-line spaces. `make verify-mir-patches` confirms the exact
+upstream-plus-patches invariant; all 45 local links/anchors and whitespace checks
+pass. `make check-formal-index` passes with its pre-existing duplicate DO25
+warning. The host, vendored MIR source and interpreter manifests are unchanged;
+no engine rebuild or regression rerun was needed for this cleanup. Evidence:
+`temp/error-handling/doc-cleanup-{checks.json,verify-mir-patches.log}`.
+
+
+**User acceptance (2026-11-03):** skip the parity check; merge these changes to
+remote master and delete the implementation worktree. This waives only the final
+parity sweep and its three-manifest refresh. The passing gates above retain
+their recorded scope; no partial sweep is promoted to a passing result.
