@@ -1393,7 +1393,7 @@ From highest to lowest:
 unary `!` in expressions (S16.8.1); `not` is the logical negation. In type
 position `!T` is the complement type, as in `x is !null`. The type operators
 `&`, `!` and `|` rank the same way in expressions as in type expressions
-(S10.1.1v3).
+(S10.1.1v5).
 
 ### Arithmetic Operators
 
@@ -1429,7 +1429,7 @@ position `!T` is the complement type, as in `x is !null`. The type operators
 ### Type Operators (`|`, `&`, `!`)
 
 `|`, `&` and `!` are type operators everywhere, expressions included
-(S10.1.1v3); they never merge containers. For set algebra on collections use
+(S10.1.1v5); they never merge containers. For set algebra on collections use
 `unique`, `intersect` and `except` (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md)).
 
 | Operator | Description  | Example        | Result |

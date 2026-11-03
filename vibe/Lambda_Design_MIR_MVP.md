@@ -8,26 +8,29 @@ write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest 100-sample release campaign detects **no statistically established
-performance regression across all 48** against the committed starting MVP.
-Including the separate matched 10,000-invocation Sumfp batch, the original
-rows qualify **28/28 against Full MIR and 20/28 against both targets**.
-Single-run zero-duration Sumfp samples remain recorded and unqualified.
+The latest release pass makes Triangl **4.35× faster** (433.45 → 99.61 ms),
+beating Full MIR at 124.25 ms. Pidigits improves about **5%**, with its Full
+MIR confidence bound still spanning parity. Runtime types, layouts and precise
+ownership remain shared (**D2.4.3, D5.3, D8.2.6v2**).
 
-The 20 additions qualify **12/20 against Full MIR and 7/20 against both**, up
-from 10/20 and 6/20 in the preceding campaign. Fasta improves about **3.6×**;
-Fasta and Permute now beat Full MIR. The full result is **40/48 against Full
-MIR and 27/48 against both targets**. The requested performance milestone
-remains open. These are execution-window timings, excluding startup and
-compilation, using one-sided 95% paired confidence gates. A separate 200-sample
-Binarytrees confirmation establishes neither a regression nor a speedup.
+The primary 100-sample campaign qualifies **40/48 against Full MIR and 25/48
+against both targets**. The original 28 retain **28/28 Full MIR** qualifications
+and **19/28 combined** qualifications, including the matched Sumfp batch.
+The 20 additions qualify **12/20 Full and 6/20 combined**. The sole primary
+regression flag, Levenshtein, does not reproduce in a separate 200-sample
+confirmation, which also passes both targets. Its primary miss remains in
+the count above. GCbench loses a marginal Full MIR qualification despite
+unchanged starting/final MIR and no paired regression. The preceding campaign's
+40/48 and 27/48 result is retained as history. **The performance milestone
+remains open.**
 
-All **47 focused groups** and the required **8,647/8,647 baseline cases** pass.
-The compiler keeps nullable and literal numeric conversion native, branches
-from guarded float-array predicates, reads native string lanes, and caches
-closed scalar-record witnesses while retaining precise owners and checked
-fallbacks (**D2.4.3, D5.3, S3.4–S3.5, S7.9.3, S9.1.3v2**).
-See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-native-array-reads-and-closed-scalar-records).
+All **49 focused groups** and the required **8,647/8,647 baseline cases** pass.
+Immutable indirect keys reuse their proof for ownership and native reads;
+Boolean predicates retain selected-arm ordering; decimal consumers reuse
+successful domain facts and rooted inlining (**S3.4–S3.5, S4.4–S4.5,
+S7.1.1v3, S7.9.3, S9.1.2–S9.1.3v2**). These are matched execution-window
+timings, excluding startup and compilation, using one-sided 95% paired
+confidence gates. See the [complete measurements and independent confirmation](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-immutable-indirect-keys-and-decimal-consumers).
 
 **Destination:** `lambda/runtime/mvp/`
 

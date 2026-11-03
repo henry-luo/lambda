@@ -638,7 +638,7 @@ locations come from a compiled host binding, and a record reference uses
 nonnull null references and access after owner invalidation return errors.
 Scripts cannot obtain or reconstruct native addresses from bytes. Layout
 metadata uses a trailing `& {…}` directly at the root or field slot of a
-`: binary` declaration (**S10.1.1v4**). Elsewhere `&` remains type intersection,
+`: binary` declaration (**S10.1.1v5**). Elsewhere `&` remains type intersection,
 and `that` keeps its predicate meaning. Binary field and record predicates
 are not supported by the current physical-layout profile. Offset pointers, recursive schemas and serialization remain outside the current
 profile. Versioned host bindings require matching root `version` metadata
@@ -830,7 +830,7 @@ fn process(value: int | string | null) => {
 
 ### Type Operators in Expressions
 
-`|`, `&` and `!` are type operators in expressions and type patterns (S10.1.1v4). The explicit exception is trailing `& {…}` layout metadata at binary declaration slots, described above. In an expression a type operand is itself and any other value stands for its literal type, and the result is always a type — the same type that type syntax names: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. A container stands for the pattern its literal spells in type position, so `let t = [1, 2] | 3` is the type `type T = [1, 2] | 3` names, and a range value for its range type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`. (A decimal value has no literal type yet and is an operand error.)
+`|`, `&` and `!` are type operators in expressions and type patterns (S10.1.1v5). From tightest to loosest, their precedence is `to`, `&`, `!`, then `|`; these binary operators associate left. The explicit exception is trailing `& {…}` layout metadata at binary declaration slots, described above. In an expression a type operand is itself and any other value stands for its literal type, and the result is always a type — the same type that type syntax names: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. A container stands for the pattern its literal spells in type position, so `let t = [1, 2] | 3` is the type `type T = [1, 2] | 3` names, and a range value for its range type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`. (A decimal value has no literal type yet and is an operand error.)
 
 ```lambda
 let choice = 1 | 2;            // a type: the literal union of 1 and 2, an enum

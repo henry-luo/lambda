@@ -7,6 +7,9 @@ pn both(var calls: int[], left: any, right: any) any {
 pn either(var calls: int[], left: any, right: any) any {
     while (touch(calls, left) or touch(calls, right)) { return 1 }
 }
+pn negate(var calls: int[], value: any) any {
+    while (not touch(calls, value)) { return 1 }
+}
 pn main() {
     var calls: int[] = [0]
     let fault = int("bad")
@@ -20,4 +23,7 @@ pn main() {
     calls[0] = 0; print([either(calls, true, fault), calls[0]]); print("\n")
     calls[0] = 0; print([either(calls, null, "text"), calls[0]]); print("\n")
     calls[0] = 0; print([either(calls, null, ""), calls[0]]); print("\n")
+    calls[0] = 0; print([negate(calls, null), negate(calls, false), negate(calls, true), calls[0]]); print("\n")
+    calls[0] = 0; let negated_error = negate(calls, fault)
+    print([match negated_error { case error: true default: false }, calls[0]]); print("\n")
 }

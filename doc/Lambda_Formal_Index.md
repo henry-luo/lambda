@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v80.0.4 (2026-11-03)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v81.0.0 (2026-11-03)
 
 | ID | Line | Title |
 |---|---|---|
@@ -255,7 +255,7 @@ in full — including lines too long for a viewer — run
 | S9.3.2 | 1639 | Construction preserves each element's type and precision |
 | **§S10** | 1657 | *Operators* |
 | **§S10.1** | 1659 | *Union, pipe, and filter* |
-| S10.1.1v4* | 1661 | `\|`, `&` and `!` are the type operators |
+| S10.1.1v5* | 1661 | `\|`, `&` and `!` are the type operators |
 | S10.1.2v4 | 1662 | The pipe is dual-mode on a parse-time syntactic test: a body with a **free `~`** is a mapping pipe (binds `~` … |
 | S10.1.3 | 1675 | `~` is lexically scoped to the RHS of its pipe; |
 | S10.1.4 | 1679 | File write/append syntax is deferred; |
@@ -447,50 +447,50 @@ in full — including lines too long for a viewer — run
 | S17.7.2 | 3085 | `lower` and `upper` map by Unicode full case mapping |
 | **§S17.8** | 3093 | *Option maps* |
 | S17.8.1* | 3095 | An option name a system function does not define is a compile-time error where the compiler can see it, and a … |
-| SO1 | 3236 | Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` … |
-| SO2 | 3237 | Int v5 §5 details: poison-algebra table ratification; |
-| SO3 | 3238 | The `int?` fourth lane value (`INT_LANE_NULL`) is undocumented in the Int_Type sentinel table; |
-| SO4 | 3239 | Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs … |
-| SO50 | 3242 | Error-preserving comparison follow-ups: canonical field traversal for key-unordered maps, selection among … |
-| SO5 | 3248 | TE-17 transitivity: does discharging `(int \| error)[]` re-narrow in place, or only by copy? Copy is the safe … |
-| SO6 | 3249 | Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); |
-| SO7 | 3250 | TE-5 R5 sticky `any`; |
-| SO8 | 3251 | Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry) |
-| SO9 | 3252 | A surface spelling for `any \ error` (the `!` exclusion operator route is broken |
-| SO10 | 3253 | A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) |
-| SO13 | 3256 | COW granularity on large documents: node representation for spine-copying, refcount discipline for … |
-| SO14 | 3257 | Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or … |
-| SO15 | 3258 | Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping) |
-| SO16 | 3259 | Close-error routing (double fault): proposed |
-| SO17 | 3260 | Resource-carrying-type containment rules (when a wrapping value is itself resource-typed) |
-| SO18 | 3261 | Snapshot iteration (C4.2d) |
-| SO19 | 3262 | Root and upward-parent navigation are resolved by S10.4.3v2, S10.5.3v2 / PTH10, PTH29: lineage lives in a … |
-| SO39 | 3266 | Node identity (S5.1.4v2): which operations preserve an identity (a COW detach and an in-place `var` write are … |
-| SO42 | 3273 | Instance type alteration (S2.1.5): the surface spelling, which declared fields must be satisfiable from the … |
-| SO43 | 3277 | Type alteration |
-| SO41 | 3280 | Cross-reference form for document graphs under S9.1.5v2: an identity or key stored as data and resolved … |
-| SO20 | 3286 | O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
-| SO21 | 3287 | `select` surface syntax; |
-| SO22 | 3288 | Deferred opt-ins: blocking send, true selective receive, `unordered` streams, CPU-bound cancellation … |
-| SO23 | 3291 | PD4 join column-collision suffixes; |
-| SO24 | 3292 | PD12 sub-items: `on error` resume semantics (abort vs skip-record), handler scoping over multiple forced … |
-| SO25 | 3293 | Deferred group-by vocabulary: `having`-style filter, post-group `let`, extended aggregates, … |
-| SO26 | 3296 | RF6 mutator convention: updated-owner vs unit; |
-| SO27 | 3297 | Whether debug logging inside `fn` is a permitted non-observable effect |
-| SO44 | 3298 | Binder depth on function values: whether a binder (S11.4.8v2) over a function value selects its full … |
-| SO29 | 3303 | File write/append syntax (C6a: `into`/`onto` candidates); |
-| SO31 | 3304 | The `<file>` element shape (name/size/mime, content as child) |
-| SO32 | 3305 | Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns |
-| SO33 | 3306 | A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in … |
-| SO34 | 3307 | `emit()` vs `send()` |
-| SO47 | 3308 | Whether an empty literal needle matches at every code-point boundary |
-| SO51 | 3310 | Local imperative control in comprehensions: mutation of a containing `fn` local across iterations, … |
-| SO35 | 3317 | A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics … |
-| SO38 | 3318 | Whether `\|:` over a **map** should keep the surviving keys (yielding a map) rather than dropping them … |
-| SO36 | 3324 | Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or … |
-| SO45 | 3333 | Whether a function type takes a suffix directly: `fn?`, `fn (x: int)?`, `fn ()[]` |
-| SO46 | 3343 | How an element pattern spells *content must be empty* |
-| SO48 | 3344 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
+| SO1 | 3237 | Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` … |
+| SO2 | 3238 | Int v5 §5 details: poison-algebra table ratification; |
+| SO3 | 3239 | The `int?` fourth lane value (`INT_LANE_NULL`) is undocumented in the Int_Type sentinel table; |
+| SO4 | 3240 | Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs … |
+| SO50 | 3243 | Error-preserving comparison follow-ups: canonical field traversal for key-unordered maps, selection among … |
+| SO5 | 3249 | TE-17 transitivity: does discharging `(int \| error)[]` re-narrow in place, or only by copy? Copy is the safe … |
+| SO6 | 3250 | Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); |
+| SO7 | 3251 | TE-5 R5 sticky `any`; |
+| SO8 | 3252 | Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry) |
+| SO9 | 3253 | A surface spelling for `any \ error` (the `!` exclusion operator route is broken |
+| SO10 | 3254 | A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) |
+| SO13 | 3257 | COW granularity on large documents: node representation for spine-copying, refcount discipline for … |
+| SO14 | 3258 | Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or … |
+| SO15 | 3259 | Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping) |
+| SO16 | 3260 | Close-error routing (double fault): proposed |
+| SO17 | 3261 | Resource-carrying-type containment rules (when a wrapping value is itself resource-typed) |
+| SO18 | 3262 | Snapshot iteration (C4.2d) |
+| SO19 | 3263 | Root and upward-parent navigation are resolved by S10.4.3v2, S10.5.3v2 / PTH10, PTH29: lineage lives in a … |
+| SO39 | 3267 | Node identity (S5.1.4v2): which operations preserve an identity (a COW detach and an in-place `var` write are … |
+| SO42 | 3274 | Instance type alteration (S2.1.5): the surface spelling, which declared fields must be satisfiable from the … |
+| SO43 | 3278 | Type alteration |
+| SO41 | 3281 | Cross-reference form for document graphs under S9.1.5v2: an identity or key stored as data and resolved … |
+| SO20 | 3287 | O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
+| SO21 | 3288 | `select` surface syntax; |
+| SO22 | 3289 | Deferred opt-ins: blocking send, true selective receive, `unordered` streams, CPU-bound cancellation … |
+| SO23 | 3292 | PD4 join column-collision suffixes; |
+| SO24 | 3293 | PD12 sub-items: `on error` resume semantics (abort vs skip-record), handler scoping over multiple forced … |
+| SO25 | 3294 | Deferred group-by vocabulary: `having`-style filter, post-group `let`, extended aggregates, … |
+| SO26 | 3297 | RF6 mutator convention: updated-owner vs unit; |
+| SO27 | 3298 | Whether debug logging inside `fn` is a permitted non-observable effect |
+| SO44 | 3299 | Binder depth on function values: whether a binder (S11.4.8v2) over a function value selects its full … |
+| SO29 | 3304 | File write/append syntax (C6a: `into`/`onto` candidates); |
+| SO31 | 3305 | The `<file>` element shape (name/size/mime, content as child) |
+| SO32 | 3306 | Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns |
+| SO33 | 3307 | A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in … |
+| SO34 | 3308 | `emit()` vs `send()` |
+| SO47 | 3309 | Whether an empty literal needle matches at every code-point boundary |
+| SO51 | 3311 | Local imperative control in comprehensions: mutation of a containing `fn` local across iterations, … |
+| SO35 | 3318 | A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics … |
+| SO38 | 3319 | Whether `\|:` over a **map** should keep the surviving keys (yielding a map) rather than dropping them … |
+| SO36 | 3325 | Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or … |
+| SO45 | 3334 | Whether a function type takes a suffix directly: `fn?`, `fn (x: int)?`, `fn ()[]` |
+| SO46 | 3344 | How an element pattern spells *content must be empty* |
+| SO48 | 3345 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
 ## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v59.0.4 (2026-11-03)
 

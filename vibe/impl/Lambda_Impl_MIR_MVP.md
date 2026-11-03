@@ -4,17 +4,16 @@
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; performance
 qualification remains open.** Updated 2026-11-03: **48 benchmark rows** are
-covered. All **47 focused groups** and the required **8,647/8,647 baseline
-cases** pass. The final 100-sample release comparison detects no statistically
-established regression against the committed starting MVP across all 48.
-Including the separate matched Sumfp batch, the original rows qualify **28/28
-against Full MIR and 20/28 against both targets**. The additions qualify
-**12/20 against Full MIR and 7/20 against both**, giving **40/48 against Full
-MIR and 27/48 against both**. Fasta is about 3.6× faster than the starting MVP;
-Fasta and Permute now beat Full MIR. The requested performance milestone
-remains unfinished. The [latest tuning results](#2026-11-03-native-array-reads-and-closed-scalar-records)
-retain every row, confidence interval and remaining gap; earlier campaigns
-below are history.
+covered. All **49 focused groups** and **8,647/8,647 baseline cases** pass.
+The latest pass makes Triangl **4.35× faster**, beating Full MIR, and improves
+Pidigits by about **5%**. Primary release qualification is **40/48 against
+Full MIR and 25/48 against both targets**. All original 28 retain their Full
+MIR qualifications. The sole primary regression flag, Levenshtein, does not
+reproduce in a separate 200-sample confirmation, which passes both targets.
+The primary count retains that miss; the confirmation is reported separately.
+The requested milestone remains unfinished. See the
+[latest tuning measurements and remaining gaps](#2026-11-03-immutable-indirect-keys-and-decimal-consumers);
+earlier campaigns below are history.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
@@ -3012,3 +3011,252 @@ Use `--subset original` for the 28-row check and separately add
 The baseline leaves the shared executable in debug configuration; all reported
 performance uses the archived release binaries; see
 [Developer Guide §7.3](../../doc/dev/Developer_Guide.md#73-build-gotchas).
+
+
+## 2026-11-03: immutable indirect keys and decimal consumers
+
+This pass targets the remaining Full MIR misses, especially Triangl and
+Pidigits. Authority: **S3.4–S3.5**, checked absence **S7.1.1v3, S7.9.3**,
+immutable snapshots and borrows **S9.1.2–S9.1.3v2**, decimal arithmetic
+**S4.4.1–S4.4.2, S4.5.1–S4.5.4**, representation and precise ownership
+**D2.4.3, D5.3**, and checked compiler facts **D8.2.6v2**. No formal ruling
+changes.
+
+### Root causes and lowering
+
+Triangl reads its mutable board through immutable move tables, for example
+`board[mfrom[mi]]`. The ordinary pure-expression query did not admit an index
+expression, so each read captured the board before computing the key. That
+froze it and forced later stores through copy-on-write. The planner already
+has a stronger indexed-key proof that admits readonly literal `int[]` tables,
+including nested lookups. Array reads now reuse that proof for receiver
+ownership and cached native witnesses. Mutable lookup tables and effectful
+keys retain capture and receiver-before-key evaluation. Checked bounds,
+nullable results, alternate carriers and rooted owner reloads remain shared
+with the existing read lowering.
+
+Predicate lowering guards each selected `and`/`or` operand in evaluation
+order. Previously a whole-condition guard prefetched immutable keys in arms
+that would be skipped, then the selected body evaluated them again. Native
+checked Boolean reads now branch from the loaded byte directly; absence takes
+the false arm. Their alternate-carrier path still uses `fn_index`. Unary
+`not` reverses branch demand while retaining lexical error propagation. Value
+demand continues to materialize ordinary nullable values.
+
+Decimal-heavy Pidigits emitted compact-int speculation even when operand
+contracts made the int-tag guards impossible. Such domains now call their
+existing operator helper directly; erased or union domains retain guarded
+integer speculation. Decimal arithmetic publishes only its successful decimal
+domain, including decimal poison values, through the existing admitted-result
+fact. Error transport remains independent, and unknown arguments retain
+admission checks. The existing bounded, rooted inliner also accepts immutable
+decimal results. String recipes with nonnullable decimal fragments use the
+shared `fn_strcat_values` formatter, including its existing owned-prefix path.
+No runtime representation, runtime helper or vendor source changes.
+
+### Correctness and measurement
+
+The release passes **49/49 focused groups**, including benchmark goldens,
+normal collection, collection on every allocation with freed-memory poisoning,
+and seeded collection with poisoning. New fixture/golden pairs cover nested
+immutable keys, mutable keys, receiver replacement during key evaluation,
+negative and full-width out-of-range keys, skipped Boolean arms, decimal
+inlining across allocations, failed admission, decimal poison propagation and
+string snapshots. MIR assertions check capture boundaries, selected-arm
+ordering, direct Boolean branches, retained checked fallbacks, and removal of
+impossible int speculation and redundant successful decimal admission.
+
+The control was rebuilt from clean merged revision
+`1b0927e30e203096b114e92b94d6ea9b6b401ef7`, rather than reusing the prior
+campaign's executable: shared numeric/error code changed in that merge.
+The provenance corpus now also covers `lambda-eval-num.cpp` and the decimal
+implementation/header, which were split out of previously hashed files.
+The expanded 38-file starting corpus is reconstructed from that revision
+under `temp/lambda_mir_mvp/tune48d/base_sources/`; the original 35-file capture
+is retained separately. Full MIR and the previous MVP use the same frozen
+starting release. The C2MIR comparator remains the independent C benchmark
+ports, not a restored Lambda C-text backend (**D8.2.4v2**).
+
+The three changed fixtures were also checked on the frozen starting and final
+releases under interpreter, AUTO and Full JIT. Starting and final outputs agree
+in every tier. Interpreter/AUTO match all goldens. Existing Full JIT differences
+remain: effectful receiver replacement in `mir_mvp_indirect_keys` reads the new
+receiver, and predicate errors in `mir_mvp_predicate_branch` do not reach the
+expected error outcome. These are recorded MVP-only fixtures, not newly
+introduced shared-runtime changes. Raw cross-tier outputs are retained in
+`temp/lambda_mir_mvp/tune48d/cross-tier-final.json`.
+
+The required aggregate baseline passes **8,647/8,647 cases**: 2,112 input
+parser cases and 6,535 runtime cases, including 2,008 Lambda script cases.
+The final archived release also passes all 49 focused groups after timing.
+
+### Qualified results and remaining gaps
+
+The primary 100-sample campaign qualifies **40/48 against Full MIR and 25/48
+against both targets**. The original 28 qualify **28/28 against Full MIR and
+19/28 against both**, including the separate 30-sample matched Sumfp batch.
+The additions qualify **12/20 against Full MIR and 6/20 against both**.
+Single-invocation Sumfp is still sub-resolution and unqualified in its raw
+report; its matched batch retains all 10,000 invocations per sample.
+
+Triangl improves **433.4470 → 99.6075 ms**, about **4.35×**, and now beats
+Full MIR at **124.2505 ms**. Its one-sided Full MIR upper bound is **0.8104**.
+C2MIR is **50.6331 ms**, so the C2MIR target remains open. The emitted module
+shrinks from 3,823 to 3,435 lines and removes eight hot capture calls; the two
+remaining captures belong to other boundaries.
+
+Pidigits improves **0.3735 → 0.3550 ms**, about **5%**, with a statistically
+supported paired gain. Full MIR is **0.3580 ms**, but the upper ratio bound
+**1.0173** does not qualify a Full MIR win. C2MIR is **0.0457 ms**. Its emitted
+module shrinks from 2,385 to 1,203 lines after impossible speculation,
+decimal admission and call boundaries are removed.
+
+**Regression checks:** the primary run flags only Levenshtein, at 0.9125 ms
+versus starting MVP 0.8755 ms (two-sided ratio interval 1.0056–1.0646). The
+prearranged separate **200-sample confirmation** does not reproduce it:
+**0.8830 versus 0.8890 ms**, with a two-sided 95% ratio interval
+**0.9787–1.0045**. That confirmation passes both targets against Full MIR
+1.8700 ms and C2MIR 0.7988 ms. Starting/final pointer-normalized MIR is
+identical at 2,514 lines. There is no reproduced regression in the original
+28; the primary flag and confirmation remain separate, visible reports.
+The primary qualification count above is not replaced with the more favorable
+confirmation result.
+
+Binarytrees shows a paired gain in the primary samples, but its normalized
+MIR is identical at 2,623 lines. This pass does not attribute that sample
+difference to a compiler change. GCbench also has identical MIR (2,741 lines)
+and no paired regression: MVP 71.1555 ms versus starting MVP 71.0730 ms.
+Its Full MIR comparison is 70.7265 ms and the Full upper bound is 1.0183, so
+it misses that gate. It still satisfies the C2MIR allowance.
+
+The preceding campaign's **40 Full / 27 combined** result and this campaign's
+**40 / 25** primary result are both retained. Triangl gains a Full win while
+GCbench loses its marginal Full qualification; GCbench and Levenshtein account
+for the two lost primary combined qualifications. Full MIR was rebuilt from
+the newer merged revision for this campaign, and all timings were collected
+again. These gate changes do not establish an MVP slowdown: GCbench's
+starting/final MIR is identical and its paired comparison is unchanged;
+Levenshtein's flag fails independent confirmation. They remain target misses
+in the primary denominator.
+
+**The milestone remains open.** Eight rows miss the primary Full MIR gate:
+Puzzle, GCbench, Deriv, Pidigits, Storage, Towers, Cube3D and Raytrace3D.
+Twenty-three rows miss at least one primary target. Prioritize their measured
+hot paths; do not substitute median parity or a faster diagnostic sample for
+qualification.
+
+### Complete release tables
+
+Values are median execution-window milliseconds, excluding startup and JIT.
+Each primary row has 100 samples per engine and two warmups, with randomized
+interleaved order. `Full` requires the one-sided 95% upper ratio bound below
+1.00; `both` also requires the C2MIR upper bound at most 1.20. Every row and
+sample remains present. The coordinator discarded one interrupted Diviter
+attempt when a separate Test262 job began, waited for that job to finish,
+and reran the entire row without trimming timings.
+
+**20 additions: 12 Full; 6 both.**
+
+| Workload | Starting MVP | MVP | Full MIR | C2MIR | Full upper | C2MIR upper | Gates |
+|---|---:|---:|---:|---:|---:|---:|---|
+| r7rs/cpstak | 0.1460 | 0.1475 | 0.2685 | 0.2371 | 0.5627 | 0.6348 | both |
+| larceny/diviter | 230.0405 | 230.4145 | 270.9405 | 269.2316 | 0.8550 | 0.8707 | both |
+| larceny/primes | 0.9415 | 0.9415 | 2.2240 | 1.5990 | 0.4315 | 0.6007 | both |
+| larceny/puzzle | 17.3480 | 17.2260 | 4.6965 | 1.2295 | 3.7179 | 14.2656 | — |
+| larceny/triangl | 433.4470 | 99.6075 | 124.2505 | 50.6331 | 0.8104 | 1.9892 | Full |
+| larceny/gcbench | 71.0730 | 71.1555 | 70.7265 | 68.5226 | 1.0183 | 1.0448 | — |
+| larceny/deriv | 7.7565 | 7.7750 | 7.2130 | 2.5975 | 1.0855 | 3.0343 | — |
+| beng/nbody | 1.4555 | 1.4865 | 10.3300 | 1.4895 | 0.1453 | 1.0420 | both |
+| beng/binarytrees | 2.5235 | 2.4655 | 3.6000 | 2.8855 | 0.7009 | 0.8687 | both |
+| beng/fasta | 0.3470 | 0.3480 | 0.3765 | 0.2451 | 0.9307 | 1.4501 | Full |
+| beng/pidigits | 0.3735 | 0.3550 | 0.3580 | 0.0457 | 1.0173 | 7.9706 | — |
+| awfy/list | 0.1260 | 0.1300 | 0.1860 | 0.0190 | 0.7228 | 7.1405 | Full |
+| awfy/permute | 0.0690 | 0.0660 | 0.0690 | 0.0226 | 0.9714 | 3.0482 | Full |
+| awfy/storage | 0.2995 | 0.3010 | 0.2430 | 0.0906 | 1.2678 | 3.4003 | — |
+| awfy/towers | 0.3000 | 0.3015 | 0.1880 | 0.0269 | 1.6519 | 11.3945 | — |
+| kostya/base64 | 3.4975 | 3.5030 | 5.1770 | 0.5310 | 0.6861 | 6.6628 | Full |
+| jetstream/nbody | 1.4875 | 1.4940 | 10.3840 | 1.4845 | 0.1454 | 1.0240 | both |
+| jetstream/navier_stokes | 52.2695 | 52.3825 | 78.5265 | 35.2566 | 0.6736 | 1.4942 | Full |
+| jetstream/cube3d | 5.7445 | 5.7745 | 4.7910 | 0.4385 | 1.2332 | 13.3477 | — |
+| jetstream/raytrace3d | 20.6000 | 20.6685 | 11.9530 | 1.9810 | 1.7456 | 10.6641 | — |
+
+**Original 28: 28 Full; 19 both in the primary comparison.** The Sumfp
+row below uses the separate matched batch, not its zero-duration single-run
+samples. Levenshtein's independent confirmation follows the table.
+
+| Workload | Starting MVP | MVP | Full MIR | C2MIR | Full upper | C2MIR upper | Gates |
+|---|---:|---:|---:|---:|---:|---:|---|
+| r7rs/fib | 0.6080 | 0.6045 | 1.2135 | 1.0630 | 0.5079 | 0.5821 | both |
+| r7rs/sum | 0.1035 | 0.1025 | 0.2730 | 0.2810 | 0.3820 | 0.3704 | both |
+| r7rs/sumfp (10,000×) | 0.0110 | 0.0110 | 732.0485 | 749.8407 | 0.0000 | 0.0000 | both |
+| awfy/mandelbrot | 22.3650 | 22.2800 | 28.2995 | 22.2681 | 0.7923 | 1.0080 | both |
+| larceny/array1 | 0.1075 | 0.1095 | 1.4145 | 0.2947 | 0.0793 | 0.3807 | both |
+| awfy/sieve | 0.0160 | 0.0160 | 0.0270 | 0.0120 | 0.6296 | 1.4210 | Full |
+| beng/spectralnorm | 0.2575 | 0.2535 | 1.1815 | 0.3610 | 0.2188 | 0.7158 | both |
+| awfy/nbody | 1.4745 | 1.4860 | 2.7075 | 1.4895 | 0.5558 | 1.0137 | both |
+| r7rs/tak | 0.0740 | 0.0730 | 0.1330 | 0.1179 | 0.5692 | 0.6360 | both |
+| r7rs/ack | 5.6790 | 5.6610 | 10.3215 | 12.1110 | 0.5552 | 0.4731 | both |
+| larceny/quicksort | 0.2280 | 0.2305 | 0.5940 | 0.2271 | 0.3997 | 1.0484 | both |
+| kostya/matmul | 4.6285 | 4.6510 | 19.7640 | 6.1650 | 0.2368 | 0.7605 | both |
+| kostya/collatz | 176.8205 | 177.0515 | 301.7050 | 226.2095 | 0.5916 | 0.7861 | both |
+| r7rs/fibfp | 0.5885 | 0.5920 | 0.6815 | 1.1274 | 0.8816 | 0.5333 | both |
+| r7rs/fft | 0.0350 | 0.0370 | 0.0780 | 0.0190 | 0.4805 | 1.9430 | Full |
+| r7rs/nqueens | 0.5505 | 0.5425 | 0.6085 | 0.3560 | 0.9086 | 1.5509 | Full |
+| awfy/bounce | 0.0400 | 0.0390 | 0.0590 | 0.0210 | 0.6897 | 1.9481 | Full |
+| awfy/queens | 0.0220 | 0.0230 | 0.0620 | 0.0159 | 0.3770 | 1.5195 | Full |
+| beng/fannkuch | 0.2195 | 0.2175 | 0.2735 | 0.1516 | 0.8060 | 1.4711 | Full |
+| kostya/primes | 0.9810 | 0.9865 | 2.3010 | 1.6525 | 0.4413 | 0.6156 | both |
+| kostya/levenshtein | 0.8755 | 0.9125 | 1.7900 | 0.7485 | 0.5170 | 1.2376 | Full |
+| kostya/brainfuck | 52.2985 | 52.2850 | 83.1290 | 27.0754 | 0.6354 | 1.9543 | Full |
+| larceny/paraffins | 0.0910 | 0.0920 | 0.1370 | 0.0415 | 0.6957 | 2.3477 | Full |
+| larceny/pnpoly | 1.8285 | 1.8075 | 2.3555 | 1.8716 | 0.7877 | 0.9830 | both |
+| larceny/ray | 0.1220 | 0.1210 | 0.2160 | 0.1444 | 0.5769 | 0.8516 | both |
+| beng/mandelbrot | 11.7570 | 11.8535 | 13.4090 | 11.9661 | 0.8949 | 0.9989 | both |
+| kostya/json_gen | 1.4385 | 1.4375 | 4.7490 | 1.4147 | 0.3085 | 1.0351 | both |
+| larceny/divrec | 0.9580 | 0.9765 | 1.2700 | 5.1000 | 0.7799 | 0.1941 | both |
+
+**Levenshtein confirmation, 200 fresh samples per engine:**
+
+| Workload | Starting MVP | MVP | Full MIR | C2MIR | Full upper | C2MIR upper | Gates |
+|---|---:|---:|---:|---:|---:|---:|---|
+| kostya/levenshtein | 0.8890 | 0.8830 | 1.8700 | 0.7988 | 0.4772 | 1.1158 | both |
+
+### Evidence and reproduction
+
+- [20 additions](../../test/benchmark/lambda_mvp/tune48_indirect_keys_2026-11-03.json).
+- [Original 28](../../test/benchmark/lambda_mvp/tune48_indirect_keys_regression28_2026-11-03.json).
+- [Matched Sumfp batch](../../test/benchmark/lambda_mvp/tune48_indirect_keys_sumfp_2026-11-03.json).
+- [Levenshtein confirmation](../../test/benchmark/lambda_mvp/tune48_indirect_keys_levenshtein_confirmation_2026-11-03.json).
+
+Final release SHA-256:
+`faf6de30e2d533bbe0a16d61ae460e582e412efb8efb31c4471f8e077e558793`.
+Starting release SHA-256:
+`9d1a5cdf1e13685707f8d9f26ab7d49d02c2a1cd5ff1d5d27a22e345db3c68de`.
+The final 38-file experiment corpus is
+`cc7fefad76fd63c80ed4e959dc08d3424374a58f007b698a5c96281ad110b087`;
+the expanded starting corpus is
+`2fc738d291dab22ba50d82b6c8e5127125d041ae35e36d766fd12f812ba2038a`.
+
+All case Lambda/C/golden hashes, executable hashes, sample counts, execution
+orders and per-row report hashes were audited after timing. The engine source
+corpus still matches the frozen release. Subsequent unrelated parser/spec
+edits in the shared checkout are not part of this binary or tuning pass.
+Intermediate binaries, build logs, baseline artifacts, timing/discard logs,
+normalized MIR/diffs and cross-tier outputs remain under
+`temp/lambda_mir_mvp/tune48d/`. Earlier reports and diagnostic stages are retained.
+
+```bash
+LAMBDA_TEST_EXE=./temp/lambda_mir_mvp/tune48d/final-release.exe \
+  python3 test/benchmark/test_lambda_mir_mvp.py
+python3 test/benchmark/lambda_mir_mvp.py --release --subset additional \
+  --exe temp/lambda_mir_mvp/tune48d/final-release.exe \
+  --control temp/lambda_mir_mvp/tune48d/start-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune48d/start-release.exe \
+  --runs 100 --warmups 2
+```
+
+Use `--subset original` for the original rows; separately add
+`--case r7rs/sumfp --sumfp-batch 10000 --runs 30` for the matched batch. Use
+`--subset original --case kostya/levenshtein --runs 200` for the independent
+confirmation. The baseline leaves the shared `lambda.exe` in debug mode;
+all performance results use the archived release binaries.

@@ -85,6 +85,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_record_witness.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_string_arrays.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_predicate_branch.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_indirect_keys.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -147,6 +149,46 @@ class LambdaMirMvpTests(unittest.TestCase):
             with self.subTest(compiler=compiler):
                 self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler,
                     "LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"})
+
+    def test_immutable_indirect_keys(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_indirect_keys.ls"
+        for name in ("table_read", "nested_table"):
+            body = self.function_mir(source, name)
+            self.assertNotIn("\tcall\tcow_capture_value", body)
+            self.assertIn("\tcall\tfn_index", body)  # invalid keys retain checked absence
+        for name in ("mutable_table", "effectful_read"):
+            self.assertIn("\tcall\tcow_capture_value", self.function_mir(source, name))
+        lazy = self.function_mir(source, "lazy_condition")
+        key = re.search(r"\tmov\t(%r[0-9a-f]+), arg1\n", lazy).group(1)
+        key_read = re.search(r"\tmov\t%r[0-9a-f]+, " + re.escape(key) + r"\n", lazy)
+        first_truth = re.search(r"\t(?:eq|beq|bne)\t[^\n]+, 1\n", lazy)
+        self.assertIsNotNone(key_read)
+        self.assertIsNotNone(first_truth)
+        self.assertGreater(key_read.start(), first_truth.end())
+        native = lazy[:lazy.index("\tcall\tfn_index")]
+        self.assertRegex(native, r"\tb(?:eq|ne)\t[^\n]+, 1\n")
+        self.assertNotRegex(native, r"\teq\t[^\n]+, 1\n")
+
+    def test_static_scalar_fallback(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls"
+        for name in ("decimal_sum", "decimal_remainder", "decimal_quotient", "decimal_compare", "string_compare"):
+            body = self.function_mir(source, name)
+            self.assertNotIn("lambda_int_lane_", body)
+            before_helper = body[:re.search(r"\tcall\tfn_", body).start()]
+            self.assertNotIn("\tubgt\t", before_helper)
+        dynamic = self.function_mir(source, "dynamic_sum")
+        self.assertIn("\tubgt\t", dynamic)
+        self.assertIn("\tcall\tfn_add", dynamic)
+        chain = self.function_mir(source, "decimal_chain")
+        self.assertNotRegex(chain, r"\tcall\tmvp_\d+_decimal_quotient_dp")
+        self.assertIn("\tcall\tfn_mod", chain)
+        epilogue = re.search(r"(?m)^(L\d+):\n(?:\t[^\n]*\n)*?\tret\t", chain).group(1)
+        # the failed-local completion keeps its cold check; successful arithmetic does not.
+        self.assertNotIn("lambda_type_check", chain[:chain.index("\tjmp\t" + epilogue)])
+        self.assertIn("lambda_type_check", self.function_mir(source, "loose_decimal"))
+        text = self.function_mir(source, "decimal_text")
+        self.assertIn("fn_strcat_values", text)
+        self.assertNotIn("\tcall\tfn_join", text)
 
     def test_native_shift_mir(self):
         for function in ("typed", "fixed"):

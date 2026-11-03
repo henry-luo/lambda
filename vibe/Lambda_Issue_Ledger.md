@@ -18,6 +18,10 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Type-operator precedence follow-up — 2026-11-03
+
+The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern precedence `to` > `&` > `!` > `|`. The production C parser has distinct binding powers for these operators. **LR02-37 remains open pending focused qualification; no tests were run in this change.**
+
 ## Names, containment and matrix-row follow-up — 2026-10-31
 
 Implemented the long-name portion of **LR07-11**, correctness residues 1–4 of
@@ -609,8 +613,8 @@ every use fails to parse.
 <a id="lr02-36"></a>**LR02-36 · A quoted-path `import` without an alias is silently ignored · OPEN (found 2026-10-07, std test triage)**
 `import './circular_import.ls'` at the top of a script neither imports nor errors: the quoted-module branch at `lambda/runtime/build_ast.cpp:13179` only acts when `node->alias` is set, so the script runs as if the line were absent (it printed `42`). S16.9.8 gives the relative form `import .circular_import`, which does detect the cycle (E217, now asserted by `NegativeScriptTest.SelfImportIsCircularE217`). The unaliased quoted form should be rejected or resolved, not dropped.
 
-<a id="lr02-37"></a>**LR02-37 · The C expression parser gives `|`, `&`, `!` and `to` one binding power, so a type operation means one thing in a `type` declaration and another in a value expression (S10.1.1v4) · OPEN (found 2026-09-27 by the string-pattern audit; filed 2026-10-23)**
-`infix_bp` maps all four tokens to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c:1856`–`1858`), while the type-pattern parser and the reference grammar rank `to` above `&` above `!` above `|`. Re-checked 2026-10-23: with `type T = "a" | "b" & "c"` and `let x = "a" | "b" & "c"`, `"a" is T` is `true` and `"a" is x` is `false`; `let r = 5 | 1 to 3` fails at run time ("range bounds must be exact integers or single-codepoint strings") while the same type admits 5 and 1 to 3. S10.1.1v4 promises a type operation the same meaning wherever it is written; no ruling fixes the tiers themselves (SPO7, [LR05-17](#lr05-17)). Recommendation: make the reference-grammar order a clause of S10.1.1 and align the C expression parser. Record: [Lambda_Design_String_Pattern.md §5.5](Lambda_Design_String_Pattern.md#55-the-same-operators-in-value-expressions).
+<a id="lr02-37"></a>**LR02-37 · The C expression parser gave `|`, `&`, `!` and `to` one binding power · OPEN (S10.1.1v5 implemented 2026-11-03; qualification pending)**
+`infix_bp` previously mapped all four operators to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c`). That made `type T = "a" | "b" & "c"` admit `"a"`, while the same expression in `let x = ...` denoted `none`; `let r = 5 | 1 to 3` also failed at run time. **S10.1.1v5** adopts the reference grammar and type-pattern order, `to` > `&` > `!` > `|`, left-associative. The C parser now has separate binding powers, so both contexts group the first example as `"a" | ("b" & "c")`, and the range expression as `5 | (1 to 3)`. The previous reproducers have not yet been rerun.
 
 ## 3. Value & type model (LR_03)
 
@@ -767,7 +771,7 @@ this sits outside the pool/GC discipline.
 
 <a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
 These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
-- **SPO7, value half:** the tiers of `|`, `&`, binary `!` and `to` in value expressions. The island half is SP19. The resulting divergence between front ends is [LR02-37](#lr02-37).
+- **SPO7, value half resolved 2026-11-03 (S10.1.1v5):** value expressions now use `to` > `&` > `!` > `|`; implementation qualification remains [LR02-37](#lr02-37). The island half is SP19.
 - **SPO10:** what `.`, `...` and `"\s"` match across line terminators. Today `.` stops at a newline and `...` does not; the recommendation is a dotall `.` and the ECMAScript `\s` set.
 - **SPO12, spelling half:** how to write a case-insensitive `is` or `match`. The folding rule is S17.7.1. SP16's `\tag( … )` family, which the recommendation leaned on, was superseded by SP24.
 - **SPO1:** multi-letter and Unicode class names (`\p{Letter}`), deferred on 2026-08-07.
