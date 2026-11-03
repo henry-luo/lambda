@@ -5522,6 +5522,7 @@ void layout_shift_view_children(View* view, float offset_x, float offset_y);
 void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y);
 void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+bool layout_line_over_is_block_end(ViewBlock* block);
 float layout_line_block_start_baseline(LayoutContext* lycon, float used_line_height = -1.0f);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,

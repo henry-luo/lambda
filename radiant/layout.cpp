@@ -3150,7 +3150,7 @@ void layout_apply_inline_edge_extents(float top_extent, float bottom_extent,
     *line_after = max(*line_after, top_extent - *line_before);
 }
 
-static bool layout_line_over_is_block_end(ViewBlock* block) {
+bool layout_line_over_is_block_end(ViewBlock* block) {
     return block && layout_block_writing_mode(block) == WM_VERTICAL_LR &&
         layout_element_css_writing_mode(block->as_element()) != CSS_VALUE_SIDEWAYS_LR;
 }

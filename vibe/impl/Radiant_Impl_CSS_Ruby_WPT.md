@@ -16,6 +16,8 @@ float exclusion for internally split Ruby remain open. Whole unbroken Ruby
 float bands, relative-offset composition and block-axis annotation margin
 envelopes are qualified. Inline margin contributions and source border-box
 publication are also qualified. The objective is not complete.
+Semantic line-over/under mapping and internal block-start padding are qualified
+for ordinary Ruby across horizontal and both vertical writing modes.
 
 ## Objective and contracts
 
@@ -2565,3 +2567,76 @@ separate 41px/51px loose-line difference alone does not justify forcing
 Chromium's line-height choice. Evidence and bounded acceptance cases:
 `temp/ruby-m28/{original-remaining-difference.json,line-side-comparison.json,
 next-milestone.json}`.
+
+## M29: semantic Ruby sides use the line's source-axis mapping
+
+P1, qualified with the recorded BR/boundary limits below. The
+last three readings in imported `ruby-annotation-with-margin` have correct
+inline positions/sizes but appear on the wrong side in vertical-lr. Fresh
+horizontal/vertical-rl/vertical-lr controls reproduce the side reversal; the
+qualified M28 binary differs on 29 coordinates in the final initial fixture,
+up to 50px. Evidence: `temp/ruby-m29/{focused-before.log,
+browser-comparison-before.json}` and M28's original-case audit.
+
+[CSS Ruby §4.1](https://drafts.csswg.org/css-ruby-1/#rubypos) places annotations
+line-over/under, while [CSS Writing Modes §6.3](https://www.w3.org/TR/css-writing-modes-3/#line-directions)
+distinguishes those sides from block-start/end. The ordinary inline formatter's
+existing direction helper is promoted through the layout header and reused.
+Ruby alternation stays semantic; placement and extent measurement map that
+side into the owning flow's source block coordinates. Ascent/descent
+contributions retain their line-over convention. After-line placement uses
+the same mapping, rather than adding a final visual correction.
+
+Causal padding controls expose a second stage: M17's block-start-space adapter
+returned zero for every vertical context. Internal padding now uses the shared
+line-relative edge mapper, and the first line consumes that space from the
+corresponding semantic leading side. The existing external adjoining-margin
+protocol still uses physical Y; that separate vertical transfer remains open.
+No new persistent state or formal ruling is added (**D4.5.1v4 / D4.1.4v5**);
+the promoted helper stays inside the layout module (**D7.3.3–D7.3.4**).
+
+The regression covers ordinary and top/bottom/all margins in all three writing
+modes, three repeated Ruby lines, internal block-start padding, source identity
+and every reading character rectangle. Initial/retained and live under/over
+changes preserve physical side, separation and non-overlapping equivalent line
+envelopes. The padding assertions initially fail without the owning-stage fix
+and pass afterward without weakening expectations. All **230 affected neighbors**
+pass. Evidence: `temp/ruby-m29/{focused-padding-final.log,
+focused-padding-qualified-candidate.log,neighbors-final.log}`.
+
+Two full browser comparisons retain all **1,352 element/source coordinate**
+checks. Every remaining difference is one of **16 vertical BR rectangle
+coordinates**; annotation/base/flow/source-text geometry agrees within the
+existing 0.11px capture tolerance. Those BR failures remain in the artifact,
+and the raw comparator/references are unchanged. A separate 41px/51px
+loose-line example does not justify forcing Chromium's line-height policy:
+[CSS Ruby §3.6](https://drafts.csswg.org/css-ruby-1/#line-height) permits
+annotation overflow while requiring equivalent repeated Ruby not to overlap.
+Evidence: `temp/ruby-m29/browser-comparison-final.json` and M28's line-side probe.
+
+The frozen raw suite reaches **59/212 full matches**, gaining both
+`ruby-annotation-with-margin` and its reference, with no lost match or changed
+partial score. Dimension lint and the 421-name inventory check pass; only
+source/test reference columns change. Strict boundary DSOs link; the checker
+rejects the same six recorded imports as M28, with no added import or allowlist
+change. Evidence: `temp/ruby-m29/{wpt-final.log,delta-final.json,lint-final.log,
+inventory-check.log,boundary-comparison.json,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,091 passed, 305 partial, 2 skipped,
+0 failed / 9,398 checks**, including **495 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All seven frozen inputs and the qualified CLI hash remain unchanged
+after the gate. Evidence: `temp/ruby-m29/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 153 raw mismatches. The next milestone addresses
+the imported `pseudo-first-line` case. Fresh explicit-font controls check 192
+element/source coordinates; only the first reading box/text Y differs, with
+the reading staying over instead of inheriting first-line under positioning.
+Color-only, local Ruby position override, constant-under and later-line controls
+agree geometrically. CSS Pseudo §2.1.2–2.1.3 permits `ruby-position` and defines
+fragment-specific inherited values. Trace that inheritance at the source line
+and retain the effective value through metric and after-line phases; avoid
+coupling it to a dummy first-line font override or patching only final geometry.
+The existing font resolver correctly declines rules with no font properties.
+Evidence and bounded acceptance cases:
+`temp/ruby-m29/{first-line-comparison.json,next-milestone.json}`.

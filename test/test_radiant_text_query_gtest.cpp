@@ -15123,6 +15123,97 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyLineSidesFollowLineOverWithoutReversingBlockProgression) {
+    ASSERT_NE(load("test/html/layout_ruby_line_sides.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool vertical; bool reverse; float top, right, bottom, left;
+        size_t lines; float padding; DomText* source[3]; DomNode* parent[3]; const unsigned char* data[3];
+    } cases[] = {{"horizontal", false, false, 0, 0, 0, 0, 1},
+        {"horizontal-all", false, false, 10, 10, 10, 10, 1},
+        {"horizontal-top", false, false, 10, 0, 0, 0, 1},
+        {"horizontal-bottom", false, false, 0, 0, 10, 0, 1},
+        {"horizontal-lines", false, false, 0, 0, 0, 0, 3},
+        {"lr", true, false, 0, 0, 0, 0, 1}, {"lr-all", true, false, 10, 10, 10, 10, 1},
+        {"lr-top", true, false, 10, 0, 0, 0, 1}, {"lr-bottom", true, false, 0, 0, 10, 0, 1},
+        {"lr-lines", true, false, 0, 0, 0, 0, 3},
+        {"rl", true, true, 0, 0, 0, 0, 1}, {"rl-all", true, true, 10, 10, 10, 10, 1},
+        {"rl-top", true, true, 10, 0, 0, 0, 1}, {"rl-bottom", true, true, 0, 0, 10, 0, 1},
+        {"rl-lines", true, true, 0, 0, 0, 0, 3},
+        {"horizontal-padding", false, false, 0, 0, 0, 0, 3, 20},
+        {"lr-padding", true, false, 0, 0, 0, 0, 3, 20},
+        {"rl-padding", true, true, 0, 0, 0, 0, 3, 20}};
+    auto part = [&](const Case& entry, size_t line, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s-%s", entry.id,
+            line == 0 ? "" : line == 1 ? "-second" : "-third", suffix); return find(id);
+    };
+    auto bounds = [](DomElement* element) {
+        Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height); return box;
+    };
+    for (Case& entry : cases) for (size_t line = 0; line < entry.lines; line++) {
+        DomText* text = first_text_leaf(part(entry, line, "reading")); ASSERT_NE(text, nullptr);
+        entry.source[line] = text; entry.parent[line] = text->parent; entry.data[line] = text->text_data();
+    }
+    auto check = [&](bool under) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-line-sides"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id); Rect previous = {};
+            for (size_t line = 0; line < entry.lines; line++) {
+                Rect base = bounds(part(entry, line, "ruby")), reading = bounds(part(entry, line, "reading"));
+                if (!line && entry.padding > 0.0f) {
+                    char id[80]; str_fmt(id, sizeof(id), "%s-flow", entry.id);
+                    Rect flow = bounds(find(id));
+                    if (!entry.vertical) EXPECT_FLOAT_EQ(base.y, flow.y + entry.padding);
+                    else if (entry.reverse)
+                        EXPECT_FLOAT_EQ(base.x + base.width, flow.x + flow.width - entry.padding);
+                    else EXPECT_FLOAT_EQ(base.x, flow.x + entry.padding);
+                }
+                if (entry.vertical) {
+                    if (under) EXPECT_FLOAT_EQ(reading.x + reading.width + entry.right, base.x);
+                    else EXPECT_FLOAT_EQ(reading.x - entry.left, base.x + base.width);
+                    EXPECT_FLOAT_EQ(reading.width, 10.0f); EXPECT_FLOAT_EQ(reading.height, 80.0f);
+                } else {
+                    if (under) EXPECT_FLOAT_EQ(reading.y - entry.top, base.y + base.height);
+                    else EXPECT_FLOAT_EQ(reading.y + reading.height + entry.bottom, base.y);
+                    EXPECT_FLOAT_EQ(reading.width, 80.0f); EXPECT_FLOAT_EQ(reading.height, 10.0f);
+                }
+                Rect envelope = reading;
+                envelope.x -= entry.left; envelope.y -= entry.top;
+                envelope.width += entry.left + entry.right; envelope.height += entry.top + entry.bottom;
+                float end_x = max(envelope.x + envelope.width, base.x + base.width);
+                float end_y = max(envelope.y + envelope.height, base.y + base.height);
+                envelope.x = min(envelope.x, base.x); envelope.y = min(envelope.y, base.y);
+                envelope.width = end_x - envelope.x; envelope.height = end_y - envelope.y;
+                if (line) {
+                    if (!entry.vertical) EXPECT_LE(previous.y + previous.height, envelope.y);
+                    else if (entry.reverse) EXPECT_GE(previous.x, envelope.x + envelope.width);
+                    else EXPECT_LE(previous.x + previous.width, envelope.x);
+                }
+                previous = envelope;
+                DomText* text = entry.source[line];
+                EXPECT_EQ(first_text_leaf(part(entry, line, "reading")), text);
+                EXPECT_EQ(text->parent.get(), entry.parent[line]); EXPECT_EQ(text->text_data(), entry.data[line]);
+                for (unsigned character = 0; character < 8; character++) {
+                    Rect expected = {reading.x, reading.y, 10.0f, 10.0f};
+                    if (entry.vertical) expected.y += (float)character * 10.0f;
+                    else expected.x += (float)character * 10.0f;
+                    expect_character_rect(range, text, character, expected);
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(false); }
+    for (bool under : {true, false}) {
+        for (const Case& entry : cases) {
+            char id[80]; str_fmt(id, sizeof(id), "%s-flow", entry.id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "ruby-position", under ? "under" : "over"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(under);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyInlineMarginsContributeToColumnsWithoutEnteringBorderBoxes) {
     ASSERT_NE(load("test/html/layout_ruby_inline_margins.html"), nullptr);
     process_document_font_faces(&ui, document);
