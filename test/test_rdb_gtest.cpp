@@ -20,6 +20,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <uv.h>
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(path, mode) _mkdir(path)
@@ -2490,3 +2491,460 @@ TEST(RdbLiveCancel, MysqlInterruptsSleep) {
 }
 
 #endif  // _WIN32
+
+/* Scoped SQLite primitives: real files, host-owned connections and no Lambda API yet. */
+extern "C" {
+#include "../lib/rdb_sqlite_tx.h"
+}
+
+static int tx_sql(RdbSqliteTxn* tx, const char* sql, const RdbValue* params = NULL,
+                  int count = 0, RdbSqliteRowFn row = NULL, void* user = NULL) {
+    return rdb_sqlite_tx_execute(tx, sql, strlen(sql), params, count, row, user);
+}
+
+typedef struct TxRowCheck {
+    int rows;
+    bool matches;
+} TxRowCheck;
+
+static bool tx_integer_row(void* user, int count, const char* const* names,
+                           const RdbValue* values) {
+    TxRowCheck* check = (TxRowCheck*)user;
+    check->rows++;
+    check->matches = count == 1 && strcmp(names[0], "n") == 0 &&
+        values[0].type == RDB_TYPE_INT && values[0].int_val == 42;
+    return true;
+}
+
+static bool tx_bytes_row(void* user, int count, const char* const* names,
+                         const RdbValue* values) {
+    (void)names;
+    TxRowCheck* check = (TxRowCheck*)user;
+    const char bytes[] = {'a', '\0', 'b'};
+    check->rows++;
+    check->matches = count == 3 && values[0].type == RDB_TYPE_STRING &&
+        values[0].str_len == 3 && memcmp(values[0].str_val, bytes, 3) == 0 &&
+        values[1].type == RDB_TYPE_BLOB && values[1].str_len == 3 &&
+        memcmp(values[1].str_val, bytes, 3) == 0 && values[2].type == RDB_TYPE_BLOB &&
+        values[2].str_len == 0 && !values[2].is_null;
+    return true;
+}
+
+static bool tx_reject_row(void* user, int count, const char* const* names,
+                          const RdbValue* values) {
+    (void)user; (void)count; (void)names; (void)values;
+    return false;
+}
+
+TEST_F(RdbTest, SqliteSingleStatementAutocommitsAndRollsBackFailure) {
+    const char* create = "CREATE TABLE autocommit_entries (n INTEGER NOT NULL)";
+    ASSERT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, create, strlen(create), NULL, 0, NULL, NULL), RDB_OK);
+    const char* insert = "INSERT INTO autocommit_entries VALUES (?1)";
+    RdbValue value = {};
+    value.type = RDB_TYPE_INT;
+    value.int_val = 42;
+    ASSERT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, insert, strlen(insert), &value, 1, NULL, NULL), RDB_OK);
+    const char* rejected = "INSERT INTO autocommit_entries VALUES (NULL)";
+    EXPECT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, rejected, strlen(rejected), NULL, 0, NULL, NULL), RDB_ERROR);
+    const char* returning = "INSERT INTO autocommit_entries VALUES (17) RETURNING n";
+    EXPECT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, returning, strlen(returning), NULL, 0,
+                                      tx_reject_row, NULL), RDB_ERROR);
+    const char* query = "SELECT n FROM autocommit_entries";
+    TxRowCheck check = {};
+    EXPECT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, query, strlen(query), NULL, 0,
+                                      tx_integer_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 1);
+    EXPECT_TRUE(check.matches);
+}
+
+TEST_F(RdbTest, SqliteTransactionCommitsAndReadsOwnWrites) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE entries (n INTEGER NOT NULL)"), RDB_OK);
+    RdbValue value = {};
+    value.type = RDB_TYPE_INT;
+    value.int_val = 42;
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO entries VALUES (?1)", &value, 1), RDB_OK);
+    TxRowCheck check = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT n FROM entries", NULL, 0, tx_integer_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 1);
+    EXPECT_TRUE(check.matches);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT n FROM entries");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 42);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteExistingTransactionDoesNotCreateMissingFile) {
+    ASSERT_EQ(unlink(TEST_DB_EMPTY), 0);
+    EXPECT_EQ(rdb_sqlite_tx_begin_existing(pool, TEST_DB_EMPTY), nullptr);
+    EXPECT_NE(access(TEST_DB_EMPTY, F_OK), 0);
+    EXPECT_EQ(rdb_sqlite_tx_begin_existing(pool, ":memory:"), nullptr);
+    EXPECT_EQ(rdb_sqlite_tx_begin_existing(pool, "file::memory:?mode=memory"), nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'Existing')"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteTransactionFailurePoisonsEvenWhenHandled) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'valid')"), RDB_OK);
+    EXPECT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (11, NULL)"), RDB_ERROR);
+    TxRowCheck check = {};
+    EXPECT_EQ(tx_sql(tx, "SELECT 42 AS n", NULL, 0, tx_integer_row, &check), RDB_OK);
+    EXPECT_TRUE(check.matches);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_row_count(conn, "authors"), 3);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteTransactionUnwindRollsBackAndReleasesLock) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'pending')"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, true), RDB_OK);
+    tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'committed')"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteTransactionPreservesTextAndBlobBytes) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    const char bytes[] = {'a', '\0', 'b'};
+    RdbValue params[3] = {};
+    params[0].type = RDB_TYPE_STRING;
+    params[0].str_val = bytes;
+    params[0].str_len = 3;
+    params[1].type = RDB_TYPE_BLOB;
+    params[1].str_val = bytes;
+    params[1].str_len = 3;
+    params[2].type = RDB_TYPE_BLOB;
+    TxRowCheck check = {};
+    EXPECT_EQ(tx_sql(tx, "SELECT ?1, ?2, ?3", params, 3, tx_bytes_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 1);
+    EXPECT_TRUE(check.matches);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteTransactionRejectsUncontrolledStatements) {
+    const char* statements[] = {
+        "SELECT 1; SELECT 2", "ATTACH DATABASE ':memory:' AS other", "PRAGMA foreign_keys = OFF",
+        "BEGIN", "SAVEPOINT nested", "SELECT load_extension('missing')"
+    };
+    for (const char* sql : statements) {
+        RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+        ASSERT_NE(tx, nullptr);
+        EXPECT_EQ(tx_sql(tx, sql, NULL, 0, tx_integer_row, NULL), RDB_ERROR) << sql;
+        EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR) << sql;
+    }
+}
+
+TEST_F(RdbTest, SqliteTransactionRejectsArityAndForeignKeyErrors) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(tx_sql(tx, "SELECT ?1", NULL, 0, tx_integer_row, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(tx_sql(tx, "INSERT INTO books (id, title, author_id) VALUES (8, 'bad', 999)"), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+}
+
+TEST_F(RdbTest, SqliteTransactionResultConsumerFailureRollsBack) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'pending')"), RDB_OK);
+    EXPECT_EQ(tx_sql(tx, "SELECT 1", NULL, 0, tx_reject_row, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_row_count(conn, "authors"), 3);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteTransactionCommitFailureRollsBackSchemaAndData) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE deferred_child (id INTEGER REFERENCES authors(id) DEFERRABLE INITIALLY DEFERRED)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO deferred_child VALUES (999)"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_get_table(conn, "deferred_child"), nullptr);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteTransactionTreatsParametersAsData) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    const char text[] = "value'); DROP TABLE authors; --";
+    RdbValue param = {};
+    param.type = RDB_TYPE_STRING;
+    param.str_val = text;
+    param.str_len = (int)strlen(text);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, ?1)", &param, 1), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_row_count(conn, "authors"), 4);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteTransactionRejectsEmbeddedNulInSql) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    const char sql[] = "SELECT 1\0; DELETE FROM authors";
+    EXPECT_EQ(rdb_sqlite_tx_execute(tx, sql, sizeof(sql) - 1, NULL, 0, tx_integer_row, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+}
+
+TEST_F(RdbRegistryTest, SqliteTransactionTeardownRollsBackBeforeLateFinish) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_transaction_registry.db";
+    unlink(path);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, path);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(registry.adds, 1);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pending (n INTEGER)"), RDB_OK);
+    // Context teardown owns the native connection even if the transaction outlives it.
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    EXPECT_EQ(registry.removes, 0);
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    sqlite3_stmt* stmt = NULL;
+    ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='pending'", -1, &stmt, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    unlink(path);
+}
+
+static bool tx_teardown_row(void* user, int count, const char* const* names,
+                            const RdbValue* values) {
+    (void)count; (void)names; (void)values;
+    rdb_conn_life_close((RdbConnLife*)user);
+    return true;
+}
+
+TEST_F(RdbRegistryTest, SqliteTransactionTeardownDuringRowDefersClose) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_transaction_row_teardown.db";
+    unlink(path);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, path);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pending (n INTEGER)"), RDB_OK);
+    EXPECT_EQ(tx_sql(tx, "SELECT 1", NULL, 0, tx_teardown_row, registry.life), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    sqlite3_stmt* stmt = NULL;
+    ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='pending'", -1, &stmt, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    unlink(path);
+}
+
+struct SqliteWorkRace {
+    RdbSqliteWork* work;
+    uv_sem_t entered;
+    uv_sem_t resume;
+    int cancelled;
+    int result;
+    bool waited;
+    const char* sql;
+};
+
+static bool sqlite_work_wait_row(void* user, int count, const char* const* names,
+                                 const RdbValue* values) {
+    (void)count; (void)names; (void)values;
+    SqliteWorkRace* race = (SqliteWorkRace*)user;
+    if (!race->waited) {
+        race->waited = true;
+        uv_sem_post(&race->entered);
+        uv_sem_wait(&race->resume);
+    }
+    return true;
+}
+
+static void sqlite_work_thread(void* user) {
+    SqliteWorkRace* race = (SqliteWorkRace*)user;
+    race->result = rdb_sqlite_tx_work_execute(race->work, race->sql, strlen(race->sql),
+        NULL, 0, sqlite_work_wait_row, race, &race->cancelled);
+}
+
+TEST_F(RdbRegistryTest, SqliteWorkerPinDefersRegistryTeardown) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_worker_teardown.db";
+    unlink(path);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, path);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pending (n INTEGER)"), RDB_OK);
+    SqliteWorkRace race = {};
+    race.work = rdb_sqlite_tx_work_begin(tx);
+    race.sql = "SELECT 42";
+    ASSERT_NE(race.work, nullptr);
+    ASSERT_EQ(uv_sem_init(&race.entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&race.resume, 0), 0);
+    uv_thread_t worker;
+    ASSERT_EQ(uv_thread_create(&worker, sqlite_work_thread, &race), 0);
+    uv_sem_wait(&race.entered);
+    // The registry closes while SQLite is active; the owner-held pin defers close.
+    rdb_conn_life_close(registry.life);
+    uv_sem_post(&race.resume);
+    ASSERT_EQ(uv_thread_join(&worker), 0);
+    EXPECT_EQ(race.result, RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_work_end(race.work), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    uv_sem_destroy(&race.entered);
+    uv_sem_destroy(&race.resume);
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    sqlite3_stmt* stmt = NULL;
+    ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='pending'", -1, &stmt, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    unlink(path);
+}
+
+TEST_F(RdbTest, SqliteWorkerInterruptsRunningStatement) {
+    ASSERT_NE(sqlite3_threadsafe(), 0);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'pending')"), RDB_OK);
+    SqliteWorkRace race = {};
+    race.work = rdb_sqlite_tx_work_begin(tx);
+    race.sql = "WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n + 1 FROM seq WHERE n < 100000000) SELECT n FROM seq";
+    ASSERT_NE(race.work, nullptr);
+    ASSERT_EQ(uv_sem_init(&race.entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&race.resume, 0), 0);
+    uv_thread_t worker;
+    ASSERT_EQ(uv_thread_create(&worker, sqlite_work_thread, &race), 0);
+    uv_sem_wait(&race.entered);
+    __atomic_store_n(&race.cancelled, 1, __ATOMIC_RELEASE);
+    uv_sem_post(&race.resume);
+    ASSERT_EQ(uv_thread_join(&worker), 0);
+    EXPECT_EQ(race.result, RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_work_end(race.work), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    uv_sem_destroy(&race.entered);
+    uv_sem_destroy(&race.resume);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_row_count(conn, "authors"), 3);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteWorkerCancellationPoisonsTransaction) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pending (n INTEGER)"), RDB_OK);
+    RdbSqliteWork* work = rdb_sqlite_tx_work_begin(tx);
+    ASSERT_NE(work, nullptr);
+    int cancelled = 1;
+    const char* sql = "INSERT INTO pending VALUES (1)";
+    EXPECT_EQ(rdb_sqlite_tx_work_execute(work, sql, strlen(sql), NULL, 0, NULL, NULL, &cancelled), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_work_end(work), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name='pending'");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 0);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbRegistryTest, HeldConnectionDefersCloseUntilFinalRelease) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    RdbConnLife* first = rdb_conn_life_hold(conn);
+    RdbConnLife* second = rdb_conn_life_hold(conn);
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(first, second);
+    rdb_close(conn);
+    EXPECT_EQ(registry.removes, 1);
+    EXPECT_EQ(fake.closes, 0);
+    EXPECT_EQ(rdb_ping(conn), RDB_CONN_LOST);
+    rdb_conn_life_release(first);
+    EXPECT_EQ(fake.closes, 0);
+    rdb_conn_life_release(second);
+    EXPECT_EQ(fake.closes, 1);
+}
+
+TEST_F(RdbRegistryTest, SqliteTransactionHonorsHostAuthorization) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_transaction_refused.db";
+    unlink(path);
+    registry.refuse_authorize = true;
+    EXPECT_EQ(rdb_sqlite_tx_begin(pool, path), nullptr);
+    const char* sql = "CREATE TABLE forbidden (n INTEGER)";
+    EXPECT_EQ(rdb_sqlite_execute_once(path, sql, strlen(sql), NULL, 0, NULL, NULL), RDB_ERROR);
+    EXPECT_EQ(registry.refused_authorizations, 2);
+    EXPECT_EQ(registry.adds, 0);
+    EXPECT_NE(access(path, F_OK), 0);
+}
+
+typedef struct TxReentryCheck {
+    RdbSqliteTxn* tx;
+    int inner_result;
+} TxReentryCheck;
+
+static bool tx_reenter_row(void* user, int count, const char* const* names,
+                           const RdbValue* values) {
+    (void)count; (void)names; (void)values;
+    TxReentryCheck* check = (TxReentryCheck*)user;
+    check->inner_result = tx_sql(check->tx, "DELETE FROM authors");
+    return true;
+}
+
+TEST_F(RdbTest, SqliteTransactionRejectsReentryAndRemainsRollbackOnly) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id, name) VALUES (10, 'pending')"), RDB_OK);
+    TxReentryCheck check = {tx, RDB_OK};
+    EXPECT_EQ(tx_sql(tx, "SELECT 1", NULL, 0, tx_reenter_row, &check), RDB_OK);
+    EXPECT_EQ(check.inner_result, RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    EXPECT_EQ(rdb_row_count(conn, "authors"), 3);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqliteTransactionAcceptsTriggerBodyAsSingleStatement) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE tx_source (n INTEGER)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE tx_audit (n INTEGER)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "CREATE TRIGGER tx_after_insert AFTER INSERT ON tx_source "
+        "BEGIN INSERT INTO tx_audit VALUES (NEW.n); END;"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO tx_source VALUES (42)"), RDB_OK);
+    TxRowCheck check = {};
+    EXPECT_EQ(tx_sql(tx, "SELECT n FROM tx_audit", NULL, 0, tx_integer_row, &check), RDB_OK);
+    EXPECT_TRUE(check.matches);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+}

@@ -2030,6 +2030,80 @@ pn unread_count(password) {
 }
 ```
 
+#### lambda.io.sqlite
+
+Import `lambda.io.sqlite` with an alias to execute one parameterized SQLite
+statement against a local database file. Outside an `open` transaction each
+statement commits on success or rolls back on failure (S12.4.4v4); these calls
+park while SQLite executes (D7.2.4v4).
+
+| Function | Result | Behavior |
+|----------|--------|----------|
+| `database(path)` | target or error | Create a target for an `open` block; acquisition occurs when entering the block. |
+| `existing(path)` | target or error | Create an `open` target that requires an existing file and does not create a missing database. |
+| `execute(path_or_tx, sql, params?)` | `null` or error | Execute one statement with no result columns. |
+| `query(path_or_tx, sql, params?)` | array of rows or error | Execute one statement and return each row as an array in column order. |
+
+`path` and `sql` are strings; `params` is an array and defaults to `[]`.
+Placeholders are bound separately from SQL text. Values may be null, boolean,
+finite numeric values representable by SQLite, UTF-8 text or binary; booleans
+are stored as SQLite integers. Results use Lambda `int` for integers within
+its exact range and `int64` for larger signed values. SQLite text must be valid
+UTF-8. Positional rows preserve duplicate column names and nulls. Decimal and
+datetime values need an explicit application conversion.
+
+SQL is limited to one statement per call. Transaction-control statements,
+`ATTACH`, `DETACH`, pragmas, virtual-table creation and extension loading are
+rejected. Input SQL is limited to 1 MiB, paths to 32 KiB, and parameters to
+1,024 and 16 MiB of text/binary data. A query returns at most 100,000 rows,
+1,024 columns, 1,000,000 cells and 16 MiB of text/binary data; exceeding a
+limit fails and rolls back the statement. Cancellation interrupts execution
+and joins the worker before rollback. Opening the database and the final
+commit currently run on the caller's thread.
+
+To execute several statements atomically, create a target and pass the handle
+bound by `open` to each call. Reads see prior writes in that block. A clean
+exit commits, including `return`, `break` and `continue` leaving the block;
+errors, cancellation and failed return-type admission roll back. A failed SQL
+call makes the transaction rollback-only even if its error is caught; the
+block then rolls back and raises an error on exit (S12.4.4v4). A transaction
+handle belongs to its task and becomes invalid on leaving the block. SQL calls
+inside the block must use that handle, not a path. Nested `open` blocks,
+document updates and explicit `commit` or `rollback` are currently rejected
+within a SQLite block; SQL inside a document update block is rejected.
+`existing` opens read/write without SQLite's create flag and rejects
+`:memory:` and SQLite `file:` URIs. Prefix a literal filename beginning with
+`file:` with `./`. It is suitable when a missing file must remain missing;
+`database` and standalone calls may create a database file.
+
+The initial confined-app profile has no database broker and denies acquisition
+before opening a file (D7.5.2). macOS has been exercised; Windows and Linux
+remain to be qualified. These primitives do not by themselves provide the
+accounting app's migrations, backups or business controls.
+
+```lambda
+import sqlite: lambda.io.sqlite
+
+pn transfer(db, from_id, to_id, cents) {
+    let target = sqlite.database(db)^
+    open tx = target {
+        sqlite.execute(tx, "UPDATE balance SET cents = cents - ? WHERE id = ?", [cents, from_id])^
+        sqlite.execute(tx, "UPDATE balance SET cents = cents + ? WHERE id = ?", [cents, to_id])^
+    }
+}
+```
+
+```lambda
+import sqlite: lambda.io.sqlite
+
+pn main() {
+    let db = "temp/example.sqlite"
+    sqlite.execute(db, "CREATE TABLE IF NOT EXISTS notes (message TEXT NOT NULL)")^
+    sqlite.execute(db, "INSERT INTO notes VALUES (?1)", ["hello"])^
+    sqlite.query(db, "SELECT message FROM notes")^
+}
+```
+
 #### lambda.io.secret
 
 Passwords and tokens in the OS secret store, as a built-in module at `lambda.io.secret` (D7.2.4v4). Import it with an alias: `import secret: lambda.io.secret`. A value is a generic password named by a `service` and an `account`, both non-empty text. On macOS the store is the user's login Keychain. Other platforms raise `no secret store on this platform` until they gain a backend. All three functions are procedures: the OS may wait on an unlock or access prompt, so each call runs on a worker thread while the calling task parks. Values are never logged (`vibe/Lambda_Demo_Mail.md` ML6).

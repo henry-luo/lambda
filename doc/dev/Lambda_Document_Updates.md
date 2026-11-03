@@ -7,7 +7,7 @@ Lambda reads documents with the force step `#`, gives the nodes inside them an i
 > - [Lambda Procedural](../Lambda_Procedural.md) — `var`, assignment and value semantics (Tier 2)
 > - [Lambda System Functions](../Lambda_Sys_Func.md#inputoutput-functions) — `input`, `output`, `temp`
 
-> **Status.** The model is designed in [`vibe/Lambda_Design_Reference.md`](../../vibe/Lambda_Design_Reference.md) (rulings PTH30–PTH80) and implemented; its ratification into the formal semantics as S9.4 "Document updates" is pending, so this document cites the design IDs (`PTH#`). Differences between the design and the current build are marked **Not yet implemented**.
+> **Status.** The model is designed in [`vibe/Lambda_Design_Reference.md`](../../vibe/Lambda_Design_Reference.md) (rulings PTH30–PTH80) and implemented; its broader ratification into formal semantics as S9.4 "Document updates" is pending; transaction exit behavior is ruled by S12.4.4v4, and other document-update details cite the design IDs (`PTH#`). Differences between the design and the current build are marked **Not yet implemented**.
 
 ---
 
@@ -127,7 +127,7 @@ Update statements are procedure-family effects, like `output` (PTH55): inside a 
 
 ## Transactions: `open`, `commit`, `rollback`
 
-Outside `open`, each update statement is its own transaction and commits at once. Inside `open`, every update statement forms **one write set**, applied by `commit` or at the end of the block (PTH62, PTH63v2, PTH66v2):
+Outside `open`, each update statement is its own transaction and commits at once. Inside `open`, every update statement forms **one write set**, applied by `commit` or at the end of the block (PTH62, PTH63v2, S12.4.4v4):
 
 ```lambda
 let scratch = temp('scratch', {n: 1})^
@@ -139,7 +139,7 @@ open t = temp.'scratch' {
 temp('scratch')               // {n: 5, tag: 'x'}
 ```
 
-The `open` alias is the opened document, with `#` implied; `&t` recovers its address. `rollback` discards the write set, and an error that leaves the block rolls it back:
+The `open` alias is the opened document, with `#` implied; `&t` recovers its address. A successful `return`, `break` or `continue` that leaves the block also commits its pending write set; a transfer inside the block does not close it. A returned value must pass the enclosing function's declared return admission before commit; failure rolls back. This early-exit behavior is ruled by S12.4.4v4 but implementation parity remains pending. `rollback` discards the write set, and an error that leaves the block rolls it back:
 
 ```lambda
 pn fail() int^ { raise error("stop") }

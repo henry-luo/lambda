@@ -125,6 +125,8 @@ struct InterpFrame {
     // signal on the frame rather than in every return type lets it propagate
     // through `eval_expr` unchanged, since a content block is an expression.
     EvalSignal          signal;
+    uint32_t            open_depth;     // active transaction blocks in this activation
+    bool                return_admitted; // return checked before an open-block commit
     NameEntry*          skip_binding; // S7.7.2: identity of the rejected binding
     // bit i: `var` parameter slot i has a caller home or legacy entry, so a
     // replaced root reaches the caller at return (CW33)

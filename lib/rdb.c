@@ -221,6 +221,8 @@ struct RdbConnLife {
     ArrayList* stmts;           /* live driver statement handles */
     bool       closed;
     bool       owner_closing;   /* rdb_close() rather than registry teardown */
+    bool       free_pending;
+    unsigned   active_calls;
     uint32_t   rid;
     void*      registry;        /* runtime table holding the row (opaque) */
     RdbTunnel* tunnels[RDB_MAX_TARGETS];   /* host TLS bridges opened for this connection */
@@ -359,14 +361,7 @@ static void rdb_life_close_tunnels(RdbConnLife* life) {
     life->tunnel_count = 0;
 }
 
-void rdb_conn_life_close(RdbConnLife* life) {
-    if (!life || life->closed) return;
-    life->closed = true;
-    if (!life->owner_closing) {
-        // GC/teardown is a backstop, never the closing mechanism (S12.4.3)
-        log_error("rdb-registry: closing connection rid=%u '%s' left open by its owner",
-                  life->rid, life->uri);
-    }
+static void rdb_life_close_handle(RdbConnLife* life) {
     if (life->stmts) {
         for (int i = 0; i < life->stmts->length; i++) {
             life->driver->finalize(life->stmts->data[i]);
@@ -378,6 +373,18 @@ void rdb_conn_life_close(RdbConnLife* life) {
     rdb_life_close_tunnels(life);
 }
 
+void rdb_conn_life_close(RdbConnLife* life) {
+    if (!life || life->closed) return;
+    life->closed = true;
+    if (!life->owner_closing) {
+        // GC/teardown is a backstop, never the closing mechanism (S12.4.3)
+        log_error("rdb-registry: closing connection rid=%u '%s' left open by its owner",
+                  life->rid, life->uri);
+    }
+    // A synchronous row callback can trigger teardown while its statement is live.
+    if (!life->active_calls) rdb_life_close_handle(life);
+}
+
 static void rdb_life_free(RdbConnLife* life) {
     if (!life) return;
     rdb_life_close_tunnels(life);   // a failed open may leave bridges behind
@@ -385,7 +392,23 @@ static void rdb_life_free(RdbConnLife* life) {
     mem_free(life);
 }
 
-RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly) {
+RdbConnLife* rdb_conn_life_hold(RdbConn* conn) {
+    if (!conn || !conn->life || conn->life->closed) return NULL;
+    conn->life->active_calls++;
+    return conn->life;
+}
+
+void rdb_conn_life_release(RdbConnLife* life) {
+    if (!life || !life->active_calls) return;
+    life->active_calls--;
+    if (!life->active_calls && life->closed) {
+        rdb_life_close_handle(life);
+        if (life->free_pending) rdb_life_free(life);
+    }
+}
+
+static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, bool readonly,
+                              bool sqlite_no_create) {
     if (!pool || !uri) return NULL;
     char redacted[1024];
     rdb_redact_uri(uri, redacted, sizeof(redacted));
@@ -441,6 +464,7 @@ RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly) 
     memset(&opts, 0, sizeof(opts));
     opts.struct_size = sizeof(opts);
     opts.readonly = readonly;
+    opts.sqlite_no_create = sqlite_no_create;
 
     void* handle = NULL;
     int rc = driver->open(&rdb_host_api, &ctx, uri, &opts, &handle);
@@ -477,6 +501,14 @@ RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly) 
     return conn;
 }
 
+RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly) {
+    return rdb_open_impl(pool, uri, type, readonly, false);
+}
+
+RdbConn* rdb_open_sqlite_existing(Pool* pool, const char* path) {
+    return rdb_open_impl(pool, path, "sqlite", false, true);
+}
+
 void rdb_close(RdbConn* conn) {
     if (!conn || !conn->life) return;
     RdbConnLife* life = conn->life;
@@ -487,7 +519,8 @@ void rdb_close(RdbConn* conn) {
         rdb_registry_hooks->remove(life->registry, life->rid);
     }
     rdb_conn_life_close(life);
-    rdb_life_free(life);
+    if (life->active_calls) life->free_pending = true;
+    else rdb_life_free(life);
     conn->life = NULL;
     conn->handle = NULL;
     conn->rid = 0;

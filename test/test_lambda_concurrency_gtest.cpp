@@ -1092,6 +1092,59 @@ protected:
     }
 };
 
+struct AttachmentTeardownProbe {
+    int worker_started;
+    int worker_finished;
+    int offload_released;
+    int attachment_released;
+    bool release_order_valid;
+};
+
+static void attachment_teardown_worker(LambdaOffload* job, void* data) {
+    AttachmentTeardownProbe* probe = (AttachmentTeardownProbe*)data;
+    __atomic_store_n(&probe->worker_started, 1, __ATOMIC_RELEASE);
+    while (!__atomic_load_n(lambda_offload_cancel_flag(job), __ATOMIC_ACQUIRE)) uv_sleep(1);
+    __atomic_store_n(&probe->worker_finished, 1, __ATOMIC_RELEASE);
+}
+
+static void attachment_teardown_offload_release(void* data) {
+    AttachmentTeardownProbe* probe = (AttachmentTeardownProbe*)data;
+    probe->release_order_valid = __atomic_load_n(&probe->worker_finished, __ATOMIC_ACQUIRE) != 0;
+    probe->offload_released++;
+}
+
+static void attachment_teardown_attachment_release(void* data) {
+    AttachmentTeardownProbe* probe = (AttachmentTeardownProbe*)data;
+    probe->release_order_valid = probe->release_order_valid && probe->offload_released == 1;
+    probe->attachment_released++;
+}
+
+static Item attachment_teardown_task(Activation* self, Item arg) {
+    AttachmentTeardownProbe* probe = (AttachmentTeardownProbe*)(uintptr_t)arg.item;
+    static const char attachment_key = 0;
+    static const LambdaOffloadOps ops = {
+        attachment_teardown_worker, NULL, attachment_teardown_offload_release
+    };
+    if (!lambda_task_attachment_install(entry_task(self), &attachment_key, probe,
+            attachment_teardown_attachment_release)) return ItemError;
+    return lambda_task_offload(&ops, probe, 0);
+}
+
+// S12.4.2–S12.4.3: native resources must outlive orphaned workers during shutdown.
+TEST_F(LambdaConcurrencyRuntime, ShutdownJoinsOffloadBeforeReleasingTaskAttachment) {
+    AttachmentTeardownProbe probe = {};
+    ASSERT_NE(lambda_task_create(scheduler, attachment_teardown_task, frame_arg(&probe)), nullptr);
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    for (int i = 0; i < 1000 && !__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE); i++) uv_sleep(1);
+    ASSERT_EQ(__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE), 1);
+    lambda_scheduler_destroy(scheduler);
+    scheduler = NULL;
+    eval.scheduler = NULL;
+    EXPECT_EQ(probe.offload_released, 1);
+    EXPECT_EQ(probe.attachment_released, 1);
+    EXPECT_TRUE(probe.release_order_valid);
+}
+
 // S7.4.4: a payload-less compatibility value never borrows another error's state.
 TEST_F(LambdaConcurrencyRuntime, LegacyErrorMembersDoNotBorrowAmbientDiagnostics) {
     // Error members intern their stable default text in the runtime name pool.

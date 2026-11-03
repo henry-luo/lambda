@@ -66,6 +66,8 @@ typedef struct WriteEdit {
 // contributes to the block's set, as a stored procedure joins its caller's
 // transaction.
 bool write_set_transaction_open(void);
+// Distinguish an open block in this task from one held by another task.
+bool write_set_transaction_open_here(void);
 bool write_set_begin_transaction(void);
 
 // PTH80: an `open` block confines CRUD targets to the opened document. NULL

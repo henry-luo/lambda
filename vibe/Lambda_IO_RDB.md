@@ -1520,7 +1520,7 @@ behind the same descriptor:
 - Public domain license — no licensing concerns
 - Version: latest stable (≥ 3.45.0)
 
-**Build integration**: Add `sqlite3.c` to `build_lambda_config.json` under a new `sqlite` source group, compiled as C with `-DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION`.
+**Build integration**: Add `sqlite3.c` to `build_lambda_config.json` under a new `sqlite` source group, compiled as C with `-DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION`. Thread-safe SQLite is required for parked concurrent database tasks (D7.2.4v4).
 
 ---
 
@@ -2475,3 +2475,59 @@ full-auth request (`0x04`) is answered with the password only when the mode is
 - ~~§13 (first draft, 2026-10-02) RDB10: ADBC as a fourth driver with an
   optional `fetch_batch`.~~ Superseded the same day. The column-batch API
   stands on its own (RDB7), and ADBC moves to §9 Phase 5 (future).
+
+## 14. Scoped SQLite SQL transactions (RDB14v4)
+
+**Ruling:** S12.4.4v4; user decisions 2026-11-03. **Status:** single-statement
+autocommit and task-owned SQLite `open` transactions are implemented; the
+shared Lambda baseline passes after the URI guard. Platform and
+failure-injection work remains open.
+Scope: a SQLite transaction accessed from a Lambda procedure;
+this is not a ruling for every RDB backend. The resource lifetime remains
+governed by S12.4.1v3–S12.4.3.
+
+An `open` block scopes a SQLite transaction using parameterized SQL. A SQL read sees preceding
+SQL writes in its own transaction, following SQLite transaction visibility.
+A clean successful scope commits at exit, including `return`, `break` or
+`continue` that leaves the scope. A transfer inside it does not close it. An
+error exit or cancellation rolls back. A returned value must pass the
+enclosing function's declared return admission before commit; a failure rolls
+back. Outside an `open` transaction, each
+SQL statement is its own transaction and commits automatically on success or
+rolls back on failure. A failed SQL statement makes its scope rollback-only even when the
+program handles that statement error; the scope rolls back and raises at exit.
+This is separate from the document update write set, whose
+next version remains write-only before commit (PTH61). The two are not
+silently treated as one transaction.
+
+The user chose the existing `open` block form over a transaction callback and
+confirmed the error on rollback-only exit. It does not ratify the acquisition
+expression, SQL operation names, nesting, cross-document atomicity, the result
+type mapping, retry policy, or a security bypass. Those remain open; see
+[`Lambda_Impl_RDB_Write.md`](impl/Lambda_Impl_RDB_Write.md) for the
+implementation checkpoint and acceptance cases. Existing read-only `input()`
+remains eager and call-scoped (S12.4.1v3); the existing host registry owns
+connection lifecycle (JA16.1–JA16.4). Confined app database authorization
+remains subject to D7.5.2.
+
+The earlier RDB14 left the block form and rollback-only exit outcome undecided;
+RDB14v2 resolved both; RDB14v3 added successful control-flow exits and one-statement autocommit;
+RDB14v4 also rolls back on failed enclosing return admission per the user ruling.
+
+The `lambda.io.sqlite` built-in exposes a `database` target, parameterized
+one-statement `execute` and positional-row `query` for unconfined callers.
+An `open` handle belongs to its task, reads its own writes and is invalidated
+at scope exit. Nested transactions and explicit `commit`/`rollback` inside a
+SQLite scope are currently rejected. `existing(path)` supplies a target that
+fails if the file is absent and rejects transient-memory paths and `file:` URIs;
+the SQLite driver reads its additive `sqlite_no_create` open option only when
+the ABI record's `struct_size` includes that field. The owning task authorizes
+and pins a transaction; an offload worker executes with a cancellation progress
+handler and copies rows into bounded native storage. After the worker joins, the
+owner materializes Lambda values and commits or rolls back. An owner-held pin
+protects the connection if the registry is cleared while work is in flight.
+Opening and committing the SQLite file still occur on the owner thread;
+cross-platform qualification remains open.
+The existing D7.5.2 confined-app denial is unchanged. See
+[the implementation checkpoint](impl/Lambda_Impl_RDB_Write.md) for limits,
+security, tests and remaining work.

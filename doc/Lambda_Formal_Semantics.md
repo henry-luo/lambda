@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 85.0.0 (2026-11-03)
+**Spec version:** 86.0.0 (2026-11-03)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2396,6 +2396,21 @@ the last write.* [Features R1–R5]
   resources with a close capability. The GC finalizer is a backstop and
   leak detector, never the closing mechanism — *GC runs on memory pressure,
   not resource pressure.*
+- **S12.4.4v4*** An `open` block that scopes a transaction commits it on a
+  clean, successful exit, including when a `return`, `break` or `continue`
+  leaves the block; a transfer that stays inside the block does not end the
+  transaction. An error exit or cancellation rolls it back. The block, not the
+  control-flow statement, owns this boundary. Before a return crosses the
+  transaction boundary, its enclosing function's declared return admission
+  must succeed; a failed admission is an error exit and rolls back. A SQLite
+  `open` scopes a
+  transaction using parameterized SQL; reads see earlier writes in that same
+  transaction. A failed SQL statement marks the transaction rollback-only even
+  if its error is handled; at scope exit it rolls back and raises an error.
+  Outside an `open` transaction, each SQL statement is its own transaction and
+  commits automatically on success or rolls back on failure. SQLite visibility
+  is distinct from the document write-set rule. [RDB14v4, PTH66v4,
+  S12.4.1v3–S12.4.3]
 
 ---
 
@@ -3210,6 +3225,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S2.5.3v3, S2.5.4v3, S12.1.2v3 | **Fn-local control and M1 handler integration, 2026-11-03.** Functional fallthrough collects normal values; procedural normal results replace earlier results, including null. No-result declarations, assignments and statement loops leave the accumulator unchanged. M1 handlers contribute their ordinary success/recovery result under S7.6.1v9. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results), [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
 | S9.1.3v3, S9.2.2v2 | Place-home publication and numeric-row/view snapshots implemented 2026-11-03 on both tiers; baseline 8,718/8,718. Scalar/nullable/import/error/GC and AUTO-promotion regressions: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`; LR12-10/LR12-14 archived. Broader borrowing checks keep their existing status. |
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
+| S12.4.4v4 | Scoped SQLite transactions, return admission and statement autocommit ruled 2026-11-03; not implemented. Document `open` early-exit parity is also incomplete. See `vibe/impl/Lambda_Impl_RDB_Write.md`. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |

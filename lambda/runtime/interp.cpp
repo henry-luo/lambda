@@ -578,6 +578,8 @@ public:
         }
         frame_.slots[frame_.signal_index] = ITEM_NULL;   // zero before publish
         frame_.signal = EvalSignal::NORMAL;
+        frame_.open_depth = 0;
+        frame_.return_admitted = false;
         frame_.skip_binding = NULL;
         frame_.caller = st->top;
         st->top = &frame_;
@@ -1397,6 +1399,17 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
+// The same return admission serves ordinary function exit and open-block exit.
+static Item interp_admit_return(InterpFrame* f, Item value) {
+    Function* callable = f->callable_slot ? (Function*)(uintptr_t)*f->callable_slot : NULL;
+    TypeFunc* signature = callable ? (TypeFunc*)callable->fn_type : NULL;
+    if (!signature || !signature->has_explicit_return_contract || !signature->return_contract)
+        return value;
+    static const LambdaBoundary return_label = {"function return", NULL, NULL, NULL, 0};
+    return interp_coerce_declared_binding(f, value, signature->return_contract, &return_label,
+        f->fn && f->fn->analysis ? f->fn->analysis->frame_plan.return_boundary : NULL);
+}
+
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         AstNamedNode* parameter, const LambdaBoundary* boundary) {
     if (!parameter) return value;
@@ -2204,7 +2217,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
         return ItemError;
     }
-    if (node->interp_self_tail_call && f->fn && f->plan) {
+    if (node->interp_self_tail_call && f->fn && f->plan && !f->open_depth) {
         // Every argument is evaluated *before* any parameter is rebound: an
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
         // the slots as we go would feed the new n into acc.
@@ -6391,18 +6404,41 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Scratch target_slot(f);
         target_slot.set(target);
         Item opened = fn_open_begin(target_slot.get());
-        if (item_is_error(opened)) return opened;
+        if (item_is_error(opened)) {
+            // An open statement has no value position to carry acquisition failure.
+            interp_signal(f, EvalSignal::RETURNED, opened);
+            return opened;
+        }
         Scratch opened_slot(f);
         opened_slot.set(opened);
         NameEntry* alias_entry = ast_open_alias_entry(open_node);
         if (alias_entry) interp_write_binding(f, alias_entry, opened_slot.get());
-        Item body = eval_expr(f, open_node->body);
-        // PTH66v2: the block commits at its end, and ALWAYS rolls back when it
-        // exits by an unhandled runtime error.
-        bool unwinding = item_is_error(body) || interp_frame_pending(f);
+        f->open_depth++;
+        RootFrame roots(1);
+        Rooted<Item> body(roots, eval_expr(f, open_node->body));
+        f->open_depth--;
+        if (f->signal == EvalSignal::RETURNED && !item_is_error(interp_signal_payload(f))) {
+            // A rejected function return is an error exit of this transaction.
+            Item checked = interp_admit_return(f, interp_signal_payload(f));
+            interp_signal(f, EvalSignal::RETURNED, checked);
+            f->return_admitted = true;
+        }
+        // The block owns cleanup: successful nonlocal control transfers commit
+        // while a returned error or failed binding rolls back (S12.4.4v4).
+        bool unwinding = item_is_error(body.get()) || f->signal == EvalSignal::ERROR_SKIP ||
+            (f->signal == EvalSignal::RETURNED && item_is_error(interp_signal_payload(f)));
         Item closed = fn_open_end(unwinding ? BOOL_TRUE : BOOL_FALSE);
-        if (unwinding) return body;
-        return item_is_error(closed) ? closed : ItemNull;
+        if (unwinding) {
+            if (!interp_frame_pending(f) && item_is_error(body.get()))
+                interp_signal(f, EvalSignal::RETURNED, body.get());
+            return body.get();
+        }
+        if (item_is_error(closed)) {
+            // A failed commit replaces a pending successful control transfer.
+            interp_signal(f, EvalSignal::RETURNED, closed);
+            return closed;
+        }
+        return ItemNull;
     }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
@@ -7501,19 +7537,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 frame->signal == EvalSignal::ERROR_SKIP) {
             result = interp_signal_payload(frame);
         }
-        if (signature && signature->has_explicit_return_contract &&
-                signature->return_contract) {
-            // The MIR return firewall checks a dynamic body at every declared
-            // return site. T0 must perform the same check before the callee
-            // frame closes, otherwise `fn f() int { any_value() }` leaks its
-            // runtime value to the caller without the required E201 (S7.7.2).
-            static const LambdaBoundary return_label =
-                {"function return", NULL, NULL, NULL, 0};
-            Item checked = interp_coerce_declared_binding(frame, result,
-                signature->return_contract, &return_label,
-                frame->fn->analysis->frame_plan.return_boundary);
-            result = checked;
-        }
+        // A transaction exit may already have admitted the returned value.
+        if (!frame->return_admitted) result = interp_admit_return(frame, result);
         if (borrowed) {
             // a transported home (satellite caller) has no caller frame but
             // still needs its final value captured for the write-back below

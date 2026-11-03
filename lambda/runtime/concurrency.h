@@ -16,6 +16,7 @@ typedef struct LambdaTask LambdaTask;
 typedef struct LambdaTaskScope LambdaTaskScope;
 typedef void (*LambdaTaskCompletionFn)(LambdaTask* task, Item result, void* data);
 typedef void (*LambdaTaskObserverDestroyFn)(void* data);
+typedef void (*LambdaTaskAttachmentReleaseFn)(void* data);
 typedef bool (*LambdaPromiseIsFn)(Item value);
 typedef Item (*LambdaPromiseWaitFn)(Item promise, LambdaTask* waiter);
 typedef Item (*LambdaHandleToPromiseFn)(Item handle);
@@ -81,6 +82,13 @@ bool lambda_task_cancel(LambdaTask* task);
 Item lambda_task_suspend(LambdaTask* task);
 bool lambda_task_on_complete(LambdaTask* task, LambdaTaskCompletionFn callback,
     void* data, LambdaTaskObserverDestroyFn destroy_data);
+// Task-owned native state; called only by its scheduler thread. `take` removes
+// the entry without releasing it. Teardown releases remaining entries after
+// any offload worker has joined (S12.4.2–S12.4.3).
+bool lambda_task_attachment_install(LambdaTask* task, const void* key, void* data,
+    LambdaTaskAttachmentReleaseFn release);
+void* lambda_task_attachment_find(LambdaTask* task, const void* key);
+void* lambda_task_attachment_take(LambdaTask* task, const void* key);
 void lambda_concurrency_set_promise_bridge(LambdaPromiseIsFn is_promise,
     LambdaPromiseWaitFn wait_promise, LambdaHandleToPromiseFn handle_to_promise);
 

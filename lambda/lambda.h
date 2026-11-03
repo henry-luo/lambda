@@ -740,6 +740,10 @@ typedef enum SysFunc {
     SYSFUNC_HASH,                 // hash(value, algorithm) - SHA-256/384/512 digest as binary
     SYSPROC_UUID,                 // uuid() - a random version 4 UUID
     SYSFUNC_URL_ENCODE,           // url_encode(text) - RFC 3986 percent-encoding
+    SYSPROC_IO_SQLITE_DATABASE,
+    SYSPROC_IO_SQLITE_EXISTING,
+    SYSPROC_IO_SQLITE_EXECUTE,
+    SYSPROC_IO_SQLITE_QUERY,
     SYSPROC_IO_LOOPBACK_LISTEN,   // lambda.io.loopback listen() - a listener on 127.0.0.1
     SYSPROC_IO_LOOPBACK_ACCEPT,   // lambda.io.loopback accept(listener, seconds, page) - one browser request
     SYSPROC_IO_WEBSOCKET_OPEN,    // lambda.io.websocket: task-owned WS/WSS transport
@@ -3637,6 +3641,12 @@ extern "C" {
     Item pn_io_websocket_listen2(Item port, Item options);
     Item pn_io_websocket_accept1(Item listener);
     Item pn_io_websocket_accept2(Item listener, Item timeout_ms);
+    Item pn_io_sqlite_database(Item path);
+    Item pn_io_sqlite_existing(Item path);
+    Item pn_io_sqlite_execute2(Item path, Item sql);
+    Item pn_io_sqlite_execute3(Item path, Item sql, Item params);
+    Item pn_io_sqlite_query2(Item path, Item sql);
+    Item pn_io_sqlite_query3(Item path, Item sql, Item params);
     Item pn_io_loopback_listen(void);
     Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 

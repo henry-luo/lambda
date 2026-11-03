@@ -456,7 +456,7 @@ The rulings:
 - **The write set is the enclosing `open` block; outside one, each
   statement is its own (PTH63v2).** Inside `open { }` all CRUD statements
   across all documents form one write set, committed by `commit` or at
-  block exit (PTH66v2). Outside any `open`, a CRUD statement is a
+  block exit (S12.4.4v4, PTH66v4). Outside any `open`, a CRUD statement is a
   one-statement transaction that **autocommits at once** — the shell case:
   `put cfg#retries = 3` takes effect immediately, with no pending state
   to remember. At `commit` a write set is applied **in program order** and
@@ -519,13 +519,18 @@ The rulings:
   explicitly lazy *plan* value. PTH64 is what keeps S1.6: an eager and a
   lazy reader raise at the same `commit`, because the cursor is semantic.
   The error *site* for content errors under deferred reading is PTH-O13.
-- **Block exit (PTH66v2).** An `open` block requires an explicit `commit`
-  or commits implicitly at its end; if it exits by an unhandled runtime
-  error it **always** rolls back. Nothing is ever pending at evaluation
-  end — outside a block every statement has already committed, and an
-  evaluation cannot end inside a block except by an error — so the
-  configurable end-of-evaluation default of the first draft is withdrawn
-  (PTH-O16 resolved).
+- **Block exit (PTH66v4; S12.4.4v4).** An `open` block commits implicitly
+  on successful exit, including a `return`, `break` or `continue` that leaves
+  the block; a control transfer that stays inside it does not close it. An
+  unhandled runtime error or cancellation rolls back. If the enclosing
+  function's declared return admission fails, the block rolls back before
+  the error reaches the caller. Explicit `commit` and
+  `rollback` retain their existing behavior within the block. Nothing remains
+  pending at evaluation end; the configurable end-of-evaluation default of
+  the first draft remains withdrawn (PTH-O16 resolved). The former assumption
+  that an evaluation can end inside a block only by error did not account for
+  early control-flow exits. User ruling 2026-11-03. Implementation parity is
+  pending.
 - **Persistence is the store's (PTH67).** `commit` advances the head of
   this evaluation's document context. Whether and when the document store
   persists a committed head, and how it presents a stable head between
@@ -541,7 +546,7 @@ The rulings:
   … }` and `open v = target { … }`, where the target is a document, a set
   of documents, or a directory, open those documents for the block: the
   block is a transaction scope, its exit is a commit-or-rollback point
-  under PTH66v2, and a `commit` inside it ends the current write set and
+  under S12.4.4v4/PTH66v4, and a `commit` inside it ends the current write set and
   begins a new one. This is the block form of the S14 `open()` scoped
   resource (block-exit auto-close). **The transaction scope is dynamic
   (PTH78)**: a `pn` called from inside the block contributes to the
@@ -935,7 +940,7 @@ the identity model.
 | **PTH63v2** ✓ | Inside `open { }` all CRUD statements across all documents form one write set; outside any `open` each statement is a one-statement transaction that autocommits at once. A write set is applied in program order and validated at `commit`, atomically: any rejected operation raises and rolls back the whole set. |
 | **PTH64v2** ✓ | MVCC: an iteration over a forced document iterates the version its source bound; `commit` advances the head for later forces and never waits or raises for a cursor; a deferred reader pins its version. |
 | **PTH65v2** ✓ | `#` turns a reference into what it refers to; how much is materialised and when — per step included — is representation (S14.3.1v2); the semantic cursor keeps S1.6. |
-| **PTH66v2** ✓ | An `open` block commits explicitly or implicitly at its end, and always rolls back on an unhandled runtime error; nothing is pending at evaluation end (the configurable default is withdrawn). |
+| **PTH66v4** | S12.4.4v4: successful exits including `return`, `break` and `continue` commit; errors, cancellation and failed return admission roll back. The block owns cleanup. Implementation parity pending. |
 | **PTH67v2** ✓ | Persistence is outside the spec: `commit` advances this evaluation's head; the store decides durability, must present a stable head between the evaluation's commits, and must keep a version readable while a binding or cursor holds it. |
 | **PTH68v3** ✓ | `open target { … }` / `open v = target { … }` (document, document set, directory) is a bounded transaction: explicit `commit` or implicit at block end, rollback on error; a `commit` inside ends the write set and begins a new one. Nesting deferred, write confinement open (PTH-O15). |
 | **PTH78** | Transaction scope is dynamic: a `pn` called inside an `open` block joins its write set; `commit`/`rollback` with no transaction open raise. The relative base (PTH74) is lexical. |

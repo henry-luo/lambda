@@ -165,10 +165,12 @@ extern int g_js_force_document_interp;
 // ============================================================================
 
 // Loop label pair for break/continue
+struct MirOpenScope;
 struct LoopLabels {
     MIR_label_t continue_label;
     MIR_label_t break_label;
     MIR_reg_t task_scope_base;
+    MirOpenScope* open_scope_base;
     // A zero-based forward loop proves its induction variable and the bound
     // bindings named by the condition nonnegative while the body is executing.
     NameEntry* nonnegative_counter;
@@ -247,6 +249,17 @@ struct MirInlineFrame {
     MirInlineFrame* parent = NULL;
 };
 
+// Tracks the lexical open block for exits emitted by this activation only.
+struct MirOpenScope {
+    MirOpenScope* parent;
+    MIR_item_t function;
+    MirInlineFrame* inline_frame;
+    MirSkipRegion* outer_skip;
+    MirBindingBoundary* outer_boundary;
+    MirAdmissionGuard* outer_admission;
+    MIR_reg_t task_scope_base;
+};
+
 // Hash-map values can relocate as the lowering scope grows. Keep stable
 // binding identity plus the map key, then resolve the current entry on use.
 typedef struct MirBindingVarLocator {
@@ -273,6 +286,7 @@ struct MirArrayTailPlan {
 };
 
 struct MirTranspiler {
+    MirOpenScope* open_scope;
     const AstNode* boundary_source;
     // a store tracks its retained RHS at the producer boundary, once.
     AstCompoundAssignNode* stored_value_capture;
@@ -2199,6 +2213,7 @@ static MirIndexedLoopFrame mir_begin_indexed_loop(MirTranspiler* mt, const char*
     if (mt->loop_depth < 31) {
         mt->loop_stack[mt->loop_depth].continue_label = frame.continue_label;
         mt->loop_stack[mt->loop_depth].break_label = frame.end;
+        mt->loop_stack[mt->loop_depth].open_scope_base = mt->open_scope;
         mt->loop_stack[mt->loop_depth].task_scope_base = mt->task_scopes
             ? em_call_0(&mt->em, "lambda_task_scope_current", MIR_T_P, false) : 0;
         mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
@@ -2618,7 +2633,23 @@ static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
     em_stage_function_return(&mt->em, value);
 }
 
+static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value,
+    JitValueClass value_class);
+static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char* prefix);
+
+static MIR_reg_t mir_unwind_open_error(MirTranspiler* mt, MIR_reg_t error_item) {
+    MirOpenScope* scope = mt->open_scope;
+    if (!scope || scope->function != mt->em.func_item || scope->inline_frame != mt->inline_frame)
+        return error_item;
+    // Cleanup can allocate, so the error stays rooted until publication.
+    int root = create_gc_root_slot(mt, error_item, JIT_VALUE_BOXED_ITEM);
+    (void)emit_call_1(mt, "fn_open_end", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+    return load_gc_root_slot(mt, root, "open_error");
+}
+
 static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) {
+    error_item = mir_unwind_open_error(mt, error_item);
     if (mir_inline_exit(mt, MIR_new_reg_op(mt->ctx, error_item))) return;
     if (mt->em.frame.return_lane_kind != RETURN_LANE_ERROR) {
         // LR12-24: a native value lane cannot represent an error Item, so
@@ -9000,6 +9031,41 @@ static void transpile_task_scope_unwind(MirTranspiler* mt, bool error_exit) {
     transpile_task_scope_unwind_to(mt, mt->task_scope_base_reg, error_exit);
 }
 
+// Commit only scopes crossed by this transfer; inner task scopes leave first.
+static void mir_commit_open_to(MirTranspiler* mt, MirOpenScope* base) {
+    MirOpenScope* saved = mt->open_scope;
+    MirSkipRegion* saved_skip = mt->skip_region;
+    MirBindingBoundary* saved_boundary = mt->binding_boundary;
+    MirAdmissionGuard* saved_admission = mt->admission_guard;
+    for (MirOpenScope* scope = saved; scope && scope != base; scope = scope->parent) {
+        if (scope->function != mt->em.func_item || scope->inline_frame != mt->inline_frame) break;
+        transpile_task_scope_unwind_to(mt, scope->task_scope_base, false);
+        mt->open_scope = scope->parent;
+        mt->skip_region = scope->outer_skip;
+        mt->binding_boundary = scope->outer_boundary;
+        mt->admission_guard = scope->outer_admission;
+        MIR_reg_t result = emit_call_1(mt, "fn_open_end", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        emit_return_if_item_error(mt, result);
+    }
+    mt->open_scope = saved;
+    mt->skip_region = saved_skip;
+    mt->binding_boundary = saved_boundary;
+    mt->admission_guard = saved_admission;
+}
+
+// A returned Item or raw GC pointer stays live across transaction cleanup.
+static MIR_reg_t mir_commit_open_value(MirTranspiler* mt, MIR_reg_t value,
+        JitValueClass value_class) {
+    MirOpenScope* scope = mt->open_scope;
+    if (!scope || scope->function != mt->em.func_item || scope->inline_frame != mt->inline_frame)
+        return value;
+    int root = (value_class == JIT_VALUE_BOXED_ITEM || value_class == JIT_VALUE_RAW_GC_POINTER)
+        ? create_gc_root_slot(mt, value, value_class) : -1;
+    mir_commit_open_to(mt, NULL);
+    return root >= 0 ? load_gc_root_slot(mt, root, "open_return") : value;
+}
+
 // ============================================================================
 // Phase 3: Direct Map/Struct Field Access helpers
 // ============================================================================
@@ -12725,6 +12791,13 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         // arithmetic consumer gets a chance to use it.
         TypeId direct_native_return = mir_direct_native_return_type(mt, call);
         NativeFuncInfo* direct_native_info = mir_direct_native_info(mt, call);
+        // A non-native container call returns an Item even when its inferred
+        // success type is a map or array; machine register class cannot prove
+        // that the producer returned a raw GC pointer (D2.4.1–D2.4.3).
+        if (!call->propagate && direct_native_return == LMD_TYPE_ANY &&
+                (!direct_callee || direct_callee->node_type != AST_NODE_SYS_FUNC) &&
+                (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM ||
+                 tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_RANGE)) return LMD_TYPE_ANY;
         if (direct_signature && !direct_signature->has_explicit_return_contract &&
                 direct_native_info && direct_native_info->has_native &&
                 direct_native_return == LMD_TYPE_ANY) {
@@ -18492,7 +18565,9 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         !mir_branch_ends_in_return(if_node->otherwise);
     bool need_boxing = !native_tail_result &&
         (condition_error || if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_TYPE ||
-         then_mir != else_mir || then_mir != type_to_mir(if_tid));
+         then_mir != else_mir || then_mir != type_to_mir(if_tid) ||
+         lambda_canonical_rep_for_type_id(then_tid) != lambda_canonical_rep_for_type_id(if_tid) ||
+         lambda_canonical_rep_for_type_id(else_tid) != lambda_canonical_rep_for_type_id(if_tid));
     if (native_tail_result) {
         // A raised arm exits through the function error lane and never reaches
         // this join. Keep the reachable tail arm in the native return lane
@@ -22078,6 +22153,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     if (mt->loop_depth < 31) {
         mt->loop_stack[mt->loop_depth].continue_label = l_loop;
         mt->loop_stack[mt->loop_depth].break_label = l_end;
+        mt->loop_stack[mt->loop_depth].open_scope_base = mt->open_scope;
         mt->loop_stack[mt->loop_depth].task_scope_base = mt->task_scopes
             ? emit_call_0(mt, "lambda_task_scope_current", MIR_T_P) : 0;
         mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
@@ -37609,6 +37685,9 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // TCO: return value is in tail position — if this is a recursive call,
     // it can be converted to a goto jump instead of a function call.
     bool saved_tail = mt->in_tail_position;
+    bool open_transfer = mt->open_scope && mt->open_scope->function == mt->em.func_item &&
+        mt->open_scope->inline_frame == mt->inline_frame;
+    if (open_transfer) mt->in_tail_position = false;
     AstNode* return_expr = ret_node && ret_node->value
         ? ast_unwrap_primary(ret_node->value) : NULL;
     bool pair_return_frame = mt->em.frame.return_lane_kind == RETURN_LANE_SCALAR &&
@@ -37622,7 +37701,8 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // D5.2.1v5/S11.4.1v5: forwarding a pair cannot bypass return admission.
         mir_boundary_is_redundant(mt, ret_node->value,
             mir_unwrap_decl_type(mt->current_return_type));
-    if (mt->tco_func || pending_tail_candidate) {
+    if (open_transfer) pending_tail_candidate = false;
+    if (!open_transfer && (mt->tco_func || pending_tail_candidate)) {
         mt->in_tail_position = true;
     }
 
@@ -37678,6 +37758,16 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         if (mt->block_returned) {
             mt->in_tail_position = saved_tail;
             return val;
+        }
+
+        // An error returned from inside an open block is an error exit, even
+        // when the declared return contract admits error values.
+        if (mt->open_scope && mt->open_scope->function == mt->em.func_item &&
+                mt->open_scope->inline_frame == mt->inline_frame &&
+                value_producer.rep == VALUE_REP_ITEM) {
+            val = mir_materialize_pending_reg(mt, val, MIR_PENDING_REASON_REP_CONVERSION);
+            value_producer.reg = val;
+            emit_return_if_item_error(mt, val);
         }
 
         if (pending_tail_candidate && mt->em.pending_live_companion &&
@@ -37758,6 +37848,9 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                 native_val = emit_unbox_contract_lane(mt, boxed, native_ret,
                     mt->current_return_type);
             }
+            ValueRep native_rep = lambda_canonical_rep_for_type_id(native_ret);
+            native_val = mir_commit_open_value(mt, native_val,
+                native_rep == VALUE_REP_RAW_GC_POINTER ? JIT_VALUE_RAW_GC_POINTER : JIT_VALUE_NON_GC_SCALAR);
             emit_vargs_restore();
             transpile_task_scope_unwind(mt, false);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, native_val));
@@ -37769,22 +37862,31 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             MIR_reg_t boxed = em_require_rep(&mt->em, value_producer,
                 VALUE_REP_ITEM).reg;
             boxed = emit_coerce_boxed_to_declared(mt, boxed, mt->current_return_type);
+            boxed = mir_commit_open_value(mt, boxed, JIT_VALUE_BOXED_ITEM);
             emit_vargs_restore();
             transpile_task_scope_unwind(mt, false);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed));
         }
     } else {
-        // Return with no value
+        // A bare return is null and must pass the same declared return
+        // admission before a transaction can commit (S11.4.1v5, S12.4.4v4).
+        MIR_reg_t null_value = emit_null_item_reg(mt);
+        MIR_reg_t checked = null_value;
+        if (return_contract_needs_checked_boundary(mt->current_return_type)) {
+            checked = emit_checked_value_boundary(mt,
+                em_value_for_rep(null_value, LMD_TYPE_NULL, VALUE_REP_ITEM),
+                mir_unwrap_decl_type(mt->current_return_type), "function return");
+            emit_return_if_item_error(mt, checked);
+        }
+        MIR_reg_t result = native_ret == LMD_TYPE_ANY ? checked :
+            emit_unbox_contract_lane(mt, checked, native_ret, mt->current_return_type);
+        ValueRep rep = native_ret == LMD_TYPE_ANY ? VALUE_REP_ITEM :
+            lambda_canonical_rep_for_type_id(native_ret);
+        result = mir_commit_open_value(mt, result, rep == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM :
+            rep == VALUE_REP_RAW_GC_POINTER ? JIT_VALUE_RAW_GC_POINTER : JIT_VALUE_NON_GC_SCALAR);
         emit_vargs_restore();
         transpile_task_scope_unwind(mt, false);
-        if (native_ret == LMD_TYPE_FLOAT) {
-            emit_function_return(mt, MIR_new_double_op(mt->ctx, 0.0));
-        } else if (native_ret != LMD_TYPE_ANY) {
-            emit_function_return(mt, MIR_new_int_op(mt->ctx, 0));
-        } else {
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_function_return(mt, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL));
-        }
+        emit_function_return(mt, MIR_new_reg_op(mt->ctx, result));
     }
 
     mt->in_tail_position = saved_tail;
@@ -40483,11 +40585,24 @@ static MIR_reg_t transpile_open_statement_item(MirTranspiler* mt,
         mir_bind_item_var(mt, open_node->alias, alias_entry, &TYPE_ANY,
             opened);
     }
-    transpile_expr_value(mt, open_node->body);
-    // PTH66v2: the block commits at its end. An unhandled runtime error inside
-    // the body has already returned through emit_return_if_item_error, so a
-    // rollback on that path is the ENCLOSING evaluation's teardown, not this
-    // instruction stream's -- which is why `unwinding` is false here.
+    MirOpenScope scope = {mt->open_scope, mt->em.func_item, mt->inline_frame,
+        mt->skip_region, mt->binding_boundary, mt->admission_guard,
+        mt->task_scopes ? emit_call_0(mt, "lambda_task_scope_current", MIR_T_P) : 0};
+    mt->open_scope = &scope;
+    MirValue body = transpile_expr_value(mt, open_node->body);
+    MIR_reg_t body_item = em_require_rep(&mt->em, body, VALUE_REP_ITEM).reg;
+    mt->open_scope = scope.parent;
+    // A local block join can carry an error without taking a function return.
+    MIR_reg_t tag = emit_item_tag(mt, body_item);
+    MIR_label_t body_ok = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, body_ok),
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+    int root = create_gc_root_slot(mt, body_item, JIT_VALUE_BOXED_ITEM);
+    (void)emit_call_1(mt, "fn_open_end", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+    emit_return_if_item_error(mt, load_gc_root_slot(mt, root, "open_body_error"));
+    emit_label(mt, body_ok);
+    // S12.4.4v4: the block commits at its successful end.
     MIR_reg_t closed = emit_call_1(mt, "fn_open_end", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
     emit_return_if_item_error(mt, closed);
@@ -40499,6 +40614,7 @@ static MirValue transpile_statement_value(MirTranspiler* mt, AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_BREAK_STAM:
         if (mt->loop_depth > 0) {
+            mir_commit_open_to(mt, mt->loop_stack[mt->loop_depth - 1].open_scope_base);
             transpile_task_scope_unwind_to(mt,
                 mt->loop_stack[mt->loop_depth - 1].task_scope_base, false);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -40511,6 +40627,7 @@ static MirValue transpile_statement_value(MirTranspiler* mt, AstNode* node) {
         break;
     case AST_NODE_CONTINUE_STAM:
         if (mt->loop_depth > 0) {
+            mir_commit_open_to(mt, mt->loop_stack[mt->loop_depth - 1].open_scope_base);
             transpile_task_scope_unwind_to(mt,
                 mt->loop_stack[mt->loop_depth - 1].task_scope_base, false);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
