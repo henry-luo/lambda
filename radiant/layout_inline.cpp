@@ -571,7 +571,7 @@ void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
     }
 }
 
-static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
+bool layout_inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
     DomNode* source = nullptr;
     uint32_t edge = layout_inline_text_edge_codepoint(inline_node, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
@@ -799,6 +799,8 @@ static void contribute_misparented_ruby_annotation_line_height(
         LayoutContext* lycon, ViewSpan* annotation,
         const Linebox* base_line_before_annotation) {
     if (!lycon || !annotation || !base_line_before_annotation) return;
+    // an empty strut has no annotation line whose inherited leading could enlarge the base line.
+    if (inline_child_is_empty_strut(static_cast<View*>(annotation))) return;
     float annotation_extent = max(annotation->height, annotation->content_height);
     if (annotation_extent <= 0.0f) return;
 
@@ -3106,7 +3108,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // nearest common ancestor's wrapping mode, not the inline's own mode.
     if ((span_is_unbreakable || layout_inline_span_isolate(span)) && !lycon->line.is_line_start &&
         has_following_content(elmt, true) &&
-        inline_boundary_allows_soft_wrap(lycon, elmt)) {
+        layout_inline_boundary_allows_soft_wrap(lycon, elmt)) {
         // following normal text needs the candidate too; a nowrap-only flag loses the closing seam.
         layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
             lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);

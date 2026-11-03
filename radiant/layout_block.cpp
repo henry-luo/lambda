@@ -6793,6 +6793,26 @@ static float layout_inline_content_measure(LayoutContext* lycon, ViewBlock* bloc
     return line_content_width;
 }
 
+static float block_start_annotation_space(LayoutContext* context, ViewBlock* block) {
+    if (layout_block_inline_axis_is_vertical(block)) return 0.0f;
+    BoxMetrics box = layout_box_metrics(block);
+    float space = max(box.padding.top, 0.0f);
+    // independent contexts keep their external margins outside the internal annotation space.
+    if (block_context_establishes_bfc(block) || box.border.top > 0.0f ||
+            (block->scroller && block->scroll()->overflow_y != CSS_VALUE_VISIBLE) ||
+            (block->blk && block->block()->contain_paint)) return space;
+    float margin = box.margin.top;
+    View* previous = previous_collapsible_sibling(block);
+    if (previous && previous->is_block()) {
+        // placement already resolved sibling collapse, including negative and chained margins.
+        margin = block->y - previous->y - previous->height;
+    } else if (!previous && context->block.parent &&
+            parent_start_margin_has_no_boundary(layout_nearest_block_ancestor(block->parent_view()))) {
+        margin = layout_collapse_margins(margin, context->block.parent->annotation_start_space);
+    }
+    return space + max(margin, 0.0f);
+}
+
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.bidi_paragraphs = nullptr;
     // retained future fragments cannot keep membership in lines this pass has not built yet.
@@ -6803,6 +6823,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     layout_walk_inline_views(static_cast<View*>(block->first_child), invalidate_membership, [](View*) {});
     // positioned reflows also own their line cursor and baseline policy, independently of the caller.
     lycon->block.flow_box = lam::up(block);
+    lycon->block.annotation_start_space = block_start_annotation_space(lycon, block);
     float content_width = lycon->block.content_width;
     float line_content_width = layout_inline_content_measure(lycon, block, content_width);
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;

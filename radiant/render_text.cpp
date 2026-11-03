@@ -306,10 +306,6 @@ static bool render_text_space_survives(const unsigned char* source, const unsign
         cursor == source || !layout_text_is_segment_break(cursor[-1]);
 }
 
-static bool render_text_source_word_start(const unsigned char* text, int byte_offset) {
-    // a paint slice can start inside a word; UTF-8 continuation bytes cannot be CSS whitespace.
-    return byte_offset == 0 || is_space(text[byte_offset - 1]);
-}
 
 static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
                                   RenderContext* context, bool first_cluster_required = false,
@@ -335,7 +331,7 @@ static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
     float scale = ui_context_raster_scale(context->ui_context);
     FontStyleDesc descriptor = font_style_desc_from_prop(entry->font.style);
     CssEnum transform = render_text_inherited_transform(entry->text);
-    bool word_start = render_text_source_word_start(
+    bool word_start = layout_text_source_word_start(
         entry->text->text_data(), source_start);
     while (cursor < end) {
         size_t bytes = render_text_paint_cluster_bytes(cursor, end);
@@ -800,7 +796,7 @@ char* render_text_create_export_segment(const unsigned char* text,
     int start, length;
     text_rect_painted_source_range(text_rect, &start, &length);
     return render_text_create_paint_segment(text, text_rect, transform, include_ellipsis,
-        white_space, whitespace, render_text_source_word_start(text, start), source_range, collapse_segment_breaks);
+        white_space, whitespace, layout_text_source_word_start(text, start), source_range, collapse_segment_breaks);
 }
 
 static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, unsigned char* text,
@@ -1040,7 +1036,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         // Render the text with adjusted spacing
         bool has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
         uint32_t codepoint;
-        bool is_word_start = render_text_source_word_start(str, text_rect->start_index);
+        bool is_word_start = layout_text_source_word_start(str, text_rect->start_index);
         int char_index = text_rect->start_index;  // Track character offset for selection
         TextJustifyContext justify_context = {};
 
@@ -1405,7 +1401,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
         float sx_pos = x;
         bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
         FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
-        bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
+        bool s_word_start = layout_text_source_word_start(str, text_rect->start_index);
         TextJustifyContext justify_context = {};
 
         while (sp < s_end) {

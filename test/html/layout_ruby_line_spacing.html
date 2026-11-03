@@ -1,0 +1,32 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/20px Ahem; }
+.row { width:200px; }
+rt { line-height:normal; }
+.under { ruby-position:under; }
+.ample { line-height:40px; }
+</style>
+<div id="result">
+<div id="over" class="row">x<ruby><span id="over-a">XX</span><rt id="over-ra">AAAA</rt></ruby><br>x<ruby><span id="over-b">XX</span><rt id="over-rb">AAAA</rt></ruby><br>x<ruby><span id="over-c">XX</span><rt id="over-rc">AAAA</rt></ruby></div>
+<div id="under" class="row under">x<ruby><span id="under-a">XX</span><rt id="under-ra">AAAA</rt></ruby><br>x<ruby><span id="under-b">XX</span><rt id="under-rb">AAAA</rt></ruby><br>x<ruby><span id="under-c">XX</span><rt id="under-rc">AAAA</rt></ruby></div>
+<div id="after-plain" class="row">xxx<br>x<ruby><span id="after-plain-b">XX</span><rt id="after-plain-rb">AAAA</rt></ruby></div>
+<div id="before-plain" class="row">x<ruby><span id="before-plain-a">XX</span><rt id="before-plain-ra">AAAA</rt></ruby><br>xxx</div>
+<div id="under-after-plain" class="row under">xxx<br>x<ruby><span id="under-after-plain-b">XX</span><rt id="under-after-plain-rb">AAAA</rt></ruby></div>
+<div id="under-before-plain" class="row under">x<ruby><span id="under-before-plain-a">XX</span><rt id="under-before-plain-ra">AAAA</rt></ruby><br>xxx</div>
+<div id="ample-over" class="row ample">x<ruby><span id="ample-over-a">XX</span><rt id="ample-over-ra">AAAA</rt></ruby><br>x<ruby><span id="ample-over-b">XX</span><rt id="ample-over-rb">AAAA</rt></ruby></div>
+<div id="ample-under" class="row ample under">x<ruby><span id="ample-under-a">XX</span><rt id="ample-under-ra">AAAA</rt></ruby><br>x<ruby><span id="ample-under-b">XX</span><rt id="ample-under-rb">AAAA</rt></ruby></div>
+<div id="wrap-over" class="row" style="width:125px;word-break:break-all">zzz<ruby><span style="text-wrap:nowrap" id="wrap-over-a">mmm</span><span style="text-wrap:nowrap" id="wrap-over-b">mm</span><rt><span style="text-wrap:nowrap" id="wrap-over-ra">mmmmmm</span><span style="text-wrap:nowrap" id="wrap-over-rb">mmmm</span></rt></ruby>zzz</div>
+<div id="wrap-under" class="row under" style="width:125px;word-break:break-all">zzz<ruby><span style="text-wrap:nowrap" id="wrap-under-a">mmm</span><span style="text-wrap:nowrap" id="wrap-under-b">mm</span><rt><span style="text-wrap:nowrap" id="wrap-under-ra">mmmmmm</span><span style="text-wrap:nowrap" id="wrap-under-rb">mmmm</span></rt></ruby>zzz</div>
+
+<div id="margin-over" class="row" style="margin:20px 0">x<ruby><span id="margin-over-a">XX</span><rt id="margin-over-ra">AAAA</rt></ruby><br>x<ruby><span id="margin-over-b">XX</span><rt id="margin-over-rb">AAAA</rt></ruby></div>
+<div id="padding-over" class="row" style="padding:20px 0">x<ruby><span id="padding-over-a">XX</span><rt id="padding-over-ra">AAAA</rt></ruby><br>x<ruby><span id="padding-over-b">XX</span><rt id="padding-over-rb">AAAA</rt></ruby></div>
+<div id="margin-under" class="row under" style="margin:20px 0">x<ruby><span id="margin-under-a">XX</span><rt id="margin-under-ra">AAAA</rt></ruby><br>x<ruby><span id="margin-under-b">XX</span><rt id="margin-under-rb">AAAA</rt></ruby></div>
+<div id="atomic-over" class="row" style="display:inline-block;margin-top:20px">x<ruby><span id="atomic-over-a">XX</span><rt id="atomic-over-ra">AAAA</rt></ruby><br>x<ruby><span id="atomic-over-b">XX</span><rt id="atomic-over-rb">AAAA</rt></ruby></div>
+<div id="root-over" class="row" style="display:flow-root;margin-top:20px">x<ruby><span id="root-over-a">XX</span><rt id="root-over-ra">AAAA</rt></ruby><br>x<ruby><span id="root-over-b">XX</span><rt id="root-over-rb">AAAA</rt></ruby></div>
+<div id="border-over" class="row" style="margin-top:20px;border-top:2px solid">x<ruby><span id="border-over-a">XX</span><rt id="border-over-ra">AAAA</rt></ruby><br>x<ruby><span id="border-over-b">XX</span><rt id="border-over-rb">AAAA</rt></ruby></div>
+<div id="clip-over" class="row" style="margin-top:20px;overflow:hidden">x<ruby><span id="clip-over-a">XX</span><rt id="clip-over-ra">AAAA</rt></ruby><br>x<ruby><span id="clip-over-b">XX</span><rt id="clip-over-rb">AAAA</rt></ruby></div>
+<div id="nested-over-parent" style="margin-top:20px"><div id="nested-over" class="row" style="margin-top:5px">x<ruby><span id="nested-over-a">XX</span><rt id="nested-over-ra">AAAA</rt></ruby><br>x<ruby><span id="nested-over-b">XX</span><rt id="nested-over-rb">AAAA</rt></ruby></div></div>
+<div id="nested-padding-over-parent" style="margin-top:20px;padding-top:5px"><div id="nested-padding-over" class="row" style="">x<ruby><span id="nested-padding-over-a">XX</span><rt id="nested-padding-over-ra">AAAA</rt></ruby><br>x<ruby><span id="nested-padding-over-b">XX</span><rt id="nested-padding-over-rb">AAAA</rt></ruby></div></div>
+<div id="nested-clip-over-parent" style="overflow:clip"><div id="nested-clip-over" class="row" style="margin-top:20px">x<ruby><span id="nested-clip-over-a">XX</span><rt id="nested-clip-over-ra">AAAA</rt></ruby><br>x<ruby><span id="nested-clip-over-b">XX</span><rt id="nested-clip-over-rb">AAAA</rt></ruby></div></div>
+</div>
