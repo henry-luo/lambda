@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/layout_ruby.hpp"
 #include "../radiant/layout_text_context.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
@@ -15121,6 +15122,108 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     lam::Temp<char> content(render_text_create_export_segment(
         clipped->first_child->text_data(), visible, CSS_VALUE_NONE, true, CSS_VALUE_NORMAL));
     EXPECT_STREQ(content.get(), "x…");
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationFloatsKeepContainingBfcClearanceAndAutoHeight) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { DomElement* row; DomElement* clear; DomText* source; DomNode* parent;
+        const unsigned char* data; bool annotation_float; } cases[16] = {};
+    size_t count = 0;
+    for (const char* mode : {"root", "root-seeded", "nested", "nested-seeded"}) {
+        for (const char* kind : {"plain", "outside", "base", "reading"}) {
+            char id[80]; str_fmt(id, sizeof(id), "%s-%s", mode, kind);
+            Case& entry = cases[count++]; entry.row = dom_find_element_by_id(document->root, id);
+            str_fmt(id, sizeof(id), "%s-%s-clear", mode, kind);
+            entry.clear = dom_find_element_by_id(document->root, id);
+            str_fmt(id, sizeof(id), "%s-%s-base", mode, kind);
+            entry.source = first_text_leaf(dom_find_element_by_id(document->root, id));
+            ASSERT_NE(entry.row, nullptr); ASSERT_NE(entry.clear, nullptr); ASSERT_NE(entry.source, nullptr);
+            entry.parent = entry.source->parent; entry.data = entry.source->text_data();
+            entry.annotation_float = strcmp(kind, "reading") == 0;
+        }
+    }
+    auto check = [&](float height, bool hidden) {
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.row->get_attribute("id"));
+            float clear = hidden && entry.annotation_float ? 40.0f : height + 4.0f;
+            float row_y = 0.0f, clear_y = 0.0f;
+            view_get_visual_bounds(entry.row, nullptr, &row_y, nullptr, nullptr);
+            view_get_visual_bounds(entry.clear, nullptr, &clear_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(clear_y - row_y, clear);
+            EXPECT_FLOAT_EQ(entry.row->height, clear + 10.0f);
+            EXPECT_EQ(entry.source->parent.get(), entry.parent);
+            EXPECT_EQ(entry.source->text_data(), entry.data);
+            EXPECT_EQ(first_text_leaf(entry.parent), entry.source);
+        }
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(100.0f, false); }
+    for (bool left : {false, true}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-side", left ? "left" : "right"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "width", left ? "300px" : "260px"));
+        }
+        check(100.0f, false);
+    }
+    for (bool hidden : {true, false}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--reading-display", hidden ? "none" : "ruby-text"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-height", hidden ? "70px" : "100px"));
+        }
+        check(hidden ? 70.0f : 100.0f, hidden);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationIntrinsicProbesPreserveLiveFloatListsAndSelectedFlow) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* row = find("root-seeded-reading"), *ruby = find("root-seeded-reading-ruby");
+    DomElement* seed = find("root-seeded-reading-seed"), *reading = find("root-seeded-reading-reading");
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(seed, nullptr); ASSERT_NE(reading, nullptr);
+    DomText* base = first_text_leaf(find("root-seeded-reading-base")), *annotation = first_text_leaf(reading);
+    ASSERT_NE(base, nullptr); ASSERT_NE(annotation, nullptr);
+    DomNode* base_parent = base->parent, *reading_parent = annotation->parent;
+    const unsigned char* base_data = base->text_data(), *reading_data = annotation->text_data();
+    View* targets[] = {static_cast<View*>(ruby), static_cast<View*>(reading), static_cast<View*>(base),
+        static_cast<View*>(annotation), static_cast<View*>(find("root-seeded-reading-float"))};
+    Rect before[5] = {};
+    for (size_t index = 0; index < sizeof(targets) / sizeof(*targets); index++)
+        view_get_visual_bounds(targets[index],
+            &before[index].x, &before[index].y, &before[index].width, &before[index].height);
+    LayoutContext context = {};
+    LayoutPassScope pass(&context, document, &ui);
+    context.selected_view_tree = lam::up(document->view_tree.get());
+    context.root_font_size = 20.0f;
+    context.view = lam::up(static_cast<View*>(row)); context.elmt = lam::up(static_cast<DomNode*>(row));
+    layout_setup_assigned_block_context(&context, lam::view_require_block(row), nullptr, 300.0f, -1.0f);
+    setup_font(&ui, &context.font, row->font);
+    setup_line_height(&context, lam::view_require_block(row));
+    layout_setup_block_font_metrics(&context); setup_inline(&context, lam::view_require_block(row));
+    block_context_add_float(&context.block, lam::view_require_block(seed));
+    FloatBox* head = context.block.left_floats;
+    ASSERT_NE(head, nullptr); ASSERT_EQ(head->next.get(), nullptr);
+    ASSERT_EQ(context.block.left_float_count, 1);
+    float bottom = context.block.lowest_float_bottom;
+    for (float width : {300.0f, 260.0f, 300.0f}) {
+        EXPECT_GT(layout_ruby_intrinsic_height(&context, ruby, width), 0.0f);
+        EXPECT_EQ(context.block.left_floats.get(), head); EXPECT_EQ(context.block.left_floats_tail.get(), head);
+        EXPECT_EQ(head->next.get(), nullptr); EXPECT_EQ(context.block.left_float_count, 1);
+        EXPECT_EQ(context.block.right_floats.get(), nullptr); EXPECT_EQ(context.block.right_float_count, 0);
+        EXPECT_FLOAT_EQ(context.block.lowest_float_bottom, bottom);
+        // flow-result replay clones fragment payloads while retaining source identity and geometry.
+        EXPECT_EQ(first_text_leaf(ruby), base); EXPECT_EQ(first_text_leaf(reading), annotation);
+        EXPECT_EQ(base->parent.get(), base_parent); EXPECT_EQ(annotation->parent.get(), reading_parent);
+        EXPECT_EQ(base->text_data(), base_data); EXPECT_EQ(annotation->text_data(), reading_data);
+        for (size_t index = 0; index < sizeof(targets) / sizeof(*targets); index++) {
+            Rect after = {}; view_get_visual_bounds(targets[index],
+                &after.x, &after.y, &after.width, &after.height);
+            EXPECT_FLOAT_EQ(after.x, before[index].x); EXPECT_FLOAT_EQ(after.y, before[index].y);
+            EXPECT_FLOAT_EQ(after.width, before[index].width); EXPECT_FLOAT_EQ(after.height, before[index].height);
+        }
+    }
 }
 
 TEST_F(RadiantTextQuery, RubyColumnsPreserveTheSourceOriginBesideInternalFloats) {

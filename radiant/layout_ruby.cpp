@@ -1214,6 +1214,9 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     LayoutContextScope state(context);
     LayoutViewScope view(context);
     RubyLevelScope level_scope(context, level);
+    // CSS Ruby §2.1.1: the annotation IFC borrows its containing BFC; committed floats survive line-state restoration.
+    context->block.parent = lam::up(&state.saved_block);
+    context->block.is_bfc_root = false;
     // this stage emits one selected parallel interval, not an independent soft-wrap decision.
     LayoutInlineKeepScope keep(context, true);
     context->block.inline_box_metrics = nullptr;

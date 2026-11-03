@@ -21,7 +21,9 @@ for ordinary Ruby across horizontal and both vertical writing modes.
 First-line position inheritance is qualified for selected horizontal source
 fragments, including retained line membership changes.
 Ruby column completion also retains newly introduced leading base-float
-exclusions; annotation-emitted float ownership remains partial.
+exclusions.
+Containing-BFC ownership of committed annotation floats is qualified for
+clearance and auto-height; full annotation-float placement remains partial.
 
 ## Objective and contracts
 
@@ -2765,10 +2767,13 @@ native before/after audit retains all 468 coordinates: only 68 horizontal
 coordinates move, each by the required 14px exclusion; other coordinates and
 tree/source structure remain identical (`fixture-before-after-audit.json`).
 
-Annotation-emitted floats remain partial. A separate padded unannotated-Ruby
-probe also retains an extra 10px origin discrepancy; the disabled-reading and
-ordinary controls agree. This milestone does not claim that independent path
-is repaired. Evidence: `temp/ruby-m31/float-cause-padding-native.json`.
+Annotation-emitted floats remain partial. An initial padded unannotated-Ruby
+probe appeared to retain an extra 10px origin discrepancy. M32's source audit
+finds a diagnostic error: that case applied padding to both its row and Ruby,
+while its control padded only the inline. Fresh explicit controls agree on
+base and following-text positions; this is removed from the engine backlog.
+Evidence: `temp/ruby-m31/float-cause-padding.html` and
+`temp/ruby-m33/base-only-coordinate-audit.json`.
 
 All **149 focused neighbors** pass. Dimension lint and the 421-name inventory
 check pass; only source/test reference columns 14–15 change. The required
@@ -2794,3 +2799,71 @@ govern containing-block ownership and clearance. Evidence and finite acceptance:
 `temp/ruby-m31/next-milestone.json` and
 `temp/ruby-m32/{clear-coordinate-audit.json,annotation-float-clear-debugger.log,
 owner-control-audit.json}`.
+
+## M32: annotation IFCs retain their containing BFC's committed floats
+
+P1, completed with the recorded limits below. A 100px float
+with 2px margins must give following `clear:both` a 104px clearance edge. The
+annotation case instead clears at 40px and gives a 50px containing auto-height,
+while ordinary, external and base-level controls clear at 104px and give 114px
+auto-height. LLDB observes the new float count/extent before
+`LayoutContextScope` restores an empty block snapshot. An ordinary child block
+preserves the ancestor BFC owner; a preexisting list hides the clearance symptom
+through linked-node aliasing. Evidence:
+`temp/ruby-m32/{clear-coordinate-audit.json,annotation-float-clear-debugger.log,
+owner-control-audit.json,focused-before.log}`.
+
+[CSS Ruby §2.1.1](https://drafts.csswg.org/css-ruby-1/#formatting-context)
+establishes a separate annotation IFC while retaining the containing block's
+float ownership. The annotation's temporary block now borrows the saved source
+block through the existing context chain and declines BFC-root status. Float
+registration therefore updates the real owner; scope restoration keeps those
+updates while restoring the base line's cursor, font and metrics. No individual
+float fields are copied back and no persistent state or allocation is added.
+The synchronous parent borrow ends before the saved block's scope exits
+(**D4.5.1v4 / D4.1.4v5**); the repair stays private to layout
+(**D7.3.3–D7.3.4**).
+
+Two native regressions cover current/ancestor BFCs, empty/seeded lists, both
+float sides, retained width changes, reading removal and 100px/70px height
+changes. Repeated intrinsic probes preserve live float heads/tails/counts,
+links, extent and selected source identity/geometry. The existing height-probe
+setup already supplies an isolated measurement BFC. Replay deliberately clones
+text-fragment payloads, so the regression checks source identity and geometry
+instead of requiring allocation identity. All **154 affected neighbors** pass.
+External-float browser controls agree on **144 element/source coordinates**,
+with 0px maximum delta. Chromium's nested-float suppression remains recorded;
+it is not used to disable native floats. Evidence:
+`temp/ruby-m32/{focused-probes-1.log,neighbors-owner-1.log,
+external-clear-comparison.json}`.
+
+The unchanged-reference raw suite remains **60/212 full matches**, with no full
+or partial score changes. Dimension lint and the 421-name inventory check pass;
+only test-reference column 15 changes. Annotation-float visual alignment remains
+partial. The earlier padded-unannotated diagnostic limitation is corrected in
+M31's note: its source applied an extra row padding, and fresh controls do not
+reproduce a content-origin defect.
+Evidence: `temp/ruby-m32/{delta-owner-1.json,lint.log,inventory-check.log,
+source-inputs.json}` and `temp/ruby-m33/base-only-coordinate-audit.json`.
+
+The required Radiant aggregate passes: **9,097 passed, 305 partial, 2 skipped,
+0 failed / 9,404 checks**, including **501 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial matches.
+All four frozen inputs and the qualified CLI hash remain unchanged after the
+gate. No module API/import or persistent state placement changes; M30's
+same-six-import boundary limit remains recorded without a redundant audit.
+Evidence: `temp/ruby-m32/{radiant.log,qualification-result.json,source-inputs.json}`.
+
+The goal remains active with 152 raw mismatches. Next is the intrinsic boundary
+diagnosis for `ruby-intrinsic-isize-003`: explicit-font controls agree for Latin,
+standalone CJK and every max-content width. CJK neighbors around decorated Ruby
+give native/Chromium min-content widths of 62px/82px; an ordinary bidi isolate
+gives 62px/77px, while ordinary wrapping spans agree at 62px. Trace shared
+boundary classification, decoration accounting and existing first/last-run
+facts; verify the relevant CSS Text/UAX14 rule before treating browser choices
+as normative. The ordinary wrapping control also retains a separate standalone
+height difference. The complete 144-coordinate element audit keeps all nineteen
+differences; collapsed-whitespace/source-fragment capture discrepancies remain
+explicit. Evidence and finite acceptance:
+`temp/ruby-m32/next-milestone.json` and
+`temp/ruby-m33/{intrinsic-element-comparison.json,intrinsic-control-audit.json}`.
