@@ -15123,6 +15123,99 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLines) {
+    ASSERT_NE(load("test/html/layout_ruby_float_band.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* rows[] = {"under", "over", "tall", "prefix", "wrap", "nested", "push", "counter", "single-wrap"};
+    struct Source { const char* id; DomText* text; DomNode* parent; const unsigned char* data; } sources[] = {
+        {"under-ruby"}, {"over-ruby"}, {"prefix-ruby"}, {"wrap-ruby"},
+        {"wrap-next-ruby"}, {"nested-ruby"}, {"push-ruby"}, {"counter-ruby"}, {"single-wrap-ruby"}
+    };
+    for (Source& source : sources) {
+        source.text = first_text_leaf(find(source.id));
+        ASSERT_NE(source.text, nullptr);
+        source.parent = source.text->parent;
+        source.data = source.text->text_data();
+    }
+    auto check = [&](float second_width, bool wide) {
+        float edge = max(50.0f, second_width);
+        auto bounds = [&](const char* id, float x, float y, float width, float height) {
+            SCOPED_TRACE(id);
+            DomElement* element = find(id); ASSERT_NE(element, nullptr);
+            Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height);
+            EXPECT_FLOAT_EQ(box.x, x); EXPECT_FLOAT_EQ(box.y, y);
+            EXPECT_FLOAT_EQ(box.width, width); EXPECT_FLOAT_EQ(box.height, height);
+        };
+        for (size_t index = 0; index < sizeof(rows) / sizeof(rows[0]); index++) {
+            char id[64];
+            str_fmt(id, sizeof(id), "%s-first", rows[index]);
+            bounds(id, 0.0f, (float)index * 100.0f, 50.0f, 20.0f);
+            str_fmt(id, sizeof(id), "%s-second", rows[index]);
+            bounds(id, 0.0f, (float)index * 100.0f + 20.0f, second_width, 50.0f);
+        }
+        bounds("under-ruby", edge, 0.0f, 40.0f, 20.0f);
+        bounds("under-reading", edge, 20.0f, 40.0f, 10.0f);
+        bounds("over-ruby", edge, 110.0f, 40.0f, 20.0f);
+        bounds("over-reading", edge, 100.0f, 40.0f, 10.0f);
+        bounds("tall-control", edge, 200.0f, 40.0f, 30.0f);
+        bounds("prefix-control", edge, 300.0f, 30.0f, 20.0f);
+        bounds("prefix-ruby", edge + 30.0f, 300.0f, 40.0f, 20.0f);
+        bool wraps = !wide && second_width > 50.0f;
+        float wrap_x = edge + (wraps ? 0.0f : 30.0f);
+        float wrap_y = 400.0f + (wraps ? 20.0f : 0.0f);
+        bounds("wrap-control", edge, 400.0f, 30.0f, 20.0f);
+        bounds("wrap-ruby", wrap_x, wrap_y, 40.0f, 20.0f);
+        bounds("wrap-next-ruby", wrap_x + 40.0f, wrap_y, 40.0f, 20.0f);
+        bounds("nested-control", edge, 500.0f, 30.0f, 20.0f);
+        bounds("nested-wrapper", edge, 500.0f, 70.0f, 20.0f);
+        bounds("nested-ruby", edge + 30.0f, 500.0f, 40.0f, 20.0f);
+        bool clears = !wide && second_width > 50.0f;
+        bounds("push-ruby", clears ? 0.0f : edge, 600.0f + (clears ? 70.0f : 0.0f), 40.0f, 20.0f);
+        bounds("counter-ruby", edge, 700.0f, 40.0f, 20.0f);
+        bounds("counter-after", edge + 40.0f, 700.0f, 20.0f, 20.0f);
+        bounds("single-wrap-control", edge, 800.0f, 30.0f, 20.0f);
+        bounds("single-wrap-ruby", edge + (wraps ? 0.0f : 30.0f), 800.0f + (wraps ? 20.0f : 0.0f), 40.0f, 20.0f);
+        DomElement* after = find("counter-after");
+        ASSERT_NE(after->pseudo, nullptr); ASSERT_NE(after->pseudo->before, nullptr);
+        DomText* generated = first_text_leaf(after->pseudo->before);
+        ASSERT_NE(generated, nullptr); EXPECT_STREQ((const char*)generated->text_data(), "1");
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-float-band"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Source& source : sources) {
+            SCOPED_TRACE(source.id);
+            EXPECT_EQ(first_text_leaf(find(source.id)), source.text);
+            EXPECT_EQ(source.text->parent.get(), source.parent);
+            EXPECT_EQ(source.text->text_data(), source.data);
+            EXPECT_STREQ((const char*)source.data, "ab");
+            Rect first = {}, second = {};
+            ASSERT_TRUE(character_rect(range, source.text, 0, &first));
+            ASSERT_TRUE(character_rect(range, source.text, 1, &second));
+            float x = 0.0f, y = 0.0f;
+            view_get_visual_bounds(find(source.id), &x, &y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(first.x, x); EXPECT_FLOAT_EQ(first.y, y); EXPECT_FLOAT_EQ(first.width, 20.0f);
+            EXPECT_FLOAT_EQ(second.x, x + 20.0f); EXPECT_FLOAT_EQ(second.y, y); EXPECT_FLOAT_EQ(second.width, 20.0f);
+            TestRadiantPaintGlyphs<4> glyphs;
+            ASSERT_TRUE(visit_text_paint_glyphs(find("result"), source.text, TestRadiantPaintGlyphs<4>::collect, &glyphs));
+            ASSERT_EQ(glyphs.count, 2u);
+            EXPECT_EQ(glyphs.glyphs[0].codepoint, 'a'); EXPECT_EQ(glyphs.glyphs[1].codepoint, 'b');
+            EXPECT_FLOAT_EQ(glyphs.glyphs[0].x, first.x); EXPECT_FLOAT_EQ(glyphs.glyphs[1].x, second.x);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(100.0f, false); }
+    for (bool wide : {false, true, false}) {
+        for (const char* row : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-second", row);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", wide ? "100px" : "40px"));
+        }
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap"), "width", wide ? "240px" : "180px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("push"), "width", wide ? "160px" : "120px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("single-wrap"), "width", wide ? "200px" : "160px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? 100.0f : 40.0f, wide);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
     ASSERT_NE(load("test/html/layout_ruby_trailing_space.html"), nullptr);
     process_document_font_faces(&ui, document);

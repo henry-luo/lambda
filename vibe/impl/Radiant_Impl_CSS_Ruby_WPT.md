@@ -12,7 +12,8 @@ horizontal flow is qualified for source-text fragments, complete shared columns
 and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
 source fragmentation remain open. Completed-line trailing spaces and bounded
 Ruby column reconciliation are qualified; hidden-annotation CSSOM exposure and
-annotation/float exclusion remain open. The objective is not complete.
+float exclusion for internally split Ruby remain open. Whole unbroken Ruby
+float bands are qualified. The objective is not complete.
 
 ## Objective and contracts
 
@@ -2287,3 +2288,70 @@ left beside stacked floats while vertical coordinates agree. Verify the line's
 occupied exclusion band and source interval selection before changing code;
 under/over Ruby and ordinary tall-inline controls must distinguish the cause.
 The finite diagnosis plan is `temp/ruby-m24/next-milestone.json`.
+
+## M25: whole-Ruby float bands before source selection
+
+P1, qualified with the recorded boundary-check limit. Fresh captures of
+`ruby-with-floats-003` reproduce the 50px horizontal error with the qualified
+M24 binary: the base and under-reading begin at 58px rather than Chromium's
+108px. Float geometry and vertical Ruby coordinates agree. Read-only debugger
+breakpoints show ordinary queries using an 18px band, then Ruby increasing the
+line requirement to 26px without another query at that height. The second,
+wider float intersects the grown line. Under/over Ahem controls reproduce the
+same cause, while an ordinary tall inline-block already avoids that float.
+
+[CSS 2.2 §9.5](https://www.w3.org/TR/CSS22/visuren.html#floats) defines float
+adjacency through the line's vertical extent; [CSS Ruby §3.6](https://drafts.csswg.org/css-ruby-1/#line-height)
+requires additional leading when annotations exceed the specified line-height.
+A line now retains its selected float query height independently of final line
+advance. Nested wrappers cannot replace a taller selected band with their
+smaller strut; a line reset and independent annotation IFC clear the band.
+
+Before emitting a complete Ruby run without an internal used/forced break,
+the formatter reuses the existing scoped height measurement. Its assigned BFC
+isolates float placement, the existing counter checkpoint rolls back generated
+effects, and selected fragments restore under **D4.5.1v4 / D4.1.4v5**. The shared
+float service updates the band and shifts already committed preceding content.
+The existing traversal can include enclosing non-atomic inlines, preserving
+atomic descendants' local frames. Existing boundary/lookahead and float-Y
+search services choose a legal break or clearance before actual source emission.
+The original CSSOM sources are neither reparented nor re-emitted to retry a line.
+
+Core scope is horizontal LTR whole Ruby runs. Internally split Ruby needs a
+band measured for each selected source interval; it retains its existing path.
+Vertical/RTL Ruby and shape-outside remain separate. No formal ruling changes.
+
+The regression covers under/over annotations, a tall-inline control, fitting
+and wrapping prefixes, adjacent unbreakable Ruby, a nowrap Ruby with a legal
+outer boundary, nested prefixes, clearance, and a generated counter. Initial,
+retained and width-mutation checks pin source identity, character rectangles,
+visible glyph positions, float geometry and a counter value of 1. All **214**
+affected neighbors pass. Three browser control states agree on all **924**
+element/source coordinates with 0px maximum delta; the qualified M24 binary
+differs on 64 coordinates in the initial state. Evidence:
+`temp/ruby-m25/{float-metrics.log,browser-comparison-3.json,
+browser-comparison-before-3.json,neighbors-band-3.log,source-inputs.json}`.
+
+The frozen raw suite reaches **56/212 full matches**: `ruby-with-floats-003`
+newly passes, no full match is lost, and no partial score changes. Dimension
+lint and the 421-name inventory check pass; only source/test reference columns
+change. Strict boundary DSOs link, but the checker rejects the same six recorded
+deferred imports as M24 (140 current / 165 baseline), with no additions or
+allowlist changes. The required Radiant aggregate passes: **9,087 passed, 305 partial, 2 skipped,
+0 failed / 9,394 checks**, including **491 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial and
+CSS Text 894 full / 86 partial, with no baseline regressions. All seven frozen
+inputs and the qualified CLI hash remain unchanged after the gate. Evidence:
+`temp/ruby-m25/{wpt-final.log,delta-final.json,lint.log,boundary-comparison.json,
+radiant.log,qualification-result.json}`. The goal remains active with 156 raw
+mismatches. Whole-Ruby float composition is qualified; per-selected-fragment
+float bands remain open.
+
+The next diagnosis extracts the three relative-positioning behaviors asserted by
+`position-relative.html` into causal native/browser controls, separating them
+from its generated test-report UI before assigning a root cause. A probe of
+`ruby-overhang:none` did not demonstrate the suspected layout violation: its
+direct/inherited geometry agrees with Chromium, and current CSS Ruby §5.1
+aliases `none` to `spaces`; `auto` overhang amount remains UA-defined. No patch
+is made from that older-spec hypothesis. Evidence and next plan:
+`temp/ruby-m25/{overhang-none-comparison.json,next-milestone.json}`.

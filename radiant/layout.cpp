@@ -3810,17 +3810,23 @@ bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSp
 }
 
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
-                                              View* view, float offset) {
+        View* view, float offset, bool include_inline_ancestors) {
     if (!lycon || !view) return;
     int line_number = lycon->block.line_number;
-    View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
-    while (prev) {
-        if (prev->view_type == RDT_VIEW_INLINE) {
-            layout_shift_span_current_line(
-                lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
-        } else shift_inline_flow_view(offset,0.0f,line_number,prev);
-        prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
-    }
+    do {
+        View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
+        while (prev) {
+            if (prev->view_type == RDT_VIEW_INLINE) {
+                layout_shift_span_current_line(
+                    lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
+            } else shift_inline_flow_view(offset,0.0f,line_number,prev);
+            prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
+        }
+        // a new float band also reaches earlier siblings of enclosing non-atomic inlines.
+        DomNode* parent = view->parent;
+        view = include_inline_ancestors && parent && parent->view_type == RDT_VIEW_INLINE
+            ? static_cast<View*>(parent) : nullptr;
+    } while (view);
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view);

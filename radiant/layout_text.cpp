@@ -1999,6 +1999,9 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     // CSS 2.1 §9.5.1: For inline-blocks, query using the element's full height
     float effective_height = query_height > 0 ? query_height :
         (lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f);
+    // nested wrappers cannot narrow a band already selected for a taller pending inline.
+    effective_height = max(effective_height, lycon->line.float_query_height);
+    lycon->line.float_query_height = effective_height;
 
     FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height,
         query_height <= 0.0f);
@@ -2033,6 +2036,19 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
         lycon->line.advance_x = lycon->line.effective_left;
     }
 
+}
+
+void layout_prepare_inline_float_band(LayoutContext* lycon, View* pending, float height) {
+    float previous_left = lycon->line.has_float_intrusion
+        ? lycon->line.effective_left : lycon->line.left;
+    float previous_advance = lycon->line.advance_x;
+    update_line_for_bfc_floats(lycon, height);
+    float offset = lycon->line.effective_left - previous_left;
+    if (!lycon->line.is_line_start && offset > 0.0f) {
+        // all committed siblings share the new float edge; atomic descendants keep local coordinates.
+        layout_shift_preceding_inline_line_views(lycon, pending, offset, true);
+        lycon->line.advance_x = previous_advance + offset;
+    }
 }
 
 struct LineFillProbe {
@@ -2336,6 +2352,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = lycon->line.has_replaced_content = false;
+    lycon->line.float_query_height = 0.0f;
     lycon->line.atomic_inline_count = 0;
     lycon->line.max_top_bottom_height = lycon->line.max_top_height =
         lycon->line.max_bottom_height = 0;

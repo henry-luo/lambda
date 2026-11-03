@@ -2666,6 +2666,7 @@ typedef struct Linebox {
     float align_left, align_right;    // original alignment bounds when wrap measure differs
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
+    float float_query_height;         // selected exclusion band, independent of final line advance
     float advance_x;
     lam::Up<LayoutInlineAdvance> inline_advances; // consumed inline ranges can differ from overhanging ink
     float max_ascender;
@@ -4651,6 +4652,7 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx);
  *                     Used for inline-blocks whose height exceeds the line-height.
  */
 void update_line_for_bfc_floats(LayoutContext* lycon, float query_height = 0);
+void layout_prepare_inline_float_band(LayoutContext* lycon, View* pending, float height);
 
 /**
  * Find the BFC root for a given BlockContext
@@ -4887,7 +4889,7 @@ View* layout_inline_span_edge_leaf(ViewSpan* span, bool source_end,
     float* left_decoration = nullptr, float* right_decoration = nullptr,
     float* relative_offset = nullptr);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
-                                              View* view, float offset);
+    View* view, float offset, bool include_inline_ancestors = false);
 void layout_bidi_line(LayoutContext* lycon);
 void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);

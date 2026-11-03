@@ -1784,6 +1784,43 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
     return true;
 }
 
+static void ruby_prepare_unbroken_float_band(LayoutContext* context, ViewSpan* ruby,
+        LayoutRubyModel* model, const IntrinsicSizes& sizes) {
+    if (ruby->view_type != RDT_VIEW_INLINE || sizes.has_used_content_break ||
+            layout_inline_flow_is_kept(context) ||
+            context->block.direction != CSS_VALUE_LTR ||
+            layout_element_writing_mode(ruby) != WM_HORIZONTAL_TB ||
+            !ruby_has_unbroken_segments(context, model)) return;
+    BlockContext* bfc = block_context_find_bfc(&context->block);
+    if (!bfc || (!bfc->left_float_count && !bfc->right_float_count)) return;
+
+    // D4.5.1v4: the existing measurement scope restores selected fragments and generated effects.
+    float height = layout_ruby_intrinsic_height(context, ruby, sizes.max_content);
+    height = max(height, context->line.max_ascender + context->line.max_descender);
+    layout_prepare_inline_float_band(context, ruby, height);
+    float width = sizes.max_content + layout_inline_end_edge(ruby);
+    if (context->line.wrap_opportunity_before_nowrap &&
+            line_has_prior_flow_content(&context->line) &&
+            (context->line.advance_x + width > context->line.effective_right + kTextLayoutSubpixelEpsilon ||
+             (!layout_inline_boundary_allows_soft_wrap(context, ruby) &&
+              !layout_following_inline_content_fits(context, ruby, width)))) {
+        // choose the boundary before emitting source; following unbreakable boxes keep their shared unit.
+        line_break(context);
+        layout_prepare_inline_float_band(context, ruby, height);
+    }
+    if (!line_has_prior_flow_content(&context->line) &&
+            context->line.advance_x + width > context->line.effective_right &&
+            width <= context->line.right - context->line.left) {
+        float next_y = find_line_y_for_width_with_floats(bfc, &context->block, &context->line,
+            width, context->block.advance_y, height);
+        if (next_y > context->block.advance_y) {
+            context->block.advance_y = next_y;
+            line_reset(context);
+            layout_prepare_inline_float_band(context, ruby, height);
+        }
+    }
+}
+
 void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     ScratchScope scope(&context->scratch);
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
@@ -1804,8 +1841,11 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     }
     bool parallel_wraps = true;
     if (has_annotations) {
-        parallel_wraps = ruby_measure_model(context, ruby, &model, &scope).has_used_content_break;
+        IntrinsicSizes sizes = ruby_measure_model(context, ruby, &model, &scope);
+        parallel_wraps = sizes.has_used_content_break;
         if (model.failed) return;
+        ruby_prepare_unbroken_float_band(context, ruby, &model, sizes);
+        start = context->line.advance_x;
         if (parallel_wraps && ruby_flow_parallel_text(context, ruby, &model, &scope)) return;
         if (parallel_wraps && ruby_has_unbroken_segments(context, &model)) {
             ruby_flow_unbroken_segments(context, ruby, &model, &scope);
