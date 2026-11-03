@@ -6186,6 +6186,14 @@ void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         }
         return;
     }
+    if (!is_maximum && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_AUTO) {
+        // explicit auto retains the flex content minimum instead of becoming a zero length.
+        *constraint = -1.0f;
+        *constraint_type = CSS_VALUE_AUTO;
+        *percentage = NAN;
+        return;
+    }
     if (is_maximum && value->type == CSS_VALUE_TYPE_KEYWORD &&
         value->data.keyword == CSS_VALUE_NONE) {
         *constraint = -1.0f;
@@ -6196,8 +6204,8 @@ void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         (value->data.keyword == CSS_VALUE_INITIAL ||
          value->data.keyword == CSS_VALUE_UNSET ||
          value->data.keyword == CSS_VALUE_REVERT)) {
-        // CSS-wide values use the property's initial constraint: min-* is
-        *constraint = is_maximum ? -1.0f : 0.0f;
+        // min-* resets to auto; max-* resets to none.
+        *constraint = -1.0f;
         *constraint_type = is_maximum ? CSS_VALUE_NONE : CSS_VALUE_AUTO;
         *percentage = NAN;
         return;
@@ -6269,6 +6277,7 @@ static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
 static void css_set_flex_basis_value(DomElement* span,
                                      const CssFlexBasisValue& basis) {
     span->fi->flex_basis = basis.value;
+    span->fi->flex_basis_offset = basis.offset;
     span->fi->flex_basis_is_percent = basis.is_percent;
     span->fi->flex_basis_is_content = basis.is_content;
     span->fi->flex_basis_is_stretch = basis.is_stretch;
@@ -10164,6 +10173,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
                 const FlexItemProp* item = parent ? parent->flex_item() : nullptr;
                 if (item) {
                     basis.value = item->flex_basis;
+                    basis.offset = item->flex_basis_offset;
                     basis.is_percent = item->flex_basis_is_percent;
                     basis.is_content = item->flex_basis_is_content;
                     basis.is_stretch = item->flex_basis_is_stretch;

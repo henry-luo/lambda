@@ -6591,39 +6591,28 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
 }
 
 static bool dom_append_document_text(DomDocument* doc, const char* text) {
-    DomElement* body = dom_document_body_element(doc);
-    if (!body) return false;
-
-    const char* cursor = text;
-    while (*cursor) {
-        const char* br = nullptr;
-        for (const char* scan = cursor; *scan; scan++) {
-            if (*scan == '<' && str_istarts_with_cstr(scan, "<br")) {
-                const char* end = strchr(scan, '>');
-                if (end) {
-                    br = scan;
-                    break;
-                }
-            }
+    DomNode* cursor = doc->js.write_cursor;
+    DomElement* parent = cursor && cursor->parent ? cursor->parent->as_element()
+        : dom_document_body_element(doc);
+    if (!parent) return false;
+    DomElement* fragment = dom_parse_html_fragment(doc, text, parent);
+    if (!fragment) return false;
+    RootFrame roots(4);
+    Rooted<Item> fragment_root(roots, dom_wrap_element(fragment));
+    Rooted<Item> reference(roots, cursor && cursor->next_sibling
+        ? dom_wrap_element(cursor->next_sibling) : ItemNull);
+    Rooted<Item> child(roots, ItemNull);
+    Rooted<Item> inserted(roots, ItemNull);
+    while (fragment->first_child) {
+        child.set(dom_wrap_element(fragment->first_child));
+        inserted.set(dom_insert_before_bridge(parent, child.get(), reference.get()));
+        DomNode* node = (DomNode*)dom_unwrap_element(inserted.get());
+        if (!node || item_is_error(inserted.get())) return false;
+        // parser-written scripts run at the insertion point before the writing script resumes.
+        doc->js.write_cursor = node;
+        if (node->is_element() && doc->js.write_script_subtree) {
+            doc->js.write_script_subtree(doc->js.write_script_context, node->as_element());
         }
-        size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
-        if (text_len > 0) {
-            DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
-            if (text_node) {
-                ((DomNode*)body)->append_child((DomNode*)text_node);
-                dom_post_insert((DomNode*)body, (DomNode*)text_node);
-            }
-        }
-        if (!br) break;
-        const char* br_end = strchr(br, '>');
-        MarkBuilder builder(doc->input);
-        Item br_item = builder.element("br").final();
-        DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
-        if (br_elem) {
-            ((DomNode*)body)->append_child((DomNode*)br_elem);
-            dom_post_insert((DomNode*)body, (DomNode*)br_elem);
-        }
-        cursor = br_end ? br_end + 1 : br + 3;
     }
     return true;
 }
@@ -15628,14 +15617,14 @@ extern "C" Item dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
 extern "C" Item dom_document_open_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!doc) return js_get_document_object_value();
+    // opening a fresh stream retires the previous document.write insertion point.
+    doc->js.write_cursor = nullptr;
     // document.open() reuses the Document and its Selection. Tree mutation
     // below retargets live Range boundaries as children are removed.
     DomElement* body = dom_document_body_element(doc);
     if (body) {
-        clear_element_children_for_navigation(body);
-        dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
-                               (DomNode*)body,
-                               (DomNode*)body->parent);
+        // clearing only native links lets the next Mark-aware write resurrect the old body.
+        dom_replace_inner_html(body, "", true);
     }
     return js_get_document_object_value();
 }
@@ -15643,14 +15632,17 @@ extern "C" Item dom_document_open_bridge(void* doc_ptr) {
 extern "C" Item dom_document_write_bridge(void* doc_ptr, Item text_arg) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!doc || !doc->root) return ItemNull;
-    const char* text = fn_to_cstr(text_arg);
+    // written scripts reenter the realm and may collect the caller's dynamic markup string.
+    RootFrame roots(1);
+    Rooted<Item> markup(roots, text_arg);
+    const char* text = fn_to_cstr(markup.get());
     if (!text) return ItemNull;
 
     if (!dom_append_document_text(doc, text)) {
         log_debug("js_document_write_bridge: no body element found");
         return ItemNull;
     }
-    log_debug("js_document_write_bridge: appended '%s' to body", text);
+    log_debug("js_document_write_bridge: parsed %zu bytes at the document insertion point", strlen(text));
     return ItemNull;
 }
 

@@ -1128,6 +1128,7 @@ typedef struct FlexRetainedPass {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
     float flex_basis;  // -1 for automatic/content keyword bases
+    float flex_basis_offset; // signed length term when the basis contains a percentage.
     float flex_grow;
     float flex_shrink;
     CssEnum align_self;  // AlignType

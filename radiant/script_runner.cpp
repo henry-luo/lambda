@@ -1884,7 +1884,7 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
 class DocumentCurrentScriptScope {
 public:
     DocumentCurrentScriptScope(Runtime* runtime, JsScriptTask* task)
-        : document(nullptr), previous(nullptr), active(false) {
+        : document(nullptr), previous(nullptr), previous_cursor(nullptr), active(false) {
         if (!runtime || !task || task->kind != JS_SCRIPT_TASK_CLASSIC) return;
         DomDocument* doc = (DomDocument*)runtime->dom_doc;
         DomElement* script = doc
@@ -1892,16 +1892,22 @@ public:
         if (!doc || !script) return;
         document = doc;
         previous = dom_document_swap_current_script(document, script);
+        previous_cursor = doc->js.write_cursor;
+        doc->js.write_cursor = script;
         active = true;
     }
 
     ~DocumentCurrentScriptScope() {
-        if (active) dom_document_swap_current_script(document, previous);
+        if (active) {
+            dom_document_swap_current_script(document, previous);
+            if (!previous) ((DomDocument*)document)->js.write_cursor = previous_cursor;
+        }
     }
 
 private:
     void* document;
     void* previous;
+    DomNode* previous_cursor;
     bool active;
 };
 
@@ -2037,6 +2043,44 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         task->executed = true;
     }
     return !fatal_error;
+}
+
+struct DocumentWriteScripts {
+    Runtime* runtime;
+    JsPreambleState* preamble;
+    JsScriptTaskCollection* collection;
+    JsScriptSchedulerQueues* queues;
+};
+
+static void execute_document_written_scripts(void* context, DomElement* element) {
+    DocumentWriteScripts* writer = (DocumentWriteScripts*)context;
+    DomDocument* doc = element ? element->doc.get() : nullptr;
+    if (!writer || !doc || element->tag() == MARKUP_NAME_TEMPLATE) return;
+    JsScriptTaskCollection written;
+    if (!script_task_collection_init(&written)) return;
+    written.resource_policy = doc->resource_policy;
+    collect_scripts_recursive(dom_element_to_element(element), &written, doc->url, 0);
+    load_external_script_sources(&written, doc->resource_manager, nullptr);
+    JsScriptSchedulerQueues queues;
+    if (script_scheduler_queues_init(&queues)) {
+        if (script_scheduler_enqueue(&written, &queues)) {
+            execute_script_task_queue(writer->runtime, queues.post_dom, writer->preamble,
+                "document-write", writer->collection);
+            // scheduled written scripts share the document's lifecycle queues and source owner.
+            for (int i = 0; i < written.scripts->length; i++) {
+                JsScriptTask* task = (JsScriptTask*)written.scripts->data[i];
+                if (!task || task->executed || task->scheduling == JS_SCRIPT_SCHED_POST_DOM) continue;
+                ArrayList* target = task->scheduling == JS_SCRIPT_SCHED_ASYNC
+                    ? writer->queues->async_ready : writer->queues->defer;
+                if (arraylist_append(writer->collection->scripts, task)) {
+                    written.scripts->data[i] = nullptr;
+                    arraylist_append(target, task);
+                }
+            }
+        }
+        script_scheduler_queues_free(&queues);
+    }
+    script_task_collection_free(&written);
 }
 
 static bool execute_body_onload_tasks(Runtime* runtime, JsScriptTaskCollection* collection,
@@ -2235,6 +2279,10 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     }
     if (timing) timing->scheduler_us += time_now_us() - phase_start_us;
 
+    DocumentWriteScripts writer = {runtime, preamble, collection, &queues};
+    executing_document->js.write_script_subtree = execute_document_written_scripts;
+    executing_document->js.write_script_context = &writer;
+
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
             runtime, queues.post_dom, preamble, "post-dom", collection)) {
@@ -2311,6 +2359,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         any_error = true;
     }
 
+    executing_document->js.write_script_subtree = nullptr;
+    executing_document->js.write_script_context = nullptr;
     script_scheduler_queues_free(&queues);
     return any_error ? ItemError : result;
 }
@@ -2605,6 +2655,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // A signal watchdog bypasses C++ scope destructors. Never let an aborted
     // task expose a stale currentScript during later lifecycle callbacks.
     dom_document_swap_current_script(dom_doc, nullptr);
+    dom_doc->js.write_cursor = nullptr;
+    dom_doc->js.write_script_subtree = nullptr;
+    dom_doc->js.write_script_context = nullptr;
 
     phase_start_us = timing ? time_now_us() : 0;
     // Keep the document's canonical context current through its initial task

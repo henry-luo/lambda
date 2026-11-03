@@ -53,7 +53,7 @@ struct CssUsedGeometry {
     Spacing padding, border_width;
     float insets[4], inset_percents[4];
     bool inset_present[4];
-    float flex_basis, flex_grow, flex_shrink, aspect_ratio;
+    float flex_basis, flex_basis_offset, flex_grow, flex_shrink, aspect_ratio;
     CssEnum align_self;
     int order;
     bool flex_percent, flex_content, flex_stretch;

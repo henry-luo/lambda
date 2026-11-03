@@ -234,6 +234,7 @@ bool css_compute_opacity_result(const CssMathResult* math, float* result);
 bool css_compute_nonnegative_number_result(const CssMathResult* math, float* result);
 struct CssFlexBasisValue {
     float value = -1.0f;
+    float offset = 0.0f; // signed length term of a percentage calculation.
     bool is_percent = false;
     bool is_content = false;
     bool is_stretch = false;

@@ -1017,10 +1017,16 @@ bool css_compute_flex_basis_result(const CssValue* value, const CssMathResult* m
         bool zero = value->type == CSS_VALUE_TYPE_NUMBER && math &&
             math->type == CSS_MATH_NUMBER && math->value == 0.0;
         if (!math || !math->resolved ||
-            (math->type != CSS_MATH_LENGTH && math->type != CSS_MATH_PERCENT && !zero)) return false;
-        computed.is_percent = math->type == CSS_MATH_PERCENT;
+            (math->type != CSS_MATH_LENGTH && math->type != CSS_MATH_PERCENT &&
+             math->type != CSS_MATH_LENGTH_PERCENT && !zero)) return false;
+        bool mixed = math->type == CSS_MATH_LENGTH_PERCENT;
+        computed.is_percent = math->type == CSS_MATH_PERCENT || mixed;
+        // mixed terms may be negative individually; range checking needs the used basis.
+        if (mixed) computed.offset = (float)css_clamp_numeric_value(
+            math->value, -(double)FLT_MAX, (double)FLT_MAX);
         computed.value = (float)css_clamp_numeric_value(
-            computed.is_percent ? math->percentage : math->value, 0.0, (double)FLT_MAX);
+            computed.is_percent ? math->percentage : math->value,
+            mixed ? -(double)FLT_MAX : 0.0, (double)FLT_MAX);
     }
     // the snapshot carries only numbers and modes, never a declaration-owner pointer.
     *result = computed;

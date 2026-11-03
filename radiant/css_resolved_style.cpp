@@ -448,6 +448,7 @@ static void css_geometry_transfer(LayoutContext* context, DomElement* element,
         css_transfer_value<capture>(&item->aspect_ratio, &geometry->aspect_ratio);
         css_transfer_value<capture>(&item->align_self, &geometry->align_self);
         css_transfer_value<capture>(&item->order, &geometry->order);
+        css_transfer_value<capture>(&item->flex_basis_offset, &geometry->flex_basis_offset);
         if constexpr (capture) {
             geometry->flex_basis = item->flex_basis;
             geometry->flex_percent = item->flex_basis_is_percent;

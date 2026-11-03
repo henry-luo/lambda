@@ -221,6 +221,9 @@ struct DomJsRuntime {
     // Set only while a classic script is evaluated, matching HTML's
     // document.currentScript lifetime.
     DomElement* current_script;
+    DomNode* write_cursor;
+    void (*write_script_subtree)(void* context, DomElement* element);
+    void* write_script_context; // borrowed only during the loader's script scheduler.
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), implicit_doctype(true), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
@@ -233,7 +236,8 @@ struct DomJsRuntime {
         auto_close_event_loop(false),
         virtual_clock_enabled(false), virtual_clock_ms(0.0),
         post_load_settle_ms(0.0),
-        redirect_stdout_to_stderr(false), current_script(nullptr) {}
+        redirect_stdout_to_stderr(false), current_script(nullptr), write_cursor(nullptr),
+        write_script_subtree(nullptr), write_script_context(nullptr) {}
 };
 
 // tier-1: document-owned semantic zoom and raster-output scale inputs

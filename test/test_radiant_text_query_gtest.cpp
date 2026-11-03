@@ -6139,6 +6139,59 @@ struct FlexFlowTestContext {
     }
 };
 
+TEST_F(RadiantTextQuery, DocumentWrittenMarkupRunsScriptsAtTheirInsertionPoint) {
+    DomElement* result = load("test/html/document_write_scripts.html");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->first_child->as_text()->text,
+        "before|external:written-script|nested:nested|resume:written-script|after:42:writer|following");
+    DomElement* written = dom_find_element_by_id(document->root, "written");
+    DomElement* writer = dom_find_element_by_id(document->root, "writer");
+    DomElement* tail = dom_find_element_by_id(document->root, "tail");
+    ASSERT_NE(written, nullptr);
+    ASSERT_NE(tail, nullptr);
+    EXPECT_STREQ(written->first_child->as_text()->text, "written & parsed");
+    EXPECT_EQ(written->prev_sibling.get(), writer);
+    DomNode* following = tail->next_sibling;
+    while (following && !following->is_element()) following = following->next_sibling;
+    ASSERT_NE(following, nullptr);
+    EXPECT_STREQ(following->as_element()->id, "following");
+    EXPECT_EQ(document->js.current_script, nullptr);
+    EXPECT_EQ(document->js.write_script_context, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-inert"), "undefined");
+}
+
+TEST_F(RadiantTextQuery, FlexBasisLengthPercentagesResolveAgainstCurrentMainSize) {
+    ASSERT_NE(load("test/html/flex_basis_length_percentage.html"), nullptr);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    for (float width : {1000.0f, 800.0f, 1334.0f, 1640.0f}) {
+        ui.viewport_width = width;
+        ui.viewport_height = 800;
+        layout_html_doc(&ui, document, width != 1000.0f);
+        float available = width - 192.0f;
+        float main_width = available * 0.8f;
+        EXPECT_NEAR(find("left")->width, 160.0f, 0.05f);
+        EXPECT_NEAR(find("main")->width, main_width, 0.05f);
+        EXPECT_NEAR(find("right")->width, available * 0.2f, 0.05f);
+        EXPECT_NEAR(find("right")->x + find("right")->width, width - 8.0f, 0.05f);
+        EXPECT_NEAR(find("verse")->width, min(main_width, 1100.0f), 0.05f);
+        EXPECT_NEAR(find("passage")->width, min(main_width, 1100.0f), 0.05f);
+        EXPECT_NEAR(find("signed")->width, max(0.0f, 120.0f - width * 0.1f), 0.05f);
+        EXPECT_FLOAT_EQ(find("clamped")->width, 0.0f);
+        EXPECT_FLOAT_EQ(find("control")->width, 180.0f);
+        EXPECT_FLOAT_EQ(find("inherited")->width, 230.0f);
+        EXPECT_FLOAT_EQ(find("content")->height, 40.0f);
+        EXPECT_FLOAT_EQ(find("sized")->height, 110.0f);
+        EXPECT_FLOAT_EQ(find("banner-wrapper")->width, 600.0f);
+        EXPECT_FLOAT_EQ(find("auto-minimum")->width, 40.0f);
+        EXPECT_FLOAT_EQ(find("initial-minimum")->width, 40.0f);
+        EXPECT_FLOAT_EQ(find("zero-minimum")->width, 20.0f);
+        EXPECT_FLOAT_EQ(find("search-outer")->width, 744.0f);
+        EXPECT_FLOAT_EQ(find("floating-controls")->width, 121.0f);
+        EXPECT_FLOAT_EQ(find("version-wrapper")->width, 78.0f);
+        EXPECT_FLOAT_EQ(find("search-submit")->width, 43.0f);
+    }
+}
+
 TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConstraints) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);

@@ -1,0 +1,17 @@
+<!doctype html>
+<body>
+<div id="result"></div>
+<script id="writer">
+window.writeOrder = ['before'];
+document.write('<span id="written">written &amp; parsed</span>');
+document.write('<script id="written-script" src="document_write_scripts.js"><\/script>');
+writeOrder.push('after:' + window.writtenValue + ':' + document.currentScript.id);
+document.write('<span id="tail">tail</span>');
+</script>
+<script id="following">
+writeOrder.push('following');
+document.getElementById('result').textContent = writeOrder.join('|');
+document.getElementById('result').innerHTML += '<script>window.inertWriteScript = true;<\/script>';
+document.getElementById('result').setAttribute('data-inert', String(window.inertWriteScript));
+</script>
+</body>

@@ -913,11 +913,12 @@ static bool intrinsic_percentage_width_is_indefinite(LayoutContext* lycon, DomEl
     // a provisional used width is not a percentage basis while its own inline contribution is being measured.
     if (!parent || !parent->measuring_intrinsic_width() ||
         layout_block_inline_axis_is_vertical(parent)) return false;
-    bool assigned_item = parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX ||
-        parent->parent_item_kind() == DomElement::PARENT_ITEM_GRID;
+    // auto block descendants also have cyclic percentages while their intrinsic width is queried.
     return intrinsic_parent_has_auto_inline_width(parent) ||
         layout_axis_uses_intrinsic_size(parent->blk, LAYOUT_AXIS_X) ||
-        (assigned_item && layout_block_has_automatic_size(parent, true));
+        layout_block_has_automatic_size(parent, true) ||
+        (layout_axis_size_is_percentage(parent, true) &&
+         intrinsic_percentage_width_is_indefinite(lycon, parent->as_element()));
 }
 
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,

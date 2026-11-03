@@ -1926,11 +1926,14 @@ TEST_F(MotionCascadeTest, ImageRenderingComputedValuesShareCascadeAndDefaults) {
 TEST_F(MotionCascadeTest, FlexBasisComputedSnapshotsPreserveDeclarationOwners) {
     apply("font-size:20px");
     const struct { const char* value; float computed; bool percent = false;
-        bool content = false; bool stretch = false; } cases[] = {
+        bool content = false; bool stretch = false; float offset = 0.0f; } cases[] = {
         {"2em", 40.0f}, {"calc(25%)", 25.0f, true},
         {"auto", -1.0f}, {"content", -1.0f, false, true},
         {"stretch", -1.0f, false, false, true}, {"calc(-2px)", 0.0f},
-        {"calc(-0px)", 0.0f}, {"initial", -1.0f}
+        {"calc(-0px)", 0.0f}, {"initial", -1.0f},
+        {"calc((100% - 176px)/5*4)", 80.0f, true, false, false, -140.8f},
+        {"calc(120px - 10%)", -10.0f, true, false, false, 120.0f},
+        {"calc(50% - 1em)", 50.0f, true, false, false, -20.0f}
     };
     CssFlexBasisValue basis = {};
     for (const auto& item : cases) {
@@ -1939,6 +1942,7 @@ TEST_F(MotionCascadeTest, FlexBasisComputedSnapshotsPreserveDeclarationOwners) {
         apply(declaration);
         ASSERT_TRUE(css_prop_compute_declared_flex_basis(&element, &basis));
         EXPECT_FLOAT_EQ(basis.value, item.computed);
+        EXPECT_FLOAT_EQ(basis.offset, item.offset);
         EXPECT_EQ(basis.is_percent, item.percent);
         EXPECT_EQ(basis.is_content, item.content);
         EXPECT_EQ(basis.is_stretch, item.stretch);

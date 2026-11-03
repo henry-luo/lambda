@@ -1150,6 +1150,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         FlexIntrinsicAccumulator children(is_row_flex_container);
 
         {
+            // content-based minima cannot resolve descendants from the item's auto/percentage preferred width.
+            LayoutContainingBlockScope width_scope(lycon, LAYOUT_AXIS_X, -1.0f,
+                layout_block_has_automatic_size(lam::view_as_block(item), true) ||
+                layout_axis_size_is_percentage(lam::view_as_block(item), true));
             DomNode* c = child;
             // Set up parent context with item's height so children with percentage heights
             // and aspect-ratio can compute their intrinsic width

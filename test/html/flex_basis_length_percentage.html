@@ -1,0 +1,76 @@
+<!doctype html>
+<style>
+body { margin:0; font:10px/20px monospace }
+#page { display:flex; padding:16px 8px 0; column-gap:8px;
+    --left:160px; --available:calc(100% - var(--left) - 16px) }
+#left { flex:0 0 var(--left) }
+#main { flex:1 1 calc(var(--available)/5*4); min-width:0 }
+#right { flex:0 0 calc(var(--available)/5); min-width:0; width:100% }
+#card { display:flex; width:100%; max-width:100%; flex-wrap:wrap }
+#verse { flex:3; max-width:1100px }
+#verse { display:flex; flex-direction:column }
+#passage { flex:1; box-sizing:border-box; padding:24px; border:1px solid }
+#band { width:100% }
+#controls { display:flex }
+#controls > div { width:50% }
+#signed-row { display:flex }
+#signed { flex:0 0 calc(120px - 10%); min-width:0 }
+#clamped-row { display:flex; width:100px }
+#clamped { flex:0 0 calc(10% - 20px); min-width:0 }
+#form-row { display:flex; width:400px }
+#control { flex:0 0 calc(50% - 20px); min-width:0; padding:0; border:0 }
+#inherited-row { display:flex; width:500px; font-size:20px; flex-basis:calc(50% - 1em) }
+#inherited { flex:0 0 auto; flex-basis:inherit; font-size:10px; min-width:0 }
+.column { display:flex; flex-direction:column; width:200px }
+.column > div { flex:0 0 calc(50% + 10px); min-height:0 }
+#definite { height:200px }
+#banner { display:flex; width:600px }
+#banner-wrapper { flex:1 }
+#notice { display:flex; padding:10px 16px }
+#message { display:flex; justify-content:center; min-width:0; width:100% }
+#message-text { max-width:90%; white-space:nowrap; overflow:hidden }
+#close { width:16px }
+.minimum-row { display:flex; width:20px }
+.minimum-child > div { width:40px; height:10px }
+#auto-minimum { min-width:auto }
+#initial-minimum { min-width:initial }
+#zero-minimum { min-width:0 }
+#search { display:flex; width:744px }
+#search-outer { flex:1 }
+#search-bar { position:relative; width:100%; height:48px }
+#floating-controls { position:absolute; right:4px }
+#search-menu { display:flex }
+#version-wrapper { display:flex; width:100% }
+#version-fill, #version-button, #version-label { width:100% }
+#version-button { display:flex; box-sizing:border-box; padding:8px 16px }
+#version-label > div { width:18px }
+#version-icon { flex:none; width:12px; margin-left:16px }
+#search-submit { min-width:auto }
+#search-submit > button { width:39px; height:39px; margin-left:4px; padding:0; border:0 }
+</style>
+<body id="result">
+<div id="page">
+  <aside id="left"></aside>
+  <main id="main"><section id="card"><div id="verse"><div id="passage">
+    A full width passage<div id="band"><div id="controls"><div>Email</div><div>Legal</div></div></div>
+  </div></div></section></main>
+  <aside id="right"></aside>
+</div>
+<div id="signed-row"><div id="signed"></div></div>
+<div id="clamped-row"><div id="clamped"></div></div>
+<div id="form-row"><input id="control"></div>
+<div id="inherited-row"><div id="inherited"></div></div>
+<div id="indefinite" class="column"><div id="content">one<br>two</div></div>
+<div id="definite" class="column"><div id="sized">one<br>two</div></div>
+<div id="banner"><div id="banner-wrapper"><div id="notice">
+  <div id="message"><div id="message-text">A short announcement</div></div><div id="close">X</div>
+</div></div></div>
+<div class="minimum-row"><div id="auto-minimum" class="minimum-child"><div></div></div></div>
+<div class="minimum-row"><div id="initial-minimum" class="minimum-child"><div></div></div></div>
+<div class="minimum-row"><div id="zero-minimum" class="minimum-child"><div></div></div></div>
+<div id="search"><div id="search-outer"><div id="search-bar">
+  <div id="floating-controls"><div id="search-menu"><div id="version-wrapper"><div id="version-fill">
+    <div id="version-button"><div id="version-label"><div>NIV</div></div><div id="version-icon"></div></div>
+  </div></div><div id="search-submit"><button></button></div></div></div>
+</div></div></div>
+</body>

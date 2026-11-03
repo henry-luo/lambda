@@ -474,6 +474,16 @@ bool flex_item_has_content_flex_basis(ViewElement* item) {
     return item && item->fi && item->fi->flex_basis_is_content;
 }
 
+static float flex_item_resolved_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
+    if (!item || !item->fi) return -1.0f;
+    const FlexItemProp* prop = item->fi;
+    if (!prop->flex_basis_is_percent) return prop->flex_basis;
+    // percentage calculations stay deferred across intrinsic probes and retained reflow.
+    if (!flex_layout || flex_layout->main_axis_is_indefinite) return -1.0f;
+    return max(0.0f, prop->flex_basis * flex_layout->main_axis_size / 100.0f +
+        prop->flex_basis_offset);
+}
+
 static float flex_item_replaced_natural_aspect_ratio(ViewElement* item) {
     ViewBlock* block = lam::view_as_block(item);
     ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(nullptr, block);
@@ -607,10 +617,8 @@ float flex_column_item_content_extent(LayoutContext* lycon,
         if (flex_layout && flex_item_has_content_flex_basis(item)) {
             return calculate_flex_basis(item, flex_layout);
         }
-        if (item->fi->flex_basis >= 0.0f &&
-            (flex_layout || !item->fi->flex_basis_is_percent)) {
-            return item->fi->flex_basis;
-        }
+        float basis = flex_item_resolved_basis(item, flex_layout);
+        if (basis >= 0.0f) return basis;
     }
     // The multipass probe preserves the legacy fallback for non-flex views;
     // the intrinsic contribution path below may still inspect their CSS height.
@@ -2063,19 +2071,8 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 
     if (item->form_control()) {
         // Form controls with explicit flex-basis should use that value
-        float form_flex_basis = item->fi ? item->fi->flex_basis : -1.0f;
-        if (form_flex_basis >= 0) {
-            if (item->fi->flex_basis_is_percent) {
-                if (!flex_layout->main_axis_is_indefinite) {
-                    // CSS Flexbox: flex-basis % resolves against container's inner main size
-                    float container_size = flex_layout->main_axis_size;
-                    float basis = form_flex_basis * container_size / 100.0f;
-                    return basis;
-                }
-            } else {
-                return form_flex_basis;
-            }
-        }
+        float form_flex_basis = flex_item_resolved_basis(item, flex_layout);
+        if (form_flex_basis >= 0.0f) return form_flex_basis;
         // CSS Flexbox §7.2.3: flex-basis:auto retrieves the used main-size.
         if (layout_axis_has_given_size(item, is_horizontal)) {
             ViewBlock* form_block = lam::view_as_block(item);
@@ -2105,18 +2102,8 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
     }
     // Case 1: Explicit flex-basis value (not auto)
-    if (item->fi->flex_basis >= 0) {
-        if (item->fi->flex_basis_is_percent) {
-            if (!flex_layout->main_axis_is_indefinite) {
-                // CSS Flexbox: flex-basis % resolves against container's inner main size
-                float container_size = flex_layout->main_axis_size;
-                float basis = item->fi->flex_basis * container_size / 100.0f;
-                return basis;
-            }
-        } else {
-            return item->fi->flex_basis;
-        }
-    }
+    float specified_basis = flex_item_resolved_basis(item, flex_layout);
+    if (specified_basis >= 0.0f) return specified_basis;
     // Check for explicit width/height in CSS (>= 0 because -1 means auto, 0 means explicit width:0px)
     bool horizontal_percent_main_size_is_auto = is_horizontal && item->blk &&
         !isnan(item->block()->given_width_percent) &&
