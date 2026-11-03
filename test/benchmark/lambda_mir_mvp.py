@@ -32,9 +32,19 @@ EXTENDED_CASES = (("r7rs", "fibfp"),) + EXTENDED_ARRAY_CASES + (
 ARRAY_CASES = CORE_ARRAY_CASES + EXPANSION_ARRAY_CASES + EXTENDED_ARRAY_CASES
 GC_CASES = ARRAY_CASES + (("kostya", "json_gen"),)
 CORE_CASES = SCALAR_CASES + CORE_ARRAY_CASES
-CASES = CORE_CASES + EXPANSION_CASES + EXTENDED_CASES
+ORIGINAL_CASES = CORE_CASES + EXPANSION_CASES + EXTENDED_CASES
+ADDITIONAL_CASES = (("r7rs", "cpstak"), ("larceny", "diviter"), ("larceny", "primes"),
+                    ("larceny", "puzzle"), ("larceny", "triangl"), ("larceny", "gcbench"),
+                    ("larceny", "deriv"), ("beng", "nbody"), ("beng", "binarytrees"),
+                    ("beng", "fasta"), ("beng", "pidigits"), ("awfy", "list"),
+                    ("awfy", "permute"), ("awfy", "storage"), ("awfy", "towers"),
+                    ("kostya", "base64"), ("jetstream", "nbody"), ("jetstream", "navier_stokes"),
+                    ("jetstream", "cube3d"), ("jetstream", "raytrace3d"))
+CASES = ORIGINAL_CASES + ADDITIONAL_CASES
 TIMED_OUTPUT_CASES = (("beng", "spectralnorm"), ("beng", "fannkuch"), ("beng", "mandelbrot"),
-                      ("kostya", "levenshtein"), ("larceny", "pnpoly"))
+                      ("kostya", "levenshtein"), ("larceny", "pnpoly"),
+                      ("beng", "nbody"), ("beng", "binarytrees"), ("beng", "fasta"),
+                      ("beng", "pidigits"), ("larceny", "gcbench"))
 
 
 def compiler_identity():
@@ -120,7 +130,8 @@ def main():
     parser.add_argument("--c2mir-allowance-percent", type=float, default=20.0,
                         help="maximum slowdown against C2MIR, using the one-sided 95%% upper ratio bound")
     subsets = {"scalar": SCALAR_CASES, "array": ARRAY_CASES, "float-array": FLOAT_ARRAY_CASES,
-               "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES, "all": CASES}
+               "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES,
+               "original": ORIGINAL_CASES, "additional": ADDITIONAL_CASES, "all": CASES}
     parser.add_argument("--subset", choices=tuple(subsets), default="all")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--case", choices=[f"{suite}/{name}" for suite, name in CASES],
@@ -165,7 +176,8 @@ def main():
         "timer_sha256": sha256_file(TIMER_MAIN),
         "timer_sources": hashed_file_corpus([TIMER_MAIN, ROOT / "test/benchmark/c2mir/bench_clock.h",
                                                ROOT / "test/benchmark/c2mir/bench_kernel_timer.h"], ROOT),
-        "reference_helpers": hashed_file_corpus([ROOT / "test/benchmark/c2mir/bench_lcg.h"], ROOT),
+        "reference_helpers": hashed_file_corpus([ROOT / "test/benchmark/c2mir" / name
+            for name in ("bench_lcg.h", "nbody_kernel.h", "tree_benchmark.h")], ROOT),
         "runner_sources": hashed_file_corpus([Path(__file__), ROOT / "test/benchmark/run_paired_benchmarks.py",
                                                 ROOT / "test/benchmark/run_c2mir_benchmarks.py",
                                                 ROOT / "test/benchmark/benchmark_provenance.py"], ROOT),
@@ -214,7 +226,9 @@ def main():
         medians = {engine: statistics.median(values) for engine, values in samples.items()}
         row = {"name": f"{suite}/{name}", "lambda_sha256": sha256_file(source),
                "timer_scope": "C main including final reporting; Lambda uses its script clock pair" if args.legacy_timer else
-                   "workload plus formatting/output (pnpoly excludes final DONE line)" if (suite, name) in TIMED_OUTPUT_CASES else
+                   "setup and workload with intermediate output; final long-lived tree check/output excluded" if name == "gcbench" else
+                   "workload plus formatting/output; final DONE line excluded" if (suite, name) == ("larceny", "pnpoly") else
+                   "workload plus formatting/output" if (suite, name) in TIMED_OUTPUT_CASES else
                    "setup, sort and sortedness check; final reporting excluded" if name == "quicksort" else
                    "workload including setup; final reporting excluded",
                "c_sha256": sha256_file(c_source), "golden_sha256": sha256_file(source.with_suffix('.txt')),
@@ -240,6 +254,11 @@ def main():
                 None if limited[engine] or limited["mvp"] else paired_ratio_bootstrap(pairs, 10000, 1101))
         if args.previous_mvp:
             row["mvp_over_previous"] = medians["mvp"] / medians["previous_mvp"] if medians["previous_mvp"] else None
+            previous = row["uncertainty"]["mvp_over_previous_mvp"]
+            row["previous_mvp_comparison"] = {
+                "statistically_faster": previous["upper_bound"] < 1.0 if previous else None,
+                "statistically_slower": previous["two_sided_lower_bound"] > 1.0 if previous else None,
+            }
         full = row["uncertainty"]["mvp_over_production"]
         reference = row["uncertainty"]["mvp_over_c2mir"]
         row["performance_gates"] = {

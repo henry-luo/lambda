@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of awfy/towers2.ls. */
 extern int printf(const char *, ...);
 
@@ -26,12 +27,15 @@ static void move_disks(int piles[42], int tops[3], int disks, int from_pile, int
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int piles[42] = {0};
     int tops[3] = {0, 0, 0};
     int moves = 0;
     int disk;
     for (disk = 12; disk >= 0; disk--) push_disk(piles, tops, disk, 0);
     move_disks(piles, tops, 13, 0, 1, &moves);
+    BENCH_KERNEL_END();
     printf(moves == 8191 ? "Towers: PASS\n" : "Towers: FAIL result=%d\n", moves);
+    BENCH_KERNEL_REPORT();
     return moves != 8191;
 }

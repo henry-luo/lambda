@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of beng/pidigits.ls. */
 /* Unbounded spigot algorithm (Gibbons 2004) over a small sign-magnitude
  * bignum: base 2^32 limbs in fixed-capacity structs. The r component of the
@@ -142,6 +143,7 @@ static void big_muladd(Big *dst, const Big *base, unsigned int mult, const Big *
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     Big q, r, s, t, nq, nr, ns, nt, a, b;
     unsigned int k = 0;
     int i = 0;
@@ -214,11 +216,15 @@ int main(void) {
         printf("%s\t:%d\n", line, i);
     }
 
+    BENCH_KERNEL_END();
     all_digits[total_len] = 0;
     ok = total_len == NUM_DIGITS;
     for (j = 0; j < NUM_DIGITS; j++) {
         if (all_digits[j] != expected[j]) ok = 0;
     }
+#ifndef C2MIR_KERNEL_TIMING
     printf(ok ? "pidigits: PASS\n" : "pidigits: FAIL\n");
+#endif
+    BENCH_KERNEL_REPORT();
     return ok ? 0 : 1;
 }
