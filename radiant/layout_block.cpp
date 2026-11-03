@@ -10039,6 +10039,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_inline_atomic && !is_float_element) {
             // wrapping finalizes the old line; its bidi pass must not collect this pending item.
             block->inline_line_number = -1;
+            // assigning a fresh atomic frame discards offsets applied by an earlier content pass.
+            if (block->position)
+                block->position->inline_relative_x = block->position->inline_relative_y = 0.0f;
             if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(block));
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
             float inline_block_height = block->height;

@@ -13,7 +13,7 @@ and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
 source fragmentation remain open. Completed-line trailing spaces and bounded
 Ruby column reconciliation are qualified; hidden-annotation CSSOM exposure and
 float exclusion for internally split Ruby remain open. Whole unbroken Ruby
-float bands are qualified. The objective is not complete.
+float bands and relative-offset composition are qualified. The objective is not complete.
 
 ## Objective and contracts
 
@@ -2355,3 +2355,81 @@ direct/inherited geometry agrees with Chromium, and current CSS Ruby §5.1
 aliases `none` to `spaces`; `auto` overhang amount remains UA-defined. No patch
 is made from that older-spec hypothesis. Evidence and next plan:
 `temp/ruby-m25/{overhang-none-comparison.json,next-milestone.json}`.
+
+## M26: relative offsets survive Ruby column and line placement
+
+P1, qualified. The three causal
+behaviors asserted by imported `position-relative.html` are checked separately
+from its test-report UI. Ruby and ordinary ancestor motion already work, but
+column/late annotation placement cancels the reading's own `left`/`top`. The
+relative-descendant walk also enters atomic local content, translating glyphs
+again. Fresh explicit-font controls and completed read-only debugger callbacks
+prove these owners; the first trace stops on an optimized-out variable and is
+excluded. Evidence: `temp/ruby-m26/{relative-comparison-before.json,
+relative-trace-2.log}`.
+
+[CSS Position §3.3](https://www.w3.org/TR/css-position-3/#relative-positioning)
+keeps relative movement separate from normal-flow sizing. Ruby now derives its
+column and annotation-level constraints from normal-flow rectangles while
+publishing the corresponding visual offsets. The existing applied inline-Y
+accumulator is generalized to a scoped offset pair, shared by Ruby and generic
+inline bounds. Ordinary ancestor offsets stay in the shared Ruby frame; only
+internal offsets are removed from constraints. The shared descendant walk stops
+at independent atomic frames.
+
+An atomic base exposes a second stage dependency: declared offsets can still be
+deferred, so they cannot be subtracted as though already applied. PositionProp
+records both applied components. Fresh inline/atomic placement resets them;
+repeated vertical alignment retains the already shifted X while rebuilding Y.
+The generic inline-bounds path reads those facts too, converting source-axis
+facts after vertical publication. Full flow results already copy PositionProp
+by value. Scalar measurement scopes now preserve both applied components beside
+the restored geometry (**D4.5.1v4 / D4.1.4v5**). No formal ruling changes.
+
+The strict regression covers root/ancestor/annotation accumulation, an atomic
+reading and a relatively positioned atomic base, unaffected following siblings,
+negative/reset offsets, original source identity, per-character Range and visible
+glyph positions through initial/retained CSSOM edits. Glyph captures use their
+documented local origin; document-coordinate assertions add the resolved text
+frame origin. A real percentage-inset trial changes the containing dimensions,
+then verifies restoration of the original position and column bounds.
+
+All five rows agree with Chromium on **432 element/source coordinates** across
+initial, accumulated and negative states, with 0px maximum delta. The qualified
+M25 build differs on 15 coordinates in the shifted state, up to 100px. All **154
+affected neighboring tests** pass after the scalar-snapshot completion, including
+the focused restoration regression. All **492 native text-query tests** also pass
+in the final aggregate.
+Evidence:
+`temp/ruby-m26/{browser-comparison-final.json,browser-comparison-qualified-before.json,
+neighbors-final.log,focused-relative-final.log}`.
+
+The raw Ruby suite remains **56/212 full matches**, with none gained or lost.
+`position-relative` improves from **66.7% to 100% text** and **33.3% to 50%
+elements**, with no other score changes. Its source container, Ruby, reading and
+all text rectangles now agree exactly. The remaining element mismatch is the
+browser's generated 642.67px report panel and its effect on document dimensions;
+no reporting shim or reference change conceals it. Optional default overhang
+in an earlier unequal-width control stays separate from the exact equal-width
+controls. Evidence: `temp/ruby-m26/{wpt-qualified-candidate.log,delta-qualified-candidate.json,
+original-remaining-difference.json}`.
+
+The required Radiant aggregate passes: **9,088 passed, 305 partial, 2 skipped,
+0 failed / 9,395 checks**, including **504 paged-media** and **752 UI automation**
+checks. Layout retains 4,973 full / 301 partial matches. Dimension lint and the
+421-name inventory check pass; only source/test reference columns change.
+Strict boundary DSOs link, but the checker rejects the same six recorded
+deferred imports as M25, with no new import or allowlist change. All eleven
+frozen source inputs and the qualified CLI hash remain unchanged after the
+gate. Evidence: `temp/ruby-m26/{source-inputs.json,radiant.log,
+qualification-result.json,boundary-comparison.json,lint-final.log}`.
+
+The goal remains active with 156 raw mismatches. The next finite milestone
+addresses block-axis annotation margins: explicit-font over/under controls
+show that an 11px separating margin is ignored while padding and borders agree
+with Chromium; repeated lines advance 30px instead of 50px. CSS Ruby §3.1.2
+requires margin-box level envelopes. Hidden-annotation CSSOM exposure stays
+deferred: Chromium's collapse probe retains layout effects contrary to §2.4,
+so its geometry alone cannot justify a repair. Diagnosis and acceptance cases:
+`temp/ruby-m26/{margin-comparison-before.json,margin-multiline-browser.json,
+next-milestone.json}`.

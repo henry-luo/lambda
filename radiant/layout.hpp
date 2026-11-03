@@ -5075,6 +5075,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback);
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 RdtLogicalPoint layout_relative_position_offset_in_flow(ViewBlock* block);
+RdtLogicalPoint layout_applied_inline_relative_offset(View* first, View* stop = nullptr);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);

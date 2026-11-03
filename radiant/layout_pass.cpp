@@ -22,6 +22,7 @@ struct LayoutViewSnapshot {
     bool is_element;
     float content_width;
     float content_height;
+    float inline_relative_x, inline_relative_y;
     bool measuring_intrinsic_width;
     bool main_size_from_flex;
     bool flex_has_intrinsic_width, flex_has_intrinsic_height;
@@ -56,6 +57,8 @@ static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snap
         ::DomElement* element = node->as_element();
         snapshot->content_width = element->content_width;
         snapshot->content_height = element->content_height;
+        snapshot->inline_relative_x = element->position ? element->positionp()->inline_relative_x : 0.0f;
+        snapshot->inline_relative_y = element->position ? element->positionp()->inline_relative_y : 0.0f;
         snapshot->measuring_intrinsic_width = element->measuring_intrinsic_width();
         snapshot->main_size_from_flex = element->flex_item() && element->flex_item()->main_size_from_flex;
         if (FlexItemProp* item = element->flex_item()) {
@@ -104,6 +107,11 @@ static void layout_view_snapshot_restore(const LayoutViewSnapshot* snapshot) {
         ::DomElement* element = node->as_element();
         element->content_width = snapshot->content_width;
         element->content_height = snapshot->content_height;
+        // used relative offsets must follow the restored geometry, including speculative atomic placement.
+        if (element->position) {
+            element->position->inline_relative_x = snapshot->inline_relative_x;
+            element->position->inline_relative_y = snapshot->inline_relative_y;
+        }
         // Intrinsic results are pure for one layout generation. Retain them
         // across a temporary measurement so nested flex/grid queries share it.
         element->set_measuring_intrinsic_width(snapshot->measuring_intrinsic_width);

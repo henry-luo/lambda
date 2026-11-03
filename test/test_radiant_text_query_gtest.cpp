@@ -15123,6 +15123,119 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyRelativeOffsetsSurviveColumnAndLinePlacement) {
+    ASSERT_NE(load("test/html/layout_ruby_relative_offsets.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool ancestor; bool offset_reading; bool atomic_reading; bool atomic_base;
+        DomText* base; DomText* reading; DomNode* base_parent; DomNode* reading_parent;
+        const unsigned char* base_data; const unsigned char* reading_data;
+    } cases[] = {{"root"}, {"ancestor", true}, {"sum", false, true},
+        {"atomic", false, true, true}, {"base-atom", false, true, false, true}};
+    auto part = [&](const char* id, const char* suffix) {
+        char name[64]; str_fmt(name, sizeof(name), "%s-%s", id, suffix); return find(name);
+    };
+    for (Case& entry : cases) {
+        entry.base = first_text_leaf(part(entry.id, "ruby"));
+        entry.reading = first_text_leaf(part(entry.id, "reading"));
+        ASSERT_NE(entry.base, nullptr); ASSERT_NE(entry.reading, nullptr);
+        entry.base_parent = entry.base->parent; entry.reading_parent = entry.reading->parent;
+        entry.base_data = entry.base->text_data(); entry.reading_data = entry.reading->text_data();
+    }
+    struct State { const char* root; const char* ancestor; const char* reading_x; const char* reading_y;
+        float root_x; float ancestor_x; float x; float y;
+    } states[] = {{"0px", "0px", "0px", "0px", 0, 0, 0, 0},
+        {"100px", "100px", "10px", "-50px", 100, 100, 10, -50},
+        {"-24px", "15px", "-7px", "13px", -24, 15, -7, 13},
+        {"0px", "0px", "0px", "0px", 0, 0, 0, 0}};
+    auto check = [&](const State& state) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-relative-offsets"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
+            const Case& entry = cases[index]; SCOPED_TRACE(entry.id);
+            float flow_x = index == 2 || index == 3 ? 20.0f : 0.0f;
+            float base_y = (float)index * 100.0f + 20.0f;
+            float root_x = flow_x + (entry.ancestor ? state.ancestor_x : state.root_x);
+            auto bounds = [&](DomElement* element, float x, float y, float width, float height) {
+                ASSERT_NE(element, nullptr);
+                Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height);
+                EXPECT_FLOAT_EQ(box.x, x); EXPECT_FLOAT_EQ(box.y, y);
+                EXPECT_FLOAT_EQ(box.width, width); EXPECT_FLOAT_EQ(box.height, height);
+            };
+            bounds(part(entry.id, "ruby"), root_x, base_y, 80.0f, 20.0f);
+            float reading_x = root_x + (entry.offset_reading ? state.x : 0.0f);
+            float reading_y = base_y - 10.0f + (entry.offset_reading ? state.y : 0.0f);
+            bounds(part(entry.id, "reading"), reading_x, reading_y, 80.0f, 10.0f);
+            bounds(part(entry.id, "tail"), flow_x + 80.0f, base_y + 12.0f, 10.0f, 4.0f);
+            if (entry.atomic_reading) bounds(find("reading-atom"), reading_x - 6.0f, reading_y + 7.0f, 80.0f, 10.0f);
+            if (entry.atomic_base) bounds(find("base-atom-box"), root_x + 6.0f, base_y + 7.0f, 80.0f, 20.0f);
+            EXPECT_EQ(first_text_leaf(part(entry.id, "ruby")), entry.base);
+            EXPECT_EQ(first_text_leaf(part(entry.id, "reading")), entry.reading);
+            EXPECT_EQ(entry.base->parent.get(), entry.base_parent); EXPECT_EQ(entry.reading->parent.get(), entry.reading_parent);
+            EXPECT_EQ(entry.base->text_data(), entry.base_data); EXPECT_EQ(entry.reading->text_data(), entry.reading_data);
+            for (bool annotation : {false, true}) {
+                DomText* text = annotation ? entry.reading : entry.base;
+                float x = annotation ? reading_x - (entry.atomic_reading ? 6.0f : 0.0f)
+                    : root_x + (entry.atomic_base ? 6.0f : 0.0f);
+                float y = annotation ? reading_y + (entry.atomic_reading ? 7.0f : 0.0f)
+                    : base_y + (entry.atomic_base ? 7.0f : 0.0f);
+                float advance = annotation ? 10.0f : 20.0f;
+                TestRadiantPaintGlyphs<16> glyphs;
+                ASSERT_TRUE(visit_text_paint_glyphs(find("result"), text, TestRadiantPaintGlyphs<16>::collect, &glyphs));
+                ASSERT_EQ(glyphs.count, dom_text_utf16_length(text));
+                // the collector emits local glyph coordinates; queries use document coordinates.
+                float frame_x = 0.0f, frame_y = 0.0f;
+                view_get_visual_bounds(text, &frame_x, &frame_y, nullptr, nullptr);
+                frame_x -= text->rect->x; frame_y -= text->rect->y;
+                for (size_t character = 0; character < glyphs.count; character++) {
+                    Rect box = {}; ASSERT_TRUE(character_rect(range, text, character, &box));
+                    EXPECT_FLOAT_EQ(box.x, x + (float)character * advance); EXPECT_FLOAT_EQ(box.y, y);
+                    EXPECT_FLOAT_EQ(box.width, advance); EXPECT_FLOAT_EQ(box.height, annotation ? 10.0f : 20.0f);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[character].x + frame_x, box.x);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[character].y + frame_y,
+                        box.y + font_get_rendering_ascender(text->font->font_handle));
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(states[0]); }
+    for (const State& state : states) {
+        for (const Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.ancestor ? find("ancestor-span") : part(entry.id, "ruby"),
+                "left", entry.ancestor ? state.ancestor : state.root));
+            if (entry.offset_reading) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(part(entry.id, "reading"), "left", state.reading_x));
+                ASSERT_TRUE(dom_cssom_set_inline_property(part(entry.id, "reading"), "top", state.reading_y));
+            }
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(state);
+    }
+    DomElement* row = find("base-atom"), *ruby = find("base-atom-ruby"), *element = find("base-atom-box");
+    ASSERT_TRUE(dom_cssom_set_inline_property(element, "left", "10%"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(element, "top", "10%"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    Rect before = {}; view_get_visual_bounds(element, &before.x, &before.y, &before.width, &before.height);
+    float ruby_x = 0.0f; view_get_visual_bounds(ruby, &ruby_x, nullptr, nullptr, nullptr);
+    FlexFlowTestContext flow(&ui, document, row); ASSERT_NE(flow.arena, nullptr);
+    {
+        radiant::LayoutMeasureScope trial(&flow.layout, row);
+        row->width *= 0.5f; row->content_width *= 0.5f;
+        row->height *= 0.5f; row->content_height *= 0.5f;
+        element->x = element->y = 0.0f;
+        layout_relative_positioned(&flow.layout, lam::view_require_block(element));
+        float measured_x = 0.0f, measured_y = 0.0f;
+        view_get_visual_bounds(element, &measured_x, &measured_y, nullptr, nullptr);
+        EXPECT_NE(measured_x, before.x); EXPECT_NE(measured_y, before.y);
+    }
+    Rect after = {}; view_get_visual_bounds(element, &after.x, &after.y, &after.width, &after.height);
+    EXPECT_FLOAT_EQ(after.x, before.x); EXPECT_FLOAT_EQ(after.y, before.y);
+    EXPECT_FLOAT_EQ(after.width, before.width); EXPECT_FLOAT_EQ(after.height, before.height);
+    recompute_span_bounding_box_after_line_layout(lam::view_require<RDT_VIEW_INLINE>(ruby), false, ruby->font->font_handle);
+    float restored_x = 0.0f; view_get_visual_bounds(ruby, &restored_x, nullptr, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(restored_x, ruby_x);
+}
+
 TEST_F(RadiantTextQuery, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLines) {
     ASSERT_NE(load("test/html/layout_ruby_float_band.html"), nullptr);
     process_document_font_faces(&ui, document);

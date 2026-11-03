@@ -632,11 +632,27 @@ static void ruby_refresh_inline_bounds(View* view, int) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
-static void ruby_publish_geometry(DomElement* element, float start, float width) {
+static RdtLogicalPoint ruby_relative_offset(View* view) {
+    View* scope = view ? view->parent.get() : nullptr;
+    while (scope && scope->view_type == RDT_VIEW_INLINE && ruby_node_role(scope) != CSS_VALUE_RUBY)
+        scope = scope->parent;
+    return layout_applied_inline_relative_offset(view, scope);
+}
+
+static Rect ruby_flow_bounds(View* view, Rect bounds) {
+    RdtLogicalPoint relative = ruby_relative_offset(view);
+    bounds.x -= relative.x;
+    bounds.y -= relative.y;
+    return bounds;
+}
+
+static void ruby_publish_geometry(DomElement* element, float start, float width,
+        bool normal_flow_start = false) {
     ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(element);
     if (!span) return;
     DomElementExt* ext = element->ensure_ext();
     if (!ext) return;
+    if (normal_flow_start) start += ruby_relative_offset(span).x;
     ext->has_ruby_column_geometry = false;
     ruby_refresh_inline_bounds(span, 0);
     ext->ruby_column_start_offset = start - span->x;
@@ -682,12 +698,14 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
             if (ViewText* text = lam::view_as<RDT_VIEW_TEXT>(view)) {
                 for (TextRect* rect = text->rect; rect; rect = rect->next)
                     if (rect->line_number == box->fragment_line)
-                        ruby_include_bounds(&result, &found, {rect->x, rect->y, rect->width, rect->height});
+                        ruby_include_bounds(&result, &found, ruby_flow_bounds(text,
+                            {rect->x, rect->y, rect->width, rect->height}));
             } else if (leaf && view->is_element() &&
                     layout_intrinsic_element_is_atomic_inline(view->as_element()) &&
                     view->inline_line_number == box->fragment_line) {
                 // atomic boxes belong to the parent line; their descendants use an independent frame.
-                ruby_include_bounds(&result, &found, {view->x, view->y, view->width, view->height});
+                ruby_include_bounds(&result, &found, ruby_flow_bounds(view,
+                    {view->x, view->y, view->width, view->height}));
             }
         };
         ruby_walk_box(box, include, [](View*, int) {});
@@ -697,7 +715,9 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
         View* view = static_cast<View*>(box->nodes[index]);
         if (view->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(view) ||
             (view->view_type == RDT_VIEW_TEXT && view_is_collapsed_whitespace_text(view))) continue;
-        ruby_include_bounds(&result, &found, {view->x, view->y, view->width, view->height});
+        // column constraints use normal flow; relative offsets affect visual publication only.
+        ruby_include_bounds(&result, &found, ruby_flow_bounds(view,
+            {view->x, view->y, view->width, view->height}));
     }
     if (!found) return result;
     // CSS Ruby §3.1.2 includes nested containers in the block-axis envelope,
@@ -709,8 +729,9 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
         bool box_root = parent_role == CSS_VALUE_RUBY ||
             parent_role == CSS_VALUE_RUBY_BASE_CONTAINER || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER;
         if (role != CSS_VALUE_RUBY && !css_display_is_ruby_internal(role) && !box_root) return;
-        float bottom = max(result.y + result.height, view->y + view->height);
-        result.y = min(result.y, view->y);
+        Rect bounds = ruby_flow_bounds(view, {view->x, view->y, view->width, view->height});
+        float bottom = max(result.y + result.height, bounds.y + bounds.height);
+        result.y = min(result.y, bounds.y);
         result.height = bottom - result.y;
     };
     ruby_walk_box(box, include_nested, [](View*, int) {}, true);
@@ -807,7 +828,7 @@ static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
         adjust_text_bounds(text);
     };
     ruby_walk_box(box, align_view, ruby_refresh_inline_bounds);
-    if (box->element && !box->fragmented) ruby_publish_geometry(box->element, start, width);
+    if (box->element && !box->fragmented) ruby_publish_geometry(box->element, start, width, true);
 }
 
 static void ruby_measure_used_level(LayoutRubyLevel* level) {
@@ -837,7 +858,7 @@ static void ruby_place_level(LayoutRubySegment* segment, LayoutRubyLevel* level,
         ruby_align_box(box, level->element ? level->element : ruby, box_start, width);
     }
     if (level->element && (!level->first || !level->first->fragmented))
-        ruby_publish_geometry(level->element, start, segment->width);
+        ruby_publish_geometry(level->element, start, segment->width, true);
 }
 
 static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool contents_only = false) {

@@ -481,8 +481,8 @@ void layout_shift_inline_descendants(ViewElement* view, float offset_x, float of
                     lam::view_require<RDT_VIEW_TEXT>(child), offset_x, offset_y);
             }
         }
-        // block descendants establish their own coordinate space for inline layout.
-        if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
+        // atomic inline descendants also establish independent local coordinates.
+        if (child->view_type == RDT_VIEW_INLINE) {
             layout_shift_inline_descendants(
                 lam::view_require_element(child), offset_x, offset_y);
         }
@@ -3231,13 +3231,27 @@ bool layout_inline_span_has_content_on_line(View* view, int line_number) {
     return view->inline_line_number == line_number;
 }
 
-static float layout_applied_inline_relative_y(View* view) {
-    float offset = 0.0f;
-    for (View* parent = view->parent; parent && parent->view_type == RDT_VIEW_INLINE; parent = parent->parent) {
-        ViewElement* span = lam::view_require_element(parent);
-        if (span->position) offset += span->positionp()->inline_relative_y;
+RdtLogicalPoint layout_applied_inline_relative_offset(View* first, View* stop) {
+    RdtLogicalPoint offset = {};
+    for (View* view = first; view && view != stop; view = view->parent) {
+        // only the starting atomic box belongs to this frame; its ancestors must be inlines.
+        if (view != first && view->view_type != RDT_VIEW_INLINE) break;
+        ViewBlock* block = lam::view_as_block(view);
+        if (ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(view))
+            block = lam::unsafe_view_block_api_span(span);
+        if (!block) continue;
+        if (block->position) {
+            offset.x += block->positionp()->inline_relative_x;
+            offset.y += block->positionp()->inline_relative_y;
+        }
     }
     return offset;
+}
+
+static float layout_applied_inline_relative_y(View* view) {
+    View* parent = view->parent;
+    if (!parent || parent->view_type != RDT_VIEW_INLINE) return 0.0f;
+    return layout_applied_inline_relative_offset(parent).y;
 }
 
 void view_vertical_align(LayoutContext* lycon, View* view) {
@@ -3515,6 +3529,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         if (block->position && block->positionp()->position == CSS_VALUE_RELATIVE) {
+            // vertical alignment resets Y, but repeated alignment retains the already shifted X.
+            block->x -= block->positionp()->inline_relative_x;
             layout_relative_positioned(lycon, block);
         }
     }

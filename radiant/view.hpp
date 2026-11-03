@@ -2027,7 +2027,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
-    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
+    float inline_relative_x, inline_relative_y; // offsets already applied in the parent inline frame
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
