@@ -15269,6 +15269,59 @@ TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningConten
     EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
 }
 
+TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; const char* reading; const char* suffix; float width; } cases[] = {
+        {"zero-ink", "zero-ink-reading", "zero-ink-suffix", 30.0f},
+        {"zero-anonymous", "zero-anonymous-reading", "zero-anonymous-suffix", 30.0f},
+        {"zero-reading", "zero-reading-annotation", "zero-reading-suffix", 40.0f},
+        {"zero-levels", "zero-levels-reading", "zero-levels-suffix", 30.0f}
+    };
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    auto check = [&](const Case& entry, float width) {
+        DomElement* ruby = find(entry.id);
+        DomElement* reading = find(entry.reading);
+        DomElement* suffix = find(entry.suffix);
+        ASSERT_NE(ruby, nullptr);
+        ASSERT_NE(reading, nullptr);
+        ASSERT_NE(suffix, nullptr);
+        SCOPED_TRACE(entry.id);
+        float x = 0.0f, reading_x = 0.0f, suffix_x = 0.0f;
+        view_get_visual_bounds(ruby, &x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(reading, &reading_x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(suffix, &suffix_x, nullptr, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(ruby->width, width);
+        EXPECT_FLOAT_EQ(reading->width, width);
+        EXPECT_FLOAT_EQ(reading_x, x);
+        EXPECT_FLOAT_EQ(suffix_x, x + width);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, width);
+    };
+    DomElement* base = find("zero-ink-base");
+    DomElement* atomic = find("zero-ink-atomic");
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    DomNode* parent = atomic->parent;
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) check(entry, entry.width);
+        EXPECT_FLOAT_EQ(base->width, 30.0f);
+        EXPECT_FLOAT_EQ(base->height, 0.0f);
+        EXPECT_FLOAT_EQ(atomic->width, 0.0f);
+        EXPECT_FLOAT_EQ(atomic->height, 0.0f);
+        EXPECT_EQ(atomic->parent.get(), parent);
+        EXPECT_FLOAT_EQ(find("zero-ordinary")->width, 0.0f);
+        EXPECT_FLOAT_EQ(find("zero-ordinary-suffix")->x, 0.0f);
+    }
+    for (const char* width : {"60px", "0px", "20px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(atomic, "width", width));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check(cases[0], strcmp(width, "60px") == 0 ? 60.0f : 30.0f);
+        EXPECT_EQ(atomic->parent.get(), parent);
+        EXPECT_EQ(parent, base);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
     ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
     process_document_font_faces(&ui, document);
@@ -15631,6 +15684,26 @@ TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
         DomElement* no_annotation = dom_find_element_by_id(document->root, "ruby-no-annotation-row");
         ASSERT_NE(no_annotation, nullptr);
         EXPECT_FLOAT_EQ(no_annotation->height, 0.0f);
+        DomElement* empty = dom_find_element_by_id(document->root, "ruby-empty-reading");
+        DomElement* empty_row = dom_find_element_by_id(document->root, "ruby-empty-reading-row");
+        DomElement* decorated_empty = dom_find_element_by_id(document->root, "ruby-decorated-empty-reading");
+        ASSERT_NE(empty, nullptr);
+        ASSERT_NE(empty_row, nullptr);
+        ASSERT_NE(decorated_empty, nullptr);
+        EXPECT_FLOAT_EQ(empty_row->height, 20.0f);
+        EXPECT_FLOAT_EQ(decorated_empty->height, 10.0f);
+        for (const char* id : {"ruby-zero", "ruby-zero-leading", "ruby-high-leading", "ruby-tall",
+                "ruby-under", "ruby-role", "ruby-nested", "ruby-small-child", "ruby-large-child"}) {
+            DomElement* reading = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(reading, nullptr);
+            DomElement* child = reading->first_child->as_element();
+            ASSERT_NE(child, nullptr);
+            if (strcmp(id, "ruby-nested") == 0) child = child->first_child->as_element();
+            ASSERT_NE(child, nullptr);
+            // baseline-aligned atomic contents share the reading's font baseline, regardless of leading.
+            float ascent = font_get_rendering_ascender(reading->fontp()->font_handle);
+            EXPECT_NEAR(child->y + child->height, reading->y + ascent, 0.01f) << id;
+        }
     }
     DomElement* annotation = dom_find_element_by_id(document->root, "ruby-zero");
     DomNode* atomic = annotation->first_child;

@@ -1417,7 +1417,6 @@ static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
 static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback_fh) {
     if (span->has_collapsed_line_fragment_union()) {
         compute_span_from_collapsed_line_fragment(span);
-        layout_apply_ruby_column_geometry(span);
         return;
     }
     // CSS 2.1 section 9.4.2: only inline-axis decorations keep an empty span present.
@@ -1438,10 +1437,9 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
         span->width = 0.0f;
         span->height = 0.0f;
     }
-    layout_apply_ruby_column_geometry(span);
 }
 
-void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
+static void compute_span_content_bounds(ViewSpan* span, bool is_multi_line, FontHandle* fallback_fh) {
     ViewBlock* source_flow = layout_nearest_block_ancestor(span->parent_view());
     if (!layout_block_inline_axis_is_vertical(source_flow) ||
         (source_flow->blk && source_flow->block()->vertical_geometry_published)) {
@@ -1914,6 +1912,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                                  content_width + left_edge + right_edge,
                                  final_max_y - final_min_y);
     }
+}
+
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, FontHandle* fallback_fh) {
+    compute_span_content_bounds(span, is_multi_line, fallback_fh);
+    // allocated Ruby columns survive every natural-bounds exit, including zero ink and collapsed content.
     layout_apply_ruby_column_geometry(span);
 }
 
