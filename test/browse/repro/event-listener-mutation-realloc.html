@@ -4,17 +4,38 @@
   <meta charset="utf-8">
   <title>event listener mutation realloc repro</title>
   <script>
+    globalThis.growthCounts = {first: 0, existing: 0, added: 0};
     document.addEventListener("radiant-repro", function firstListener() {
+      growthCounts.first++;
       for (let i = 0; i < 24; i++) {
-        document.addEventListener("radiant-repro", function addedListener() {});
+        document.addEventListener("radiant-repro", function addedListener() { growthCounts.added++; });
       }
+      return false;
     });
 
     for (let i = 0; i < 7; i++) {
-      document.addEventListener("radiant-repro", function existingListener() {});
+      document.addEventListener("radiant-repro", function existingListener() { growthCounts.existing++; });
     }
 
-    document.dispatchEvent(new Event("radiant-repro"));
+    globalThis.growthAccepted = document.dispatchEvent(new Event("radiant-repro", {cancelable: true}));
+
+    const onceTarget = document.createElement("div");
+    globalThis.onceCounts = {getters: 0, calls: 0, peers: 0};
+    onceTarget.addEventListener("once-growth", {get handleEvent() {
+      onceCounts.getters++;
+      for (let i = 0; i < 24; i++) onceTarget.addEventListener("once-growth", function added() {});
+      if (onceCounts.getters === 1) onceTarget.dispatchEvent(new Event("once-growth"));
+      return function handle() { onceCounts.calls++; };
+    }}, {once: true});
+    onceTarget.addEventListener("once-growth", function peer() { onceCounts.peers++; });
+    onceTarget.dispatchEvent(new Event("once-growth"));
+
+    const idlTarget = document.createElement("button");
+    idlTarget.onclick = function handler() {
+      for (let i = 0; i < 24; i++) idlTarget.addEventListener("click", function added() {});
+      return false;
+    };
+    globalThis.idlCancelled = !idlTarget.dispatchEvent(new Event("click", {cancelable: true}));
   </script>
 </head>
 <body>

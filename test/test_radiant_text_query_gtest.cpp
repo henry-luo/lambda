@@ -6,7 +6,9 @@
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_capture.hpp"
 #include "../radiant/audio_cue_owner.hpp"
+#include "../radiant/audio_render.hpp"
 #include "../radiant/document_clock.hpp"
 #include "test_audio_fixture.hpp"
 #include <uv.h>
@@ -18,11 +20,14 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_core.h"
+#include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/dom/dom_cssom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/value_builder.hpp"
 #include "../lib/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "radiant_flow_test_utils.hpp"
@@ -20190,6 +20195,145 @@ protected:
     }
 };
 
+class RadiantAudioCapture : public RadiantDecodedAudio {
+protected:
+    AudioFixtureCaptureBackend host;
+    void prepare() {
+        ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+        auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend));
+    }
+};
+TEST_F(RadiantAudioCapture, HostGrantAndOsPermissionAreIndependentAndAcquisitionIsExplicit) {
+    prepare(); uint64_t denied = radiant_capture_open(document); ASSERT_NE(denied, 0u);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_DENIED; uint64_t os_denied = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, os_denied, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    EXPECT_FALSE(radiant_capture_info(document, denied, &info));
+    host.permission = AUDIO_CAPTURE_PENDING; uint64_t pending = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, pending, &info)); EXPECT_STREQ(info.state, "pending");
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_EQ(radiant_capture_open(document), 0u);
+    ASSERT_TRUE(radiant_capture_stop(document, pending)); host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_FALSE(radiant_capture_tick(document)); EXPECT_EQ(host.opens, 0u);
+    uint64_t active = radiant_capture_open(document); ASSERT_NE(active, 0u);
+    ASSERT_TRUE(radiant_capture_info(document, active, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.granted); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+}
+TEST_F(RadiantAudioCapture, PendingConsentKeepsTheHostAliveAndStartsOnlyOnce) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); ASSERT_NE(token, 0u); EXPECT_TRUE(radiant_audio_tick(document, 0));
+    EXPECT_TRUE(dom_document_has_pending_work(document));
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u);
+    host.permission = AUDIO_CAPTURE_ALLOWED; EXPECT_TRUE(radiant_audio_tick(document, 1)); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_tick(document, 2)); EXPECT_EQ(host.opens, 1u);
+    ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 1u); EXPECT_EQ(bytes, audio_capture_pcm_bytes());
+    const float samples[] = {.25f,-.25f,.5f,-.5f}; ASSERT_NE(host.sink, nullptr);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 123, samples, 2), 2u);
+    float output[4]; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    EXPECT_EQ(first, 123u); for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i]);
+    ASSERT_TRUE(radiant_capture_stop(document, token)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    EXPECT_FALSE(radiant_audio_frames_pending(document)); ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes));
+    EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "stopped");
+    EXPECT_EQ(info.pcm.captured, 2u); EXPECT_EQ(info.pcm.dropped, 123u); EXPECT_EQ(info.pcm.queued, 0u);
+}
+TEST_F(RadiantAudioCapture, ProceduralReadCopiesWideTimestampsAndPcmIntoOrdinaryGcValues) {
+    DomElement* element = load("test/ui/audio_shared_bus.html", true); ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(radiant_eval_context_switch(runtime_get_eval_context(dom_document_script_runtime(document))));
+    auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend)); ASSERT_TRUE(radiant_capture_grant(document, true));
+    RootFrame roots(2); ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, radiant_dom_wrap_node(element)), result(roots, ItemNull);
+    RootedValueBuilder request(RootedValueBuilder::DATA_MAP);
+    request.put("op", Item{.item=s2it(heap_create_name("open"))});
+    result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    auto field = [&](const char* key) {
+        Item name = {.item=s2it(heap_create_name(key))}; return fn_member(result.get(), name);
+    };
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    auto token = field("token").get_uint64(); ASSERT_NE(token, 0u);
+    const float input[] = {.25f,-.25f,.5f,-.5f}; uint64_t wide = (UINT64_C(1) << 53) + 17;
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, wide, input, 2), 2u);
+    request.put("op", Item{.item=s2it(heap_create_name("read"))}); request.put("token", box_uint64_value(token));
+    request.put("frames", push_d(2)); result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    EXPECT_EQ(field("first_frame").get_uint64(), wide); EXPECT_EQ(field("next_frame").get_uint64(), wide + 2);
+    EXPECT_EQ(field("dropped").get_uint64(), wide); EXPECT_EQ(it2l(field("frames")), 2);
+    ASSERT_EQ(get_type_id(field("data")), LMD_TYPE_BINARY); auto* bytes = field("data").get_binary(); ASSERT_EQ(bytes->len, 16u);
+    for (unsigned i = 0; i < 2; i++) for (unsigned channel = 0; channel < 2; channel++)
+        EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), i, channel), input[i * 2 + channel]);
+    ASSERT_TRUE(radiant_capture_stop(document, token));
+    // the copied binary survives closure of the producer and its native queues (D5.3.3).
+    EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), 1, 0), .5f);
+    request.put("frames", push_d(1.5)); EXPECT_EQ(dom_engine_audio_capture(owner.get(), request.value.get()).item, ItemNull.item);
+}
+TEST_F(RadiantAudioCapture, PendingDenialOrDocumentRetirementNeverStartsADeviceLater) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED; AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_PENDING; ASSERT_NE(radiant_capture_open(document), 0u);
+    ui.document = nullptr; free_document(document); document = nullptr; host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_EQ(host.opens, 0u); EXPECT_EQ(host.closes, 0u); EXPECT_EQ(host.sink, nullptr);
+}
+TEST_F(RadiantAudioCapture, RecordingDoesNotNeedOutputActivationAndMonitoringUsesTheSharedGate) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto* local = document->url.get(); auto* network = url_parse("https://example.test/capture"); ASSERT_NE(network, nullptr);
+    document->url = lam::own(network); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    EXPECT_FALSE(radiant_document_may_start_audio(document)); EXPECT_FALSE(radiant_capture_monitor(document, token, .5f));
+    const float samples[] = {.5f,-.5f,.25f,-.25f}; ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, samples, 2), 2u);
+    radiant_audio_note_activation(document); ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 2, samples, 2), 2u);
+    float output[8] = {}; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 4, &first), 4u);
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 4));
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i] * .5f);
+    for (unsigned i = 4; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, 0)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+    document->url = lam::own(local); url_destroy(network);
+}
+TEST_F(RadiantAudioCapture, RevocationAndDeviceLossJoinTheProducerAndReleaseItsQuota) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_capture_monitor(document, token, 1));
+    ASSERT_TRUE(radiant_capture_grant(document, false)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked");
+    EXPECT_FALSE(radiant_capture_monitor(document, token, 1)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); token = radiant_capture_open(document); host.loss = true;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(host.closes, 2u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+    host.loss = false; token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(host.closes, 3u);
+}
+TEST_F(RadiantAudioCapture, OutputLossLeavesRecordingActiveAndMonitoringMustBeReenabled) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f)); audio_bus_retire_output(); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.monitor_lost); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.closes, 0u);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, nullptr, 2), 2u); float output[4]; uint64_t first = 0;
+    EXPECT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_FALSE(info.monitor_lost);
+}
+TEST_F(RadiantAudioCapture, FailedDeviceAndFullDocumentBudgetLeaveNoReaderOrDeviceBehind) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto reservation = radiant_audio_storage_acquire(document, 512u * 1024u * 1024u); ASSERT_NE(reservation, 0u);
+    auto token = radiant_capture_open(document); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "error"); EXPECT_EQ(host.opens, 0u);
+    radiant_audio_storage_release(document, reservation); host.fail_open = true; token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "unavailable"); EXPECT_EQ(host.opens, 1u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+}
+TEST_F(RadiantAudioCapture, TeardownClosesBeforeItsQuotaOwnerAndNoGrantIsInherited) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    auto inherited = document_js_host_config_inherit(&ui, document); EXPECT_FALSE(inherited.microphone_granted);
+    struct Peer { DomDocument* doc; ~Peer() { dom_document_destroy(doc); } } peer{dom_document_create(document->input)};
+    ASSERT_NE(peer.doc, nullptr); dom_document_borrow_input_resources(peer.doc); auto backend = host.backend();
+    ASSERT_TRUE(radiant_capture_set_backend(peer.doc, &backend)); document_apply_js_host_config(peer.doc, &inherited);
+    AudioCaptureInfo info; EXPECT_FALSE(radiant_capture_info(peer.doc, token, &info));
+    auto denied = radiant_capture_open(peer.doc); ASSERT_TRUE(radiant_capture_info(peer.doc, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    dom_document_destroy(peer.doc); peer.doc = nullptr;
+    ui.document = nullptr; free_document(document); document = nullptr; EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+}
+
 TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
     unsigned char bytes[44 + 16 * 4];
@@ -20206,6 +20350,29 @@ TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     }
     EXPECT_STREQ(radiant_audio_state(document, token), "ended");
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 16.0 / AUDIO_BUS_RATE);
+}
+
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareDecodedPcmBytesAndRejectStaleRelease) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    size_t players = 0, bytes = 0; size_t limit = 512u * 1024u * 1024u;
+    EXPECT_EQ(radiant_audio_storage_acquire(document, 0), 0u);
+    EXPECT_EQ(radiant_audio_storage_acquire(document, limit + 1), 0u);
+    auto all = radiant_audio_storage_acquire(document, limit); ASSERT_NE(all, 0u);
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, limit);
+    radiant_audio_storage_release(document, all); auto next = radiant_audio_storage_acquire(document, 1);
+    ASSERT_NE(next, 0u); EXPECT_NE(next, all); radiant_audio_storage_release(document, all);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, 1u);
+    EXPECT_NE(open_clip(), 0u); radiant_audio_storage_release(document, next);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_GT(bytes, 1u);
+}
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareTheDocumentReaderCapacity) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr); uint64_t reservations[128];
+    for (auto& id : reservations) { id = radiant_audio_storage_acquire(document, 1); ASSERT_NE(id, 0u); }
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    radiant_audio_storage_release(document, reservations[0]); EXPECT_NE(open_clip(), 0u);
+    for (auto id : reservations) radiant_audio_storage_release(document, id);
+    size_t players = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u);
 }
 
 TEST_F(RadiantDecodedAudio, PauseResumeEndAndCloseRetireTheirBusVoices) {
@@ -20237,6 +20404,7 @@ TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmiss
     radiant_audio_tick(document, start + 20); EXPECT_STREQ(radiant_audio_state(document, token), "ended");
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
 }
+
 
 TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
@@ -20282,6 +20450,124 @@ TEST_F(RadiantDecodedAudio, NetworkStartsRetainActivationAndMutedPlaybackRules) 
     radiant_audio_note_activation(document); ASSERT_TRUE(radiant_audio_play(document, token, 1));
     EXPECT_FALSE(radiant_audio_play(document, token, NAN)); EXPECT_STREQ(radiant_audio_state(document, token), "playing");
     ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64)); EXPECT_FLOAT_EQ(output[0], 0.5f);
+}
+
+TEST_F(RadiantDecodedAudio, MediaGainChangesCannotBypassNetworkActivation) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    Url* local = document->url.get(); Url* network = url_parse("https://example.test/video");
+    ASSERT_NE(network, nullptr); document->url = lam::own(network);
+    MediaViewState media = {}; media.play_requested = true; media.volume = 1; media.muted = true;
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false));
+    EXPECT_TRUE(media.muted); EXPECT_EQ(media.play_error, 1);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, 0, false));
+    EXPECT_FALSE(media.muted); EXPECT_FLOAT_EQ(media.volume, 0);
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false)); EXPECT_FLOAT_EQ(media.volume, 0);
+    media.play_requested = false; EXPECT_TRUE(radiant_media_set_gain(document, &media, 1, false));
+    media.play_requested = true; radiant_audio_note_activation(document);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, .5f, false)); EXPECT_EQ(media.play_error, 0);
+    document->url = lam::own(local); url_destroy(network);
+}
+
+TEST_F(RadiantDecodedAudio, MediaStatusPollingPreservesARefusedStartDiagnostic) {
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_status_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr);
+    media->play_error = 1;
+    for (unsigned poll = 0; poll < 3; poll++) {
+        EXPECT_EQ(radiant_media_prepare(movie), media); EXPECT_EQ(media->play_error, 1);
+        EXPECT_FALSE(media->muted); EXPECT_FLOAT_EQ(media->volume, 1);
+    }
+}
+TEST_F(RadiantDecodedAudio, VideoProviderJobsRetainPcmAfterTheSelectedSourceIsDisposed) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, .25f, false));
+    AudioRenderPlan plan = {}; plan.frames = 1024; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("video"); plan.providers[0].token = media->audio_token;
+    const char* error = nullptr; uint64_t id = 0; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    ASSERT_TRUE(movie->remove_attribute("src")); EXPECT_EQ(radiant_media_prepare(movie)->player, nullptr);
+    ASSERT_TRUE(audio_render_step(document, 1, id, 1024, &error)); unsigned char bytes[1024 * 8]; size_t length = 0;
+    ASSERT_TRUE(audio_render_read(document, 1, id, 0, 1024, false, bytes, sizeof(bytes), &length, &error)); ASSERT_EQ(length, sizeof(bytes));
+    double energy = 0; for (unsigned i = 0; i < 1024; i++) energy += audio_fixture_sample(bytes, i) * audio_fixture_sample(bytes, i);
+    EXPECT_GT(energy, 0); EXPECT_EQ(radiant_audio_frame(document), 0u); ASSERT_TRUE(audio_render_close(document, 1, id));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, ProviderSnapshotsRejectUnopenedMediaWithoutStartingItsDecoder) {
+#ifdef __APPLE__
+    ASSERT_NE(load_script_source("<div id='result'><video id='movie' preload='none' src='../media/test_video_audio.mp4'></video></div>"), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_pending_test"), nullptr);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_FALSE(media->opened); const char* error = nullptr;
+    EXPECT_EQ(radiant_audio_provider_snapshot(document, radiant_audio_provider("video"), media->audio_token, 0, 32, &error), 0u);
+    EXPECT_NE(error, nullptr); EXPECT_FALSE(media->opened); EXPECT_FALSE(media->play_requested);
+    EXPECT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_IDLE);
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, PreparedSpeechJobsRegisterTheirQuotaOwnerBeforeDocumentTeardown) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr); use_fake_speech();
+    auto speech = audio_fixture_speech(owner, "go"); ASSERT_NE(speech, 0u);
+    AudioRenderPlan plan = {}; plan.frames = 64; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("speech"); plan.providers[0].token = speech;
+    uint64_t id; const char* error = nullptr; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    AudioRenderSnapshot state; ASSERT_TRUE(audio_render_snapshot(document, 1, id, &state)); EXPECT_EQ(state.state, AUDIO_RENDER_READY);
+    // teardown must retire this unfinished reader before its newly created document quota service.
+}
+
+TEST_F(RadiantDecodedAudio, DryVideoInputsFenceBusEditsWhenHostAutoplayIsWithdrawn) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_graph_gate_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    auto mix = radiant_document_submix(document); auto graph = audio_submix_graph_open(mix); ASSERT_NE(graph, 0u);
+    AudioGraphConfig config = {}; config.count = 2;
+    config.buses[0] = audio_graph_bus_default("master"); config.buses[1] = audio_graph_bus_default("providers");
+    config.buses[1].mute = true;
+    ASSERT_TRUE(audio_fixture_graph_publish(mix, graph, config));
+    auto route = audio_submix_graph_route(mix, graph, nullptr, "providers"); ASSERT_NE(route, 0u);
+    const char* error = nullptr; ASSERT_TRUE(radiant_media_route(document, media->audio_token, 0, route, &error));
+    struct NetworkUrl {
+        DomDocument* doc; Url* local; Url* network;
+        ~NetworkUrl() { radiant_audio_grant_activation(false); doc->url = lam::own(local); url_destroy(network); }
+    } url{document, document->url.get(), url_parse("https://example.test/video")};
+    ASSERT_NE(url.network, nullptr); document->url = lam::own(url.network);
+    radiant_audio_grant_activation(true); media->play_requested = true; rdt_video_play(media->player);
+    ASSERT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_PLAYING);
+    float output[64 * 2]; ASSERT_TRUE(audio_submix_render(mix, output, 64));
+    AudioGraphSnapshot snapshot; ASSERT_TRUE(audio_submix_graph_snapshot(mix, graph, &snapshot));
+    ASSERT_FALSE(snapshot.active); for (float value : output) EXPECT_FLOAT_EQ(value, 0);
+    radiant_audio_grant_activation(false); EXPECT_FALSE(radiant_document_may_start_audio(document));
+    EXPECT_FALSE(radiant_audio_graph_may_edit(document, graph));
+    config.buses[1].mute = false; AudioGraph* prepared = nullptr;
+    ASSERT_TRUE(audio_submix_graph_prepare(mix, graph, config, &prepared, &error));
+    bool committed = radiant_audio_graph_commit(document, graph, prepared, nullptr, 0, &error);
+    if (!committed) audio_graph_destroy(prepared);
+    EXPECT_FALSE(committed);
+    EXPECT_FALSE(radiant_media_route(document, media->audio_token, route, 0, &error));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 0, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    rdt_video_pause(media->player); media->play_requested = false;
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 1, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    radiant_audio_note_activation(document); media->play_requested = true; rdt_video_play(media->player);
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
 }
 
 TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers) {

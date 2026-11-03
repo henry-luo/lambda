@@ -881,6 +881,32 @@ TEST_F(JsFormalMir, LambdaIntegerResultsAndFieldsUseExactBigIntEgress) {
     EXPECT_EQ(js_get_key_cstr(value, "valid").item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, PrimitiveConstructorsHonorNativeIntegerBigIntFaces) {
+    RootFrame roots(4);
+    Rooted<Item> constructors(roots, run("[BigInt,Number,Boolean,String]")), argument(roots, ItemNull),
+        result(roots, ItemNull), text(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(constructors.get()));
+    struct IntegerCase { bool unsigned_value; uint64_t u; int64_t i; const char* digits; double number; };
+    const IntegerCase cases[] = {{true, 0, 0, "0", 0}, {true, 1, 0, "1", 1},
+        {true, 9007199254740993ULL, 0, "9007199254740993", 9007199254740992.0},
+        {true, UINT64_MAX, 0, "18446744073709551615", 18446744073709551616.0},
+        {false, 0, -1, "-1", -1}, {false, 0, INT64_MIN, "-9223372036854775808", -9223372036854775808.0}};
+    for (const auto& row : cases) {
+        argument.set(row.unsigned_value ? box_uint64_value(row.u) : box_int64_value(row.i));
+        Item args[] = {argument.get()};
+        result.set(js_call_function_into(js_elements_get_int(constructors.get(), 0), make_js_undefined(), args, 1, result.home()));
+        ASSERT_FALSE(item_is_error(result.get())) << row.digits;
+        text.set(js_to_string(result.get())); ASSERT_EQ(get_type_id(text.get()), LMD_TYPE_STRING);
+        EXPECT_STREQ(text.get().get_string()->chars, row.digits);
+        result.set(js_call_function_into(js_elements_get_int(constructors.get(), 1), make_js_undefined(), args, 1, result.home()));
+        ASSERT_FALSE(item_is_error(result.get())); EXPECT_DOUBLE_EQ(it2d(result.get()), row.number);
+        result.set(js_call_function_into(js_elements_get_int(constructors.get(), 2), make_js_undefined(), args, 1, result.home()));
+        ASSERT_FALSE(item_is_error(result.get())); EXPECT_EQ(result.get().item, row.number == 0 ? ITEM_FALSE : ITEM_TRUE);
+        text.set(js_call_function_into(js_elements_get_int(constructors.get(), 3), make_js_undefined(), args, 1, text.home()));
+        ASSERT_EQ(get_type_id(text.get()), LMD_TYPE_STRING); EXPECT_STREQ(text.get().get_string()->chars, row.digits);
+    }
+}
+
 TEST_F(JsFormalMir, PublicRedeclarationFailsBeforeExecutingAndKeepsRealm) {
     ASSERT_FALSE(item_is_error(run("let kept=7;globalThis.effects=0")));
     Item result = run("effects++;let kept=9");

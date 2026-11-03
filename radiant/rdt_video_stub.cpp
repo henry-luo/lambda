@@ -14,6 +14,10 @@ struct RdtVideo {
 extern "C" {
 
 void rdt_video_pump_events(void) {}
+bool rdt_video_bind_audio(RdtVideo*, const RdtVideoAudioBinding*) { return false; }
+bool rdt_video_audio_route(RdtVideo*, uint64_t, uint64_t, const char**) { return false; }
+bool rdt_video_audio_routing(RdtVideo*, AudioProviderInfo*) { return false; }
+RdtAudio* rdt_video_audio_snapshot(RdtVideo*, double, uint32_t) { return nullptr; }
 bool rdt_video_events_pending(RdtVideo*) { return false; }
 
 const char* rdt_video_can_play_type(const char*, size_t) {

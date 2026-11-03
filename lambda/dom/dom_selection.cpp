@@ -522,14 +522,12 @@ static RangeClientRectCollector js_range_collect_client_rects(
     collector.doc = doc;
     collector.plain = plain;
     if (host && geometry_ready) {
-        View* view = static_cast<View*>(host);
-        if (!view_get_client_matrix(view, &collector.matrix)) {
+        if (!dom_engine_element_client_frame(host, &collector.matrix, &collector.origin.x, &collector.origin.y)) {
             collector.array = array_root.get();
             collector.array_handle = nullptr;
             return collector;
         }
         collector.project = true;
-        collector.origin = view_geometry_block_viewport_origin(view);
     }
     if (geometry_ready) {
         DomNode* selected = nullptr;
@@ -1150,8 +1148,8 @@ extern "C" Item dom_core_source_range_rects(Item host_item, Item start_item, Ite
     }
     DomBoundary first = {}, last = {};
     // use the render map, so decorations follow the same source path as editor selection.
-    bool resolved = dom_boundary_from_source_pos(host, &start, &first) &&
-                    dom_boundary_from_source_pos(host, &end, &last);
+    bool resolved = dom_engine_source_boundary(host, &start, &first) &&
+                    dom_engine_source_boundary(host, &end, &last);
     source_pos_free(&start);
     source_pos_free(&end);
     if (!resolved) return ItemNull;

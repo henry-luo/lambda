@@ -2,6 +2,7 @@
 
 #include "event.hpp"
 #include "rdt_video.h"
+#include "../lambda/input/css/dom_element.hpp"
 
 static RadiantVideoWakeCallback g_video_wake_callback = nullptr;
 static void* g_video_wake_user_data = nullptr;
@@ -29,4 +30,16 @@ bool radiant_video_events_pending(DocState* state) {
         if (media->connected && media->opened && rdt_video_events_pending(media->player)) return true;
     }
     return false;
+}
+
+void radiant_media_audio_tick(DomDocument* document) {
+    DocState* state = document ? document->state : nullptr;
+    if (!state || !state->view_state_map) return;
+    size_t iter = 0; void* item;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        const auto* entry = (const ViewStateEntry*)item;
+        if (entry->kind != VIEW_STATE_MEDIA || !entry->state) continue;
+        auto* media = &entry->state->data.media;
+        if (media->connected && media->opened) rdt_video_get_state(media->player);
+    }
 }

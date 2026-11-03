@@ -2452,6 +2452,7 @@ typedef struct MediaViewState {
     bool default_autoplay;
     int last_state;
     uint64_t source_generation;
+    uint64_t audio_token;
     bool properties_initialized;
     bool muted;
     bool muted_override;
@@ -3088,6 +3089,8 @@ ViewState* view_state_get(DocState* state, View* view);
 MediaViewState* media_view_state_get(DocState* state, View* view, bool create = false);
 void media_view_state_reset(MediaViewState* media);
 MediaViewState* radiant_media_prepare(DomElement* element);
+bool radiant_media_set_gain(DomDocument* document, MediaViewState* media, float volume, bool muted);
+void radiant_media_audio_tick(DomDocument* document);
 // Retain view-scoped interaction state when an incremental template rebuild
 // replaces a structurally corresponding DOM subtree.
 void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,

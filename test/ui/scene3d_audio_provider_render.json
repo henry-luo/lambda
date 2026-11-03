@@ -1,0 +1,206 @@
+{
+  "name": "Prepared MIDI, speech and video export through private copied jobs after live source disposal",
+  "html": "test/ui/scene3d_audio.html",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "env": [
+    {
+      "key": "LAMBDA_AUDIO_OUTPUT",
+      "value": "offline"
+    },
+    {
+      "key": "LAMBDA_SPEECH_ENGINE",
+      "value": "fake"
+    }
+  ],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "globalThis.movie=document.createElement('video');movie.id='movie';movie.style.display='none';movie.src='../media/test_video_audio.mp4';document.body.appendChild(movie);globalThis.exportBus=document.createElement('audio-bus');exportBus.id='providers';exportBus.setAttribute('gain','.5');exportBus.setAttribute('smoothing','0');document.getElementById('world').appendChild(exportBus)"
+    },
+    {
+      "type": "assert_script",
+      "js": "movie.readyState>=2",
+      "assert_interval": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','midi')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='midi'&&sceneProvider.route_valid&&sceneProvider.position===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','speech')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='speech'&&sceneProvider.route_valid&&sceneProvider.position===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','video')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='video'&&sceneProvider.route_valid&&sceneProvider.position===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('open')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='ready'&&providerExport.frames===1024n&&providerExport.rendered===0n&&providerExport.pending.length===3&&providerExport.history.length===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('retire')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "exportRetired&&movie.readyState===0",
+      "assert_interval": 1
+    },
+    {
+      "type": "script",
+      "js": "exportBus.setAttribute('gain','0')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='ready'&&providerExport.rendered===0n&&providerExport.pending.length===3"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('step',{frames:37})"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='running'&&providerExport.rendered===37n&&providerExport.pending.length===0&&providerExport.history.length===3&&providerExport.history.every(row=>row.status==='applied'&&row.actual===0n)"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='complete'&&providerExport.rendered===1024n&&providerExport.bytes===8192n"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('file')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='complete'"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.audio_frame===0n&&sceneAudio.document_players===0n&&sceneAudio.cue_history.length===0",
+      "assert_interval": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('rejected')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "exportRejected&&providerExport.state==='complete'"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('cancel')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExport.state==='cancelled'&&providerExport.bytes===0n"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneExportProviders('close')"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerBusy===false",
+      "assert_interval": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "providerExportClosed===true"
+    }
+  ]
+}

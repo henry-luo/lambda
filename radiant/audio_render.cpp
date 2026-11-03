@@ -68,13 +68,19 @@ static unsigned render_source(const AudioRenderPlan& plan, uint64_t identity) {
     for (unsigned i = 0; i < plan.source_count; i++) if (plan.sources[i].identity == identity) return i;
     return plan.source_count;
 }
-bool audio_render_open(DomDocument* document, uint64_t session, const AudioRenderPlan& plan, uint64_t* id, const char** error) {
+bool audio_render_open(DomDocument* document, uint64_t session, const AudioRenderPlan& input, uint64_t* id, const char** error) {
     const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
     auto fail = [&](const char* text) { *error = text; return false; };
+    AudioRenderPlan plan = input;
     if (!document || !session || !id || !plan.frames || plan.frames > AUDIO_RENDER_BYTES / (2 * sizeof(float)) ||
-        !plan.source_count || plan.source_count > AUDIO_CUE_TRACKS || !plan.event_count || plan.event_count > AUDIO_CUE_CAPACITY ||
+        plan.source_count > AUDIO_CUE_TRACKS || plan.provider_count > AUDIO_CUE_TRACKS - plan.source_count ||
+        plan.event_count > AUDIO_CUE_CAPACITY || plan.provider_count > AUDIO_CUE_CAPACITY - plan.event_count ||
+        (!plan.provider_count && (!plan.source_count || !plan.event_count)) ||
         !isfinite(plan.scene_time) || plan.scene_time < 0 || !isfinite(plan.time_scale) || plan.time_scale <= 0)
         return fail("audio render: invalid plan or finite output limit");
+    // register the native quota owner before the pool that will retire its snapshot readers (D4.5.2).
+    if (plan.provider_count && rdt_audio_pcm_storage_bytes(plan.frames) > radiant_audio_available_pcm(document))
+        return fail("audio render: provider snapshot exceeds document PCM/reader quota");
     auto* pool = render_pool(document, true); if (!pool) return fail("audio render: document owner admission failed");
     unsigned slot = AUDIO_RENDER_JOBS; size_t bytes = (size_t)plan.frames * 2 * sizeof(float), retained = 0;
     for (unsigned i = 0; i < AUDIO_RENDER_JOBS; i++) { if (pool->jobs[i]) retained += pool->jobs[i]->bytes; else if (slot == AUDIO_RENDER_JOBS) slot = i; }
@@ -97,6 +103,23 @@ bool audio_render_open(DomDocument* document, uint64_t session, const AudioRende
     }
     job->owner = audio_cue_owner_create(document, job->submix, 1, job, render_notice);
     if (!job->owner) return fail("audio render: cue owner admission failed");
+    struct ProviderAssets {
+        DomDocument* document; uint64_t tokens[AUDIO_CUE_TRACKS] = {}; unsigned count = 0;
+        ~ProviderAssets() { for (unsigned i = 0; i < count; i++) radiant_audio_close(document, tokens[i]); }
+    } assets{document};
+    for (unsigned i = 0; i < plan.provider_count; i++) {
+        const auto& provider = plan.providers[i]; const char* bus = *provider.bus ? provider.bus : "master";
+        if (!audio_submix_graph_route(job->submix, job->graph, nullptr, bus)) return fail("audio render: invalid copied provider route");
+        auto asset = radiant_audio_provider_snapshot(document, provider.provider, provider.token, provider.position, (uint32_t)plan.frames, error);
+        if (!asset) return false;
+        assets.tokens[assets.count++] = asset;
+        auto& source = plan.sources[plan.source_count++]; source = {}; source.asset = asset;
+        source.identity = audio_bus_identity(); if (!source.identity) return fail("audio render: source identity exhausted");
+        source.parameters = rdt_audio_default_parameters(); source.gain = 1; str_copy(source.bus, sizeof(source.bus), bus, strlen(bus));
+        // prepared provider PCM joins the same sample-zero cue path as ordinary copied clips.
+        auto& event = plan.events[plan.event_count++]; event = {}; event.identity = source.identity; event.clip = asset; event.op = AUDIO_CUE_PLAY;
+        str_fmt(event.source, sizeof(event.source), "provider:%s:%llu", provider.provider->name, (unsigned long long)provider.token);
+    }
     uint64_t sources[AUDIO_CUE_TRACKS] = {}, candidates[AUDIO_CUE_CAPACITY] = {};
     AudioPlayerLease targets[AUDIO_CUE_TRACKS] = {}, readers[AUDIO_CUE_CAPACITY] = {};
     // each private reader shares the accounted immutable asset, never a live cursor or DSP history.

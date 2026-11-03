@@ -1,0 +1,234 @@
+{
+  "name": "Video provider tickets retain named routes through pause, replacement and graph retirement",
+  "html": "test/ui/scene3d_audio.html",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "env": [
+    {
+      "key": "LAMBDA_AUDIO_OUTPUT",
+      "value": "offline"
+    }
+  ],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "globalThis.movie=document.createElement('video');movie.id='movie';movie.style.display='none';movie.setAttribute('src','../media/test_video_audio.mp4');document.body.appendChild(movie);globalThis.providerBus=document.createElement('audio-bus');providerBus.id='providers';providerBus.setAttribute('mute','true');providerBus.setAttribute('smoothing','0');document.getElementById('world').appendChild(providerBus);globalThis.otherProviderBus=document.createElement('audio-bus');otherProviderBus.id='other';otherProviderBus.setAttribute('gain','.5');otherProviderBus.setAttribute('smoothing','0');document.getElementById('world').appendChild(otherProviderBus)"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "movie.readyState>=2"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='video'&&typeof sceneProvider.token==='bigint'&&sceneProvider.token>0n&&sceneProvider.route>0n&&sceneProvider.route_valid&&sceneProvider.state==='ready'"
+    },
+    {
+      "type": "assert_script",
+      "js": "BigInt(providerTokens.video)===sceneProvider.token&&BigInt({valueOf:()=>providerTokens.video})===sceneProvider.token&&Number(providerTokens.video)>0"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.originalVideoToken=sceneProvider.token;globalThis.originalVideoRoute=sceneProvider.route;audioSceneProvider('play','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.state==='playing'"
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "sceneAudio!==null&&sceneAudio.audio_frame>0n"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.buses.find(b=>b.id==='providers').peak===0&&sceneAudio.buses[0].peak===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('pause','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.state==='paused'&&sceneProvider.position>0"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.pausedVideoTime=sceneProvider.position;audioSceneProvider('route','video','other')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.route!==originalVideoRoute&&sceneProvider.position===pausedVideoTime"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneCheckProvider({provider:'video',token:originalVideoToken,expected:0n,bus:null,identity:0n},'route')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&providerRejected"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.state==='playing'"
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "sceneAudio.buses.find(b=>b.id==='other').peak>0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('pause','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.removedVideoTime=sceneProvider.position;globalThis.retainedVideoRoute=sceneProvider.route;movie.remove();audioSceneCheckProvider({provider:'video',token:originalVideoToken})"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&!providerRejected&&providerProbe.state==='paused'&&providerProbe.position===removedVideoTime&&providerProbe.route===retainedVideoRoute"
+    },
+    {
+      "type": "script",
+      "js": "document.body.appendChild(movie);audioSceneCheckProvider({provider:'video',token:originalVideoToken})"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&!providerRejected&&providerProbe.route_valid&&providerProbe.token===originalVideoToken"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.foreignFrame=document.createElement('iframe');foreignFrame.style.cssText='display:block;width:1px;height:1px;border:0';foreignFrame.src='audio_video_shared.html';document.body.appendChild(foreignFrame)"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "foreignFrame.contentDocument&&foreignFrame.contentDocument.getElementById('movie')&&foreignFrame.contentDocument.getElementById('movie').readyState>=2"
+    },
+    {
+      "type": "script",
+      "js": "readForeignVideoTicket(foreignFrame.contentDocument.getElementById('movie'))"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&foreignVideoToken>0n&&foreignVideoToken!==originalVideoToken"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneCheckProvider({provider:'video',token:foreignVideoToken})"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&providerRejected"
+    },
+    {
+      "type": "script",
+      "js": "foreignFrame.remove();movie.load()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "movie.readyState>=2"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneCheckProvider({provider:'video',token:originalVideoToken})"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&providerRejected"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','video','other')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.token!==originalVideoToken&&sceneProvider.route_valid"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&sceneProvider.state==='playing'"
+    },
+    {
+      "type": "advance_time",
+      "ms": 10,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('world').remove()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 20,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('legacy','video')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false&&providerLegacy.state==='error'"
+    }
+  ]
+}

@@ -44,6 +44,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/base64.h"
 #include "../lib/image.h"
+#include "../lib/file.h"
 
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -62,31 +63,13 @@ static const char* PDF_FIXTURE_INVOICE  = "test/input/invoice.pdf";
 // Independent three-page fixture with distinct sheet geometry and font resources.
 static const char* PDF_FIXTURE_THREEPAGE        = "test/input/pdf_three_pages.pdf";
 
-/** Read a file fully into a malloc'd buffer. Returns NULL on failure.
- *  Sets *out_len. The buffer is null-terminated for safety, but the parser
- *  is given the explicit length so embedded NULs are fine. */
-static char* read_binary_file(const char* path, size_t* out_len) {
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return nullptr;
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    if (size < 0) { fclose(fp); return nullptr; }
-    fseek(fp, 0, SEEK_SET);
-    char* buf = (char*)malloc((size_t)size + 1);
-    if (!buf) { fclose(fp); return nullptr; }
-    size_t n = fread(buf, 1, (size_t)size, fp);
-    fclose(fp);
-    buf[n] = '\0';
-    if (out_len) *out_len = n;
-    return buf;
-}
-
 /** Parse a PDF file into a fresh Input. Caller does NOT free — Input
  *  lifetime is managed by the singleton InputManager pool. */
 static Input* parse_pdf_file(const char* path) {
     size_t len = 0;
-    char* src = read_binary_file(path, &len);
-    if (!src) {
+    char* src = nullptr;
+    // share the binary reader instead of defining a symbol that conflicts with file.o.
+    if (!file_read_all(path, MEM_CAT_TEMP, &src, &len)) {
         ADD_FAILURE() << "failed to read PDF fixture: " << path;
         return nullptr;
     }
@@ -94,11 +77,11 @@ static Input* parse_pdf_file(const char* path) {
     Input* input = InputManager::create_input(url);
     if (url) url_destroy(url);
     if (!input) {
-        free(src);
+        mem_free(src);
         return nullptr;
     }
     parse_pdf(input, src, len);
-    free(src);
+    mem_free(src);
     return input;
 }
 

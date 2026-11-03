@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "../lib/mem.h"
+#include "audio_capture.hpp"
 #include "../lib/host_paths.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_context.h"
@@ -2209,6 +2210,7 @@ void document_apply_js_host_config(DomDocument* doc,
     doc->resource_policy = config->resource_policy;
     // scripting, once disabled, stays disabled
     doc->scripting_disabled = doc->scripting_disabled || config->scripting_disabled;
+    radiant_capture_grant(doc, config->microphone_granted);
 }
 
 // Script realms stay on the host thread; async loaders transfer only the parsed DOM.

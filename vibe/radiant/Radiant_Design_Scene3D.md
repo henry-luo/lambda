@@ -964,8 +964,12 @@ Explicit offline PCM/WAV jobs are implemented and qualified in the bounded nativ
 Existing MIDI/speech providers now expose copied named-route controls, retained
 route references and explicit loss behavior through the shared submix. See the
 [provider contract](../../doc/Lambda_Packages.md#native-scene3d-midi-and-speech-routes).
-Provider export and ratified capture remain pending, as does shared-provider
-integration of existing video-track audio. See the
+Existing macOS video-track audio now decodes bounded stereo PCM into the same
+document submix and uses consumed samples for A/V time. Copied document-owned
+video tickets now join named routes through the same provider table, including
+the graph-edit activation guard; see the [qualified video-route component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-named-video-routes--qualified-2026-11-03).
+Prepared provider export now reuses these native readers and the private job
+graph; explicit capture has the qualified core profile in §9.3. See the
 [decoded-audio contract](../../doc/Lambda_Packages.md#shared-decoded-audio-foundation)
 and [qualified component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-shared-audio-playback-foundation--2026-11-03)
 (**D4.5.2 / D7.5.3v2 / D7.5.4**).
@@ -1021,8 +1025,12 @@ activation under **D7.5.4**, and stream completed output through existing
 procedural IO (**S12.1.1v3 / D7.5.3v2**). Referenced authored audio controls are
 copied without publishing live gain/routing changes. The [render-job contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
 records static-pose scope, virtual scaling, native limits and cancellation/
-teardown behavior (**D4.5.2 / D5.3.3**). Provider export/shared video integration,
-ratified capture and combined scene-motion/release qualification remain open.
+teardown behavior (**D4.5.2 / D5.3.3**). Prepared MIDI/speech/video inputs now
+materialize finite independent PCM intervals before job publication, then reuse
+the same cue/render path. Live source disposal cannot change their output. See
+the [qualified provider-export profile](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-provider-export--qualified-2026-11-03).
+Capture monitoring also joins named buses through the shared provider seam;
+combined scene-motion/release qualification remains open.
 
 ### 9.3 Microphone input
 
@@ -1030,7 +1038,18 @@ Capture is an explicit procedural acquisition through the existing IO/host
 capability route, with OS permission and a per-document grant. A scene tag may
 describe a capture binding but cannot open a microphone during pure evaluation.
 The output activation ruling **D7.5.4** is not a microphone permission grant.
-This new capture policy requires ratification before the capture milestone.
+The capture policy is ratified in **D7.5.9** (USER, 2026-11-03). Permission
+grants remain host-owned and cannot be serialized into scene data.
+
+The macOS core now implements explicit `dom.audio_capture` acquisition,
+timestamped bounded copied reads, stop/revocation/loss/teardown and separate dry
+monitoring. The [public contract](../../doc/Lambda_Packages.md#explicit-microphone-capture)
+and [qualification receipt](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-explicit-microphone-capture--qualified-2026-11-03)
+record its limits. Capture monitoring supports named bus/DSP routing without
+changing recorded input; see the [qualified routing profile](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-named-capture-monitor-routes--qualified-2026-11-03).
+Other OS backends and physical
+permission/hotplug/release qualification remain open; no physical microphone
+was accessed during the deterministic qualification.
 
 Use bounded native PCM rings, timestamps, resampling/channel conversion and
 overrun diagnostics. Deliver copied buffers/meters at ordinary host boundaries.
@@ -1381,7 +1400,7 @@ implementation, without treating this proposal as formal-spec ratification.
 | Renderer profile | Preserve native OpenGL first; CPU/fragment-pass techniques and explicit required/auto capabilities for M9–M11. |
 | Lighting quality | Finite-bounce diffuse lightmaps, probe-lit dynamic objects and budgeted probe-cache dynamic GI; no unbounded ray tracing claim. |
 | Particle authority | CPU gameplay events; GPU analytic/depth collision explicitly visual where it cannot provide authoritative contacts in M6. |
-| Capture and output | Preserve D7.5.4 output gating; separately ratify document/OS capture permission, buffer access and revocation before M7 capture. |
+| Capture and output | USER ratified D7.5.9 on 2026-11-03: explicit procedural acquisition, separate document/OS grants, bounded copied buffers and close on stop/teardown/revocation/loss. Preserve D7.5.4 output gating for monitoring. |
 | Work/resource limits | Set measured workload budgets and supported platform matrices at each milestone; preserve explicit errors and reproducible smaller profiles. |
 
 Principal risks are solver stability and collision coverage, navigation deadlocks,
