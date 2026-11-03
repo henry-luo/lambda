@@ -15123,6 +15123,89 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
+    ASSERT_NE(load("test/html/layout_ruby_trailing_space.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* name; bool ruby; bool forced; bool nbsp; bool dominant = false;
+        DomText* source = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr;
+    } cases[] = {{"soft", true, false, false}, {"wide", true, false, false},
+        {"hard", true, true, false}, {"isolate-soft", false, false, false},
+        {"isolate-wide", false, false, false}, {"nbsp", true, false, true},
+        {"reading-dominates", true, false, false, true}};
+    for (Case& entry : cases) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-n", entry.name);
+        entry.source = first_text_leaf(find(id));
+        ASSERT_NE(entry.source, nullptr);
+        entry.parent = entry.source->parent;
+        entry.data = entry.source->text_data();
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-line-end-space"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.name);
+            DomElement* row = find(entry.name);
+            DomText* text = entry.source;
+            ASSERT_NE(text->rect, nullptr);
+            bool preserved = entry.nbsp || (!entry.forced && row->width > 240.0f);
+            float width = entry.dominant ? 60.0f : preserved ? 40.0f : 20.0f;
+            EXPECT_FLOAT_EQ(text->rect->width, width);
+            EXPECT_EQ(text->parent.get(), entry.parent);
+            EXPECT_EQ(text->text_data(), entry.data);
+            EXPECT_EQ(dom_text_utf16_length(text), 2u);
+            Rect letter = {}, space = {};
+            ASSERT_TRUE(character_rect(range, text, 0, &letter));
+            ASSERT_TRUE(character_rect(range, text, 1, &space));
+            float letter_width = entry.dominant ? 60.0f : 20.0f;
+            EXPECT_FLOAT_EQ(letter.width, letter_width);
+            EXPECT_FLOAT_EQ(space.x, letter.x + letter_width);
+            EXPECT_FLOAT_EQ(space.width, width - letter_width);
+            float row_x = 0.0f, row_y = 0.0f;
+            view_get_visual_bounds(row, &row_x, &row_y, nullptr, nullptr);
+            TestRadiantPaintGlyphs<4> base_glyphs;
+            ASSERT_TRUE(visit_text_paint_glyphs(row, text, TestRadiantPaintGlyphs<4>::collect, &base_glyphs));
+            ASSERT_GT(base_glyphs.count, 0u);
+            EXPECT_EQ(base_glyphs.glyphs[0].codepoint, 'n');
+            EXPECT_FLOAT_EQ(base_glyphs.glyphs[0].x,
+                letter.x - row_x + (entry.dominant ? 20.0f : 0.0f));
+            EXPECT_FLOAT_EQ(base_glyphs.glyphs[0].y,
+                letter.y - row_y + font_get_rendering_ascender(text->font->font_handle));
+            if (entry.dominant) {
+                EXPECT_FLOAT_EQ(letter.x - row_x, 220.0f);
+            }
+            if (entry.ruby) {
+                char id[64]; str_fmt(id, sizeof(id), "%s-reading", entry.name);
+                DomText* reading = first_text_leaf(find(id));
+                ASSERT_NE(reading, nullptr);
+                ASSERT_NE(reading->rect, nullptr);
+                EXPECT_FLOAT_EQ(reading->rect->width, width);
+                TestRadiantPaintGlyphs<8> glyphs;
+                ASSERT_TRUE(visit_text_paint_glyphs(row, reading, TestRadiantPaintGlyphs<8>::collect, &glyphs));
+                ASSERT_EQ(glyphs.count, dom_text_utf16_length(reading));
+                float start = text->rect->x + (width - 10.0f * (float)glyphs.count) * 0.5f;
+                for (size_t index = 0; index < glyphs.count; index++) {
+                    EXPECT_EQ(glyphs.glyphs[index].codepoint, 'x');
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[index].x, start + (float)index * 10.0f);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[index].y,
+                        reading->rect->y + font_get_rendering_ascender(reading->font->font_handle));
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial"); }
+    for (bool wide : {true, false}) {
+        for (const Case& entry : cases) {
+            if (!entry.dominant)
+                ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.name), "width", wide ? "480px" : "240px"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
+}
+
 TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     ASSERT_NE(load("test/html/layout_terminal_space_decoration.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

@@ -13524,6 +13524,11 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
         int first, length;
         // suppressed separator bytes share the visible end's allocated column edge.
         text_rect_painted_source_range(rect, &first, &length);
+        // soft wraps keep separators in exports, but consumed bytes cannot take Ruby's end padding.
+        if (rect->collapsed_space_advance != 0.0f) {
+            int consumed = text_rect_trailing_collapsible_bytes(text, rect);
+            length = max(0, length - max(0, consumed - rect->trailing_whitespace_bytes));
+        }
         if (byte_offset <= first) return rect->x;
         if (byte_offset >= first + length) return rect->x + rect->width;
     }

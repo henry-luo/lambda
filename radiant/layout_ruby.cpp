@@ -625,14 +625,20 @@ void layout_apply_ruby_column_geometry(ViewSpan* span) {
     }
 }
 
+static void ruby_refresh_inline_bounds(View* view, int) {
+    if (view->view_type != RDT_VIEW_INLINE) return;
+    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+    recompute_span_bounding_box_after_line_layout(span, false,
+        span->font ? span->fontp()->font_handle : nullptr);
+}
+
 static void ruby_publish_geometry(DomElement* element, float start, float width) {
     ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(element);
     if (!span) return;
     DomElementExt* ext = element->ensure_ext();
     if (!ext) return;
     ext->has_ruby_column_geometry = false;
-    recompute_span_bounding_box_after_line_layout(span, false,
-        element->font ? element->fontp()->font_handle : nullptr);
+    ruby_refresh_inline_bounds(span, 0);
     ext->ruby_column_start_offset = start - span->x;
     ext->ruby_column_end_offset = start + width - (span->x + span->width);
     ext->has_ruby_column_geometry = true;
@@ -800,14 +806,7 @@ static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
         }
         adjust_text_bounds(text);
     };
-    auto finish = [](View* view, int) {
-        if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            recompute_span_bounding_box_after_line_layout(span, false,
-                span->font ? span->fontp()->font_handle : nullptr);
-        }
-    };
-    ruby_walk_box(box, align_view, finish);
+    ruby_walk_box(box, align_view, ruby_refresh_inline_bounds);
     if (box->element && !box->fragmented) ruby_publish_geometry(box->element, start, width);
 }
 
@@ -1909,6 +1908,111 @@ void layout_ruby_align_annotations_after_line(LayoutContext* context, ViewSpan* 
     if (model.failed) { log_error("ruby model: final alignment scratch allocation failed"); return; }
     ruby_align_annotation_model(ruby, &model,
         {ruby->x, ruby->y, ruby->width, ruby->height}, context->block.line_number);
+}
+
+static void ruby_remove_box_alignment(LayoutRubyBox* box) {
+    float offset = 0.0f;
+    auto remove = [&](View* view, bool leaf, int) {
+        if (!leaf) return;
+        if (view->view_type != RDT_VIEW_TEXT) {
+            layout_shift_inline_fragment(view, box->fragment_line, -offset, 0.0f);
+            return;
+        }
+        ViewText* text = lam::view_require_text(view);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->line_number != box->fragment_line) continue;
+            rect->x -= offset;
+            rect->width -= rect->ruby_alignment_advance;
+            offset += rect->ruby_alignment_advance;
+            if (rect->ruby_alignment_advance != 0.0f) rect->justification_spacing = 0.0f;
+            rect->ruby_alignment_offset = rect->ruby_alignment_advance = 0.0f;
+        }
+        adjust_text_bounds(text);
+    };
+    ruby_walk_box(box, remove, ruby_refresh_inline_bounds);
+}
+
+View* layout_ruby_trim_trailing_space(LayoutContext* context, ViewText* text, TextRect* rect,
+        float* advance, bool suppress_text) {
+    ViewSpan* ruby = nullptr;
+    for (DomNode* parent = text ? text->parent.get() : nullptr; parent; parent = parent->parent) {
+        // annotation and atomic descendants own independent whitespace contexts.
+        if (layout_ruby_annotation_node(parent) || parent->view_type != RDT_VIEW_INLINE) return nullptr;
+        if (resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
+            ruby = lam::view_require<RDT_VIEW_INLINE>(parent);
+            break;
+        }
+    }
+    if (!ruby || !ruby->ext || context->block.direction != CSS_VALUE_LTR ||
+            layout_element_writing_mode(ruby) != WM_HORIZONTAL_TB ||
+            dom_element_has_before_content(ruby) || dom_element_has_after_content(ruby) ||
+            (!ruby->ext->has_ruby_column_geometry && !ruby->ext->has_ruby_parallel_fragments)) return nullptr;
+    for (LayoutRubyFlowScope* flow = context->active_ruby_flow.get(); flow; flow = flow->previous) {
+        if (flow->ruby != ruby) continue;
+        bool placed = false;
+        for (LayoutRubySegment* unit = flow->model->first; unit; unit = unit->next) {
+            if (!unit->placed || unit->line_number != context->block.line_number) continue;
+            for (LayoutRubyBox* box = unit->base.first; box; box = box->next)
+                for (int index = 0; index < box->node_count; index++)
+                    placed |= view_geometry_dom_is_descendant(text, box->nodes[index], true);
+        }
+        // a selected interval trimmed before emission has not allocated its columns yet.
+        if (!placed) return nullptr;
+        break;
+    }
+
+    ScratchScope scope(&context->scratch);
+    LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope, false);
+    if (model.failed) return nullptr;
+    bool supported = true;
+    float start = FLT_MAX, old_width = 0.0f;
+    for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
+        ruby_select_segment_line(segment, context->block.line_number);
+        ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
+            supported &= !ruby_fragment_element_needs_full_flow(level->element);
+            for (LayoutRubyBox* box = level->first; box; box = box->next) {
+                supported &= !ruby_fragment_element_needs_full_flow(box->element);
+                ruby_walk_box(box, [&](View* view, bool, int) {
+                    if (view->view_type == RDT_VIEW_INLINE)
+                        supported &= !ruby_fragment_element_needs_full_flow(view->as_element());
+                }, [](View*, int) {});
+            }
+            ruby_measure_used_level(level);
+            Rect bounds = ruby_level_bounds(level);
+            if (bounds.width > 0.0f || bounds.height > 0.0f) start = min(start, bounds.x);
+        });
+        ruby_resolve_segment_columns(segment, &scope, &model.failed);
+        old_width += segment->width;
+    }
+    if (!supported || model.failed || start == FLT_MAX) return nullptr;
+
+    // CSS Text Phase II changes natural content; CSS Ruby §3.1.1 then reallocates each paired column.
+    text_rect_trim_trailing_space(text, rect, *advance, suppress_text);
+    float cursor = start;
+    for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
+        ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
+            for (LayoutRubyBox* box = level->first; box; box = box->next) ruby_remove_box_alignment(box);
+            ruby_measure_used_level(level);
+        });
+        // reuse the already allocated scratch columns; no new failure can follow source mutation.
+        ruby_resolve_segment_columns(segment, &scope, &model.failed);
+        ruby_for_each_level(segment, [&](LayoutRubyLevel* level) {
+            ruby_place_level(segment, level, ruby, cursor);
+        });
+        cursor += segment->width;
+    }
+    if (!inline_span_has_multiple_line_fragments(ruby)) {
+        float before = layout_inline_span_edge_extent(ruby, false, true, false);
+        float after = layout_inline_span_edge_extent(ruby, false, false, false);
+        ruby_publish_geometry(ruby, start - before, cursor - start + before + after);
+    } else {
+        ruby->ext->has_ruby_column_geometry = false;
+        ruby_refresh_inline_bounds(ruby, 0);
+    }
+    layout_inline_record_advance(context, ruby, start, cursor);
+    // a wider reading can absorb the removed base space without changing the line's consumption.
+    *advance = old_width - (cursor - start);
+    return ruby;
 }
 
 float layout_ruby_intrinsic_height(LayoutContext* context, DomElement* ruby, float available_width) {

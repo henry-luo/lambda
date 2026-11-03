@@ -10,7 +10,9 @@ Ruby formatting and isolated-inline margin advances are also qualified. General 
 integration and the remaining raw suite failures are still open. Coordinated
 horizontal flow is qualified for source-text fragments, complete shared columns
 and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
-source fragmentation remain open. The objective is not complete.
+source fragmentation remain open. Completed-line trailing spaces and bounded
+Ruby column reconciliation are qualified; hidden-annotation CSSOM exposure and
+annotation/float exclusion remain open. The objective is not complete.
 
 ## Objective and contracts
 
@@ -2199,3 +2201,89 @@ disagreement with fresh source controls before changing its owning stage;
 `temp/ruby-m23/next-milestone.json` records that finite plan. The full goal stays
 active with 157 raw mismatches. References, upstream fixtures, tolerances and
 baseline floors remain unchanged.
+
+## M24: line-owned trailing spaces and completed Ruby columns
+
+P1, completed with the boundary-check limit below. The imported
+`collapse-trailing-whitespace` gave `n ` a 0px native rectangle rather than
+Chromium's 20px, while its reading retained an earlier 40px allocation. Wide
+ordinary isolates and Ruby also lost a valid internal space. Explicit-font
+captures with the qualified M23 binary reproduce the defect; forced breaks and
+NBSP distinguish the affected paths.
+
+Debugger evidence isolates the first incorrect write: the line formatter
+correctly trims 40px to 20px, then `trim_isolated_inline_text_edge` removes
+another 20px. That post-line pass also trims spaces away from line edges. It is
+removed; CSS Text **§4.1.2 Phase II** owns line-edge removal, and CSS Ruby §2.5
+keeps base-level whitespace in that common processing context. The initial
+native fixture omitted the harness's `result` wrapper and stopped before
+assertions; that load failure is excluded from verification.
+
+Late trimming also reconciles already allocated columns. A scratch-owned
+normalized model snapshots their current-line allocation before the source
+trim. Existing alignment additions are removed, then the existing measurement,
+column solver and placement stages allocate the surviving content. The owner
+reports the actual consumed advance to the line formatter: a wider reading can
+absorb the removed base space without shortening the column. Old-line geometry,
+source identities/parents/data and atomic local frames retain their ownership
+(**D4.5.1v4 / D4.1.4v5**). No source re-emission or retained scratch pointer is
+introduced. This core covers horizontal LTR flow and undecorated internal Ruby
+levels; nested Ruby, decorated internal boxes and other axes retain their
+existing paths pending independent work.
+
+The dominant-reading control exposed a separate range boundary: Ruby end
+padding belongs to the last surviving character, while a consumed source space
+maps to the allocated column end with zero width. The existing suffix scanner
+is shared by explicit paint suppression and that query boundary. Consuming a
+space's advance does not remove its logical bytes. An intermediate candidate
+unconditionally suppressed soft-wrap separators in exports, causing seven
+strict paged-media failures; it was rejected. Restoring the existing export
+policy while sharing the suffix calculation repairs those regressions.
+
+Acceptance covers ordinary isolates, soft/forced breaks, internal spaces and
+NBSP; a dominant reading preserving line consumption; character ranges, visible
+glyph positions and original source identity through retained wide/narrow
+reflow. All **148 focused neighbors** and **504 paged-media tests** pass. The
+seven controls agree with Chromium on **198 coordinates, 0px maximum delta**.
+The final capture has the identical complete layout tree as that browser
+comparison. Dimension lint and the 421-name inventory check pass; only inventory
+source/test reference columns change, with no coverage claims changed.
+
+The final required Radiant aggregate passes: **9,086 passed, 305 partial,
+2 skipped, 0 failed / 9,393 checks**, including **490 native text-query** and
+**752 UI automation** checks. Nine frozen inputs and the saved candidate CLI
+remain unchanged after the gate. Evidence and exact qualification inputs:
+`temp/ruby-m24/{source-inputs.json,qualification-result.json,
+neighbors-export-contract.log,paged-export-contract.log,
+radiant-qualified-candidate.log}`.
+
+The unchanged-reference Ruby suite remains **55/212 full matches**, with none
+gained or lost. Twenty-five partial documents change. The original whitespace
+case improves from **71.4% to 100% text** and **77.8% to 88.9% elements**. Its
+remaining mismatch is the auto-hidden `hon` annotation: native excludes its
+layout/serialized rectangle, while Chromium retains a 60×10px `rt` rectangle.
+All other source and element rectangles agree; hidden-annotation CSSOM exposure
+remains unresolved.
+
+`ruby-bidi-002` text improves from 29.7% to 31.6%, while its element report falls
+from 9.1% to 7.7%. The actual harness at its 5.5px tolerance finds the same two
+geometric matches before/after. Reported matches change from 5/55 to 4/52 because
+three forgiven whitespace/type mismatches become two. The lower raw percentage
+stays visible; explicit Ruby-role/tree differences remain open. Fresh final
+captures of this and the original whitespace document retain the identical
+complete layout trees used by these audits. Evidence:
+`temp/ruby-m24/{delta-qualified-candidate.json,remaining-original-difference.json,
+bidi-percentage-explanation.json,raw-capture-transfer.json,
+browser-comparison-qualified-candidate.json}`.
+
+The strict boundary DSOs link. The checker rejects the same six recorded
+deferred imports as M21, with no additions or allowlist changes (140 current /
+165 baseline imports). This remains a qualification limit. Evidence:
+`temp/ruby-m24/boundary-export-contract-comparison.json`.
+
+The goal remains active with 157 raw mismatches. Next is the imported
+`ruby-with-floats-003`: saved captures place the base/under-reading 50px too far
+left beside stacked floats while vertical coordinates agree. Verify the line's
+occupied exclusion band and source interval selection before changing code;
+under/over Ruby and ordinary tall-inline controls must distinguish the cause.
+The finite diagnosis plan is `temp/ruby-m24/next-milestone.json`.

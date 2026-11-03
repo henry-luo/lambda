@@ -2486,19 +2486,23 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
 static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
                                                        TextRect* text_rect);
 
-static void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text) {
-    rect->width = max(0.0f, rect->width - advance);
-    // bidi consumes the same trim decision even when soft-wrap source bytes stay queryable.
-    rect->collapsed_space_advance += advance;
-    if (!suppress_text || !text || !text->text_data()) return;
+int text_rect_trailing_collapsible_bytes(ViewText* text, const TextRect* rect) {
+    if (!text || !rect || !text->text_data()) return 0;
     int end = rect->start_index + rect->length - rect->hyphenated_trailing_bytes;
     int start = end;
     bool preserve_spaces = white_space_preserves_space_advance(get_white_space_value(text));
     while (start > rect->start_index && (preserve_spaces
         ? layout_text_is_segment_break(text->text_data()[start - 1])
         : is_space(text->text_data()[start - 1]))) start--;
-    // suppress the raw suffix once, even when several source spaces shared one measured advance.
-    rect->trailing_whitespace_bytes = max(rect->trailing_whitespace_bytes, end - start);
+    return end - start;
+}
+
+void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text) {
+    rect->width = max(0.0f, rect->width - advance);
+    // consumed advance and exported source separators have independent policies.
+    rect->collapsed_space_advance += advance;
+    if (suppress_text) rect->trailing_whitespace_bytes = max(
+        rect->trailing_whitespace_bytes, text_rect_trailing_collapsible_bytes(text, rect));
 }
 
 static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
@@ -2510,8 +2514,13 @@ static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
     bool preserve_vertical_gap = text_rect && line_trailing_space_is_vertical_atomic_gap(
         text_view, text_rect);
     float trim_amount = preserve_vertical_gap ? 0.0f : space_width;
+    View* trim_owner = owner;
     if (trim_text_bounds && !preserve_vertical_gap) {
-        if (text_rect) text_rect_trim_trailing_space(text_view, text_rect, trim_amount, suppress_text);
+        if (text_rect) {
+            View* ruby = layout_ruby_trim_trailing_space(lycon, text_view, text_rect, &trim_amount, suppress_text);
+            if (ruby) trim_owner = ruby;
+            else text_rect_trim_trailing_space(text_view, text_rect, trim_amount, suppress_text);
+        }
         else owner->width = max(0.0f, owner->width - trim_amount);
     }
     lycon->line.advance_x -= trim_amount;
@@ -2521,7 +2530,7 @@ static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
             lycon, text_view, text_rect);
     }
     if (update_ancestor_bounds) {
-        propagate_inline_trim(owner, trim_amount);
+        propagate_inline_trim(trim_owner, trim_amount);
     }
 }
 
@@ -2754,7 +2763,6 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     line_align(lycon);
     layout_finalize_static_inline_positions(lycon);
-    layout_trim_isolated_inline_text_edges(lycon, lycon->line.start_view);
     place_rtl_initial_letter_line(lycon);
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {

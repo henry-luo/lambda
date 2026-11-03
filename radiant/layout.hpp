@@ -4875,6 +4875,9 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
                                              bool update_ancestor_bounds,
                                              bool suppress_text = false);
+// source suffix length; consuming its advance need not remove it from exported text.
+int text_rect_trailing_collapsible_bytes(ViewText* text, const TextRect* rect);
+void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
 void layout_finalize_phantom_inline_line(LayoutContext* lycon);
@@ -4883,7 +4886,6 @@ CssEnum inline_box_decoration_break_value(DomElement* parent);
 View* layout_inline_span_edge_leaf(ViewSpan* span, bool source_end,
     float* left_decoration = nullptr, float* right_decoration = nullptr,
     float* relative_offset = nullptr);
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
