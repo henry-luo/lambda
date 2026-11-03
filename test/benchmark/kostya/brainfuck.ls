@@ -29,7 +29,7 @@ pn build_jump_table(prog, prog_len) {
     return jumps
 }
 
-pn run_bf(prog, prog_len, jumps) {
+fn run_bf(prog, prog_len, jumps) {
     var tape = fill(30000, 0)
     var dp = 0
     var ip = 0

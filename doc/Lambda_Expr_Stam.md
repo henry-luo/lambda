@@ -1359,7 +1359,7 @@ pn main() {                      // print is a pn: only a pn may call it
 
 ### Procedural Statements
 
-`var`, `while`, `break`, `continue`, `return`, and assignment (`=`) are only available in `pn` (procedural) functions. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
+`var`, `while`, `break`, `continue`, `return`, and local assignment (`=`) are available in `fn` and `pn` callable block bodies (S12.1.2v3). An `fn` writes only its own local variables and cannot call `pn`. `break` and `continue` target a `while` in either colour or an existing procedural `for` in the same callable. Functional comprehension extensions remain SO51. See [Lambda Functions](Lambda_Func.md#local-state-and-control-flow) and [Lambda Procedural Programming](Lambda_Procedural.md).
 
 ---
 

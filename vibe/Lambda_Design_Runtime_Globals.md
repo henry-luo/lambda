@@ -805,20 +805,17 @@ property of the *language*, which is what makes the runtime rules cheap to hold:
 
 This is not a convention; it falls out of the scope model and is enforced at compile time.
 
-**Existing enforcement (before S9.1.7v2; the new separation is pending).** The grammar is deliberately permissive — `var_stam` is an ordinary member of
-`_statement` ([grammar.js:326](../lambda/tree-sitter-lambda/grammar.js)), so `content`, and hence
-`document`, parse it anywhere. The restriction is semantic. `build_script` allocates the root
-scope with `pool_calloc` ([build_ast.cpp:11456](../lambda/runtime/build_ast.cpp)), so
-`global_vars->is_proc` is zero, and nothing ever sets it: the only `is_proc = true` assignments in
-the tree are the `while` body scope ([build_ast.cpp:8371](../lambda/runtime/build_ast.cpp)), event
-handlers ([build_ast.cpp:9643](../lambda/runtime/build_ast.cpp)), and the `fn`/`pn` keyword
-([build_ast.cpp:9330](../lambda/runtime/build_ast.cpp)); every other site inherits from the
-enclosing scope. `build_var_stam` therefore always fails at module scope
-([build_ast.cpp:8503](../lambda/runtime/build_ast.cpp)), as do the sibling guards for `while`,
-`break`, `continue`, `return`, `raise`, and assignment
-([build_ast.cpp:8362–8556](../lambda/runtime/build_ast.cpp)). The `run` entry point does **not**
-lift this: `pn main()` is an ordinary `pn` inside a functional module, so `lambda script.ls`,
-`lambda run script.ls`, and the REPL all reject a top-level `var` identically.
+**Enforcement (S9.1.7v2, 2026-11-02).** Both grammars admit local-control
+syntax independently of call colour. `resolver_function_begin` records the
+lexical callable in `NameScope::lambda_function`; `ast_scope_allows_local_control`
+admits its local statements without setting `is_proc`. A module scope has
+neither callable ownership nor procedural capability, so `resolve_var_stam`,
+`resolve_while`, `resolve_control_statement` and `resolve_assignment` reject
+top-level local control. `direct_validate_write_owner` separately prevents
+an `fn` from writing an enclosing binding. The `run` entry point does not
+lift the module restriction: `pn main()` is an ordinary procedure inside
+a functional module. Call-colour validation remains independent under
+S12.1.1v3; local state gives `fn` no effectful-call permission.
 
 A second check closes the transitive path. E211
 ([build_ast.cpp:3061](../lambda/runtime/build_ast.cpp)) rejects mutation *through* an immutable

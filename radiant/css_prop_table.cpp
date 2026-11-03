@@ -552,8 +552,11 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
     if (!element) return false;
     DomElement* receiver = element;
     int receiver_pseudo = pseudo_type;
+    bool ruby_bidi = false;
     // walk the complete CSS ancestry without consuming native stack frames.
     while (element) {
+        if (id == CSS_PROPERTY_UNICODE_BIDI && pseudo_type == 0 &&
+            css_display_is_ruby_role(resolve_display_value(element).inner)) ruby_bidi = true;
         CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
         unsigned grid_mask = css_grid_property_mask(id);
         if (grid_mask && grid_mask < 16 && !(grid_mask & (grid_mask - 1))) {
@@ -663,6 +666,14 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
                         value->data.keyword == CSS_VALUE_NORMAL))) {
             return copy_text(out, "none");
+        }
+        CssValue computed_bidi = {};
+        if (id == CSS_PROPERTY_UNICODE_BIDI && ruby_bidi &&
+            (!value || value->type == CSS_VALUE_TYPE_KEYWORD)) {
+            computed_bidi.type = CSS_VALUE_TYPE_KEYWORD;
+            computed_bidi.data.keyword = css_ruby_compute_unicode_bidi(
+                value ? value->data.keyword : CSS_VALUE_NORMAL);
+            value = &computed_bidi;
         }
         if (native_value) {
             if (!value && property) {

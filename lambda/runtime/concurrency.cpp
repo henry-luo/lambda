@@ -6,6 +6,7 @@
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "transpiler.hpp"
+#include "security_context.h"
 #include "io_file_search.hpp"
 #include "re2_wrapper.hpp"
 #include "../js/js_runtime_state.hpp"
@@ -1651,6 +1652,60 @@ static Item file_read_result(LambdaTask* task, LambdaFileRead* read) {
                         "io.read result allocation failed", NULL));
 }
 
+struct SecurityTaskRead {
+    SecurityIOClient client;
+    char* path;
+    char* bytes;
+    size_t size;
+    SecurityIOResult result;
+};
+
+static void security_task_read_release(void* data) {
+    SecurityTaskRead* read = (SecurityTaskRead*)data;
+    mem_free(read->path); mem_free(read->bytes); mem_free(read);
+}
+
+static void security_task_read_run(LambdaOffload* job, void* data) {
+    SecurityTaskRead* read = (SecurityTaskRead*)data;
+    if (__atomic_load_n(lambda_offload_cancel_flag(job), __ATOMIC_ACQUIRE)) return;
+    security_io_read_bytes(&read->client, read->path, false, INT64_MAX,
+        MEM_CAT_EVAL, &read->bytes, &read->size, &read->result);
+}
+
+static Item security_task_read(const SecurityIOClient* client, const char* path) {
+    SecurityTaskRead* read = (SecurityTaskRead*)mem_calloc(1, sizeof(*read), MEM_CAT_EVAL);
+    if (!read) return task_error(ERR_OUT_OF_MEMORY, "io.read request allocation failed");
+    read->client = *client;
+    read->path = mem_strdup(path, MEM_CAT_EVAL);
+    read->result.decision = SECURITY_DENIED;
+    if (!read->path) {
+        security_task_read_release(read);
+        return task_error(ERR_OUT_OF_MEMORY, "io.read path allocation failed");
+    }
+    // Only owned bytes and a copied transport reach the worker. The scheduler
+    // joins cancellation/teardown before the context's transport is released.
+    static const LambdaOffloadOps ops = {security_task_read_run, nullptr, security_task_read_release};
+    Item result = lambda_task_offload(&ops, read, 0);
+    if (get_type_id(result) != LMD_TYPE_ERROR) {
+        if (read->result.decision != SECURITY_ALLOWED || read->result.system_error)
+            result = task_error(read->result.decision == SECURITY_ALLOWED
+                ? ERR_FILE_READ_ERROR : ERR_FILE_ACCESS_DENIED, "io.read failed in the active resource scope");
+        else {
+            int32_t kind;
+            if (!security_io_input_kind(&read->client, read->path, &kind, nullptr) ||
+                    kind != SECURITY_OBJECT_FILE) {
+                security_task_read_release(read);
+                return task_error(ERR_FILE_ACCESS_DENIED, "io.read authority expired before task delivery");
+            }
+            String* text = heap_strcpy(read->bytes, (int64_t)read->size);
+            result = text ? (Item){.item = s2it(text)} : task_error(ERR_OUT_OF_MEMORY,
+                "io.read result allocation failed");
+        }
+    }
+    security_task_read_release(read);
+    return result;
+}
+
 extern "C" Item pn_io_read(Item target) {
     LambdaTask* task = lambda_current_task();
     if (!task) return err2it_or_error(err_create_heap(ERR_INVALID_STATE,
@@ -1659,6 +1714,12 @@ extern "C" Item pn_io_read(Item target) {
     StrBuf* path = lambda_get_local_path_from_item(target);
     if (!path) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "io.read requires a local file target", NULL));
+    const SecurityIOClient* io = eval_context_security_io(context);
+    if (io) {
+        Item result = security_task_read(io, path->str);
+        strbuf_free(path);
+        return result;
+    }
     LambdaFileRead* read = (LambdaFileRead*)mem_calloc(1, sizeof(LambdaFileRead), MEM_CAT_EVAL);
     if (!read) {
         strbuf_free(path);
@@ -2177,6 +2238,8 @@ static Item process_result(LambdaProcess* process) {
 
 extern "C" Item pn_io_exec3(Item program, Item arguments, Item options) {
     GUARD_ERROR3(program, arguments, options);
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.exec", &denied)) return denied;
     if (lambda_dry_run_enabled()) {
         LambdaProcess fabricated = {};
         return process_result(&fabricated);

@@ -1,0 +1,25 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.block { display: block; width: 30px; height: 10px; }
+</style>
+<div id="result">
+  <span id="owner" style="display:ruby">
+    <span class="block" id="direct-block">a</span>
+    <b><span class="block" id="recursive-block">b</span></b>
+    <span style="display:contents"><span class="block" id="contents-block">c</span></span>
+    <span style="display:inline list-item;list-style:none"><span class="block" id="list-child">d</span></span>
+    <span id="block-list" style="display:list-item;list-style:none">e</span>
+    <span style="display:inline-block"><span class="block" id="atomic-child">f</span></span>
+    <span id="grid" style="display:grid"><span class="block" id="grid-child">g</span></span>
+    <span id="flex" style="display:flex"><span class="block" id="flex-child">h</span></span>
+    <span id="table" style="display:table">i</span>
+    <span id="floated-annotation" style="display:ruby-text;float:left">j</span>
+    <span id="positioned-base" style="display:ruby-base;position:absolute">k</span>
+    <span id="floated-ruby" style="display:ruby;float:left">r</span>
+    <span id="floated-flex" style="display:inline flex;float:left">s</span>
+    <span id="hidden" style="display:none">l</span>
+    <span id="contents" style="display:contents">m</span>
+  </span>
+  <span style="display:ruby-text"><b><span class="block" id="annotation-descendant">n</span></b></span>
+</div>

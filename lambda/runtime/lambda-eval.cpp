@@ -18,6 +18,7 @@
 #include "side_stack.h"
 #include "output_demand.hpp"
 #include "doc_context.hpp"
+#include "security_context.h"
 #include "image_raster.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -5973,10 +5974,8 @@ Item fn_input2(Item target_item, Item type) {
 
     // A schema-backed input inherits the schema/runtime pool; a schemaless
     // input keeps the existing id-less Input seam required by D4.6.2v2.
-    Input *input = schema_type
-        ? input_from_target_with_name_parent(target, type_str, flavor_str,
-            context->name_pool)
-        : input_from_target(target, type_str, flavor_str);
+    Input *input = input_from_target_with_io(target, type_str, flavor_str,
+        schema_type ? context->name_pool : nullptr, eval_context_security_io(context));
     if (!input) {
         // input() is a can-raise effect: a loader failure must not become a
         // successful null, or callers cannot distinguish failed execution from
@@ -6066,6 +6065,31 @@ static Item force_apply_step(Item value, Path* step) {
 // (PTH50v3) and `p#body.0 === p#body.0` holds (PTH45v2).
 static Item force_document(Path* doc_path, bool* raised) {
     *raised = false;
+    const SecurityIOClient* io = eval_context_security_io(context);
+    if (io) {
+        PathScheme scheme = path_get_scheme(doc_path);
+        if (scheme == PATH_SCHEME_SYS) {
+            *raised = true;
+            return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
+                "system information is unavailable in this resource scope");
+        }
+        // A document snapshot is context-owned; a new provider force still
+        // needs authority before an already-captured head may be reused.
+        if (scheme != PATH_SCHEME_TEMP) {
+            Target* target = item_to_target((uint64_t)(uintptr_t)doc_path, NULL);
+            StrBuf* path = target && target->scheme == TARGET_SCHEME_FILE
+                ? (StrBuf*)target_to_local_path(target, NULL) : nullptr;
+            int32_t kind;
+            bool allowed = path && security_io_input_kind(io, path->str, &kind, nullptr);
+            if (path) strbuf_free(path);
+            if (target) target_free(target);
+            if (!allowed) {
+                *raised = true;
+                return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
+                    "document force is unavailable in this resource scope");
+            }
+        }
+    }
     String* key = force_location_key(doc_path);
     if (!key) return ItemNull;
     Document* existing = doc_context_lookup(key->chars, key->len);
@@ -6935,11 +6959,13 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     parse_options.source_positions = source_positions;
+    parse_options.io = context ? eval_context_security_io(context) : nullptr;
     // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
     Input* input = input_from_source_n_with_name_parent(str ? str->chars : (const char*)binary_data(binary),
         str ? str->len : binary_length(binary), dummy_url,
         type_str, flavor_str, NULL,
-        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace) ? &parse_options : NULL);
+        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace || parse_options.io)
+            ? &parse_options : NULL);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);
     arraylist_free(chaptered_names);
@@ -7571,9 +7597,8 @@ extern "C" Item path_property_get(Path* path, const char* k) {
 #ifdef LAMBDA_NO_FILE_IO
         return runtime_error_itemf(ERR_IO_ERROR, "filesystem metadata provider is excluded");
 #else
-        if (!(path->flags & PATH_FLAG_META_LOADED)) {
-            path_load_metadata(path);
-        }
+        if (!path_load_metadata(path)) return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
+            "path metadata is unavailable in this resource scope");
         PathMeta* meta = path->meta;
         if (!meta) {
             // path doesn't exist or couldn't be stat'd
@@ -7646,6 +7671,8 @@ Item fn_member(Item item, Item key) {
         if (path) {
             // Check if it's a sys path - these should be resolved to their content
             if (path_get_scheme(path) == PATH_SCHEME_SYS) {
+                if (eval_context_security_io(context)) return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
+                    "system information is unavailable in this resource scope");
                 if (path->result == 0) {
                     Item resolved = path_resolve_for_iteration(path);
                     if (resolved.item == ItemError.item) return ItemNull;
@@ -7989,31 +8016,9 @@ int64_t fn_len(Item item) {
         // Lazy evaluation: resolve path content if not cached, then get length
         Path* path_val = item.path;
         if (!path_val) { size = 0; break; }
-        // Check if content is already resolved (cached in path->result)
-        if (path_val->result == 0) {
-            // Use path_resolve_for_iteration which handles:
-            // - Directories: returns list of child paths
-            // - Files: returns parsed content
-            // - Wildcards: expands to list of matching paths
-            // - Non-existent: returns null (len = 0)
-            // - Access errors: returns error
-            Item resolved = path_resolve_for_iteration(path_val);
-            // result is now cached in path_val->result
-            if (resolved.item == ItemError.item) {
-                // 7.6: `len` is total -- an unresolvable path iterates zero
-                // times. Returning an error here would violate the one function
-                // the spec guarantees never fails.
-                size = 0;
-                break;
-            }
-        }
-        // Get length from cached result
-        Item cached = {.item = path_val->result};
-        if (cached.item == 0) {
-            size = 0;  // null path -> length 0
-        } else {
-            size = fn_len(cached);
-        }
+        Item resolved = path_resolve_for_iteration(path_val);
+        // S7.6: len remains total, including an inaccessible provider.
+        size = resolved.item == ItemError.item ? 0 : fn_len(resolved);
         break;
     }
     case LMD_TYPE_ERROR:

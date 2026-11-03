@@ -1112,6 +1112,8 @@ static Item mail_publish(MailSession* s, const char* fn) {
 
 extern "C" Item pn_io_mail_open(Item url, Item options) {
     const char* fn = "io.mail.open";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Item error = ItemNull;
     MailTarget target = {};
     if (!mail_parse_target(fn, url, false, &target, &error)) return error;
@@ -1202,6 +1204,8 @@ extern "C" Item pn_io_mail_open(Item url, Item options) {
 
 static Item mail_command(Item handle, Item command, Item args, Item options) {
     const char* fn = "io.mail.command";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     if (!is_text_type_id(get_type_id(command))) return mail_error(ERR_TYPE_MISMATCH, fn, "the command must be text");
     if (get_type_id(args) != LMD_TYPE_NULL && !mail_is_list(args))
         return mail_error(ERR_TYPE_MISMATCH, fn, "the arguments must be an array");
@@ -1279,6 +1283,8 @@ static int mail_imap_idle(MailSession* s, const char* fn, int64_t seconds, Roote
 
 extern "C" Item pn_io_mail_idle(Item session, Item seconds_item) {
     const char* fn = "io.mail.idle";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     int64_t seconds = 0;
     if (!lambda_item_to_int64_exact(seconds_item, &seconds) || seconds < 1 || seconds > MAIL_IDLE_MAX_S)
         return mail_error(ERR_TYPE_MISMATCH, fn, "seconds must be an int from 1 to %d", MAIL_IDLE_MAX_S);
@@ -1329,6 +1335,8 @@ static void smtp_rejected(const StrBuf* lines, struct curl_slist* recipients, in
 
 extern "C" Item pn_io_mail_send(Item url, Item options, Item message) {
     const char* fn = "io.mail.send";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Item error = ItemNull;
     MailTarget target = {};
     if (!mail_parse_target(fn, url, true, &target, &error)) return error;

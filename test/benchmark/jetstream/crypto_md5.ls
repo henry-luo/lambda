@@ -7,36 +7,36 @@ let CHRSZ = 8
 let MASK32 = 0xFFFFFFFF
 
 // Safe 32-bit addition
-pn safe_add(x: int, y: int) {
+fn safe_add(x: int, y: int) {
     var ux: u32 = x
     var uy: u32 = y
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-pn bit_rol(num: int, cnt: int) {
+fn bit_rol(num: int, cnt: int) {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // MD5 helper functions
-pn md5_cmn(q: int, a: int, b: int, x: int, s: int, t: int) {
+fn md5_cmn(q: int, a: int, b: int, x: int, s: int, t: int) {
     return safe_add(bit_rol(safe_add(safe_add(a, q), safe_add(x, t)), s), b)
 }
 
-pn md5_ff(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_ff(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
     return md5_cmn(bor(band(b, c), band(band(bnot(b), MASK32), d)), a, b, x, s, t)
 }
 
-pn md5_gg(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_gg(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
     return md5_cmn(bor(band(b, d), band(c, band(bnot(d), MASK32))), a, b, x, s, t)
 }
 
-pn md5_hh(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_hh(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
     return md5_cmn(bxor(bxor(b, c), d), a, b, x, s, t)
 }
 
-pn md5_ii(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_ii(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
     return md5_cmn(bxor(c, bor(b, band(bnot(d), MASK32))), a, b, x, s, t)
 }
 
@@ -59,7 +59,7 @@ pn str2binl(str) {
 }
 
 // Convert little-endian words to hex string
-pn binl2hex(binarray) {
+fn binl2hex(binarray) {
     let hex_tab = "0123456789abcdef"
     var result = ""
     var i: int = 0
@@ -75,7 +75,7 @@ pn binl2hex(binarray) {
 }
 
 // Core MD5 computation
-pn core_md5(x_in, input_len: int) {
+fn core_md5(x_in, input_len: int) {
     // Copy and pad
     var x_len = len(x_in)
     // Compute total needed: padding index + 14 + 1

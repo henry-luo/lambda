@@ -4,7 +4,7 @@
 // Traces 100x100 grid of rays against 4 spheres
 // Expected: counts pixels that hit at least one sphere
 
-pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
+fn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     // Ray-sphere intersection test
     // Ray: origin (ox,oy,oz) + t * direction (dx,dy,dz)
     // Sphere: center (cx,cy,cz), radius r
@@ -29,7 +29,7 @@ pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     return -1.0
 }
 
-pn benchmark() {
+fn benchmark() {
     // 4 spheres
     var sx = [0.0, -2.0, 2.0, 0.0]
     var sy = [0.0, 0.0, 0.0, 2.0]

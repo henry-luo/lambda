@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v80.0.0 (2026-11-02)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v80.0.4 (2026-11-03)
 
 | ID | Line | Title |
 |---|---|---|
@@ -492,7 +492,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3343 | How an element pattern spells *content must be empty* |
 | SO48 | 3344 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v59.0.0 (2026-11-02)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v59.0.4 (2026-11-03)
 
 | ID | Line | Title |
 |---|---|---|
@@ -729,67 +729,71 @@ in full — including lines too long for a viewer — run
 | D7.5.2* | 1773 | One central IO API is the sole IO door |
 | D7.5.3v2 | 1779 | Lambda↔Radiant is two explicit contracts: Radiant embeds Lambda through a versioned, Jube-aligned embed … |
 | D7.5.4* | 1787 | Audible output is a capability gated by document origin |
-| **§D8** | 1806 | *Compilation Pipeline* |
-| **§D8.1** | 1808 | *Structure* |
-| D8.1.1v18* | 1810 | First-party Lambda C lexer + hybrid recursive-descent/Pratt parser → the shared typed AST → **tiered … |
-| D8.1.2v3 | 1965 | The shipped Lambda executable uses the first-party C parser as the final production implementation for normal … |
-| D8.1.3v43* | 1976 | LambdaJS uses its first-party C lexer and hybrid recursive-descent/Pratt parser for normal JavaScript and … |
-| **§D8.2** | 2289 | *Unified AST* |
-| D8.2.1* | 2291 | One leveled core-node catalog serves host and guests; |
-| D8.2.2* | 2296 | Variance tiers in strict preference order: fields/flags → clause chains → language-range node kinds; |
-| D8.2.3v2* | 2303 | Migration is extract-after-convergence: the common core is extracted only after two working clients exist; |
-| D8.2.4v2* | 2308 | The unified compiler has one **indexed compilation unit**: dense stable IDs name … |
-| D8.2.5v3* | 2321 | One typed pass manager owns build → bind → validate → index → collect → capture/effect → environment layout → … |
-| D8.2.6v2* | 2337 | Core expression lowering is demand-driven and returns the full `MirValue` of D2.4.2 |
-| **§D8.3** | 2349 | *Dual-function compiling* |
-| D8.3.1v2* | 2351 | Plan-dependent entries comprise the boxed `<name>_b` boundary and a **bounded set of immutable raw variants** |
-| D8.3.2 | 2364 | The check lives in the callee |
-| D8.3.3 | 2370 | Source-relative correctness is the invariant |
-| D8.3.4v4 | 2375 | Visibility decides which versions exist |
-| D8.3.5 | 2395 | Numeric admission at implicit boundaries is one rule (static whole-domain embedding admits + normalizes; |
-| **§D8.4** | 2400 | *Dispatch policy* |
-| D8.4.1v2 | 2402 | No inline caches anywhere in the Lambda lane or LambdaJS |
-| D8.4.2v2* | 2417 | Core direct calls pass individual ABI operands (`Context*`, args); |
-| D8.4.3v2* | 2421 | Every hosted-language helper uses an explicit completion ABI |
-| **§D8.5** | 2440 | *MIR module cache* |
-| D8.5.1v7* | 2442 | L1 |
-| D8.5.2* | 2479 | The disk-cache direction is **code image + relocation journal** (Route B); |
-| D8.5.3* | 2486 | The **differential write verifier is mandatory and fail-closed**: compile twice at different addresses, diff; |
-| **§D8.6** | 2496 | *Emission testing* |
-| D8.6.1 | 2498 | The MT7 ratchet: 0% slack |
-| D8.6.2 | 2504 | One artifact contract: the MIR dump path honored in release; |
-| D8.6.3 | 2508 | Liveness is verified by **dynamic oracles** |
-| D8.6.4v2* | 2513 | Unified-AST consolidation has three **hard, fail-closed exit ratchets**: at least 2,000 net physical C/C++ … |
-| DO1 | 2898 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
-| DO25 | 2902 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
-| DO2 | 2909 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
-| DO3 | 2912 | Box/unbox: union params stay boxed (revisit?); |
-| DO4 | 2914 | ValueRep: `MirValue` size (measure first); |
-| DO5 | 2919 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
-| DO6 | 2923 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
-| DO7 | 2926 | Stack maps (KIV) |
-| DO8 | 2929 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
-| DO9 | 2932 | Memory Context Stage 2 opens, incl |
-| DO10 | 2935 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
-| DO11 | 2940 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
-| DO12 | 2944 | MIR cache: GC-root registry reset under L1 (verify before relying); |
-| DO13 | 2950 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
-| DO14 | 2955 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
-| DO15 | 2957 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
-| DO25 | 2963 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
-| DO16 | 2975 | Name identity: temporal canonical accepted; |
-| DO17 | 2981 | Const pool: decimal sharing scope; |
-| DO18 | 2985 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
-| DO19 | 2988 | Jube: `js_globals.cpp` allowlist audit; |
-| DO20 | 2998 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
-| DO21 | 3001 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
-| DO22 | 3007 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
-| DO23 | 3012 | Shape system opens: cross-`Input` type sharing |
-| DO24 | 3013 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
-| DO26 | 3025 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
-| DO27 | 3047 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
-| DO28 | 3051 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
-| DO29 | 3061 | Typed `var` parameter rebind on the eager tier |
-| DO30 | 3090 | *(closed 2026-09-07 |
-| DO31 | 3102 | Whether an object declaration may name an element tag |
-| DO32 | 3104 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |
+| D7.5.5* | 1805 | Apps and ad-hoc scripts execute within an admitted source/resource root |
+| D7.5.6* | 1815 | New files under the app/project root are allowed by default; overwriting existing files requires user approval |
+| D7.5.7* | 1823 | Per-app and per-ad-hoc-script grants live under `~/.lambda/setting`, controlled by the trusted host |
+| D7.5.8* | 1831 | App/script network access is denied by default; package auto-update is a separate host-owned pull service |
+| **§D8** | 1842 | *Compilation Pipeline* |
+| **§D8.1** | 1844 | *Structure* |
+| D8.1.1v18* | 1846 | First-party Lambda C lexer + hybrid recursive-descent/Pratt parser → the shared typed AST → **tiered … |
+| D8.1.2v3 | 2001 | The shipped Lambda executable uses the first-party C parser as the final production implementation for normal … |
+| D8.1.3v43* | 2012 | LambdaJS uses its first-party C lexer and hybrid recursive-descent/Pratt parser for normal JavaScript and … |
+| **§D8.2** | 2325 | *Unified AST* |
+| D8.2.1* | 2327 | One leveled core-node catalog serves host and guests; |
+| D8.2.2* | 2332 | Variance tiers in strict preference order: fields/flags → clause chains → language-range node kinds; |
+| D8.2.3v2* | 2339 | Migration is extract-after-convergence: the common core is extracted only after two working clients exist; |
+| D8.2.4v2* | 2344 | The unified compiler has one **indexed compilation unit**: dense stable IDs name … |
+| D8.2.5v3* | 2357 | One typed pass manager owns build → bind → validate → index → collect → capture/effect → environment layout → … |
+| D8.2.6v2* | 2373 | Core expression lowering is demand-driven and returns the full `MirValue` of D2.4.2 |
+| **§D8.3** | 2385 | *Dual-function compiling* |
+| D8.3.1v2* | 2387 | Plan-dependent entries comprise the boxed `<name>_b` boundary and a **bounded set of immutable raw variants** |
+| D8.3.2 | 2400 | The check lives in the callee |
+| D8.3.3 | 2406 | Source-relative correctness is the invariant |
+| D8.3.4v4 | 2411 | Visibility decides which versions exist |
+| D8.3.5 | 2431 | Numeric admission at implicit boundaries is one rule (static whole-domain embedding admits + normalizes; |
+| **§D8.4** | 2436 | *Dispatch policy* |
+| D8.4.1v2 | 2438 | No inline caches anywhere in the Lambda lane or LambdaJS |
+| D8.4.2v2* | 2453 | Core direct calls pass individual ABI operands (`Context*`, args); |
+| D8.4.3v2* | 2457 | Every hosted-language helper uses an explicit completion ABI |
+| **§D8.5** | 2476 | *MIR module cache* |
+| D8.5.1v7* | 2478 | L1 |
+| D8.5.2* | 2515 | The disk-cache direction is **code image + relocation journal** (Route B); |
+| D8.5.3* | 2522 | The **differential write verifier is mandatory and fail-closed**: compile twice at different addresses, diff; |
+| **§D8.6** | 2532 | *Emission testing* |
+| D8.6.1 | 2534 | The MT7 ratchet: 0% slack |
+| D8.6.2 | 2540 | One artifact contract: the MIR dump path honored in release; |
+| D8.6.3 | 2544 | Liveness is verified by **dynamic oracles** |
+| D8.6.4v2* | 2549 | Unified-AST consolidation has three **hard, fail-closed exit ratchets**: at least 2,000 net physical C/C++ … |
+| DO1 | 2935 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
+| DO25 | 2939 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
+| DO2 | 2946 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
+| DO3 | 2949 | Box/unbox: union params stay boxed (revisit?); |
+| DO4 | 2951 | ValueRep: `MirValue` size (measure first); |
+| DO5 | 2956 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
+| DO6 | 2960 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
+| DO7 | 2963 | Stack maps (KIV) |
+| DO8 | 2966 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
+| DO9 | 2969 | Memory Context Stage 2 opens, incl |
+| DO10 | 2972 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
+| DO11 | 2977 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
+| DO12 | 2981 | MIR cache: GC-root registry reset under L1 (verify before relying); |
+| DO13 | 2987 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
+| DO14 | 2992 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
+| DO15 | 2994 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
+| DO25 | 3000 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
+| DO16 | 3012 | Name identity: temporal canonical accepted; |
+| DO17 | 3018 | Const pool: decimal sharing scope; |
+| DO18 | 3022 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
+| DO19 | 3025 | Jube: `js_globals.cpp` allowlist audit; |
+| DO20 | 3036 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
+| DO21 | 3039 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
+| DO22 | 3045 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
+| DO23 | 3050 | Shape system opens: cross-`Input` type sharing |
+| DO24 | 3051 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
+| DO26 | 3063 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
+| DO27 | 3085 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
+| DO28 | 3089 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
+| DO29 | 3099 | Typed `var` parameter rebind on the eager tier |
+| DO30 | 3128 | *(closed 2026-09-07 |
+| DO31 | 3140 | Whether an object declaration may name an element tag |
+| DO32 | 3142 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |

@@ -99,8 +99,8 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
     MvpBinding* binding = mvp_binding(m, parameter->entry);
     TypeParam* type = lambda_type_param(parameter->type);
     if (!binding || !mvp_array_element(binding->contract) || !type || type->is_var_param != writes ||
-            parameter->entry->cow_param_borrow_snapshot || binding->owner >= m->function_count ||
-            m->functions[binding->owner].ast->node_type != AST_NODE_PROC) return false;
+            parameter->entry->cow_param_borrow_snapshot || binding->owner >= m->function_count) return false;
+    // storage/escape proofs apply to both callable colours (S9.1.2, S12.1.2v3).
     if (forwarding && !writes && !parameter->entry->cow_param_retained && !parameter->entry->cow_param_mutated) return true;
     for (unsigned i = 0; i < depth; i++) if (active[i] == parameter->entry) return true;
     if (depth == 32) return false;
@@ -1607,7 +1607,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 node->node_type == AST_NODE_CONTENT ? ((AstListNode*)node)->item : ((AstBlockNode*)node)->statements;
             int values = 0;
             for (; item; item = item->next)
-                if (!is_declaration_node(item) && !is_side_effect_stam(item->node_type) && ++values > 1)
+                // fn-local control contributes no value, just like local writes.
+                if (!is_declaration_node(item) && !ast_block_item_is_statement(item, false) && ++values > 1)
                     return mvp_reject(m, node, "multi-value functional content is not admitted yet");
         }
         switch (node->node_type) {

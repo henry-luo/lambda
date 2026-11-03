@@ -368,6 +368,8 @@ bool emit_documents(const IoSearchRun* run, const FtsHit* hits, size_t count, Ro
 
 static Item io_text_search_impl(Item source, Item query, Item options) {
     GUARD_ERROR3(source, query, options);
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.text_search", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.text_search()"); return (Item){.array = array()}; }
     Item error = ItemError;
     IoSearchOptions o;

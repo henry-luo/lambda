@@ -332,6 +332,8 @@ struct NameEntry {
     // an ordinary `var` declaration of the same name clears it.
     bool is_annex_b_companion;
     bool is_mutable;
+    // S9.1.4v2: this fn-local binding owns one traced home shared by confined pns.
+    bool lambda_shared_local;
     bool is_var_param;
     bool is_parameter;
     // JS var declarations may reuse a parameter identity but own a separate body cell.
@@ -499,6 +501,9 @@ struct NameScope {
     uint32_t name_index_count;
     uint32_t entry_count;
     bool is_proc;
+    // local mutation belongs to this callable, independently of effect colour.
+    struct AstFuncNode* lambda_function;
+    bool lambda_comprehension;
     NameScope* parent;
     ScopeKind kind;
     bool strict;
@@ -1539,6 +1544,8 @@ typedef struct FnCapture {
     bool is_const;
     bool is_nfe_binding;
     bool force_env_capture;
+    // proven parent-local access; any potentially escaping use stays a snapshot.
+    bool lambda_live_local;
     struct FnCapture* next;
 } FnCapture;
 
@@ -1860,6 +1867,9 @@ typedef struct FnAnalysis {
     int capture_count;
     int evidence_count;
     bool may_await;
+    // value-flow proof keeps this procedure inside its parent fn activation.
+    bool lambda_confined_proc;
+    bool lambda_uses_shared_homes;
     // The body starts a non-escaping child, so its blocks enter task scopes
     // that join children on exit (both tiers read this syntactic fact).
     bool owns_task_scopes;
@@ -1928,19 +1938,19 @@ typedef struct FnAnalysis {
     FnPromotionCell promotion;
 } FnAnalysis;
 
+static inline int ast_capture_count(const FnCapture* captures) {
+    int count = 0;
+    for (const FnCapture* capture = captures; capture; capture = capture->next)
+        count++;
+    return count;
+}
+
 static inline int ast_function_capture_count(const AstFuncNode* fn_node) {
     if (!fn_node) return 0;
     if (fn_node->analysis) return fn_node->analysis->capture_count;
-
-    // Synthetic functions can reach lowering before analysis publication. Their
-    // capture chain is FnCapture::next, not AstNode::next, so it must never use
-    // an AST-list utility for this fallback.
-    int count = 0;
-    for (const FnCapture* capture = fn_node->captures; capture;
-            capture = capture->next) {
-        count++;
-    }
-    return count;
+    // synthetic definitions may precede analysis publication; captures use
+    // FnCapture::next, never an AST-list utility.
+    return ast_capture_count(fn_node->captures);
 }
 
 static inline FnVariantAnalysis* fn_analysis_variant(

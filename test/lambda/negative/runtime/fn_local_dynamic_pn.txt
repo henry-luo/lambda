@@ -1,0 +1,1 @@
+cannot call a procedure (pn) from a function (fn)

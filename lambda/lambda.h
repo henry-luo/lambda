@@ -1557,6 +1557,10 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
+// internal traced binding homes; their wrapper never enters a language value.
+Array* lambda_capture_home_new(Item value);
+Item lambda_capture_home_read(Array* home);
+void lambda_capture_home_store(Array* home, Item value);
 // JS reading: an in-band i64/u64 may return as an inline int (one JS number type)
 Item js_owned_item_slot_read(Item* storage, int64_t item_count,
                              int64_t index, bool immortal);

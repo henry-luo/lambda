@@ -5464,31 +5464,9 @@ static void dom_selector_group_collect_all(SelectorMatcher* matcher,
 // Helper: recursive textContent extraction
 // ============================================================================
 
-static void collect_text_content(DomNode* node, StrBuf* sb) {
-    if (!node) return;
-    if (dom_is_generated_pseudo_node(node)) return;
-
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (text->text && text->length > 0) {
-            strbuf_append_str_n(sb, text->text, (int)text->length);
-        }
-        return;
-    }
-
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            collect_text_content(child, sb);
-            child = dom_next_script_visible_sibling(child);
-        }
-    }
-}
-
 static Item dom_text_content_item(DomElement* elem) {
     StrBuf* sb = strbuf_new_cap(32);
-    collect_text_content((DomNode*)elem, sb);
+    dom_collect_text_content((DomNode*)elem, sb);
     String* text = heap_create_name(sb->str ? sb->str : "");
     strbuf_free(sb);
     return (Item){.item = s2it(text)};
@@ -5601,7 +5579,7 @@ static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {
     if (css_value > 0.0f) return (int64_t)(css_value + 0.5f);
 
     StrBuf* text = strbuf_new_cap(32);
-    collect_text_content((DomNode*)elem, text);
+    dom_collect_text_content((DomNode*)elem, text);
     size_t text_len = text ? text->length : 0;
     if (text) strbuf_free(text);
     // CSSOM View reports zero for an empty auto-sized box; callers such as
@@ -7085,7 +7063,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
                             if (title_elem->tag_name &&
                                 str_icmp_cstr(title_elem->tag_name, "title") == 0) {
                                 StrBuf* sb = strbuf_new_cap(64);
-                                collect_text_content((DomNode*)title_elem, sb);
+                                dom_collect_text_content((DomNode*)title_elem, sb);
                                 String* result = heap_create_name(sb->str ? sb->str : "");
                                 strbuf_free(sb);
                                 return (Item){.item = s2it(result)};
@@ -7943,7 +7921,7 @@ static bool dom_element_value_is_empty(DomElement* element, const char* value) {
     if (!_is_tag(element, "textarea") || js_active_runtime_state) return true;
     StrBuf* content = strbuf_new_cap(32);
     if (!content) return true;
-    collect_text_content((DomNode*)element, content);
+    dom_collect_text_content((DomNode*)element, content);
     bool empty = content->length == 0;
     strbuf_free(content);
     return empty;
@@ -8906,7 +8884,7 @@ static void _reset_form_control(DomElement* elem) {
             tc_ensure_init(elem);
             // textarea defaultValue = descendant text content of original markup
             StrBuf* sb = strbuf_new_cap(64);
-            collect_text_content((DomNode*)elem, sb);
+            dom_collect_text_content((DomNode*)elem, sb);
             const char* s = sb->str ? sb->str : "";
             tc_set_value(elem, s, sb->length);
             dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
@@ -10104,7 +10082,7 @@ extern "C" Item dom_fp_text_content(Item n) {
         return js_name_item(content ? content : "");
     }
     StrBuf* sb = strbuf_new_cap(128);
-    collect_text_content(node, sb);
+    dom_collect_text_content(node, sb);
     return dom_serialized_item(sb);
 }
 
@@ -10899,7 +10877,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             // <input>: getAttribute("value"); <textarea>: text content of children.
             if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
                 StrBuf* sb = strbuf_new_cap(64);
-                collect_text_content((DomNode*)elem, sb);
+                dom_collect_text_content((DomNode*)elem, sb);
                 String* s = heap_create_name(sb->str ? sb->str : "");
                 strbuf_free(sb);
                 return (Item){.item = s2it(s)};

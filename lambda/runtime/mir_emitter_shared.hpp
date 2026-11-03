@@ -45,6 +45,8 @@ struct VarEntry {
     // enter through this edge rather than re-resolving a name (D8.2.4).
     NameEntry* binding;
     MIR_reg_t reg;
+    // Lambda confined captures use one GC-owned home; JS retains its own env ABI.
+    MIR_reg_t lambda_shared_home;
     MIR_reg_t method_field_present; // optional receiver fields retain absence across read-only calls
     int root_slot;
     int gc_home_id;

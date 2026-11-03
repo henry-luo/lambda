@@ -1,6 +1,6 @@
 # Lambda Design: Syntax — Line Delimiters and Expression Continuation
 
-> **2026-11-02 local imperative `fn`; implementation pending:**
+> **2026-11-02 local imperative `fn`; implemented and qualified:**
 > S12.1.2v3/S16.6.5v2 admit local control in `fn` without granting `pn`
 > calls. S16.6.7v3–S16.6.9v2 separate callable block bodies and control
 > statements from effect colour. Escaping closures retain snapshots;
@@ -1473,7 +1473,7 @@ for scalars".
     wording, which barred `=>` after an anonymous procedure as well, is
     Appendix S.5.
 
-37. *(S16.6.8v3, revised 2026-11-02; implementation pending)* **An
+37. *(S16.6.8v3, revised and implemented 2026-11-02)* **An
     imperative control block is a statement, not a general expression.**
     Blocks containing local imperative statements cannot be tuple items,
     operands, arguments or colon-form match values. Named callable bodies
@@ -1571,7 +1571,7 @@ for scalars".
   document is tracked as `SO35`.
 
   **Remaining: the user-facing doc sweep, measured 2026-08-24.** Every fenced
-  ```lambda block in the four docs was extracted and parse-checked against the
+  `lambda` block in the four docs was extracted and parse-checked against the
   production parser: **60 of 172 fail**.
 
   | Document | Failing blocks |
@@ -3359,7 +3359,8 @@ misparse (`negative/test_stack_deep.ls`,
 
 ### 7.31 Local imperative function bodies (2026-11-02)
 
-**Ratified; implementation pending.** The owning record is
+**Implemented and verified:** C conformance 444/444, CST conformance 430/430;
+Lambda/input baseline 8514/8514. The owning record is
 [`Lambda_Design_Procedural.md`](Lambda_Design_Procedural.md), especially
 §2 and §5.3; the formal rules are S12.1.2v3 and S16.6.5v2–S16.6.9v2.
 

@@ -91,5 +91,6 @@ void doc_context_register_tree(Document* doc, Item root, const void* parent,
 // still answer true.
 void doc_context_commit_head(Document* doc, Item head);
 
-// PTH44v2/SO20: the context lives for the evaluation. Called beside path_reset().
+// S2.4.4 / D5.4.2–D5.4.4: clear only the active evaluator's document capsule.
+// Heap teardown also releases its heads and precise roots before heap storage.
 void doc_context_reset(void);

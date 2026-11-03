@@ -85,11 +85,12 @@ typedef enum {
 // pool explicitly instead of exposing runtime TLS state to this lower layer.
 typedef Pool* (*PathPoolProvider)(void);
 void path_register_pool_provider(PathPoolProvider provider);
+Pool* path_get_pool(void);
 
 // Path API (defined in path.c)
-void path_init(void);                                   // Initialize root scheme paths
-void path_reset(void);                                  // Reset scheme roots (call between batch scripts)
-Path* path_get_root(PathScheme scheme);                 // Get predefined root path
+void path_init(void);                                   // Legacy lifecycle hook; roots are pool-owned
+void path_reset(void);                                  // Legacy lifecycle hook; no shared roots to reset
+Path* path_get_root(PathScheme scheme);                 // Allocate a root in the current pool
 Path* path_append(Path* parent, const char* segment);   // Append segment to path
 Path* path_append_len(Path* parent, const char* segment, size_t len);
 const char* path_get_scheme_name(Path* path);           // Get scheme name (file, http, etc.)
@@ -130,4 +131,7 @@ Path* path_append_op(Pool* pool, Path* base, Path* op);  // apply one operation 
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration
 bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
-void path_load_metadata(Path* path);                              // Load metadata via stat()
+bool path_load_metadata(Path* path);                             // false on refused acquisition
+struct FileStat;
+// Pure construction shared by input listings and runtime providers; no I/O.
+bool path_apply_stat_metadata(Path* path, Pool* pool, const struct FileStat* metadata);

@@ -1696,7 +1696,7 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool 
         if (p && p->is_var_param) borrowed[i] = mvp_local_binding(c->module, arg);
         MvpBinding* source = mvp_local_binding(c->module, arg);
         // use the shared AST's retention/mutation effects rather than rebuilding a separate call graph.
-        bool readonly_parameter = pure_arguments && f->ast->node_type == AST_NODE_PROC &&
+        bool readonly_parameter = pure_arguments &&
             mvp_parameter_borrowable(c->module, param);
         bool read_only = source && readonly_parameter;
         // a simultaneous borrow of the same owner can mutate the plain argument's snapshot (S9.1.2).
@@ -2351,8 +2351,10 @@ static MirValue statements(MvpCompiler* c, AstNode* node, bool discard) {
     MvpScope scope = {c->scope, {}}; c->scope = &scope;
     MirValue result = null_value(c);
     AstNode* last = NULL;
+    bool procedural = c->function->ast && c->function->ast->node_type == AST_NODE_PROC;
     if (!discard) for (AstNode* n = node; n; n = n->next)
-        if (!is_declaration_node(n)) last = n;
+        // fn-local statements must not replace an earlier collected value.
+        if (!is_declaration_node(n) && (procedural || !ast_block_item_is_statement(n, false))) last = n;
     for (; node && !c->module->failed; node = node->next) {
         if (AstNode* appended = append_string_recipe(c, node)) { node = appended; continue; }
         if (AstNode* moved = owner_permutation(c, node)) { node = moved; continue; }
@@ -2533,7 +2535,7 @@ static bool dense_body_eligible(MvpCompiler* c, MvpIndexLoopPlan* indices, MvpDe
 static bool dense_call_eligible(MvpCompiler* c, AstCallNode* call) {
     LambdaMvpModule* m = c->module;
     MvpFunction* f = mvp_function(m, ast_direct_call_function(call));
-    if (!f || f->ast->node_type != AST_NODE_PROC || f->abi.effects.may_reenter) return false;
+    if (!f || f->abi.effects.may_reenter) return false;
     bool recursive = f == c->function;
     if (!recursive) {
         if (!inline_eligible(c, f, true)) return false;
@@ -2661,8 +2663,7 @@ static bool dense_call_loop_plan(MvpCompiler* c, AstLoopControlNode* loop, MvpKe
         }
     }
     MvpFunction* callee = call ? mvp_function(m, ast_direct_call_function(call)) : NULL;
-    if (!callee || callee == c->function || callee->inline_cost > 512 || callee->abi.effects.may_reenter ||
-            callee->ast->node_type != AST_NODE_PROC) return false;
+    if (!callee || callee == c->function || callee->inline_cost > 512 || callee->abi.effects.may_reenter) return false;
     AstNamedNode* param = callee->ast->param;
     for (AstNode* arg = call->argument; arg; arg = arg->next, param = (AstNamedNode*)param->next) {
         if (!mvp_pure_key(arg) || !mvp_boundary_proven(mvp_value_contract(m, arg), mvp_contract(param))) return false;
@@ -3023,7 +3024,9 @@ static void function_body(MvpCompiler* c) {
     AstFuncNode* fn = c->function->ast;
     c->tail_entry = label(c); mark(c, c->tail_entry);
     MirValue result = expression(c, fn->body);
-    if (fn->node_type != AST_NODE_PROC || !mvp_proc_has_final_return(fn) || result.semantic_type == LMD_TYPE_ANY)
+    // explicit terminal returns also end fn bodies; only a boundary failure
+    // can still need the block's ordinary completion path (S12.1.2v3).
+    if (!mvp_proc_has_final_return(fn) || result.semantic_type == LMD_TYPE_ANY)
         return_value(c, fn->node_type == AST_NODE_PROC && result.semantic_type != LMD_TYPE_ANY ? null_value(c) : result, NULL);
 }
 

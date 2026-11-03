@@ -1537,6 +1537,32 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        bool ruby_base_or_container = html5_token_is(token, MARKUP_NAME_RB) ||
+            html5_token_is(token, MARKUP_NAME_RTC);
+        bool ruby_annotation = html5_token_is(token, MARKUP_NAME_RP) ||
+            html5_token_is(token, MARKUP_NAME_RT);
+        if (ruby_base_or_container || ruby_annotation) {
+            if (html5_has_element_in_scope(parser, HTML5_TAG(RUBY))) {
+                // HTML §13.2.6.4.7: rt/rp preserve an open rtc, while rb/rtc
+                // close every implied ruby end tag before inserting the new sibling.
+                if (ruby_annotation) {
+                    html5_generate_implied_end_tags_except(parser, HTML5_TAG(RTC));
+                } else {
+                    html5_generate_implied_end_tags(parser);
+                }
+                Element* current = html5_current_node(parser);
+                NameId current_id = current ? html5_element_tag_id(current) : NAME_ID_NONE;
+                const char* current_tag = current ? html5_element_tag(current) : "";
+                bool valid_parent = html5_same_tag(current_id, current_tag, HTML5_TAG(RUBY)) ||
+                    (ruby_annotation && html5_same_tag(current_id, current_tag, HTML5_TAG(RTC)));
+                if (!valid_parent) {
+                    log_error("html5 ruby start: <%s> after a non-implied ruby descendant", tag);
+                }
+            }
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
         // <applet>, <marquee>, <object> - push formatting marker
         // Per WHATWG spec: these create a scope and need a marker
         if (html5_token_is(token, MARKUP_NAME_APPLET) || html5_token_is(token, MARKUP_NAME_MARQUEE) ||

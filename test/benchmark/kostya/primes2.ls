@@ -3,7 +3,7 @@
 // Adapted from github.com/kostya/benchmarks
 // Expected: pi(1000000) = 78498
 
-pn sieve(limit: int) int {
+fn sieve(limit: int) int {
     var flags: bool[] = fill(limit + 1, true)
     flags[0] = false
     flags[1] = false

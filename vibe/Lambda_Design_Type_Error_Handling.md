@@ -1062,6 +1062,15 @@ protection. Focused tests cover explicit return, chained recovery, nested
 subjects, and forced GC. See the
 [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 
+The 2026-11-03 app-safety qualification also covers denial fields, arrays and
+bindings, pass-through, final-handler/null results and a value handler across a
+suspending read on interpreter/JIT with forced GC and poisoned frees
+(**S7.6.1v9, S7.6.7v5, S12.1.2v3**). Its earlier success-arm probes predate the
+single-arm surface; the current regression uses ordinary expressions after
+pass-through. Aggregate and signed-worker evidence remains in the
+[safety implementation record](impl/Lambda_Impl_App_Safety.md).
+This does not claim exhaustive async/fault/platform coverage.
+
 ## Appendix S — Superseded rules
 
 ### Handler result rules
@@ -1391,7 +1400,7 @@ preserved by TE-16.2.
 > `~` arm preserves the one-arm rule: success passes through unchanged. In expression position the
 > result type is `type(error_arm) | type(value_arm)`; in a procedural sequence
 > the selected arm's normal result updates the block result before execution
-> continues (**S7.6.1v5, S12.1.2v2**). The complete two-arm construct
+> continues (**S7.6.1v5, S12.1.2v3**). The complete two-arm construct
 > remains primary-like at the member-access/postfix tier, so, for example,
 > `e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
 >
@@ -1434,7 +1443,7 @@ preserved by TE-16.2.
 >   same handler. **The handler produces its normal result for both `fn` and
 >   `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside an arm exits the enclosing procedure, not just
 >   the arm; `raise`, `break`, and `continue` retain their ordinary targets.
@@ -1537,7 +1546,7 @@ preserved by TE-16.2.
 ~~Ordinary errors have distinct soft/value and hard/raised categories; only
 the latter require caller acknowledgement, and only a declared caret return
 licenses `raise`.~~ Replaced by **TE-13.2 / S7.4.1v2–S7.4.2v2,
-S7.4.6v2, S7.5.1v4–S7.5.5**.
+S7.4.6v3, S7.5.1v4–S7.5.5**.
 
 The earlier design aimed to support two workflows: batch transformations that
 retain per-item errors, and commands whose failures demand immediate attention.
@@ -1616,7 +1625,7 @@ scope of their current formal successors.
 >   again by the same handler. **The handler produces its normal result for both
 >   `fn` and `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside the body exits the enclosing procedure, not just
 >   the handler; `raise`, `break`, and `continue` retain their ordinary targets.
@@ -2248,7 +2257,7 @@ belongs specifically to `or^`.
 >   again by the same handler. **The handler produces its normal result for both
 >   `fn` and `pn` operands**, including when used as a standalone statement. In a
 >   procedural sequence that result replaces the preceding result under
->   S12.1.2v2; a later result may replace it in turn. A final handler supplies
+>   S12.1.2v3; a later result may replace it in turn. A final handler supplies
 >   the block's result. A `null` result replaces an earlier value; it is not
 >   suppressed. `return` inside the body exits the enclosing procedure, not just
 >   the handler; `raise`, `break`, and `continue` retain their ordinary targets.

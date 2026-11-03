@@ -1,0 +1,47 @@
+<!doctype html>
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/60px Ahem; }
+.row { width:40px; word-break:break-all; }
+.wide { width:80px; }
+.compact { line-height:20px; }
+.reading { font-size:50%; white-space:nowrap; }
+.tall .reading-b { font-size:30px; }
+.under ruby { ruby-position:under; }
+.base-level { display:ruby-base-container; }
+.text-level { display:ruby-text-container; }
+.level-base { display:ruby-base; white-space:nowrap; }
+.bound, .emergency { word-break:normal; }
+.emergency { overflow-wrap:break-word; }
+.center { text-align:center; }
+</style>
+<div id="result">
+<div class="row "><ruby id="simple"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="simple-control" class="row "><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row wide"><ruby id="wide"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="wide-control" class="row wide"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row wide"><span>X </span><ruby id="prefix"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="prefix-control" class="row wide"><span>X </span><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row compact"><ruby id="compact"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="compact-control" class="row compact"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row compact tall"><ruby id="tall"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="tall-control" class="row compact tall"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row compact under"><ruby id="under"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="under-control" class="row compact under"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row "><span id="roles" style="display:ruby"><span>A</span><span class="reading" style="display:ruby-text">aaa</span><span>B</span><span class="reading reading-b" style="display:ruby-text">b</span></span><span>X</span></div>
+<div id="roles-control" class="row "><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row "><ruby id="levels"><span class="base-level"><span class="level-base">A</span></span><span class="text-level"><span class="reading" style="display:ruby-text">aaa</span></span><span class="base-level"><span class="level-base">B</span></span><span class="text-level"><span class="reading reading-b" style="display:ruby-text">b</span></span></ruby><span>X</span></div>
+<div id="levels-control" class="row "><ruby><span class="level-base">A</span><rt class="reading">aaa</rt></ruby><ruby><span class="level-base">B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row "><ruby id="direct">A<rt class="reading">aaa</rt>B<rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="direct-control" class="row "><ruby>A<rt class="reading">aaa</rt></ruby><ruby>B<rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row bound"><ruby id="bound"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="bound-control" class="row bound"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row emergency"><ruby id="emergency"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="emergency-control" class="row emergency"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row center"><ruby id="center"><span>A</span><rt class="reading">aaa</rt><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div id="center-control" class="row center"><ruby><span>A</span><rt class="reading">aaa</rt></ruby><ruby><span>B</span><rt class="reading reading-b">b</rt></ruby><span>X</span></div>
+<div class="row" style="width:20px"><ruby id="wbr-kept"><span>A<wbr>B</span><rt class="reading">ab</rt></ruby></div>
+<div id="wbr-normal" class="row" style="width:20px">A<wbr>B</div>
+<div id="wbr-pre" class="row" style="width:20px;white-space:pre">A<wbr>B</div>
+<div id="wbr-nowrap" class="row" style="width:20px;white-space:nowrap">A<wbr>B</div>
+</div>

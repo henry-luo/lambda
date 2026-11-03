@@ -2420,10 +2420,9 @@ RADIANT_C_API Item fn_radiant_midi_info(Item node, Item token) {
     DomDocument* doc = radiant_window_document_from_item(node, "MIDI_INFO");
     ItemReader id(token.to_const()); MidiSnapshot snapshot;
     if (!doc || !id.isInt() || id.asInt() <= 0 || !radiant_midi_info(doc, (uint64_t)id.asInt(), &snapshot)) return ItemNull;
-    static const char* names[] = {"ready", "playing", "paused", "ended", "error"};
     RootFrame roots(1);
     Rooted<Item> result(roots, radiant_obj_new());
-    radiant_rooted_obj_set(result, "state", radiant_string_item(names[snapshot.state]));
+    radiant_rooted_obj_set(result, "state", radiant_string_item(midi_player_state_name(snapshot.state)));
     radiant_rooted_obj_set(result, "position", radiant_float_item(snapshot.position));
     radiant_rooted_obj_set(result, "duration", radiant_float_item(snapshot.duration));
     radiant_rooted_obj_set(result, "speed", radiant_float_item(snapshot.speed));

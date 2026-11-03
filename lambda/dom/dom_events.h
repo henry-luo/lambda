@@ -242,6 +242,9 @@ void js_restore_window_event_for_legacy(Item prev);
  * Reset event system state. Call between documents in batch mode.
  */
 void dom_events_reset(void);
+struct DomDocument;
+// release native pins and listener roots before the document registry retires.
+void dom_events_release_document(struct DomDocument* document);
 // GC-owned native targets trace listener slots instead of globally rooting them.
 void dom_events_trace_gc_target(void* key, struct gc_heap* gc);
 bool dom_events_target_has_listener(void* key, const char* type);

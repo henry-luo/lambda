@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><style>body {margin:0} scene3d {display:block;width:160px;height:120px}</style></head>
+<body><div id="result"><scene3d id="world" camera="main">
+<camera id="main" type="perspective" position="0 0 0" target="0 0 -1" fov="90"></camera>
+<audio-source id="speaker" clip="tone" position="1 0 0" smoothing="0" loop="true"></audio-source>
+<mesh position="0 0 -3"><geometry type="box"></geometry><material type="basic" color="#f06030"></material></mesh>
+</scene3d></div><script type="module">
+import {wav} from '../../lmd/package/audio/pcm.ls';
+import {audio_snapshot, audio_clip, audio_clip_drop, audio_command, audio_schedule, audio_cues_cancel, play, pause, time_scale, reset} from '../../lmd/package/scene3d/runtime.ls';
+import {audio_render_open,audio_render_step,audio_render_snapshot,audio_render_read,audio_render_file,audio_render_cancel,audio_render_close} from '../../lmd/package/scene3d/runtime.ls';
+import {audio_provider_read,audio_provider_route} from '../../lmd/package/scene3d/runtime.ls';
+import {provider_request} from './fixtures/_audio_shared_bridge.ls';
+const world = document.getElementById('world');
+globalThis.sceneAudio = null;
+globalThis.providerTokens = {};
+globalThis.sceneProvider = null;
+globalThis.providerLegacy = null;
+globalThis.providerBusy = false;
+globalThis.audioSceneProvider = async (action, kind='midi', bus='providers') => {
+  // each operation crosses several asynchronous PN calls; publish completion after the final snapshot.
+  globalThis.providerBusy=true;
+  try {
+  const owner=document.getElementById('result');
+  if (action==='legacy') {
+    globalThis.providerLegacy=await provider_request(owner,kind+'_read',providerTokens[kind],null);
+    return;
+  }
+  const packet=await audio_snapshot(world);
+  if (action==='open') providerTokens[kind]=await provider_request(owner,kind+'_open',0,null);
+  let token=BigInt(providerTokens[kind]);
+  let current=await audio_provider_read(world,{session:packet.session,provider:kind,token});
+  if (action==='open'||action==='route'||action==='detach') {
+    const target=action==='detach'?null:packet.buses.find(value=>value.id===bus);
+    current=await audio_provider_route(world,{session:packet.session,provider:kind,token,expected:current.route,bus:target?target.id:null,identity:target?target.identity:0n});
+  }
+  if (action==='play'||action==='pause'||action==='cancel') {
+    const command=kind==='midi'?(action==='cancel'?'stop':action):(action==='play'?'resume':action);
+    await provider_request(owner,kind+'_command',providerTokens[kind],command);
+    current=await audio_provider_read(world,{session:packet.session,provider:kind,token});
+  }
+  globalThis.sceneProvider=current;
+  } finally { globalThis.providerBusy=false; }
+};
+globalThis.audioSceneRender = async action => {
+  const packet = await audio_snapshot(world);
+  if (action === 'open') {
+    globalThis.sceneRender = await audio_render_open(world,{session:packet.session,frames:256n,events:[
+      {source:'speaker',identity:packet.sources[0].identity,clip_identity:packet.clips[0].identity,op:'play',frame:17n},
+      {source:'speaker',identity:packet.sources[0].identity,op:'stop',frame:177n}]});
+  } else {
+    const request={session:packet.session,job:sceneRender.job,frames:128};
+    if (action === 'step') globalThis.sceneRender=await audio_render_step(world,request);
+    if (action === 'read') globalThis.sceneRender=await audio_render_snapshot(world,request);
+    if (action === 'file') globalThis.sceneRender=await audio_render_file(world,request,'temp/scene3d-audio-render/ui-output.wav');
+    if (action === 'cancel') globalThis.sceneRender=await audio_render_cancel(world,request);
+    if (action === 'close') globalThis.sceneRenderClosed=await audio_render_close(world,request);
+  }
+};
+globalThis.audioSceneCue = async action => {
+  const packet = await audio_snapshot(world);
+  if (action === 'queue') {
+    const start = packet.audio_frame + 800n;
+    globalThis.audioCueBatch = {session:packet.session,epoch:packet.cue_epoch,sequence:packet.cue_sequence+1n,
+      events:['play','pause','resume','stop'].map((op,index) => {
+        const event = {source:'speaker',identity:packet.sources[0].identity,op,frame:start+[0n,600n,800n,1200n][index]};
+        if (op==='play') event.clip_identity=packet.clips[0].identity;
+        return event;
+      })};
+    globalThis.sceneAudio = await audio_schedule(world, audioCueBatch);
+  } else if (action === 'retry') {
+    globalThis.sceneAudio = await audio_schedule(world, audioCueBatch);
+  } else if (action === 'hold') {
+    await pause(world);
+    globalThis.sceneAudio = await audio_schedule(world, {session:packet.session,epoch:packet.cue_epoch,sequence:packet.cue_sequence+1n,
+      events:[{source:'speaker',identity:packet.sources[0].identity,clip_identity:packet.clips[0].identity,op:'play',clock:'scene',seconds:packet.scene_time+.02}]});
+  } else if (action === 'release') {
+    await time_scale(world, 2); await play(world); globalThis.sceneAudio = await audio_snapshot(world);
+  } else if (action === 'cancel') {
+    globalThis.sceneAudio = await audio_cues_cancel(world, {session:packet.session,epoch:packet.cue_epoch});
+  }
+};
+globalThis.audioSceneRequest = async (action, source = 'speaker') => {
+  const packet = await audio_snapshot(world);
+  if (action === 'open') {
+    const bytes = await wav(new Array(2400).fill(0.5));
+    globalThis.sceneAudio = await audio_clip(world, {session:packet.session,id:'tone',expected:0n,bytes});
+  } else if (action === 'read') {
+    globalThis.sceneAudio = packet;
+  } else if (action === 'drop') {
+    globalThis.sceneAudio = await audio_clip_drop(world, {session:packet.session,id:'tone',identity:packet.clips[0].identity});
+  } else if (action === 'reset') {
+    await reset(world);
+    globalThis.sceneAudio = await audio_snapshot(world);
+  } else {
+    globalThis.sceneAudio = await audio_command(world, {session:packet.session,source,identity:packet.sources.find(value => value.id === source).identity,action});
+  }
+};
+</script></body></html>

@@ -23,21 +23,27 @@ struct AudioReverb {
     ReverbComb combs[2][REVERB_COMBS];
     ReverbAllpass allpasses[2][REVERB_ALLPASSES];
     float* memory;
+    uint32_t nonzero;
 };
+static void reverb_store(AudioReverb* owner, float* slot, float value) {
+    owner->nonzero -= *slot != 0;
+    *slot = value;
+    owner->nonzero += value != 0;
+}
 
 // recursive filters decay into subnormals, which are slow on some CPUs.
 static inline float flush_tiny(float x) { return fabsf(x) < 1e-20f ? 0.0f : x; }
 
-static inline float comb_process(ReverbComb* c, float input) {
+static inline float comb_process(AudioReverb* owner, ReverbComb* c, float input) {
     float output = c->buffer[c->index];
-    c->store = flush_tiny(output * (1.0f - REVERB_DAMP) + c->store * REVERB_DAMP);
-    c->buffer[c->index] = input + c->store * REVERB_ROOM;
+    reverb_store(owner, &c->store, flush_tiny(output * (1.0f - REVERB_DAMP) + c->store * REVERB_DAMP));
+    reverb_store(owner, &c->buffer[c->index], input + c->store * REVERB_ROOM);
     if (++c->index == c->size) c->index = 0;
     return output;
 }
-static inline float allpass_process(ReverbAllpass* a, float input) {
+static inline float allpass_process(AudioReverb* owner, ReverbAllpass* a, float input) {
     float delayed = a->buffer[a->index];
-    a->buffer[a->index] = flush_tiny(input + delayed * ALLPASS_FEEDBACK);
+    reverb_store(owner, &a->buffer[a->index], flush_tiny(input + delayed * ALLPASS_FEEDBACK));
     if (++a->index == a->size) a->index = 0;
     return delayed - input;
 }
@@ -47,14 +53,30 @@ static uint32_t scaled_length(uint32_t tuning, uint32_t rate) {
     return length ? length : 1;
 }
 
-AudioReverb* audio_reverb_create(uint32_t rate) {
-    if (!rate) return nullptr;
+size_t audio_reverb_storage_bytes(uint32_t rate) {
+    if (!rate) return 0;
     size_t floats = 0;
     for (int ch = 0; ch < 2; ch++) {
         uint32_t spread = ch ? REVERB_STEREO_SPREAD : 0;
         for (uint32_t t : COMB_TUNING) floats += scaled_length(t + spread, rate);
         for (uint32_t t : ALLPASS_TUNING) floats += scaled_length(t + spread, rate);
     }
+    return sizeof(AudioReverb) + floats * sizeof(float);
+}
+bool audio_reverb_active(const AudioReverb* reverb) { return reverb && reverb->nonzero; }
+void audio_reverb_reset(AudioReverb* reverb) {
+    if (!reverb) return;
+    for (auto& channel : reverb->combs) for (auto& comb : channel) {
+        memset(comb.buffer, 0, comb.size * sizeof(float)); comb.index = 0; comb.store = 0;
+    }
+    for (auto& channel : reverb->allpasses) for (auto& allpass : channel) {
+        memset(allpass.buffer, 0, allpass.size * sizeof(float)); allpass.index = 0;
+    }
+    reverb->nonzero = 0;
+}
+AudioReverb* audio_reverb_create(uint32_t rate) {
+    if (!rate) return nullptr;
+    size_t floats = (audio_reverb_storage_bytes(rate) - sizeof(AudioReverb)) / sizeof(float);
     auto* r = (AudioReverb*)mem_calloc(1, sizeof(AudioReverb), MEM_CAT_RENDER);
     float* memory = r ? (float*)mem_calloc(floats, sizeof(float), MEM_CAT_RENDER) : nullptr;
     if (!memory) { mem_free(r); return nullptr; }
@@ -85,12 +107,12 @@ void audio_reverb_process(AudioReverb* r, const float* input, float* output, uin
         float in = (input[f * 2] + input[f * 2 + 1]) * REVERB_INPUT_GAIN;
         float left = 0, right = 0;
         for (int i = 0; i < REVERB_COMBS; i++) {
-            left += comb_process(&r->combs[0][i], in);
-            right += comb_process(&r->combs[1][i], in);
+            left += comb_process(r, &r->combs[0][i], in);
+            right += comb_process(r, &r->combs[1][i], in);
         }
         for (int i = 0; i < REVERB_ALLPASSES; i++) {
-            left = allpass_process(&r->allpasses[0][i], left);
-            right = allpass_process(&r->allpasses[1][i], right);
+            left = allpass_process(r, &r->allpasses[0][i], left);
+            right = allpass_process(r, &r->allpasses[1][i], right);
         }
         // full width: each output channel carries its own tail (Freeverb wet1 = 1, wet2 = 0).
         output[f * 2] += flush_tiny(left);

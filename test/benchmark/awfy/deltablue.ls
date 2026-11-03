@@ -48,7 +48,7 @@ let NO_VAR = -1   // handle-store spelling of a null variable
 
 // --- Vector ---
 
-pn vec_new() {
+fn vec_new() {
     return []
 }
 
@@ -60,11 +60,11 @@ pn vec_at(var v, idx) {
     return v[idx]
 }
 
-pn vec_size(v) {
+fn vec_size(v) {
     return len(v)
 }
 
-pn vec_is_empty(v) {
+fn vec_is_empty(v) {
     if (len(v) == 0) { return 1 }
     return 0
 }
@@ -102,23 +102,23 @@ pn vec_remove_cid(var v, cid) {
 }
 
 // --- Strength helpers ---
-pn s_stronger(a, b) {
+fn s_stronger(a, b) {
     if (a < b) { return 1 }
     return 0
 }
 
-pn s_weaker(a, b) {
+fn s_weaker(a, b) {
     if (a > b) { return 1 }
     return 0
 }
 
-pn s_weakest(a, b) {
+fn s_weakest(a, b) {
     if (a > b) { return a }
     return b
 }
 
 // --- World ---
-pn world_new() {
+fn world_new() {
     // cons[0] is the NO_CON placeholder so a cid indexes its own slot.
     var w = { vars: [], cons: [null], currentMark: 1, nextCid: 1 }
     return w

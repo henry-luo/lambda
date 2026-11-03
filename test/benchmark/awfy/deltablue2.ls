@@ -55,7 +55,7 @@ type World = {vars: Variable[], cons: Constraint?[], currentMark: int, nextCid: 
 
 // --- Vector ---
 
-pn vec_new() Vec {
+fn vec_new() Vec {
     return []
 }
 
@@ -65,15 +65,15 @@ pn vec_add(var v: Vec, item: int) any {
 
 // read-only: a `var` here made every caller's place copy (`cs = w.vars[i].constraints`)
 // count as mutated, so each call copied the constraint list (S9.1.2, D4.4.6)
-pn vec_at(v: Vec, idx: int) int {
+fn vec_at(v: Vec, idx: int) int {
     return v[idx]
 }
 
-pn vec_size(v: Vec) int {
+fn vec_size(v: Vec) int {
     return len(v)
 }
 
-pn vec_is_empty(v: Vec) int {
+fn vec_is_empty(v: Vec) int {
     if (len(v) == 0) { return 1 }
     return 0
 }
@@ -111,23 +111,23 @@ pn vec_remove_cid(var v: Vec, cid: int) int {
 }
 
 // --- Strength helpers ---
-pn s_stronger(a: int, b: int) int {
+fn s_stronger(a: int, b: int) int {
     if (a < b) { return 1 }
     return 0
 }
 
-pn s_weaker(a: int, b: int) int {
+fn s_weaker(a: int, b: int) int {
     if (a > b) { return 1 }
     return 0
 }
 
-pn s_weakest(a: int, b: int) int {
+fn s_weakest(a: int, b: int) int {
     if (a > b) { return a }
     return b
 }
 
 // --- World ---
-pn world_new() World {
+fn world_new() World {
     // cons[0] is the NO_CON placeholder so a cid indexes its own slot.
     var w: World = { vars: [], cons: [null], currentMark: 1, nextCid: 1 }
     return w

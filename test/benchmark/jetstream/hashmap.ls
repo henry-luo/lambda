@@ -11,18 +11,20 @@ let DEFAULT_CAPACITY = 16
 let LOAD_FACTOR = 0.75
 let EMPTY = -1
 
-pn compute_hash(key: int) {
+fn compute_hash(key: int) {
+    var work_key: int = key
+
     // Java-style int hash
-    key = bxor(key, shr(key, 16))
-    key = key * 73244475  // approximate of multiply-shift hash
-    key = bxor(key, shr(key, 16))
-    if (key < 0) {
-        key = 0 - key
+    work_key = bxor(work_key, shr(work_key, 16))
+    work_key = work_key * 73244475  // approximate of multiply-shift hash
+    work_key = bxor(work_key, shr(work_key, 16))
+    if (work_key < 0) {
+        work_key = 0 - work_key
     }
-    return key
+    return work_key
 }
 
-pn hashmap_new(capacity: int) {
+fn hashmap_new(capacity: int) {
     var cap = DEFAULT_CAPACITY
     if (capacity > cap) {
         // round up to power of 2
@@ -38,7 +40,7 @@ pn hashmap_new(capacity: int) {
 }
 
 // Find a free slot in the flat arrays
-pn find_free_slot(hm) {
+fn find_free_slot(hm) {
     // Simply use size as the next index (compact storage)
     return hm.size
 }
@@ -120,7 +122,7 @@ pn hashmap_rehash(var hm) {
     }
 }
 
-pn hashmap_get(hm, key: int) {
+fn hashmap_get(hm, key: int) {
     var hash = compute_hash(key)
     var bucket = hash % hm.cap
     var hm_heads = hm.heads

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import os
 import signal
 import subprocess
+import threading
 from typing import Mapping, Optional, Sequence
 
 
@@ -19,6 +20,7 @@ class LambdaProcessResult:
     return_code: Optional[int]
     timed_out: bool
     launch_error: str = ""
+    output_limited: bool = False
 
     @property
     def status(self) -> str:
@@ -26,13 +28,16 @@ class LambdaProcessResult:
             return "launcher-error"
         if self.timed_out:
             return "timeout"
+        if self.output_limited:
+            return "output-limit"
         if self.return_code == 0:
             return "ok"
         return f"exit{self.return_code}"
 
 
 def run_process(argv: Sequence[str], timeout: float,
-                extra_env: Optional[Mapping[str, Optional[str]]] = None) -> LambdaProcessResult:
+                extra_env: Optional[Mapping[str, Optional[str]]] = None,
+                output_limit: Optional[int] = None) -> LambdaProcessResult:
     """Runs an arbitrary test command in an isolated process group."""
     env = dict(os.environ)
     if extra_env:
@@ -42,6 +47,8 @@ def run_process(argv: Sequence[str], timeout: float,
             else:
                 env[name] = value
     command = list(argv)
+    if output_limit is not None and output_limit < 1:
+        raise ValueError("output_limit must be positive")
 
     proc = None
     try:
@@ -54,6 +61,11 @@ def run_process(argv: Sequence[str], timeout: float,
             errors="replace",
             start_new_session=os.name != "nt",
         )
+        if output_limit is not None:
+            stdout, stderr, timed_out, limited = _communicate_bounded(proc, timeout, output_limit)
+            return LambdaProcessResult(command, stdout, stderr,
+                                       None if timed_out else proc.returncode, timed_out,
+                                       output_limited=limited)
         stdout, stderr = proc.communicate(timeout=timeout)
         return LambdaProcessResult(command, stdout, stderr, proc.returncode, False)
     except subprocess.TimeoutExpired as error:
@@ -71,7 +83,8 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
                        timeout: float, procedural: bool = False,
                        dry_run: bool = False,
                        no_log: bool = False,
-                       extra_env: Optional[Mapping[str, str]] = None) -> LambdaProcessResult:
+                       extra_env: Optional[Mapping[str, str]] = None,
+                       output_limit: Optional[int] = None) -> LambdaProcessResult:
     """Runs one Lambda script in an isolated process group.
 
     A missing tier deliberately means AUTO. Callers that need eager MIR Direct
@@ -90,10 +103,57 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
     if no_log:
         argv.append("--no-log")
     argv.append(script)
-    return run_process(argv, timeout, env)
+    return run_process(argv, timeout, env, output_limit)
 
 
-def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
+def _communicate_bounded(proc, timeout, limit):
+    """Drain both pipes with a fixed per-stream cap, including during timeout cleanup."""
+    output = [[], []]
+    limited = threading.Event()
+
+    def drain(index, stream):
+        remaining = limit
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                retained = chunk[:remaining]
+                output[index].append(retained)
+                remaining -= len(retained)
+                if len(retained) < len(chunk):
+                    limited.set()
+                    _terminate_process_group(proc, close_pipes=False)
+                    break
+        finally:
+            stream.close()
+
+    readers = [threading.Thread(target=drain, args=(index, stream), daemon=True)
+               for index, stream in enumerate((proc.stdout, proc.stderr))]
+    for reader in readers:
+        reader.start()
+    timed_out = threading.Event()
+
+    def expire():
+        if proc.returncode is None:
+            timed_out.set()
+            _terminate_process_group(proc, close_pipes=False)
+
+    # timed Popen.wait polls on POSIX and quantizes short wall measurements;
+    # a watchdog preserves the blocking wait's exit timestamp.
+    watchdog = threading.Timer(timeout, expire)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        proc.wait()
+    finally:
+        watchdog.cancel()
+    for reader in readers:
+        reader.join(timeout=5)
+    return ''.join(output[0]), ''.join(output[1]), timed_out.is_set(), limited.is_set()
+
+
+def _terminate_process_group(proc: subprocess.Popen[str], close_pipes: bool = True) -> None:
     """Terminates descendants before closing inherited output pipes."""
     if os.name == "nt":
         proc.kill()
@@ -113,7 +173,7 @@ def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
-    if proc.stdout:
+    if close_pipes and proc.stdout:
         proc.stdout.close()
-    if proc.stderr:
+    if close_pipes and proc.stderr:
         proc.stderr.close()

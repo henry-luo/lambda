@@ -4949,11 +4949,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // the script pool, so pool_destroy would unmap its memory.
             runtime_reset_heap(&runtime);
 
-            // Reset path scheme roots. The scheme_roots[] global stores
-            // Path* pointers allocated from the heap pool, which was just
-            // destroyed by runtime_reset_heap. Without this reset the next
-            // script's path_get_root() would use dangling pointers, leading
-            // to corrupted path traversal (infinite loop / SIGSEGV).
+            // Legacy lifecycle hooks remain valid; roots and document tables
+            // now belong to their requesting pool/evaluator (D5.4.2).
             path_reset();
             doc_context_reset();
             write_set_reset();

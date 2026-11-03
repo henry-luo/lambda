@@ -42,7 +42,7 @@ pn advance(var bx, var by, var bz, var bvx, var bvy, var bvz, var bmass, dt) {
     }
 }
 
-pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
+fn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
     var e = 0.0
     var i = 0
     while (i < 5) {

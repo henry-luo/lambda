@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+struct SecurityIOClient;
 
 namespace tex {
 
@@ -24,6 +25,7 @@ struct EngineOptions {
     uint64_t max_expansions;       // 0 selects the default budget
     bool expl3;                    // start from the format with expl3 preloaded (built on first use)
     bool math_mode;                // digest math arguments and omit executed definition declarations
+    const SecurityIOClient* io;     // borrowed for this engine run; no ambient fallback
 };
 
 // One span of the reconstructed text and where it came from in the main file.

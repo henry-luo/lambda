@@ -4,14 +4,14 @@
 
 let N = 10
 
-pn make_tree(depth) {
+fn make_tree(depth) {
     if (depth == 0) {
         return {left: null, right: null}
     }
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-pn check(node) {
+fn check(node) {
     if (node.left == null) {
         return 1
     }

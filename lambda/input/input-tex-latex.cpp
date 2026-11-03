@@ -12,6 +12,8 @@
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/path_str.h"
+#include "../io/security_io.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -310,14 +312,28 @@ static bool list_contains(Engine* e, const char* list, const char* item) {
 // ======================================================================
 
 
+static char* tex_resolve_path(Engine* e, const char* path, int32_t* kind) {
+    if (!e->opts.io) {
+        char* resolved = file_realpath(path);
+        if (resolved) *kind = file_is_dir(resolved) ? SECURITY_OBJECT_DIRECTORY : SECURITY_OBJECT_FILE;
+        return resolved;
+    }
+    char normalized[4096];
+    if (path_str_normalize_lexical_posix(path, normalized, sizeof(normalized), true) < 0 ||
+        !security_io_input_kind(e->opts.io, normalized, kind, nullptr)) return nullptr;
+    return mem_strdup(normalized, MEM_CAT_INPUT_OTHER);
+}
+
 static bool ensure_base_dir(Engine* e) {
     if (e->base_dir) return true;
     const char* base = e->opts.base_path;
     if (!base || !*base) return false;
     if (strncmp(base, "file://", 7) == 0) base += 7;
-    char* canonical = file_realpath(base);
+    int32_t kind = -1;
+    char* canonical = tex_resolve_path(e, base, &kind);
+    if (e->opts.io && !canonical) return false;
     char* dir = nullptr;
-    if (canonical && file_is_dir(canonical)) {
+    if (canonical && kind == SECURITY_OBJECT_DIRECTORY) {
         dir = canonical;
     } else {
         dir = canonical ? file_path_dirname(canonical) : file_path_dirname(base);
@@ -330,8 +346,12 @@ static bool ensure_base_dir(Engine* e) {
 }
 
 static bool path_inside(const char* root, const char* path) {
+    // A scoped client's relative "." names its default directory. Normalized
+    // relative children stay inside it; a parent or absolute path does not.
+    if (!strcmp(root, ".")) return *path != '/' && strcmp(path, "..") && strncmp(path, "../", 3);
     size_t n = strlen(root);
-    return strncmp(root, path, n) == 0 && (path[n] == '/' || path[n] == '\0');
+    return n && strncmp(root, path, n) == 0 &&
+        (root[n - 1] == '/' || path[n] == '/' || path[n] == '\0');
 }
 
 // a file this run already read from beside the document (or from the bundle), or -1
@@ -361,9 +381,10 @@ bool open_local_file(Engine* e, const char* name, const char* const* exts, int e
         strbuf_append_str(rel, name);
         strbuf_append_str(rel, exts[k]);
         char* joined = file_path_join(e->base_dir, rel->str);
-        char* canonical = joined ? file_realpath(joined) : nullptr;
+        int32_t kind = -1;
+        char* canonical = joined ? tex_resolve_path(e, joined, &kind) : nullptr;
         if (joined) mem_free(joined);
-        bool ok = canonical && !file_is_dir(canonical) && path_inside(e->base_dir, canonical);
+        bool ok = canonical && kind == SECURITY_OBJECT_FILE && path_inside(e->base_dir, canonical);
         if (ok) {
             // a run sees each file once: reopening reuses the loaded text
             int32_t loaded = find_loaded_file(e, rel->str, false);
@@ -387,17 +408,17 @@ bool open_local_file(Engine* e, const char* name, const char* const* exts, int e
                 strbuf_free(rel);
                 return false;
             }
-            int64_t size = file_size(canonical);
-            if (size < 0 || total + (uint64_t)size > MAX_LOCAL_BYTES) {
+            char* data = nullptr;
+            size_t len = 0;
+            bool captured = security_io_read_bytes(e->opts.io, canonical, false, MAX_LOCAL_BYTES - total,
+                MEM_CAT_INPUT_OTHER, &data, &len, nullptr);
+            if (!captured) {
                 diag(e, "tex-budget", "beside-document files exceed the size budget");
                 mem_free(canonical);
                 strbuf_free(rel);
                 return false;
             }
-            char* data = read_text_file(canonical);
             mem_free(canonical);
-            if (!data) { strbuf_free(rel); continue; }
-            size_t len = strlen(data);
             const char* stored = arena_copy(e, data, len);
             mem_free(data);
             *file_out = add_source(e, arena_copy(e, rel->str, rel->length), stored, (uint32_t)len);
@@ -428,7 +449,7 @@ void set_resource_dir(const char* dir) {
 // a bundled resource: Lambda's own copy, never a TeX installation (Lambda_Design_TeX_Engine §4).
 // Unmodified upstream files sit at the top; Lambda-owned bindings, which expand a
 // package's user commands into constructs the digester already owns, sit in binding/
-static bool bundled_path(const char* name, const char* ext, StrBuf* out) {
+static bool bundled_path(Engine* e, const char* name, const char* ext, StrBuf* out) {
     if (!g_resource_dir[0] || !name || !*name || name[0] == '/' || strstr(name, "..")) return false;
     static const char* subdirs[] = {"/", "/binding/"};
     for (const char* sub : subdirs) {
@@ -437,21 +458,23 @@ static bool bundled_path(const char* name, const char* ext, StrBuf* out) {
         strbuf_append_str(out, sub);
         strbuf_append_str(out, name);
         strbuf_append_str(out, ext);
-        if (file_exists(out->str) && !file_is_dir(out->str)) return true;
+        int32_t kind = -1;
+        if (e->opts.io ? (security_io_input_kind(e->opts.io, out->str, &kind, nullptr) &&
+                kind == SECURITY_OBJECT_FILE) : (file_exists(out->str) && !file_is_dir(out->str))) return true;
     }
     return false;
 }
 
-static bool bundled_exists(const char* name, const char* ext) {
+static bool bundled_exists(Engine* e, const char* name, const char* ext) {
     StrBuf* sb = strbuf_new();
-    bool ok = bundled_path(name, ext, sb);
+    bool ok = bundled_path(e, name, ext, sb);
     strbuf_free(sb);
     return ok;
 }
 
 static bool open_bundled_file(Engine* e, const char* name, const char* ext, int32_t* file_out) {
     StrBuf* sb = strbuf_new();
-    bool ok = bundled_path(name, ext, sb);
+    bool ok = bundled_path(e, name, ext, sb);
     if (ok) {
         strbuf_reset(sb);
         strbuf_append_str(sb, name);
@@ -462,11 +485,13 @@ static bool open_bundled_file(Engine* e, const char* name, const char* ext, int3
             strbuf_free(sb);
             return true;
         }
-        bundled_path(name, ext, sb);
+        bundled_path(e, name, ext, sb);
     }
-    char* data = ok ? read_text_file(sb->str) : nullptr;
+    char* data = nullptr;
+    size_t len = 0;
+    if (ok) security_io_read_bytes(e->opts.io, sb->str, false, MAX_LOCAL_BYTES,
+        MEM_CAT_INPUT_OTHER, &data, &len, nullptr);
     if (data) {
-        size_t len = strlen(data);
         StrBuf* label = strbuf_new();
         strbuf_append_str(label, name);
         strbuf_append_str(label, ext);
@@ -500,8 +525,9 @@ static bool local_file_exists(Engine* e, const char* name, const char* ext) {
     strbuf_append_str(rel, name);
     strbuf_append_str(rel, ext);
     char* joined = file_path_join(e->base_dir, rel->str);
-    char* canonical = joined ? file_realpath(joined) : nullptr;
-    bool ok = canonical && !file_is_dir(canonical) && path_inside(e->base_dir, canonical);
+    int32_t kind = -1;
+    char* canonical = joined ? tex_resolve_path(e, joined, &kind) : nullptr;
+    bool ok = canonical && kind == SECURITY_OBJECT_FILE && path_inside(e->base_dir, canonical);
     if (joined) mem_free(joined);
     if (canonical) mem_free(canonical);
     strbuf_free(rel);
@@ -1314,7 +1340,7 @@ static void load_package_list(Engine* e, const char** names, uint32_t count, uin
     for (uint32_t i = from; i < count; i++) {
         const char* name = names[i];
         if (find_package(e, name, false)) continue;
-        if (bundled_exists(name, ".sty")) {
+        if (bundled_exists(e, name, ".sty")) {
             start_package_file(e, name, options, false, names, count, i + 1, options, true);
             return;
         }
@@ -1356,7 +1382,7 @@ static void do_usepackage(Engine* e, const Token& t, uint32_t code) {
             strbuf_append_str(passthrough, name);
             continue;
         }
-        if (bundled_exists(name, ".sty")) {
+        if (bundled_exists(e, name, ".sty")) {
             // programming packages run on the engine; an adapter still sees its declaration
             any_local = true;
             if (is_adapter(e, name)) {

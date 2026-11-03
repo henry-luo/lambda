@@ -13,6 +13,10 @@
 // An error value for an io search function, logged; `fmt` is printf-style.
 Item io_fs_error(LambdaErrorCode code, const char* fmt, ...);
 
+// D7.5.2: a bound client must never enter a legacy acquisition that has no
+// broker operation. Check before option parsing, jobs or native side effects.
+bool io_fs_allow_unbrokered(const char* fn, Item* error);
+
 // One options map being read. `fn` names the function in messages ("io.grep").
 struct IoFsOptionMap {
     const char* fn;

@@ -2,6 +2,7 @@
 #define LAMBDA_INPUT_PARSE_OPTIONS_H
 
 #include <stdbool.h>
+struct SecurityIOClient;
 
 // Parse options beyond type and flavor.
 typedef struct InputParseOptions {
@@ -18,6 +19,8 @@ typedef struct InputParseOptions {
     bool xml_preserve_whitespace; // xml text fragments can carry meaningful leading/trailing spaces.
     const char* const* tex_chaptered;  // class profiles whose kernel defines \chapter
     int tex_chaptered_count;
+    // Borrowed only for this synchronous parse; never retained by Input/cache.
+    const struct SecurityIOClient* io;
 } InputParseOptions;
 
 #endif

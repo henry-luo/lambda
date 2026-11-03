@@ -195,6 +195,10 @@ struct SpeechUtterance {
     SpeechRender render;          // mono at AUDIO_BUS_RATE once adopted
     uint32_t next_mark;
     int64_t char_index;
+    AudioRouteId route;
+    AudioRouteRef routing;
+    AudioSubmixId submix;
+    AudioVoiceLoss loss;
 };
 
 // what the document's speech voice plays; shared with the audio thread.
@@ -214,10 +218,20 @@ struct DocumentSpeech : DomDocumentResourceData {
     SpeechPlayback playback;
     SpeechUtterance* current;     // armed on the voice, started or not
     AudioVoiceId voice;
+    AudioSubmixId submix;
     bool fake;
     uint64_t voices_generation;
-    DocumentSpeech() : queue(MEM_CAT_RENDER, 0), playback(), current(nullptr), voice(0), fake(false), voices_generation(0) {}
+    DocumentSpeech() : queue(MEM_CAT_RENDER, 0), playback(), current(nullptr), voice(0), submix(0), fake(false), voices_generation(0) {}
 };
+static void utterance_fail(DomDocument* doc, SpeechUtterance* utterance, const char* reason);
+static bool utterance_route_check(DomDocument* doc, DocumentSpeech* speech, SpeechUtterance* utterance);
+static void utterance_release_route(SpeechUtterance* utterance) {
+    audio_submix_release_route(utterance->submix, utterance->routing); utterance->routing = 0;
+}
+static void utterance_stop_job(SpeechUtterance* utterance) {
+    if (utterance->job) rdt_speech_job_destroy(utterance->job);
+    utterance->job = nullptr;
+}
 
 static uint32_t playback_cursor(SpeechPlayback* p) { return __atomic_load_n(&p->cursor, __ATOMIC_ACQUIRE); }
 static bool playback_started(SpeechPlayback* p) { return __atomic_load_n(&p->started, __ATOMIC_ACQUIRE); }
@@ -259,7 +273,7 @@ static void playback_stop(DocumentSpeech* speech) {
 
 static void utterance_free(SpeechUtterance* u) {
     if (!u) return;
-    if (u->job) rdt_speech_job_destroy(u->job);
+    utterance_release_route(u); utterance_stop_job(u);
     speech_text_release(&u->text);
     mem_free(u->render.samples);
     mem_free(u->render.marks);
@@ -377,16 +391,19 @@ size_t radiant_speech_voices(RdtSpeechVoice* out, size_t capacity) {
 
 static uint64_t speech_next_token() {
     // tokens never alias another document or a finished utterance (D4.5.1v4).
-    static uint64_t next = 1;
-    return __atomic_fetch_add(&next, 1, __ATOMIC_RELAXED);
+    return audio_bus_identity(INT64_MAX);
 }
 
 uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechOptions* options, const char** error) {
     *error = nullptr;
     DomDocument* doc = owner ? owner->doc : nullptr;
+    if (!text || !options || !(options->volume >= 0 && options->volume <= 1) || !(options->rate >= .1f && options->rate <= 10) ||
+        !(options->pitch >= 0 && options->pitch <= 2) || !isfinite(options->at) || options->at > 86400) {
+        *error = "speech options are invalid"; if (text) speech_text_release(text); return 0;
+    }
     if (!doc || !dom_element_is_connected(owner)) { *error = "speech owner is not connected"; speech_text_release(text); return 0; }
     // D7.5.4: a network document needs sticky activation before it may sound.
-    if (!radiant_document_may_start_audio(doc)) {
+    if (options->volume > 0 && !radiant_document_may_start_audio(doc)) {
         *error = "speech needs a user gesture in a network document (D7.5.4)";
         speech_text_release(text); return 0;
     }
@@ -401,6 +418,7 @@ uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechO
     u->owner = dom_node_ref(owner);
     u->text = *text;
     memset(text, 0, sizeof(*text));
+    if (!u->token) { *error = "speech token identity exhausted"; utterance_free(u); return 0; }
     u->options = *options;
     if (options->voice_id) { snprintf(u->voice_id, sizeof(u->voice_id), "%s", options->voice_id); u->options.voice_id = u->voice_id; }
     if (options->lang) { snprintf(u->lang, sizeof(u->lang), "%s", options->lang); u->options.lang = u->lang; }
@@ -411,6 +429,8 @@ uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechO
         // the fake engine has no voices beyond its fixed two.
         if (u->options.voice_id && strncmp(u->options.voice_id, "fake.", 5)) { *error = "no voice for the requested voice or language"; utterance_free(u); return 0; }
         if (!speech_fake_render(&u->text, &u->render) || !render_to_bus_rate(&u->render)) { *error = "fake speech render failed"; utterance_free(u); return 0; }
+        // fake synthesis obeys the same authored gain/activation contract as platform renders.
+        for (uint32_t i = 0; i < u->render.frames; i++) u->render.samples[i] *= u->options.volume;
         u->state = SPEECH_QUEUED;
     } else {
         RdtSpeechRequest request = {u->text.text->str, u->text.text->length, u->text.ssml,
@@ -427,6 +447,7 @@ bool radiant_speech_command(DomDocument* doc, uint64_t token, const char* comman
     DocumentSpeech* speech = document_speech(doc);
     SpeechUtterance* u = find_utterance(speech, token);
     if (!u || !command || u->state >= SPEECH_ENDED) return false;
+    if (!utterance_route_check(doc, speech, u)) return false;
     SpeechPlayback* p = &speech->playback;
     bool current = speech->current == u;
     // pausing freezes the voice's cursor; an armed utterance that has not begun waits.
@@ -437,6 +458,7 @@ bool radiant_speech_command(DomDocument* doc, uint64_t token, const char* comman
         return true;
     }
     if (!strcmp(command, "resume")) {
+        if (u->options.volume > 0 && !radiant_document_may_start_audio(doc)) return false;
         u->paused_request = false;
         if (current) __atomic_store_n(&p->paused, 0, __ATOMIC_RELEASE);
         if (u->state == SPEECH_PAUSED) u->state = SPEECH_SPEAKING;
@@ -445,6 +467,7 @@ bool radiant_speech_command(DomDocument* doc, uint64_t token, const char* comman
     if (!strcmp(command, "cancel")) {
         if (current) playback_stop(speech);
         u->state = SPEECH_CANCELLED;
+        utterance_release_route(u); utterance_stop_job(u);
         SpeechEventFields fields = {}; fields.cancelled = true; fields.char_index = u->char_index;
         speech_fire(doc, u, "speechend", fields);
         return true;
@@ -456,11 +479,41 @@ bool radiant_speech_info(DomDocument* doc, uint64_t token, SpeechInfo* info) {
     DocumentSpeech* speech = document_speech(doc);
     SpeechUtterance* u = find_utterance(speech, token);
     if (!u || !info) return false;
+    if (u->state < SPEECH_ENDED) utterance_route_check(doc, speech, u);
     double position = 0;
     if (speech->current == u) position = playback_cursor(&speech->playback) / (double)AUDIO_BUS_RATE;
     else if (u->state == SPEECH_ENDED) position = u->render.frames / (double)AUDIO_BUS_RATE;
     *info = {u->state, position, u->char_index};
     return true;
+}
+bool radiant_speech_route(DomDocument* doc, uint64_t token, uint64_t expected, uint64_t route, const char** error) {
+    const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    auto fail = [&](const char* message) { *error = message; return false; };
+    auto* speech = document_speech(doc); auto* u = find_utterance(speech, token);
+    if (!u || u->route != expected) return fail("speech route: missing provider or stale expected route");
+    if (u->state < SPEECH_ENDED) utterance_route_check(doc, speech, u);
+    if (route && u->state >= SPEECH_ENDED) return fail("speech route: utterance is terminal");
+    bool armed = u->state < SPEECH_ENDED && u->state != SPEECH_PAUSED && !u->paused_request;
+    if (route != u->route && armed && u->options.volume > 0 && !radiant_document_may_start_audio(doc))
+        return fail("speech route: audible rewire requires document activation");
+    if (!route && !u->routing && speech->current != u) { u->route = 0; return true; }
+    auto mix = radiant_document_submix(doc);
+    auto voice = speech->current == u ? speech->voice : 0;
+    if (!audio_submix_bind_route(mix, &u->routing, voice, route)) return fail("speech route: stale/foreign route or reference quota exceeded");
+    speech->submix = u->submix = mix; u->route = route; return true;
+}
+bool radiant_speech_routing(DomDocument* doc, uint64_t token, AudioProviderInfo* info) {
+    SpeechInfo snapshot; if (!info || !radiant_speech_info(doc, token, &snapshot)) return false;
+    auto* u = find_utterance(document_speech(doc), token);
+    *info = {u->route, u->loss, radiant_speech_state_name(snapshot.state), snapshot.position, u->options.volume,
+        !u->route || audio_submix_route_valid(u->submix, u->route)};
+    return true;
+}
+bool radiant_speech_graph_audible(DomDocument* doc, uint64_t graph) {
+    auto* speech = document_speech(doc);
+    if (speech) for (auto* u : speech->queue) if (u->state < SPEECH_ENDED && u->state != SPEECH_PAUSED &&
+        !u->paused_request && u->options.volume > 0 && audio_submix_graph_has_route(u->submix, graph, u->route)) return true;
+    return false;
 }
 
 // ---------------------------------------------------------------- service loop
@@ -477,18 +530,20 @@ static bool adopt_render(SpeechUtterance* u) {
     memcpy(u->render.samples, samples, (size_t)frames * sizeof(float));
     if (count) memcpy(u->render.marks, marks, count * sizeof(RdtSpeechMark));
     u->render.frames = frames; u->render.rate = rate; u->render.mark_count = count;
-    rdt_speech_job_destroy(u->job);
-    u->job = nullptr;
+    utterance_stop_job(u);
     return render_to_bus_rate(&u->render);
 }
 
 // hands an utterance to the document's speech voice, joining the bus first if needed.
 static bool playback_arm(DomDocument* doc, DocumentSpeech* speech, SpeechUtterance* u, const char** error) {
+    if (u->options.volume > 0 && !radiant_document_may_start_audio(doc)) { *error = "speech needs document activation (D7.5.4)"; return false; }
+    auto submix = radiant_document_submix(doc); speech->submix = submix;
+    if (u->route && !audio_submix_route_ref_valid(submix, u->routing)) { *error = "speech route was removed"; return false; }
     if (!speech->voice) {
-        AudioSubmixId submix = radiant_document_submix(doc);
-        speech->voice = submix ? audio_voice_add(submix, speech_voice_render, &speech->playback, error) : 0;
+        speech->voice = submix ? audio_voice_add(submix, speech_voice_render, &speech->playback, error, u->route) : 0;
         if (!speech->voice) { if (!*error) *error = "audio device unavailable"; return false; }
     }
+    if (!audio_submix_bind_route(submix, &u->routing, speech->voice, u->route)) { *error = "speech route admission failed"; return false; }
     if (!audio_voice_lock(speech->voice)) { speech->voice = 0; *error = "audio device unavailable"; return false; }
     SpeechPlayback* p = &speech->playback;
     playback_reset(p);
@@ -520,8 +575,16 @@ static void fire_marks(DomDocument* doc, SpeechUtterance* u, uint32_t cursor) {
 
 static void utterance_fail(DomDocument* doc, SpeechUtterance* u, const char* reason) {
     u->state = SPEECH_ERROR;
+    utterance_release_route(u);
     SpeechEventFields fields = {}; fields.reason = reason;
     speech_fire(doc, u, "speecherror", fields);
+    // engine error text is borrowed until the timing event has copied it.
+    utterance_stop_job(u);
+}
+static bool utterance_route_check(DomDocument* doc, DocumentSpeech* speech, SpeechUtterance* u) {
+    if (!u->route || audio_submix_route_ref_valid(u->submix, u->routing)) return true;
+    if (speech->current == u) playback_stop(speech);
+    u->loss = AUDIO_VOICE_ROUTE_LOST; utterance_fail(doc, u, "audio route owner removed"); return false;
 }
 
 void radiant_speech_follow_rebuild(DomDocument* doc, DomNode* old_root, DomNode* new_root) {
@@ -540,6 +603,7 @@ static void speech_prune(DocumentSpeech* speech, DomDocument* doc) {
         if (owner && owner->is_element() && dom_element_is_connected(owner->as_element())) continue;
         if (speech->current == u) playback_stop(speech);
         u->state = SPEECH_CANCELLED;
+        utterance_release_route(u); utterance_stop_job(u);
     }
 }
 
@@ -554,12 +618,14 @@ bool radiant_speech_tick(DomDocument* doc) {
     speech_prune(speech, doc);
     // a lost device ends the utterance it was playing; the next one reopens the bus.
     if (speech->voice && audio_voice_lost(speech->voice)) {
+        auto reason = audio_voice_loss(speech->voice);
         SpeechUtterance* lost = speech->current;
         playback_stop(speech);
         audio_voice_remove(speech->voice);
         speech->voice = 0;
-        if (lost) utterance_fail(doc, lost, "audio device lost");
+        if (lost) { lost->loss = reason; utterance_fail(doc, lost, reason == AUDIO_VOICE_ROUTE_LOST ? "audio route owner removed" : "audio device lost"); }
     }
+    for (auto* pending : speech->queue) if (pending->state < SPEECH_ENDED) utterance_route_check(doc, speech, pending);
     // finish engine renders; a failed render is reported and dropped from the queue.
     for (SpeechUtterance* u : speech->queue) {
         if (u->state != SPEECH_RENDERING || !u->job) continue;
@@ -583,6 +649,7 @@ bool radiant_speech_tick(DomDocument* doc) {
         if (cursor >= p->frames) {
             playback_stop(speech);
             u->state = SPEECH_ENDED;
+            utterance_release_route(u);
             SpeechEventFields fields = {}; fields.char_index = u->char_index;
             fields.time = u->render.frames / (double)AUDIO_BUS_RATE;
             speech_fire(doc, u, "speechend", fields);

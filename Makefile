@@ -81,6 +81,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_zip_gtest \
 	test_lambda_gtest \
 	test_input_script_cache_gtest \
+	test_security_runtime_gtest \
 	test_lambda_parser_poc_gtest \
 	test_mir_gc_stress_gtest \
 	test_mir_ratchet_gtest \
@@ -884,6 +885,19 @@ build-debug-asan: $(MIR_LIB)
 # Runtime-only CLI build (no Radiant, JavaScript/DOM, Jube or HTTP server)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
+
+.PHONY: lambda-safety-worker build-safety-worker
+lambda-safety-worker: build-safety-worker
+
+build-safety-worker:
+	@echo "Building the broker-bound T0 worker (OS confinement is installed by its launcher)..."
+	$(PYTHON) utils/generate_premake.py --variant safety-worker --output premake5.safety-worker.lua
+	$(PREMAKE5) gmake --file=premake5.safety-worker.lua
+	$(MAKE) -C build_safety_worker/premake config=release_native lambda-safety-worker -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+
+.PHONY: build-safety-host
+build-safety-host: build-lambda-data
+	$(MAKE) -C build/premake config=release_native lambda-safety-host -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 
 build-cli:
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
@@ -3368,7 +3382,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-writing-modes"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-writing-modes, wpt-css-ruby"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -3392,13 +3406,17 @@ capture-layout:
 	    fi; \
 	    if [ -n "$$TEST_VAR" ]; then \
 	        case "$$TEST_VAR" in \
-	            *.html|*.htm|*.xht) TEST_FILE="$$TEST_VAR" ;; \
+	            *.html|*.htm|*.xht|*.xhtml) TEST_FILE="$$TEST_VAR" ;; \
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-writing-modes; do \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-writing-modes wpt-css-ruby; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.xht" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.xht"; \
+	                        FOUND_SUITE="$$dir"; \
+	                        break; \
+	                    elif [ -f "data/$$dir/$${TEST_VAR}.xhtml" ]; then \
+	                        TEST_FILE="data/$$dir/$${TEST_VAR}.xhtml"; \
 	                        FOUND_SUITE="$$dir"; \
 	                        break; \
 	                    elif [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
@@ -3414,6 +3432,10 @@ capture-layout:
 	                        if [ -d "$$subdir" ]; then \
 	                            if [ -f "$${subdir}$${TEST_VAR}.xht" ]; then \
 	                                TEST_FILE="$${subdir}$${TEST_VAR}.xht"; \
+	                                FOUND_SUITE="$$dir"; \
+	                                break 2; \
+	                            elif [ -f "$${subdir}$${TEST_VAR}.xhtml" ]; then \
+	                                TEST_FILE="$${subdir}$${TEST_VAR}.xhtml"; \
 	                                FOUND_SUITE="$$dir"; \
 	                                break 2; \
 	                            elif [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
@@ -3456,7 +3478,7 @@ capture-layout:
 
 # test-layout: Run layout tests using Lambda CSS engine
 # Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN] [update=1]
-# Note: test parameter now accepts filename with or without .html/.htm/.xht extension
+# Note: test parameter now accepts filename with or without .html/.htm/.xht/.xhtml extension
 # Example: make test-layout test=baseline_301_simple_margin
 # Node resolves imports from test/layout's real path when it is a symlink.
 test-layout:
@@ -3489,12 +3511,15 @@ test-layout:
 		if [ -n "$$CONCURRENCY_VAR" ]; then CONCURRENCY_FLAG="-j $$CONCURRENCY_VAR"; fi; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
-				*.html|*.htm|*.xht) TEST_FILE="$$TEST_VAR" ;; \
+				*.html|*.htm|*.xht|*.xhtml) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
 					TEST_FILE=""; \
-					for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline wpt-css-writing-modes; do \
+					for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline wpt-css-writing-modes wpt-css-ruby; do \
 						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.xht" ]; then \
 							TEST_FILE="$${TEST_VAR}.xht"; \
+							break; \
+						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.xhtml" ]; then \
+							TEST_FILE="$${TEST_VAR}.xhtml"; \
 							break; \
 						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
 							TEST_FILE="$${TEST_VAR}.htm"; \
@@ -3507,6 +3532,9 @@ test-layout:
 							if [ -d "$$subdir" ]; then \
 								if [ -f "$${subdir}$${TEST_VAR}.xht" ]; then \
 									TEST_FILE="$${TEST_VAR}.xht"; \
+									break 2; \
+								elif [ -f "$${subdir}$${TEST_VAR}.xhtml" ]; then \
+									TEST_FILE="$${TEST_VAR}.xhtml"; \
 									break 2; \
 								elif [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
 									TEST_FILE="$${TEST_VAR}.htm"; \

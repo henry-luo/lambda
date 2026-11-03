@@ -857,6 +857,27 @@ extern "C" void* heap_calloc_closure_env(size_t size) {
         GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS);
 }
 
+extern "C" Array* lambda_capture_home_new(Item value) {
+    RootFrame roots(2);
+    Rooted<Item> initial(roots, value);
+    Rooted<Array*> home(roots, array_plain());
+    if (!home.get()) return NULL;
+    // reuse the collector's Array/owned-slot protocol, including scalar tails.
+    array_push_verbatim(home.get(), initial.get());
+    return home.get();
+}
+
+extern "C" Item lambda_capture_home_read(Array* home) {
+    if (!home || home->length != 1) return ItemNull;
+    // a later rebind may overwrite the home's scalar tail; readers own copies.
+    return owned_item_slot_read(home->items, home->capacity, 0, false);
+}
+
+extern "C" void lambda_capture_home_store(Array* home, Item value) {
+    if (!home || home->length != 1) return;
+    array_set(home, 0, value);
+}
+
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed
 // size class. Falls back to free list recycling when bump is full.
 extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
@@ -1392,6 +1413,9 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 
 void heap_destroy() {
     if (context->heap) {
+        // Realm capsules own precise slots into this heap, including dynamic
+        // document/snapshot tables. Retire them before the collector's storage.
+        context_capsule_release_heap(context);
         // Runtime item cleanup may neuter owning Array objects, so it must run
         // while the runtime owner group and GC extents are still alive.
         // a host-only heap has no JS side tables or JS-owned array storage.

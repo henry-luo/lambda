@@ -106,6 +106,8 @@ static void loopback_owner_release(void* data) {
 // listen(): a listener on an ephemeral port of 127.0.0.1; its `port` names it
 extern "C" Item pn_io_loopback_listen(void) {
     const char* fn = "io.loopback.listen";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     if (!network_sockets_ready()) return io_fs_error(ERR_NETWORK_ERROR, "%s: sockets are unavailable", fn);
     LambdaTask* owner = lambda_task_running();
     if (!owner) return io_fs_error(ERR_INVALID_STATE, "%s: a listener needs a running procedure", fn);
@@ -249,6 +251,8 @@ static Item loopback_request_item(const char* head) {
 // timeout leaves it open for another accept.
 extern "C" Item pn_io_loopback_accept(Item listener, Item seconds, Item page) {
     const char* fn = "io.loopback.accept";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Loopback* l = loopback_of(listener);
     if (!l || l->closed) return io_fs_error(ERR_INVALID_STATE, "%s: not an open loopback listener", fn);
     if (l->busy) return io_fs_error(ERR_INVALID_STATE, "%s: the listener is already waiting", fn);

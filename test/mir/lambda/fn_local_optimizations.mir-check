@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "description": "S12.1.2v3/D2.2.2: pure terminal-return kernels retain exclusive dispatch, private-tree regions and native string concat fusion.",
+  "checks": [
+    {"in_func": "main", "expect": ["lambda_region_begin"]},
+    {"in_func": "_choose_#", "expect": ["bne"]},
+    {"in_func": "_decorate_#", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p"]}
+  ]
+}

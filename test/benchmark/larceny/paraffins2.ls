@@ -18,21 +18,21 @@
 // rcount is an int[] parameter so callees index it directly; nb() records the
 // same contract before it crosses the checked call boundary.
 // Multiset coefficients: choose k items from n with repetition
-pn ms2(r: int) int {
+fn ms2(r: int) int {
     return int(r * (r + 1) div 2)
 }
 
-pn ms3(r: int) int {
+fn ms3(r: int) int {
     return int(r * (r + 1) * (r + 2) div 6)
 }
 
-pn ms4(r: int) int {
+fn ms4(r: int) int {
     return int(r * (r + 1) * (r + 2) * (r + 3) div 24)
 }
 
 // Count radicals of size k given rcount[] (radical counts for smaller sizes)
 // A radical: central C + 3 sub-radicals of sizes s1 <= s2 <= s3, s1+s2+s3 = k-1
-pn count_radicals(rcount: int[], k: int) int {
+fn count_radicals(rcount: int[], k: int) int {
     var count: int = 0
     var target: int = k - 1
     var nc1: int = 0
@@ -67,7 +67,7 @@ pn count_radicals(rcount: int[], k: int) int {
 
 // BCP: bond-centered paraffins (even n only)
 // Two radicals of size n/2, unordered pair => ms2(rcount[n/2])
-pn count_bcp(rcount: int[], n: int) int {
+fn count_bcp(rcount: int[], n: int) int {
     if (n % 2 != 0) {
         return 0
     }
@@ -79,7 +79,7 @@ pn count_bcp(rcount: int[], n: int) int {
 // CCP: carbon-centered paraffins
 // 4 sub-radicals of sizes s1 <= s2 <= s3 <= s4, sum = n-1
 // max_rad = floor((n-1)/2) ensures no overlap with BCP and no out-of-bounds
-pn count_ccp(rcount: int[], n: int) int {
+fn count_ccp(rcount: int[], n: int) int {
     var m: int = n - 1
     var max_rad: int = shr(m, 1)
     var count: int = 0
@@ -131,7 +131,7 @@ pn count_ccp(rcount: int[], n: int) int {
     return count
 }
 
-pn nb(n: int) int {
+fn nb(n: int) int {
     if (n < 1) {
         return 0
     }

@@ -9,8 +9,12 @@ pn later(root) {
     if (owner != null) dom.dispatch(owner, {type: "ready", bubbles: false, detail: "<p id='x'>from task</p>"})
 }
 
-view <task_frame_app> state html: null, started: false {
-    <body <main id:"app", 'data-ready':string(html != null),
+pn wait_for_close() {
+    sleep(60000)^
+}
+
+view <task_frame_app> state html: null, started: false, parked: false {
+    <body <main id:"app", 'data-ready':string(html != null), 'data-parked':string(parked),
         if (html != null) <iframe id:"frame", srcdoc:html> else null>>
 }
 on load(evt) {
@@ -21,6 +25,12 @@ on load(evt) {
 }
 on ready(evt) {
     html = evt.detail
+    return 'handled'
+}
+// cancellation resumes this task while the JS dispatch realm still owns its ambient slots.
+on park(evt) {
+    start(wait_for_close, [], {owner: 'document'})
+    parked = true
     return 'handled'
 }
 

@@ -275,6 +275,7 @@ struct TextIntrinsicWidths {
     float last_segment_min = -1.0f;
     float interior_min_content = 0.0f;
     bool has_min_content_break = false;
+    bool has_used_content_break = false;
 };
 
 struct LayoutIntrinsicMinRun {
@@ -283,13 +284,19 @@ struct LayoutIntrinsicMinRun {
     float tail = 0.0f;
     float interior = 0.0f;
     bool has_break = false;
+    bool has_used_break = false;
     DomNode* previous = nullptr;
 };
 void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run);
+void layout_intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
+    const IntrinsicSizes& widths, bool boundary_break);
 void layout_intrinsic_add_min_segment_edges(IntrinsicSizes* widths, float start, float end,
     DomElement* element);
 void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun* run,
     DomNode* child, const IntrinsicSizes& widths, bool separator = false);
+bool layout_intrinsic_boundary_break(LayoutContext* context, DomNode* previous,
+    DomNode* child, bool separator = false, bool used_breaks = false);
+bool layout_intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end);
 
 // The fast text paths share the same glyph-run probe; only their CSS
 // eligibility rules differ. Keeping the byte scan and font measurement here
@@ -466,6 +473,7 @@ bool is_line_break_ba(uint32_t codepoint);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
                                        const unsigned char* text_end,
                                        size_t* cluster_bytes);
+const unsigned char* text_glyph_unit_end(const unsigned char* start, const unsigned char* end);
 bool layout_measure_grapheme_cluster_advance(
     LayoutContext* lycon, const unsigned char* cluster_start,
     const unsigned char* text_end, size_t* cluster_bytes,
@@ -492,7 +500,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     void* line_width_context = nullptr,
                                     bool allow_soft_wrap = true);
 StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descendants);
-StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space);
+StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
+                                    bool collapse_segment_breaks = false,
+                                    bool preserve_initial_space = false,
+                                    bool preserve_terminal_space = false);
 void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
@@ -678,6 +689,7 @@ struct LayoutTextIntrinsicLineOptions {
     CssEnum text_transform = CSS_VALUE_NONE;
     CssEnum font_variant = CSS_VALUE_NONE;
     CssEnum white_space = CSS_VALUE_NORMAL;
+    CssEnum text_wrap_mode = CSS_VALUE__UNDEF;
     CssEnum overflow_wrap = CSS_VALUE_NORMAL;
     CssEnum word_break = CSS_VALUE_NORMAL;
     CssEnum line_break = CSS_VALUE_AUTO;
@@ -687,6 +699,9 @@ struct LayoutTextIntrinsicLineOptions {
     float vertical_line_advance = 0.0f;
     float vertical_inline_basis = 0.0f;
     bool processed_forced_breaks = false; // layout_collect_inline_text's paragraph markers
+    bool collapse_segment_breaks = false; // used-text override; authored spaces keep their CSS policy
+    bool preserve_initial_space = false; // neighboring inline content owns these edge decisions
+    bool preserve_terminal_space = false;
     bool text_combine = false; // one effective em square, independent of internal text width/breaks
     lam::Up<ViewBlock> line_box = nullptr; // optional line-metric owner
     float line_height = 0.0f;
@@ -1814,6 +1829,8 @@ float compute_view_last_text_baseline(
 
 CssEnum get_white_space_value(DomNode* node);
 CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon = nullptr);
+bool layout_inline_flow_is_kept(LayoutContext* context);
+bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node);
 bool layout_resolve_text_wrap_value(const CssValue* value, CssEnum* mode, CssEnum* style);
 bool layout_text_is_collapsible_whitespace(DomNode* node,
                                            size_t start_index = 0,
@@ -1864,6 +1881,13 @@ enum LayoutInlineTextEdgeMode {
     LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE,
 };
 bool layout_ruby_annotation_node(DomNode* node);
+bool layout_ruby_annotation_content(DomNode* node);
+bool layout_text_collapses_segment_breaks(DomNode* node);
+bool layout_ruby_annotation_outside_scope(DomNode* node, DomElement* scope);
+void layout_text_reset_kerning_context(LayoutContext* context);
+bool view_is_collapsed_whitespace_text(View* view);
+bool layout_intrinsic_node_is_collapsible_space_only(DomNode* node);
+float layout_intrinsic_collapsed_space_width(LayoutContext* context, DomNode* source);
 uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
     LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
     DomNode** source = nullptr);
@@ -1873,7 +1897,7 @@ uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
 bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
     DomNode* node, bool before);
 bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
-    uint32_t before, uint32_t after);
+    uint32_t before, uint32_t after, bool used_breaks = false);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 float layout_inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
@@ -2614,6 +2638,13 @@ struct LineHangingSpace {
     lam::Up<LineHangingSpaceUnit> tail;
 };
 
+// tier-3: pass-arena values survive the formatter's scratch model until this line closes.
+struct LayoutInlineAdvance {
+    lam::Up<ViewSpan> owner;
+    float start, end;
+    lam::Up<LayoutInlineAdvance> next;
+};
+
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -2621,6 +2652,7 @@ typedef struct Linebox {
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
     float advance_x;
+    lam::Up<LayoutInlineAdvance> inline_advances; // consumed inline ranges can differ from overhanging ink
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
@@ -2678,6 +2710,7 @@ typedef struct Linebox {
     lam::Up<TextRect> last_text_rect;       // last text rect output on this line (for trailing space trimming)
     lam::Up<struct ViewText> last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
+    lam::Up<View> trailing_space_box; // a converted break owns its separator without synthetic DOM text
     lam::Up<TextRect> committed_trailing_rect;  // text rect that had trailing space when output_text was called
     lam::Up<struct ViewText> committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
@@ -2713,6 +2746,11 @@ typedef struct Linebox {
     float trailing_letter_spacing;   // CSS Text 3 §8: letter-spacing after the last character on a line;
                                      // trimmed at line breaks since letter-spacing is not applied at line ends
 
+    inline void clear_trailing_space() {
+        trailing_space_width = 0.0f;
+        trailing_space_box = nullptr;
+    }
+
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
         last_space_kind = BRK_TEXT;  last_space_hanging = {};
@@ -2720,7 +2758,7 @@ typedef struct Linebox {
         last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging = {};
         last_space_metrics.valid = false;
         last_non_shy_space_metrics.valid = false;
-        trailing_space_width = 0;
+        clear_trailing_space();
         committed_trailing_rect = NULL;
         committed_trailing_view = NULL;
         committed_trailing_space = 0;
@@ -4010,6 +4048,9 @@ typedef struct LayoutContext {
     lam::Up<CounterContext> counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+    lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
+    lam::Up<struct LayoutRubyFlowScope> active_ruby_flow; // borrowed chosen segments during line finalization
+    lam::Up<struct LayoutInlineKeepScope> inline_keep; // borrowed constraint for a parallel inline unit
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
     lam::Up<CssDeclaration*> cascade_priority_decls;
@@ -4801,6 +4842,8 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon, bool forced_break = false);
+void layout_record_line_break_opportunity(LayoutContext* context,
+    unsigned char* position, float width, BreakKind kind);
 void mark_line_non_space(Linebox* line);
 inline bool layout_text_is_leader(const DomNode* text) {
     DomNode* parent = text ? text->parent.get() : nullptr;
@@ -4836,6 +4879,10 @@ CssEnum layout_inline_boundary_keyword(DomElement* element, CssPropertyCode prop
 bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 bool layout_inline_span_has_content_on_line(View* view, int line_number);
+bool layout_inline_span_owns_source_edge(ViewSpan* span, int line_number, bool end);
+bool layout_inline_line_bounds(LayoutContext* context, ViewSpan* span, int line_number, Rect* bounds);
+void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float start, float end);
+bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);
@@ -4947,10 +4994,10 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     const char* text = (const char*)node->text_data();
     return text && !is_only_whitespace(text);
 }
-// Grid and flex use the same display:contents flattening; policy selects their
-// distinct text participation and initialization requirements.
+// box-tree consumers share display:contents flattening; policy selects their
+// text participation and initialization requirements independently of display role.
 typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
-                                                 ViewBlock* container);
+                                                 DomElement* container);
 typedef struct LayoutFlattenedItemPolicy {
     LayoutFlattenedTextItemPredicate include_text;
     lam::Up<DomElement> skipped_element;
@@ -4961,7 +5008,7 @@ typedef struct LayoutFlattenedItemPolicy {
 bool layout_text_has_collapsible_edge(DomText* text, bool trailing);
 DomNode* layout_adjacent_flattened_text(DomNode* node, ViewBlock* container, bool following);
 bool layout_contents_whitespace_is_text_separator(DomNode* text, ViewBlock* container);
-bool layout_collect_flattened_text_item(DomNode* text, ViewBlock* container);
+bool layout_collect_flattened_text_item(DomNode* text, DomElement* container);
 ViewElement* layout_create_anonymous_text_item(LayoutContext* lycon,
     ScratchMark* scope, ViewBlock* container, DomText* text);
 LayoutAnonymousTextRun* layout_append_anonymous_text_run(LayoutContext* lycon,
@@ -4975,11 +5022,11 @@ radiant::SizeF layout_measure_anonymous_text(LayoutContext* lycon,
     ViewElement* item, LayoutAnonymousTextRun* runs, float width, bool intrinsic = false);
 
 int layout_collect_flattened_item_nodes(LayoutContext* lycon,
-                                        ViewBlock* container,
+                                        DomElement* container,
                                         DomNode* first_child,
                                         DomNode** nodes, int capacity,
                                         const LayoutFlattenedItemPolicy* policy);
-int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text);
+int layout_count_flattened_item_nodes(DomElement* container, bool include_text);
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
     if (!text || !text->text || text->length == 0) return false;
@@ -5312,8 +5359,8 @@ static inline bool layout_walk_inline_views(View* view, Enter enter, Leave leave
 template <typename Visit, typename Leave>
 static inline void layout_walk_view_tree(View* view, Visit visit, Leave leave,
                                          bool skip_out_of_flow = true, int depth = 0,
-                                         bool descend_blocks = false) {
-    while (view) {
+                                         bool descend_blocks = false, View* stop = nullptr) {
+    while (view && view != stop) {
         bool descend = false;
         if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
             descend = visit(view, depth);
@@ -5451,6 +5498,7 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top);
+float layout_inline_content_area_height(LayoutContext* lycon, ViewSpan* span);
 void layout_include_inline_box_metrics(LayoutContext* lycon, float ascender, float descender,
     float line_height, float normal_line_height, CssEnum align, float align_offset);
 void layout_commit_inline_boxes(LayoutContext* lycon);
@@ -5581,7 +5629,7 @@ void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
-void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
+void layout_apply_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,
@@ -5902,6 +5950,20 @@ struct LayoutContextScope {
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
 };
+
+// tier-3: a parallel unit constrains only the IFC that formats its bases.
+struct LayoutInlineKeepScope {
+    lam::Up<LayoutContext> context;
+    lam::Up<LayoutInlineKeepScope> previous;
+    lam::Up<ViewBlock> flow_box;
+    LayoutInlineKeepScope(LayoutContext* layout, bool keep)
+        : context(layout), previous(layout->inline_keep), flow_box(layout->block.flow_box) {
+        if (keep) context->inline_keep = lam::up(this);
+    }
+    ~LayoutInlineKeepScope() { context->inline_keep = previous; }
+    LayoutInlineKeepScope(const LayoutInlineKeepScope&) = delete;
+    LayoutInlineKeepScope& operator=(const LayoutInlineKeepScope&) = delete;
+};
 // Intrinsic width recursion changes both the element cycle bit and active view;
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
@@ -6062,6 +6124,7 @@ LAM_NODE_OF(FloatBox, NodeStack);
 LAM_NODE_OF(InitialLetterBox, NodeStack);
 LAM_NODE_OF(BlockContext, NodeStack);
 LAM_NODE_OF(Linebox, NodeStack);
+LAM_NODE_OF(LayoutInlineAdvance, NodeStack);
 LAM_NODE_OF(FlexLineInfo, NodeStack);
 LAM_NODE_OF(FlexContainerLayout, NodeStack);
 LAM_NODE_OF(LayoutAxisRefs, NodeStack);
@@ -6086,6 +6149,7 @@ LAM_NODE_OF(LayoutFlattenedItemPolicy, NodeStack);
 LAM_NODE_OF(BlockContextScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
 LAM_NODE_OF(LayoutContextScope, NodeStack);
+LAM_NODE_OF(LayoutInlineKeepScope, NodeStack);
 LAM_NODE_OF(IntrinsicMeasureScope, NodeStack);
 LAM_NODE_OF(LayoutViewScope, NodeStack);
 LAM_NODE_OF(LayoutFontScope, NodeStack);

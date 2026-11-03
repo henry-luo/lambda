@@ -24,6 +24,7 @@
 #include "../../lambda/core/lambda-decimal.hpp"
 #include "../../lambda/runtime/heap_api.h"
 #include "../../lambda/runtime/transpiler.hpp"
+#include "../../lambda/runtime/interp.hpp"
 #include "../../lambda/runtime/root_vector.h"
 #include "../../lambda/runtime/runtime-state.h"
 
@@ -40,6 +41,63 @@ extern "C" {
 }
 
 extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
+
+class ScriptImportOverlayTest : public ::testing::Test {
+protected:
+    Script root = {}, middle = {}, leaf = {}, template_owner = {}, retired = {};
+    AstScript root_ast = {}, middle_ast = {};
+    AstImportNode root_import = {}, leaf_import = {};
+
+    void SetUp() override {
+        root.cache_template = middle.cache_template = &template_owner;
+        root.ast_root = &root_ast;
+        middle.ast_root = &middle_ast;
+        root_ast.child = &root_import;
+        middle_ast.child = &leaf_import;
+        root_import.node_type = leaf_import.node_type = AST_NODE_IMPORT;
+        root_import.script = leaf_import.script = &retired;
+        root.direct_imports = arraylist_new(1);
+        middle.direct_imports = arraylist_new(1);
+        ASSERT_NE(root.direct_imports, nullptr);
+        ASSERT_NE(middle.direct_imports, nullptr);
+        ASSERT_TRUE(arraylist_append(root.direct_imports, &middle));
+        ASSERT_TRUE(arraylist_append(middle.direct_imports, &leaf));
+    }
+
+    void TearDown() override {
+        if (root.direct_imports) arraylist_free(root.direct_imports);
+        if (middle.direct_imports) arraylist_free(middle.direct_imports);
+        if (leaf.direct_imports) arraylist_free(leaf.direct_imports);
+    }
+};
+
+TEST_F(ScriptImportOverlayTest, ImportedBodyUsesTheReceivingDependencyInsteadOfItsRetiredSource) {
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &root_import), &middle);
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &leaf_import), &leaf);
+    // an uncached caller can still analyze a body borrowed from a retained dependency.
+    root.cache_template = nullptr;
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &leaf_import), &leaf);
+}
+
+TEST_F(ScriptImportOverlayTest, MissingRetainedImportFailsClosedAndClosureCyclesTerminate) {
+    leaf.direct_imports = arraylist_new(1);
+    ASSERT_NE(leaf.direct_imports, nullptr);
+    ASSERT_TRUE(arraylist_append(leaf.direct_imports, &root));
+    ASSERT_TRUE(arraylist_append(root.direct_imports, &leaf));
+    AstImportNode absent = {};
+    absent.script = &retired;
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &absent), nullptr);
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &leaf_import), &leaf);
+}
+
+TEST_F(ScriptImportOverlayTest, CrossLanguageAndUncachedConstructionKeepTheirOwnImportOwner) {
+    leaf_import.is_cross_lang = true;
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, &leaf_import), &retired);
+    leaf_import.is_cross_lang = false;
+    EXPECT_EQ(lambda_ast_overlay_import_script(nullptr, &leaf_import), &retired);
+    EXPECT_EQ(lambda_ast_overlay_import_script(&leaf, &leaf_import), &retired);
+    EXPECT_EQ(lambda_ast_overlay_import_script(&root, nullptr), nullptr);
+}
 
 // Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.
 
