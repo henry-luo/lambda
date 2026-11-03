@@ -311,6 +311,8 @@ GrepAction on_file_done(void* ud, const char* path, uint64_t count) {
 
 static Item io_grep_impl(Item source, Item pattern, Item options) {
     GUARD_ERROR3(source, pattern, options);
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.grep", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.grep()"); return (Item){.array = array()}; }
     Item error = ItemError;
     IoGrepOptions o;

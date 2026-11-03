@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/60px "Times New Roman"; }
+.row { width: 160px; }
+</style>
+<div id="result" lang="ja">
+<div id="group-row" class="row">ここは<ruby id="group">優先通行帯<rt id="reading">ゆうせんつうこうたい</rt></ruby>。</div>
+<div id="control-row" class="row">ここは<ruby id="control-first">優先通行<rt id="control-reading-first">ゆうせんつうこう</rt></ruby><br id="control-break"><ruby id="control-last">帯<rt id="control-reading-last">たい</rt></ruby>。</div>
+<div id="nowrap-row" class="row">ここは<ruby id="nowrap">優先通行帯<rt style="white-space:nowrap">ゆうせんつうこうたい</rt></ruby>。</div>
+<div id="triple-row" style="width:60px"><ruby id="triple">優先通行帯優先通行<rt id="triple-reading">ゆうせんつうこうたいゆうせんつうこう</rt></ruby></div>
+<div id="triple-control" style="width:60px"><ruby id="triple-a">優先通<rt>ゆうせんつう</rt></ruby><br><ruby id="triple-b">行帯優<rt>こうたいゆう</rt></ruby><br><ruby id="triple-c">先通行<rt>せんつうこう</rt></ruby></div>
+<div id="spaces-row" style="width:70px;font-family:Ahem"><ruby id="spaces">  AA  BB  CC  <rt id="spaces-reading"> A  B  C </rt></ruby></div>
+<div id="spaces-control" style="width:70px;font-family:Ahem"><ruby id="spaces-a">AA<rt>A</rt></ruby><br><ruby id="spaces-b">BB<rt>B</rt></ruby><br><ruby id="spaces-c">CC<rt>C</rt></ruby></div>
+</div>

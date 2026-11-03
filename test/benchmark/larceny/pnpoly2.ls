@@ -4,7 +4,7 @@
 // Classifies 100000 test points against a 20-vertex polygon
 // Expected: 50000 (test points are generated on a grid, half inside)
 
-pn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool^ {
+fn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool^ {
     var inside = false
     var j: int = n - 1
     var i: int = 0

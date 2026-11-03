@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "../../lib/arraylist.h"
+#include "../io/security_io.h"
 
 // The module prebuild registry is deliberately language-neutral. A profile
 // owns syntax discovery, resolution, and the isolated AST build; the registry
@@ -30,6 +31,11 @@ typedef bool (*ModuleAstResolveImportFn)(void* context,
 // Called only from a prebuild worker. It must publish an AST cache artifact
 // and must never initialize a module or lower MIR.
 typedef bool (*ModuleAstBuildFn)(void* context, const char* path);
+typedef bool (*ModuleAstAuthorizedBuildFn)(void* context, const char* path,
+    const SecurityIOClient* io);
+typedef bool (*ModuleAstAuthorizedResolveFn)(void* context,
+    const char* importer, const char* specifier, ModuleAstResolvedImport* out,
+    const SecurityIOClient* io);
 
 typedef struct ModuleAstPrebuildProfile {
     // The process-global registry borrows this descriptor while its tasks are
@@ -40,6 +46,9 @@ typedef struct ModuleAstPrebuildProfile {
     ModuleAstResolveImportFn resolve_import;
     ModuleAstBuildFn build_ast;
     void* context;
+    // Bound profiles require this callback; no legacy/ambient builder fallback.
+    ModuleAstAuthorizedBuildFn build_authorized;
+    ModuleAstAuthorizedResolveFn resolve_authorized;
 } ModuleAstPrebuildProfile;
 
 typedef struct ModuleAstPrebuildProfiles {
@@ -53,6 +62,18 @@ typedef struct ModuleAstPrebuildStats {
     uint32_t failed_modules;
     uint32_t worker_pool_runs;
 } ModuleAstPrebuildStats;
+
+typedef struct ModuleAstPrebuildScope ModuleAstPrebuildScope;
+// The caller keeps profile contexts and the transport alive until close joins
+// this scope's jobs. Tasks and cross-language fallbacks never cross scopes.
+ModuleAstPrebuildScope* module_ast_prebuild_scope_open(
+    const ModuleAstPrebuildProfiles* profiles, const SecurityIOClient* io);
+bool module_ast_prebuild_scope_imports(ModuleAstPrebuildScope* scope,
+    ModuleAstLanguage language, const char* path, const char* source,
+    size_t length, ModuleAstPrebuildStats* stats);
+bool module_ast_prebuild_scope_await(ModuleAstPrebuildScope* scope,
+    const ModuleAstPrebuildProfile* profile, const char* path);
+void module_ast_prebuild_scope_close(ModuleAstPrebuildScope* scope);
 
 // Seed process-global static-import discovery. This is fire-and-forget: roots
 // never wait for a closure. Discovery jobs publish nested requests immediately;

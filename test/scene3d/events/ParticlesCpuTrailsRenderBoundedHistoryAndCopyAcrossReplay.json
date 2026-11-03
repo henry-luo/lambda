@@ -1,0 +1,172 @@
+{
+  "name": "ParticlesCpuTrailsRenderBoundedHistoryAndCopyAcrossReplay",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "configureParticleTrail();particleRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.particles_cpu_trails===true&&particleResult.particles_gpu_trails===true&&particleResult.particles_trails===true"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',6)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          72,
+          64,
+          255,
+          0,
+          0,
+          255
+        ],
+        [
+          72,
+          58,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===4&&particleTrail.sequence===0n&&Math.abs(particleTrail.samples[0].position[0]-.5)<1e-6&&Math.abs(particleTrail.samples[3].age-.3)<1e-6"
+    },
+    {
+      "type": "script",
+      "js": "particleTrail.samples[0].position[0]=999;particleTrail.samples.length=0;readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===4&&Math.abs(particleTrail.samples[0].position[0]-.5)<1e-6"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('seek',.6)"
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#world"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          72,
+          64,
+          255,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('particle-trail').setAttribute('lifetime','.1');readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===4&&Math.abs(particleTrail.samples[3].position[0]-.2)<1e-6"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          72,
+          64,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          78,
+          64,
+          255,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('particle-trail').setAttribute('segments','1');readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===0&&particleTrail.sequence===0n"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',1)"
+    },
+    {
+      "type": "script",
+      "js": "readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===1&&Math.abs(particleTrail.samples[0].position[0]-.6)<1e-6"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',1)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          85,
+          64,
+          255,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "readParticleTrail()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleTrail.samples.length===2&&Math.abs(particleTrail.samples[0].position[0]-.7)<1e-6"
+    }
+  ]
+}

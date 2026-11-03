@@ -2,7 +2,7 @@
 // Expected result: 10
 // Recursive linked-list traversal using Tak function
 
-pn make_list(length) {
+fn make_list(length) {
     if (length == 0) {
         return null
     }
@@ -10,25 +10,28 @@ pn make_list(length) {
     return e
 }
 
-pn list_length(node) {
+fn list_length(node) any^ {
     if (node == null) {
         return 0
     }
     return 1 + list_length(node.next)
 }
 
-pn is_shorter_than(x, y) {
-    while (y != null) {
-        if (x == null) {
+fn is_shorter_than(x, y) {
+    var work_x = x
+    var work_y = y
+
+    while (work_y != null) {
+        if (work_x == null) {
             return 1
         }
-        x = x.next
-        y = y.next
+        work_x = work_x.next
+        work_y = work_y.next
     }
     return 0
 }
 
-pn tail(x, y, z) {
+fn tail(x, y, z) any^ {
     if (is_shorter_than(y, x) == 1) {
         return tail(
             tail(x.next, y, z),
@@ -39,7 +42,7 @@ pn tail(x, y, z) {
     return z
 }
 
-pn benchmark() {
+fn benchmark() any^ {
     let result = tail(
         make_list(15),
         make_list(10),

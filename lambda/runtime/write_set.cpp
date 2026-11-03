@@ -13,34 +13,80 @@
 // The write set outlives its statements, so its recorded values are registered
 // roots rather than stack-frame ones.
 #include "heap_api.h"
+#include "context_capsule.h"
 
-// The whole transaction state. It is evaluation-scoped and single-threaded by
-// the same invariant as the document context: one thread of control owns the
-// cursor and the committer, which is exactly why PTH64v2 can rule that a commit
-// never waits (a wait would deadlock).
-static ArrayList* g_edits = NULL;       // WriteEdit*, in PROGRAM ORDER
-static bool g_transaction_open = false;
-static Document* g_confinement = NULL;
+// D5.4.2-D5.4.4: transactions and retained edits belong to one evaluator.
+// A peer's entry/teardown must never observe or clear this owner's pending work.
+struct WriteSetState {
+    EvalContext* owner;
+    ArrayList* edits; // WriteEdit*, in program order
+    bool transaction_open;
+    Document* confinement;
+};
+static const uint32_t write_set_owner = 0x57524954; // WRIT
 
-bool write_set_transaction_open(void) { return g_transaction_open; }
-
-void write_set_begin_transaction(void) { g_transaction_open = true; }
-
-void write_set_set_confinement(Document* doc) { g_confinement = doc; }
-
-Document* write_set_confinement(void) { return g_confinement; }
-
-static void write_set_clear(void) {
-    if (!g_edits) return;
-    for (int i = 0; i < g_edits->length; i++) {
-        WriteEdit* edit = (WriteEdit*)g_edits->data[i];
-        heap_unregister_gc_root(&edit->value.item);
-        mem_free(edit->key_name);
-        mem_free(edit);
+static void write_set_clear_state(WriteSetState* state) {
+    if (!state || !state->edits) return;
+    for (int i = 0; i < state->edits->length; i++) {
+        WriteEdit* edit = (WriteEdit*)state->edits->data[i];
+        heap_unregister_gc_root_for(state->owner, &edit->value.item);
+        mem_free(edit->key_name); mem_free(edit);
     }
-    arraylist_free(g_edits);
-    g_edits = NULL;
+    arraylist_free(state->edits); state->edits = NULL;
 }
+
+static void write_set_release_heap(void* data) {
+    WriteSetState* state = (WriteSetState*)data;
+    write_set_clear_state(state);
+    state->transaction_open = false; state->confinement = NULL;
+}
+
+static void write_set_destroy(void* data) {
+    write_set_release_heap(data); mem_free(data);
+}
+
+static WriteSetState* write_set_state(bool create) {
+    if (!context) return NULL;
+    WriteSetState* state = (WriteSetState*)context_capsule_extension(context, write_set_owner, 1);
+    if (!state && create) {
+        state = (WriteSetState*)mem_calloc(1, sizeof(*state), MEM_CAT_EVAL);
+        if (!state) return NULL;
+        state->owner = context;
+        static const ContextCapsuleOps ops = {"write-set", CONTEXT_CAPSULE_LIFETIME_REALM,
+            0, NULL, write_set_release_heap, write_set_destroy};
+        if (!context_capsule_extension_install(context, write_set_owner, 1, state, &ops)) {
+            mem_free(state); return NULL;
+        }
+    }
+    return state;
+}
+
+bool write_set_transaction_open(void) {
+    WriteSetState* state = write_set_state(false);
+    return state && state->transaction_open;
+}
+
+bool write_set_begin_transaction(void) {
+    WriteSetState* state = write_set_state(true);
+    if (!state) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "transaction state allocation failed");
+        return false;
+    }
+    state->transaction_open = true;
+    return true;
+}
+
+void write_set_set_confinement(Document* doc) {
+    WriteSetState* state = write_set_state(false);
+    if (state) state->confinement = doc;
+}
+
+Document* write_set_confinement(void) {
+    WriteSetState* state = write_set_state(false);
+    return state ? state->confinement : NULL;
+}
+
+static void write_set_clear(void) { write_set_clear_state(write_set_state(false)); }
 
 bool write_set_record(const WriteEdit* edit) {
     if (!edit || !edit->doc) {
@@ -48,14 +94,22 @@ bool write_set_record(const WriteEdit* edit) {
             "CRUD target has no location; only a document node can be written");
         return false;
     }
+    const DocNodeEntry* target = doc_context_find_node(edit->anchor);
+    if (!target || target->doc != edit->doc) {
+        set_runtime_error(ERR_FILE_ACCESS_DENIED, "CRUD target belongs to another evaluation context");
+        return false;
+    }
+    WriteSetState* state = write_set_state(true);
+    if (!state) { set_runtime_error(ERR_OUT_OF_MEMORY, "write set allocation failed"); return false; }
     // PTH80: inside a block every target must lie within the opened document.
     // Checked here rather than at commit so the diagnostic names the statement.
-    if (g_confinement && edit->doc != g_confinement) {
+    if (state->confinement && edit->doc != state->confinement) {
         set_runtime_error(ERR_SEMANTIC_ERROR,
             "CRUD target lies outside the opened document");
         return false;
     }
-    if (!g_edits) g_edits = arraylist_new(8);
+    if (!state->edits) state->edits = arraylist_new(8);
+    if (!state->edits) { set_runtime_error(ERR_OUT_OF_MEMORY, "write set allocation failed"); return false; }
     WriteEdit* owned = (WriteEdit*)mem_calloc(1, sizeof(WriteEdit), MEM_CAT_EVAL);
     if (!owned) return false;
     *owned = *edit;
@@ -67,12 +121,17 @@ bool write_set_record(const WriteEdit* edit) {
     // The recorded value outlives its statement -- inside `open` it waits until
     // the block's commit -- and the log is not otherwise reachable from the
     // collector, so each entry's value is a root until the set is applied.
-    heap_register_gc_root(&owned->value.item);
-    arraylist_append(g_edits, owned);
+    bool rooted = heap_register_gc_root_for(state->owner, &owned->value.item);
+    if (!rooted || !arraylist_append(state->edits, owned)) {
+        if (rooted) heap_unregister_gc_root_for(state->owner, &owned->value.item);
+        mem_free(owned->key_name); mem_free(owned);
+        set_runtime_error(ERR_OUT_OF_MEMORY, "write set root allocation failed");
+        return false;
+    }
     // PTH63v2: outside any `open`, a CRUD statement is a one-statement
     // transaction that autocommits at once — the shell case, with no pending
     // state to remember.
-    if (!g_transaction_open) return write_set_commit();
+    if (!state->transaction_open) return write_set_commit();
     return true;
 }
 
@@ -485,7 +544,9 @@ static Item apply_edit(Item root, const WriteEdit* edit) {
 }
 
 bool write_set_commit(void) {
-    if (!g_edits || !g_edits->length) { write_set_clear(); return true; }
+    WriteSetState* state = write_set_state(false);
+    if (!state) return true;
+    if (!state->edits || !state->edits->length) { write_set_clear(); return true; }
     // PTH63v2: applied in PROGRAM ORDER and validated THEN — the statement site
     // cannot read the next version, and an earlier statement may have created
     // the parent. On the first rejection nothing is written and the whole set
@@ -501,8 +562,8 @@ bool write_set_commit(void) {
     // owner for an Item span bounded by one native activation (rule 15).
     RootSpan working_span(MAX_DOCUMENTS_PER_COMMIT);
     Item* working = working_span.items();
-    for (int i = 0; i < g_edits->length; i++) {
-        WriteEdit* edit = (WriteEdit*)g_edits->data[i];
+    for (int i = 0; i < state->edits->length; i++) {
+        WriteEdit* edit = (WriteEdit*)state->edits->data[i];
         int slot = -1;
         for (int d = 0; d < doc_count; d++) if (docs[d] == edit->doc) { slot = d; break; }
         if (slot < 0) {
@@ -536,15 +597,14 @@ bool write_set_end_transaction(bool unwinding) {
     bool ok = true;
     if (unwinding) write_set_rollback();
     else ok = write_set_commit();
-    g_transaction_open = false;
-    g_confinement = NULL;
+    WriteSetState* state = write_set_state(false);
+    if (state) { state->transaction_open = false; state->confinement = NULL; }
     return ok;
 }
 
 void write_set_reset(void) {
-    write_set_clear();
-    g_transaction_open = false;
-    g_confinement = NULL;
+    WriteSetState* state = write_set_state(false);
+    if (state) write_set_release_heap(state);
 }
 
 // ---------------------------------------------------------------------------
@@ -746,7 +806,7 @@ extern "C" Item fn_open_begin(Item target) {
             "'open' needs a document, a document set, or a directory");
         return ItemError;
     }
-    write_set_begin_transaction();
+    if (!write_set_begin_transaction()) return ItemError;
     // PTH80: every CRUD target inside the block must lie within the opened
     // document. Checked at the statement so the diagnostic names it.
     write_set_set_confinement(entry->doc);

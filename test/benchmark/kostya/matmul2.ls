@@ -6,7 +6,7 @@
 
 let N = 200
 
-pn next_rand(seed: int) int {
+fn next_rand(seed: int) int {
     return int((seed * 1664525 + 1013904223) % 1000000)
 }
 

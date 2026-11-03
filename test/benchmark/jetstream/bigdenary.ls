@@ -10,7 +10,7 @@
 let BD1 = 8965168485622506189945604.1235068121348084163185216m
 let BD2 = 2480986213549488579706531.6546845013548451265890628m
 
-pn test_plus() {
+fn test_plus() {
     var first = BD1 + BD2
     var latest = first
     var i: int = 0
@@ -21,7 +21,7 @@ pn test_plus() {
     return first == latest
 }
 
-pn test_minus() {
+fn test_minus() {
     var first = BD1 - BD2
     var latest = first
     var i: int = 0
@@ -32,7 +32,7 @@ pn test_minus() {
     return first == latest
 }
 
-pn test_negate() {
+fn test_negate() {
     var first = -BD1
     var latest = first
     var i: int = 0
@@ -43,7 +43,7 @@ pn test_negate() {
     return first == latest
 }
 
-pn test_compare() {
+fn test_compare() {
     var first = BD1 > BD2
     var latest = first
     var i: int = 0
@@ -54,7 +54,7 @@ pn test_compare() {
     return first == latest
 }
 
-pn test_multiply() {
+fn test_multiply() {
     var first = BD1 * BD2
     var latest = first
     var i: int = 0
@@ -65,7 +65,7 @@ pn test_multiply() {
     return first == latest
 }
 
-pn test_divide() {
+fn test_divide() {
     var first = BD1 / BD2
     var latest = first
     var i: int = 0
@@ -76,7 +76,7 @@ pn test_divide() {
     return first == latest
 }
 
-pn run() {
+fn run() {
     if (test_plus() == false) { return false }
     if (test_minus() == false) { return false }
     if (test_negate() == false) { return false }

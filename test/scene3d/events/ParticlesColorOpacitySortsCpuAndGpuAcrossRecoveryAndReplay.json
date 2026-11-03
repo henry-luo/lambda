@@ -1,0 +1,137 @@
+{
+  "name": "ParticlesColorOpacitySortsCpuAndGpuAcrossRecoveryAndReplay",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "configureParticleColor('cpu');particleRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.particles_color_curves===true&&particleResult.particles_opacity_curves===true&&particleResult.particles_depth_ordering===true"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',2)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          188,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.emitters[0].live===2n&&Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6&&particleResult.emitters[0].samples[0].color[3]===.5"
+    },
+    {
+      "type": "script",
+      "js": "particleResult.emitters[0].samples[0].color[2]=999;particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6"
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#world"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          188,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('sparks').setAttribute('backend','gpu');particleRequest('seek',.2)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          188,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.emitters[0].backend==='gpu'&&Math.abs(particleResult.emitters[0].samples[0].color[2]-1)<1e-6&&particleResult.emitters[0].samples[1].color[0]===1"
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#world"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          188,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.emitters[0].gpu_recoveries===1n&&particleResult.emitters[0].samples[0].color[3]===.5"
+    }
+  ]
+}

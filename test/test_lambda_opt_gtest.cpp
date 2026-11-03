@@ -399,7 +399,7 @@ TEST(LambdaOptStrings, TypedFastDiffPrecodesStaticTextBeforeLcsLoop) {
     if (!source_text) return;
     std::string source(source_text);
     free(source_text);
-    EXPECT_NE(source.find("pn score_diff(left: int[], right: int[]) int"), std::string::npos);
+    EXPECT_NE(source.find("fn score_diff(left: int[], right: int[]) int"), std::string::npos);
     EXPECT_NE(source.find("pn text_codes(text: string) int[]"), std::string::npos);
     EXPECT_NE(source.find("score_diff(left_codes[index], right_codes[index])"),
         std::string::npos);

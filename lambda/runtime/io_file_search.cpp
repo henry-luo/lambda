@@ -1,6 +1,7 @@
 // io_file_search.cpp — helpers io.grep and io.text_search share (see the header).
 
 #include "io_file_search.hpp"
+#include "security_context.h"
 #include "lambda-number-runtime.hpp"
 #include "../core/lambda-path.h"
 #include "../../lib/str.h"
@@ -23,6 +24,13 @@ Item io_fs_error(LambdaErrorCode code, const char* fmt, ...) {
     va_end(args);
     log_error("%s", msg);
     return err2it_or_error(err_create_heap(code, msg, NULL));
+}
+
+bool io_fs_allow_unbrokered(const char* fn, Item* error) {
+    if (!lambda_current_security_io()) return true;
+    if (error) *error = io_fs_error(ERR_FILE_ACCESS_DENIED,
+        "%s: unavailable without an admitted broker service", fn);
+    return false;
 }
 
 // ── options ────────────────────────────────────────────────────────────
@@ -96,18 +104,20 @@ bool io_fs_option_text(const IoFsOptionMap* m, const char* name, char** out, Ite
 }
 
 static bool push_text(ArrayList* list, Item v) {
-    if (!is_text_type_id(get_type_id(v))) return false;
+    if (!is_text_type_id(get_type_id(v)) || memchr(v.get_chars(), 0, v.get_len())) return false;
     char* copy = mem_dup_n(v.get_chars(), v.get_len(), MEM_CAT_TEMP);
-    return copy && arraylist_append(list, copy) != 0;
+    if (copy && arraylist_append(list, copy) != 0) return true;
+    mem_free(copy);
+    return false;
 }
 
-static void free_globs(ArrayList* list) {
+void io_fs_text_list_free(ArrayList* list) {
     if (!list) return;
     for (int i = 0; i < arraylist_length(list); i++) mem_free(arraylist_get(list, i));
     arraylist_free(list);
 }
 
-static bool option_globs(const IoFsOptionMap* m, const char* name, ArrayList** out, Item* error) {
+bool io_fs_option_text_list(const IoFsOptionMap* m, const char* name, ArrayList** out, Item* error) {
     Item v = io_fs_option_get(m, name);
     if (get_type_id(v) == LMD_TYPE_NULL) return true;
     ArrayList* list = arraylist_new(4);
@@ -119,7 +129,7 @@ static bool option_globs(const IoFsOptionMap* m, const char* name, ArrayList** o
         ok = push_text(list, v);
     }
     if (!ok) {
-        free_globs(list);
+        io_fs_text_list_free(list);
         *error = io_fs_error(ERR_TYPE_MISMATCH, "%s: option '%s' must be a string or an array of strings", m->fn, name);
         return false;
     }
@@ -154,8 +164,8 @@ bool io_fs_common_read(const IoFsOptionMap* m, IoFsCommonOptions* o, Item* error
         io_fs_option_count(m, "limit", &limit, error) &&
         io_fs_option_count(m, "limit_per_file", &per_file, error) &&
         io_fs_option_count(m, "max_size", &size, error) &&
-        option_globs(m, "include", &o->include, error) &&
-        option_globs(m, "exclude", &o->exclude, error);
+        io_fs_option_text_list(m, "include", &o->include, error) &&
+        io_fs_option_text_list(m, "exclude", &o->exclude, error);
     if (!ok) return false;
     bool has_depth = get_type_id(io_fs_option_get(m, "max_depth")) != LMD_TYPE_NULL;
     if (has_depth && !io_fs_option_count(m, "max_depth", &depth, error)) return false;
@@ -184,8 +194,8 @@ bool io_fs_common_read(const IoFsOptionMap* m, IoFsCommonOptions* o, Item* error
 }
 
 void io_fs_common_release(IoFsCommonOptions* o) {
-    free_globs(o->include);
-    free_globs(o->exclude);
+    io_fs_text_list_free(o->include);
+    io_fs_text_list_free(o->exclude);
     o->include = o->exclude = NULL;
 }
 

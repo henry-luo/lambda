@@ -4,7 +4,7 @@
 // Creates array of 10000 elements, fills with indices, sums all
 // Expected: sum(0..9999) = 49995000
 
-pn benchmark() int^ {
+fn benchmark() int^ {
     let size: int = 10000
     var arr: int[] = fill(size, 0)^
 

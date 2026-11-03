@@ -13,6 +13,7 @@
 #include "../format/format.h"
 #include "../io/script_format.hpp"
 #include "radiant_event_hook.h"
+#include "security_context.h"
 
 #include <stdarg.h>
 #include <time.h>
@@ -108,7 +109,21 @@ static int create_parent_dirs(const char* file_path) {
 }
 
 static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic,
-                            const void* data, size_t length) {
+                            const void* data, size_t length, Item* failure) {
+    *failure = ItemError;
+    const SecurityIOClient* client = eval_context_security_io(context);
+    if (client) {
+        SecurityIOResult result = client->write(client->context, file_path, data, length, mode[0] == 'a', atomic);
+        if (result.decision == SECURITY_ALLOWED && !result.system_error && result.committed) return true;
+        log_info("SECURITY-OUTPUT: decision=%d error=%d committed=%d unknown=%d approval=%llu",
+            (int)result.decision, result.system_error, result.committed, result.outcome_unknown,
+            (unsigned long long)result.approval.serial);
+        // The returned error owns this call's failure; ambient diagnostics are
+        // not an error carrier (S7.4.5, D5.4.2).
+        if (result.outcome_unknown) *failure = io_fs_error(ERR_FILE_WRITE_ERROR,
+            "output: broker connection lost; write outcome is unknown");
+        return false;
+    }
     // The shared writer checks close/flush and reserves atomic destinations exclusively.
     return (atomic ? write_binary_file_atomic(file_path, data, length)
         : mode[0] == 'a' ? append_binary_file(file_path, (const char*)data, length)
@@ -124,6 +139,7 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
 // Returns: bytes written on success, ItemError on failure
 static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic, const ZipWriteOptions* zip_options = nullptr) {
     if (lambda_dry_run_enabled()) return dry_run_fabricated_output();
+    Item write_error = ItemError;
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
 
@@ -167,8 +183,8 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     const char* file_path = path_buf->str;
     log_debug("pn_output_internal: writing to %s (mode=%s, format=%s)", file_path, mode, format_str ? format_str : "auto");
 
-    // Always try to create parent directories for resolved paths
-    if (create_parent_dirs(file_path) != 0) {
+    // Brokered output authorizes and creates parents inside the same request.
+    if (!eval_context_security_io(context) && create_parent_dirs(file_path) != 0) {
         log_error("pn_output_internal: failed to create directories for %s", file_path);
         strbuf_free(path_buf);
         target_free(target);
@@ -194,10 +210,11 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         StrBuf* encoded = strbuf_new();
         ZipError error = {};
         bool ok = encoded && fs_zip_encode(source_root.get(), zip_options, encoded, &error);
-        if (ok) ok = write_binary_file_atomic(file_path, encoded->str, encoded->length) == 0;
+        if (ok) ok = write_raw_bytes(file_path, "wb", true, encoded->str, encoded->length, &write_error);
         size_t size = encoded ? encoded->length : 0;
         if (encoded) strbuf_free(encoded);
         strbuf_free(path_buf);
+        if (!ok && write_error.item != ItemError.item) return write_error;
         return ok ? (Item){.item = i2it((int64_t)size)}
             : io_fs_error(ERR_FILE_WRITE_ERROR, "output ZIP: %s", error.message[0] ? error.message : "atomic write failed");
 #endif
@@ -217,9 +234,9 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         const char* bytes = NULL;
         size_t size = 0;
         bool ok = virtual_output_bytes(source, &bytes, &size) &&
-            write_raw_bytes(file_path, mode_binary, atomic, bytes, size);
+            write_raw_bytes(file_path, mode_binary, atomic, bytes, size, &write_error);
         strbuf_free(path_buf);
-        return ok ? (Item){.item = i2it((int64_t)size)} : ItemError;
+        return ok ? (Item){.item = i2it((int64_t)size)} : write_error;
     }
 
     // string source: output as raw text (ignore format)
@@ -231,9 +248,9 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             return ItemError;
         }
 
-        if (!write_raw_bytes(file_path, mode, atomic, str->chars, str->len)) {
+        if (!write_raw_bytes(file_path, mode, atomic, str->chars, str->len, &write_error)) {
             strbuf_free(path_buf);
-            return ItemError;
+            return write_error;
         }
         log_debug("pn_output_internal: wrote %zu bytes (text) to %s", (size_t)str->len, file_path);
         strbuf_free(path_buf);
@@ -252,9 +269,9 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         }
 
         size_t bin_len = binary_length(bin);
-        if (!write_raw_bytes(file_path, mode_binary, atomic, binary_data(bin), bin_len)) {
+        if (!write_raw_bytes(file_path, mode_binary, atomic, binary_data(bin), bin_len, &write_error)) {
             strbuf_free(path_buf);
-            return ItemError;
+            return write_error;
         }
 
         log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", bin_len, file_path);
@@ -336,11 +353,11 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         strbuf_append_char(mark, '\n');
         data = mark->str; length = mark->length;
     }
-    bool ok = write_raw_bytes(file_path, mode_binary, atomic, data, length);
+    bool ok = write_raw_bytes(file_path, mode_binary, atomic, data, length, &write_error);
     if (mark) strbuf_free(mark);
     mem_pool_destroy(temp_pool);
     strbuf_free(path_buf);
-    return ok ? (Item){.item = i2it((int64_t)length)} : ItemError;
+    return ok ? (Item){.item = i2it((int64_t)length)} : write_error;
 }
 
 // 2-parameter wrapper: output(source, trg) - writes data to target (default format, write mode)
@@ -1024,6 +1041,8 @@ static Item dry_run_fabricated_fetch() {
 
 Item pn_fetch(Item url, Item options) {
     GUARD_ERROR2(url, options);
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.fetch", &denied)) return denied;
     if (lambda_dry_run_enabled()) return dry_run_fabricated_fetch();
     log_debug("pn_fetch called");
     RootFrame roots(3);
@@ -1216,11 +1235,12 @@ String* format_cmd_args(String* cmd, Item args) {
 Item pn_cmd2(Item cmd, Item args);
 
 Item pn_cmd1(Item cmd) {
-    if (lambda_dry_run_enabled()) return dry_run_fabricated_cmd();
     return pn_cmd2(cmd, ItemNull);
 }
 
 Item pn_cmd2(Item cmd, Item args) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("cmd", &denied)) return denied;
     if (lambda_dry_run_enabled()) return dry_run_fabricated_cmd();
     log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
@@ -1310,6 +1330,8 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
 // src can be local path or remote URL (http/https)
 // dst must be a local path
 Item pn_io_copy(Item src_item, Item dst_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.copy", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.copy()"); return ItemNull; }
     // First, check if source is remote
     Target* src_target = item_to_target(src_item.item, NULL);
@@ -1381,6 +1403,8 @@ Item pn_io_copy(Item src_item, Item dst_item) {
 
 // io.move(src, dst) - Move/rename file or directory
 Item pn_io_move(Item src_item, Item dst_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.move", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.move()"); return ItemNull; }
     StrBuf* src_buf = lambda_get_local_path_from_item(src_item);
     StrBuf* dst_buf = lambda_get_local_path_from_item(dst_item);
@@ -1424,6 +1448,8 @@ Item pn_io_move(Item src_item, Item dst_item) {
 
 // io.delete(path) - Delete file or directory
 Item pn_io_delete(Item path_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.delete", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.delete()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
@@ -1455,6 +1481,8 @@ Item pn_io_delete(Item path_item) {
 
 // io.mkdir(path) - Create directory (recursive)
 Item pn_io_mkdir(Item path_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.mkdir", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.mkdir()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
@@ -1480,6 +1508,8 @@ Item pn_io_mkdir(Item path_item) {
 
 // io.touch(path) - Create file or update modification time
 Item pn_io_touch(Item path_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.touch", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.touch()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
@@ -1505,6 +1535,8 @@ Item pn_io_touch(Item path_item) {
 
 // io.symlink(target, link) - Create symbolic link
 Item pn_io_symlink(Item target_item, Item link_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.symlink", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.symlink()"); return ItemNull; }
     StrBuf* target_buf = lambda_get_local_path_from_item(target_item);
     StrBuf* link_buf = lambda_get_local_path_from_item(link_item);
@@ -1537,6 +1569,8 @@ Item pn_io_symlink(Item target_item, Item link_item) {
 // io.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
 Item pn_io_chmod(Item path_item, Item mode_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.chmod", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.chmod()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
@@ -1579,6 +1613,8 @@ Item pn_io_chmod(Item path_item, Item mode_item) {
 
 // io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
 Item pn_io_rename(Item old_item, Item new_item) {
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.rename", &denied)) return denied;
     if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.rename()"); return ItemNull; }
     StrBuf* old_buf = lambda_get_local_path_from_item(old_item);
     StrBuf* new_buf = lambda_get_local_path_from_item(new_item);

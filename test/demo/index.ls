@@ -64,6 +64,8 @@ let DEMOS = [
      blurb: "Play engraved sheet music, notes and lyrics lit as they sound."},
     {name: "soundflow", title: "Soundflow", cat: "media", sub: "Visual instrument",
      blurb: "Draw across the strings; every stroke loops and sings."},
+    {name: "chat", title: "Chat", cat: "utilities", sub: "One-to-one messaging",
+     blurb: "Send messages, switch profiles and see delivery and read receipts."},
     {name: "mail", title: "Mail", cat: "utilities", sub: "Email",
      blurb: "An IMAP mail client, passwords kept in the Keychain."},
     {name: "archive", title: "Archive", cat: "utilities", sub: "Web archiver",

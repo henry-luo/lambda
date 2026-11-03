@@ -707,6 +707,7 @@ DomElement* dom_parent_element(DomElement* element);
 DomNode* dom_source_parent(DomNode* node);
 DomNode* dom_source_child(DomElement* element, bool first);
 DomNode* dom_source_sibling(DomNode* node, bool forward);
+void dom_collect_text_content(DomNode* node, StrBuf* output);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length = (size_t)-1, bool exclude_animations = false);
 void dom_element_invalidate_custom_property_index(DomElement* element);
@@ -943,13 +944,12 @@ struct DomElementExt {
     lam::Up<struct DomInlineDeclarations> inline_declarations; // document resource; authored CSSOM block
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
-    float ruby_column_anchor_x;
-    float ruby_column_width;
-    float ruby_column_inline_advance;
-    float ruby_column_start_overhang;
-    bool has_simple_ruby_column_geometry;
-    float ruby_empty_inline_advance;
+    float ruby_column_start_offset;
+    float ruby_column_end_offset;
+    float ruby_empty_base_block_size;
+    bool has_ruby_column_geometry;
     bool has_empty_ruby_base;
+    bool has_ruby_parallel_fragments; // selected text rectangles own each line's allocation
     bool popover_open;
     bool dialog_modal;
     lam::Own<const char> dialog_return_value; // document-pooled WebIDL state, independent of JS expandos
@@ -1450,13 +1450,12 @@ struct DomElement : DomNode {
         ext->layout_fragment_count = 0;
         ext->has_inline_cb_edge_snapshot = false;
         ext->custom_layout_paint = nullptr;
-        ext->ruby_column_anchor_x = 0.0f;
-        ext->ruby_column_width = 0.0f;
-        ext->ruby_column_inline_advance = 0.0f;
-        ext->ruby_column_start_overhang = 0.0f;
-        ext->has_simple_ruby_column_geometry = false;
-        ext->ruby_empty_inline_advance = 0.0f;
+        ext->ruby_column_start_offset = 0.0f;
+        ext->ruby_column_end_offset = 0.0f;
+        ext->ruby_empty_base_block_size = 0.0f;
+        ext->has_ruby_column_geometry = false;
         ext->has_empty_ruby_base = false;
+        ext->has_ruby_parallel_fragments = false;
     }
 
 };

@@ -23,5 +23,8 @@ pn check() {
     if (not (bad is error)) { print("UNEXPECTED BORROW\n") }
     print(a[0]); print(" "); print(saved[0]); print("\n")
     print(observed(a, a)); print(" "); print(a[0]); print("\n")
+    let alias: int[] = a
+    store_at(a, 0, 90)
+    print(observed(a, alias)); print(" "); print(alias[0]); print(" "); print(a[0]); print("\n")
 }
 pn main() { check() }

@@ -5047,7 +5047,8 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         bool include_ellipsis,
                                         CssEnum white_space = CSS_VALUE_PRE,
                                         const RadiantWhitespaceSpec* whitespace = nullptr,
-                                        TextSourceRangeMap* source_range = nullptr);
+                                        TextSourceRangeMap* source_range = nullptr,
+                                        bool collapse_segment_breaks = false);
 // initialize the common selected-face/text style; content remains caller-owned.
 bool render_text_init_glyph_run(PaintGlyphRun* run, const FontBox* font, Color color,
                                 const char* content);

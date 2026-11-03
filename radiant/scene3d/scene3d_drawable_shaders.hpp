@@ -2,12 +2,14 @@
 
 // retained center/endpoints expand in camera space; camera edits never rewrite vertex buffers.
 static const char* scene3d_drawable_vertex = R"GLSL(
-#if DRAWABLE_KIND > 0
+#if DRAWABLE_KIND > 0 || defined(PARTICLES)
 uniform mat4 view;
-uniform vec2 logical_viewport,drawable_size,drawable_center;
-uniform float drawable_screen,drawable_source_uvs;
 vec3 camera_right() {return vec3(view[0][0],view[1][0],view[2][0]);}
 vec3 camera_up() {return vec3(view[0][1],view[1][1],view[2][1]);}
+#endif
+#if DRAWABLE_KIND > 0 || defined(PARTICLE_TRAILS)
+uniform vec2 logical_viewport,drawable_size,drawable_center;
+uniform float drawable_screen,drawable_source_uvs;
 void drawable_hidden() {gl_Position=vec4(2.0,2.0,2.0,1.0);}
 vec2 drawable_pixel(vec4 clip) {return clip.xy/clip.w*logical_viewport*0.5;}
 vec2 drawable_perpendicular(vec2 direction) {return vec2(-direction.y,direction.x);}
@@ -19,6 +21,30 @@ float ribbon_radius(vec2 axis,vec4 clip,vec3 placed,mat4 world) {
     vec2 right=drawable_pixel(r)-drawable_pixel(clip),up=drawable_pixel(u)-drawable_pixel(clip);
     return length(vec2(dot(axis,right),dot(axis,up)));
 }
+void drawable_segment(mat4 world,vec4 placed,vec4 end,float role,vec4 from_color,vec4 to_color,
+                      vec2 from_uv,vec2 to_uv,vec2 from_uv1,vec2 to_uv1,bool source_uvs) {
+    vec4 a=projection*placed,b=projection*end;
+    float da=a.z+a.w,db=b.z+b.w;
+    if(da<0.0&&db<0.0) {drawable_hidden();return;}
+    float first=0.0,last=1.0;
+    if(da<0.0) first=da/(da-db);
+    if(db<0.0) last=da/(da-db);
+    vec4 from=mix(a,b,first),to=mix(a,b,last);
+    vec2 direction=drawable_pixel(to)-drawable_pixel(from);
+    float magnitude=dot(direction,direction);
+    if(magnitude<=0.0) {drawable_hidden();return;}
+    vec2 axis=drawable_perpendicular(direction*inversesqrt(magnitude));
+    // the quad index order starts on its left edge and keeps camera-facing CCW winding.
+    float selected=role<2.0?first:last,side=1.0-mod(role,2.0)*2.0;
+    vec4 clip=mix(a,b,selected);vec3 center=mix(placed.xyz,end.xyz,selected);
+    float radius=ribbon_radius(axis,clip,center,world);
+    clip.xy+=axis*side*radius*2.0/logical_viewport*clip.w;gl_Position=clip;
+    vertex_color=mix(from_color,to_color,selected);
+    texture_uv=vec2(mix(from_uv.x,to_uv.x,selected),source_uvs?mix(from_uv.y,to_uv.y,selected):side*0.5+0.5);
+    texture_uv1=mix(from_uv1,to_uv1,selected);world_position=center;
+}
+#endif
+#if DRAWABLE_KIND > 0
 void drawable_vertex(mat4 world) {
     vec4 placed=world*vec4(position,1.0);world_position=placed.xyz;
     world_normal=vec3(view[0][2],view[1][2],view[2][2]);world_tangent=world_bitangent=vec3(0.0);
@@ -41,24 +67,8 @@ void drawable_vertex(mat4 world) {
     vec4 end=world*vec4(tangent.xyz,1.0),a=projection*placed,b=projection*end;
     float role=skin_indices.x;
     if(role<4.0) {
-        float da=a.z+a.w,db=b.z+b.w;
-        if(da<0.0&&db<0.0) {drawable_hidden();return;}
-        float first=0.0,last=1.0;
-        if(da<0.0) first=da/(da-db);
-        if(db<0.0) last=da/(da-db);
-        vec4 from=mix(a,b,first),to=mix(a,b,last);
-        vec2 direction=drawable_pixel(to)-drawable_pixel(from);
-        float magnitude=dot(direction,direction);
-        if(magnitude<=0.0) {drawable_hidden();return;}
-        vec2 axis=drawable_perpendicular(direction*inversesqrt(magnitude));
-        // the quad index order starts on its left edge and keeps camera-facing CCW winding.
-        float selected=role<2.0?first:last,side=1.0-mod(role,2.0)*2.0;
-        vec4 clip=mix(a,b,selected);vec3 center=mix(placed.xyz,end.xyz,selected);
-        float radius=ribbon_radius(axis,clip,center,world);
-        clip.xy+=axis*side*radius*2.0/logical_viewport*clip.w;gl_Position=clip;
-        vertex_color=colored>0.5?mix(color,skin_weights,selected):vec4(1.0);
-        texture_uv=vec2(mix(normal.x,normal.y,selected),drawable_source_uvs>0.5?mix(normal.z,tangent.w,selected):side*0.5+0.5);
-        texture_uv1=mix(uv1,skin_indices.yz,selected);world_position=center;
+        drawable_segment(world,placed,end,role,colored>0.5?color:vec4(1.0),colored>0.5?skin_weights:vec4(1.0),
+                         normal.xz,vec2(normal.y,tangent.w),uv1,skin_indices.yz,drawable_source_uvs>0.5);
     } else {
         // bevels stay inside the two outer offset edges, including at a sharp turn.
         if(a.z+a.w<0.0) {drawable_hidden();return;}

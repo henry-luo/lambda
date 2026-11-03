@@ -19,7 +19,7 @@ type RngState = {seed: int}
 
 // Node: {key, left, right, value}
 // SplayNode type annotation ensures runtime data layout matches direct access offsets
-pn create_node(key: float, value: Payload) SplayNode {
+fn create_node(key: float, value: Payload) SplayNode {
     var node: SplayNode = {key: key, left: null, right: null, value: value}
     return node
 }
@@ -37,12 +37,12 @@ pn next_random(var st: RngState) float^ {
 }
 
 // Splay tree using maps for tree state
-pn splay_tree_new() SplayTree {
+fn splay_tree_new() SplayTree {
     var tree: SplayTree = {root: null}
     return tree
 }
 
-pn splay_is_empty(tree: SplayTree) bool {
+fn splay_is_empty(tree: SplayTree) bool {
     return tree.root == null
 }
 
@@ -206,12 +206,14 @@ pn splay_find(var tree: SplayTree, key: float) SplayNode? {
     return null
 }
 
-pn splay_find_max(node: SplayNode) SplayNode^ {
-    while (node.right != null) {
-        let checked_right: SplayNode = node.right
-        node = checked_right^
+fn splay_find_max(node: SplayNode) SplayNode^ {
+    var work_node: SplayNode = node
+
+    while (work_node.right != null) {
+        let checked_right: SplayNode = work_node.right
+        work_node = checked_right^
     }
-    return node
+    return work_node
 }
 
 pn splay_find_greatest_less_than(var tree: SplayTree, key: float) SplayNode?^ {
@@ -229,7 +231,7 @@ pn splay_find_greatest_less_than(var tree: SplayTree, key: float) SplayNode?^ {
 }
 
 // Count nodes for verification
-pn count_nodes(node: SplayNode?) int {
+fn count_nodes(node: SplayNode?) int {
     if (node == null) {
         return 0
     }
@@ -249,7 +251,7 @@ pn traverse_keys(node: SplayNode?, var keys: float[], idx_in: int) int {
 }
 
 // Generate payload tree for node values
-pn generate_payload(depth: int, tag: float) Payload {
+fn generate_payload(depth: int, tag: float) Payload {
     if (depth == 0) {
         var leaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
         return leaf

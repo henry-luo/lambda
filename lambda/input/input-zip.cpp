@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "../io/fs_node.hpp"
 #include "../io/snapshot_identity.hpp"
+#include "../io/security_io.h"
 #include "../core/lambda-error-data.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
@@ -110,7 +111,13 @@ static Item fs_parse_uncached(FsNode* node, String* type, String* flavor) {
     }
     // Give MIME detection the archive-local name, while retaining the outer Path.
     Url* member_url = url_parse(entry->path);
-    Input* parsed = input_from_source_n(data, size, member_url, type, flavor);
+    // A captured member's parser/cache owns bytes, not the caller's live file
+    // grants. Never let lazy member parsing acquire ambient external resources.
+    static const SecurityIOClient captured_resources = {1};
+    InputParseOptions options = {};
+    options.io = &captured_resources;
+    Input* parsed = input_from_source_n_with_name_parent(data, size, member_url,
+        type, flavor, nullptr, &options);
     if (!parsed) { if (member_url) url_destroy(member_url); return ItemError; }
     if (parsed->parse_failed) return fs_error(tree->input, entry->path,
         parsed->parse_error_message ? parsed->parse_error_message : "member parsing failed");

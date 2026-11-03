@@ -60,7 +60,7 @@ pn advance(var bx: float[], var by: float[], var bz: float[],
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[],
+fn energy(bx: float[], by: float[], bz: float[],
           bvx: float[], bvy: float[], bvz: float[],
           bmass: float[]) float^ {
     var e: float = 0.0

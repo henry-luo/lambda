@@ -6,7 +6,7 @@
 let NUM_DIGITS = 30
 
 // integer division for decimals: floor(a/b) = (a - a % b) / b
-pn idiv(a: decimal, b: decimal) decimal {
+fn idiv(a: decimal, b: decimal) decimal {
     return (a - a % b) / b
 }
 

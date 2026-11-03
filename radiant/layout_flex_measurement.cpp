@@ -25,7 +25,7 @@ static TextIntrinsicWidths flex_measure_text_widths(LayoutContext* lycon,
                                                      DomNode* node,
                                                      const LayoutTextRun& run) {
     CssEnum overflow_wrap, word_break;
-    layout_resolve_inherited_text_wrap(node, &overflow_wrap, &word_break);
+    layout_resolve_inherited_text_wrap(lycon, node, &overflow_wrap, &word_break);
     return measure_text_intrinsic_widths(lycon, run.text, run.length,
         layout_inherited_text_transform(node), CSS_VALUE_NONE,
         get_white_space_value(node), overflow_wrap, word_break);

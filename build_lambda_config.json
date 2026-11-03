@@ -106,7 +106,6 @@
   "sqlite_version": "3.45.3",
   "exclude_source_files": [
     "lambda/runtime/lambda-decimal-runtime.cpp",
-    "lambda/runtime/path_runtime.c",
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
     "radiant/rdt_vector_cg.mm",
@@ -525,8 +524,12 @@
       ],
       "file_rules": [
         {
-          "files": ["lib/procgen/*.c"],
-          "build_options": ["-ffp-contract=off"]
+          "files": [
+            "lib/procgen/*.c"
+          ],
+          "build_options": [
+            "-ffp-contract=off"
+          ]
         }
       ],
       "libraries": [
@@ -614,6 +617,9 @@
         "lambda/io/archive_native.cpp",
         "lambda/io/zip_archive.cpp",
         "lambda/io/target.cpp",
+        "lambda/io/security_policy.cpp",
+        "lambda/io/security_io.cpp",
+        "lambda/io/security_channel.cpp",
         "lambda/core/lambda-decimal.cpp",
         "lambda/io/mark_builder.cpp",
         "lambda/core/mark_reader.cpp",
@@ -785,6 +791,7 @@
         "lambda/runtime/lambda-mem.cpp",
         "lambda/runtime/root_vector.cpp",
         "lambda/runtime/context_capsule.cpp",
+        "lambda/runtime/security_context.cpp",
         "lambda/runtime/lambda-stack.cpp",
         "lambda/runtime/lambda-vector.cpp",
         "lambda/runtime/lambda-eval-science.cpp",
@@ -1064,6 +1071,7 @@
           "IOKit",
           "CoreVideo",
           "AVFoundation",
+          "AudioToolbox",
           "CoreMedia",
           "GL",
           "Foundation",
@@ -1095,6 +1103,72 @@
         ]
       },
       "link": "static"
+    },
+    {
+      "name": "lambda-safety-host",
+      "description": "Trusted offline macOS worker supervisor; signed publisher deployment required",
+      "lang": "c++17",
+      "source_files": [
+        "lambda/host/safety/host_main.cpp",
+        "lambda/host/safety/supervisor.cpp",
+        "lambda/host/safety/admission.cpp",
+        "lambda/host/safety/file_broker.cpp",
+        "lambda/host/safety/grant_store.cpp",
+        "lambda/host/safety/update_controls.cpp",
+        "lambda/host/safety/update_command.cpp"
+      ],
+      "libraries": [
+        "lambda-data",
+        "lambda-lib",
+        "CoreFoundation",
+        "Security"
+      ],
+      "target_name": "lambda-safety-host",
+      "target_dir": ".",
+      "link": "executable"
+    },
+    {
+      "name": "lambda-safety-host-fixture",
+      "description": "Test-only supervisor with isolated account home and pinned ad-hoc worker",
+      "lang": "c++17",
+      "source_files": [
+        "lambda/host/safety/host_main.cpp",
+        "lambda/host/safety/supervisor.cpp",
+        "lambda/host/safety/admission.cpp",
+        "lambda/host/safety/file_broker.cpp",
+        "lambda/host/safety/grant_store.cpp",
+        "lambda/host/safety/update_controls.cpp",
+        "lambda/host/safety/update_command.cpp"
+      ],
+      "libraries": [
+        "lambda-data",
+        "lambda-lib",
+        "CoreFoundation",
+        "Security"
+      ],
+      "target_name": "lambda-safety-host-fixture",
+      "target_dir": ".",
+      "link": "executable",
+      "defines": [
+        "LAMBDA_SECURITY_STORE_TESTING",
+        "LAMBDA_SECURITY_SUPERVISOR_TESTING"
+      ]
+    },
+    {
+      "name": "lambda-safety-supervisor-probe",
+      "description": "Test-only native supervisor invariants and quota probe",
+      "lang": "c++17",
+      "source_files": [
+        "test/safety/supervisor_probe.cpp"
+      ],
+      "libraries": [
+        "lambda-lib",
+        "CoreFoundation",
+        "Security"
+      ],
+      "target_name": "lambda-safety-supervisor-probe",
+      "target_dir": ".",
+      "link": "executable"
     }
   ],
   "static_module_validation": {
@@ -1328,7 +1402,11 @@
         "lambda/input/markup/format",
         "lambda/format",
         "lambda/validator",
-        "lambda/network"
+        "lambda/network",
+        "lib/font",
+        "lib/font/woff2",
+        "lambda/runtime/mvp",
+        "lambda/devtools"
       ],
       "source_files": [
         "lib/sqlite/sqlite3.c",
@@ -1339,7 +1417,6 @@
       ],
       "exclude_source_files": [
         "lambda/runtime/lambda-decimal-runtime.cpp",
-        "lambda/runtime/path_runtime.c",
         "lambda/runtime/http_module.cpp",
         "lambda/runtime/concurrency_js.cpp",
         "lambda/format/format_latex_html_v2.cpp",
@@ -1352,18 +1429,17 @@
       "includes": [
         ".",
         "lambda/mir",
-        "lib/re2"
+        "lib/re2",
+        "mac-deps/thorvg/src/bindings/capi"
       ],
       "exclude_libraries": [
-        "glfw",
-        "ThorVG"
+        "glfw"
       ],
       "exclude_macos_libraries": [
         "Cocoa",
         "IOKit",
         "CoreVideo",
         "GL",
-        "CoreGraphics",
         "AppKit",
         "Carbon"
       ],
@@ -1392,46 +1468,89 @@
       "build_dir": "build_ime_macos",
       "premake_location": "build_ime_macos/premake",
       "object_dir": "build_ime_macos/obj/%{prj.name}",
-      "remove_source_dirs": ["lambda", "lambda/input", "lambda/input/css",
-        "lambda/input/html5", "lambda/input/markup", "lambda/input/markup/block",
-        "lambda/input/markup/inline", "lambda/input/markup/format", "lambda/format",
-        "lambda/io", "lib/image", "lib/physics", "lib/grep", "lib/fts",
-        "lambda/network"],
-      "remove_source_files": ["lambda/js/js_well_known_names.c"],
+      "remove_source_dirs": [
+        "lambda",
+        "lambda/input",
+        "lambda/input/css",
+        "lambda/input/html5",
+        "lambda/input/markup",
+        "lambda/input/markup/block",
+        "lambda/input/markup/inline",
+        "lambda/input/markup/format",
+        "lambda/format",
+        "lambda/io",
+        "lib/image",
+        "lib/physics",
+        "lib/grep",
+        "lib/fts",
+        "lambda/network",
+        "lib/font",
+        "lib/font/woff2",
+        "lambda/devtools"
+      ],
+      "remove_source_files": [
+        "lambda/js/js_well_known_names.c"
+      ],
       "extra_exclude_source_files": [
         "lambda/runtime/devtools_scratch.cpp",
-        "lib/sqlite/sqlite3.c", "lib/rdb_sqlite.c", "lib/rdb_batch.c",
-        "lib/rdb.c", "lib/rdb_tunnel.c", "lib/mail_imap.c", "lib/mail_mime.c",
-        "lib/trust_store.c", "lib/secret_store.c",
-        "lib/terminal_device.c", "lib/mime-types.c", "lib/mime-detect.c",
-        "lib/zlib_exact.c", "lib/line_framer.c",
+        "lib/sqlite/sqlite3.c",
+        "lib/rdb_sqlite.c",
+        "lib/rdb_batch.c",
+        "lib/rdb.c",
+        "lib/rdb_tunnel.c",
+        "lib/mail_imap.c",
+        "lib/mail_mime.c",
+        "lib/trust_store.c",
+        "lib/secret_store.c",
+        "lib/terminal_device.c",
+        "lib/mime-types.c",
+        "lib/mime-detect.c",
+        "lib/zlib_exact.c",
+        "lib/line_framer.c",
         "lib/test_utils.c",
-        "lib/test_utils_pool.c", "lib/test_utils_runtime.cpp",
-        "lambda/runtime/mcp_module.cpp", "lambda/runtime/pdf_builder.cpp",
+        "lib/test_utils_pool.c",
+        "lib/test_utils_runtime.cpp",
+        "lambda/runtime/mcp_module.cpp",
+        "lambda/runtime/pdf_builder.cpp",
         "lambda/runtime/rdb_host.cpp",
-        "lambda/runtime/io_secret.cpp", "lambda/runtime/io_loopback.cpp",
-        "lambda/runtime/wasm_embed.cpp", "lambda/runtime/radiant_event_hook.cpp",
+        "lambda/runtime/io_secret.cpp",
+        "lambda/runtime/io_loopback.cpp",
+        "lambda/runtime/wasm_embed.cpp",
+        "lambda/runtime/radiant_event_hook.cpp",
         "lambda/runtime/terminal_host.cpp"
       ],
       "extra_source_files": [
         "lambda/host/macos_ime/main.mm",
         "lambda/runtime/no_dom_ime.cpp",
         "lambda/input/css/css_symbol_hook.cpp",
-        "lambda/input/input.cpp", "lambda/input/input-context.cpp",
-        "lambda/input/input-utils.cpp", "lambda/input/input-json.cpp",
-        "lambda/input/input-script-cache.cpp", "lambda/input/parse_error.cpp",
+        "lambda/input/input.cpp",
+        "lambda/input/input-context.cpp",
+        "lambda/input/input-utils.cpp",
+        "lambda/input/input-json.cpp",
+        "lambda/input/input-script-cache.cpp",
+        "lambda/input/parse_error.cpp",
         "lambda/input/source_tracker.cpp",
-        "lambda/format/format.cpp", "lambda/format/format-json.cpp",
-        "lambda/format/format-text.cpp", "lambda/format/format-utils.cpp",
-        "lambda/io/collection_io.cpp", "lambda/io/mark_builder.cpp",
-        "lambda/io/target.cpp", "lambda/io/mark_editor.cpp"
+        "lambda/format/format.cpp",
+        "lambda/format/format-json.cpp",
+        "lambda/format/format-text.cpp",
+        "lambda/format/format-utils.cpp",
+        "lambda/io/collection_io.cpp",
+        "lambda/io/mark_builder.cpp",
+        "lambda/io/security_io.cpp",
+        "lambda/io/target.cpp",
+        "lambda/io/mark_editor.cpp"
       ],
       "exclude_source_globs": [
-        "lib/image*.c", "lib/image*.cpp",
-        "lambda/runtime/image_artwork.cpp", "lambda/runtime/image_composite.cpp",
-        "lambda/runtime/image_document.cpp", "lambda/runtime/image_edit.cpp",
-        "lambda/runtime/image_process.cpp", "lambda/runtime/image_psd.cpp",
-        "lambda/runtime/image_style.cpp", "lambda/io/image*.cpp",
+        "lib/image*.c",
+        "lib/image*.cpp",
+        "lambda/runtime/image_artwork.cpp",
+        "lambda/runtime/image_composite.cpp",
+        "lambda/runtime/image_document.cpp",
+        "lambda/runtime/image_edit.cpp",
+        "lambda/runtime/image_process.cpp",
+        "lambda/runtime/image_psd.cpp",
+        "lambda/runtime/image_style.cpp",
+        "lambda/io/image*.cpp",
         "lambda/input/input-css*.cpp",
         "lambda/format/format-css.cpp",
         "lambda/input/input-tex*.cpp",
@@ -1448,27 +1567,67 @@
         "lambda/format/format-latex*.cpp",
         "lambda/runtime/pdf_runtime.cpp",
         "lambda/runtime/postscript_runtime.cpp",
-        "lambda/runtime/lambda-physics.cpp", "lambda/core/physics_scene.cpp",
-        "lambda/runtime/io_mail.cpp", "lambda/io/mcp*.cpp",
-        "lambda/runtime/io_grep.cpp", "lambda/runtime/io_text_search.cpp"
+        "lambda/runtime/lambda-physics.cpp",
+        "lambda/core/physics_scene.cpp",
+        "lambda/runtime/io_mail.cpp",
+        "lambda/runtime/io_websocket.cpp",
+        "lambda/io/mcp*.cpp",
+        "lambda/runtime/io_grep.cpp",
+        "lambda/runtime/io_text_search.cpp"
       ],
-      "restore_macos_libraries": ["AppKit", "Carbon"],
-      "linker_flags": ["-Wl,-map,../../temp/ime_chinese/m5/LambdaChineseIME.map"],
+      "restore_macos_libraries": [
+        "AppKit",
+        "Carbon"
+      ],
+      "linker_flags": [
+        "-Wl,-map,../../temp/ime_chinese/m5/LambdaChineseIME.map"
+      ],
       "additional_libraries": [
-        {"name": "InputMethodKit", "lib": "-framework InputMethodKit", "link": "dynamic"}
+        {
+          "name": "InputMethodKit",
+          "lib": "-framework InputMethodKit",
+          "link": "dynamic"
+        }
       ],
-      "exclude_libraries": ["image-codecs", "openjpeg", "curl", "nghttp2",
-        "mbedtls", "mbedx509", "bzip2", "brotlidec", "brotlicommon",
-        "zlib", "lzma", "zstd", "archive-readers"],
-      "exclude_macos_libraries": ["WebKit", "AVFoundation", "CoreMedia", "fribidi"],
+      "exclude_libraries": [
+        "image-codecs",
+        "openjpeg",
+        "curl",
+        "nghttp2",
+        "mbedtls",
+        "mbedx509",
+        "bzip2",
+        "brotlidec",
+        "brotlicommon",
+        "zlib",
+        "lzma",
+        "zstd",
+        "archive-readers"
+      ],
+      "exclude_macos_libraries": [
+        "WebKit",
+        "AVFoundation",
+        "CoreMedia",
+        "fribidi"
+      ],
       "defines": [
-        "LAMBDA_MACOS_IME", "LAMBDA_NO_NETWORK",
-        "LAMBDA_NO_IMAGE_IO", "LAMBDA_NO_IMAGE_PROCESSING", "LAMBDA_NO_PDF",
-        "LAMBDA_NO_LATEX", "LAMBDA_NO_CSS_INPUT", "LAMBDA_NO_GRAPH_INPUT",
-        "LAMBDA_NO_MATH_INPUT", "LAMBDA_NO_CSS_FORMAT",
-        "LAMBDA_NO_GRAPH_FORMAT", "LAMBDA_NO_MATH_FORMAT",
-        "LAMBDA_NO_EDIT_HISTORY", "LAMBDA_NO_EMIT", "LAMBDA_NO_PHYSICS",
-        "LAMBDA_NO_SEARCH_IO", "LAMBDA_IME_RESOURCE_IO"
+        "LAMBDA_MACOS_IME",
+        "LAMBDA_NO_NETWORK",
+        "LAMBDA_NO_IMAGE_IO",
+        "LAMBDA_NO_IMAGE_PROCESSING",
+        "LAMBDA_NO_PDF",
+        "LAMBDA_NO_LATEX",
+        "LAMBDA_NO_CSS_INPUT",
+        "LAMBDA_NO_GRAPH_INPUT",
+        "LAMBDA_NO_MATH_INPUT",
+        "LAMBDA_NO_CSS_FORMAT",
+        "LAMBDA_NO_GRAPH_FORMAT",
+        "LAMBDA_NO_MATH_FORMAT",
+        "LAMBDA_NO_EDIT_HISTORY",
+        "LAMBDA_NO_EMIT",
+        "LAMBDA_NO_PHYSICS",
+        "LAMBDA_NO_SEARCH_IO",
+        "LAMBDA_IME_RESOURCE_IO"
       ]
     },
     "lambda-nomir": {
@@ -2236,6 +2395,12 @@
           "link": "dynamic"
         },
         {
+          "name": "AudioToolbox",
+          "include": "",
+          "lib": "-framework AudioToolbox",
+          "link": "dynamic"
+        },
+        {
           "name": "CoreMedia",
           "include": null,
           "lib": "-framework CoreMedia",
@@ -2424,6 +2589,7 @@
         "lambda/runtime/collection_runtime.cpp",
         "lambda/runtime/compiler_pass.cpp",
         "lambda/runtime/context_capsule.cpp",
+        "lambda/runtime/security_context.cpp",
         "lambda/runtime/doc_context.cpp",
         "lambda/runtime/edit_bridge.cpp",
         "lambda/runtime/gc/gc_data_zone.c",
@@ -2610,6 +2776,58 @@
         }
       ],
       "debug": false
+    },
+    "safety-worker": {
+      "extends": "cli",
+      "description": "Experimental broker-bound offline Lambda worker; T0 only; OS launch qualification remains separate",
+      "output": "lambda-safety-worker.exe",
+      "build_dir": "build_safety_worker",
+      "remove_source_dirs": [
+        "lambda",
+        "lambda/devtools"
+      ],
+      "extra_source_files": [
+        "lambda/host/safety/worker.cpp",
+        "lambda/host/safety/worker_main.cpp"
+      ],
+      "extra_exclude_source_files": [
+        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_plan.cpp",
+        "lambda/runtime/mvp/mvp_mir.cpp",
+        "lambda/runtime/mir.c",
+        "lambda/runtime/mir_dump.cpp",
+        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp",
+        "lambda/io/security_policy.cpp",
+        "lambda/runtime/devtools_scratch.cpp"
+      ],
+      "exclude_libraries": [
+        "mir"
+      ],
+      "defines": [
+        "LAMBDA_NO_MIR",
+        "LAMBDA_NO_NETWORK"
+      ],
+      "debug": false,
+      "premake_location": "build_safety_worker/premake",
+      "object_dir": "build_safety_worker/obj/%{prj.name}",
+      "exclude_macos_libraries": [
+        "WebKit"
+      ]
+    },
+    "safety-probe-worker": {
+      "extends": "safety-worker",
+      "description": "Native syscall and real Lambda IPC qualification worker; test-only entrypoint",
+      "output": "lambda-safety-probe-worker.exe",
+      "build_dir": "build_safety_probe_worker",
+      "extra_exclude_source_files": [
+        "lambda/host/safety/worker_main.cpp"
+      ],
+      "extra_source_files": [
+        "test/safety/safety_worker_probe.cpp"
+      ],
+      "debug": false,
+      "premake_location": "build_safety_probe_worker/premake",
+      "object_dir": "build_safety_probe_worker/obj/%{prj.name}"
     }
   },
   "test": {
@@ -3479,6 +3697,91 @@
             "icon": "\ud83d\udc1a"
           },
           {
+            "source": "test_security_policy_gtest.cpp",
+            "name": "App Safety Policy Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_policy_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
+            "source": "test_security_store_gtest.cpp",
+            "name": "App Safety Grant Store Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/grant_store.cpp"
+            ],
+            "defines": [
+              "LAMBDA_SECURITY_STORE_TESTING"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_store_gtest.exe",
+            "icon": "\ud83d\udd10"
+          },
+          {
+            "source": "test_security_file_broker_gtest.cpp",
+            "name": "App Safety File Broker Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/file_broker.cpp"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_file_broker_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
+            "source": "test_security_channel_gtest.cpp",
+            "name": "App Safety IPC Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/file_broker.cpp"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_channel_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
+            "source": "test_security_admission_gtest.cpp",
+            "name": "App Safety Host Admission Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/file_broker.cpp",
+              "lambda/host/safety/grant_store.cpp",
+              "lambda/host/safety/admission.cpp"
+            ],
+            "defines": [
+              "LAMBDA_SECURITY_STORE_TESTING"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_admission_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
             "source": "lib/test_file_module_gtest.cpp",
             "name": "File Module Tests",
             "dependencies": [
@@ -3561,6 +3864,26 @@
               "gtest_main"
             ],
             "binary": "test_image_io_gtest.exe"
+          },
+          {
+            "source": "test_security_update_gtest.cpp",
+            "name": "App Safety Package Update Controls",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/grant_store.cpp",
+              "lambda/host/safety/update_controls.cpp"
+            ],
+            "defines": [
+              "LAMBDA_SECURITY_STORE_TESTING"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_security_update_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
           }
         ],
         "type": "library"
@@ -3892,6 +4215,7 @@
               "lambda/runtime/render_map.cpp",
               "lambda/runtime/template_state.cpp",
               "lambda/runtime/context_capsule.cpp",
+              "lambda/runtime/security_context.cpp",
               "radiant/animation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
@@ -4016,9 +4340,26 @@
             "additional_sources": [
               "radiant/midi_player.cpp",
               "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
               "radiant/audio_reverb.cpp"
             ],
             "binary": "test_midi_player_gtest.exe",
+            "icon": "\ud83c\udfb5"
+          },
+          {
+            "source": "test_audio_player_gtest.cpp",
+            "name": "Decoded Audio Playback Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": [
+              "radiant/rdt_audio.cpp",
+              "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
+              "radiant/audio_cues.cpp",
+              "radiant/audio_reverb.cpp"
+            ],
+            "macos": {"libraries": ["AudioToolbox"]},
+            "binary": "test_audio_player_gtest.exe",
             "icon": "\ud83c\udfb5"
           },
           {
@@ -4892,7 +5233,9 @@
                 "radiant/clipboard_mac.mm",
                 "test/test_clipboard_mac_cases.mm"
               ],
-              "libraries": ["Cocoa"]
+              "libraries": [
+                "Cocoa"
+              ]
             },
             "binary": "test_clipboard_store_gtest.exe",
             "icon": "\ud83d\udccb"
@@ -4913,6 +5256,7 @@
               "lambda/input/css/selector_matcher.cpp",
               "lambda/runtime/render_map.cpp",
               "lambda/runtime/context_capsule.cpp",
+              "lambda/runtime/security_context.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/layout_counters.cpp",
               "radiant/dom_range.cpp",
@@ -5715,6 +6059,48 @@
               ]
             },
             "icon": "\ud83d\udd00"
+          },
+          {
+            "source": "test/test_security_runtime_gtest.cpp",
+            "name": "App Safety Runtime IO Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "additional_sources": [
+              "lambda/runtime/concurrency.cpp",
+              "lib/uv_loop.c",
+              "lambda/host/safety/file_broker.cpp"
+            ],
+            "binary": "test_security_runtime_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "libuv"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "\ud83d\udee1\ufe0f"
           },
           {
             "source": "test/test_io_terminal_gtest.cpp",

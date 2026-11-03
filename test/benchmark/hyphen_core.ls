@@ -4,7 +4,7 @@
 let hyphen_data_path = "test/benchmark/text/hyphen_patterns.json"
 import .hyphen_common
 
-pn trie_child(nodes, edges, node_index: int, code: int) int {
+fn trie_child(nodes, edges, node_index: int, code: int) int {
     let node = nodes[node_index]
     var offset: int = 0
     while (offset < node.count) {
@@ -70,7 +70,7 @@ pn markers_for_word(word, data, var marker_cache) {
     return markers
 }
 
-pn insert_hyphens(word, markers) string {
+fn insert_hyphens(word, markers) string {
     var result = ""
     var marker_index: int = 0
     var index: int = 0

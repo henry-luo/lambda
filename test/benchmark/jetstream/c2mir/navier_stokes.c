@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of jetstream/navier_stokes.ls. */
 extern int printf(const char *, ...);
 extern double sqrt(double);
@@ -216,6 +217,7 @@ static void add_points(double *d, double *u, double *v) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int iterations = 20;
     double dt = 0.1;
     int frames_till_add = 0;
@@ -240,10 +242,13 @@ int main(void) {
     }
     /* checksum: truncate-toward-zero per element, like the .ls int() */
     for (ci = 7000; ci < 7100; ci++) result += (long) (dens[ci] * 10.0);
+    BENCH_KERNEL_END();
     if (result == 77) {
         printf("navier-stokes: PASS (checksum=%ld)\n", result);
+        BENCH_KERNEL_REPORT();
         return 0;
     }
     printf("navier-stokes: FAIL (checksum=%ld, expected 77)\n", result);
+    BENCH_KERNEL_REPORT();
     return 1;
 }

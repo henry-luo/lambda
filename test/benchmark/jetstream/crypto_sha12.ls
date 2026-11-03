@@ -9,20 +9,20 @@ let MASK32 = 0xFFFFFFFF
 // 32-bit addition relies on u32 wraparound. Unsigned sized contracts reject
 // negative signed inputs, so normalize each signed 32-bit word before the
 // explicit conversion instead of relying on an invalid negative-to-u32 cast.
-pn safe_add(x: int, y: int) int^ {
+fn safe_add(x: int, y: int) int^ {
     var ux: u32 = if (x < 0) { x + 4294967296 } else { x }
     var uy: u32 = if (y < 0) { y + 4294967296 } else { y }
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-pn rol(num: int, cnt: int) int^ {
+fn rol(num: int, cnt: int) int^ {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // SHA-1 round function
-pn sha1_ft(t: int, b: int, c: int, d: int) int {
+fn sha1_ft(t: int, b: int, c: int, d: int) int {
     if (t < 20) {
         return bor(band(b, c), band(band(bnot(b), MASK32), d))
     }
@@ -36,7 +36,7 @@ pn sha1_ft(t: int, b: int, c: int, d: int) int {
 }
 
 // SHA-1 round constant
-pn sha1_kt(t: int) int {
+fn sha1_kt(t: int) int {
     if (t < 20) {
         return 0x5A827999
     }
@@ -50,7 +50,7 @@ pn sha1_kt(t: int) int {
 }
 
 // Convert string to array of big-endian words
-pn str2binb(str: string) int[]^ {
+fn str2binb(str: string) int[]^ {
     var slen: int = len(str)
     var bin_len: int = shr(slen * CHRSZ, 5) + 1
     var bin: int[] = fill(bin_len + 1, 0)^
@@ -68,7 +68,7 @@ pn str2binb(str: string) int[]^ {
 }
 
 // Core SHA-1 computation on array of big-endian words
-pn core_sha1(x_in: int[], input_len: int) int[]^ {
+fn core_sha1(x_in: int[], input_len: int) int[]^ {
     // Copy input to mutable array with padding space
     var x_len: int = len(x_in)
     var padded_len: int = shr(input_len + 64, 9)
@@ -135,7 +135,7 @@ pn core_sha1(x_in: int[], input_len: int) int[]^ {
 }
 
 // Convert array of big-endian words to hex string
-pn binb2hex(binarray: int[]) string^ {
+fn binb2hex(binarray: int[]) string^ {
     let hex_chars = "0123456789abcdef"
     var result: string = ""
     var i: int = 0
@@ -151,7 +151,7 @@ pn binb2hex(binarray: int[]) string^ {
 }
 
 // Compute hex SHA-1 of a string
-pn hex_sha1(s: string) string^ {
+fn hex_sha1(s: string) string^ {
     var words = str2binb(s)
     var hash = core_sha1(words, len(s) * CHRSZ)
     return binb2hex(hash)

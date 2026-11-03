@@ -17,7 +17,7 @@
 // Moves: each move is (from, over, to)
 // We encode as parallel arrays for from, over, to
 
-pn benchmark() int^ {
+fn benchmark() int^ {
     // All valid jump moves
     var mfrom = [0,0,1,1,2,2,3,3,3,3,4,4,5,5,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,12,12,13,13,14,14]
     var mover = [1,2,3,4,4,5,1,4,6,7,7,8,2,4,8,9,3,7,4,8,4,7,5,8,6,11,7,12,7,8,11,13,8,12,9,13]

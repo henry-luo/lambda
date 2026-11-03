@@ -1661,6 +1661,20 @@ extern "C" bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first
     return true;
 }
 
+extern "C" TypeString* ast_string_literal_type(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_PRIMARY ||
+            ((AstPrimaryNode*)node)->expr || !node->type ||
+            !node->type->is_literal || node->type->type_id != LMD_TYPE_STRING) {
+        return NULL;
+    }
+    TypeString* literal = (TypeString*)node->type;
+    return literal->string ? literal : NULL;
+}
+
 // bounded source-order leaves; preserves the original AST for fallback replay.
 extern "C" bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count) {
     AstNode* pending[LAMBDA_STRING_CONCAT_MAX_PARTS];

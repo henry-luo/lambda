@@ -1,0 +1,22 @@
+<!doctype html>
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/20px Ahem; word-break:break-all; }
+.row { width:260px; height:32px; column-count:2; column-gap:10px; }
+.control { display:flex; width:260px; gap:10px; height:32px; }
+.column { width:125px; flex:none; }
+.base,.reading { text-wrap:nowrap; }
+.ruby { display:ruby; }
+.annotation { display:ruby-text; font-size:50%; }
+rt,.annotation { line-height:normal; }
+</style>
+<div id="result">
+<div class="row" id="split"><span id="split-prefix">zzz</span><ruby id="split-ruby"><span class="base" id="split-ba">mmm</span><span class="base" id="split-bb">mm</span><rt><span class="reading" id="split-ra">mmmmmm</span><span class="reading" id="split-rb">mmmm</span></rt></ruby><span id="split-suffix">zzz</span></div>
+<div class="control" id="split-control"><div class="column"><span id="split-cprefix">zzz</span><ruby><span id="split-ca">mmm</span><rt id="split-cra">mmmmmm</rt></ruby></div><div class="column"><ruby><span id="split-cb">mm</span><rt id="split-crb">mmmm</rt></ruby><span id="split-csuffix">zzz</span></div></div>
+<div class="row" id="continuous"><span id="continuous-prefix">zzz</span><ruby id="continuous-base">mmmmm<rt id="continuous-reading">mmmmmmmmmm</rt></ruby><span id="continuous-suffix">zzz</span></div>
+<div class="control" id="continuous-control"><div class="column"><span id="continuous-cprefix">zzz</span><ruby><span id="continuous-ca">mmm</span><rt id="continuous-cra">mmmmmm</rt></ruby></div><div class="column"><ruby><span id="continuous-cb">mm</span><rt id="continuous-crb">mmmm</rt></ruby><span id="continuous-csuffix">zzz</span></div></div>
+<div class="row" id="custom"><span id="custom-prefix">zzz</span><x-ruby class="ruby" id="custom-ruby"><span class="base" id="custom-ba">mmm</span><span class="base" id="custom-bb">mm</span><x-annotation class="annotation"><span class="reading" id="custom-ra">mmmmmm</span><span class="reading" id="custom-rb">mmmm</span></x-annotation></x-ruby><span id="custom-suffix">zzz</span></div>
+<div class="control" id="custom-control"><div class="column"><span id="custom-cprefix">zzz</span><ruby><span id="custom-ca">mmm</span><rt id="custom-cra">mmmmmm</rt></ruby></div><div class="column"><ruby><span id="custom-cb">mm</span><rt id="custom-crb">mmmm</rt></ruby><span id="custom-csuffix">zzz</span></div></div>
+<div class="row" id="mixed"><span id="mixed-prefix">zzz</span><ruby id="mixed-ruby"><span class="base" id="mixed-ba">mmm</span><span class="base" id="mixed-bb">mm</span><rt><span class="reading" id="mixed-ra">mmmmmm</span><span class="reading" id="mixed-rb">mmmm</span></rt></ruby><ruby><span id="mixed-neighbor">Z</span><rt id="mixed-neighbor-reading">zz</rt></ruby><span id="mixed-suffix">zzz</span></div>
+<div class="control" id="mixed-control"><div class="column"><span id="mixed-cprefix">zzz</span><ruby><span id="mixed-ca">mmm</span><rt id="mixed-cra">mmmmmm</rt></ruby></div><div class="column"><ruby><span id="mixed-cb">mm</span><rt id="mixed-crb">mmmm</rt></ruby><ruby><span id="mixed-control-neighbor">Z</span><rt id="mixed-control-neighbor-reading">zz</rt></ruby><span id="mixed-csuffix">zzz</span></div></div>
+</div>

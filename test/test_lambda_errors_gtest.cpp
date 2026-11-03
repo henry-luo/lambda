@@ -88,6 +88,47 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     EXPECT_EQ(before, after);
 }
 
+// S9.1.4v2/D4.3.3: closure environments, rather than native locals, own
+// the shared binding after its parent's explicit root is released.
+TEST_F(EvalContextTest, ConfinedCaptureHomesShareWritesAndTraceTheirValues) {
+    RootFrame roots(5);
+    const double initial = 1.000000000000001;
+    const double replacement = 2.000000000000001;
+    Rooted<Array*> home(roots, lambda_capture_home_new(push_d(initial)));
+    ASSERT_NE(home.get(), nullptr);
+    Rooted<void*> env(roots, heap_calloc_closure_env(16));
+    ASSERT_NE(env.get(), nullptr);
+    Rooted<Function*> first(roots, to_closure_named(nullptr, 0, env.get(), "first"));
+    ASSERT_NE(first.get(), nullptr);
+    first.get()->closure_field_count = 1;
+    owned_item_slot_store((Item*)env.get(), 1, 0, Item{.array = home.get()});
+    env.set(heap_calloc_closure_env(16));
+    ASSERT_NE(env.get(), nullptr);
+    Rooted<Function*> second(roots, to_closure_named(nullptr, 0, env.get(), "second"));
+    ASSERT_NE(second.get(), nullptr);
+    second.get()->closure_field_count = 1;
+    owned_item_slot_store((Item*)env.get(), 1, 0, Item{.array = home.get()});
+    home.set(nullptr);
+    env.set(nullptr);
+    heap_gc_collect();
+    Array* first_home = ((Item*)first.get()->closure_env)[0].array;
+    Array* second_home = ((Item*)second.get()->closure_env)[0].array;
+    ASSERT_EQ(first_home, second_home);
+    Rooted<Item> previous(roots, lambda_capture_home_read(first_home));
+    lambda_capture_home_store(second_home, push_d(replacement));
+    heap_gc_collect();
+    EXPECT_DOUBLE_EQ(it2d(previous.get()), initial);
+    EXPECT_DOUBLE_EQ(it2d(lambda_capture_home_read(
+        ((Item*)first.get()->closure_env)[0].array)), replacement);
+    // a newly stored managed value is reachable through either sibling only.
+    Item text = {.item = s2it(heap_strcpy("capture survives", 16))};
+    lambda_capture_home_store(((Item*)second.get()->closure_env)[0].array, text);
+    heap_gc_collect();
+    Item actual = lambda_capture_home_read(((Item*)first.get()->closure_env)[0].array);
+    ASSERT_EQ(get_type_id(actual), LMD_TYPE_STRING);
+    EXPECT_STREQ(actual.get_string()->chars, "capture survives");
+}
+
 TEST(MirRootGraphTest, SparsePredecessorsPreserveDenseTraversalOrder) {
     constexpr int blocks = 70, words = (blocks + 63) / 64;
     uint64_t successors[blocks * words] = {};
@@ -1957,11 +1998,9 @@ TEST_F(NegativeScriptTest, FunctionDeclarationColourIsCheckedStatically) {
         "'apply_all' a pn call, which a function (fn) cannot make");
     ExpectErrorMessage("test/lambda/negative/semantic/function_body_is_fn.ls",
         "error[E224]: 'logsq' is a procedure (pn) and cannot be called from a function (fn)");
-    ExpectErrorMessage("test/lambda/negative/semantic/function_body_var.ls",
-        "error[E224]: `var` is only allowed inside a procedure (pn)");
 }
 
-TEST_F(NegativeScriptTest, ProceduralStatementsOutsidePnReportE224WithoutCascade) {
+TEST_F(NegativeScriptTest, LocalStatementsAtModuleScopeReportE224WithoutCascade) {
     const char* script = "test/lambda/negative/semantic/proc_stam_outside_pn.ls";
     ScriptResult result = run_lambda_script(script);
 
@@ -1971,7 +2010,7 @@ TEST_F(NegativeScriptTest, ProceduralStatementsOutsidePnReportE224WithoutCascade
     for (const char* subject : {"`var`", "assignment", "`while`",
                                 "`break`", "`continue`", "`return`"}) {
         std::string expected = std::string("error[E224]: ") + subject
-            + " is only allowed inside a procedure (pn)";
+            + " is only allowed inside a callable (fn or pn)";
         EXPECT_NE(result.output.find(expected), std::string::npos)
             << "Missing diagnostic: " << expected << "\nOutput: " << result.output;
     }
@@ -2409,16 +2448,58 @@ TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
 
 // S12.1.2: assignment, `var`, `while` and `break` belong to procedures; outside
 // a `pn` each is E224, and the rejection must not cascade into a crash.
-TEST_F(NegativeScriptTest, ReassignOutsidePnReportsE224) {
+TEST_F(NegativeScriptTest, ReassignAtModuleScopeReportsE224) {
     ExpectErrorMessage("test/lambda/negative/semantic/immutable_reassign.ls",
-        "error[E224]: assignment is only allowed inside a procedure (pn)");
+        "error[E224]: assignment is only allowed inside a callable (fn or pn)");
 }
 
-TEST_F(NegativeScriptTest, ProceduralStatementsInFnReportE224) {
-    ExpectErrorMessage("test/lambda/negative/semantic/mutation_in_fn.ls",
-        "error[E224]: `var` is only allowed inside a procedure (pn)");
-    ExpectErrorMessage("test/lambda/negative/semantic/mutation_in_fn.ls",
-        "error[E224]: `while` is only allowed inside a procedure (pn)");
+TEST_F(NegativeScriptTest, EscapingProcedureAliasesKeepImmutableCaptures) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_variadic_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_alias_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_unknown_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_transitive_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_pure_barrier.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_cycle.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_capture_parent_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+}
+
+TEST_F(NegativeScriptTest, DecompositionPreservesMutabilityAndEscapePermissions) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_decomposition_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_decomposition_named_escape.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_decomposition_pure_capture.ls", false,
+        "cannot mutate captured binding 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/fn_local_decomposition_immutable.ls", false,
+        "cannot assign to let binding 'a'");
+}
+
+TEST_F(NegativeScriptTest, FunctionLocalStatePreservesOwnershipAndEffects) {
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_outer_write.ls",
+        "cannot mutate captured binding 'value' from a function (fn)");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_outer_member_write.ls",
+        "cannot mutate captured binding 'value' from a function (fn)");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_pn_call.ls",
+        "cannot be called from a function (fn)");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_break_scope.ls",
+        "requires an enclosing loop in the same callable");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_var_param.ls",
+        "a function (fn) cannot have a var parameter");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_comprehension_write.ls",
+        "a functional comprehension cannot mutate enclosing binding 'total'");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_capture_escape.ls",
+        "cannot mutate captured binding 'value'");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_local_capture_member_escape.ls",
+        "cannot mutate captured binding 'value'");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/fn_local_dynamic_pn.ls",
+        "cannot call a procedure (pn) from a function (fn)");
 }
 
 // S7.5.1: a fallible call must be acknowledged with `^`, a handler or `or`.

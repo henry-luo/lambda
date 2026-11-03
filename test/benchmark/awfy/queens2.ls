@@ -1,7 +1,7 @@
 // AWFY Benchmark: Queens (Typed version)
 // Expected result: true (solved 10 times, each placement validated)
 
-pn get_row_column(free_rows: bool[], free_maxs: bool[], free_mins: bool[], r: int, c: int) int {
+fn get_row_column(free_rows: bool[], free_maxs: bool[], free_mins: bool[], r: int, c: int) int {
     if (free_rows[r] and free_maxs[c + r] and free_mins[c - r + 7]) {
         return 1
     }
@@ -36,7 +36,7 @@ pn place_queen(var free_rows: bool[], var free_maxs: bool[], var free_mins: bool
 // a placement is valid when every row holds one queen and no two share a
 // column or a diagonal; `result == 1` alone cannot tell a solver that
 // stopped searching from one that solved the board
-pn is_valid(queen_rows: int[]) int^ {
+fn is_valid(queen_rows: int[]) int^ {
     var r1: int = 0
     while (r1 < 8) {
         let c1: int = queen_rows[r1]

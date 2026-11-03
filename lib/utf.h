@@ -46,7 +46,8 @@ size_t utf8_encode_z(uint32_t codepoint, char buf[5]);
 
 typedef enum UtfNormalizationForm {
     UTF_NORMALIZE_NFC, UTF_NORMALIZE_NFD, UTF_NORMALIZE_NFKC,
-    UTF_NORMALIZE_NFKD, UTF_NORMALIZE_CASEFOLD
+    UTF_NORMALIZE_NFKD, UTF_NORMALIZE_CASEFOLD,
+    UTF_NORMALIZE_NFKC_CASEFOLD
 } UtfNormalizationForm;
 /** Stable Unicode normalization; caller frees the returned buffer with free(). */
 char* utf8_normalize(const char* text, size_t length, UtfNormalizationForm form, size_t* out_length);

@@ -15,3 +15,4 @@ true true 1.5
 1 2 4 8 8 9
 2 21 13 5
 inf -inf nan nan
+12 inf inf 8

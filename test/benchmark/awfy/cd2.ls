@@ -35,23 +35,23 @@ type Motion = {cs: int, p1x: float, p1y: float, p1z: float,
 // =====================================================
 // Helpers
 // =====================================================
-pn safe_div(a: float, b: float) float {
+fn safe_div(a: float, b: float) float {
     if (b == 0) { return 0.0 }
     var r = a / b
     return r
 }
 
-pn min_f(a: float, b: float) float {
+fn min_f(a: float, b: float) float {
     if (a <= b) { return a }
     return b
 }
 
-pn max_f(a: float, b: float) float {
+fn max_f(a: float, b: float) float {
     if (a >= b) { return a }
     return b
 }
 
-pn check_overlap(low: float, high: float) int {
+fn check_overlap(low: float, high: float) int {
     if (low <= 1) {
         if (1 <= high) { return 1 }
     }
@@ -64,7 +64,7 @@ pn check_overlap(low: float, high: float) int {
     return 0
 }
 
-pn get_old_or_new(old: any, newp: Vec3) Vec3^ {
+fn get_old_or_new(old: any, newp: Vec3) Vec3^ {
     if ((old == null)^) { return newp }
     return old
 }
@@ -72,14 +72,14 @@ pn get_old_or_new(old: any, newp: Vec3) Vec3^ {
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-pn arr_new() Arr^ {
+fn arr_new() Arr^ {
     // propagate fill's allocation/argument error before the typed boundary (S7.6.3v2).
     let init: array = fill(16, null)^
     var a = { l0: init, sz: 0 }
     return a
 }
 
-pn arr_get(a: Arr, idx: int) any {
+fn arr_get(a: Arr, idx: int) any {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -120,7 +120,7 @@ pn arr_set(var a: Arr, idx: int, val: any) int^ {
 // =====================================================
 // Small vector: 16x16=256
 // =====================================================
-pn vec_new() array {
+fn vec_new() array {
     return []
 }
 
@@ -129,11 +129,11 @@ pn vec_add(var v: array, item: any) int^ {
     return 0
 }
 
-pn vec_at(v: array, idx: int) any {
+fn vec_at(v: array, idx: int) any {
     return v[idx]
 }
 
-pn vec_size(v: array) int {
+fn vec_size(v: array) int {
     return len(v)
 }
 
@@ -147,7 +147,7 @@ pn vec_size(v: array) int {
 // snapshot, so the mutable owner is an explicit key/value table instead
 // (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
 
-pn rbt_new() RbtTable^ {
+fn rbt_new() RbtTable^ {
     let _admitted_keys_151: int[] = []
     var keys: int[] = _admitted_keys_151
     var vals = vec_new()
@@ -155,7 +155,7 @@ pn rbt_new() RbtTable^ {
     return table
 }
 
-pn rbt_find_node(tree: RbtTable, key: int) int {
+fn rbt_find_node(tree: RbtTable, key: int) int {
     let keys = tree.keys
     var i = 0
     while (i < len(keys)) {
@@ -167,7 +167,7 @@ pn rbt_find_node(tree: RbtTable, key: int) int {
     return NIL
 }
 
-pn rbt_nd(tree: RbtTable, id: int) array {
+fn rbt_nd(tree: RbtTable, id: int) array {
     return [tree.keys[id], tree.vals[id]]
 }
 
@@ -188,7 +188,7 @@ pn rbt_put(var tree: RbtTable, key: int, value: any) any {
     return null
 }
 
-pn rbt_get(tree: RbtTable, key: int) any {
+fn rbt_get(tree: RbtTable, key: int) any {
     var index = rbt_find_node(tree, key)
     if (index == NIL) {
         return null
@@ -196,14 +196,14 @@ pn rbt_get(tree: RbtTable, key: int) any {
     return tree.vals[index]
 }
 
-pn rbt_first(tree: RbtTable) int {
+fn rbt_first(tree: RbtTable) int {
     if (len(tree.keys) == 0) {
         return NIL
     }
     return 0
 }
 
-pn rbt_successor(tree: RbtTable, id: int) int {
+fn rbt_successor(tree: RbtTable, id: int) int {
     var next = id + 1
     if (next >= len(tree.keys)) {
         return NIL
@@ -234,7 +234,7 @@ pn rbt_remove(var tree: RbtTable, key: int) any {
 // =====================================================
 // Vector2D key encoding
 // =====================================================
-pn v2d_key(x: int, y: int) int {
+fn v2d_key(x: int, y: int) int {
     var kx = int(x) + 1000
     var ky = int(y) + 1000
     var k = kx * 100000 + ky
@@ -244,7 +244,7 @@ pn v2d_key(x: int, y: int) int {
 // =====================================================
 // Vector3D operations
 // =====================================================
-pn v3d_new(x: float, y: float, z: float) Vec3 {
+fn v3d_new(x: float, y: float, z: float) Vec3 {
     return [x, y, z]
 }
 
@@ -266,7 +266,7 @@ pn voxel_hash_xy(px: float, py: float, var out: array) int {
 // =====================================================
 // isInVoxel check
 // =====================================================
-pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float,
+fn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float,
         p2x: float, p2y: float) int {
     if (vx > MAX_X) { return 0 }
     if (vx < MIN_X) { return 0 }
@@ -394,7 +394,7 @@ pn recurse_draw(voxel_map: RbtTable, seen_tree: RbtTable, vx: int, vy: int,
 // =====================================================
 // findIntersection between two motions
 // =====================================================
-pn find_intersection(m1: Motion, m2: Motion) any {
+fn find_intersection(m1: Motion, m2: Motion) any {
     var i1x = m1.p1x
     var i1y = m1.p1y
     var i1z = m1.p1z
@@ -496,7 +496,7 @@ pn find_intersection(m1: Motion, m2: Motion) any {
 // =====================================================
 // Motion
 // =====================================================
-pn motion_new(cs: int, p1x: float, p1y: float, p1z: float,
+fn motion_new(cs: int, p1x: float, p1y: float, p1z: float,
         p2x: float, p2y: float, p2z: float) Motion {
     return {cs: cs, p1x: p1x, p1y: p1y, p1z: p1z, p2x: p2x, p2y: p2y, p2z: p2z}
 }

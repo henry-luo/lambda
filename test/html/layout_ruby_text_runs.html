@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/60px "Times New Roman"; }
+rt { line-height: normal; }
+.row { width: 160px; }
+.keep > span { text-wrap: nowrap; }
+</style>
+<div id="result" lang="ja">
+<div id="normal-row" class="row">ここは<ruby id="normal"><span id="normal-ba">優先</span><span id="normal-bb">通行帯</span><rt id="normal-reading"><span id="normal-ra">ゆうせん</span><span id="normal-rb">つうこうたい</span></rt></ruby>。</div>
+<div id="normal-control" class="row">ここは<ruby><span id="normal-ca">優先</span><span id="normal-cb1">通行</span><rt><span id="normal-cra">ゆうせん</span><span id="normal-crb1">つうこう</span></rt></ruby><br class="normal-break"><ruby><span id="normal-cb2">帯</span><rt><span id="normal-crb2">たい</span></rt></ruby>。</div>
+<div id="keep-row" class="row">ここは<ruby class="keep" id="keep"><span id="keep-ba">優先通行</span><span id="keep-bb">帯</span><rt class="keep" id="keep-reading"><span id="keep-ra">ゆうせんつうこう</span><span id="keep-rb">たい</span></rt></ruby>。</div>
+<div id="keep-control" class="row">ここは<ruby><span id="keep-ca">優先通行</span><rt><span id="keep-cra">ゆうせんつうこう</span></rt></ruby><br class="keep-break"><ruby><span id="keep-cb">帯</span><rt><span id="keep-crb">たい</span></rt></ruby>。</div>
+<div id="pieces-row" style="width:70px"><ruby class="keep" id="pieces"><span id="pieces-ba">垂直</span><span id="pieces-bb">二等辺</span><span id="pieces-bc">三角形</span><rt class="keep" id="pieces-reading"><span id="pieces-ra">すいちょく</span><span id="pieces-rb">にとうへん</span><span id="pieces-rc">さんかくけい</span></rt></ruby></div>
+<div id="pieces-control" style="width:70px"><ruby><span id="pieces-ca">垂直</span><rt><span id="pieces-cra">すいちょく</span></rt></ruby><br class="pieces-break"><ruby><span id="pieces-cb">二等辺</span><rt><span id="pieces-crb">にとうへん</span></rt></ruby><br class="pieces-break"><ruby><span id="pieces-cc">三角形</span><rt><span id="pieces-crc">さんかくけい</span></rt></ruby></div>
+<div id="pieces-wide-control" style="display:none;width:200px"><ruby><span id="pieces-wa">垂直</span><span id="pieces-wb">二等辺</span><span id="pieces-wc">三角形</span><rt><span id="pieces-wra">すいちょく</span><span id="pieces-wrb">にとうへん</span><span id="pieces-wrc">さんかくけい</span></rt></ruby></div>
+<div id="letters-row" style="width:125px;font-family:Ahem;word-break:break-all">zzz<ruby class="keep" id="letters"><span id="letters-ba">mmm</span><span id="letters-bb">mm</span><rt class="keep"><span id="letters-ra">mmmmmm</span><span id="letters-rb">mmmm</span></rt></ruby>zzz</div>
+<div id="letters-control" style="width:125px;font-family:Ahem;word-break:break-all">zzz<ruby><span id="letters-ca">mmm</span><rt><span id="letters-cra">mmmmmm</span></rt></ruby><br><ruby><span id="letters-cb">mm</span><rt><span id="letters-crb">mmmm</span></rt></ruby>zzz</div>
+<div style="width:200px;font-family:Ahem;word-break:break-all;overflow-wrap:normal"><ruby id="wrap-rules" class="keep" style="word-break:normal"><span>mmm</span><span>mm</span><rt class="keep"><span>mmmmmm</span><span>mmmm</span></rt></ruby></div>
+</div>

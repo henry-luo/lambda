@@ -17,6 +17,7 @@ struct LayoutViewSnapshot {
     float width;
     float height;
     bool layout_dirty;
+    bool ruby_annotation_hidden;
     float layout_height_contribution;
     bool is_element;
     float content_width;
@@ -47,6 +48,7 @@ static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snap
     snapshot->width = node->width;
     snapshot->height = node->height;
     snapshot->layout_dirty = node->layout_dirty;
+    snapshot->ruby_annotation_hidden = node->ruby_annotation_hidden;
     snapshot->layout_height_contribution = node->layout_height_contribution;
     snapshot->is_element = node->is_element();
 
@@ -95,6 +97,7 @@ static void layout_view_snapshot_restore(const LayoutViewSnapshot* snapshot) {
     node->width = snapshot->width;
     node->height = snapshot->height;
     node->layout_dirty = snapshot->layout_dirty;
+    node->ruby_annotation_hidden = snapshot->ruby_annotation_hidden;
     node->layout_height_contribution = snapshot->layout_height_contribution;
 
     if (snapshot->is_element && node->is_element()) {
@@ -212,8 +215,8 @@ struct LayoutFlowNode {
     bool has_embed;
     uint8_t text_trim_applied;
     float text_trim_start, text_trim_end, initial_letter_trimmed_start;
-    float ruby_anchor, ruby_width, ruby_advance, ruby_start_overhang, ruby_empty_advance;
-    bool ruby_simple, ruby_empty;
+    float ruby_start_offset, ruby_end_offset, ruby_empty_block_size;
+    bool ruby_geometry, ruby_empty, ruby_fragments;
     bool inline_strut;
     lam::Own<LayoutFlowNode> next;
 };
@@ -374,13 +377,12 @@ static bool layout_flow_capture_nodes(LayoutContext* context, DomNode* node,
         if (element->ext) {
             memcpy(output->fragments, element->ext->frags, sizeof(output->fragments));
             output->fragment_presence_mask = element->ext->fragment_presence_mask;
-            output->ruby_anchor = element->ext->ruby_column_anchor_x;
-            output->ruby_width = element->ext->ruby_column_width;
-            output->ruby_advance = element->ext->ruby_column_inline_advance;
-            output->ruby_start_overhang = element->ext->ruby_column_start_overhang;
-            output->ruby_empty_advance = element->ext->ruby_empty_inline_advance;
-            output->ruby_simple = element->ext->has_simple_ruby_column_geometry;
+            output->ruby_start_offset = element->ext->ruby_column_start_offset;
+            output->ruby_end_offset = element->ext->ruby_column_end_offset;
+            output->ruby_empty_block_size = element->ext->ruby_empty_base_block_size;
+            output->ruby_geometry = element->ext->has_ruby_column_geometry;
             output->ruby_empty = element->ext->has_empty_ruby_base;
+            output->ruby_fragments = element->ext->has_ruby_parallel_fragments;
         }
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (!layout_flow_capture_nodes(context, child, tail, depth + 1, remaining)) return false;
@@ -509,13 +511,12 @@ bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* re
             if (element->ext) {
                 memcpy(element->ext->frags, output->fragments, sizeof(output->fragments));
                 element->ext->fragment_presence_mask = output->fragment_presence_mask;
-                element->ext->ruby_column_anchor_x = output->ruby_anchor;
-                element->ext->ruby_column_width = output->ruby_width;
-                element->ext->ruby_column_inline_advance = output->ruby_advance;
-                element->ext->ruby_column_start_overhang = output->ruby_start_overhang;
-                element->ext->ruby_empty_inline_advance = output->ruby_empty_advance;
-                element->ext->has_simple_ruby_column_geometry = output->ruby_simple;
+                element->ext->ruby_column_start_offset = output->ruby_start_offset;
+                element->ext->ruby_column_end_offset = output->ruby_end_offset;
+                element->ext->ruby_empty_base_block_size = output->ruby_empty_block_size;
+                element->ext->has_ruby_column_geometry = output->ruby_geometry;
                 element->ext->has_empty_ruby_base = output->ruby_empty;
+                element->ext->has_ruby_parallel_fragments = output->ruby_fragments;
             }
         } else if (node->is_text()) {
             DomText* text = node->as_text();

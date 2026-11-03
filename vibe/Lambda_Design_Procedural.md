@@ -1,9 +1,9 @@
 # Lambda Local State, Control Flow and Procedures — Design
 
 **Revision:** 3 (2026-11-02) — local imperative `fn` bodies and confined shared captures, ratified by the user.
-**Status:** the new `fn` local-control surface and non-escaping nested-`pn` capture permission are **ratified, implementation pending**. Existing `pn` support and COW have their prior implementation status; this document does not claim the new feature runs. Escaping closures retain snapshot-at-creation semantics and reject capture writes. Comprehension extensions remain SO51. The resource model remains designed, not built.
+**Status:** `fn` local control and confined shared captures are **implemented and qualified in `codex/fn-local-state`** (Lambda/input baseline **8520/8520**). The indexed escape analysis covers aliases, containers, known return/retention summaries and transitive captures. Escaping closures preserve creation-time snapshots and reject writes of fn-owned captures. Qualification, conservative proof boundaries and existing `pn`/COW debt are recorded in the implementation plan. Comprehension extensions remain SO51. The resource model remains designed, not built.
 **Formal linkage:** call effects S12.1.1v3, D6.1.1v2; local control S12.1.2v3, S16.6.5v2; results S2.5.3v3–S2.5.4v3; local ownership S1.4v2, S9.1.7v2; inout/captures S9.1.3v2–S9.1.4v2, D6.2.3v3; assignment S12.2.1v3–S12.2.2; COW S9.1.2, D4.4.1–D4.4.6; optimization D6.1.2v2; control forms S16.6.6–S16.6.9v2; error completion S7.4.6v3; resources S12.4.1v3–S12.4.3; script top level S16.7.1, S16.7.6.
-**Implementation plan:** [`impl/Lambda_Impl_Function_Local_State.md`](impl/Lambda_Impl_Function_Local_State.md).
+**Implementation plan:** [completed implementation record](<impl/Lambda_Impl_Function_Local_State (done).md>).
 **Spec mapping:** `Lambda_Procedural.md` §1–§5 (the 2026-01-23 proposal) → S12.1.2, S16.6.5, S12.2.1; `Lambda_Proc_Assignment.md` design principles 1–4 → S12.2.1; principle 5 and §4.3–§4.5 → S9.1.6, S9.3.2, S12.2.2; §4.6 and Phase 6 → superseded by S9.1.4 (Appendix S, S-1).
 **Scope:** local imperative computation in both callable colours, the continuing `fn`→`pn` prohibition, mutable-root ownership, confined procedure captures, and the procedural APIs for external effects. COW machinery, document updates and concurrency retain their own records.
 **ID series:** none minted. Rulings are cited by `S#`/`D#`; neighbouring areas keep their own series (C4 in `Lambda_Semantics_Formal.md`, CW# in the COW record, PTH# in the reference record, RG# in the runtime-globals record). Superseded items are numbered S-1… within Appendix S only.
@@ -54,7 +54,7 @@ Three boundaries follow from the bit and are easy to miss:
 The grammar remains shared. Semantic analysis, rather than a duplicated `fn`/`pn` grammar, checks these permissions (S16.6.5v2). A `while` inside an `fn` inherits the pure call boundary; opening its body must never set the enclosing computation's effect to `pn`.
 
 ```lambda no-run
-// no-run: ratified fn-local control; implementation pending
+// no-run: design example; executable fixture is fn_local_control.ls
 fn first_index(xs, target) {
     var i = 0
     while (i < len(xs)) {
@@ -106,10 +106,10 @@ type. Other statements follow their own result contracts; this clarification
 does not assign a new result to assignment or loop statements.
 
 A handler has an ordinary normal result, regardless of its operand's `fn`/`pn`
-effect (S7.6.1v5, S7.6.7v5). A final handler supplies the block's result; a
+effect (S7.6.1v9, S7.6.7v5). A final handler supplies the block's result; a
 later result can replace it. Producing a fallback value in the handler body
 differs from writing `return fallback`, which exits the enclosing callable.
-The new behavior and its pending implementation are recorded in
+The M1 implementation and qualification are recorded in
 [TE-16.1](Lambda_Design_Type_Error_Handling.md#te-161--handler-results-follow-procedural-sequencing).
 
 `return` is how a scoped resource escapes its block, and the escape must be visible in the declared return type (S12.4.2, §7.3).
@@ -190,7 +190,7 @@ Binding, assignment and construction **copy, observably, for every container kin
 **Escape classification precedes capture creation.** Returning a closure, retaining it outside the invocation, forwarding it through a callee that may retain it, or capturing it transitively in an escaping closure prevents a live capture. An unknown escape path is not a proof of confinement. A potentially escaping closure takes its snapshots when formed, not at the eventual return/store; a mutable captured write is rejected rather than silently changing its target. Internal representation must preserve existing no-cycle, inout-exclusivity and precise-rooting contracts (S9.1.3v2, S9.1.5v2, D4.3.3).
 
 ```lambda no-run
-// no-run: fn-local var admission is pending; the escaping capture stays a snapshot
+// no-run: design example; executable fixtures cover creation-time snapshots
 fn make_reader(seed) {
     var value = seed
     let read = pn () => { return value }
@@ -240,9 +240,9 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 | Topic | Ruling | Status |
 |---|---|---|
 | `fn`/`pn` effect bit; top level and element construction are `fn` context | S12.1.1v3, D6.1.1v2 | Implemented; residue in the S12.1.4v3 footnote |
-| Local `break`/`continue`/`return`/`while`/`var` and assignment in either callable colour | S12.1.2v3, S16.6.5v2 | Ratified 2026-11-02; fn admission and execution qualification pending |
-| Fn fallthrough collects; pn normal results replace, including null; no-result statements leave the accumulator unchanged | S2.5.3v3, S2.5.4v3, S12.1.2v3, S7.6.1v9, S7.6.7v5 | Fn local-control extension and uniform handler results pending |
-| `while` two spellings; statements need braces; control blocks versus value blocks; branch homogeneity | S16.6.1–S16.6.2, S16.6.6, S16.6.8v3, S16.6.9v2 | Existing pn surface implemented; fn/arrow-body extension pending |
+| Local `break`/`continue`/`return`/`while`/`var` and assignment in either callable colour | S12.1.2v3, S16.6.5v2 | Qualified on interp/jit/auto; Lambda/input baseline 8520/8520 |
+| Fn fallthrough collects; pn normal results replace, including null; no-result statements leave the accumulator unchanged | S2.5.3v3, S2.5.4v3, S12.1.2v3, S7.6.1v9, S7.6.7v5 | Fn local-control extension implemented; broader handler changes retain their own status |
+| `while` two spellings; statements need braces; control blocks versus value blocks; branch homogeneity | S16.6.1–S16.6.2, S16.6.6, S16.6.8v3, S16.6.9v2 | Fn/arrow extension qualified; C parser 444/444, CST parser 430/430 |
 | `return` takes the next start-token line | S16.2.5 | See its footnote |
 | `let`/params immutable; unannotated `var` may change type; annotated `var` by exact embedding | S12.2.1, S4.4.1, S11.4.1 | Implemented; LR03-36 partial |
 | Member/index writes stay in the key domain; no kind change | S9.1.6 | Core tiers conformant; editor/host access sites unaudited |
@@ -250,9 +250,9 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 | Writes never corrupt a packed representation | S9.3.2, D2.6.2 | Implemented |
 | Values copy; COW unobservable | S9.1.2, D4.4.1–D4.4.6 | Stage 1 landed |
 | Inout parameters; exclusivity; invariance | S9.1.3v2, S9.2.1 | Snapshot half unconditional; exclusivity partial |
-| Escaping/`fn` closures snapshot; confined nested `pn` may share parent `fn` locals | S9.1.4v2, D6.2.3v3 | Captured `let` writes rejected (E211); captured `var` writes still use the writable copy, guarded by E231 |
-| Comma decomposition; no bracket destructuring | S16.8.7 | Implemented |
-| No global mutable state; fn activation may own local working state | S9.1.7v2 | Existing global prohibition implemented; fn-local admission pending |
+| Escaping/`fn` closures snapshot; confined nested `pn` may share parent `fn` locals | S9.1.4v2, D6.2.3v3 | Indexed confinement proofs select shared traced homes in T0/MIR; escaping fn-local captures reject writes and retain value snapshots. Unknown retention requires snapshots. Legacy pn-parent capture debt remains separate. |
+| Comma decomposition; no bracket destructuring | S16.8.7, S12.2.1v3 | Mutable targets, COW ownership and capture flow implemented; [follow-up record](<impl/Lambda_Impl_Function_Local_Decomposition (done).md>) |
+| No global mutable state; fn activation may own local working state | S9.1.7v2 | Global prohibition preserved; fn-local admission implemented |
 | `=` is Tier 2; documents change only by `put`/`del`/`output` | PTH55, PTH72v2, PTH73 | Implemented (PTH30–PTH80) |
 | Auto-close resources; no `defer` | S12.4.1v3–S12.4.3 | Designed, not built |
 
@@ -260,8 +260,7 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 
 - **SO51 — Comprehension extensions:** local cross-iteration mutation and early exits need a separate ruling (§6); they are outside the `while` milestone.
 
-- **Capture modes** (S9.1.4v2, D6.2.3v3): confined shared captures are not implemented; escaping and `fn` captures must reject writes. A closure assigning a captured `var` keeps the superseded writable-copy behavior (S-1), and only the E231 read-after-call guard protects the outer scope (§5.3). COW Stage 2.
-- **`var a, b = expr` mutability** — `resolve_var_stam` skips decomposition declarations, so the names may not be marked mutable. Not verified at run time; probe before relying on it.
+- **Legacy pn-parent capture modes** (S9.1.4v2, D6.2.3v3): the parent-fn extension has indexed confinement proofs and shared traced homes. A closure over a pn-parent `var` still has legacy writable-copy debt (S-1), and only the E231 read-after-call guard protects the outer scope (§5.3). COW Stage 2.
 - **Exclusivity** (S9.1.3): faces 1, 3 and 4 landed (overlapping `var` arguments are E211); face 2 is unreachable behind E229; view-borrow confinement (S9.2.2) and the view-state half of S9.2.4v2 are outstanding.
 - **A repeated literal map key** keeps both entries; a write updates the first while a read takes the last — [LR03-17](Lambda_Issue_Ledger.md#lr03-17), needs a ruling.
 - **Nested-mutation ergonomics** — SO14, owned by the nested-mutation record.
@@ -289,19 +288,20 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 
 ### A.1 Current shape
 
-Anchors are symbol names; confirm line numbers against the tree. Surveyed 2026-10-23 from source, not from a test run.
+Anchors are symbol names; confirm line numbers against the tree. Local-control
+and capture sections updated 2026-11-02; other entries retain the 2026-10-23 survey.
 
-- **Front end.** The C parser handles `while` in `parse_while_statement` and `var` in `parse_var_statement`; `return`, `break` and `continue` are parsed beside them, and only `return` takes an operand. The pn-only rule (E224) lives in `build_ast.cpp`: `resolve_control_statement`, `resolve_while`, `resolve_var_stam` and `resolve_assignment`. E225–E227 are defined but unused for this rule.
+- **Front end.** Both parsers already admit local-control syntax. `resolver_function_begin` records lexical ownership independently of `NameScope::is_proc`; `resolve_control_statement`, `resolve_while`, `resolve_var_stam` and `resolve_assignment` use that ownership for S12.1.2v3. `direct_validate_write_owner` enforces fn-local writes and the SO51 boundary. Call-colour validation remains a separate pass (S12.1.1v3).
 - **AST.** The statement nodes are `AST_NODE_BREAK_STAM`, `CONTINUE_STAM`, `RETURN_STAM`, `VAR_STAM` and `ASSIGN_STAM`. `while` is an `AST_NODE_LOOP` with `LOOP_FORM_WHILE` (`AstWhileNode` is a typedef). `resolve_assignment` retags an index or member target as `AST_NODE_INDEX_ASSIGN_STAM` or `AST_NODE_MEMBER_ASSIGN_STAM`. Every assignment is one record, `AstAssignNode`, with `target_entry` and its COW fields (D8.2.2); `AstAssignStamNode` and `AstCompoundAssignNode` are aliases of it, where "compound" means an index or member target, not `+=`. Decomposition is `AST_NODE_DECOMPOSE` (`AstDecomposeNode`).
 - **Binding facts.** `NameEntry` keeps the three 2026-02 flags `is_mutable`, `has_type_annotation` and `type_widened`, beside the COW facts (`cow_param_mutated`, `cow_owned`, `is_place_copy`, `var_root_may_share`, …). `resolve_assignment` sets `type_widened` on the first type-changing write to an unannotated `var`; later reads are typed `any`. MIR decides a native-lane `var`'s home once at its declaration (`mir_nested_control_writes_binding` with widening cascade). A `var` passed as a `var` argument is also boxed. T0 stores every binding as an `Item`.
 - **Execution.** T0 runs loops in `interp.cpp` and signals `break`, `continue` and `return` through `EvalSignal`. MIR lowers through `transpile_while` and `transpile_assign_stam_core`. Annotated boundaries go through `emit_checked_boundary`, and on T0 through the matching interp check.
 - **Paths and COW.** A nested path write runs through `exec_place_assign` on T0, and through `transpile_compound_assignment_item` and the `cow_place_leaf_*` helpers in MIR. Both reach `cow_path_set_impl` / `cow_path_set_inplace`. The COW primitives are `cow_mark_shared`, `cow_bind_var` and `cow_prepare_write`. The Lambda-side write wrappers (`index_assign_cow`, `array_set_cow`, `member_set_cow`, `map_set_cow`) prepare the write before calling the raw setter (D4.4.2).
 - **Runtime setters.** `fn_index_set` dispatches by owner kind. A sequence write with a non-integer key raises E201. On an element, an integer key writes a child (`fn_array_set`) and a name key writes an attribute (`fn_map_set`). `fn_array_set` still converts a specialized array in place (`convert_specialized_to_generic`). A field type change in `fn_map_set` retags in place when that is safe, and otherwise moves the container onto a runtime shape-tree target (`container_retype_field`, D3.4.5). `map_rebuild_for_type_change` now serves only JS shapes. A new member is added by `map_extend_open_shape`. `Container::is_data_migrated` is still consulted for parser-built containers.
 - **`var` parameters.** At the call site an argument must be a mutable `var` root (E211). Overlapping roots or view bases are E211, and the types must match exactly (E207). A plain `pn` parameter written by the callee is snapshotted (`cow_param_mutated`).
-- **Closures.** `finish_capture_analysis` rejects a write to a captured `let` (E211). A write to a captured `var` is stored into the closure env (`owned_item_slot_store`). `scan_invalidated_call` raises E231 for a stale outer read. A `start` capturing a mutable `var` is E221.
+- **Closures.** `lambda_analyze_capture_permissions` builds one indexed value-flow graph and fixed-point known-call summaries before either tier creates captures (S9.1.4v2, D6.2.3v3). Confined named/anonymous pn values share actual parent homes through aliases and containers; unknown retention, pure-fn capture boundaries, escaping ancestors and reference-cycle backedges require snapshots. A home is an internal one-element GC Array using existing owned Item/scalar storage. Parent writes and COW detaches publish through that home; snapshots mark captured containers shared and copy wide scalar payloads. T0/MIR environments and parent slots precisely root their homes. AUTO declines shared-home satellites; eager MIR supports them. Legacy pn-parent captured-var writes and their E231 guard remain separate debt. A `start` capturing a mutable `var` is E221.
 - **Element purity.** `colour_walk_visit` switches to functional mode inside element and object literals, so `colour_walk_call` reports E224. Dynamic callees go through the run-time colour guard (`fn_colour_guard`).
 - **Output.** `output` is registered at arity 2 and 3 (`pn_output2`, `pn_output3`; append through `pn_output_append`) in `lambda-proc.cpp`. The `io.*` procedures are in `sys_func_registry.c`. Both tiers still handle `AST_NODE_PIPE_FILE_STAM`, the old pipe-to-file statement, but `build_ast` no longer creates it, so the path looks unreachable. Retiring it is a cleanup, not a design question.
-- **Fixtures.** Positive fixtures are under `test/lambda/proc/`: `proc_control`, `proc_var`, `proc_var_type_widen`, `while_swap`, `proc_array_type_convert`, `proc_map_type_change`, `proc_element_mutation`, `proc_markup_mutation`, `object_open_instance`, `proc_oob_write_error`, `proc_closure_mutation` (read capture and snapshot independence only), `var_param*`, `cow_*`, `let_finality`, `test_pipe_file` (`output`), `element_prepared_parts`. Negative fixtures are under `test/lambda/negative/semantic/`: `immutable_assignment`, `immutable_interior_assignment`, `immutable_reassign`, `mutation_in_fn`, `proc_stam_outside_pn`, `function_body_var`, `capture_mutation` (E231; no golden), `start_mutable_capture`, `element_calls_pn`, `proc_method_let_receiver`. Run-time negatives under `test/lambda/negative/runtime/` cover element-attribute `pn` calls and typed-container writes (`type_enforcement_*_write`).
+- **Fixtures.** Local-control and snapshot coverage is in `test/lambda/fn_local_*.ls` and `proc/fn_local_proc_snapshot.ls`; the former `mutation_in_fn` and `function_body_var` negatives are now the valid `fn_local_legacy` and `fn_local_colour_poly` cases. Ownership, capture escape, comprehension control, lexical targets and static/dynamic pn refusal have `negative/{semantic,runtime}/fn_local_*` fixtures. Existing `proc_control`, `proc_var*`, `cow_*`, `var_param*`, `let_finality` and typed-container-write cases retain their roles.
 
 ### A.2 History
 

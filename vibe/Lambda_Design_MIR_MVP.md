@@ -1,37 +1,39 @@
 # Lambda MIR MVP — typed execution on the existing runtime
 
-**Date:** 2026-11-02
+**Date:** 2026-11-03
 
-**Status:** experimental scalar/array compiler behind an explicit selector,
-with bounded inlining, guarded numeric loops, checked mutation and precise
-`var` write-back (**S9.1.3**, **D5.3**, **D8.4.1v2**).
-Coverage now extends to **28 rows**, including floating recursion, FFT,
-allocation-heavy search, dynamic arrays, character processing, numerical kernels
-and JSON generation. All 28 original goldens pass; allocation workloads also
-pass forced GC with freed-memory poisoning. The latest 100-run paired campaign
-qualifies **26/28** against Full MIR and **15/28** against both gates using the
-original execution windows. A separate matched 10,000-invocation Sumfp batch
-resolves that row's clock limit, bringing combined qualification to **27/28**
-against Full MIR and **16/28** against both. The original zero-duration samples
-remain recorded and unqualified.
+**Status:** experimental typed compiler behind an explicit selector, with
+native scalar/array kernels, typed records, checked mutation and precise `var`
+write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
+the original 28 plus 20 additional recursion, record, allocation, text and
+numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest pass lowers native-bit primitive fills, folds small constant fills
-for proven direct read-only consumers, keeps nested bitwise operations in native
-lanes, reuses closed array guards inside conditional arms and extends read-only
-array tail calls (**D4.1.1v2–D4.1.3**, **D5.3**, **S4.1.2**, **S9.1.2–S9.1.3**).
-NQueens improves another **16.6%** against the interleaved previous MVP and now
-qualifies against Full MIR; Beng Mandelbrot now qualifies against both. Fannkuch
-has a faster median than Full MIR but still misses its confidence gate. Twelve
-rows miss the C2MIR allowance. All **40 focused test groups** pass. The full
-baseline remains **8,501/8,502**, with the previously recorded AUTO-tier
-cold-float snapshot failure. Brainfuck also records a 3.3% before/after
-slowdown in this campaign. The 28-row performance milestone remains open.
-See the
-[implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
+The latest 100-sample release campaign detects **no statistically established
+performance regression across all 48** against the committed starting MVP.
+Including the separate matched 10,000-invocation Sumfp batch, the original
+rows qualify **28/28 against Full MIR and 20/28 within 20% of C2MIR (and both
+gates)**. Single-run zero-duration Sumfp samples remain recorded and unqualified.
+
+The 20 additions qualify **10/20 against Full MIR and 6/20 against both targets**,
+up from 7/20 and 5/20 in the expansion campaign. GCbench and Binarytrees now
+clear both targets; 12 added rows improve against the starting MVP. BENG NBody
+has a median within 10% of C2MIR, but its confidence bound does not qualify in
+this run. The requested performance milestone remains open: **38/48 beat Full
+MIR and 26/48 meet both targets**. These are execution-window timings, excluding
+startup and compilation, with one-sided 95% paired confidence gates.
+
+All **42 focused test groups** pass, including all 48 Lambda and C reference
+goldens, precise-root/poisoned-GC fixtures and MIR emission checks. The latest
+aggregate baseline and focused failure rechecks are recorded in the
+implementation notes. The compiler now retains proven record and private array
+domains, guards allocating vector bodies while rooting their owners, forwards
+precise `var` homes, and avoids redundant captures on fresh return-only owners
+(**D2.4.3, D5.3, S9.1.3v2, S9.3.1, S12.2.1v3**).
+See the [implementation and complete release measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-tuning-the-slower-expansion-rows).
 
 **Destination:** `lambda/runtime/mvp/`
 
-**Source inspected:** `d8c604ec5611ee7cac4a4bc6dd4b5e15228149a8`.
+**Initial proposal source inspected:** `d8c604ec5611ee7cac4a4bc6dd4b5e15228149a8`.
 
 **Scope:** a fresh implementation of Lambda's MIR planning and lowering, initially
 for a small typed subset, with selective runtime-helper reimplementation where
@@ -387,16 +389,20 @@ weak. Require successful exit and absence of failures as well. The existing
 runner's `ok` status alone is insufficient: [Developer Guide §7.4](../doc/dev/Developer_Guide.md#74-test-gotchas)
 states that it does not compare output with goldens.
 
-### 8.2 Proposed performance gates
+### 8.2 Performance gates
 
-These are targets to qualify, not promised results:
+The user revised the current target on 2026-11-03 to **every one of the 28
+covered rows within 20% of C2MIR or faster**. Qualification uses each row's
+one-sided 95% paired-bootstrap upper ratio bound, at most **1.20×**. The runner
+records `c2mir_allowance_percent` and `within_c2mir_allowance`; it also retains
+the 10% diagnostic and the Full MIR comparison. Historical reports keep their
+original gates. Zero-resolution observations require a separate, matched batch
+before qualification. This changes the requested performance target, not a
+language or runtime ruling.
 
-- **Near-C2MIR milestone:** upper 95% confidence bound for the geometric mean
-  of MVP/C2MIR execution ratios at most **1.10×**, and no admitted row's median
-  above **1.25×**, on the frozen, audited eight-row population with matched timer
-  boundaries. This includes workload allocation and GC; kernel-only results
-  cannot satisfy this gate. Report individual rows so a fast control cannot
-  hide a large miss.
+- **Per-row milestone:** all 28 audited workloads meet the bound above with
+  matched execution windows, including allocation and GC. A geometric mean
+  cannot compensate for a failing row.
 - **Per-row parity claim:** reserve “as fast as C2MIR” for a row whose measured
   uncertainty establishes no more than 10% overhead; overlapping error bars
   alone do not establish equivalence. The optimization target remains 1.00×.

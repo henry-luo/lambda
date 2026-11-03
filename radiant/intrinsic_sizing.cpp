@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_ruby.hpp"
 #include "layout_table.hpp"
 #include "css_resolved_style.hpp"
 
@@ -1579,7 +1580,7 @@ static bool intrinsic_measure_grapheme_cluster(
     return true;
 }
 
-static void intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
+void layout_intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
         const IntrinsicSizes& widths, bool boundary_break) {
     float first = widths.first_segment_min >= 0.0f
         ? widths.first_segment_min : widths.min_content;
@@ -1599,6 +1600,7 @@ static void intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
     if (run->first < 0.0f) run->first = first;
     else if (!run->has_break && !boundary_break) run->first += first;
     run->has_break |= boundary_break || internal_break;
+    run->has_used_break |= boundary_break || internal_break || widths.has_used_content_break;
     run->tail = internal_break ? last : joined;
 }
 
@@ -1645,19 +1647,48 @@ static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* cur
     widths->min_content = max(widths->min_content, *current);
     if (!at_break && widths->last_segment_min < 0.0f) widths->last_segment_min = widths->first_segment_min;
     widths->has_min_content_break |= at_break;
+    widths->has_used_content_break |= at_break;
     *current = 0.0f;
 }
 
-// pre and nowrap leave no soft wrap opportunity: the run is one unbreakable segment.
-static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space) {
-    if (white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP) return;
+static bool intrinsic_text_wraps(CssEnum white_space, CssEnum wrap_mode) {
+    return wrap_mode == CSS_VALUE__UNDEF
+        ? white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP : wrap_mode != CSS_VALUE_NOWRAP;
+}
+
+// pre and nowrap leave no soft wrap opportunity unless text-wrap-mode overrides that component.
+static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space,
+                                         CssEnum wrap_mode = CSS_VALUE__UNDEF) {
+    if (intrinsic_text_wraps(white_space, wrap_mode)) return;
     widths->min_content = widths->max_content;
     widths->first_segment_min = widths->max_content;
     widths->remaining_min_content = 0.0f;
     widths->last_segment_min = widths->max_content;
     widths->has_min_content_break = false;
+    widths->has_used_content_break = false;
     widths->interior_min_content = 0.0f;
 }
+
+struct IntrinsicTextBreakObserver {
+    LayoutTextBreakPlan* plan;
+    const size_t* source_offsets;
+    size_t source_length;
+    bool allows_wrap;
+
+    void record(size_t start, size_t end, float advance, float next_advance,
+                float first_adjustment, bool at_break) {
+        if (start == 0 && advance == 0.0f && next_advance > 0.0f)
+            plan->leading_space = {source_offsets[end], 0.0f, next_advance};
+        if (at_break && !allows_wrap) return;
+        if (!at_break) plan->width = next_advance;
+        LayoutTextBreakPoint* previous = &plan->points[plan->count - 1];
+        // a new line has no kerning/autospace pair with the preceding fragment.
+        if (previous->source_end == source_offsets[start]) previous->next_advance += first_adjustment;
+        size_t source_end = at_break ? source_offsets[end] : source_length;
+        if (source_end <= previous->source_end) return;
+        plan->points[plan->count++] = {source_end, advance, next_advance};
+    }
+};
 
 static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            const char* text,
@@ -1668,7 +1699,8 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            CssEnum overflow_wrap,
                                                            CssEnum word_break,
                                                            CssEnum line_break,
-                                                           IntrinsicTextLinePacking* packing = nullptr) {
+                                                           IntrinsicTextLinePacking* packing = nullptr,
+                                                           IntrinsicTextBreakObserver* observer = nullptr) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
@@ -1679,6 +1711,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     if (!text || length == 0) {
         return result;
     }
+    // CSS Text 3 §5.4: break-word permits emergency unit breaks without reducing min-content.
+    const unsigned char* text_end = (const unsigned char*)text + length;
+    const unsigned char* first_unit_end = break_word
+        ? text_glyph_unit_end((const unsigned char*)text, text_end) : nullptr;
+    result.has_used_content_break = first_unit_end && first_unit_end < text_end;
     size_t trailing_space_start = length;
     while (trailing_space_start > 0 && str_is_html_space(text[trailing_space_start - 1])) {
         trailing_space_start--;
@@ -1689,10 +1726,25 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     }
 
     float total_width = 0.0f;
+    float trailing_advance = 0.0f;
     float current_word = 0.0f;
     float packed_end = 0.0f;
     bool packed_content = false;
-    auto record_segment = [&](bool at_break = true, float end_adjustment = 0.0f) {
+    bool segment_started = false;
+    float first_adjustment = 0.0f;
+    size_t segment_start = 0;
+    auto append_advance = [&](float advance, float boundary_adjustment = 0.0f) {
+        if (!segment_started) { first_adjustment = boundary_adjustment; segment_started = true; }
+        current_word += advance;
+        total_width += advance;
+    };
+    auto record_segment = [&](size_t source_end, bool at_break = true,
+                              float end_adjustment = 0.0f, float next_adjustment = 0.0f) {
+        if (observer) observer->record(segment_start, source_end, total_width + end_adjustment,
+            total_width + next_adjustment, first_adjustment, at_break);
+        segment_start = source_end;
+        segment_started = false;
+        first_adjustment = 0.0f;
         if (packing && current_word != 0.0f) {
             float end = total_width + end_adjustment;
             // separators participate between words, but collapse at a new line's start.
@@ -1713,23 +1765,23 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     // CSS Text 3 §4.2.2: break-spaces — spaces are not hangable,
                     // contribute to min-content. Break opportunity is AFTER the space.
                     current_word += 4.0f;
-                    if (i + 1 < length) record_segment(true, 4.0f);
+                    if (i + 1 < length) record_segment(i + 1, true, 4.0f, 4.0f);
                 } else {
-                    if (i < trailing_space_start) record_segment();
+                    if (i < trailing_space_start) record_segment(i + 1, true, 0.0f, 4.0f);
                 }
                 total_width += 4.0f;  // Space width estimate
+                if (i >= trailing_space_start) trailing_advance += 4.0f;
             } else {
-                current_word += 11.0f;  // Use 11.0 to match font fallback width
-                total_width += 11.0f;
+                append_advance(11.0f);  // use the same font fallback width.
                 if (layout_text_break_opportunity(ch, ch,
                         (const unsigned char*)text + i + 1,
                         (const unsigned char*)text + length, native_breaks, i + 1,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
-                    record_segment();
+                    record_segment(i + 1);
                 }
             }
         }
-        record_segment(false);
+        record_segment(length, false, observer ? -trailing_advance : 0.0f);
 
         result.max_content = total_width;
         return result;
@@ -1754,7 +1806,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         IntrinsicZeroWidthChar zero_width = intrinsic_zero_width_char(str, i, length);
 
         if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
-            if (i + 3 < length) record_segment();
+            if (i + 3 < length) record_segment(i + 3);
             is_word_start = true;
             i += 3;
             continue;
@@ -1785,13 +1837,14 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 // and DO contribute to min-content width. Break opportunity is AFTER
                 // each preserved space, so include space in the preceding segment.
                 current_word += kerning_adj + space_width;
-                if (i + 1 < length) record_segment(true, kerning_adj + space_width);
+                if (i + 1 < length) record_segment(i + 1, true, kerning_adj + space_width, kerning_adj + space_width);
             } else {
                 // terminal collapsible/hanging spaces do not invent an empty final fragment.
-                if (i < trailing_space_start) record_segment();
+                if (i < trailing_space_start) record_segment(i + 1, true, 0.0f, kerning_adj + space_width);
             }
 
             total_width += kerning_adj + space_width;
+            if (i >= trailing_space_start) trailing_advance += kerning_adj + space_width;
 
             prev_codepoint = (uint32_t)ch;
             prev_is_zwj_base = false;
@@ -1820,8 +1873,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                             shaped_script_first);
                     }
                     float advance = shaped_script_width + kerning;
-                    current_word += advance;
-                    total_width += advance;
+                    append_advance(advance, kerning);
                     prev_codepoint = shaped_script_last;
                     prev_text_autospace_codepoint = shaped_script_last;
                     prev_is_zwj_base = false;
@@ -1830,7 +1882,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     if (layout_text_break_opportunity(shaped_script_first, shaped_script_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
-                        record_segment();
+                        record_segment(i);
                     }
                     continue;
                 }
@@ -1856,8 +1908,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                             cluster_first)) {
                         advance += layout_text_autospace_advance(lycon);
                     }
-                    current_word += advance;
-                    total_width += advance;
+                    append_advance(advance, advance - cluster_width);
                     prev_codepoint = cluster_last;
                     prev_text_autospace_codepoint = cluster_last;
                     prev_is_zwj_base = false;
@@ -1868,7 +1919,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     if (layout_text_break_opportunity(cluster_first, cluster_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
-                        record_segment();
+                        record_segment(i);
                     }
                     continue;
                 }
@@ -1894,8 +1945,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                         shaped_first_cp)) {
                     advance += layout_text_autospace_advance(lycon);
                 }
-                current_word += advance;
-                total_width += advance;
+                append_advance(advance, advance - shaped_width);
                 prev_codepoint = shaped_last_cp;
                 prev_text_autospace_codepoint = shaped_last_cp;
                 prev_is_zwj_base = false;
@@ -1906,7 +1956,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
                     // a shaped Latin run can end at a native CJK boundary;
                     // its advance must not carry into the following word.
-                    record_segment();
+                    record_segment(i);
                 }
                 continue;
             }
@@ -1915,12 +1965,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         uint32_t codepoint;
         int bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
         if (bytes <= 0) {
-            current_word += 11.0f;
-            total_width += 11.0f;
+            append_advance(11.0f);
             i++;
             is_word_start = false;
             if (break_anywhere) {
-                record_segment();
+                record_segment(i);
             }
             continue;
         }
@@ -1985,6 +2034,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
             lycon, codepoint, is_small_caps_lower, kerning,
             emoji_presentation, &glyph_loaded);
         if (!glyph_loaded) advance = 11.0f;
+        float boundary_adjustment = kerning;
         if (text_transform == CSS_VALUE_NONE && font_variant != CSS_VALUE_SMALL_CAPS &&
             utf_requires_contextual_shaping(codepoint)) {
             float contextual_width = 0.0f;
@@ -1994,18 +2044,20 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 advance = contextual_width + (contextual_width > 0.0f
                     ? text_character_spacing(lycon->font.style, codepoint) : 0.0f);
                 glyph_loaded = true;
+                boundary_adjustment = 0.0f;
             }
         }
         if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                 text_autospace, prev_text_autospace_codepoint, codepoint)) {
-            advance += layout_text_autospace_advance(lycon);
+            float autospace = layout_text_autospace_advance(lycon);
+            advance += autospace;
+            boundary_adjustment += autospace;
         }
         if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
             advance += lycon->font.style->word_spacing;
             is_word_start = true;
         }
-        current_word += advance;
-        total_width += advance;
+        append_advance(advance, boundary_adjustment);
 
         if (glyph_index) prev_codepoint = codepoint;
         prev_text_autospace_codepoint = codepoint;
@@ -2014,11 +2066,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         if (layout_text_break_opportunity(codepoint, codepoint,
                 &str[i], str + length, native_breaks, i,
                 break_anywhere, break_all, cjk_breaks, line_break)) {
-            record_segment();
+            record_segment(i);
         }
     }
 
-    record_segment(false);
+    record_segment(length, false, observer ? -trailing_advance : 0.0f);
 
     // max-content disables wrapping, including line-break:anywhere, to retain whole-run shaping.
     result.max_content = break_all || break_anywhere || break_word
@@ -2062,6 +2114,19 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         if (metrics) { metrics->line_count = 1; metrics->block_extent = em; }
         return result;
     }
+    if (options.collapse_segment_breaks) {
+        StrBuf* normalized = layout_normalize_inline_text(text, length, options.white_space, true,
+            options.preserve_initial_space, options.preserve_terminal_space);
+        if (!normalized) return result;
+        LayoutTextIntrinsicLineOptions normalized_options = options;
+        normalized_options.collapse_segment_breaks = false;
+        // normalized text contains spaces, while genuine forced-break markers retain their meaning.
+        normalized_options.processed_forced_breaks = true;
+        result = layout_measure_text_intrinsic_lines(lycon, normalized->str, normalized->length,
+            normalized_options, vertical_text_extent, metrics);
+        strbuf_free(normalized);
+        return result;
+    }
     bool preserve_spaces = white_space_preserves_space_advance(options.white_space);
     bool preserve_newlines = preserve_spaces || options.white_space == CSS_VALUE_PRE_LINE;
     const char* line_start = text;
@@ -2083,12 +2148,12 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
             while (line_length > 0 && is_space((unsigned char)line_start[line_length - 1])) line_length--;
         }
         IntrinsicTextLinePacking packing(options.vertical_inline_basis,
-            options.white_space != CSS_VALUE_PRE && options.white_space != CSS_VALUE_NOWRAP);
+            intrinsic_text_wraps(options.white_space, options.text_wrap_mode));
         TextIntrinsicWidths widths = measure_text_intrinsic_segments(
             lycon, line_start, line_length, options.text_transform, options.font_variant,
             options.white_space, options.overflow_wrap, options.word_break, options.line_break,
             vertical_text_extent ? &packing : nullptr);
-        intrinsic_text_apply_no_wrap(&widths, options.white_space);
+        intrinsic_text_apply_no_wrap(&widths, options.white_space, options.text_wrap_mode);
         if (preserve_spaces && text_line_has_tab(line_start, line_length)) {
             widths.max_content = measure_preserved_line_width_with_tabs(
                 lycon, line_start, line_length, first_line ? options.start_offset : 0.0f,
@@ -2097,13 +2162,14 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         }
         // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines;
         // the tab-adjusted max-content above needs the clamp again.
-        intrinsic_text_apply_no_wrap(&widths, options.white_space);
+        intrinsic_text_apply_no_wrap(&widths, options.white_space, options.text_wrap_mode);
         IntrinsicSizes line_sizes = {widths.min_content, widths.max_content};
         line_sizes.first_segment_min = widths.first_segment_min;
         line_sizes.last_segment_min = widths.last_segment_min;
         line_sizes.interior_min_content = widths.interior_min_content;
         line_sizes.has_min_content_break = widths.has_min_content_break;
-        intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
+        line_sizes.has_used_content_break = widths.has_used_content_break;
+        layout_intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
         result.min_content = min_run.minimum;
         result.max_content = max(result.max_content, widths.max_content);
         if (first_line) result.first_line_max = widths.max_content;
@@ -2132,6 +2198,7 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     result.last_segment_min = min_run.tail;
     result.interior_min_content = min_run.interior;
     result.has_min_content_break = min_run.has_break;
+    result.has_used_content_break = min_run.has_used_break;
     result.remaining_min_content = min_run.has_break ? max(min_run.interior, min_run.tail) : 0.0f;
     return result;
 }
@@ -2499,7 +2566,7 @@ bool layout_intrinsic_element_is_atomic_inline(DomElement* element) {
     return false;
 }
 
-static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
+bool layout_intrinsic_node_is_collapsible_space_only(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
         return !layout_text_combine_upright_applies(node) && text_node_is_ascii_whitespace(node) &&
@@ -2510,9 +2577,10 @@ static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
     DomElement* element = node->as_element();
     if (!is_inline_level_element(element)) return false;
     bool saw_child = false;
+    if (element->tag() == MARKUP_NAME_BR && layout_ruby_annotation_content(element)) return true;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (child->is_comment()) continue;
-        if (!intrinsic_node_is_collapsible_space_only(child)) return false;
+        if (!layout_intrinsic_node_is_collapsible_space_only(child)) return false;
         saw_child = true;
     }
     return saw_child;
@@ -2526,7 +2594,7 @@ static bool intrinsic_is_vertical_block_sequence(DomElement* element) {
         (is_inline_level_element(element) && !layout_intrinsic_element_is_atomic_inline(element))) return false;
     bool has_block = false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (child->is_comment() || intrinsic_node_is_collapsible_space_only(child)) continue;
+        if (child->is_comment() || layout_intrinsic_node_is_collapsible_space_only(child)) continue;
         if (!child->is_element()) return false;
         DomElement* child_element = child->as_element();
         DisplayValue display = resolve_display_value(child_element);
@@ -2576,7 +2644,6 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     return false;
 }
 
-static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end);
 
 static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bool following) {
     DomNode* current = node;
@@ -2586,16 +2653,17 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
             if (sibling->is_comment()) continue;
             // a forced break ends the intrinsic line even through transparent
             // inline wrappers; later content cannot retain its trailing space.
-            if (intrinsic_node_has_forced_break_at_edge(sibling, !following)) return false;
+            if (layout_intrinsic_node_has_forced_break_at_edge(sibling, !following)) return false;
             if (intrinsic_node_has_inline_boundary_content(sibling)) {
                 return true;
             }
-            if (intrinsic_node_is_collapsible_space_only(sibling)) continue;
+            if (layout_intrinsic_node_is_collapsible_space_only(sibling)) continue;
             if (sibling->is_element() && !is_inline_level_element(sibling->as_element())) return false;
         }
 
         DomNode* parent = current->parent;
         if (!parent || !parent->is_element()) break;
+        if (layout_ruby_annotation_node(parent)) break;
         if (!is_inline_level_element(parent->as_element())) break;
         if (layout_intrinsic_element_is_atomic_inline(parent->as_element())) {
             // css display 3: an atomic inline owns its formatting context, so
@@ -2607,7 +2675,34 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
     return false;
 }
 
-static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
+static LayoutTextIntrinsicLineOptions intrinsic_text_line_options(LayoutContext* lycon,
+        DomElement* owner, DomNode* source, bool processed_forced_breaks = false) {
+    LayoutTextIntrinsicLineOptions options;
+    if (owner) {
+        options.text_transform = get_element_text_transform(owner);
+        options.font_variant = get_element_font_variant(owner);
+        if (owner->blk) {
+            if (owner->block()->tab_size >= 0.0f) options.tab_size = owner->block()->tab_size;
+            options.tab_size_length = owner->block()->tab_size_length;
+        }
+    }
+    options.white_space = get_white_space_value(source);
+    options.text_wrap_mode = get_text_wrap_mode_value(owner ? static_cast<DomNode*>(owner) : source, lycon);
+    DomNode* inheritance = owner ? static_cast<DomNode*>(owner) : source;
+    layout_resolve_inherited_text_wrap(lycon, inheritance, &options.overflow_wrap, &options.word_break);
+    options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
+        &BlockProp::line_break, CSS_VALUE_AUTO, inheritance);
+    options.processed_forced_breaks = processed_forced_breaks;
+    options.collapse_segment_breaks = !processed_forced_breaks &&
+        !layout_white_space_collapses_newlines(options.white_space) && layout_ruby_annotation_content(source);
+    if (options.collapse_segment_breaks) {
+        options.preserve_initial_space = intrinsic_has_inline_boundary_content_in_direction(source, false);
+        options.preserve_terminal_space = intrinsic_has_inline_boundary_content_in_direction(source, true);
+    }
+    return options;
+}
+
+bool layout_intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
@@ -2619,19 +2714,19 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
             white_space == CSS_VALUE_BREAK_SPACES ||
             white_space == CSS_VALUE_PRE_LINE;
         char edge = text[end ? length - 1 : 0];
-        return preserves_newlines && layout_text_is_segment_break(edge);
+        return preserves_newlines && !layout_ruby_annotation_content(node) && layout_text_is_segment_break(edge);
     }
     if (!node->is_element()) return false;
 
     DomElement* element = node->as_element();
     if (!is_inline_level_element(element)) return false;
-    if (element->tag() == MARKUP_NAME_BR) return true;
+    if (element->tag() == MARKUP_NAME_BR) return !layout_ruby_annotation_content(element);
     if (layout_intrinsic_element_is_atomic_inline(element)) return false;
     for (DomNode* child = end ? element->last_child : element->first_child;
          child; child = end ? child->prev_sibling : child->next_sibling) {
         if (child->is_comment()) continue;
-        if (intrinsic_node_is_collapsible_space_only(child)) continue;
-        return intrinsic_node_has_forced_break_at_edge(child, end);
+        if (layout_intrinsic_node_is_collapsible_space_only(child)) continue;
+        return layout_intrinsic_node_has_forced_break_at_edge(child, end);
     }
     return false;
 }
@@ -2639,8 +2734,12 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
 static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
-        return layout_text_edge_has_whitespace((const char*)node->text_data(), end) &&
-            !white_space_preserves_space_advance(get_white_space_value(node));
+        const char* text = (const char*)node->text_data();
+        if (!text || !*text) return false;
+        char edge = text[end ? strlen(text) - 1 : 0];
+        return layout_text_edge_has_whitespace(text, end) &&
+            (!white_space_preserves_space_advance(get_white_space_value(node)) ||
+             (layout_text_is_segment_break(edge) && layout_ruby_annotation_content(node)));
     }
     if (!node->is_element()) return false;
 
@@ -2657,10 +2756,13 @@ static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end
     return false;
 }
 
-static bool intrinsic_min_boundary_break(LayoutContext* lycon, DomNode* previous,
-                                         DomNode* child, bool separator) {
-    if (!previous) return false;
-    if (get_text_wrap_mode_value(child->parent, lycon) == CSS_VALUE_NOWRAP) return false;
+bool layout_intrinsic_boundary_break(LayoutContext* lycon, DomNode* previous,
+                                     DomNode* child, bool separator, bool used_breaks) {
+    if (!previous || !child) return false;
+    // CSS Text §5.5: the common source owner controls a seam, not the following child's parent.
+    DomNode* owner = view_geometry_dom_common_ancestor(previous, child);
+    if (!owner) owner = child->parent;
+    if (get_text_wrap_mode_value(owner, lycon) == CSS_VALUE_NOWRAP) return false;
     if (separator) return true;
     uint32_t before = layout_inline_text_edge_codepoint(previous, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE);
@@ -2671,15 +2773,15 @@ static bool intrinsic_min_boundary_break(LayoutContext* lycon, DomNode* previous
     bool child_atomic = child->is_element() &&
         layout_intrinsic_element_is_atomic_inline(child->as_element());
     CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-        &BlockProp::line_break, CSS_VALUE_AUTO, child->parent);
-    if (child_atomic) return layout_atomic_inline_boundary_allows_soft_wrap(lycon, child, true);
+        &BlockProp::line_break, CSS_VALUE_AUTO, owner);
+    if (child_atomic) return layout_atomic_wrap_neighbor_allows(before);
     if (previous_atomic) {
-        return layout_atomic_inline_boundary_allows_soft_wrap(lycon, previous, false) &&
+        return layout_atomic_wrap_neighbor_allows(after) &&
             layout_text_allows_letter_break(0xFFFC, after, line_break, false, false);
     }
     if (!before || !after) return false;
     if (is_space(before) || is_space(after) || before == 0x200B) return true;
-    return layout_inline_text_boundary_break(lycon, child->parent, before, after);
+    return layout_inline_text_boundary_break(lycon, owner, before, after, used_breaks);
 }
 
 void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run) {
@@ -2687,6 +2789,7 @@ void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run) {
     if (run->has_break) run->interior = max(run->interior, run->tail);
     run->tail = 0.0f;
     run->has_break = true;
+    run->has_used_break = true;
     run->previous = nullptr;
 }
 
@@ -2738,9 +2841,13 @@ void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun
         segments.first_segment_min = segments.last_segment_min = widths.min_content;
         segments.interior_min_content = 0.0f;
         segments.has_min_content_break = segments.has_forced_break = false;
+        segments.has_used_content_break = false;
     }
-    bool boundary_break = intrinsic_min_boundary_break(lycon, run->previous, child, separator);
-    intrinsic_append_min_segments(run, segments, boundary_break);
+    bool boundary_break = layout_intrinsic_boundary_break(lycon, run->previous, child, separator);
+    bool used_boundary_break = boundary_break ||
+        layout_intrinsic_boundary_break(lycon, run->previous, child, separator, true);
+    layout_intrinsic_append_min_segments(run, segments, boundary_break);
+    run->has_used_break |= used_boundary_break;
     // empty inline boxes add decoration without erasing the surrounding text boundary.
     if (atomic || layout_inline_text_edge_codepoint(child, true)) run->previous = child;
 }
@@ -2751,7 +2858,7 @@ static bool intrinsic_element_has_explicit_box_decoration_break(DomElement* elem
     return decoration_break == CSS_VALUE_SLICE || decoration_break == CSS_VALUE_CLONE;
 }
 
-static float intrinsic_collapsed_space_width(LayoutContext* lycon, DomNode* source) {
+float layout_intrinsic_collapsed_space_width(LayoutContext* lycon, DomNode* source) {
     DomNode* text = nullptr;
     layout_inline_text_edge_codepoint(source, false,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &text);
@@ -3869,7 +3976,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_inline_non_replaced = false;
     {
         DisplayValue resolved_display = resolve_display_value((void*)element);
-        if (resolved_display.outer == CSS_VALUE_INLINE && resolved_display.inner == CSS_VALUE_FLOW) {
+        if (resolved_display.outer == CSS_VALUE_INLINE &&
+            (resolved_display.inner == CSS_VALUE_FLOW || resolved_display.inner == CSS_VALUE_RUBY ||
+             css_display_is_ruby_internal(resolved_display.inner))) {
             is_inline_non_replaced = true;
         }
     }
@@ -5156,8 +5265,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     DomNode* intrinsic_children = replaced_intrinsic_set ? nullptr : element->first_child;
     if (!replaced_intrinsic_set) {
         intrinsic_materialize_pseudo_content(lycon, element);
-        intrinsic_prepare_anonymous_table_children(lycon, element);
-        intrinsic_children = element->first_child;
+        if (resolve_display_value(element).inner == CSS_VALUE_RUBY) {
+            // CSS Ruby §3.1.1: paired columns contribute once, shared with used layout.
+            sizes = layout_ruby_intrinsic_sizes(lycon, element);
+            intrinsic_children = nullptr;
+        } else {
+            intrinsic_prepare_anonymous_table_children(lycon, element);
+            intrinsic_children = element->first_child;
+        }
     }
 
     // Track inline-level content separately
@@ -5549,7 +5664,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (next && next->is_element()) {
                             // Table-cell boxes inside inline content are wrapped in anonymous
                             // inline-table boxes, so preceding collapsed spaces still render.
-                            has_inline_after = !intrinsic_node_has_forced_break_at_edge(next, false) &&
+                            has_inline_after = !layout_intrinsic_node_has_forced_break_at_edge(next, false) &&
                                 (is_inline_level_element(next->as_element()) ||
                                 (is_inline_level_element(element) &&
                                  !layout_intrinsic_element_is_atomic_inline(element) &&
@@ -5581,36 +5696,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     continue;
                 }
 
-                // Get text-transform from parent element (text inherits from parent)
-                CssEnum text_transform = get_element_text_transform(element);
-                CssEnum font_variant = get_element_font_variant(element);
-
-                // Get overflow-wrap from element or ancestors (inherited property)
-                // CSS Text 3 §5.2: word-break: break-word is a deprecated keyword that
-                // has the same effect as word-break: normal and overflow-wrap: anywhere.
-                // Get overflow-wrap and word-break from element or ancestors (inherited properties)
-                CssEnum ow = CSS_VALUE_NORMAL;
-                CssEnum wb = CSS_VALUE_NORMAL;
-                layout_resolve_inherited_text_wrap(
-                    static_cast<DomNode*>(element), &ow, &wb);
-
                 float vertical_text_extent = 0.0f;
-                LayoutTextIntrinsicLineOptions line_options;
+                LayoutTextIntrinsicLineOptions line_options = intrinsic_text_line_options(lycon, element, child);
                 line_options.text_combine = combined;
-                line_options.text_transform = text_transform;
-                line_options.font_variant = font_variant;
                 line_options.white_space = ws;
-                line_options.overflow_wrap = ow;
-                line_options.word_break = wb;
-                line_options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-                    &BlockProp::line_break, CSS_VALUE_AUTO, element);
                 line_options.start_offset = inline_max_sum;
-                if (view_block->blk) {
-                    if (view_block->block()->tab_size >= 0.0f) {
-                        line_options.tab_size = view_block->block()->tab_size;
-                    }
-                    line_options.tab_size_length = view_block->block()->tab_size_length;
-                }
                 line_options.vertical_line_advance = vertical_line_advance;
                 line_options.vertical_inline_basis = vertical_inline_basis;
                 child_sizes = layout_measure_text_intrinsic_lines(
@@ -5740,14 +5830,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
 
-            bool is_collapsible_space_only = intrinsic_node_is_collapsible_space_only(child);
+            bool is_collapsible_space_only = layout_intrinsic_node_is_collapsible_space_only(child);
             if (is_collapsible_space_only) {
                 layout_intrinsic_break_min_run(&inline_min_run);
                 // Recursive inline measurement trims edge spaces inside each inline
                 // box, so the parent must own collapsed whitespace runs across boxes.
                 if (inline_max_sum > 0.0f && !inline_run_ends_with_collapsible_space &&
                     intrinsic_has_inline_boundary_content_in_direction(child, true)) {
-                    inline_max_sum += intrinsic_collapsed_space_width(lycon, child);
+                    inline_max_sum += layout_intrinsic_collapsed_space_width(lycon, child);
                     inline_run_ends_with_collapsible_space = true;
                 }
                 // A collapsed separator ends the current unbreakable run; it must
@@ -5869,7 +5959,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (inline_run_ends_with_collapsible_space &&
                     intrinsic_node_has_collapsible_space_at_edge(child, false)) {
                     inline_max_sum -= min(inline_max_sum,
-                        intrinsic_collapsed_space_width(lycon, child));
+                        layout_intrinsic_collapsed_space_width(lycon, child));
                 }
                 inline_max_sum += child_sizes.max_content;
                 inline_run_ends_with_collapsible_space =
@@ -6162,6 +6252,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ? max(sizes.interior_min_content, inline_min_run.tail) : 0.0f;
         sizes.last_segment_min = inline_min_run.tail;
         sizes.has_min_content_break = inline_min_run.has_break;
+        sizes.has_used_content_break = inline_min_run.has_used_break;
         // CSS 2.1 §16.1: text-indent applies to the first formatted line.
         // If a forced break (<br>) already flushed the first line with text-indent
         // applied, skip indent here — it only applies to the first line.
@@ -6197,6 +6288,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
             sizes.remaining_min_content = sizes.interior_min_content = 0.0f;
             sizes.has_min_content_break = false;
+            sizes.has_used_content_break = false;
         } else {
             sizes.min_content = max(sizes.min_content, inline_min_sum);
             // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
@@ -6215,11 +6307,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.first_line_max = first_inline_break_sum;
             sizes.last_line_max = inline_max_sum;
         }
-        DomNode* white_space_probe = element->first_child
-            ? element->first_child : static_cast<DomNode*>(element);
-        CssEnum element_white_space = get_white_space_value(white_space_probe);
-        if (element_white_space == CSS_VALUE_PRE ||
-            element_white_space == CSS_VALUE_NOWRAP) {
+        // the owner's wrap component cannot be replaced by its first inline child's override.
+        if (get_text_wrap_mode_value(element, lycon) == CSS_VALUE_NOWRAP) {
             // Preserved/nowrap inline content has no wrapping opportunities;
             // its min-content contribution is the unwrapped max-content line.
             sizes.min_content = sizes.max_content;
@@ -6227,6 +6316,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (!sizes.has_forced_break) {
                 sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
                 sizes.has_min_content_break = false;
+                sizes.has_used_content_break = false;
             }
         }
     }
@@ -6510,16 +6600,10 @@ IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* no
         lycon->elmt = lam::up(node);
         const char* text = (const char*)node->text_data();
         if (text) {
-            CssEnum text_transform = CSS_VALUE_NONE;
-            CssEnum font_variant = CSS_VALUE_NONE;
-            if (node->parent && node->parent->is_element()) {
-                text_transform = get_element_text_transform(node->parent->as_element());
-                font_variant = get_element_font_variant(node->parent->as_element());
-            }
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text), text_transform, font_variant);
-            sizes.min_content = widths.min_content;
-            sizes.max_content = widths.max_content;
+            DomElement* owner = node->parent ? node->parent->as_element() : nullptr;
+            // retain computed break policy and edge segments for parallel Ruby and parent inline runs.
+            sizes = layout_measure_text_intrinsic_lines(lycon, text, strlen(text),
+                intrinsic_text_line_options(lycon, owner, node));
         }
         return sizes;
     }
@@ -6567,30 +6651,42 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
 struct IntrinsicInlineTextState {
     bool pending_space = false;
     bool has_line_content = false;
+    size_t pending_source_end = 0;
 };
 
-static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextState* state) {
-    if (state->pending_space && state->has_line_content) strbuf_append_char(output, ' ');
+static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextState* state,
+                                         size_t* source_offsets = nullptr) {
+    if (state->pending_space && state->has_line_content) {
+        strbuf_append_char(output, ' ');
+        if (source_offsets) source_offsets[output->length] = state->pending_source_end;
+    }
     state->pending_space = false;
 }
 
 static void intrinsic_append_normalized_text(StrBuf* output,
                                                     const char* data, size_t length, CssEnum white_space,
-                                                    IntrinsicInlineTextState* state) {
+                                                    IntrinsicInlineTextState* state,
+                                                    bool collapse_segment_breaks = false,
+                                                    size_t* source_offsets = nullptr) {
     if (!data) return;
     bool collapse = layout_white_space_collapses(white_space);
-    bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
+    bool collapse_newlines = collapse_segment_breaks || layout_white_space_collapses_newlines(white_space);
     for (size_t i = 0; i < length; i++) {
         char ch = data[i];
         if (layout_text_is_segment_break(ch) && !collapse_newlines) {
             strbuf_append_char(output, '\v');
+            if (source_offsets) source_offsets[output->length] = i + 1;
             state->pending_space = false;
             state->has_line_content = false;
-        } else if (collapse && is_space((unsigned char)ch)) {
+        } else if ((collapse && is_space((unsigned char)ch)) ||
+                   (collapse_segment_breaks && layout_text_is_segment_break(ch))) {
             state->pending_space = true;
+            state->pending_source_end = i + 1;
         } else {
-            intrinsic_flush_inline_space(output, state);
+            intrinsic_flush_inline_space(output, state, source_offsets);
+            if (source_offsets && output->length == 0) source_offsets[0] = i;
             strbuf_append_char(output, (char)layout_text_resolve_css_whitespace(ch));
+            if (source_offsets) source_offsets[output->length] = i + 1;
             state->has_line_content = true;
         }
     }
@@ -6600,15 +6696,61 @@ static void intrinsic_append_normalized_inline_text(StrBuf* output, DomNode* nod
                                                     IntrinsicInlineTextState* state) {
     const char* data = reinterpret_cast<const char*>(node->text_data());
     intrinsic_append_normalized_text(output,data,data ? strlen(data) : 0,
-        get_white_space_value(node),state);
+        get_white_space_value(node),state,layout_ruby_annotation_content(node));
 }
 
-StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space) {
+StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space,
+                                    bool collapse_segment_breaks,
+                                    bool preserve_initial_space, bool preserve_terminal_space,
+                                    size_t* source_offsets) {
     StrBuf* normalized = strbuf_new();
     if (!normalized) return nullptr;
     IntrinsicInlineTextState state;
-    intrinsic_append_normalized_text(normalized,text,length,white_space,&state);
+    state.has_line_content = preserve_initial_space;
+    if (source_offsets) source_offsets[0] = 0;
+    intrinsic_append_normalized_text(normalized,text,length,white_space,&state,collapse_segment_breaks,source_offsets);
+    if (preserve_terminal_space) intrinsic_flush_inline_space(normalized, &state, source_offsets);
     return normalized;
+}
+
+bool layout_measure_text_break_plan(LayoutContext* context, DomNode* source,
+        ScratchScope* scope, LayoutTextBreakPlan* plan) {
+    *plan = {};
+    if (!context || !source || !source->is_text() || !source->text_data()) return false;
+    LayoutFontScope font(context);
+    LayoutViewScope selected(context);
+    context->elmt = lam::up(source);
+    DomElement* owner = source->parent ? source->parent->as_element() : nullptr;
+    if (owner && owner->font) setup_font(context->ui_context, &context->font, owner->font);
+    LayoutTextIntrinsicLineOptions options = intrinsic_text_line_options(context, owner, source);
+    const char* text = (const char*)source->text_data();
+    size_t length = strlen(text);
+    // conditional breaks need generated-mark/emergency metadata beyond a prefix-width plan.
+    if (options.overflow_wrap == CSS_VALUE_BREAK_WORD || strstr(text, "\xC2\xAD") ||
+            get_inherited_text_enum(context, CSS_PROPERTY_HYPHENS, &BlockProp::hyphens,
+                CSS_VALUE_MANUAL, source) == CSS_VALUE_AUTO) return false;
+    // preserved spaces can hang and tabs depend on the line origin; prefix widths do not describe those edges.
+    if (!layout_white_space_collapses(options.white_space)) return false;
+    size_t* offsets = scope->array_zero<size_t>(length + 1);
+    plan->points = scope->array_zero<LayoutTextBreakPoint>(length + 2);
+    if (!offsets || !plan->points) return false;
+    uint32_t following = layout_adjacent_inline_codepoint(source, false, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT);
+    StrBuf* normalized = layout_normalize_inline_text(text, length, options.white_space,
+        options.collapse_segment_breaks, true, following && following != '\n', offsets);
+    if (!normalized) return false;
+    bool supported = memchr(normalized->str, '\v', normalized->length) == nullptr;
+    if (supported) {
+        plan->points[plan->count++] = {offsets[0], 0.0f, 0.0f};
+        IntrinsicTextBreakObserver observer = {plan, offsets, length,
+            intrinsic_text_wraps(options.white_space, options.text_wrap_mode)};
+        measure_text_intrinsic_segments(context, normalized->str, normalized->length,
+            options.text_transform, options.font_variant, options.white_space,
+            options.overflow_wrap, options.word_break, options.line_break, nullptr, &observer);
+        if (plan->points[plan->count - 1].source_end < length)
+            plan->points[plan->count++] = {length, 0.0f, 0.0f};
+    }
+    strbuf_free(normalized);
+    return supported;
 }
 
 static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
@@ -6628,6 +6770,10 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     ViewElement* element_view = lam::view_require_element(static_cast<View*>(element));
     if (layout_display_is_none(element_view->display)) return true;
     if (element->tag_id == MARKUP_NAME_BR) {
+        if (layout_ruby_annotation_content(element)) {
+            intrinsic_append_normalized_text(output, "\n", 1, CSS_VALUE_NORMAL, state);
+            return true;
+        }
         // preserve a forced break without making it ordinary collapsible whitespace.
         strbuf_append_char(output, '\v');
         state->pending_space = false;
@@ -6671,20 +6817,7 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
 
 static LayoutTextIntrinsicLineOptions intrinsic_inline_text_options(LayoutContext* lycon,
                                                                     ViewBlock* block) {
-    LayoutTextIntrinsicLineOptions options;
-    options.text_transform = get_element_text_transform(block->as_element());
-    options.font_variant = get_element_font_variant(block->as_element());
-    // whitespace lookup starts at the text node's parent.
-    options.white_space = get_white_space_value(block->first_child);
-    layout_resolve_inherited_text_wrap(block, &options.overflow_wrap, &options.word_break);
-    options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-        &BlockProp::line_break, CSS_VALUE_AUTO, block->as_element());
-    options.processed_forced_breaks = true;
-    if (block->blk) {
-        if (block->block()->tab_size >= 0.0f) options.tab_size = block->block()->tab_size;
-        options.tab_size_length = block->block()->tab_size_length;
-    }
-    return options;
+    return intrinsic_text_line_options(lycon, block->as_element(), block->first_child, true);
 }
 
 static bool intrinsic_measure_direct_text(LayoutContext* lycon, ViewBlock* block,
@@ -6769,6 +6902,7 @@ struct IntrinsicInlineContentRun {
         sizes.last_segment_min = minimum.tail;
         sizes.interior_min_content = minimum.interior;
         sizes.has_min_content_break = minimum.has_break;
+        sizes.has_used_content_break = minimum.has_used_break;
         sizes.remaining_min_content = minimum.has_break
             ? max(minimum.interior, minimum.tail) : 0.0f;
         if (!sizes.has_forced_break) sizes.first_line_max = line_max;
@@ -6863,7 +6997,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
     bool supported = true;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
         if (child->is_comment() ||
-            (block_sequence && intrinsic_node_is_collapsible_space_only(child))) continue;
+            (block_sequence && layout_intrinsic_node_is_collapsible_space_only(child))) continue;
         if (child->is_text()) {
             intrinsic_append_normalized_inline_text(text, child, &text_state);
             text_source = child;
@@ -6873,7 +7007,8 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
         DomElement* element = child->as_element();
         ViewBlock* atom = lam::unsafe_view_block_element_storage(element);
         IntrinsicSizes contribution = {};
-        bool forced_break = element->tag() == MARKUP_NAME_BR;
+        bool converted_break = element->tag() == MARKUP_NAME_BR && layout_ruby_annotation_content(element);
+        bool forced_break = element->tag() == MARKUP_NAME_BR && !converted_break;
         bool soft_break = element->tag() == MARKUP_NAME_WBR;
         {
             BlockContextScope block_scope(lycon);
@@ -6912,7 +7047,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
             }
             bool parallel_block = block_sequence && !atom->display.list_item &&
                 layout_block_inline_axis_is_vertical(atom) == layout_block_inline_axis_is_vertical(block);
-            if (layout_element_is_floated(element) || (!composed && !forced_break && !soft_break &&
+            if (layout_element_is_floated(element) || (!composed && !forced_break && !soft_break && !converted_break &&
                 ((!parallel_block && !layout_intrinsic_element_is_atomic_inline(element)) ||
                  !intrinsic_measure_box_inline_contribution(lycon, atom,
                     !layout_block_inline_axis_is_vertical(block), &contribution)))) {
@@ -6929,6 +7064,11 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
         if (forced_break) {
             strbuf_append_char(text, '\v');
             text_state = {};
+            text_source = child;
+            continue;
+        }
+        if (converted_break) {
+            intrinsic_append_normalized_text(text, "\n", 1, CSS_VALUE_NORMAL, &text_state);
             text_source = child;
             continue;
         }
@@ -7559,6 +7699,9 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
         // Empty auto-height containers have zero content height. Padding and border
         // are still added below, but line-height must not synthesize a line.
         height = 0.0f;
+    } else if (display_inner == CSS_VALUE_RUBY) {
+        // the same normalized formatter supplies paired line metrics; annotations are not block siblings.
+        height = layout_ruby_intrinsic_height(lycon, element, width);
     } else if (is_table_structure_box) {
         // CSS tables size rows from the max cell height; block stacking would sum
         // sibling cells and overstate intrinsic table height.

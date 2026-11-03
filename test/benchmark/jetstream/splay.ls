@@ -7,7 +7,7 @@ let TREE_SIZE = 8000
 let TREE_MODIFICATIONS = 80
 
 // Node: {key, left, right, value}
-pn create_node(key, value) {
+fn create_node(key, value) {
     return {key: key, left: null, right: null, value: value}
 }
 
@@ -23,11 +23,11 @@ pn next_random(var st) {
 }
 
 // Splay tree using maps for tree state
-pn splay_tree_new() {
+fn splay_tree_new() {
     return {root: null}
 }
 
-pn splay_is_empty(tree) {
+fn splay_is_empty(tree) {
     return tree.root == null
 }
 
@@ -189,11 +189,13 @@ pn splay_find(var tree, key) {
     return null
 }
 
-pn splay_find_max(node) {
-    while (node.right != null) {
-        node = node.right
+fn splay_find_max(node) {
+    var work_node = node
+
+    while (work_node.right != null) {
+        work_node = work_node.right
     }
-    return node
+    return work_node
 }
 
 pn splay_find_greatest_less_than(var tree, key) {
@@ -211,7 +213,7 @@ pn splay_find_greatest_less_than(var tree, key) {
 }
 
 // Count nodes for verification
-pn count_nodes(node) {
+fn count_nodes(node) any^ {
     if (node == null) {
         return 0
     }
@@ -231,7 +233,7 @@ pn traverse_keys(node, var keys, idx_in) {
 }
 
 // Generate payload tree for node values
-pn generate_payload(depth: int, tag) {
+fn generate_payload(depth: int, tag) {
     if (depth == 0) {
         return {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
     }

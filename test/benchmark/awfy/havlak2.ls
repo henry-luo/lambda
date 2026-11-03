@@ -32,13 +32,13 @@ type IntQueue = {items: int[], first: int}
 // =====================================================
 // IntQueue: the node pool and the work list
 // =====================================================
-pn queue_new() IntQueue^ {
+fn queue_new() IntQueue^ {
     let _admitted_q_36: IntQueue = {items: [], first: 0}
     var q: IntQueue = _admitted_q_36^
     return q
 }
 
-pn queue_has(q: IntQueue, id: int) int {
+fn queue_has(q: IntQueue, id: int) int {
     var s = len(q.items)
     var i = q.first
     while (i < s) {
@@ -51,13 +51,13 @@ pn queue_has(q: IntQueue, id: int) int {
 // =====================================================
 // BasicBlock / ControlFlowGraph
 // =====================================================
-pn bb_new(name: int) BasicBlock^ {
+fn bb_new(name: int) BasicBlock^ {
     let _admitted_b_54: BasicBlock = {bid: name, inEdges: [], outEdges: []}
     var b: BasicBlock = _admitted_b_54^
     return b
 }
 
-pn cfg_new() ControlFlowGraph^ {
+fn cfg_new() ControlFlowGraph^ {
     let _admitted_c_59: ControlFlowGraph = {startNode: null, bbMap: [], numNodes: 0}
     var c: ControlFlowGraph = _admitted_c_59^
     return c
@@ -85,7 +85,7 @@ pn cfg_add_edge(var cfg: ControlFlowGraph, fromName: int, toName: int) int^ {
     return 0
 }
 
-pn cfg_get_num_nodes(cfg: ControlFlowGraph) int {
+fn cfg_get_num_nodes(cfg: ControlFlowGraph) int {
     return cfg.numNodes
 }
 
@@ -125,7 +125,7 @@ pn lsg_create_new_loop(var lsg: LoopStructureGraph, bb: BasicBlock,
     return lc
 }
 
-pn lsg_get_num_loops(lsg: LoopStructureGraph) int {
+fn lsg_get_num_loops(lsg: LoopStructureGraph) int {
     return lsg.loopCounter
 }
 
@@ -164,29 +164,31 @@ pn lsg_calc_nesting(var lsg: LoopStructureGraph) int^ {
 // =====================================================
 // UnionFindNode: nodes[dfn] is the node numbered dfn
 // =====================================================
-pn uf_new(dfsNum: int, bb: BasicBlock?) UnionFindNode^ {
+fn uf_new(dfsNum: int, bb: BasicBlock?) UnionFindNode^ {
     var n: UnionFindNode = {dfn: dfsNum, parentDfn: dfsNum, bb: bb, loopId: -1}
     return n
 }
 
-pn uf_find_set(nodes: UnionFindNode[], nodeId: int) int^ {
-    var pdfn = nodes[nodeId].parentDfn
-    if (pdfn == nodeId) { return nodeId }
+fn uf_find_set(nodes: UnionFindNode[], nodeId: int) int^ {
+    var work_nodeId: int = nodeId
+
+    var pdfn = nodes[work_nodeId].parentDfn
+    if (pdfn == work_nodeId) { return work_nodeId }
     var curp = pdfn
-    while ((nodeId != curp)^) {
+    while ((work_nodeId != curp)^) {
         var pp = curp
         var gpp = nodes[pp].parentDfn
-        nodeId = pp
+        work_nodeId = pp
         curp = gpp
     }
-    return nodeId
+    return work_nodeId
 }
 
 // =====================================================
 // Havlak Loop Finder
 // =====================================================
 
-pn hlf_is_ancestor(hlf_last: int[], w: int, v: int) int {
+fn hlf_is_ancestor(hlf_last: int[], w: int, v: int) int {
     if (w > v) { return 0 }
     if (v > hlf_last[w]) { return 0 }
     return 1

@@ -15,8 +15,8 @@ sweep and interpreter-manifest refresh on 2026-11-03; the manifests retain their
 last qualified contents, and no final parity pass is claimed. Exact results and
 limits are in the
 [M8 qualification record](../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m8-qualification-boundary-2026-11-03).
-General `fn`-local control, including explicit `return` in `fn`, is a separate
-[extension](../vibe/impl/Lambda_Impl_Function_Local_State.md).
+General `fn`-local control, including explicit `return` in `fn`, is qualified
+separately in the [completed extension](<../vibe/impl/Lambda_Impl_Function_Local_State (done).md>).
 
 Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
 [Expressions](Lambda_Expr_Stam.md), and [System functions](Lambda_Sys_Func.md).

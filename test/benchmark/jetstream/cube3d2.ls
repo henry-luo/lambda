@@ -6,14 +6,14 @@
 // M[i][j] -> m[i*4+j]
 
 // signatures and matrix/vector locals use the same packed float representation.
-pn mat4_identity() float[] {
+fn mat4_identity() float[] {
     return [1.0,0.0,0.0,0.0,
             0.0,1.0,0.0,0.0,
             0.0,0.0,1.0,0.0,
             0.0,0.0,0.0,1.0]
 }
 
-pn mat4_mul(m1: float[], m2: float[]) float[]^ {
+fn mat4_mul(m1: float[], m2: float[]) float[]^ {
     var m: float[] = fill(16, 0.0)^
     var i: int = 0
     while (i < 4) {
@@ -30,7 +30,7 @@ pn mat4_mul(m1: float[], m2: float[]) float[]^ {
     return m
 }
 
-pn mat4_add(m1: float[], m2: float[]) float[]^ {
+fn mat4_add(m1: float[], m2: float[]) float[]^ {
     var m: float[] = fill(16, 0.0)^
     var i: int = 0
     while (i < 16) {
@@ -41,7 +41,7 @@ pn mat4_add(m1: float[], m2: float[]) float[]^ {
 }
 
 // multiply 4x4 matrix with 4-element vector
-pn vmulti(m: float[], v: float[]) float[]^ {
+fn vmulti(m: float[], v: float[]) float[]^ {
     var r: float[] = fill(4, 0.0)^
     var i: int = 0
     while (i < 4) {
@@ -53,7 +53,7 @@ pn vmulti(m: float[], v: float[]) float[]^ {
 }
 
 // multiply 3x3 sub-matrix with 3-element vector
-pn vmulti2(m: float[], v: float[]) float[]^ {
+fn vmulti2(m: float[], v: float[]) float[]^ {
     var r: float[] = fill(3, 0.0)^
     var i: int = 0
     while (i < 3) {
@@ -63,7 +63,7 @@ pn vmulti2(m: float[], v: float[]) float[]^ {
     return r
 }
 
-pn translate_mat(m: float[], dx: float, dy: float, dz: float) float[]^ {
+fn translate_mat(m: float[], dx: float, dy: float, dz: float) float[]^ {
     var t: float[] = [1.0,0.0,0.0,dx,
              0.0,1.0,0.0,dy,
              0.0,0.0,1.0,dz,
@@ -71,7 +71,7 @@ pn translate_mat(m: float[], dx: float, dy: float, dz: float) float[]^ {
     return mat4_mul(t, m)
 }
 
-pn rotate_x(m: float[], phi: float) float[]^ {
+fn rotate_x(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -82,7 +82,7 @@ pn rotate_x(m: float[], phi: float) float[]^ {
     return mat4_mul(r, m)
 }
 
-pn rotate_y(m: float[], phi: float) float[]^ {
+fn rotate_y(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -93,7 +93,7 @@ pn rotate_y(m: float[], phi: float) float[]^ {
     return mat4_mul(r, m)
 }
 
-pn rotate_z(m: float[], phi: float) float[]^ {
+fn rotate_z(m: float[], phi: float) float[]^ {
     var a: float = phi * math.pi / 180.0
     var c: float = math.cos(a)
     var s: float = math.sin(a)
@@ -104,13 +104,13 @@ pn rotate_z(m: float[], phi: float) float[]^ {
     return mat4_mul(r, m)
 }
 
-pn calc_cross(v0: float[], v1: float[]) float[] {
+fn calc_cross(v0: float[], v1: float[]) float[] {
     return [v0[1] * v1[2] - v0[2] * v1[1],
             v0[2] * v1[0] - v0[0] * v1[2],
             v0[0] * v1[1] - v0[1] * v1[0]]
 }
 
-pn calc_normal(v0: float[], v1: float[], v2: float[]) float[]^ {
+fn calc_normal(v0: float[], v1: float[], v2: float[]) float[]^ {
     var a: float[] = [v0[0] - v1[0], v0[1] - v1[1], v0[2] - v1[2]]
     var b: float[] = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]]
     var cross: float[] = calc_cross(a, b)^
@@ -119,7 +119,7 @@ pn calc_normal(v0: float[], v1: float[], v2: float[]) float[]^ {
 }
 
 // Draw line (just count pixels, no actual rendering)
-pn draw_line(from_v: float[], to_v: float[], last_px: int) int^ {
+fn draw_line(from_v: float[], to_v: float[], last_px: int) int^ {
     var x1: float = from_v[0]
     var x2: float = to_v[0]
     var y1: float = from_v[1]
@@ -135,7 +135,7 @@ pn draw_line(from_v: float[], to_v: float[], last_px: int) int^ {
     return int(round(float(last_px) + num_pix))
 }
 
-pn run_cube(cube_size: int) float^ {
+fn run_cube(cube_size: int) float^ {
     let cs: float = float(cube_size)
 
     // Qube vertices as flat array: 9 points x 4 components = 36

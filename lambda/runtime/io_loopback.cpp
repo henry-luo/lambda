@@ -11,6 +11,7 @@
 // ends.
 
 #include "io_file_search.hpp"
+#include "io_resource.hpp"
 #include "concurrency.h"
 #include "lambda-number-runtime.hpp"
 #include "re2_wrapper.hpp"
@@ -22,35 +23,7 @@
 
 #include <string.h>
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-typedef SOCKET LoopSocket;
-#define LOOP_INVALID_SOCKET INVALID_SOCKET
-static void loop_socket_close(LoopSocket s) { closesocket(s); }
-static bool loop_socket_nonblocking(LoopSocket s) { u_long on = 1; return ioctlsocket(s, FIONBIO, &on) == 0; }
-static bool loop_would_block(void) { return WSAGetLastError() == WSAEWOULDBLOCK; }
-static bool loop_sockets_ready(void) {
-    static bool ready = [] { WSADATA data; return WSAStartup(MAKEWORD(2, 2), &data) == 0; }();
-    return ready;
-}
-#else
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-typedef int LoopSocket;
-#define LOOP_INVALID_SOCKET (-1)
-static void loop_socket_close(LoopSocket s) { close(s); }
-static bool loop_socket_nonblocking(LoopSocket s) {
-    int flags = fcntl(s, F_GETFL, 0);
-    return flags >= 0 && fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
-}
-static bool loop_would_block(void) { return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR; }
-static bool loop_sockets_ready(void) { return true; }
-#endif
+#include "../network/socket_utils.h"
 
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -66,7 +39,7 @@ static const char LOOP_DEFAULT_PAGE[] =
     "<p>You can close this window and return to Lambda.</p></body></html>";
 
 struct Loopback {
-    LoopSocket fd;
+    NetworkSocket fd;
     int port;
     LambdaSocketWaiter* waiter;
     Item handle;                // the listener's VMap, rooted while open
@@ -84,20 +57,9 @@ static Item loopback_handle_get(void* data, Item key) {
     if (key.get_len() == 4 && !memcmp(key.get_chars(), "port", 4)) return (Item){.item = i2it((int64_t)l->port)};
     return ItemNull;
 }
-static void loopback_handle_set(void* data, Item key, Item value) {
-    (void)data; (void)key; (void)value;
-    log_error("io.loopback: listeners are immutable");
-}
-static int64_t loopback_handle_count(void* data) { (void)data; return 0; }
-static SymbolKeyList* loopback_handle_keys(void* data) { (void)data; return NULL; }
-static Item loopback_handle_at(void* data, int64_t index) { (void)data; (void)index; return ItemNull; }
-// the owning task releases the listener; the handle owns nothing
-static void loopback_handle_destroy(void* data) { (void)data; }
-static void loopback_handle_trace(void* data, gc_heap* gc) { (void)data; (void)gc; }
-
 static VMapVtable loopback_handle_vtable = {
-    loopback_handle_get, loopback_handle_set, loopback_handle_count, loopback_handle_keys,
-    loopback_handle_at, loopback_handle_at, loopback_handle_destroy, loopback_handle_trace,
+    loopback_handle_get, io_resource_set, io_resource_count, io_resource_keys,
+    io_resource_at, io_resource_at, io_resource_destroy, io_resource_trace,
 };
 
 static Loopback* loopback_of(Item item) {
@@ -118,14 +80,14 @@ static void loopback_close(Loopback* l) {
     // closing the waiter wakes an accept parked on it
     lambda_socket_waiter_close(l->waiter);
     l->waiter = NULL;
-    if (!l->busy && l->fd != LOOP_INVALID_SOCKET) {
-        loop_socket_close(l->fd);
-        l->fd = LOOP_INVALID_SOCKET;
+    if (!l->busy && l->fd != NETWORK_INVALID_SOCKET) {
+        network_socket_close(l->fd);
+        l->fd = NETWORK_INVALID_SOCKET;
     }
 }
 
 static void loopback_free(Loopback* l) {
-    if (l->fd != LOOP_INVALID_SOCKET) loop_socket_close(l->fd);
+    if (l->fd != NETWORK_INVALID_SOCKET) network_socket_close(l->fd);
     mem_free(l);
 }
 
@@ -144,24 +106,26 @@ static void loopback_owner_release(void* data) {
 // listen(): a listener on an ephemeral port of 127.0.0.1; its `port` names it
 extern "C" Item pn_io_loopback_listen(void) {
     const char* fn = "io.loopback.listen";
-    if (!loop_sockets_ready()) return io_fs_error(ERR_NETWORK_ERROR, "%s: sockets are unavailable", fn);
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
+    if (!network_sockets_ready()) return io_fs_error(ERR_NETWORK_ERROR, "%s: sockets are unavailable", fn);
     LambdaTask* owner = lambda_task_running();
     if (!owner) return io_fs_error(ERR_INVALID_STATE, "%s: a listener needs a running procedure", fn);
-    LoopSocket fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == LOOP_INVALID_SOCKET) return io_fs_error(ERR_NETWORK_ERROR, "%s: cannot create a socket", fn);
+    NetworkSocket fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == NETWORK_INVALID_SOCKET) return io_fs_error(ERR_NETWORK_ERROR, "%s: cannot create a socket", fn);
     struct sockaddr_in address = {};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // never another interface
     address.sin_port = 0;
     socklen_t length = sizeof(address);
     if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0 || listen(fd, 4) != 0 ||
-        getsockname(fd, (struct sockaddr*)&address, &length) != 0 || !loop_socket_nonblocking(fd)) {
-        loop_socket_close(fd);
+        getsockname(fd, (struct sockaddr*)&address, &length) != 0 || !network_socket_nonblocking(fd)) {
+        network_socket_close(fd);
         return io_fs_error(ERR_NETWORK_ERROR, "%s: cannot listen on 127.0.0.1", fn);
     }
     Loopback* l = (Loopback*)mem_calloc(1, sizeof(Loopback), MEM_CAT_NETWORK);
     if (!l) {
-        loop_socket_close(fd);
+        network_socket_close(fd);
         return io_fs_error(ERR_OUT_OF_MEMORY, "%s: out of memory", fn);
     }
     l->fd = fd;
@@ -172,16 +136,11 @@ extern "C" Item pn_io_loopback_listen(void) {
         loopback_free(l);
         return io_fs_error(ERR_INVALID_STATE, "%s: cannot wait on the listener", fn);
     }
-    VMap* handle = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
+    VMap* handle = io_resource_handle_new(&loopback_handle_vtable, &loopback_brand, l);
     if (!handle) {
         loopback_close(l);
         return io_fs_error(ERR_OUT_OF_MEMORY, "%s: out of memory", fn);
     }
-    handle->type_id = LMD_TYPE_VMAP;
-    handle->vtable = &loopback_handle_vtable;
-    handle->host_type = &loopback_brand;
-    handle->host_data = l;
-    handle->data = l;
     l->handle = (Item){.vmap = handle};
     heap_register_gc_root(&l->handle.item);
     l->handle_rooted = true;
@@ -191,7 +150,7 @@ extern "C" Item pn_io_loopback_listen(void) {
 
 // Reads one request head into `head`: 1 when complete, 0 when the peer sent
 // none in time or closed early, -1 with *error set when the task was cancelled.
-static int loopback_read_head(LoopSocket client, int64_t wait_ms, StrBuf* head, Item* error) {
+static int loopback_read_head(NetworkSocket client, int64_t wait_ms, StrBuf* head, Item* error) {
     LambdaSocketWaiter* waiter = lambda_socket_waiter_new((uint64_t)client);
     if (!waiter) return 0;
     uint64_t deadline = time_now_ms() + (uint64_t)wait_ms;
@@ -204,7 +163,7 @@ static int loopback_read_head(LoopSocket client, int64_t wait_ms, StrBuf* head, 
             if (strstr(head->str, "\r\n\r\n") || strstr(head->str, "\n\n")) { outcome = 1; break; }
             continue;
         }
-        if (n == 0 || !loop_would_block()) break;
+        if (n == 0 || !network_socket_would_block()) break;
         uint64_t now = time_now_ms();
         if (now >= deadline) break;
         int ready = lambda_socket_waiter_wait(waiter, false, (int64_t)(deadline - now), error);
@@ -215,7 +174,7 @@ static int loopback_read_head(LoopSocket client, int64_t wait_ms, StrBuf* head, 
     return outcome;
 }
 
-static void loopback_respond(LoopSocket client, const char* status, const char* body, size_t body_length) {
+static void loopback_respond(NetworkSocket client, const char* status, const char* body, size_t body_length) {
     StrBuf* reply = strbuf_new_cap(256 + body_length);
     if (!reply) return;
     strbuf_append_format(reply, "HTTP/1.1 %s\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %zu\r\n"
@@ -226,7 +185,7 @@ static void loopback_respond(LoopSocket client, const char* status, const char* 
     for (int tries = 0; sent < reply->length && tries < 1000; tries++) {
         long n = (long)send(client, reply->str + sent, (int)(reply->length - sent), 0);
         if (n > 0) sent += (size_t)n;
-        else if (!loop_would_block()) break;
+        else if (!network_socket_would_block()) break;
     }
     strbuf_free(reply);
 }
@@ -292,6 +251,8 @@ static Item loopback_request_item(const char* head) {
 // timeout leaves it open for another accept.
 extern "C" Item pn_io_loopback_accept(Item listener, Item seconds, Item page) {
     const char* fn = "io.loopback.accept";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Loopback* l = loopback_of(listener);
     if (!l || l->closed) return io_fs_error(ERR_INVALID_STATE, "%s: not an open loopback listener", fn);
     if (l->busy) return io_fs_error(ERR_INVALID_STATE, "%s: the listener is already waiting", fn);
@@ -320,22 +281,22 @@ extern "C" Item pn_io_loopback_accept(Item listener, Item seconds, Item page) {
         int ready = lambda_socket_waiter_wait(l->waiter, false, (int64_t)(deadline - now), &error);
         if (ready < 0) { result = error; break; }
         if (ready == 0) continue;
-        LoopSocket client = accept(l->fd, NULL, NULL);
-        if (client == LOOP_INVALID_SOCKET) continue;
-        loop_socket_nonblocking(client);
+        NetworkSocket client = accept(l->fd, NULL, NULL);
+        if (client == NETWORK_INVALID_SOCKET) continue;
+        network_socket_nonblocking(client);
         strbuf_reset(head);
         uint64_t left = deadline - time_now_ms();
         int got = loopback_read_head(client, left < LOOP_CONNECTION_WAIT_MS ? (int64_t)left : LOOP_CONNECTION_WAIT_MS,
                                      head, &error);
-        if (got < 0) { loop_socket_close(client); result = error; break; }
-        if (got == 0) { loop_socket_close(client); continue; }
+        if (got < 0) { network_socket_close(client); result = error; break; }
+        if (got == 0) { network_socket_close(client); continue; }
         if (!strncmp(head->str, "GET /favicon.ico", 16)) {
             loopback_respond(client, "404 Not Found", "", 0);
-            loop_socket_close(client);
+            network_socket_close(client);
             continue;
         }
         loopback_respond(client, "200 OK", body, body_length);
-        loop_socket_close(client);
+        network_socket_close(client);
         result = loopback_request_item(head->str);
         // one request: the listener has served its purpose
         loopback_close(l);
@@ -344,9 +305,9 @@ extern "C" Item pn_io_loopback_accept(Item listener, Item seconds, Item page) {
     if (head) strbuf_free(head);
     else result = io_fs_error(ERR_OUT_OF_MEMORY, "%s: out of memory", fn);
     l->busy = false;
-    if (l->closed && l->fd != LOOP_INVALID_SOCKET) {
-        loop_socket_close(l->fd);
-        l->fd = LOOP_INVALID_SOCKET;
+    if (l->closed && l->fd != NETWORK_INVALID_SOCKET) {
+        network_socket_close(l->fd);
+        l->fd = NETWORK_INVALID_SOCKET;
     }
     if (l->release_when_idle) loopback_free(l);
     return result;

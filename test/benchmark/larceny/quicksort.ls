@@ -5,7 +5,7 @@
 // Expected: PASS (all elements in non-decreasing order)
 
 // Simple pseudo-random number generator that stays in safe int range
-pn lcg_next(seed) {
+fn lcg_next(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
@@ -40,7 +40,7 @@ pn quicksort(var arr, lo, hi) {
     return 0
 }
 
-pn is_sorted(arr, n) {
+fn is_sorted(arr, n) {
     var i = 1
     while (i < n) {
         if (arr[i] < arr[i - 1]) {

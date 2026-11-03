@@ -4,16 +4,16 @@
 // Computes edit distance between two strings, repeated for timing
 // Expected: levenshtein("kitten", "sitting") = 3
 
-pn min2(a: int, b: int) int {
+fn min2(a: int, b: int) int {
     if (a < b) { return a }
     return b
 }
 
-pn min3(a: int, b: int, c: int) int {
+fn min3(a: int, b: int, c: int) int {
     return min2(min2(a, b), c)
 }
 
-pn levenshtein(s1: string, s2: string) int^ {
+fn levenshtein(s1: string, s2: string) int^ {
     let n: int = len(s1)
     let m: int = len(s2)
 
@@ -53,7 +53,7 @@ pn levenshtein(s1: string, s2: string) int^ {
     return prev[m]
 }
 
-pn make_string(ch: string, n: int) string {
+fn make_string(ch: string, n: int) string {
     var s: string = ch
     var sz: int = 1
     while (sz * 2 <= n) {

@@ -26,6 +26,8 @@ enum Scene3dTickResult { SCENE3D_TICK_IDLE, SCENE3D_TICK_ACTIVE, SCENE3D_TICK_FA
 typedef Scene3dTickResult (*Scene3dTickFn)(void* owner, double timestep);
 // internal main-owner source admission, before sampling; never a script callback.
 typedef const char* (*Scene3dAdmitFn)(void* owner);
+// post-pose native observation; never enters script or creates a separate simulation driver.
+typedef const char* (*Scene3dSampleFn)(void* owner, double sampled_time);
 typedef const char* (*Scene3dCommandFn)(void* owner, const void* payload);
 static constexpr unsigned SCENE3D_COMMAND_BATCH_LIMIT = 32;
 struct Scene3dCommandBatch {
@@ -46,7 +48,9 @@ struct Scene3dRuntimeStats {
 };
 // native service plumbing only; scripts use the existing radiant-dom command boundary.
 Scene3dRuntime* scene3d_runtime_create(DomElement* root);
-bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime, void* owner, Scene3dAdmitFn admit);
+bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime, void* owner, Scene3dAdmitFn admit,
+                                   Scene3dSampleFn sampled = nullptr);
+double scene3d_runtime_sampled_time(const Scene3dRuntime* runtime);
 void scene3d_runtime_destroy(Scene3dRuntime* runtime);
 void scene3d_runtime_follow_rebuild(Scene3dRuntime* runtime, struct DomNode* old_root, struct DomNode* new_root);
 bool scene3d_runtime_bind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, Scene3dTickFn tick);
@@ -64,6 +68,8 @@ bool scene3d_runtime_configure(Scene3dRuntime* runtime, double timestep, unsigne
 bool scene3d_runtime_can_configure(const Scene3dRuntime* runtime, double timestep, unsigned max_substeps);
 bool scene3d_runtime_pause(Scene3dRuntime* runtime, bool paused);
 bool scene3d_runtime_time_scale(Scene3dRuntime* runtime, double scale);
+// timed native observers use the existing coordinator without adding a solver phase.
+bool scene3d_runtime_clock_work(Scene3dRuntime* runtime, bool enabled);
 bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed);
 bool scene3d_runtime_step(Scene3dRuntime* runtime, size_t ticks);
 bool scene3d_runtime_reset_clock(Scene3dRuntime* runtime, uint64_t tick);
@@ -91,6 +97,7 @@ struct Scene3dStats {
     uint32_t postprocess_passes;    // color passes, excluding the common output conversion
     uint64_t visibility_tests, culled_draws, lod_skips; // decisions across presentation, capture and shadow views
     uint64_t lod_state_bytes; // document-owned hysteresis, separate from the disposable projection
+    uint64_t particle_sort_passes; // bounded device index passes; no particle readback
     uint32_t lods;
     unsigned raster_width, raster_height;
     float camera_aspect;
@@ -146,6 +153,16 @@ struct Scene3dParticleGpuOps {
                     NativeGlResource *program) = nullptr;
     Scene3dParticleGpu **registry = nullptr; // includes private replay candidates until graphics-owner retirement
 };
+struct Scene3dParticleTrailPoint { Scene3dVec position; float age; };
+struct Scene3dParticleTrailView {
+    const Scene3dParticleTrailPoint *points;
+    const float *slots, *styles;
+    unsigned samples, head, columns, rows, records;
+    float lifetime, width;
+    bool fade;
+    Scene3dVec lo, hi;
+    NativeGlResource target;
+};
 struct Scene3dEmitterView {
     const Scene3dMatrix *matrices; // owner-borrowed; reacquire after source/replay changes
     unsigned capacity, count, live;
@@ -156,10 +173,19 @@ struct Scene3dEmitterView {
     const float *slots;
     NativeGlResource gpu_positions, gpu_births;
     float max_size;
-    uint64_t gpu_readbacks, gpu_passes, gpu_recoveries, gpu_bytes;
+    uint64_t gpu_readbacks, gpu_passes, gpu_recoveries, gpu_bytes, gpu_history_ticks;
     uint64_t collisions, killed, collision_queries, collision_work, collision_triangles, pending_events;
     bool world, mirrored, rotating;
     uint64_t surface_versions, surface_triangles, surface_bytes;
+    const float *colors; // CPU matrix-order RGBA multipliers; GPU colors live in pose texels
+    bool fading;
+    const unsigned *frames; // CPU matrix-order frames; GPU frames occupy rotation.w
+    unsigned sheet_columns, sheet_rows;
+    float sheet_inset;
+    const float *billboards; // CPU matrix-order X/Y scale and roll; valid for billboard presentation
+    bool billboard;
+    Scene3dParticleTrailView trail;
+    uint64_t identity;
 };
 struct Scene3dParticleSample {
     uint64_t sequence;
@@ -167,6 +193,10 @@ struct Scene3dParticleSample {
     Scene3dVec position, velocity;
     float size;
     Scene3dVec rotation; // local Euler XYZ radians, before the retained affine birth basis
+    unsigned collision_status; // GPU visual state: 0 running, 1 impact limit, 2 initial overlap
+    float color[4]; // linear RGB multipliers and opacity, before material factors
+    unsigned frame; // exact top-left row-major atlas cell, before material UV transforms
+    unsigned depth; // explicit spawn provenance; authored births start at zero
 };
 Scene3dParticles *scene3d_particles_create(DomElement *root, Scene3dRuntime *runtime,
                                            const Scene3dParticleGpuOps &gpu = {});
@@ -178,9 +208,14 @@ uint64_t scene3d_particles_generation(Scene3dParticles *state);
 bool scene3d_particles_view(Scene3dParticles *state, DomElement *emitter, Scene3dEmitterView *view);
 bool scene3d_particles_sample(Scene3dParticles *state, DomElement *emitter, unsigned index,
                               Scene3dParticleSample *sample);
+// the caller supplies room for 64 points; successful copies are newest first, including retained off-window points.
+bool scene3d_particles_trail_samples(Scene3dParticles *state, DomElement *emitter, unsigned index,
+                                     Scene3dParticleTrailPoint *points, unsigned *count);
+Item scene3d_particles_trail_read(Scene3dParticles *state, Item request);
 bool scene3d_particles_samples(Scene3dParticles *state, DomElement *emitter, unsigned first, unsigned count,
                                Scene3dParticleSample *samples);
 Item scene3d_particles_snapshot(Scene3dParticles *state);
+Item scene3d_particles_commands(Scene3dParticles *state, Item batch);
 Item scene3d_particles_events(Scene3dParticles *state, Item request);
 bool scene3d_particles_needs_world(Scene3dParticles *state);
 const char *scene3d_particles_diagnostic(Scene3dParticles *state);

@@ -211,7 +211,7 @@ make resolve TEST=baseline_803_basic_margin
 
 ### Available Layout Suites
 
-`basic`, `baseline`, `css2.1`, `flex`, `grid`, `yoga`, `wpt-css-box`, `wpt-css-images`, `wpt-css-tables`, `wpt-css-position`, `wpt-css-text`
+`basic`, `baseline`, `css2.1`, `flex`, `grid`, `yoga`, `wpt-css-box`, `wpt-css-images`, `wpt-css-tables`, `wpt-css-position`, `wpt-css-text`, `wpt-css-writing-modes`, `wpt-css-ruby`
 
 ---
 

@@ -7,20 +7,20 @@ let CHRSZ = 8  // bits per input character (ASCII)
 let MASK32 = 0xFFFFFFFF
 
 // 32-bit addition relies on u32 wraparound.
-pn safe_add(x: int, y: int) {
+fn safe_add(x: int, y: int) any^ {
     var ux: u32 = x
     var uy: u32 = y
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-pn rol(num: int, cnt: int) {
+fn rol(num: int, cnt: int) any^ {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // SHA-1 round function
-pn sha1_ft(t: int, b: int, c: int, d: int) {
+fn sha1_ft(t: int, b: int, c: int, d: int) {
     if (t < 20) {
         return bor(band(b, c), band(band(bnot(b), MASK32), d))
     }
@@ -34,7 +34,7 @@ pn sha1_ft(t: int, b: int, c: int, d: int) {
 }
 
 // SHA-1 round constant
-pn sha1_kt(t: int) {
+fn sha1_kt(t: int) {
     if (t < 20) {
         return 0x5A827999
     }
@@ -66,7 +66,7 @@ pn str2binb(str: string) {
 }
 
 // Core SHA-1 computation on array of big-endian words
-pn core_sha1(x_in, input_len) {
+fn core_sha1(x_in, input_len) any^ {
     // Copy input to mutable array with padding space
     var x_len = len(x_in)
     var padded_len = shr(input_len + 64, 9)
@@ -131,7 +131,7 @@ pn core_sha1(x_in, input_len) {
 }
 
 // Convert array of big-endian words to hex string
-pn binb2hex(binarray) {
+fn binb2hex(binarray) any^ {
     let hex_chars = "0123456789abcdef"
     var result = ""
     var i: int = 0

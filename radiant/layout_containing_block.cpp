@@ -41,7 +41,7 @@ bool layout_element_has_direct_text_content(DomElement* element) {
 }
 
 static int layout_collect_flattened_item_children(
-        LayoutContext* lycon, ViewBlock* container, DomNode* first_child,
+        LayoutContext* lycon, DomElement* container, DomNode* first_child,
         DomNode** nodes, int capacity, const LayoutFlattenedItemPolicy* policy,
         bool allow_skipped_element) {
     if (!container || !nodes || capacity <= 0) return 0;
@@ -89,7 +89,7 @@ static int layout_collect_flattened_item_children(
 }
 
 int layout_collect_flattened_item_nodes(LayoutContext* lycon,
-                                        ViewBlock* container,
+                                        DomElement* container,
                                         DomNode* first_child,
                                         DomNode** nodes, int capacity,
                                         const LayoutFlattenedItemPolicy* policy) {
@@ -117,7 +117,7 @@ static int layout_count_flattened_item_children(DomNode* first_child,
     return count;
 }
 
-int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text) {
+int layout_count_flattened_item_nodes(DomElement* container, bool include_text) {
     return layout_count_flattened_item_children(
         container ? container->first_child : nullptr, include_text);
 }
@@ -585,7 +585,7 @@ bool layout_contents_whitespace_is_text_separator(DomNode* text,
 }
 
 bool layout_collect_flattened_text_item(DomNode* text,
-                                             ViewBlock* container) {
+                                             DomElement* container) {
     return layout_text_node_has_content(text) ||
-        layout_contents_whitespace_is_text_separator(text, container);
+        layout_contents_whitespace_is_text_separator(text, lam::view_as_block(container));
 }

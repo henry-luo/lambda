@@ -1,5 +1,5 @@
 // Shared untyped scalar workloads; SUITE.md defines counts, loop order and checks.
-pn decimal_text(value) {
+fn decimal_text(value) any^ {
     let negative = value < 0
     var remaining = if (negative) -value else value
     var divisor = 1
@@ -138,7 +138,7 @@ pn matrix_statistics() {
     }
     return [int(floor(variation(v) * 1e9)), int(floor(variation(w) * 1e9)), digest, seed]
 }
-pn iteration_pi_sum() {
+fn iteration_pi_sum() {
     var values = fill(500, 0.0)
     var iteration = 0
     while (iteration < 500) {
@@ -188,7 +188,7 @@ pn micro_workload(bench_name) {
     if (bench_name == "formatted_output") { return formatted_output() }
     return [-1, -1, -1, -1]
 }
-pn micro_verify(bench_name, result) {
+fn micro_verify(bench_name, result) {
     var expected = [0, 0, 0, 0]
     if (bench_name == "parse_integers") { expected = [592470661, 854479, 1966931148, 0] }
     if (bench_name == "matrix_statistics") { expected = [464726438, 486656926, 47509838, 1966931148] }

@@ -25,15 +25,15 @@ let NONE     = 0
 let FORWARD  = 1
 let BACKWARD = 2
 
-pn stronger(s1: int, s2: int) bool {
+fn stronger(s1: int, s2: int) bool {
     return s1 < s2
 }
 
-pn weaker(s1: int, s2: int) bool {
+fn weaker(s1: int, s2: int) bool {
     return s1 > s2
 }
 
-pn weakest_of(s1: int, s2: int) int {
+fn weakest_of(s1: int, s2: int) int {
     if (s1 > s2) {
         return s1
     }
@@ -42,7 +42,7 @@ pn weakest_of(s1: int, s2: int) int {
 
 // --- Variable ---
 // { value, constraints (array of constraint indices), determined_by, mark, walk_strength, stay, name }
-pn create_variable(name: string, initial_value: int) Variable^ {
+fn create_variable(name: string, initial_value: int) Variable^ {
     var v: Variable = {value: initial_value, constraints: fill(0, 0), det_by: -1,
             mark: 0, walk_str: WEAKEST, stay: true, name: name}
     return v
@@ -57,7 +57,7 @@ let C_EDIT  = 1
 let C_EQUAL = 2
 let C_SCALE = 3
 
-pn create_constraint(kind: int, strength: int, v1: int, v2: int,
+fn create_constraint(kind: int, strength: int, v1: int, v2: int,
         scale: int, offset: int) Constraint^ {
     var c: Constraint = {kind: kind, strength: strength, direction: NONE,
             v1: v1, v2: v2, scale: scale, offset: offset, satisfied: false}
@@ -65,7 +65,7 @@ pn create_constraint(kind: int, strength: int, v1: int, v2: int,
 }
 
 // Planner globals stored in a state map
-pn create_planner() Planner^ {
+fn create_planner() Planner^ {
     var p: Planner = {current_mark: 0, vars: [], constraints: [],
             nv: 0, nc: 0}
     return p
@@ -94,7 +94,7 @@ pn planner_add_constraint(var p: Planner, kind: int, strength: int, v1: int,
 }
 
 // Constraint operations
-pn constraint_input(p: Planner, ci: int) int^ {
+fn constraint_input(p: Planner, ci: int) int^ {
     var c: Constraint = (p.constraints)[ci]
     // Unary (stay/edit): no input, return -1
     if ((c.kind == C_STAY)^) { return -1 }
@@ -106,7 +106,7 @@ pn constraint_input(p: Planner, ci: int) int^ {
     return c.v2
 }
 
-pn constraint_output(p: Planner, ci: int) int^ {
+fn constraint_output(p: Planner, ci: int) int^ {
     var c: Constraint = (p.constraints)[ci]
     // Unary (stay/edit): output is always v1
     if ((c.kind == C_STAY)^) { return c.v1 }
@@ -118,7 +118,7 @@ pn constraint_output(p: Planner, ci: int) int^ {
     return c.v1
 }
 
-pn constraint_is_input(p: Planner, ci: int, vi: int) bool^ {
+fn constraint_is_input(p: Planner, ci: int, vi: int) bool^ {
     var c: Constraint = (p.constraints)[ci]
     if ((c.direction == FORWARD)^) {
         return vi == c.v1

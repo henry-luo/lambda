@@ -131,7 +131,7 @@ lambda nested.ls
 
 ## Pure Functions
 
-An `fn` is **pure**: its result depends only on its arguments, and calling it does nothing else. It cannot print, write a file or change a variable, and it cannot call a procedure — a `pn` — that does. Save this as `pure.ls`:
+An `fn` is **pure**: it can use its own local `var` bindings and loops while computing a result, but it cannot change a caller's or enclosing function's variables (S12.1.2v3, S9.1.7v2). It cannot print, write a file or call a procedure — a `pn` — that does. Save this as `pure.ls`:
 
 ```lambda error=E224
 // pure.ls

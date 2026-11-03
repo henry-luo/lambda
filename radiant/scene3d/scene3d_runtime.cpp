@@ -36,18 +36,20 @@ struct Scene3dRuntime {
     Scene3dRuntimeService services[SCENE3D_TICK_PHASES];
     void* admission_owner;
     Scene3dAdmitFn admit;
+    Scene3dSampleFn sampled;
     Scene3dRuntimeStats stats;
     Scene3dCommandBatch commands[SCENE3D_COMMAND_BATCH_LIMIT];
     unsigned command_count;
     double previous_host_time;
     double animation_ahead;
     unsigned max_substeps;
-    bool sampling, admitting;
+    bool sampling, admitting, clock_work;
     const char* diagnostic;
 };
 
 static bool scene3d_runtime_schedule(Scene3dRuntime* runtime);
 static bool scene3d_runtime_fail(Scene3dRuntime* runtime, const char* message);
+static unsigned scene3d_runtime_active(Scene3dRuntime* runtime);
 static bool scene3d_runtime_commands_pending(const Scene3dRuntime* runtime) {
     for (unsigned i = 0; i < runtime->command_count; i++) {
         const auto& service = runtime->services[runtime->commands[i].phase];
@@ -56,6 +58,9 @@ static bool scene3d_runtime_commands_pending(const Scene3dRuntime* runtime) {
         }
     }
     return false;
+}
+static bool scene3d_runtime_needs_clock(Scene3dRuntime* runtime) {
+    return scene3d_runtime_active(runtime) || scene3d_runtime_commands_pending(runtime) || runtime->clock_work;
 }
 static void scene3d_runtime_command_finish(Scene3dRuntime* runtime, const Scene3dCommandBatch& batch,
                                            const char* diagnostic) {
@@ -226,6 +231,13 @@ static bool scene3d_runtime_run_service(Scene3dRuntime* runtime, unsigned phase,
         service.enabled = false;
     return true;
 }
+double scene3d_runtime_sampled_time(const Scene3dRuntime* runtime) {
+    return runtime ? runtime->stats.time + runtime->animation_ahead : 0;
+}
+static bool scene3d_runtime_observe(Scene3dRuntime* runtime) {
+    const char* error = runtime->sampled ? runtime->sampled(runtime->admission_owner, scene3d_runtime_sampled_time(runtime)) : nullptr;
+    return error ? scene3d_runtime_fail(runtime, error) : true;
+}
 static bool scene3d_runtime_tick_once(Scene3dRuntime* runtime, bool all_services) {
     if (runtime->stats.ticks == UINT64_MAX || !isfinite((double)(runtime->stats.ticks + 1) * runtime->stats.timestep))
         return scene3d_runtime_fail(runtime, "simulation tick count exceeded");
@@ -242,7 +254,7 @@ static bool scene3d_runtime_tick_once(Scene3dRuntime* runtime, bool all_services
     runtime->animation_ahead = 0;
     runtime->stats.ticks++;
     runtime->stats.time = (double)runtime->stats.ticks * runtime->stats.timestep;
-    return true;
+    return scene3d_runtime_observe(runtime);
 }
 static bool scene3d_runtime_animation_only(Scene3dRuntime* runtime) {
     for (unsigned phase = 0; phase < SCENE3D_TICK_PHASES; phase++) {
@@ -259,9 +271,10 @@ static bool scene3d_runtime_sample_animation(Scene3dRuntime* runtime, double deb
     runtime->sampling = true;
     bool sampled =
         scene3d_runtime_run_service(runtime, SCENE3D_TICK_ANIMATION, fmax(0, debt - runtime->animation_ahead), false);
-    runtime->sampling = false;
-    if (!sampled)
+    if (!sampled) {
+        runtime->sampling = false;
         return false;
+    }
     runtime->stats.ticks += (uint64_t)ticks;
     runtime->stats.time =
         (double)runtime->stats.ticks * runtime->stats.timestep; // INT_CAST_OK: bounded finite whole tick count
@@ -271,7 +284,9 @@ static bool scene3d_runtime_sample_animation(Scene3dRuntime* runtime, double deb
     if (presentation) {
         runtime->stats.presentations++;
     }
-    return true;
+    bool published = scene3d_runtime_observe(runtime);
+    runtime->sampling = false;
+    return published;
 }
 bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed) {
     if (!runtime || runtime->sampling || runtime->stats.faulted || !isfinite(elapsed) || elapsed < 0)
@@ -281,7 +296,7 @@ bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed) {
         return true;
     if (!scene3d_runtime_admit(runtime))
         return false;
-    if (!scene3d_runtime_active(runtime) && !scene3d_runtime_commands_pending(runtime))
+    if (!scene3d_runtime_needs_clock(runtime))
         return true;
     double debt = runtime->stats.debt + elapsed * runtime->stats.time_scale;
     if (!isfinite(debt))
@@ -299,7 +314,7 @@ bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed) {
     // tolerate roundoff at an exact boundary without changing the fixed timestep.
     while (runtime->stats.debt + runtime->stats.timestep * 1e-10 >= runtime->stats.timestep &&
            steps < runtime->max_substeps &&
-           (scene3d_runtime_active(runtime) || scene3d_runtime_commands_pending(runtime))) {
+           scene3d_runtime_needs_clock(runtime)) {
         if (!scene3d_runtime_tick_once(runtime, false)) {
             runtime->sampling = false;
             return false;
@@ -309,7 +324,7 @@ bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed) {
     }
     runtime->sampling = false;
     if (scene3d_runtime_animation_only(runtime)) {
-        if (scene3d_runtime_active(runtime)) {
+        if (scene3d_runtime_needs_clock(runtime)) {
             return scene3d_runtime_sample_animation(runtime, runtime->stats.debt, false);
         }
         runtime->stats.debt = 0;
@@ -330,12 +345,12 @@ static void scene3d_runtime_tick(AnimationInstance* driver, float) {
     double elapsed = now - runtime->previous_host_time;
     runtime->previous_host_time = now;
     if (!attached || !scene3d_runtime_advance(runtime, elapsed) ||
-        (!scene3d_runtime_active(runtime) && !scene3d_runtime_commands_pending(runtime)) || runtime->stats.paused ||
+        !scene3d_runtime_needs_clock(runtime) || runtime->stats.paused ||
         runtime->stats.time_scale == 0)
         driver->play_state = ANIM_PLAY_FINISHED;
 }
 static bool scene3d_runtime_schedule(Scene3dRuntime* runtime) {
-    bool active = (scene3d_runtime_active(runtime) || scene3d_runtime_commands_pending(runtime)) &&
+    bool active = scene3d_runtime_needs_clock(runtime) &&
                   !runtime->stats.paused && !runtime->stats.faulted && runtime->stats.time_scale > 0;
     // never cancel the driver from inside its own stage callback.
     if (runtime->sampling || runtime->admitting)
@@ -378,11 +393,12 @@ Scene3dRuntime* scene3d_runtime_create(DomElement* root) {
     runtime->max_substeps = 8;
     return runtime;
 }
-bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime, void* owner, Scene3dAdmitFn admit) {
+bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime, void* owner, Scene3dAdmitFn admit, Scene3dSampleFn sampled) {
     if (!runtime || runtime->sampling || runtime->admitting || runtime->admission_owner || !owner || !admit)
         return false;
     runtime->admission_owner = owner;
     runtime->admit = admit;
+    runtime->sampled = sampled;
     return true;
 }
 void scene3d_runtime_destroy(Scene3dRuntime* runtime) {
@@ -474,6 +490,12 @@ bool scene3d_runtime_time_scale(Scene3dRuntime* runtime, double scale) {
     if (!runtime || runtime->sampling || !isfinite(scale) || scale < 0)
         return false;
     runtime->stats.time_scale = scale;
+    return scene3d_runtime_schedule(runtime);
+}
+bool scene3d_runtime_clock_work(Scene3dRuntime* runtime, bool enabled) {
+    if (!runtime) return false;
+    if (runtime->clock_work == enabled) return true;
+    runtime->clock_work = enabled;
     return scene3d_runtime_schedule(runtime);
 }
 bool scene3d_runtime_step(Scene3dRuntime* runtime, size_t ticks) {
@@ -598,13 +620,27 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
                                    "particles_contact_batches",
                                    "particles_gpu",
                                    "particles_gpu_mesh",
+                                   "particles_gpu_analytic_collision",
+                                   "particles_gpu_collision_replay",
                                    "particles_seeded",
                                    "particles_world_space",
                                    "particles_mesh_surface",
                                    "particles_size_curves",
-                                   "particles_rotation_curves"};
-        const char *pending[] = {"navigation", "ccd_convex", "animation_graphs", "particles_collision",
-                                 "particles_trails"};
+                                   "particles_rotation_curves",
+                                   "particles_noise",
+                                   "particles_color_curves",
+                                   "particles_opacity_curves",
+                                   "particles_depth_ordering",
+                                   "particles_texture_sheet", "particles_velocity_curves", "particles_billboards",
+                                   "particles_cpu_trails", "particles_gpu_trails", "particles_trails",
+                                   "particles_spawn_commands", "particles_child_queues",
+                                   "audio_clips", "audio_sources", "audio_stereo", "audio_spatial_2d", "audio_spatial_3d",
+                                   "audio_doppler", "audio_source_lowpass", "audio_source_meters",
+                                   "audio_bus_routing", "audio_bus_sends", "audio_bus_solo", "audio_dsp_inserts", "audio_sidechain", "audio_dsp_tails",
+                                   "audio_sample_cues", "audio_scene_cues", "audio_cue_receipts", "audio_pitch_follow",
+                                   "audio_render_jobs", "audio_render_pcm", "audio_render_wav",
+                                   "audio_midi_routes", "audio_speech_routes", "audio_provider_tickets", "audio_route_lifetime"};
+        const char *pending[] = {"navigation", "ccd_convex", "animation_graphs", "particles_collision"};
         for (const char* key : available)
             result.put(key, Item{.item = b2it(true)});
         for (const char* key : pending)

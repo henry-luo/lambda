@@ -10,14 +10,14 @@ fn make_create(path: array, value: any) map =>
 fn make_change(path: array, value: any, old_value: any) map =>
     {type: "CHANGE", path: path, value: value, oldValue: old_value}
 
-pn is_rich_leaf(value: any) bool^ {
+fn is_rich_leaf(value: any) bool^ {
     if (value is map) {
         return "__microdiff_rich_type" at value
     }
     return false
 }
 
-pn rich_leaf_equal(old_value: any, fresh_value: any) bool^ {
+fn rich_leaf_equal(old_value: any, fresh_value: any) bool^ {
     if ((not is_rich_leaf(old_value) or not is_rich_leaf(fresh_value))^) {
         return false
     }
@@ -25,7 +25,7 @@ pn rich_leaf_equal(old_value: any, fresh_value: any) bool^ {
         old_value.value == fresh_value.value
 }
 
-pn both_nan(left: any, right: any) bool^ {
+fn both_nan(left: any, right: any) bool^ {
     return left is nan and right is nan
 }
 

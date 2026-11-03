@@ -1,0 +1,53 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/100px Ahem; }
+ruby { ruby-align: start; }
+rt, .annotation { font-size: 20px; }
+.annotation { display: ruby-text; }
+.preserved { white-space: pre; }
+.atomic { display: inline-block; }
+</style>
+<div id="result">
+<div><ruby id="direct">XX<rt id="direct-reading">A<br id="direct-br">B</rt></ruby></div>
+<div><ruby id="nested">XX<rt><span>A<br>B</span></rt></ruby></div>
+<div><ruby id="collapsed-spaces">XX<rt>A <br> B</rt></ruby></div>
+<div><ruby id="repeated">XX<rt>A<br><br>B</rt></ruby></div>
+<div><ruby id="leading">XX<rt><br>A</rt></ruby></div>
+<div><ruby id="trailing">XX<rt>A<br></rt></ruby></div>
+<div><ruby id="newline">XX<rt class="preserved" id="newline-reading">A
+B</rt></ruby></div>
+<div><ruby id="repeated-newline">XX<rt class="preserved" id="repeated-newline-reading">A
+
+B</rt></ruby></div>
+<div><ruby id="leading-newline">XX<rt class="preserved">
+A</rt></ruby></div>
+<div><ruby id="trailing-newline">XX<rt class="preserved">A
+</rt></ruby></div>
+<div><ruby id="preserved-br">XX<rt class="preserved">A<br><br>B</rt></ruby></div>
+<div><ruby id="rtl-newline" dir="rtl">XX<rt class="preserved" id="rtl-newline-reading">A
+B</rt></ruby></div>
+<div><ruby id="rtl-repeated-newline" dir="rtl">XX<rt class="preserved" id="rtl-repeated-newline-reading">A
+
+B</rt></ruby></div>
+<div><ruby id="rtl-br" dir="rtl">XX<rt>A<br>B</rt></ruby></div>
+<div><ruby dir="rtl">XX<rt class="preserved" id="rtl-mixed-space">A אבB</rt></ruby></div>
+<div><ruby dir="rtl">XX<rt class="preserved" id="rtl-mixed-newline">A
+
+אבB</rt></ruby></div>
+<div><ruby id="split-newline">XX<rt class="preserved">A<span>
+</span>B</rt></ruby></div>
+<div><ruby id="split-repeated-newline">XX<rt class="preserved">A<span>
+</span><span>
+</span>B</rt></ruby></div>
+<div><ruby id="split-trailing-newline">XX<rt class="preserved">A<span>
+</span></rt></ruby></div>
+<div><ruby id="preserved-spaces">XX<rt class="preserved">A&#32;&#32;
+  B</rt></ruby></div>
+<div><ruby id="computed-role">XX<span class="annotation" id="role-reading">A<br id="role-br">B</span></ruby></div>
+<div><ruby id="annotation-atomic">XX<rt><span class="atomic preserved" id="annotation-atomic-box">A
+B</span></rt></ruby></div>
+<div><ruby><span class="atomic preserved" id="base-atomic-box">A
+B</span><rt>xy</rt></ruby></div>
+<div><span id="ordinary">A<br>B</span></div>
+</div>

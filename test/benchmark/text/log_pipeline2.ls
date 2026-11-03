@@ -77,7 +77,7 @@ pn build_logs() string[]^ {
     lines
 }
 
-pn decimal_span(line: string, start: int, end: int) int^ {
+fn decimal_span(line: string, start: int, end: int) int^ {
     var value: int = 0
     var index: int = start
     while (index < end) {
@@ -91,7 +91,7 @@ pn decimal_span(line: string, start: int, end: int) int^ {
 // The layout matches C2MIR's four scalar groups: count, errors, slow,
 // total latency and total bytes. The benchmark's output reads api latency and
 // worker bytes, so all groups remain live through the timed parse.
-pn process_logs(lines: string[]) int^ {
+fn process_logs(lines: string[]) int^ {
     var totals: int[] = fill(22, 0)^
     var row: int = 0
     while (row < len(lines)) {

@@ -5,6 +5,30 @@
 
 #include <mbedtls/md.h>
 #include <mbedtls/pkcs5.h>
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#endif
+
+bool crypto_random_bytes(void* out, size_t len) {
+    if (!out || !len) return false;
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
+    // shared by UUIDs, broker sessions and exclusive staging names
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context drbg;
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&drbg);
+    static const unsigned char personal[] = "lambda secure random";
+    bool ok = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
+        personal, sizeof(personal) - 1) == 0 &&
+        mbedtls_ctr_drbg_random(&drbg, out, len) == 0;
+    mbedtls_ctr_drbg_free(&drbg);
+    mbedtls_entropy_free(&entropy);
+    return ok;
+#endif
+}
 
 struct DigestCtx {
     mbedtls_md_context_t md_ctx;

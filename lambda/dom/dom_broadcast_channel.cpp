@@ -19,7 +19,7 @@ extern __thread EvalContext* context;
 extern "C" Item vmap_new(void);
 
 struct BroadcastRegistry;
-struct BroadcastChannel : DomDocumentResourceData {
+struct BroadcastChannel : DomDocumentResourceData, DomGcEventOwner {
     BroadcastRegistry* owner;
     BroadcastChannel* previous;
     BroadcastChannel* next;
@@ -66,6 +66,10 @@ void* dom_broadcast_channel_native(Item receiver) {
     if (get_type_id(receiver) != LMD_TYPE_VMAP) return nullptr;
     const void* brand = jube_iface_type_by_name("broadcast_channel", 17);
     return brand && receiver.vmap->host_type == brand ? receiver.vmap->host_data : nullptr;
+}
+
+DomGcEventOwner* dom_broadcast_channel_event_owner(Item receiver) {
+    return (BroadcastChannel*)dom_broadcast_channel_native(receiver);
 }
 
 void dom_broadcast_channel_listeners_changed(void* data) {
@@ -157,6 +161,9 @@ Item dom_broadcast_channel_create(Item name) {
     Rooted edges(roots, vmap_new());
     auto* channel = (BroadcastChannel*)mem_calloc(1, sizeof(BroadcastChannel), MEM_CAT_JS_RUNTIME);
     if (!channel) return ItemError;
+    channel->listeners_changed = [](DomGcEventOwner* owner) {
+        dom_broadcast_channel_listeners_changed(static_cast<BroadcastChannel*>(owner));
+    };
     channel->handlers[0] = channel->handlers[1] = ItemNull;
     channel->name_length = name_root.get().get_string()->len;
     channel->name = (char*)mem_calloc(1, channel->name_length + 1, MEM_CAT_JS_RUNTIME);

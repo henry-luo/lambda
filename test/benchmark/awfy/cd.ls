@@ -25,23 +25,23 @@ let NC = 5
 // =====================================================
 // Helpers
 // =====================================================
-pn safe_div(a, b) {
+fn safe_div(a, b) {
     if (b == 0) { return 0.0 }
     var r = a / b
     return r
 }
 
-pn min_f(a, b) {
+fn min_f(a, b) {
     if (a <= b) { return a }
     return b
 }
 
-pn max_f(a, b) {
+fn max_f(a, b) {
     if (a >= b) { return a }
     return b
 }
 
-pn check_overlap(low, high) {
+fn check_overlap(low, high) {
     if (low <= 1) {
         if (1 <= high) { return 1 }
     }
@@ -54,7 +54,7 @@ pn check_overlap(low, high) {
     return 0
 }
 
-pn get_old_or_new(old, newp) {
+fn get_old_or_new(old, newp) {
     if (old == null) { return newp }
     return old
 }
@@ -62,12 +62,12 @@ pn get_old_or_new(old, newp) {
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-pn arr_new() {
+fn arr_new() {
     var a = { l0: fill(16, null), sz: 0 }
     return a
 }
 
-pn arr_get(a, idx) {
+fn arr_get(a, idx) {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -108,7 +108,7 @@ pn arr_set(var a, idx, val) {
 // =====================================================
 // Small vector: 16x16=256
 // =====================================================
-pn vec_new() {
+fn vec_new() {
     return []
 }
 
@@ -117,11 +117,11 @@ pn vec_add(var v, item) {
     return 0
 }
 
-pn vec_at(v, idx) {
+fn vec_at(v, idx) {
     return v[idx]
 }
 
-pn vec_size(v) {
+fn vec_size(v) {
     return len(v)
 }
 
@@ -135,7 +135,7 @@ pn vec_size(v) {
 // snapshot, so the mutable owner is an explicit key/value table instead
 // (D3.3.1). The CD workload needs ordered iteration only, not tree balancing.
 
-pn rbt_new() {
+fn rbt_new() {
     var keys = vec_new()
     var vals = vec_new()
     var table = { keys: null, vals: null }
@@ -144,7 +144,7 @@ pn rbt_new() {
     return table
 }
 
-pn rbt_find_node(tree, key) {
+fn rbt_find_node(tree, key) any^ {
     var keys = tree.keys
     var i = 0
     while ((i < len(keys))^) {
@@ -156,7 +156,7 @@ pn rbt_find_node(tree, key) {
     return NIL
 }
 
-pn rbt_nd(tree, id) {
+fn rbt_nd(tree, id) {
     return [tree.keys[id], tree.vals[id]]
 }
 
@@ -177,7 +177,7 @@ pn rbt_put(var tree, key, value) {
     return null
 }
 
-pn rbt_get(tree, key) {
+fn rbt_get(tree, key) any^ {
     var index = rbt_find_node(tree, key)
     if ((index == NIL)^) {
         return null
@@ -185,14 +185,14 @@ pn rbt_get(tree, key) {
     return tree.vals[index]
 }
 
-pn rbt_first(tree) {
+fn rbt_first(tree) any^ {
     if ((len(tree.keys) == 0)^) {
         return NIL
     }
     return 0
 }
 
-pn rbt_successor(tree, id) {
+fn rbt_successor(tree, id) any^ {
     var next = id + 1
     if ((next >= len(tree.keys))^) {
         return NIL
@@ -223,7 +223,7 @@ pn rbt_remove(var tree, key) {
 // =====================================================
 // Vector2D key encoding
 // =====================================================
-pn v2d_key(x, y) {
+fn v2d_key(x, y) any^ {
     var kx = int(x) + 1000
     var ky = int(y) + 1000
     var k = kx * 100000 + ky
@@ -233,7 +233,7 @@ pn v2d_key(x, y) {
 // =====================================================
 // Vector3D operations
 // =====================================================
-pn v3d_new(x, y, z) {
+fn v3d_new(x, y, z) {
     return [x, y, z]
 }
 
@@ -255,7 +255,7 @@ pn voxel_hash_xy(px, py, var out) {
 // =====================================================
 // isInVoxel check
 // =====================================================
-pn is_in_voxel(vx, vy, p1x, p1y, p2x, p2y) {
+fn is_in_voxel(vx, vy, p1x, p1y, p2x, p2y) any^ {
     if (vx > MAX_X) { return 0 }
     if (vx < MIN_X) { return 0 }
     if (vy > MAX_Y) { return 0 }
@@ -285,7 +285,7 @@ pn is_in_voxel(vx, vy, p1x, p1y, p2x, p2y) {
     if (xv != 0) {
         xOk = check_overlap(lowX, highX)
     }
-    if (xOk == 0) { return 0 }
+    if ((xOk == 0)^) { return 0 }
 
     // Compute y interval outside if blocks
     var rawLY = safe_div(vy - r - y0, yv)
@@ -304,19 +304,19 @@ pn is_in_voxel(vx, vy, p1x, p1y, p2x, p2y) {
     if (yv != 0) {
         yOk = check_overlap(lowY, highY)
     }
-    if (yOk == 0) { return 0 }
+    if ((yOk == 0)^) { return 0 }
 
     // Check combined condition
     if (xv == 0) { return 1 }
     if (yv == 0) { return 1 }
-    if (lowY <= highX) {
-        if (highX <= highY) { return 1 }
+    if ((lowY <= highX)^) {
+        if ((highX <= highY)^) { return 1 }
     }
-    if (lowY <= lowX) {
-        if (lowX <= highY) { return 1 }
+    if ((lowY <= lowX)^) {
+        if ((lowX <= highY)^) { return 1 }
     }
-    if (lowX <= lowY) {
-        if (highY <= highX) { return 1 }
+    if ((lowX <= lowY)^) {
+        if ((highY <= highX)^) { return 1 }
     }
     return 0
 }
@@ -330,7 +330,7 @@ pn recurse_draw(voxel_map, seen_tree, vx, vy, p1x, p1y, p2x, p2y, motion_idx) {
     var voxels = voxel_map
     var seen = seen_tree
     var in_voxel = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
-    if (in_voxel == 0) {
+    if ((in_voxel == 0)^) {
         return [voxels, seen]
     }
 
@@ -481,7 +481,7 @@ pn find_intersection(m1, m2) {
 // =====================================================
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
-pn motion_new(cs, p1x, p1y, p1z, p2x, p2y, p2z) {
+fn motion_new(cs, p1x, p1y, p1z, p2x, p2y, p2z) {
     return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 

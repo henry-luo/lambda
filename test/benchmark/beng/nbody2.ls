@@ -8,14 +8,16 @@ let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
-pn format9(x: float) string^ {
+fn format9(x: float) string^ {
+    var work_x: float = x
+
     var neg: string = ""
-    if (x < 0.0) {
+    if (work_x < 0.0) {
         neg = "-"
-        x = -x
+        work_x = -work_x
     }
-    var int_part: int = int(floor(x))
-    var frac: float = x - float(int_part)
+    var int_part: int = int(floor(work_x))
+    var frac: float = work_x - float(int_part)
     var scaled: float = frac * 1000000000.0 + 0.5
     var fl: float = floor(scaled)
     var frac_int: int = int(fl)^
@@ -67,7 +69,7 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float^ {
+fn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float^ {
     var e: float = 0.0
     var i: int = 0
     while (i < 5) {

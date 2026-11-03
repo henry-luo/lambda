@@ -67,3 +67,12 @@ let covered_rows = [for (entry in ((descendants(covered_doc)) ^ { [] }) where en
 "rowspans preserve covered empty rows:";
 [covered_doc.content[0].tag=='table',len(covered_rows)==2,len(covered_rows[1].content)==0,
  stable(covered),gate(covered)==null]
+
+// the HTML parser stores leading fragment comments before its implicit html element.
+let wp_fragment = "<!-- wp:paragraph --><p>Saved block</p><!-- /wp:paragraph -->"
+"fragment envelope comments survive save:";
+[starts_with(written(wp_fragment),"<!-- wp:paragraph -->\n"),
+ contains(written(wp_fragment),"<!-- /wp:paragraph -->"),stable(wp_fragment),gate(wp_fragment)==null,
+ stable("<!-- lead --><meta name=\"author\" content=\"Editor\"><p>Body</p>"),
+ gate("<!-- lead --><meta name=\"author\" content=\"Editor\"><p>Body</p>")==null,
+ stable("<!-- only -->"),gate("<!-- only -->")==null]

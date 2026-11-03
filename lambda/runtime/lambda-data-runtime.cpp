@@ -5,6 +5,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "heap_api.h"
+#include "gc/gc_object_zone.h"
 #include "context_capsule.h"
 #include "root_vector.h"
 #include "../../lib/log.h"
@@ -166,11 +167,6 @@ extern "C" void symbol_key_list_free(void* keys_ptr) {
 static Item resolve_path_content(Path* path) {
     if (!path) return ItemNull;
 
-    // Check if already resolved
-    if (path->result != 0) {
-        return {.item = path->result};
-    }
-
     // Use the new path resolution which handles:
     // - Directories: returns list of child paths
     // - Files: returns parsed content
@@ -302,22 +298,33 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
                                                int64_t extra, bool zeroed,
         int ndim, const int64_t* dimensions) {
     if (length < 0 || extra < 0 || length > INT64_MAX - extra) return NULL;
-    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    size_t bytes = 0, combined = 0;
+    bool valid_size = elem_size > 0 &&
+        lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes);
+    int payload_class = ndim == 1 && valid_size &&
+        lam::checked_add(sizeof(ArrayNum), bytes, &combined)
+        ? gc_object_zone_class_index(combined) : -1;
+    ArrayNum *arr = (ArrayNum*)(payload_class >= 0
+        ? heap_calloc_class(combined, LMD_TYPE_ARRAY_NUM, payload_class)
+        : heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM));
     if (!arr) return NULL;
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->set_elem_type(elem_type);
+    arr->extra = extra;
+    if (payload_class >= 0) {
+        // small owned lanes fit in the existing nonmoving object slot (D4.3.1).
+        // no second allocation/safepoint is needed; growth still uses the data zone.
+        arr->data = bytes ? (uint8_t*)arr + sizeof(ArrayNum) : NULL;
+        arr->length = length; arr->capacity = length + extra;
+        return arr;
+    }
     // The data-zone allocation can force GC before this helper returns the new
     // header to generated code, so the native construction interval needs an
     // exact root of its own.
     RootFrame roots(1);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
-    arr->extra = extra;
-    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
-    size_t bytes;
-    if (elem_size <= 0 ||
-            !lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes)) {
-        return arr;
-    }
+    if (!valid_size) return arr;
     if (ndim>1) {
         size_t shape_bytes=sizeof(ArrayNumShape)+2*(size_t)ndim*sizeof(int64_t);
         ArrayNumShape* shape=(ArrayNumShape*)heap_data_calloc(shape_bytes);
@@ -3777,10 +3784,8 @@ Item item_attr(Item data, const char* key) {
         // access on any path whose content could not load. fn_member gates the same
         // delegation on the scheme; the two must agree.
         if (path_get_scheme(path) == PATH_SCHEME_SYS) {
-            if (path->result == 0) {
-                Item resolved = path_resolve_for_iteration(path);
-                if (resolved.item == ItemError.item) return ItemNull;
-            }
+            Item current = path_resolve_for_iteration(path);
+            if (current.item == ItemError.item) return ItemNull;
             if (path->result != 0) {
                 Item resolved = {.item = path->result};
                 TypeId resolved_type = get_type_id(resolved);
@@ -3882,13 +3887,8 @@ SymbolKeyList* item_keys(Item data) {
     if (type_id == LMD_TYPE_PATH) {
         Path* path = data.path;
         if (!path) return NULL;
-        // Resolve the path if not already resolved
-        if (path->result == 0) {
-            Item resolved = path_resolve_for_iteration(path);
-            if (resolved.item == ItemError.item) return NULL;
-        }
-        // Get keys from resolved content
-        data = {.item = path->result};
+        data = path_resolve_for_iteration(path);
+        if (data.item == ItemError.item) return NULL;
         type_id = get_type_id(data);
     }
 

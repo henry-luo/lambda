@@ -742,6 +742,12 @@ typedef enum SysFunc {
     SYSFUNC_URL_ENCODE,           // url_encode(text) - RFC 3986 percent-encoding
     SYSPROC_IO_LOOPBACK_LISTEN,   // lambda.io.loopback listen() - a listener on 127.0.0.1
     SYSPROC_IO_LOOPBACK_ACCEPT,   // lambda.io.loopback accept(listener, seconds, page) - one browser request
+    SYSPROC_IO_WEBSOCKET_OPEN,    // lambda.io.websocket: task-owned WS/WSS transport
+    SYSPROC_IO_WEBSOCKET_SEND,
+    SYSPROC_IO_WEBSOCKET_RECEIVE,
+    SYSPROC_IO_WEBSOCKET_CLOSE,
+    SYSPROC_IO_WEBSOCKET_LISTEN,
+    SYSPROC_IO_WEBSOCKET_ACCEPT,
     SYSFUNC_WFC,                 // math.wfc(key, weights, masks, control) - exact batch solver
     SYSFUNC_HYDRAULIC,           // math.hydraulic(key, field, control, settings)
     SYSFUNC_DELAUNAY,            // math.delaunay(points, unique_ids, ccw_seed)
@@ -1551,6 +1557,10 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
+// internal traced binding homes; their wrapper never enters a language value.
+Array* lambda_capture_home_new(Item value);
+Item lambda_capture_home_read(Array* home);
+void lambda_capture_home_store(Array* home, Item value);
 // JS reading: an in-band i64/u64 may return as an inline int (one JS number type)
 Item js_owned_item_slot_read(Item* storage, int64_t item_count,
                              int64_t index, bool immortal);
@@ -3118,6 +3128,10 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
+    // shared resolved store plan; primitive proofs still guard the live carrier.
+    Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
+        Type* expected, Type* element, const LaneStorageDesc* lane,
+        const char* boundary, bool inplace, bool uncounted_primitive);
     Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
@@ -3414,6 +3428,7 @@ extern "C" {
         String *part4, String *part5);
     enum { LAMBDA_STRING_CONCAT_MAX_PARTS = 64 };
     String *fn_strcat_many(int64_t owned, int64_t count, ...);
+    String *fn_strcat_values(int64_t owned, int64_t count, ...);
     String *fn_string_freeze(String *str);
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC
@@ -3608,6 +3623,18 @@ extern "C" {
     Item pn_io_secret_set(Item service, Item account, Item value);
     Item pn_io_secret_delete(Item service, Item account);
     // lambda.io.loopback (D7.2.4v4; vibe/Lambda_Demo_Mail.md MG7)
+    Item pn_io_websocket_open1(Item url);
+    Item pn_io_websocket_open2(Item url, Item options);
+    Item pn_io_websocket_send(Item connection, Item data);
+    Item pn_io_websocket_receive1(Item connection);
+    Item pn_io_websocket_receive2(Item connection, Item timeout_ms);
+    Item pn_io_websocket_close(Item connection);
+    Item pn_io_websocket_close2(Item connection, Item code);
+    Item pn_io_websocket_close3(Item connection, Item code, Item reason);
+    Item pn_io_websocket_listen(Item port);
+    Item pn_io_websocket_listen2(Item port, Item options);
+    Item pn_io_websocket_accept1(Item listener);
+    Item pn_io_websocket_accept2(Item listener, Item timeout_ms);
     Item pn_io_loopback_listen(void);
     Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 

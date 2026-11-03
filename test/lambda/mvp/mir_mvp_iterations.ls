@@ -33,6 +33,42 @@ pn contract_end(start: int) int^ {
     while ((n < 0)^) { n = int(n div 2) }
     return n
 }
+// S7.1.1v3, S9.1.2: complete-loop guards retain tails, empty loops and snapshots.
+pn stride_rows(var a: float[], b: float[], first: int, end: int, step: int) int {
+    var i: int = first
+    while (i < end) {
+        a[i] = b[i] + b[i + 1]
+        i = i + step
+    }
+    return i
+}
+pn moving_limit(var a: float[], end: int) {
+    var i: int = 0
+    var limit: int = end
+    while (i < limit) {
+        a[i] = a[i] + a[i + 1]
+        limit = limit - 1
+        i = i + 1
+    }
+}
+pn text_matches(a: string, b: string, start: int, end: int) int {
+    var i: int = start
+    var count: int = 0
+    while (i < end) {
+        if (a[i] == b[i]) { count = count + 1 }
+        i = i + 1
+    }
+    return count
+}
+pn fixed_character_matches(a: string, b: string, row: int, end: int) int {
+    var i: int = 0
+    var count: int = 0
+    while (i < end) {
+        if (a[row] == b[i]) { count = count + 1 }
+        i = i + 1
+    }
+    return count
+}
 pn conditional_swap(var a: float[], i: int, j: int, enabled: bool) {
     if (enabled) {
         let saved = a[i]
@@ -78,6 +114,26 @@ pn main() {
     var partial: float[] = [1.0]
     conditional_swap(partial, 0, 0, false)
     print(partial); print("\n")
+    var lanes: float[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    let original: float[] = lanes
+    print(stride_rows(lanes, original, 0, 8, 3)); print(" "); print(lanes); print("\n")
+    print(stride_rows(lanes, original, 0, 6, 4)); print(" "); print(lanes); print("\n")
+    print(stride_rows(lanes, original, 5, 2, 1)); print(" "); print(original); print("\n")
+    moving_limit(lanes, 7)
+    print(lanes); print("\n")
+    stride_rows(lanes, original, -1, 1, 1)
+    stride_rows(lanes, partial, 0, 3, 1)
+    print(stride_rows(lanes, original, 3, 1, 0)); print(" "); print(lanes); print("\n")
+    print(text_matches("abc", "axc", 0, 3)); print(" ")
+    print(text_matches("éλz", "éμz", 0, 3)); print(" ")
+    print(text_matches("ab", "ab", -1, 2)); print(" ")
+    print(text_matches("a", "ab", 0, 3)); print("\n")
+    print(text_matches("a\u0000", "a", 0, 2)); print(" ")
+    print(text_matches("a\u0000", "a\u0000", 0, 2)); print(" ")
+    print(fixed_character_matches("ax", "aab", 0, 3)); print(" ")
+    print(fixed_character_matches("é", "éaé", 0, 3)); print(" ")
+    print(fixed_character_matches("\u0000", "a\u0000b", 0, 3)); print(" ")
+    print(fixed_character_matches("a", "", -1, 2)); print("\n")
 }
 pn dispatch(op: int) int {
     var result: int = 0

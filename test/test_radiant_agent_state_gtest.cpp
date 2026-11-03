@@ -229,6 +229,29 @@ TEST(RadiantAgentState, ClosingSessionRejectsDeferredCookieWriter) {
     cookie_jar_release(jar);
 }
 
+TEST(RadiantAgentState, WebSocketHandshakeCookiesRespectRequestScope) {
+    CookieJar* jar = cookie_jar_create(nullptr);
+    ASSERT_NE(jar, nullptr);
+    cookie_jar_store(jar, "https://example.test/chat", "session=secret; HttpOnly; Secure; Path=/chat");
+    cookie_jar_store(jar, "https://example.test/chat", "visible=yes; Path=/");
+    char* request = cookie_jar_build_request_cookie(jar, "https://example.test/chat/socket");
+    ASSERT_NE(request, nullptr);
+    EXPECT_NE(strstr(request, "session=secret"), nullptr);
+    EXPECT_NE(strstr(request, "visible=yes"), nullptr);
+    mem_free(request);
+    char* document = cookie_jar_build_document_cookie(jar, "https://example.test/chat/socket");
+    ASSERT_NE(document, nullptr);
+    EXPECT_EQ(strstr(document, "session="), nullptr);
+    mem_free(document);
+    const char* urls[] = {"http://example.test/chat/socket", "https://example.test/other", "https://another.test/chat"};
+    for (const char* url : urls) {
+        request = cookie_jar_build_request_cookie(jar, url);
+        EXPECT_TRUE(!request || !strstr(request, "session="));
+        mem_free(request);
+    }
+    cookie_jar_destroy(jar);
+}
+
 TEST(RadiantAgentState, FailsClosedWithoutReplacingCorruptDatabase) {
     char* cache_dir = dir_temp_create("radiant_agent_state_corrupt");
     ASSERT_NE(cache_dir, nullptr);

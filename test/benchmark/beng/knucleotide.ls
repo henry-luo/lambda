@@ -6,7 +6,7 @@
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // extract >THREE section from fasta input
-pn extract_three(text) {
+fn extract_three(text) any^ {
     let lines = split(text, "\n")
     var num_lines = len(lines)
     var seq = ""
@@ -60,7 +60,7 @@ pn count_small_kmers(seq) {
 }
 
 // format float to 3 decimal places
-pn format3(x) {
+fn format3(x) any^ {
     var int_part = int(floor(x))
     var frac = x - float(int_part)
     var frac_f = floor(frac * 1000.0 + 0.5)
@@ -120,7 +120,7 @@ pn print_frequency_table(counts, offset, width, total) {
     print("\n")
 }
 
-pn count_literal(seq, pattern) {
+fn count_literal(seq, pattern) {
     let pattern_len = len(pattern)
     let seq_len = len(seq)
     var count = 0
