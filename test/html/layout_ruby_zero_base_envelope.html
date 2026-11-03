@@ -1,0 +1,26 @@
+<!doctype html>
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/40px Ahem; }
+.row { height:100px; width:300px; }
+ruby { line-height:0; }
+.base { display:ruby-base; font-size:0; }
+.reading { font-size:10px; line-height:10px; }
+.under { ruby-position:under; }
+.atom { display:inline-block; width:0; height:0; }
+.tail { display:inline-block; width:10px; height:4px; }
+</style>
+<div id="result">
+<div class="row" id="over-empty"><ruby id="over-empty-ruby" class="over"><span class="base" id="over-empty-base"></span><rt class="reading" id="over-empty-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-empty-tail"></i></div>
+<div class="row" id="over-text"><ruby id="over-text-ruby" class="over"><span class="base" id="over-text-base">XX</span><rt class="reading" id="over-text-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-text-tail"></i></div>
+<div class="row" id="over-atomic"><ruby id="over-atomic-ruby" class="over"><span class="base" id="over-atomic-base"><i class="atom"></i></span><rt class="reading" id="over-atomic-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-atomic-tail"></i></div>
+<div class="row" id="over-anonymous"><ruby id="over-anonymous-ruby" class="over"><span style="font-size:0" id="over-anonymous-base">XX</span><rt class="reading" id="over-anonymous-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-anonymous-tail"></i></div>
+<div class="row" id="over-missing"><ruby id="over-missing-ruby" class="over"><rt class="reading" id="over-missing-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-missing-tail"></i></div>
+<div class="row" id="over-normal"><ruby id="over-normal-ruby" class="over"><span class="base" style="font-size:20px" id="over-normal-base">XX</span><rt class="reading" id="over-normal-reading">xxxxxxxx</rt></ruby><i class="tail" id="over-normal-tail"></i></div>
+<div class="row" id="under-empty"><ruby id="under-empty-ruby" class="under"><span class="base" id="under-empty-base"></span><rt class="reading" id="under-empty-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-empty-tail"></i></div>
+<div class="row" id="under-text"><ruby id="under-text-ruby" class="under"><span class="base" id="under-text-base">XX</span><rt class="reading" id="under-text-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-text-tail"></i></div>
+<div class="row" id="under-atomic"><ruby id="under-atomic-ruby" class="under"><span class="base" id="under-atomic-base"><i class="atom"></i></span><rt class="reading" id="under-atomic-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-atomic-tail"></i></div>
+<div class="row" id="under-anonymous"><ruby id="under-anonymous-ruby" class="under"><span style="font-size:0" id="under-anonymous-base">XX</span><rt class="reading" id="under-anonymous-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-anonymous-tail"></i></div>
+<div class="row" id="under-missing"><ruby id="under-missing-ruby" class="under"><rt class="reading" id="under-missing-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-missing-tail"></i></div>
+<div class="row" id="under-normal"><ruby id="under-normal-ruby" class="under"><span class="base" style="font-size:20px" id="under-normal-base">XX</span><rt class="reading" id="under-normal-reading">xxxxxxxx</rt></ruby><i class="tail" id="under-normal-tail"></i></div>
+</div>

@@ -2867,3 +2867,71 @@ differences; collapsed-whitespace/source-fragment capture discrepancies remain
 explicit. Evidence and finite acceptance:
 `temp/ruby-m32/next-milestone.json` and
 `temp/ruby-m33/{intrinsic-element-comparison.json,intrinsic-control-audit.json}`.
+
+
+## M33: explicit zero-size base envelopes remain present
+
+P1 geometry invariant, qualified with the limitations below. A zero-font explicit `ruby-base` is present even when
+its margin box has zero area. The old bounds query discarded that point, and
+both initial placement and final line alignment treated the base as absent,
+substituting the Ruby container's inherited-font empty base. An annotation
+therefore failed to meet its actual base margin edge. The new native regression
+fails before the repair for empty, text and zero-size atomic base contents, on
+both annotation sides; nonzero-font controls remain correct. Evidence:
+`temp/ruby-m33/focused-before.log`.
+
+[CSS Ruby §3.1.2](https://drafts.csswg.org/css-ruby-1/#interlinear-block)
+requires the base container to enclose its actual base margin boxes and stacks
+annotation containers against that envelope. The shared box query now reports
+whether bounds exist independently of their dimensions. Level aggregation keeps
+an explicit zero-size box's point; one shared base-envelope query governs the
+fallback in initial placement and final alignment. Anonymous zero-content bases
+retain their inherited-font fallback. The change adds no source mutation,
+allocation, persistent payload or module API (**D4.5.1v4 / D4.1.4v5**,
+**D7.3.3–D7.3.4**).
+
+The focused fixture checks explicit empty/text/atomic bases, anonymous and
+missing bases, positive-font controls, over/under placement, initial/retained
+layout and 0px → 10px → 20px → 0px font changes. Reading source identity,
+parents/data, column advance and character Range endpoints survive. All **155
+affected neighbors** pass. The refreshed merged baseline and repaired CLI both
+retain **60/212 raw full matches**, without full or partial score changes;
+references, fixtures in the imported corpus, thresholds and floors are unchanged.
+Chromium 152 does not implement `ruby-base`; explicit-role assertions here are
+spec-derived native coverage, not a browser-parity claim. Evidence:
+`temp/ruby-m33/{focused-bounds-1.log,neighbors-bounds-1.log,
+delta-bounds-1.json,source-inputs.json}`.
+
+The earlier intrinsic probe remains unresolved, not an implementation change.
+Literal Unicode isolate controls permit a line break after their opener in
+ICU's line-break iterator; CSS Writing Modes' synthetic controls describe bidi
+reordering and do not establish Chromium's larger minimum widths. No width
+adjustment is introduced to force the 62px/82px Ruby or 62px/77px ordinary-isolate
+results to match. The recursive inlinification base row agrees on all geometry
+with explicit fonts. A standalone annotation retains a separate anonymous
+container/IFC placement defect after equalizing its font and leading; a local
+line-height adjustment would leave that structural defect. These remain scoped
+follow-up work. Evidence: `temp/ruby-m33/{icu-isolate-break-audit.json,
+fixed-width-browser-audit.json,inlinize-comparison.json,
+inlinize-explicit-comparison.json,orphan-leading-probe.html}`.
+
+The main checkout advanced to merge `a8e349182` before this milestone's edit.
+Its generated makefiles were stale and omitted new audio objects. Regenerating
+through `make build` restores a successful current-source build; neither build
+configuration nor vendor sources are changed. The focused failure and raw
+before/after runs use that refreshed build. Dimension lint and the 421-name
+inventory check pass, with only reference columns 14–15 changed. The goal
+remains active with 152 raw mismatches; no completion is claimed.
+
+
+The required Radiant aggregate passes: **9,174 passed, 305 partial, 2 skipped,
+0 failed / 9,481 checks**, including **519 native text-query** and **758 UI
+automation** checks. Layout retains 4,973 full / 301 partial matches. All four
+frozen inputs and the candidate executable hash remain unchanged after the
+gate. Module APIs/imports and selected-state placement are unchanged; the
+recorded M30 boundary and M15 input/PDF limits are not rerun or claimed resolved.
+Evidence: `temp/ruby-m33/{radiant.log,radiant-output/test_summary.json,
+qualification-result.json}`. The next finite milestone is shared anonymous
+Ruby normalization for misparented annotation runs, with source/line ownership
+and an independent annotation IFC resolved before changing placement. Its
+acceptance and verification budget are in `temp/ruby-m33/next-milestone.json`.

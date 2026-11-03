@@ -710,8 +710,9 @@ static void ruby_walk_box(LayoutRubyBox* box, Visit visit, Leave leave,
     }
 }
 
-static Rect ruby_box_bounds(LayoutRubyBox* box) {
+static Rect ruby_box_bounds(LayoutRubyBox* box, bool* has_bounds = nullptr) {
     Rect result = {};
+    if (has_bounds) *has_bounds = false;
     if (box->hidden) return result;
     bool found = false;
     if (box->fragmented) {
@@ -730,6 +731,7 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
             }
         };
         ruby_walk_box(box, include, [](View*, int) {});
+        if (has_bounds) *has_bounds = found;
         return result;
     }
     for (int index = 0; index < box->node_count; index++) {
@@ -740,6 +742,7 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
         ruby_include_bounds(&result, &found, ruby_flow_bounds(view,
             {view->x, view->y, view->width, view->height}));
     }
+    if (has_bounds) *has_bounds = found;
     if (!found) return result;
     // CSS Ruby §3.1.2 includes nested containers in the block-axis envelope,
     // without changing the source inline's font box or its column allocation.
@@ -759,15 +762,29 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
     return result;
 }
 
-static Rect ruby_level_bounds(LayoutRubyLevel* level) {
+static Rect ruby_level_bounds(LayoutRubyLevel* level, bool* has_explicit_box = nullptr) {
     Rect result = {};
     bool found = false;
+    if (has_explicit_box) *has_explicit_box = false;
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
-        Rect bounds = ruby_box_bounds(box);
-        if (bounds.width <= 0.0f && bounds.height <= 0.0f) continue;
+        bool present = false;
+        Rect bounds = ruby_box_bounds(box, &present);
+        if (!present) continue;
+        // an explicit zero-size box still owns a baseline point; anonymous empty content inherits its base strut.
+        if (bounds.width <= 0.0f && bounds.height <= 0.0f && !box->element) continue;
+        if (has_explicit_box && box->element) *has_explicit_box = true;
         ruby_include_bounds(&result, &found, bounds);
     }
     return result;
+}
+
+static Rect ruby_base_level_bounds(LayoutRubyLevel* level, Rect empty_base, bool* has_base = nullptr) {
+    bool explicit_box = false;
+    Rect bounds = ruby_level_bounds(level, &explicit_box);
+    // CSS Ruby §3.1.2 substitutes an inherited-font base only when no real base box supplies the envelope.
+    bool present = explicit_box || bounds.height > 0.0f;
+    if (has_base) *has_base = present;
+    return present ? bounds : empty_base;
 }
 
 static bool ruby_level_has_visible_boxes(LayoutRubyLevel* level) {
@@ -1052,9 +1069,8 @@ static bool ruby_place_segment(LayoutContext* context, ViewSpan* ruby, LayoutRub
         float start, Rect empty_base, const Linebox* base_line, float baseline, float line_height,
         bool finish_annotations = true) {
     ruby_place_level(segment, &segment->base, ruby, start);
-    Rect base = ruby_level_bounds(&segment->base);
-    bool has_base = base.height > 0.0f;
-    if (!has_base) base = empty_base;
+    bool has_base = false;
+    Rect base = ruby_base_level_bounds(&segment->base, empty_base, &has_base);
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
         ruby_place_level(segment, level, ruby, start);
     if (finish_annotations)
@@ -1266,8 +1282,7 @@ static void ruby_align_annotation_model(ViewSpan* ruby, LayoutRubyModel* model,
                 on_line |= layout_inline_span_has_content_on_line(box->nodes[index], line_number);
         }
         if (segment->base.first && !on_line) continue;
-        Rect base = ruby_level_bounds(&segment->base);
-        if (base.height <= 0.0f) base = empty_base;
+        Rect base = ruby_base_level_bounds(&segment->base, empty_base);
         auto no_contribution = [](LayoutRubyLevel*, Rect, bool) {};
         ruby_position_annotation_levels(ruby, segment, base, line_number, true, no_contribution);
     }

@@ -17198,6 +17198,66 @@ TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
     }
 }
 
+TEST_F(RadiantTextQuery, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelope) {
+    ASSERT_NE(load("test/html/layout_ruby_zero_base_envelope.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id, const char* suffix) {
+        char name[80]; str_fmt(name, sizeof(name), "%s-%s", id, suffix);
+        return dom_find_element_by_id(document->root, name);
+    };
+    struct Case { const char* id; bool under; bool explicit_base; bool mutable_font;
+        DomText* reading; DomNode* parent; const unsigned char* data;
+    } cases[] = {{"over-empty", false, true, true}, {"over-text", false, true, true},
+        {"over-atomic", false, true, true}, {"over-anonymous"}, {"over-missing"},
+        {"over-normal", false, true}, {"under-empty", true, true, true},
+        {"under-text", true, true, true}, {"under-atomic", true, true, true},
+        {"under-anonymous", true}, {"under-missing", true}, {"under-normal", true, true}};
+    for (Case& entry : cases) {
+        entry.reading = first_text_leaf(find(entry.id, "reading"));
+        ASSERT_NE(entry.reading, nullptr);
+        entry.parent = entry.reading->parent; entry.data = entry.reading->text_data();
+    }
+    auto check = [&](float font_size) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-zero-base-envelope"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = find(entry.id, "ruby"), *reading = find(entry.id, "reading");
+            ASSERT_NE(ruby, nullptr); ASSERT_NE(reading, nullptr);
+            Rect base = {}, annotation = {}, tail = {};
+            DomElement* base_element = entry.explicit_base ? find(entry.id, "base") : ruby;
+            ASSERT_NE(base_element, nullptr);
+            view_get_visual_bounds(base_element, &base.x, &base.y, &base.width, &base.height);
+            view_get_visual_bounds(reading, &annotation.x, &annotation.y, &annotation.width, &annotation.height);
+            view_get_visual_bounds(find(entry.id, "tail"), &tail.x, &tail.y, &tail.width, &tail.height);
+            // CSS Ruby §3.1.2 stacks against the explicit base's own margin box, even at zero size.
+            EXPECT_FLOAT_EQ(annotation.y, entry.under ? base.y + base.height : base.y - annotation.height);
+            EXPECT_FLOAT_EQ(annotation.width, 80.0f);
+            EXPECT_FLOAT_EQ(tail.x, annotation.x + 80.0f);
+            if (entry.explicit_base) {
+                EXPECT_FLOAT_EQ(base.height, entry.mutable_font ? font_size : 20.0f);
+                EXPECT_FALSE(ruby->ext->has_empty_ruby_base);
+            }
+            EXPECT_EQ(first_text_leaf(reading), entry.reading);
+            EXPECT_EQ(entry.reading->parent.get(), entry.parent);
+            EXPECT_EQ(entry.reading->text_data(), entry.data);
+            for (size_t character : {size_t(0), size_t(7)}) {
+                Rect box = {}; ASSERT_TRUE(character_rect(range, entry.reading, character, &box));
+                EXPECT_FLOAT_EQ(box.x, annotation.x + (float)character * 10.0f);
+                EXPECT_FLOAT_EQ(box.y, annotation.y);
+                EXPECT_FLOAT_EQ(box.width, 10.0f); EXPECT_FLOAT_EQ(box.height, 10.0f);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(0.0f); }
+    for (const char* size : {"10px", "20px", "0px"}) {
+        for (const Case& entry : cases) if (entry.mutable_font)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id, "base"), "font-size", size));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(strtof(size, nullptr));
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
     ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
     process_document_font_faces(&ui, document);
