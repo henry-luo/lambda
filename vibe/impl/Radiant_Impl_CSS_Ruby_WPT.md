@@ -1324,3 +1324,65 @@ partial score decreases; three other partial scores improve. Evidence:
 `temp/ruby-m13/qualification-result.json`. Source hashes stay unchanged through
 the gate. The goal remains active with 176 Ruby mismatches; coordinated source
 fragments and other recorded limits are not claimed as implemented.
+
+
+## M14: preserve column allocations through zero-area bounds
+
+P1 shared geometry invariant: a 30px reading paired with a zero-size atomic
+base loses its Ruby container's allocated width during bounds recomputation.
+The current native probe reports Ruby width 0px and reading width 30px;
+Chromium reports 30px for both. The zero-area early return in
+`compute_span_bounding_box` skips the existing column-geometry application
+used by its other exit paths. [CSS Ruby §3.1.1](https://drafts.csswg.org/css-ruby-1/#interlinear-inline)
+sizes each column by its widest content, independent of its base's ink area.
+
+Reuse `layout_apply_ruby_column_geometry` at the missing exit, preserving the
+shared selected geometry contract (**D4.5.1v4 / D4.1.4v5**). Acceptance: explicit
+and anonymous zero-area bases, zero-area readings, explicit level containers,
+following text advance, ordinary zero-area controls, initial/retained reflow
+and live atomic-width changes. Check used and intrinsic widths and retain DOM
+source identity. Do not change the separate zero-height base-envelope policy.
+Budget: one failing native reproducer, focused Ruby/bidi/intrinsic controls,
+raw Ruby score comparison, lint/inventory and the required Radiant gate after
+this invariant is stable.
+
+
+Implementation separates the existing natural/content bounds calculation from
+one shared column-allocation step. Empty, zero-area and collapsed-content
+returns now all reach that step; existing helper calls are consolidated rather
+than copied into additional branches. The native reproducer fails before the
+repair; all **88** focused Ruby/bidi/wrapping/intrinsic checks pass after it.
+Used/intrinsic widths, source identity and following advances survive retained
+layout and 60px → 0px → 20px atomic-width mutations.
+
+The browser controls use atomic following text to avoid its optional 5px
+end overhang from changing the consumed Ruby advance. These horizontal column
+checks do not qualify the separate vertical envelope differences. Saved M13
+and current captures of the identical fixture show three zero-area containers
+changing from width 0px to 30px, without changing their block extents.
+Evidence: `temp/ruby-m14/{columns-before,columns-after,columns-browser-atomic}.json`
+and `temp/ruby-m14/{reproducer-before,focused-final}.log`.
+
+The structured raw-suite run remains **36/212** with no full match lost.
+`ruby-align-space-around-ref` improves **42.9% → 57.1%** element matches with
+100% text retained. No partial score decreases. Evidence:
+`temp/ruby-m14/wpt-qualified.log` and `temp/ruby-m14/wpt-delta.json`.
+Dimension lint, inventory generation/check and whitespace checks pass; only
+reference columns 13/14 change in the inventory.
+
+
+M14 is qualified on local base `8a7b76f8b`. The complete required Radiant gate
+passes: **9072 passed / 304 partial / 0 failed / 2 skipped** of 9378 checks,
+including **475/475** text/query checks and **752/752** UI checks. All 16 layout
+baseline categories retain **4974 full / 300 partial / 0 regressions**.
+Source inputs remain unchanged through qualification. Evidence:
+`temp/ruby-m14/radiant.log`, `temp/ruby-m14/radiant-output/test_summary.json`,
+and `temp/ruby-m14/qualification-result.json`.
+
+A separate controlled-prefix capture also verifies the same 30px allocation
+at x=40px. Atomic text on both sides excludes optional overhang; native and
+browser geometry agree. Captures: `temp/ruby-m14/columns-prefix-{native,browser}.json`.
+The goal remains active with **176 Ruby mismatches**. Next priority is
+coordinated within-base/reading fragments; source-range design findings are
+retained in `temp/ruby-m14/next-fragment-plan.json`. Browser references,
+upstream fixtures, thresholds and baselines remain unchanged.

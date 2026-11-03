@@ -15269,6 +15269,59 @@ TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningConten
     EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
 }
 
+TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; const char* reading; const char* suffix; float width; } cases[] = {
+        {"zero-ink", "zero-ink-reading", "zero-ink-suffix", 30.0f},
+        {"zero-anonymous", "zero-anonymous-reading", "zero-anonymous-suffix", 30.0f},
+        {"zero-reading", "zero-reading-annotation", "zero-reading-suffix", 40.0f},
+        {"zero-levels", "zero-levels-reading", "zero-levels-suffix", 30.0f}
+    };
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    auto check = [&](const Case& entry, float width) {
+        DomElement* ruby = find(entry.id);
+        DomElement* reading = find(entry.reading);
+        DomElement* suffix = find(entry.suffix);
+        ASSERT_NE(ruby, nullptr);
+        ASSERT_NE(reading, nullptr);
+        ASSERT_NE(suffix, nullptr);
+        SCOPED_TRACE(entry.id);
+        float x = 0.0f, reading_x = 0.0f, suffix_x = 0.0f;
+        view_get_visual_bounds(ruby, &x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(reading, &reading_x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(suffix, &suffix_x, nullptr, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(ruby->width, width);
+        EXPECT_FLOAT_EQ(reading->width, width);
+        EXPECT_FLOAT_EQ(reading_x, x);
+        EXPECT_FLOAT_EQ(suffix_x, x + width);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, width);
+    };
+    DomElement* base = find("zero-ink-base");
+    DomElement* atomic = find("zero-ink-atomic");
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    DomNode* parent = atomic->parent;
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) check(entry, entry.width);
+        EXPECT_FLOAT_EQ(base->width, 30.0f);
+        EXPECT_FLOAT_EQ(base->height, 0.0f);
+        EXPECT_FLOAT_EQ(atomic->width, 0.0f);
+        EXPECT_FLOAT_EQ(atomic->height, 0.0f);
+        EXPECT_EQ(atomic->parent.get(), parent);
+        EXPECT_FLOAT_EQ(find("zero-ordinary")->width, 0.0f);
+        EXPECT_FLOAT_EQ(find("zero-ordinary-suffix")->x, 0.0f);
+    }
+    for (const char* width : {"60px", "0px", "20px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(atomic, "width", width));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check(cases[0], strcmp(width, "60px") == 0 ? 60.0f : 30.0f);
+        EXPECT_EQ(atomic->parent.get(), parent);
+        EXPECT_EQ(parent, base);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
     ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
     process_document_font_faces(&ui, document);
