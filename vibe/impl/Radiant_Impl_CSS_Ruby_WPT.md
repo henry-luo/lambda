@@ -13,7 +13,8 @@ and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
 source fragmentation remain open. Completed-line trailing spaces and bounded
 Ruby column reconciliation are qualified; hidden-annotation CSSOM exposure and
 float exclusion for internally split Ruby remain open. Whole unbroken Ruby
-float bands and relative-offset composition are qualified. The objective is not complete.
+float bands, relative-offset composition and block-axis annotation margin
+envelopes are qualified. The objective is not complete.
 
 ## Objective and contracts
 
@@ -2433,3 +2434,62 @@ deferred: Chromium's collapse probe retains layout effects contrary to §2.4,
 so its geometry alone cannot justify a repair. Diagnosis and acceptance cases:
 `temp/ruby-m26/{margin-comparison-before.json,margin-multiline-browser.json,
 next-milestone.json}`.
+
+## M27: block-axis margin envelopes for interlinear levels
+
+P1, qualified. Imported
+`ruby-annotation-with-margin` and `interlinear-block-margin-box` expose an
+ordinary reading/base separation defect. Explicit-font over/under controls
+reproduce an ignored 11px separating margin while padding/border controls
+agree. With 9px/11px outer margins, successive 20px base lines advance only
+30px instead of 50px. The qualified M26 binary differs from Chromium on 48
+coordinates in the strict fixture. Evidence:
+`temp/ruby-m26/{margin-comparison-before.json,margin-multiline-browser.json}`
+and `temp/ruby-m27/{focused-before.log,browser-comparison-before.json}`.
+
+[CSS Ruby §3.1.2](https://drafts.csswg.org/css-ruby-1/#interlinear-block) sizes
+base/annotation containers around their units' margin boxes. The shared
+normal-flow bounds adapter now includes block-axis margins for computed
+ruby-base/ruby-text roles, using the existing line-relative boundary-edge
+mapping. Column width and published source border boxes retain their existing
+owners; level stacking and line-leading contribution consume the corrected
+envelope. No tag exception, new storage, module API or formal ruling is added
+(**D4.5.1v4 / D4.1.4v5**, **D7.3.3–D7.3.4**).
+
+The strict regression checks two successive lines for over/under readings,
+plain and padding/border decorations, following atomic tails, source identity
+and first/last character rectangles. Initial, retained, zero-margin and changed
+margin states pass. Three browser states agree on all **588 element/source
+coordinates**, with 0px maximum delta. The first capture attempt used external
+normal-priority overrides that lost to the document stylesheet; recaptures
+explicitly give both engines the same override precedence. The native live
+CSSOM regression does not need that capture adapter. Evidence:
+`temp/ruby-m27/{focused-margin.log,browser-comparison.json,plan.json}`.
+
+All **182 affected neighboring tests** pass. The frozen raw suite reaches
+**57/212 full matches**, gaining `interlinear-block-margin-box` with no lost
+match. `ruby-annotation-with-margin` improves from 0% to 48.4% elements and
+44.4% text; no other partial score changes. Dimension lint and the 421-name
+inventory check pass, with only source/test reference columns changed. No
+module API/import changes require a new boundary audit; the recorded M26
+six-import checker limitation is not claimed resolved. Evidence:
+`temp/ruby-m27/{neighbors.log,wpt-final.log,delta-final.json,lint.log,
+inventory-check.log,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,089 passed, 305 partial, 2 skipped,
+0 failed / 9,396 checks**, including **493 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All four frozen source inputs and the qualified CLI hash remain
+unchanged after the gate. Evidence:
+`temp/ruby-m27/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 155 raw mismatches. The next finite milestone
+addresses inline-axis annotation margins. Fresh left/right/asymmetric controls
+show lost column width and reading offsets; 5px/15px margins contribute 80px
+instead of 100px to a minimum, and 90px instead of 110px to a maximum with a
+10px tail. A padding-only control already agrees with Chromium and can reuse
+the existing source-range/glyph comparison helper. Investigate both normalized
+intrinsic outer contributions and the conversion from column margin-box
+allocations to published border boxes before editing. Evidence and acceptance:
+`temp/ruby-m27/{inline-margin-comparison.json,inline-margin-intrinsic-comparison.json,
+inline-margin-control-comparison.json,next-milestone.json}`.

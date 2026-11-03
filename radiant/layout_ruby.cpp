@@ -643,6 +643,15 @@ static Rect ruby_flow_bounds(View* view, Rect bounds) {
     RdtLogicalPoint relative = ruby_relative_offset(view);
     bounds.x -= relative.x;
     bounds.y -= relative.y;
+    CssEnum role = ruby_node_role(view);
+    if (role == CSS_VALUE_RUBY_BASE || role == CSS_VALUE_RUBY_TEXT) {
+        // CSS Ruby §3.1.2 stacks level margin boxes; published inline geometry remains a border box.
+        BoxEdges margin = layout_line_relative_box_edges(
+            layout_boundary_margin_edges(view->as_element()->bound),
+            layout_nearest_block_ancestor(view->parent_view()));
+        bounds.y -= margin.top;
+        bounds.height += margin.top + margin.bottom;
+    }
     return bounds;
 }
 
