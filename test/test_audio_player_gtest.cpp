@@ -230,6 +230,33 @@ TEST_F(DecodedAudioPlayer, CopiesStereoSamplesAndAddsOnlyLivingFrames) {
     EXPECT_EQ(rdt_audio_state(player), RDT_AUDIO_ENDED); EXPECT_EQ(rdt_audio_frames(player), 16u);
 }
 
+TEST_F(DecodedAudioPlayer, PlatformDecoderReadsTheExistingVideoAudioTrack) {
+#ifdef __APPLE__
+    char* bytes = nullptr; size_t length = 0;
+    ASSERT_TRUE(file_read_all_limit("test/media/test_video_audio.mp4", MEM_CAT_RENDER,
+        RDT_AUDIO_SOURCE_LIMIT, &bytes, &length));
+    player = rdt_audio_open_bytes(bytes, length); mem_free(bytes); ASSERT_NE(player, nullptr);
+    ASSERT_TRUE(rdt_audio_play(player, 1)); float output[4096 * 2] = {}; rdt_audio_mix(player, output, 4096, 0);
+    double energy = 0; for (float value : output) { EXPECT_TRUE(isfinite(value)); energy += value * value; }
+    EXPECT_GT(energy, 0); RdtAudioInfo info; ASSERT_TRUE(rdt_audio_info(player, &info));
+    EXPECT_GT(info.duration, 1); EXPECT_NEAR(info.position, 4096. / AUDIO_BUS_RATE, 1e-9);
+#else
+    GTEST_SKIP() << "platform video/audio decoder is macOS only";
+#endif
+}
+TEST_F(DecodedAudioPlayer, OwnedFloatSnapshotsValidateSamplesAndRetainSharedPcmAcrossClones) {
+    EXPECT_EQ(rdt_audio_pcm_alloc(0), nullptr); EXPECT_EQ(rdt_audio_pcm_alloc(SIZE_MAX), nullptr);
+    auto* invalid = rdt_audio_pcm_alloc(4); ASSERT_NE(invalid, nullptr); invalid[3] = NAN;
+    EXPECT_EQ(rdt_audio_adopt_pcm(invalid, 4), nullptr);
+    auto* samples = rdt_audio_pcm_alloc(4); ASSERT_NE(samples, nullptr);
+    for (unsigned i = 0; i < 4; i++) { samples[i * 2] = .5f; samples[i * 2 + 1] = -.25f; }
+    player = rdt_audio_adopt_pcm(samples, 4); ASSERT_NE(player, nullptr);
+    EXPECT_EQ(rdt_audio_storage_bytes(player), rdt_audio_pcm_storage_bytes(4)); peer = rdt_audio_clone(player); ASSERT_NE(peer, nullptr);
+    rdt_audio_destroy(player); player = nullptr; ASSERT_TRUE(rdt_audio_play(peer, .5f)); float output[12] = {};
+    rdt_audio_mix(peer, output, 6, 0);
+    for (unsigned i = 0; i < 6; i++) { EXPECT_FLOAT_EQ(output[i * 2], i < 4 ? .25f : 0); EXPECT_FLOAT_EQ(output[i * 2 + 1], i < 4 ? -.125f : 0); }
+}
+
 TEST_F(DecodedAudioPlayer, PausePreservesCursorAndEndedPlaybackRestarts) {
     open(AUDIO_BUS_RATE, 2, 20); ASSERT_TRUE(rdt_audio_play(player, 1));
     float output[64 * 2] = {}; rdt_audio_mix(player, output, 8, 0);

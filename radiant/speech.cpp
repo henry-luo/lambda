@@ -486,6 +486,17 @@ bool radiant_speech_info(DomDocument* doc, uint64_t token, SpeechInfo* info) {
     *info = {u->state, position, u->char_index};
     return true;
 }
+RdtAudio* radiant_speech_snapshot(DomDocument* doc, uint64_t token, double position, uint32_t frames) {
+    auto* utterance = find_utterance(document_speech(doc), token);
+    if (!utterance || !utterance->render.samples || utterance->state >= SPEECH_CANCELLED || !isfinite(position) ||
+        position < 0 || position > utterance->render.frames / (double)AUDIO_BUS_RATE) return nullptr;
+    auto* samples = rdt_audio_pcm_alloc(frames); if (!samples) return nullptr;
+    uint64_t begin = (uint64_t)llround(position * AUDIO_BUS_RATE), count = utterance->render.frames - begin;
+    if (count > frames) count = frames;
+    // engine/fake PCM already includes utterance gain; export delivers no live word/bookmark events.
+    for (uint64_t i = 0; i < count; i++) samples[i * 2] = samples[i * 2 + 1] = utterance->render.samples[begin + i];
+    return rdt_audio_adopt_pcm(samples, frames);
+}
 bool radiant_speech_route(DomDocument* doc, uint64_t token, uint64_t expected, uint64_t route, const char** error) {
     const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
     auto fail = [&](const char* message) { *error = message; return false; };

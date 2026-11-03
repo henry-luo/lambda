@@ -856,6 +856,10 @@ bool radiant_media_routing(DomDocument* document, uint64_t token, AudioProviderI
     auto* owner = media_audio_owner(document, token);
     return owner && rdt_video_audio_routing(owner->video, info);
 }
+RdtAudio* radiant_media_snapshot(DomDocument* document, uint64_t token, double position, uint32_t frames) {
+    auto* owner = media_audio_owner(document, token);
+    return owner ? rdt_video_audio_snapshot(owner->video, position, frames) : nullptr;
+}
 bool radiant_media_graph_audible(DomDocument* document, AudioGraphId graph) {
     if (document) for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
         if (resource->destroy != media_audio_owner_destroy) continue;

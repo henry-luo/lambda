@@ -4,6 +4,7 @@
 #include "../radiant/rdt_video.h"
 #include "../lib/file.h"
 #include "../lib/mem.h"
+#include "../lib/endian.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -25,6 +26,10 @@ static inline bool audio_fixture_graph_publish(AudioSubmixId submix, AudioGraphI
     if (!audio_submix_graph_prepare(submix, graph, config, &prepared, &error)) return false;
     if (audio_submix_graph_commit(submix, graph, prepared, nullptr, 0)) return true;
     audio_graph_destroy(prepared); return false;
+}
+static inline float audio_fixture_sample(const void* bytes, unsigned frame, unsigned channel = 1) {
+    uint32_t bits = read_le32((const uint8_t*)bytes + (frame * 2 + channel) * 4);
+    float value; memcpy(&value, &bits, sizeof(value)); return value;
 }
 
 static inline void audio_fixture_le(unsigned char* out, uint32_t value, unsigned bytes) {

@@ -117,16 +117,7 @@ static bool audio_decode(const void* bytes, size_t length, AudioPcmBuilder* pcm)
     }
 }
 
-RdtAudio* rdt_audio_open_bytes_limit(const void* bytes, size_t length, size_t storage_budget) {
-    const size_t header = sizeof(RdtAudio) + sizeof(AudioPcm);
-    if (!bytes || !length || length > RDT_AUDIO_SOURCE_LIMIT || storage_budget < header + 2 * sizeof(float))
-        return nullptr;
-    size_t available = storage_budget - header;
-    if (available > RDT_AUDIO_PCM_LIMIT) available = RDT_AUDIO_PCM_LIMIT;
-    AudioPcmBuilder pcm(available / (2 * sizeof(float)));
-    if (!audio_decode(bytes, length, &pcm)) {
-        log_error("audio-decode: invalid/unsupported source or decoded PCM exceeds finite storage"); return nullptr;
-    }
+static RdtAudio* audio_pcm_finish(AudioPcmBuilder& pcm) {
     auto* audio = (RdtAudio*)mem_calloc(1, sizeof(RdtAudio), MEM_CAT_RENDER);
     if (!audio) return nullptr;
     auto* storage = (AudioPcm*)mem_calloc(1, sizeof(AudioPcm), MEM_CAT_RENDER);
@@ -140,6 +131,32 @@ RdtAudio* rdt_audio_open_bytes_limit(const void* bytes, size_t length, size_t st
     audio->pcm = storage; audio->volume = 1; audio->state = RDT_AUDIO_READY; audio->pitch = 1;
     audio->parameters = rdt_audio_default_parameters();
     return audio;
+}
+size_t rdt_audio_pcm_storage_bytes(size_t frames) {
+    return frames && frames <= RDT_AUDIO_PCM_LIMIT / (2 * sizeof(float)) ?
+        sizeof(RdtAudio) + sizeof(AudioPcm) + frames * 2 * sizeof(float) : 0;
+}
+float* rdt_audio_pcm_alloc(size_t frames) {
+    return rdt_audio_pcm_storage_bytes(frames) ? (float*)mem_calloc(frames, 2 * sizeof(float), MEM_CAT_RENDER) : nullptr;
+}
+RdtAudio* rdt_audio_adopt_pcm(float* samples, size_t frames) {
+    AudioPcmBuilder pcm(RDT_AUDIO_PCM_LIMIT / (2 * sizeof(float)));
+    pcm.samples = samples; pcm.frames = pcm.capacity = frames;
+    if (!samples || !rdt_audio_pcm_storage_bytes(frames)) return nullptr;
+    for (size_t i = 0; i < frames * 2; i++) if (!isfinite(samples[i])) return nullptr;
+    return audio_pcm_finish(pcm);
+}
+RdtAudio* rdt_audio_open_bytes_limit(const void* bytes, size_t length, size_t storage_budget) {
+    const size_t header = sizeof(RdtAudio) + sizeof(AudioPcm);
+    if (!bytes || !length || length > RDT_AUDIO_SOURCE_LIMIT || storage_budget < header + 2 * sizeof(float))
+        return nullptr;
+    size_t available = storage_budget - header;
+    if (available > RDT_AUDIO_PCM_LIMIT) available = RDT_AUDIO_PCM_LIMIT;
+    AudioPcmBuilder pcm(available / (2 * sizeof(float)));
+    if (!audio_decode(bytes, length, &pcm)) {
+        log_error("audio-decode: invalid/unsupported source or decoded PCM exceeds finite storage"); return nullptr;
+    }
+    return audio_pcm_finish(pcm);
 }
 RdtAudio* rdt_audio_open_bytes(const void* bytes, size_t length) {
     return rdt_audio_open_bytes_limit(bytes, length, sizeof(RdtAudio) + sizeof(AudioPcm) + RDT_AUDIO_PCM_LIMIT);

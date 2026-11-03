@@ -115,6 +115,7 @@ protected:
     bool previous_offline = false;
     VideoStorageControl owner = {};
     RdtVideo* control = nullptr;
+    RdtAudio* snapshot = nullptr;
     AudioSubmixId control_submix = 0;
     AudioGraphId graph = 0;
     AudioGraphConfig graph_config = {};
@@ -132,6 +133,7 @@ protected:
     }
 
     void TearDown() override {
+        rdt_audio_destroy(snapshot);
         if (video) {
             rdt_video_destroy(video);
             video = nullptr;
@@ -169,6 +171,46 @@ protected:
         rdt_video_play(video); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
     }
 };
+
+TEST_F(RdtVideoTest, AudioSnapshotsKeepIndependentCursorGainAndDecoderOwnership) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_seek(video, .15); rdt_video_set_volume(video, .5f);
+    snapshot = rdt_video_audio_snapshot(video, 0, 4096); ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY); EXPECT_NEAR(rdt_video_get_current_time(video), .15, 1e-9);
+    control_submix = audio_submix_create(true); control = create_bound_video(control_submix); ASSERT_NE(control, nullptr); ASSERT_TRUE(open_ready(control));
+    rdt_video_set_volume(control, .5f); rdt_video_play(control); float reference[4096 * 2], copied[4096 * 2] = {};
+    ASSERT_TRUE(audio_submix_render(control_submix, reference, 4096));
+    rdt_video_destroy(video); video = nullptr;
+    ASSERT_TRUE(rdt_audio_play(snapshot, 1)); rdt_audio_mix(snapshot, copied, 4096, 0);
+    double energy = 0; for (unsigned i = 0; i < 4096 * 2; i++) { EXPECT_NEAR(copied[i], reference[i], 1e-6); energy += copied[i] * copied[i]; }
+    EXPECT_GT(energy, 0);
+}
+
+TEST_F(RdtVideoTest, AudioSnapshotsReuseLoopTimestampsAndStayIndependentOfRenderPartitions) {
+    ASSERT_TRUE(open_and_wait_ready()); rdt_video_set_loop(video, true); rdt_video_set_volume(video, .25f);
+    double position = rdt_video_get_duration(video) - .02; snapshot = rdt_video_audio_snapshot(video, position, 8192); ASSERT_NE(snapshot, nullptr);
+    control_submix = audio_submix_create(true); control = create_bound_video(control_submix); ASSERT_NE(control, nullptr); ASSERT_TRUE(open_ready(control));
+    rdt_video_set_loop(control, true); rdt_video_set_volume(control, .25f); rdt_video_seek(control, position); rdt_video_play(control);
+    ASSERT_TRUE(rdt_audio_play(snapshot, 1));
+    float reference[128 * 2], copied[128 * 2];
+    for (unsigned done = 0; done < 8192;) {
+        unsigned count = 8192 - done < 73 ? 8192 - done : 73;
+        memset(copied, 0, sizeof(copied)); ASSERT_TRUE(audio_submix_render(control_submix, reference, count));
+        rdt_audio_mix(snapshot, copied, count, done);
+        for (unsigned i = 0; i < count * 2; i++) EXPECT_NEAR(copied[i], reference[i], 1e-6);
+        done += count;
+    }
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY); EXPECT_EQ(rdt_video_get_current_time(video), 0);
+}
+
+TEST_F(RdtVideoTest, AudioSnapshotsNeedNoOutputBindingAndRejectInvalidIntervals) {
+    ASSERT_TRUE(open_and_wait_ready()); ASSERT_TRUE(rdt_video_bind_audio(video, nullptr));
+    for (double position : {-1., (double)NAN, rdt_video_get_duration(video) + 1}) EXPECT_EQ(rdt_video_audio_snapshot(video, position, 16), nullptr);
+    EXPECT_EQ(rdt_video_audio_snapshot(video, 0, 0), nullptr);
+    EXPECT_EQ(rdt_video_audio_snapshot(video, 0, UINT32_MAX), nullptr);
+    snapshot = rdt_video_audio_snapshot(video, 0, 16); ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_READY);
+    rdt_video_play(video); EXPECT_EQ(rdt_video_get_state(video), RDT_VIDEO_STATE_ERROR);
+}
 
 // ============================================================================
 // Lifecycle Tests

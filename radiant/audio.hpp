@@ -19,6 +19,9 @@ bool radiant_audio_bind_lease_locked(DomDocument* document, uint64_t token, Audi
     bool* new_voice = nullptr, bool* new_binding = nullptr);
 void radiant_audio_unbind_lease_locked(DomDocument* document, uint64_t token, void* owner, bool remove_voice);
 uint64_t radiant_audio_open(DomDocument* document, const void* bytes, size_t length);
+// output-free preparation registers the quota owner before borrowers; adoption always consumes the player.
+size_t radiant_audio_available_pcm(DomDocument* document);
+uint64_t radiant_audio_adopt(DomDocument* document, RdtAudio* player);
 // scene sources retain independent players over an existing immutable sample owner.
 // reuse replaces a prepared player at a buffer boundary; rejection preserves the old player.
 uint64_t radiant_audio_source_start(DomDocument* document, uint64_t asset, uint64_t reuse,
@@ -56,6 +59,18 @@ struct AudioProviderInfo {
     double position, gain;
     bool route_valid;
 };
+struct AudioProviderOps {
+    const char* name;
+    bool (*route)(DomDocument*, uint64_t, AudioRouteId, AudioRouteId, const char**);
+    bool (*read)(DomDocument*, uint64_t, AudioProviderInfo*);
+    RdtAudio* (*snapshot)(DomDocument*, uint64_t, double, uint32_t);
+};
+const AudioProviderOps* radiant_audio_provider(const char* name);
+uint64_t radiant_audio_provider_snapshot(DomDocument* document, const AudioProviderOps* provider,
+    uint64_t token, double position, uint32_t frames, const char** error);
+RdtAudio* radiant_midi_snapshot(DomDocument* document, uint64_t token, double position, uint32_t frames);
+RdtAudio* radiant_speech_snapshot(DomDocument* document, uint64_t token, double position, uint32_t frames);
+RdtAudio* radiant_media_snapshot(DomDocument* document, uint64_t token, double position, uint32_t frames);
 bool radiant_midi_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error);
 bool radiant_midi_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info);
 bool radiant_media_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error);

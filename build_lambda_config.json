@@ -4319,6 +4319,7 @@
               "radiant/audio_bus.cpp",
               "radiant/audio_graph.cpp",
               "radiant/audio_reverb.cpp",
+              "radiant/rdt_audio.cpp",
               "radiant/audio_stream.cpp"
             ],
             "macos": {

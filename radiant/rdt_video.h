@@ -26,6 +26,7 @@ extern "C" {
 
 typedef struct RdtVideo RdtVideo;
 struct AudioProviderInfo;
+struct RdtAudio;
 
 // native host ownership only; callbacks run on the control thread, never the output callback.
 typedef struct {
@@ -59,6 +60,8 @@ static inline const char* rdt_video_state_name(RdtVideoState state) {
 
 bool rdt_video_audio_route(RdtVideo* video, uint64_t expected, uint64_t route, const char** error);
 bool rdt_video_audio_routing(RdtVideo* video, struct AudioProviderInfo* info);
+// output-free, timestamp-preserving PCM copy with independent decode/loop state.
+struct RdtAudio* rdt_video_audio_snapshot(RdtVideo* video, double position, uint32_t frames);
 
 typedef struct {
     uint8_t*    pixels;     // RGBA 32bpp, caller-owned buffer

@@ -796,6 +796,22 @@ static bool audio_render_count(ItemReader value, uint64_t fallback, uint64_t lim
     if (!lambda_item_to_int64_exact(value.item(), &number) || number < 0 || (uint64_t)number > limit) return false;
     *result = (uint64_t)number; return true;
 }
+static const char* audio_render_providers(ItemReader input, AudioRenderPlan* plan) {
+    if (input.isNull()) return nullptr;
+    if (!input.isArray() || input.asArray().length() > AUDIO_CUE_TRACKS) return "audio render: invalid bounded provider array";
+    plan->provider_count = (unsigned)input.asArray().length();
+    for (unsigned i = 0; i < plan->provider_count; i++) {
+        auto entry = input.asArray().get(i); if (!entry.isMap()) return "audio render: provider must be a map";
+        auto fields = entry.asMap(); auto& provider = plan->providers[i];
+        provider.provider = radiant_audio_provider(scene3d_command_name(fields.get("provider")));
+        const char* bus = fields.get("bus").isNull() ? "master" : scene3d_command_name(fields.get("bus"));
+        if (!provider.provider || !scene3d_counter(fields.get("token"), &provider.token) || !provider.token ||
+            !physics_scene_real(fields.get("position"), 0, &provider.position) || provider.position < 0 ||
+            !bus || !*bus || strlen(bus) >= sizeof(provider.bus)) return "audio render: invalid provider, exact token, position or bus";
+        str_copy(provider.bus, sizeof(provider.bus), bus, strlen(bus));
+    }
+    return nullptr;
+}
 static Item audio_render_operate(Scene3dAudio* state, uint64_t session, const char* operation, MapReader fields) {
     auto fail = [](const char* message) { return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr)); };
     const char* error = nullptr; uint64_t id;
@@ -804,7 +820,10 @@ static Item audio_render_operate(Scene3dAudio* state, uint64_t session, const ch
         if (!audio_render_count(fields.get("frames"), 0, AUDIO_RENDER_BYTES / 8, &plan.frames) ||
             !physics_scene_real(fields.get("scene_time"), 0, &plan.scene_time) ||
             !physics_scene_real(fields.get("time_scale"), 1, &plan.time_scale)) return fail("audio render: invalid frame or virtual-time field");
-        if (const char* rejected = audio_copy_commands(state, fields.get("events"), AUDIO_CUE_CAPACITY, plan.events, sources, &plan.event_count)) return fail(rejected);
+        if (const char* rejected = audio_render_providers(fields.get("providers"), &plan)) return fail(rejected);
+        auto events = fields.get("events");
+        if (!events.isNull() && (!events.isArray() || events.asArray().length()))
+            if (const char* rejected = audio_copy_commands(state, events, AUDIO_CUE_CAPACITY, plan.events, sources, &plan.event_count)) return fail(rejected);
         auto* node = dom_node_ref_validate(state->document, state->root);
         if (!node || !node->is_element() || !dom_element_is_connected(node->as_element())) return fail("audio render: detached scene");
         auto* root = node->as_element();
@@ -872,14 +891,7 @@ static Item audio_render_operate(Scene3dAudio* state, uint64_t session, const ch
 }
 static Item audio_provider_operate(Scene3dAudio* state, uint64_t session, const char* operation, MapReader fields) {
     auto fail = [](const char* message) { return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr)); };
-    static constexpr struct Provider {
-        const char* name;
-        bool (*route)(DomDocument*, uint64_t, AudioRouteId, AudioRouteId, const char**);
-        bool (*read)(DomDocument*, uint64_t, AudioProviderInfo*);
-    } providers[] = {{"midi", radiant_midi_route, radiant_midi_routing}, {"speech", radiant_speech_route, radiant_speech_routing},
-        {"video", radiant_media_route, radiant_media_routing}};
-    const char* name = scene3d_command_name(fields.get("provider")); const Provider* provider = nullptr;
-    for (const auto& entry : providers) if (name && !strcmp(name, entry.name)) provider = &entry;
+    const auto* provider = radiant_audio_provider(scene3d_command_name(fields.get("provider")));
     uint64_t token;
     if (!provider || !scene3d_counter(fields.get("token"), &token) || !token) return fail("audio provider: missing kind or exact provider token");
     if (!strcmp(operation, "audio_provider_route")) {

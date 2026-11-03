@@ -148,6 +148,42 @@ uint64_t radiant_audio_open(DomDocument* doc, const void* bytes, size_t length) 
     RdtAudio* player = rdt_audio_open_bytes_limit(bytes, length, AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes);
     return player ? audio_slot_add(audio, {0, player, nullptr, {}}) : 0;
 }
+size_t radiant_audio_available_pcm(DomDocument* doc) {
+    auto* audio = document_audio(doc, true); AudioDocumentUsage usage;
+    return audio && document_audio_usage(audio, &usage) && usage.count < AUDIO_DECODED_SLOTS ? AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes : 0;
+}
+uint64_t radiant_audio_adopt(DomDocument* doc, RdtAudio* player) {
+    if (!player) return 0;
+    auto* audio = document_audio(doc, true);
+    if (!audio || rdt_audio_storage_bytes(player) > radiant_audio_available_pcm(doc)) { rdt_audio_destroy(player); return 0; }
+    return audio_slot_add(audio, {0, player, nullptr, {}});
+}
+const AudioProviderOps* radiant_audio_provider(const char* name) {
+    static const AudioProviderOps providers[] = {
+        {"midi", radiant_midi_route, radiant_midi_routing, radiant_midi_snapshot},
+        {"speech", radiant_speech_route, radiant_speech_routing, radiant_speech_snapshot},
+        {"video", radiant_media_route, radiant_media_routing, radiant_media_snapshot}};
+    for (const auto& provider : providers) if (name && !strcmp(name, provider.name)) return &provider;
+    return nullptr;
+}
+uint64_t radiant_audio_provider_snapshot(DomDocument* doc, const AudioProviderOps* provider,
+    uint64_t token, double position, uint32_t frames, const char** error) {
+    const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    AudioProviderInfo info; size_t bytes = rdt_audio_pcm_storage_bytes(frames);
+    if (!provider || !token || !isfinite(position) || position < 0 || !bytes || !provider->read(doc, token, &info)) {
+        *error = "audio render: missing provider or invalid position/interval"; return 0;
+    }
+    if (info.loss != AUDIO_VOICE_OK || !strcmp(info.state, "idle") || !strcmp(info.state, "loading") ||
+        !strcmp(info.state, "rendering") || !strcmp(info.state, "cancelled") || !strcmp(info.state, "error")) {
+        *error = "audio render: provider is not prepared or has failed"; return 0;
+    }
+    if (bytes > radiant_audio_available_pcm(doc)) { *error = "audio render: provider snapshot exceeds document PCM/reader quota"; return 0; }
+    auto* copy = provider->snapshot(doc, token, position, frames);
+    if (!copy) { *error = "audio render: provider position or native snapshot preparation failed"; return 0; }
+    auto id = radiant_audio_adopt(doc, copy);
+    if (!id) *error = "audio render: provider snapshot ownership admission failed";
+    return id;
+}
 
 // D7.5.4: judged by the document's own URL, so a network iframe in a local
 // page needs its own activation; a host-built document without a URL is local.
@@ -514,6 +550,25 @@ bool radiant_midi_info(DomDocument* doc, uint64_t token, MidiSnapshot* snapshot)
     *snapshot = midi_player_info(slot->midi);
     snapshot->reverb = slot->reverb;
     return true;
+}
+RdtAudio* radiant_midi_snapshot(DomDocument* doc, uint64_t token, double position, uint32_t frames) {
+    auto* slot = document_audio_slot(doc, token);
+    if (!slot || !slot->midi || !rdt_audio_pcm_storage_bytes(frames)) return nullptr;
+    struct PreparedMidi { MidiPlayer* player = nullptr; ~PreparedMidi() { midi_player_close(player); } } copy;
+    {
+        AudioMixAccess access(slot->submix); if (!access.valid) return nullptr;
+        copy.player = midi_player_clone(slot->midi, 0);
+    }
+    if (!copy.player || !midi_player_command(copy.player, "seek", position)) return nullptr;
+    auto info = midi_player_info(copy.player);
+    if (position < info.duration && !midi_player_command(copy.player, "play", 0)) return nullptr;
+    auto* samples = rdt_audio_pcm_alloc(frames); if (!samples) return nullptr;
+    // fixed preparation partitions make job stepping independent of synth control-block boundaries.
+    for (uint32_t done = 0; done < frames;) {
+        uint32_t count = frames - done < 4096 ? frames - done : 4096;
+        midi_player_render(copy.player, samples + done * 2, count); done += count;
+    }
+    return rdt_audio_adopt_pcm(samples, frames);
 }
 bool radiant_midi_route(DomDocument* doc, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error) {
     const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;

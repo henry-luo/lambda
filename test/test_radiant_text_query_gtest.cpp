@@ -7,6 +7,7 @@
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
 #include "../radiant/audio_cue_owner.hpp"
+#include "../radiant/audio_render.hpp"
 #include "../radiant/document_clock.hpp"
 #include "test_audio_fixture.hpp"
 #include <uv.h>
@@ -19110,6 +19111,50 @@ TEST_F(RadiantDecodedAudio, MediaStatusPollingPreservesARefusedStartDiagnostic) 
         EXPECT_EQ(radiant_media_prepare(movie), media); EXPECT_EQ(media->play_error, 1);
         EXPECT_FALSE(media->muted); EXPECT_FLOAT_EQ(media->volume, 1);
     }
+}
+TEST_F(RadiantDecodedAudio, VideoProviderJobsRetainPcmAfterTheSelectedSourceIsDisposed) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, .25f, false));
+    AudioRenderPlan plan = {}; plan.frames = 1024; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("video"); plan.providers[0].token = media->audio_token;
+    const char* error = nullptr; uint64_t id = 0; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    ASSERT_TRUE(movie->remove_attribute("src")); EXPECT_EQ(radiant_media_prepare(movie)->player, nullptr);
+    ASSERT_TRUE(audio_render_step(document, 1, id, 1024, &error)); unsigned char bytes[1024 * 8]; size_t length = 0;
+    ASSERT_TRUE(audio_render_read(document, 1, id, 0, 1024, false, bytes, sizeof(bytes), &length, &error)); ASSERT_EQ(length, sizeof(bytes));
+    double energy = 0; for (unsigned i = 0; i < 1024; i++) energy += audio_fixture_sample(bytes, i) * audio_fixture_sample(bytes, i);
+    EXPECT_GT(energy, 0); EXPECT_EQ(radiant_audio_frame(document), 0u); ASSERT_TRUE(audio_render_close(document, 1, id));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, ProviderSnapshotsRejectUnopenedMediaWithoutStartingItsDecoder) {
+#ifdef __APPLE__
+    ASSERT_NE(load_script_source("<div id='result'><video id='movie' preload='none' src='../media/test_video_audio.mp4'></video></div>"), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_pending_test"), nullptr);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_FALSE(media->opened); const char* error = nullptr;
+    EXPECT_EQ(radiant_audio_provider_snapshot(document, radiant_audio_provider("video"), media->audio_token, 0, 32, &error), 0u);
+    EXPECT_NE(error, nullptr); EXPECT_FALSE(media->opened); EXPECT_FALSE(media->play_requested);
+    EXPECT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_IDLE);
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, PreparedSpeechJobsRegisterTheirQuotaOwnerBeforeDocumentTeardown) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr); use_fake_speech();
+    auto speech = audio_fixture_speech(owner, "go"); ASSERT_NE(speech, 0u);
+    AudioRenderPlan plan = {}; plan.frames = 64; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("speech"); plan.providers[0].token = speech;
+    uint64_t id; const char* error = nullptr; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    AudioRenderSnapshot state; ASSERT_TRUE(audio_render_snapshot(document, 1, id, &state)); EXPECT_EQ(state.state, AUDIO_RENDER_READY);
+    // teardown must retire this unfinished reader before its newly created document quota service.
 }
 
 TEST_F(RadiantDecodedAudio, DryVideoInputsFenceBusEditsWhenHostAutoplayIsWithdrawn) {

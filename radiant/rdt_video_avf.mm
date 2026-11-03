@@ -214,8 +214,8 @@ static bool video_pcm_seek(RdtVideo* video, uint64_t frame) {
 }
 static bool video_pcm_prepare(RdtVideo* video) {
     if (video->pcm) return true;
-    if (!video->audio_binding.submix || !isfinite(video->duration) || video->duration <= 0 || video->duration > 86400)
-        return video_pcm_error(video, "missing document submix or unsupported finite media duration");
+    if (!isfinite(video->duration) || video->duration <= 0 || video->duration > 86400)
+        return video_pcm_error(video, "unsupported finite media duration");
     if (video->audio_binding.reserve) {
         if (!video->audio_binding.reserve(video->audio_binding.owner, audio_stream_storage_bytes()))
             return video_pcm_error(video, "document PCM quota exceeded");
@@ -597,6 +597,7 @@ void rdt_video_play(RdtVideo* video) {
     video->play_requested = true;
     if (atomic_load(&video->state) == RDT_VIDEO_STATE_LOADING) return;
     if (!video->has_audio_track) { [video->player play]; return; }
+    if (!video->audio_binding.submix) { video_pcm_error(video, "missing document submix"); return; }
     video_pcm_poll(video);
     if (atomic_load(&video->state) == RDT_VIDEO_STATE_ERROR) return;
     video->play_requested = true;
@@ -698,6 +699,34 @@ RdtVideoState rdt_video_get_state(RdtVideo* video) {
     return cur;
 }
 
+RdtAudio* rdt_video_audio_snapshot(RdtVideo* video, double position, uint32_t frames) {
+    if (!video || !video->asset || !video->has_audio_track || !isfinite(position) || position < 0 ||
+        position > video->duration || !rdt_audio_pcm_storage_bytes(frames)) return nullptr;
+    auto state = (RdtVideoState)atomic_load(&video->state);
+    if (state == RDT_VIDEO_STATE_LOADING || state == RDT_VIDEO_STATE_ERROR) return nullptr;
+    @autoreleasepool {
+        struct PreparedVideo {
+            RdtVideo value = {};
+            ~PreparedVideo() { video_pcm_close(&value); [value.asset release]; }
+        } copy;
+        copy.value.asset = [video->asset retain]; copy.value.has_audio_track = true;
+        copy.value.duration = video->duration; copy.value.requested_time = position;
+        copy.value.loop = video->loop; copy.value.volume = video->volume; copy.value.muted = video->muted;
+        if (!video_pcm_prepare(&copy.value) || !audio_stream_play(copy.value.pcm)) return nullptr;
+        auto* samples = rdt_audio_pcm_alloc(frames); if (!samples) return nullptr;
+        // reuse PTS gap/overlap and loop handling; the borrowed source stays untouched during preparation.
+        for (uint32_t done = 0; done < frames;) {
+            @autoreleasepool {
+                uint32_t count = frames - done < 4096 ? frames - done : 4096;
+                if (!video_pcm_fill(&copy.value)) { mem_free(samples); return nullptr; }
+                auto ready = audio_stream_snapshot(copy.value.pcm);
+                if (!ready.finished && ready.queued < count) { mem_free(samples); return nullptr; }
+                audio_stream_mix(copy.value.pcm, samples + done * 2, count, done); done += count;
+            }
+        }
+        return rdt_audio_adopt_pcm(samples, frames);
+    }
+}
 bool rdt_video_audio_routing(RdtVideo* video, AudioProviderInfo* info) {
     if (!video || !info || !video->audio_binding.submix || !video->has_audio_track) return false;
     auto state = rdt_video_get_state(video);

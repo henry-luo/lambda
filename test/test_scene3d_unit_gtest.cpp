@@ -39,6 +39,7 @@
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/core/lambda-error-data.h"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -10766,6 +10767,13 @@ class Scene3dAudioTest : public Scene3dAgentTest {
     bool previous_offline;
     AudioFixtureSpeechEngine speech_engine;
 protected:
+    struct NetworkOrigin {
+        DomDocument* document; Url* local; Url* network;
+        explicit NetworkOrigin(DomDocument* doc) : document(doc), local(doc->url), network(url_parse("https://example.test/scene")) {
+            if (network) doc->url = lam::own(network);
+        }
+        ~NetworkOrigin() { radiant_audio_grant_activation(false); document->url = lam::own(local); url_destroy(network); }
+    };
     void SetUp() override {
         Scene3dAgentTest::SetUp(); previous_offline = audio_bus_offline(); audio_bus_set_offline(true);
         attr(camera, "position", "0 0 0"); attr(camera, "target", "0 0 -1");
@@ -10868,6 +10876,15 @@ protected:
         ticket(&request); request.put("frames", box_uint64_value(frames)); request.put("events", events.value.get());
         return call_audio("audio_render_open", request.value.get());
     }
+    Item render_provider_open(const char* kind, uint64_t token, uint64_t frames = 480,
+        const char* bus = "master", double position = 0, Item events = ItemNull) {
+        RootedValueBuilder provider(RootedValueBuilder::DATA_MAP), providers(true), request(RootedValueBuilder::DATA_MAP);
+        provider.put("provider", Item{.item=s2it(heap_create_name(kind))}); provider.put("token", box_uint64_value(token));
+        provider.put("bus", Item{.item=s2it(heap_create_name(bus))}); provider.put("position", push_d(position)); providers.append(provider.value.get());
+        ticket(&request); request.put("frames", box_uint64_value(frames)); request.put("providers", providers.value.get());
+        if (events.item != ItemNull.item) request.put("events", events);
+        return call_audio("audio_render_open", request.value.get());
+    }
     Item render_command(const char* operation, uint64_t id, uint64_t frames = 64, uint64_t offset = 0, const char* format = nullptr) {
         RootedValueBuilder request(RootedValueBuilder::DATA_MAP); ticket(&request); request.put("job", box_uint64_value(id));
         request.put("frames", box_uint64_value(frames)); request.put("offset", box_uint64_value(offset));
@@ -10876,8 +10893,7 @@ protected:
     }
     uint64_t render_id(Item packet) { return ItemReader(item_attr(packet, "job").to_const()).asUInt64(); }
     float render_sample(Item packet, unsigned frame, unsigned channel = 1) {
-        Item bytes = item_attr(packet, "data"); uint32_t bits = read_le32((const uint8_t*)binary_data(bytes.get_binary()) + (frame * 2 + channel) * 4);
-        float value; memcpy(&value, &bits, sizeof(value)); return value;
+        return audio_fixture_sample(binary_data(item_attr(packet, "data").get_binary()), frame, channel);
     }
 };
 
@@ -10990,7 +11006,7 @@ TEST_F(Scene3dAudioTest, GraphOwnerRemovalFailsActiveSpeechAndUnvoicedMidiWithou
     EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0)); EXPECT_FALSE(radiant_speech_command(&doc, speech, "resume"));
 }
 TEST_F(Scene3dAudioTest, UnactivatedNetworkProvidersCanPrepareRoutesAndPlayMutedButCannotBecomeAudible) {
-    fake_speech(); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    fake_speech(); NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr);
     auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); RootFrame roots(1); Rooted<Item> packet(roots, read_audio());
     auto route = bus_identity(packet.get(), "providers"), midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
     ASSERT_FALSE(item_is_error(provider_route("midi", midi, "providers", route))); EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0));
@@ -11000,7 +11016,6 @@ TEST_F(Scene3dAudioTest, UnactivatedNetworkProvidersCanPrepareRoutesAndPlayMuted
     float output[512 * 2]; auto mix = radiant_document_submix(&doc); ASSERT_TRUE(audio_submix_render(mix, output, 512)); for (float sample : output) EXPECT_FLOAT_EQ(sample, 0);
     EXPECT_FALSE(radiant_midi_command(&doc, midi, "volume", 1)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
     radiant_audio_note_activation(&doc); EXPECT_TRUE(radiant_midi_command(&doc, midi, "volume", 1));
-    url_destroy(doc.url); doc.url = lam::own(local);
 }
 TEST_F(Scene3dAudioTest, AudibleDefaultDetachmentAndSpeechResumeRequireActivationAfterOriginChanges) {
     fake_speech(); auto* bus = element("audio-bus", root); attr(bus, "id", "providers"); attr(bus, "mute", "true");
@@ -11050,8 +11065,111 @@ TEST_F(Scene3dAudioTest, OutputFreeRenderJobsProduceExactCuePcmWithoutAdvancingL
     for (unsigned i = 0; i < 64; i++) EXPECT_NEAR(render_sample(output.get(), i), i < 17 ? 0 : .5, 1e-6);
     EXPECT_EQ(radiant_audio_frame(&doc), 0u); EXPECT_FALSE(radiant_audio_frames_pending(&doc));
 }
+TEST_F(Scene3dAudioTest, RenderJobsAdmitIndependentMidiProvidersWithoutAdvancingLiveTransport) {
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, render_provider_open("midi", midi)), output(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(packet.get()));
+    ASSERT_FALSE(item_is_error(job.get())) << (it2err(job.get()) ? it2err(job.get())->message : "unallocated error"); auto id = render_id(job.get());
+    job.set(render_command("audio_render_step", id, 480)); ASSERT_FALSE(item_is_error(job.get()));
+    output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+    double energy = 0; for (unsigned i = 0; i < 480; i++) { double sample = render_sample(output.get(), i); energy += sample * sample; }
+    EXPECT_GT(energy, 0); MidiSnapshot live; ASSERT_TRUE(radiant_midi_info(&doc, midi, &live));
+    EXPECT_EQ(live.state, MIDI_READY); EXPECT_EQ(live.position, 0); EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+}
+TEST_F(Scene3dAudioTest, ProviderJobsRetainMidiControlsAndPcmAfterCloseAcrossStepPartitions) {
+    auto* quiet = element("audio-bus", root); attr(quiet, "id", "quiet"); attr(quiet, "gain", ".5"); attr(quiet, "smoothing", "0");
+    RootFrame roots(7); Rooted<Item> packet(roots, read_audio()), one(roots, ItemNull), many(roots, ItemNull), half(roots, ItemNull),
+        first(roots, ItemNull), second(roots, ItemNull), third(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u);
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "volume", .4)); ASSERT_TRUE(radiant_midi_command(&doc, midi, "speed", .5));
+    ASSERT_TRUE(radiant_midi_command(&doc, midi, "play", 0)); float live[64 * 2]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(&doc), live, 64));
+    MidiSnapshot before, after; ASSERT_TRUE(radiant_midi_info(&doc, midi, &before));
+    one.set(render_provider_open("midi", midi, 1024, "master", .01)); many.set(render_provider_open("midi", midi, 1024, "master", .01));
+    half.set(render_provider_open("midi", midi, 1024, "quiet", .01));
+    ASSERT_FALSE(item_is_error(one.get())); ASSERT_FALSE(item_is_error(many.get())); ASSERT_FALSE(item_is_error(half.get()));
+    ASSERT_TRUE(radiant_midi_info(&doc, midi, &after)); EXPECT_EQ(after.state, before.state); EXPECT_EQ(after.position, before.position);
+    ASSERT_TRUE(radiant_audio_close(&doc, midi)); auto a = render_id(one.get()), b = render_id(many.get());
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", a, 1024)));
+    for (unsigned done = 0; done < 1024;) { unsigned count = 1024 - done < 37 ? 1024 - done : 37; ASSERT_FALSE(item_is_error(render_command("audio_render_step", b, count))); done += count; }
+    first.set(render_command("audio_render_read", a, 1024)); second.set(render_command("audio_render_read", b, 1024));
+    ASSERT_FALSE(item_is_error(first.get())); ASSERT_FALSE(item_is_error(second.get()));
+    EXPECT_EQ(memcmp(binary_data(item_attr(first.get(), "data").get_binary()), binary_data(item_attr(second.get(), "data").get_binary()), 1024 * 8), 0);
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(half.get()), 1024)));
+    third.set(render_command("audio_render_read", render_id(half.get()), 1024)); ASSERT_FALSE(item_is_error(third.get()));
+    for (unsigned i = 0; i < 1024; i++) for (unsigned channel = 0; channel < 2; channel++) EXPECT_NEAR(render_sample(third.get(), i, channel), render_sample(first.get(), i, channel) * .5f, 1e-6);
+    double energy = 0; for (unsigned i = 0; i < 1024; i++) energy += render_sample(first.get(), i) * render_sample(first.get(), i);
+    EXPECT_GT(energy, 0); EXPECT_EQ(radiant_audio_frame(&doc), 64u);
+}
+TEST_F(Scene3dAudioTest, MixedSpeechAndClipJobsMatchIndependentInputsAfterUtteranceCancellation) {
+    fake_speech(); speaker(); ASSERT_FALSE(item_is_error(upload())); auto speech = audio_fixture_speech(root, "go go", .5f); ASSERT_NE(speech, 0u);
+    RootFrame roots(6); Rooted<Item> packet(roots, read_audio()), voice(roots, render_provider_open("speech", speech, 480, "master", .05)),
+        clip(roots, render_open(packet.get(), 480, 0)), mixed(roots, ItemNull), output(roots, ItemNull), result(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(voice.get())); ASSERT_FALSE(item_is_error(clip.get()));
+    RootedValueBuilder events(true); events.append(cue(packet.get(), "play", 0));
+    mixed.set(render_provider_open("speech", speech, 480, "master", .05, events.value.get())); ASSERT_FALSE(item_is_error(mixed.get()));
+    ASSERT_TRUE(radiant_speech_command(&doc, speech, "cancel")); float expected[480 * 2] = {};
+    for (auto id : {render_id(voice.get()), render_id(clip.get())}) {
+        ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 480))); output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+        for (unsigned frame = 0; frame < 480; frame++) for (unsigned channel = 0; channel < 2; channel++) expected[frame * 2 + channel] += render_sample(output.get(), frame, channel);
+    }
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(mixed.get()), 480)));
+    result.set(render_command("audio_render_read", render_id(mixed.get()), 480)); ASSERT_FALSE(item_is_error(result.get()));
+    for (unsigned frame = 0; frame < 480; frame++) for (unsigned channel = 0; channel < 2; channel++) EXPECT_NEAR(render_sample(result.get(), frame, channel), expected[frame * 2 + channel], 1e-6);
+    EXPECT_EQ(radiant_audio_frame(&doc), 0u); SpeechInfo info; ASSERT_TRUE(radiant_speech_info(&doc, speech, &info)); EXPECT_EQ(info.state, SPEECH_CANCELLED);
+}
+TEST_F(Scene3dAudioTest, UnactivatedNetworkProviderJobsUsePrivateOutputWithoutStartingLiveTransports) {
+    fake_speech(); RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr); audio_bus_set_offline(false);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); EXPECT_FALSE(radiant_midi_command(&doc, midi, "play", 0));
+    radiant_audio_grant_activation(true); auto speech = audio_fixture_speech(root, "go", .5f); ASSERT_NE(speech, 0u);
+    ASSERT_TRUE(radiant_speech_command(&doc, speech, "pause")); radiant_audio_grant_activation(false);
+    SpeechInfo before; ASSERT_TRUE(radiant_speech_info(&doc, speech, &before));
+    const struct { const char* name; uint64_t token; } providers[] = {{"midi", midi}, {"speech", speech}};
+    for (const auto& provider : providers) {
+        job.set(render_provider_open(provider.name, provider.token, 480)); ASSERT_FALSE(item_is_error(job.get()));
+        auto id = render_id(job.get()); ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 480)));
+        output.set(render_command("audio_render_read", id, 480)); ASSERT_FALSE(item_is_error(output.get()));
+        double energy = 0; for (unsigned i = 0; i < 480; i++) energy += render_sample(output.get(), i) * render_sample(output.get(), i); EXPECT_GT(energy, 0);
+    }
+    EXPECT_FALSE(radiant_document_may_start_audio(&doc)); EXPECT_EQ(radiant_audio_frame(&doc), 0u);
+    MidiSnapshot midi_info; SpeechInfo speech_info; ASSERT_TRUE(radiant_midi_info(&doc, midi, &midi_info)); ASSERT_TRUE(radiant_speech_info(&doc, speech, &speech_info));
+    EXPECT_EQ(midi_info.state, MIDI_READY); EXPECT_EQ(midi_info.position, 0); EXPECT_EQ(speech_info.state, before.state); EXPECT_EQ(speech_info.position, before.position);
+}
+TEST_F(Scene3dAudioTest, ProviderJobsRetireWithTheirSceneWhileCopiedReadResultsSurvive) {
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, ItemNull), output(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); job.set(render_provider_open("midi", midi)); ASSERT_FALSE(item_is_error(job.get()));
+    auto id = render_id(job.get()), session = ItemReader(item_attr(packet.get(), "session").to_const()).asUInt64();
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", id, 64))); output.set(render_command("audio_render_read", id, 64)); ASSERT_FALSE(item_is_error(output.get()));
+    float first = render_sample(output.get(), 17);
+    doc.root = nullptr; doc.mutation_epoch++; radiant_audio_tick(&doc, 0);
+    AudioRenderSnapshot snapshot; EXPECT_FALSE(audio_render_snapshot(&doc, session, id, &snapshot));
+    EXPECT_FLOAT_EQ(render_sample(output.get(), 17), first);
+}
+TEST_F(Scene3dAudioTest, ProviderQuotaAndInvalidPeerRejectionPreserveEarlierJobsAndReleaseSnapshots) {
+    RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), peer(roots, ItemNull), rejected(roots, ItemNull);
+    auto midi = audio_fixture_midi(root, .2); ASSERT_NE(midi, 0u); peer.set(render_provider_open("midi", midi)); ASSERT_FALSE(item_is_error(peer.get()));
+    DomDocument foreign; const char* foreign_error = nullptr;
+    EXPECT_EQ(radiant_audio_provider_snapshot(&foreign, radiant_audio_provider("midi"), midi, 0, 480, &foreign_error), 0u);
+    EXPECT_NE(foreign_error, nullptr); EXPECT_EQ(foreign.resources.get(), nullptr);
+    uint64_t reservations[128] = {}; unsigned count = 0;
+    while (count < 128 && (reservations[count] = radiant_audio_storage_acquire(&doc, 1))) count++;
+    rejected.set(render_provider_open("midi", midi)); EXPECT_TRUE(item_is_error(rejected.get()));
+    ASSERT_FALSE(item_is_error(render_command("audio_render_step", render_id(peer.get()), 480)));
+    for (unsigned i = 0; i < count; i++) radiant_audio_storage_release(&doc, reservations[i]);
+    size_t before_players, before_bytes, players, bytes; ASSERT_TRUE(radiant_audio_usage(&doc, &before_players, &before_bytes));
+    RootedValueBuilder providers(true), request(RootedValueBuilder::DATA_MAP);
+    for (auto token : {midi, UINT64_MAX}) {
+        RootedValueBuilder provider(RootedValueBuilder::DATA_MAP); provider.put("provider", Item{.item=s2it(heap_create_name("midi"))}); provider.put("token", box_uint64_value(token)); providers.append(provider.value.get());
+    }
+    ticket(&request); request.put("frames", box_uint64_value(480)); request.put("providers", providers.value.get());
+    rejected.set(call_audio("audio_render_open", request.value.get())); EXPECT_TRUE(item_is_error(rejected.get()));
+    ASSERT_TRUE(radiant_audio_usage(&doc, &players, &bytes)); EXPECT_EQ(players, before_players); EXPECT_EQ(bytes, before_bytes);
+    for (double position : {-1., .3}) EXPECT_TRUE(item_is_error(render_provider_open("midi", midi, 480, "master", position)));
+    EXPECT_TRUE(item_is_error(render_provider_open("unsupported", midi))); EXPECT_TRUE(item_is_error(render_provider_open("midi", midi, 480, "missing")));
+    rejected.set(render_provider_open("midi", midi)); EXPECT_FALSE(item_is_error(rejected.get()));
+}
 TEST_F(Scene3dAudioTest, NetworkRenderJobsRunWithOnlineOutputButNeverJoinOrActivateTheDevice) {
-    audio_bus_set_offline(false); Url* local = doc.url; doc.url = lam::own(url_parse("https://example.test/scene"));
+    audio_bus_set_offline(false); NetworkOrigin origin(&doc); ASSERT_NE(origin.network, nullptr);
     speaker(); ASSERT_FALSE(item_is_error(upload())); EXPECT_TRUE(item_is_error(transport("play")));
     RootFrame roots(3); Rooted<Item> packet(roots, read_audio()), job(roots, render_open(packet.get())), output(roots, ItemNull);
     ASSERT_FALSE(item_is_error(job.get())); uint64_t id = render_id(job.get()); float silence[64 * 2]; audio_bus_mix(silence, 64);
@@ -11061,7 +11179,7 @@ TEST_F(Scene3dAudioTest, NetworkRenderJobsRunWithOnlineOutputButNeverJoinOrActiv
     EXPECT_STREQ(ItemReader(item_attr(job.get(), "state").to_const()).asString()->chars, "complete");
     output.set(render_command("audio_render_read", id)); ASSERT_FALSE(item_is_error(output.get()));
     EXPECT_FLOAT_EQ(render_sample(output.get(), 17), .5f); EXPECT_FALSE(radiant_audio_frames_pending(&doc)); EXPECT_FALSE(radiant_document_may_start_audio(&doc));
-    EXPECT_TRUE(item_is_error(transport("play"))); url_destroy(doc.url); doc.url = lam::own(local);
+    EXPECT_TRUE(item_is_error(transport("play")));
 }
 TEST_F(Scene3dAudioTest, RenderPlanRetainsCopiedAssetsSpatialParametersGraphAndResultsAcrossLiveReset) {
     auto* source = speaker(); attr(source, "bus", "effects"); auto* bus = element("audio-bus", root); attr(bus, "id", "effects");

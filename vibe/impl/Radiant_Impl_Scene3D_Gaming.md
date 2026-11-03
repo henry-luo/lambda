@@ -58,14 +58,14 @@ does not revise those contracts.
 
 | Stage | Outcome | Status |
 |---|---|---|
-| M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
-| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Coordinator and copied generation/target-tick animation batches implemented; other command consumers and whole-tick transactions pending; aggregate qualification limited |
-| M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
-| M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
+| M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; current aggregate qualification recorded below |
+| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Coordinator and copied generation/target-tick animation batches implemented; other command consumers and whole-tick transactions pending; current aggregate qualification recorded below |
+| M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; current aggregate qualification recorded below; broader CCD remains open |
+| M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, current aggregate qualification recorded below; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused/current aggregate gates pass with recorded profile limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, rotation/velocity curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; analytic GPU plane/sphere collision, bounded seeded CPU/GPU noise, color/opacity with per-emitter depth ordering, texture sheets, billboard presentation and bounded CPU/GPU ribbon trails and copied spawn commands implemented and qualified with the recorded limits; depth collision awaits M9; presets/effect/sub-emitter rules moved to M13 |
-| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded output, scene clips/sources/listeners, spatialization/Doppler, bounded named bus/send/solo graphs, ordered filter/EQ/delay/reverb/compressor/limiter inserts, tail-aware lifetime, sample-time cues and explicit offline PCM/WAV jobs implemented and qualified with recorded limits; MIDI/speech routes implemented with focused evidence; post-merge aggregates pending; provider export, video-track routing and ratified microphone acquisition pending; music/voice/occlusion policy and factories moved to M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Shared decoded/video output, scene clips/sources/listeners, spatialization/Doppler, named bus/send/solo graphs and ordered DSP, tail-aware lifetime, sample-time cues, MIDI/speech/video routes and explicit PCM/WAV jobs with prepared provider snapshots are implemented and qualified with recorded limits; microphone acquisition awaits policy ratification; physical/release/integration qualification remains open; music/voice/occlusion policy and factories remain M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
 | M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
@@ -6028,3 +6028,57 @@ gate-*-after.log,gate-ui-normal-status.json,gate-ui-asan-status.json,
 routes-final-lambda.log,routes-closure-status.json,routes-closure-*.log,
 routes-closed-source-hashes.json,routes-core-carry-forward.json,
 provider-export-next.json,checkpoint.json}`.
+
+### M7 provider export — qualified 2026-11-03
+
+**Done behavior:** existing `audio_render` jobs admit document-scoped prepared
+MIDI, speech and video tickets with a fresh position and copied bus selection.
+A valid-session replay against the committed parser reproduces rejection at
+its required clip-event array; the extended input now accepts providers, clip
+events or both. One shared provider table serves read, routing and snapshot
+admission (**S4.9.1 / D7.5.3v2 / D7.5.4**).
+
+Each provider prepares one owned finite PCM interval before job publication.
+MIDI reuses the synthesizer's immutable-font copy and fresh seek/controller
+state; speech copies completed, normalized engine PCM; video reuses the existing
+PTS gap/overlap, loop and gain kernel with an independent retained asset/reader.
+The existing immutable PCM constructor/admission, sample-zero cue path, virtual
+submix, graph and file IO perform the remaining work. Snapshots join the existing scheduler/mixer through owned PCM and release
+provider transport pointers before publication. Live edits, close/reload,
+removal and device retirement leave admitted output intact.
+
+**Ownership/bounds:** quota ownership is registered before the job pool so
+unfinished speech-only jobs retire before their newly created document audio
+service (**D4.5.2 / D5.3.3**). Each input reserves a job-length stereo interval;
+combined source/event, reader/PCM and output limits reject atomically. Partial
+provider preparation closes its temporary assets. Completion/cancellation/scene
+and document teardown reuse the existing reader retirement. Render steps remain
+bounded; synchronous preparation and release peak-memory/deadline qualification
+are recorded separately. The [public contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
+defines fields, frozen state, preparation limits and private cue receipts.
+
+**Verification:** independent synth/video ownership controls, copied bus gain,
+mixed-input PCM, step partitions, source disposal, network isolation, stale/
+foreign/unprepared/quota rejection and teardown pass. Four imported flows pass
+all six JS/Lambda backend combinations with forced/poisoned GC; provider WAV
+bytes match exactly across modes. Supported ASan passes 176 focused native
+controls (one opt-in device skip) and both UI backends; the WAV also matches the
+normal profile. The required Radiant gate passes with 9,119 passed, 304 configured
+partial cases, two skips and zero failures. Boundary validation stays at 133
+imports against baseline 165; dimension lint and whitespace pass. Lambda engine
+and `.ls` package source are unchanged from the earlier 8,647-case core gate.
+
+**Open behavior / next action:** the capture policy remains pending user
+ratification under proposal §9.3; its unapplied draft is in the evidence folder.
+Starting synthesis within a job, live-history continuation, additional video backends,
+physical input/output and release/combined-scene qualification are not claimed
+by this prepared-provider profile. Remaining M1–M6 extensions, M8–M12 and
+M13 retain the full goal scope. Capture implementation follows ratification;
+M8 is the next independent native milestone while that decision is pending.
+
+Evidence: `temp/scene3d-provider-export/{base-parser-status.json,
+provider-admission-base-parser.log,native-final-*.log,stable-*.log,
+ui-normal-status.json,ui-asan-status.json,provider-output-normal.wav,
+provider-output-asan.wav,qualification-status.json,qualification-*.log,
+frozen-source-hashes.json,lambda-engine-carry-forward.json,
+capture-policy-proposal.patch,checkpoint.json}`.

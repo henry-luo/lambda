@@ -12,6 +12,8 @@ struct MidiSnapshot { MidiState state; double position, duration, speed, volume;
 MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double duration,
     const void* font, size_t font_size, uint32_t sample_rate = 48000);
 void midi_player_close(MidiPlayer* player);
+// copies authored controls into a fresh synth/seek state; immutable font data stays shared.
+MidiPlayer* midi_player_clone(MidiPlayer* player, double position);
 bool midi_player_command(MidiPlayer* player, const char* command, double value);
 MidiSnapshot midi_player_info(MidiPlayer* player);
 const char* midi_player_state_name(MidiState state);

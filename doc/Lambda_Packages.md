@@ -3156,7 +3156,8 @@ same document submix as MIDI and speech. `dom.audio_clock(owner)` counts rendere
 frames on that submix. The scene integration below adds sources/listeners,
 Doppler, bounded bus/DSP graphs, native sample-time cues and explicit offline
 PCM/WAV jobs, named MIDI/speech routes and macOS video-track output with named
-scene routes. Provider export and microphone input remain subsequent M7 work
+scene routes. Prepared MIDI/speech/video snapshots now join explicit offline jobs;
+microphone input remains subsequent M7 work
 (**D7.5.3v2 / D7.5.4**).
 
 Opening encoded bytes prepares owned 48000-Hz interleaved stereo float PCM
@@ -3220,7 +3221,7 @@ Network play, unmute and a positive gain increase from zero require the same
 sticky activation as other audible output (**D7.5.4**). A refused command returns
 `false`; JavaScript reports `NotAllowedError`. Removing authored `muted` without
 activation pauses playback. These checks also apply to the host's offline
-backend. Named video routes are described below. Video export providers, microphone acquisition,
+backend. Named video routes and prepared export snapshots are described below. Microphone acquisition,
 other platform backends and release/device qualification remain pending.
 
 ### Native Scene3D clips and spatial sources
@@ -3360,7 +3361,7 @@ Reverb tails continue after MIDI voice retirement. A muted MIDI transport may
 play without activation; positive audible starts and live gain changes retain
 **D7.5.4**. Graph/source snapshots copy ordered insert parameters, send target/
 current gains, bus peak/RMS/frame meters, routing generation/storage/activity and
-fault state. Provider export and ratified microphone capture remain native M7
+fault state. Prepared provider export uses the render jobs below; ratified microphone capture remains native M7
 work. Routing factories and music/voice/occlusion
 policy remain deferred M13.
 
@@ -3428,7 +3429,7 @@ overwrite old rows. Source rows add `armed` and `pitch_follow`.
 Native readers and commands have explicit ownership (**D4.5.2 / D5.3.3**).
 Preparation and retired-reader cleanup occur on the main owner; the callback
 only applies copied commands and swaps retained PCM readers at split-buffer
-deadlines. Provider export, microphone acquisition and release
+deadlines. Prepared provider snapshots join render jobs below; microphone acquisition and release
 callback/memory qualification remain M7/M12
 work; cue selection and voice policy remain deferred M13.
 
@@ -3476,8 +3477,8 @@ authored bus edits affecting active positive-gain providers retain **D7.5.4**
 activation. These checks use provider state as well as DSP tail state, so a dry
 MIDI/speech input cannot evade the gate. Muted preparation/playback and bus
 edits with paused providers remain allowed.
-This profile routes existing providers; offline jobs still select decoded scene
-sources; provider export and ratified capture remain native M7 work. Music/voice policy remains deferred M13.
+Prepared providers can also supply copied PCM to the explicit render jobs below.
+Ratified capture remains native M7 work; music/voice policy remains deferred M13.
 
 ### Native Scene3D video routes
 
@@ -3504,18 +3505,50 @@ ticket and release route references (**D4.5.2 / D5.3.3**). Bus deletion is fence
 by ready/paused references. Graph-owner removal faults ready, paused and playing
 providers with `route_lost`; no default output takes over. Default detach can
 release the reference, but playback requires source reload after the fault.
-The shared finite-media/PCM limits above still apply. Video-provider export,
-other video backends and physical-device/deadline qualification remain pending.
+The shared finite-media/PCM limits above still apply. Prepared video snapshots
+join offline jobs below. Other video backends and physical-device/deadline
+qualification remain pending.
 
 ### Native Scene3D offline audio render jobs
 
 `runtime.audio_render_open(node, request)` creates an explicit output-free native
 job (**D7.5.4 / D7.5.3v2**, proposal §9.2). Supply the current scene `session`,
-an output length `frames`, and 1–64 `events` using the cue schema above. Source
-and clip identities come from `audio_snapshot`. Optional `scene_time` (default
+an output length `frames`, and clip `events`, prepared `providers`, or both.
+Clip events use the cue schema above; source/clip identities come from
+`audio_snapshot`. Optional `scene_time` (default
 0) and positive finite `time_scale` (default 1) define the private scene-clock
 anchor. Audio-frame events count from zero; scene events map through that anchor.
 Deadlines must fit within the selected interval, including its final boundary.
+
+A `providers` entry contains `{provider, token, position?, bus?}`. Kinds are
+`midi`, `speech` and `video`; tickets identify an existing prepared provider in
+this document. `position` defaults to zero and selects a fresh source seek;
+`bus` defaults to `master` in the copied scene graph. Position must fit that
+provider's finite duration. Foreign/stale, loading/rendering, cancelled and
+failed providers reject. Video requires the macOS native backend. Speech uses
+an already completed engine render; opening a job does not initiate synthesis
+or resume its live utterance.
+
+Before a job becomes ready, each provider materializes an owned stereo 48-kHz
+PCM interval of the requested output length on the control thread. MIDI copies
+volume/speed/mute/solo into a fresh synth/seek state; speech copies normalized,
+gain-applied engine PCM; video reuses its timestamp-gap/overlap, mute/volume and
+loop kernel with an independent decoder. At the copied interval’s input EOF,
+non-looping sources contribute silence through the remaining output frames.
+MIDI's legacy document reverb send is outside this copied bus graph; named
+inserts/sends provide the job's effects. Readers use fresh decoder, synth/filter
+and DSP histories. Later live controls, source close/reload/removal, or device
+loss cannot alter admitted PCM.
+
+Provider intervals start at private audio frame zero through the existing cue
+kernel. Job cue history includes their starts, with identities private to that
+job. Combined clip/provider sources are limited to 32, and explicit clip events
+plus provider starts to 64. Omit `events` or supply an empty array for a
+provider-only job. Each provider snapshot reserves `frames * 8` PCM bytes plus
+reader metadata within the existing document PCM/reader limits; output storage
+has its separate limits below. Preparation is finite and synchronous; explicit
+render steps remain capped at 4096 frames. Physical/release latency and peak
+memory qualification remain open (**D4.5.2 / D5.3.3 / D7.5.4**).
 
 Opening copies the referenced authored audio descriptions and current selected
 native poses, listener and bus/insert/send graph into private readers and fresh
@@ -3551,15 +3584,15 @@ Each document retains at most four job handles, 64 MiB of output per job and
 128 MiB across jobs. The existing 128 decoded-player/512-MiB PCM limits, 96
 shared voice records, submix table and 8-MiB graph bound also apply. Admission
 is atomic; quota failure preserves live playback and earlier jobs. Each plan
-references at most 32 sources. Completion retires readers/DSP while retaining
+references at most 32 combined clip/provider sources. Completion retires readers/DSP while retaining
 output; cancellation also releases output, and close releases the handle slot.
 Scene removal or document teardown closes its jobs. No job advances from the
 device callback or ordinary frame polling; callers explicitly step it. The
 host-wide offline playback backend retains audible-output gating.
 
 Native jobs reuse the submix, cue and DSP kernel with explicit reader ownership
-(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; capture and
-provider export remain separate native M7 work. Release
+(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; microphone
+capture remains separate native M7 work. Release
 deadlines/peak memory, cross-platform execution and broader combined-scene
 qualification remain M12 work.
 
