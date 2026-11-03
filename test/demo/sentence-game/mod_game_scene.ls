@@ -5,7 +5,7 @@ import picture: .mod_picture
 import base: .mod_scene
 import art: .mod_art
 
-fn levels_screen(app) => base.frame({phase:"levels",book:[],clauses:[]},0,"Three ways to play",<div
+fn levels_screen(app) any^ => base.frame({phase:"levels",book:[],clauses:[]},0,"Three ways to play",<div
     (base.hero("Little words. ","Big stories!","Choose a level and grow from sentence builder to picture storyteller. Your progress stays here when you switch levels."));
     <section id:"level-screen",class:"level-grid",'aria-label':"Choose a level",*[for (level in game.levels)
         <button id:"level-" ++ string(level.id),type:"button",class:"level-choice level-color-" ++ string(level.id),
@@ -42,7 +42,7 @@ fn puzzle_play(st) => <section id:"puzzle-screen",class:"game-board",'aria-label
             <div class:"sentence-tools",<button id:"hint",type:"button",class:"text-button",'data-action':"hint",'aria-pressed':string(st.hint),
                 *:(if (st.phase != "build") {disabled:""} else {}),if (st.hint) "Hide hint" else "Need a hint?">
                 ; (base.read_button(st,puzzle.assembled(st)))>>
-        if (st.hint) <p class:"puzzle-hint","Start with “" ++ join([for (i,word in split(puzzle.lesson(st).answers[0]," ") where i < 2) word]," ") ++ "”. The full stop goes last.">;
+        if (st.hint) <p class:"puzzle-hint","Start with “" ++ join([for (i,word in ((split(puzzle.lesson(st).answers[0]," ")) ^ { [] }) where i < 2) word]," ") ++ "”. The full stop goes last.">;
         <div id:"ordered-words",class:"ordered-words",role:"group",'aria-label':"Words in your sentence",
             if (len(st.order) == 0) <p class:"empty-order","Click the cards below in sentence order.">
             else *[for (i,card in puzzle.placed(st)) placed_word(card,i,len(st.order),st.phase != "build")]>
@@ -68,7 +68,7 @@ fn puzzle_play(st) => <section id:"puzzle-screen",class:"game-board",'aria-label
     >
     ; (base.collection(st))
 >
-fn puzzle_page(st) => base.frame(st,2,<span "★ " string(len(st.book)) " of " string(len(puzzle.lessons)) " solved">,<div
+fn puzzle_page(st) any^ => base.frame(st,2,<span "★ " string(len(st.book)) " of " string(len(puzzle.lessons)) " solved">,<div
     (base.hero("Untangle the ","sentence!","All the words are here. Follow the clue, put the cards in order, then read your sentence aloud."));
     (base.round_navigation(st,len(puzzle.lessons),"Puzzle"));
     if (st.phase == "done") <div class:"game-board",(base.finish(st,"Sentence detective!",3))> else puzzle_play(st);
@@ -120,13 +120,13 @@ fn picture_play(st) {
         <div class:"picture-book",(base.collection(st))>
     >
 }
-fn picture_page(st) => base.frame(st,3,<span "★ " ++ string(len(st.book)) ++ (if (len(st.book) == 1) " description" else " descriptions")>,<div
+fn picture_page(st) any^ => base.frame(st,3,<span "★ " ++ string(len(st.book)) ++ (if (len(st.book) == 1) " description" else " descriptions")>,<div
     (base.hero("Describe the ","picture!","Use the picture as your inspiration. Build as many different descriptions as you can; your cards never run out."));
     if (st.phase == "picture") picture_picker(st) else picture_play(st);
     <p class:"footer-note","Choose cards that describe what you see. Every card is reusable, including in sentences joined with and, but, or because.">
 >)
 // whether the sentence is being read aloud is view state, so it joins the level state for rendering only.
-pub fn page(app,reading=false) {
+pub fn page(app,reading=false) any^ {
     let st = if (app.level == 0) app.play else {*:app.play,reading:reading}
     if (app.level == 0) levels_screen(app) else if (app.level == 1) base.page(st)
     else if (app.level == 2) puzzle_page(st) else picture_page(st)

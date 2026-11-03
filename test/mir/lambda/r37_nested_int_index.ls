@@ -13,8 +13,8 @@ pn scan(board: bool[], mfrom: int[], mto: int[], n: int) int {
     return hits
 }
 pn main() {
-    var board: bool[] = fill(15, true)
-    var mfrom: int[] = fill(36, 1)
-    var mto: int[] = fill(36, 3)
+    var board: bool[] = fill(15, true)^
+    var mfrom: int[] = fill(36, 1)^
+    var mto: int[] = fill(36, 3)^
     print(scan(board, mfrom, mto, 36), "\n")
 }

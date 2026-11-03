@@ -6,10 +6,10 @@ view dtna_form: <dtna.form> {
 }
 on submit(evt) {
     // UA validation and submitter policy run before this cancelable event.
-    emit("ui_action",c.action(~,'submit',dom.form_entries(evt.target,evt.submitter)))
+    emit("ui_action",c.action(~,'submit',dom.form_entries(evt.target,evt.submitter))^)
     'prevent-default'
 }
-on reset(evt) { emit("ui_action",c.action(~,'reset')); 'pass' }
+on reset(evt) { emit("ui_action",c.action(~,'reset')^); 'pass' }
 
 view dtna_form_item: <dtna.form_item> {
     <div *:c.attrs(c.props(~)), class:c.classes('form-item',c.props(~)), style:c.props(~).style,

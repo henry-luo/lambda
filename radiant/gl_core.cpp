@@ -2,6 +2,7 @@
 #include "../lib/mem.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/hash.h"
 #include "../lib/time_util.h"
 #include <math.h>
 #include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
@@ -25,6 +26,7 @@
 #endif
 
 #include "view.hpp"
+#include "render.hpp"
 
 // per-context GPU budget. 128 MiB could not hold a 2x-scaled 1280x720 4x-MSAA
 // target (132.7 MB) plus any real scene geometry (USER 2026-10-19).
@@ -32,6 +34,7 @@ static constexpr size_t GL_BYTE_LIMIT = 512u * 1024u * 1024u;
 static constexpr unsigned GL_RESOURCE_LIMIT = 4096;
 static constexpr unsigned GL_DIMENSION_LIMIT = 4096;
 static constexpr unsigned GL_CUBE_DIMENSION_LIMIT = 2048;
+static constexpr unsigned GL_UNIFORM_HINTS = 1024;
 static uint64_t native_gl_next_id = 1;
 static unsigned native_gl_context_count;
 
@@ -145,6 +148,13 @@ static uint64_t native_gl_id() { return __atomic_fetch_add(&native_gl_next_id, 1
     X(void, StencilOpSeparate, (GLenum, GLenum, GLenum, GLenum)) \
     X(void, Flush, ()) \
     X(void, Finish, ()) \
+    X(GLsync, FenceSync, (GLenum, GLbitfield)) \
+    X(void, WaitSync, (GLsync, GLbitfield, GLuint64)) \
+    X(void, DeleteSync, (GLsync)) \
+    X(void, GenSamplers, (GLsizei, GLuint*)) \
+    X(void, DeleteSamplers, (GLsizei, const GLuint*)) \
+    X(void, BindSampler, (GLuint, GLuint)) \
+    X(void, SamplerParameteri, (GLuint, GLenum, GLint)) \
     X(void, GetBufferParameteriv, (GLenum, GLenum, GLint*)) \
     X(void, PrimitiveRestartIndex, (GLuint)) \
     X(GLboolean, IsBuffer, (GLuint)) \
@@ -196,10 +206,16 @@ struct NativeGlSlot {
     unsigned width, height, samples, immutable_levels;
     size_t bytes, length;
     void* data;
+    // the largest index among the first index_max_count of a retained index copy; 0 = unknown
+    uint32_t index_max;
+    unsigned index_max_count;
     NativeGlAttribute attributes[16];
     unsigned attribute_count;
     NativeGlResource indices;
-    bool initialized, webgl, immutable, hdr, resolve_dirty;
+    bool initialized, webgl, immutable, hdr, resolve_dirty, top_down;
+    // a published target's fences: producer to presenter, and the presenter's last draw back
+    GLsync produced, consumed;
+    uint64_t publication;  // advances with every publication of the target
     unsigned layered, levels; // NATIVE_GL_LAYERS_* and the mip count of a layered target
     uint64_t link_generation;
     unsigned attribute_types[16], enabled_attributes;
@@ -215,15 +231,37 @@ struct NativeGlContext {
     WebGlOptions webgl_options;
     unsigned webgl_width, webgl_height;
     bool webgl_dirty, webgl_discard, webgl_flip, webgl_premultiply, webgl_loss_reported;
+    // the drawing buffer's presented copy the GPU compositor samples, current while it holds the buffer's
+    // last presented frame (native_gl_webgl_publish)
+    NativeGlResource webgl_copy;
+    bool webgl_copy_current;
     bool extension_checked, floating_targets;
     unsigned webgl_colorspace;
     uint64_t drawing; // the target the last native begin bound; a draw may not sample it
 #ifdef NATIVE_GL_ENABLED
     GLFWwindow* window;
+    bool presenter; // borrows a window's own context: destroy leaves the window
+    // the presenter's programs, samplers, and persistent textures: the page, then each layer's upper segment
+    struct {
+        NativeGlResource program, layer_program;
+        GLuint vertex_array, samplers[2];
+        GLuint textures[1 + NATIVE_GL_PRESENT_LAYERS];
+        int widths[1 + NATIVE_GL_PRESENT_LAYERS], heights[1 + NATIVE_GL_PRESENT_LAYERS];
+        GLuint masks[NATIVE_GL_PRESENT_LAYERS];   // each layer's clip coverage, uploaded once per key
+        uint64_t mask_keys[NATIVE_GL_PRESENT_LAYERS];
+        // the page texture holds only the segment below a composited viewport, or missed presents
+        // while one hid it: either way a partial upload would keep stale pixels
+        bool page_segment, page_stale;
+    } present;
     pthread_t thread;
     NativeGlFunctions gl;
     unsigned texture_units;
     NativeGlSlot slots[GL_RESOURCE_LIMIT];
+    // slot index by id modulo the table: a draw looks up a dozen resources, and ids never move or
+    // repeat, so a verified hint replaces the table scan
+    uint16_t slot_hints[GL_RESOURCE_LIMIT];
+    // uniform locations by program, link and name: a scene sets about ten uniforms per mesh and pass
+    struct { uint64_t name, program, link; GLint location; } uniform_hints[GL_UNIFORM_HINTS];
 #endif
 };
 
@@ -235,21 +273,36 @@ static void native_gl_error(NativeGlContext* context, const char* message) {
 #ifdef NATIVE_GL_ENABLED
 struct NativeGlScope {
     GLFWwindow* previous;
-    bool valid;
-    NativeGlScope(NativeGlContext* context) : previous(nullptr), valid(false) {
+    bool valid, switched;
+    NativeGlScope(NativeGlContext* context) : previous(nullptr), valid(false), switched(false) {
         if (!context || context->lost || !pthread_equal(context->thread, pthread_self())) return;
         previous = glfwGetCurrentContext();
-        glfwMakeContextCurrent(context->window);
+        // inside a NativeGlCurrent the context is already current; each NSGL switch costs a round trip
+        switched = previous != context->window;
+        if (switched) glfwMakeContextCurrent(context->window);
         valid = glfwGetCurrentContext() == context->window;
     }
-    ~NativeGlScope() { if (valid) glfwMakeContextCurrent(previous); }
+    ~NativeGlScope() { if (valid && switched) glfwMakeContextCurrent(previous); }
 };
 
 static NativeGlSlot* native_gl_slot(NativeGlContext* context, NativeGlResource resource, NativeGlKind kind) {
     if (!context || context->lost || !resource.id) return nullptr;
-    for (NativeGlSlot& slot : context->slots)
-        if (slot.id == resource.id && slot.kind == kind) return &slot;
+    uint16_t& hint = context->slot_hints[resource.id % GL_RESOURCE_LIMIT];
+    // ids are unique, so a slot holding this id is the only candidate
+    if (context->slots[hint].id == resource.id) return context->slots[hint].kind == kind ? &context->slots[hint] : nullptr;
+    for (unsigned i = 0; i < GL_RESOURCE_LIMIT; i++)
+        if (context->slots[i].id == resource.id && context->slots[i].kind == kind) { hint = (uint16_t)i; return &context->slots[i]; }
     return nullptr;
+}
+
+static GLint native_gl_uniform_location(NativeGlContext* context, const NativeGlSlot* program, const char* name) {
+    uint64_t key = hash_fnv1a_64(name, strlen(name));
+    auto& hint = context->uniform_hints[(key ^ program->id) % GL_UNIFORM_HINTS];
+    // a relink (WebGL linkProgram) may move every location of the program
+    if (hint.name == key && hint.program == program->id && hint.link == program->link_generation) return hint.location;
+    GLint location = context->gl.GetUniformLocation(program->name, name);
+    hint = {key, program->id, program->link_generation, location};
+    return location;
 }
 
 static NativeGlSlot* native_gl_allocate(NativeGlContext* context, NativeGlKind kind, size_t bytes) {
@@ -259,6 +312,7 @@ static NativeGlSlot* native_gl_allocate(NativeGlContext* context, NativeGlKind k
     }
     for (NativeGlSlot& slot : context->slots) if (!slot.id) {
         slot = {}; slot.id = native_gl_id(); slot.kind = kind; slot.bytes = bytes;
+        context->slot_hints[slot.id % GL_RESOURCE_LIMIT] = (uint16_t)(&slot - context->slots);
         context->stats.resources++; context->stats.allocated_bytes += bytes;
         return &slot;
     }
@@ -285,52 +339,477 @@ static GLuint native_gl_compile(NativeGlContext* context, GLenum stage, const ch
 }
 #endif
 
-NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacity) {
+#ifdef NATIVE_GL_ENABLED
+// entry points and driver identity of a context whose window exists; null on success
+static const char* native_gl_load(NativeGlContext* context) {
+    NativeGlScope scope(context);
+    bool loaded = scope.valid;
+#define LOAD_GL(result, name, args) \
+    context->gl.name = (result (APIENTRY *) args)glfwGetProcAddress("gl" #name); \
+    loaded = loaded && context->gl.name;
+    GL_FUNCTIONS(LOAD_GL)
+#undef LOAD_GL
+    if (!loaded) return "native graphics entry points unavailable";
+    NativeGlFunctions& gl = context->gl;
+    GLint units=0;gl.GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&units);
+    context->texture_units=units>0?(unsigned)units:0;
+    str_copy(context->stats.driver, sizeof(context->stats.driver), (const char*)gl.GetString(GL_RENDERER), strlen((const char*)gl.GetString(GL_RENDERER)));
+    str_copy(context->stats.version, sizeof(context->stats.version), (const char*)gl.GetString(GL_VERSION), strlen((const char*)gl.GetString(GL_VERSION)));
+    str_copy(context->stats.shading_language, sizeof(context->stats.shading_language), (const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION), strlen((const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION)));
+    log_info("native graphics provider%s: %s; GL %s; GLSL %s", context->presenter ? " (window presenter)" : "",
+             context->stats.driver, context->stats.version, context->stats.shading_language);
+    return nullptr;
+}
+// contexts alive now: a presenter keeps producers from an earlier frame and must not reach a destroyed one
+static NativeGlContext* native_gl_live[64];
+static void native_gl_track(NativeGlContext* context, bool live) {
+    for (NativeGlContext*& slot : native_gl_live)
+        if (slot == (live ? nullptr : context)) { slot = live ? context : nullptr; return; }
+}
+static NativeGlContext* native_gl_context_alloc() {
+    NativeGlContext* context = (NativeGlContext*)mem_calloc(1, sizeof(NativeGlContext), MEM_CAT_RENDER);
+    if (context) { context->thread = pthread_self(); context->stats.generation = native_gl_id(); native_gl_track(context, true); }
+    return context;
+}
+#endif
+bool native_gl_alive(NativeGlContext* context) {
+#ifdef NATIVE_GL_ENABLED
+    if (context) for (NativeGlContext* slot : native_gl_live) if (slot == context) return true;
+#endif
+    return false;
+}
+static void native_gl_create_failed(const char* failure, char* diagnostic, size_t capacity) {
+    if (diagnostic && capacity) str_copy(diagnostic, capacity, failure, strlen(failure));
+    native_gl_error(nullptr, failure);
+}
+
+void native_gl_core_profile_hints(void) {
+#ifdef NATIVE_GL_ENABLED
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+#else
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+#endif
+#endif
+}
+
+NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacity, void* share_window) {
     const char* failure = "native graphics unavailable: enable the full Radiant GLFW host";
     NativeGlContext* context = nullptr;
 #ifdef NATIVE_GL_ENABLED
     if (enabled && native_gl_context_count < 32) {
-        context = (NativeGlContext*)mem_calloc(1, sizeof(NativeGlContext), MEM_CAT_RENDER);
+        context = native_gl_context_alloc();
         if (!context) return nullptr;
-        context->thread = pthread_self(); context->stats.generation = native_gl_id();
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-#ifdef __APPLE__
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-#endif
-        context->window = glfwCreateWindow(1, 1, "Radiant native graphics", nullptr, nullptr);
+        native_gl_core_profile_hints();
+        context->window = glfwCreateWindow(1, 1, "Radiant native graphics", nullptr, (GLFWwindow*)share_window);
         glfwDefaultWindowHints();
         if (context->window) {
             native_gl_context_count++;
-            NativeGlScope scope(context);
-            bool loaded = scope.valid;
-#define LOAD_GL(result, name, args) \
-            context->gl.name = (result (APIENTRY *) args)glfwGetProcAddress("gl" #name); \
-            loaded = loaded && context->gl.name;
-            GL_FUNCTIONS(LOAD_GL)
-#undef LOAD_GL
-            if (loaded) {
-                NativeGlFunctions& gl = context->gl;
-                GLint units=0;gl.GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&units);
-                context->texture_units=units>0?(unsigned)units:0;
-                str_copy(context->stats.driver, sizeof(context->stats.driver), (const char*)gl.GetString(GL_RENDERER), strlen((const char*)gl.GetString(GL_RENDERER)));
-                str_copy(context->stats.version, sizeof(context->stats.version), (const char*)gl.GetString(GL_VERSION), strlen((const char*)gl.GetString(GL_VERSION)));
-                str_copy(context->stats.shading_language, sizeof(context->stats.shading_language), (const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION), strlen((const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION)));
-                log_info("scene3d provider: %s; GL %s; GLSL %s", context->stats.driver, context->stats.version, context->stats.shading_language);
-                return context;
-            }
-            failure = "native graphics entry points unavailable";
+            failure = native_gl_load(context);
+            if (!failure) return context;
         } else failure = "native graphics core context creation failed";
     } else if (enabled) failure = "native graphics context quota exceeded";
     if (context) native_gl_destroy(context);
+#else
+    (void)share_window;
 #endif
-    if (diagnostic && capacity) str_copy(diagnostic, capacity, failure, strlen(failure));
-    native_gl_error(nullptr, failure); return nullptr;
+    native_gl_create_failed(failure, diagnostic, capacity); return nullptr;
+}
+
+#ifdef NATIVE_GL_ENABLED
+// each draw is one quad over `rect` (NDC left, top, right, bottom); `flip` marks a bottom-up image
+static const char* PRESENT_VERTEX = "#version 330 core\n"
+    "uniform vec4 rect;\n"
+    "uniform float flip;\n"
+    "out vec2 uv;\n"
+    "void main() {\n"
+    "    vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));\n"
+    "    uv = vec2(corner.x, flip > 0.5 ? corner.y : 1.0 - corner.y);\n"
+    "    gl_Position = vec4(mix(rect.x, rect.z, corner.x), mix(rect.w, rect.y, corner.y), 0.0, 1.0);\n"
+    "}\n";
+// page segments are display-encoded premultiplied bytes, drawn as they are
+static const char* PRESENT_FRAGMENT = "#version 330 core\n"
+    "uniform sampler2D page;\n"
+    "in vec2 uv;\n"
+    "out vec4 color;\n"
+    "void main() { color = texture(page, uv); }\n";
+// A native target stores sRGB-encoded premultiplied linear light; texel fetches decode it, and `fetch`
+// re-encodes it to the stored bytes. The snapshot path's conversion (native_gl_snapshot) turns stored
+// bytes into premultiplied display bytes (`display`). The layer then samples as the CPU's
+// SCALE_MODE_LINEAR_EDGE does (render_image_project_pixels): each device pixel center maps back into the
+// destination, clamped inside it, is filtered bilinearly in display bytes, and is scaled by the coverage
+// of the quad's own edges and by the layer's opacity. An `upsampled` layer's snapshot is the target
+// upsampled by native_gl_upscale, which filters the stored bytes before the conversion; it filters so too.
+// Clip shapes cover by their rasterized mask over the clip rectangle. A WebGL presented copy (`encoding`
+// above 0, native_gl_layer_encoding) stores display bytes, which its snapshot only normalizes for alpha
+// (webgl_normalize_alpha): premultiplied as they are, straight ones premultiplied with truncation, or opaque.
+static const char* PRESENT_LAYER_FRAGMENT = "#version 330 core\n"
+    "uniform sampler2D page;\n"
+    "uniform vec3 inverse_x, inverse_y;\n" // surface pixel -> destination space
+    "uniform vec3 edges[4];\n"             // signed distance to each quad edge in surface pixels, positive inside
+    "uniform vec4 dst;\n"                  // destination x, y, width, height
+    "uniform vec3 device;\n"               // framebuffer height, the page's scale into the framebuffer
+    "uniform float flip, opacity, upsampled, masked, encoding;\n"
+    "uniform sampler2D mask;\n"           // clip coverage from mask_origin, in surface pixels
+    "uniform vec2 mask_origin;\n"
+    "out vec4 color;\n"
+    "float encode(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }\n"
+    "float decode(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }\n"
+    "vec4 fetch(ivec2 at, ivec2 size) {\n"
+    "    at = clamp(at, ivec2(0), size - 1);\n"
+    "    if (flip > 0.5) at.y = size.y - 1 - at.y;\n"
+    "    vec4 t = texelFetch(page, at, 0);\n"
+    "    return encoding > 0.5 ? t : vec4(encode(t.r), encode(t.g), encode(t.b), t.a);\n"
+    "}\n"
+    "vec4 display(vec4 e) {\n"
+    "    if (encoding > 2.5) return vec4(e.rgb, 1.0);\n"
+    "    if (encoding > 1.5) return vec4(floor(e.rgb * e.a * 255.0 + 0.001) / 255.0, e.a);\n"
+    "    if (encoding > 0.5) return e;\n"
+    "    vec3 s = e.a > 0.0 ? min(vec3(1.0), vec3(decode(e.r), decode(e.g), decode(e.b)) / e.a) : vec3(0.0);\n"
+    "    return vec4(min(vec3(1.0), vec3(encode(s.r), encode(s.g), encode(s.b))) * e.a, e.a);\n"
+    "}\n"
+    "void main() {\n"
+    "    vec3 p = vec3(gl_FragCoord.x / device.y, (device.x - gl_FragCoord.y) / device.z, 1.0);\n"
+    "    float distance = min(min(dot(edges[0], p), dot(edges[1], p)), min(dot(edges[2], p), dot(edges[3], p)));\n"
+    "    if (distance <= -0.5) discard;\n"
+    "    vec2 local = clamp(vec2(dot(inverse_x, p), dot(inverse_y, p)), dst.xy, dst.xy + dst.zw - 0.0001);\n"
+    "    ivec2 size = textureSize(page, 0);\n"
+    "    vec2 at = (local - dst.xy) * vec2(size) / dst.zw - 0.5;\n"
+    "    vec2 base = floor(at), f = at - base;\n"
+    "    ivec2 i = ivec2(base);\n"
+    "    vec4 t00 = fetch(i, size), t10 = fetch(i + ivec2(1, 0), size);\n"
+    "    vec4 t01 = fetch(i + ivec2(0, 1), size), t11 = fetch(i + ivec2(1, 1), size);\n"
+    "    vec4 c = upsampled > 0.5 ? display(mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y))\n"
+    "        : mix(mix(display(t00), display(t10), f.x), mix(display(t01), display(t11), f.x), f.y);\n"
+    "    float coverage = min(1.0, distance + 0.5) * opacity;\n"
+    "    if (masked > 0.5) coverage *= texelFetch(mask, ivec2(floor(p.xy - mask_origin)), 0).a;\n"
+    "    color = c * coverage;\n"
+    "}\n";
+#endif
+
+NativeGlContext* native_gl_presenter_create(void* window, char* diagnostic, size_t capacity) {
+    const char* failure = "native graphics unavailable: enable the full Radiant GLFW host";
+#ifdef NATIVE_GL_ENABLED
+    NativeGlContext* context = window ? native_gl_context_alloc() : nullptr;
+    if (context) {
+        context->window = (GLFWwindow*)window; context->presenter = true;
+        failure = native_gl_load(context);
+        if (!failure) {
+            NativeGlScope scope(context);
+            NativeGlFunctions& gl = context->gl;
+            context->present.program = native_gl_program(context, PRESENT_VERTEX, PRESENT_FRAGMENT);
+            context->present.layer_program = native_gl_program(context, PRESENT_VERTEX, PRESENT_LAYER_FRAGMENT);
+            // core profile draws need a bound vertex array, even one without attributes
+            gl.GenVertexArrays(1, &context->present.vertex_array);
+            // the presenter samples shared producer textures through its own samplers, never by
+            // changing their texture parameters, which belong to the producer
+            gl.GenSamplers(2, context->present.samplers);
+            for (unsigned i = 0; i < 2; i++) {
+                GLint filter = i == 0 ? GL_NEAREST : GL_LINEAR;
+                gl.SamplerParameteri(context->present.samplers[i], GL_TEXTURE_MIN_FILTER, filter);
+                gl.SamplerParameteri(context->present.samplers[i], GL_TEXTURE_MAG_FILTER, filter);
+                gl.SamplerParameteri(context->present.samplers[i], GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                gl.SamplerParameteri(context->present.samplers[i], GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            }
+            if (context->present.program.id && context->present.layer_program.id &&
+                native_gl_check(context, "presenter setup")) return context;
+            failure = "window presenter program failed";
+        }
+        native_gl_destroy(context);
+    }
+#else
+    (void)window;
+#endif
+    native_gl_create_failed(failure, diagnostic, capacity); return nullptr;
+}
+
+#ifdef NATIVE_GL_ENABLED
+// RADIANT_PRESENT_CHECK=1 reads each unscaled frame back before the swap and compares it with the
+// CPU result: the page itself, or for a composited frame the CPU composition of the same recording.
+// A damage rectangle that missed a write leaves stale pixels; a composite may round differently by
+// up to `tolerance` per channel.
+static void native_gl_present_check(NativeGlContext* presenter, const ImageSurface* expected_surface,
+                                    int framebuffer_width, int framebuffer_height, int tolerance) {
+    if (!native_gl_present_check_enabled()) return;
+    static uint64_t frame = 0;
+    frame++;
+    // only the part of the top-left-anchored image the framebuffer shows (a window can be smaller while it opens)
+    int width = expected_surface->width < framebuffer_width ? expected_surface->width : framebuffer_width;
+    int height = expected_surface->height < framebuffer_height ? expected_surface->height : framebuffer_height;
+    size_t count = (size_t)width * height;
+    uint32_t* drawn = (uint32_t*)mem_alloc(count * sizeof(uint32_t), MEM_CAT_RENDER);
+    if (!drawn) return;
+    NativeGlFunctions& gl = presenter->gl;
+    gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+    gl.ReadPixels(0, framebuffer_height - height, width, height, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, drawn);
+    size_t differ = 0; int first_x = -1, first_y = -1, worst = 0;
+    for (int y = 0; y < height; y++) {
+        // GL rows run bottom up
+        const uint32_t* row = drawn + (size_t)(height - 1 - y) * width;
+        const uint32_t* expected = (const uint32_t*)((const uint8_t*)expected_surface->pixels + (size_t)y * expected_surface->pitch);
+        for (int x = 0; x < width; x++) {
+            if (((row[x] ^ expected[x]) & 0x00FFFFFFu) == 0) continue;
+            int delta = 0;
+            for (int c = 0; c < 3; c++) {
+                int d = abs((int)((row[x] >> (8 * c)) & 0xFF) - (int)((expected[x] >> (8 * c)) & 0xFF));
+                if (d > delta) delta = d;
+            }
+            if (delta > worst) worst = delta;
+            if (delta <= tolerance) continue;
+            if (!differ) { first_x = x; first_y = y; }
+            differ++;
+        }
+    }
+    mem_free(drawn);
+    if (differ) log_error("[PRESENT_CHECK] frame %llu: %zu of %zu pixels differ from the CPU result by more than %d, first at (%d,%d), worst %d",
+                          (unsigned long long)frame, differ, count, tolerance, first_x, first_y, worst);
+    else log_info("[PRESENT_CHECK] frame %llu: window matches the CPU result (worst channel delta %d)",
+                  (unsigned long long)frame, worst);
+}
+
+// One texture per page segment persists across presents (Radiant_Design_Animation_Repaint §3 A3):
+// with `partial`, only the damage rect's rows and columns are uploaded.
+static void native_gl_present_upload(NativeGlContext* presenter, unsigned index, const ImageSurface* surface,
+                                     const Bound* damage, bool partial) {
+    NativeGlFunctions& gl = presenter->gl;
+    auto& present = presenter->present;
+    bool reuse = present.textures[index] && present.widths[index] == surface->width &&
+        present.heights[index] == surface->height;
+    if (!reuse) {
+        gl.DeleteTextures(1, &present.textures[index]);
+        gl.GenTextures(1, &present.textures[index]);
+        present.widths[index] = surface->width; present.heights[index] = surface->height;
+    }
+    gl.BindTexture(GL_TEXTURE_2D, present.textures[index]);
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (!reuse || !partial) {
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, surface->width, surface->height, 0,
+                      GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, surface->pixels);
+    } else if (damage && damage->right > damage->left && damage->bottom > damage->top) {
+        int x0 = (int)fmaxf(0.0f, floorf(damage->left)); // INT_CAST_OK: texel column
+        int y0 = (int)fmaxf(0.0f, floorf(damage->top)); // INT_CAST_OK: texel row
+        int x1 = (int)fminf((float)surface->width, ceilf(damage->right)); // INT_CAST_OK: texel column
+        int y1 = (int)fminf((float)surface->height, ceilf(damage->bottom)); // INT_CAST_OK: texel row
+        if (x1 > x0 && y1 > y0) {
+            gl.PixelStorei(GL_UNPACK_ROW_LENGTH, surface->pitch / 4);
+            gl.TexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                             (const uint8_t*)surface->pixels + (size_t)y0 * surface->pitch + (size_t)x0 * 4);
+            gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        }
+    }
+}
+
+// How a layer's texels hold its pixels: 0, sRGB-encoded premultiplied linear light (a native scene); a
+// WebGL presented copy's display bytes, 1 premultiplied, 2 with straight alpha, 3 without an alpha channel.
+static float native_gl_layer_encoding(const NativeGlContext* producer, const NativeGlSlot* image) {
+    if (!image->webgl) return 0.0f;
+    const WebGlOptions& options = producer->webgl_options;
+    return !options.alpha ? 3.0f : options.premultiplied_alpha ? 1.0f : 2.0f;
+}
+
+// binds a layer's clip mask to the active unit, uploading it when its key changed
+static void native_gl_present_mask(NativeGlContext* presenter, unsigned index, const ImageSurface* mask, uint64_t key) {
+    NativeGlFunctions& gl = presenter->gl;
+    auto& present = presenter->present;
+    if (!present.masks[index]) gl.GenTextures(1, &present.masks[index]);
+    gl.BindTexture(GL_TEXTURE_2D, present.masks[index]);
+    gl.BindSampler(1, presenter->present.samplers[0]);
+    if (present.mask_keys[index] == key) return;
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gl.PixelStorei(GL_UNPACK_ROW_LENGTH, mask->pitch / 4);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, mask->width, mask->height, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                  mask->pixels);
+    gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    present.mask_keys[index] = key;
+}
+
+// one quad from surface-pixel coordinates (top-left origin) into the page's NDC rectangle
+static void native_gl_present_quad(NativeGlContext* presenter, NativeGlSlot* program, const ImageSurface* page,
+                                   float left, float top, float right, float bottom, bool flip) {
+    NativeGlFunctions& gl = presenter->gl;
+    float rect[4] = {left / page->width * 2.0f - 1.0f, 1.0f - top / page->height * 2.0f,
+                     right / page->width * 2.0f - 1.0f, 1.0f - bottom / page->height * 2.0f};
+    float flip_value = flip ? 1.0f : 0.0f;
+    gl.UseProgram(program->name);
+    gl.Uniform1i(native_gl_uniform_location(presenter, program, "page"), 0);
+    gl.Uniform4fv(native_gl_uniform_location(presenter, program, "rect"), 1, rect);
+    gl.Uniform1fv(native_gl_uniform_location(presenter, program, "flip"), 1, &flip_value);
+    gl.DrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+}
+#endif
+
+bool native_gl_present_check_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) { const char* env = getenv("RADIANT_PRESENT_CHECK"); enabled = env && strcmp(env, "0") != 0; }
+    return enabled;
+}
+
+bool native_gl_present(NativeGlContext* presenter, const NativeGlPresentFrame* frame) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(presenter);
+    bool usable = scope.valid && presenter->presenter && frame && frame->page && frame->page->pixels &&
+        frame->framebuffer_width > 0 && frame->framebuffer_height > 0;
+    NativeGlSlot* page_program = usable ? native_gl_slot(presenter, presenter->present.program, NATIVE_GL_PROGRAM) : nullptr;
+    NativeGlSlot* layer_program = usable ? native_gl_slot(presenter, presenter->present.layer_program, NATIVE_GL_PROGRAM) : nullptr;
+    if (!page_program || !layer_program) return false;
+    const ImageSurface* page = frame->page;
+    NativeGlFunctions& gl = presenter->gl;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl.Viewport(0, frame->framebuffer_height - frame->present_height, frame->present_width, frame->present_height);
+    uint32_t bg = frame->background_rgba;
+    gl.ClearColor((bg & 0xff) / 255.0f, ((bg >> 8) & 0xff) / 255.0f, ((bg >> 16) & 0xff) / 255.0f, ((bg >> 24) & 0xff) / 255.0f);
+    gl.Clear(GL_COLOR_BUFFER_BIT);
+    // segments and layers are display-encoded: no sRGB conversion, and layers blend premultiplied
+    gl.Disable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.Disable(GL_CULL_FACE); gl.Disable(GL_FRAMEBUFFER_SRGB);
+    gl.Disable(GL_BLEND); gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    gl.BindVertexArray(presenter->present.vertex_array);
+    gl.ActiveTexture(GL_TEXTURE0);
+    float scale_x = (float)frame->present_width / page->width, scale_y = (float)frame->present_height / page->height;
+    bool unscaled = frame->present_width == page->width && frame->present_height == page->height;
+    gl.BindSampler(0, presenter->present.samplers[unscaled ? 0 : 1]);
+    bool segment = frame->layer_count > 0;
+    if (!frame->page_hidden) {
+        auto& present = presenter->present;
+        bool partial = frame->partial && !present.page_stale && present.page_segment == segment;
+        native_gl_present_upload(presenter, 0, page, frame->damage, partial);
+        present.page_segment = segment;
+        present.page_stale = false;
+        native_gl_present_quad(presenter, page_program, page, 0, 0, (float)page->width, (float)page->height, false);
+    } else {
+        presenter->present.page_stale = true;
+    }
+    bool fenced = false;
+    for (unsigned i = 0; i < frame->layer_count && i < NATIVE_GL_PRESENT_LAYERS; i++) {
+        const NativeGlPresentLayer& layer = frame->layers[i];
+        // a stale layer draws nothing; ui_context_present_surface re-renders the page before presenting one
+        NativeGlSlot* image = native_gl_present_layer_current(&layer)
+            ? native_gl_slot(layer.producer, layer.image, NATIVE_GL_TARGET) : nullptr;
+        if (image && image->initialized && image->produced) {
+            gl.Enable(GL_BLEND);
+            gl.WaitSync(image->produced, 0, GL_TIMEOUT_IGNORED);
+            // texel fetches filter in the shader; the sampler only keeps the shared texture complete
+            gl.BindSampler(0, presenter->present.samplers[0]);
+            gl.BindTexture(GL_TEXTURE_2D, image->texture);
+            gl.UseProgram(layer_program->name);
+            const float device[3] = {(float)frame->framebuffer_height, scale_x, scale_y};
+            const float dst[4] = {layer.dst_x, layer.dst_y, layer.dst_width, layer.dst_height};
+            gl.Uniform3fv(native_gl_uniform_location(presenter, layer_program, "inverse_x"), 1, layer.inverse);
+            gl.Uniform3fv(native_gl_uniform_location(presenter, layer_program, "inverse_y"), 1, layer.inverse + 3);
+            gl.Uniform3fv(native_gl_uniform_location(presenter, layer_program, "edges"), 4, &layer.edges[0][0]);
+            gl.Uniform4fv(native_gl_uniform_location(presenter, layer_program, "dst"), 1, dst);
+            gl.Uniform3fv(native_gl_uniform_location(presenter, layer_program, "device"), 1, device);
+            gl.Uniform1fv(native_gl_uniform_location(presenter, layer_program, "opacity"), 1, &layer.opacity);
+            float upsampled = layer.upsampled ? 1.0f : 0.0f, masked = layer.clip_mask ? 1.0f : 0.0f;
+            float encoding = native_gl_layer_encoding(layer.producer, image);
+            const float mask_origin[2] = {layer.clip_left, layer.clip_top};
+            gl.Uniform1fv(native_gl_uniform_location(presenter, layer_program, "upsampled"), 1, &upsampled);
+            gl.Uniform1fv(native_gl_uniform_location(presenter, layer_program, "encoding"), 1, &encoding);
+            gl.Uniform1fv(native_gl_uniform_location(presenter, layer_program, "masked"), 1, &masked);
+            gl.Uniform2fv(native_gl_uniform_location(presenter, layer_program, "mask_origin"), 1, mask_origin);
+            // an unmasked layer never reads `mask`, but the driver validates every sampler a draw could read:
+            // it names the image's own unit rather than an empty one
+            gl.Uniform1i(native_gl_uniform_location(presenter, layer_program, "mask"), layer.clip_mask ? 1 : 0);
+            if (layer.clip_mask) {
+                // a mask uploads only when its shapes changed; texture unit 1 keeps the image on unit 0
+                gl.ActiveTexture(GL_TEXTURE1);
+                native_gl_present_mask(presenter, i, layer.clip_mask, layer.clip_mask_key);
+                gl.ActiveTexture(GL_TEXTURE0);
+            }
+            // the clip is whole surface pixels inside the quad's bounds, so its quad covers every drawn pixel
+            native_gl_present_quad(presenter, layer_program, page, layer.clip_left, layer.clip_top,
+                                   layer.clip_right, layer.clip_bottom, !image->top_down);
+            gl.BindSampler(0, presenter->present.samplers[unscaled ? 0 : 1]);
+            // the producer's next write to this target waits for this draw on the GPU
+            if (image->consumed) gl.DeleteSync(image->consumed);
+            image->consumed = gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            fenced = true;
+        }
+        if (layer.above) {
+            gl.Enable(GL_BLEND);
+            Bound none = {};
+            if (!layer.above_changed || !layer.above_damage_count)
+                native_gl_present_upload(presenter, 1 + i, layer.above, &none, !layer.above_changed);
+            for (unsigned r = 0; layer.above_changed && r < layer.above_damage_count; r++)
+                native_gl_present_upload(presenter, 1 + i, layer.above, &layer.above_damage[r], true);
+            native_gl_present_quad(presenter, page_program, page, 0, 0, (float)page->width, (float)page->height, false);
+        }
+    }
+    gl.Disable(GL_BLEND);
+    gl.BindSampler(0, 0);
+    gl.BindSampler(1, 0);
+    // other contexts may wait only on fences already submitted
+    if (fenced) gl.Flush();
+    if (unscaled) {
+        const ImageSurface* expected = frame->reference ? frame->reference : frame->layer_count ? nullptr : page;
+        // a composite rounds translucent edges in two premultiplied steps instead of one blend
+        if (expected) native_gl_present_check(presenter, expected, frame->framebuffer_width, frame->framebuffer_height,
+                                              frame->layer_count ? 8 : 0);
+    }
+    return native_gl_check(presenter, "window present");
+#else
+    (void)presenter; (void)frame;
+    return false;
+#endif
+}
+
+#ifdef NATIVE_GL_ENABLED
+static void native_gl_resolve_current(NativeGlContext* context, NativeGlSlot* slot);
+#endif
+bool native_gl_publish(NativeGlContext* context, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    NativeGlSlot* slot = scope.valid ? native_gl_slot(context, target, NATIVE_GL_TARGET) : nullptr;
+    if (!slot || !slot->initialized || slot->layered || slot->hdr) return false;
+    NativeGlFunctions& gl = context->gl;
+    // the presenter samples the single-sample copy
+    native_gl_resolve_current(context, slot);
+    if (slot->produced) gl.DeleteSync(slot->produced);
+    slot->produced = gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    slot->publication = native_gl_id();
+    // flushing submits the fence, so the presenter's context can wait on it
+    gl.Flush();
+    return slot->produced && native_gl_check(context, "target publication");
+#else
+    (void)context; (void)target;
+    return false;
+#endif
+}
+uint64_t native_gl_publication(NativeGlContext* context, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlSlot* slot = native_gl_alive(context) ? native_gl_slot(context, target, NATIVE_GL_TARGET) : nullptr;
+    return slot ? slot->publication : 0;
+#else
+    (void)context; (void)target;
+    return 0;
+#endif
+}
+
+bool native_gl_present_layer_current(const NativeGlPresentLayer* layer) {
+    // a producer destroyed or rebuilt since the cut has nothing to show
+    return layer && native_gl_alive(layer->producer) &&
+        layer->producer->stats.generation == layer->producer_generation && layer->publication &&
+        native_gl_publication(layer->producer, layer->image) == layer->publication;
+}
+
+void native_gl_await_presenter(NativeGlContext* context, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    NativeGlSlot* slot = scope.valid ? native_gl_slot(context, target, NATIVE_GL_TARGET) : nullptr;
+    if (!slot || !slot->consumed) return;
+    // the GPU, not the CPU, holds this context's next writes until the presenter's draw from the target ends
+    context->gl.WaitSync(slot->consumed, 0, GL_TIMEOUT_IGNORED);
+    context->gl.DeleteSync(slot->consumed);
+    slot->consumed = nullptr;
+#else
+    (void)context; (void)target;
+#endif
 }
 
 const char* native_gl_diagnostic(NativeGlContext* context) { return context ? context->diagnostic : "native graphics unavailable"; }
@@ -372,7 +851,10 @@ void native_gl_release(NativeGlContext* context, NativeGlResource resource) {
                 gl.DeleteFramebuffers(1, &slot.name); gl.DeleteFramebuffers(1, &slot.resolve);
                 if (slot.hdr) gl.DeleteTextures(1,&slot.color);else gl.DeleteRenderbuffers(1, &slot.color);
                 gl.DeleteRenderbuffers(1, &slot.depth);
-                gl.DeleteTextures(1, &slot.texture); break;
+                gl.DeleteTextures(1, &slot.texture);
+                if (slot.produced) gl.DeleteSync(slot.produced);
+                if (slot.consumed) gl.DeleteSync(slot.consumed);
+                break;
         }
         context->stats.resources--; context->stats.allocated_bytes -= slot.bytes; slot = {}; return;
     }
@@ -392,9 +874,32 @@ void native_gl_destroy(NativeGlContext* context) {
     // ordinary teardown retires resources without reporting a device failure.
     if (!context->lost) for (NativeGlSlot& slot : context->slots)
         if (slot.id) native_gl_release(context, {slot.id});
-    if (context->window) { glfwDestroyWindow(context->window); native_gl_context_count--; }
+    if (context->presenter) {
+        NativeGlScope scope(context);
+        if (scope.valid) {
+            context->gl.DeleteTextures(1 + NATIVE_GL_PRESENT_LAYERS, context->present.textures);
+            context->gl.DeleteTextures(NATIVE_GL_PRESENT_LAYERS, context->present.masks);
+            context->gl.DeleteSamplers(2, context->present.samplers);
+            context->gl.DeleteVertexArrays(1, &context->present.vertex_array);
+        }
+    } else if (context->window) { glfwDestroyWindow(context->window); native_gl_context_count--; }
+    native_gl_track(context, false);
 #endif
     mem_free(context);
+}
+
+NativeGlCurrent::NativeGlCurrent(NativeGlContext* context) : previous(nullptr), switched(false) {
+#ifdef NATIVE_GL_ENABLED
+    if (!context || context->lost || !context->window || !pthread_equal(context->thread, pthread_self())) return;
+    previous = glfwGetCurrentContext();
+    switched = previous != context->window;
+    if (switched) glfwMakeContextCurrent(context->window);
+#endif
+}
+NativeGlCurrent::~NativeGlCurrent() {
+#ifdef NATIVE_GL_ENABLED
+    if (switched) glfwMakeContextCurrent((GLFWwindow*)previous);
+#endif
 }
 
 NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes, bool retain_index_data) {
@@ -433,6 +938,7 @@ bool native_gl_buffer_update(NativeGlContext *context, NativeGlResource buffer, 
         return false;
     if (slot->data)
         memcpy((char *)slot->data + offset, data, bytes);
+    slot->index_max_count = 0;
     return true;
 #else
     return false;
@@ -511,7 +1017,7 @@ bool native_gl_uniform_info(NativeGlContext* context, NativeGlResource program, 
 NativeGlUniform native_gl_uniform(NativeGlContext* context, NativeGlResource program, const char* name) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, program, NATIVE_GL_PROGRAM);
-    if (scope.valid && slot && name) return {program, context->gl.GetUniformLocation(slot->name, name), context->stats.generation};
+    if (scope.valid && slot && name) return {program, native_gl_uniform_location(context, slot, name), context->stats.generation};
 #endif
     return {{}, -1, 0};
 }
@@ -994,11 +1500,17 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
         if (!indices || draw->count > indices->length / sizeof(uint32_t)) {
             native_gl_error(context, "index draw range exceeds upload"); return false;
         }
-        maximum = 0;
-        for (unsigned i = 0; i < draw->count; i++) {
-            uint32_t index; memcpy(&index, (const uint8_t*)indices->data + i * sizeof(index), sizeof(index));
-            if (index > maximum) maximum = index;
+        // a merged mesh draws ~10^5 indices in every shadow and view pass; scan each upload once
+        if (indices->index_max_count != draw->count) {
+            maximum = 0;
+            for (unsigned i = 0; i < draw->count; i++) {
+                uint32_t index; memcpy(&index, (const uint8_t*)indices->data + i * sizeof(index), sizeof(index));
+                if (index > maximum) maximum = index;
+            }
+            indices->index_max = maximum;
+            indices->index_max_count = draw->count;
         }
+        maximum = indices->index_max;
     }
     for (unsigned i = 0; i < vertices->attribute_count; i++) {
         const NativeGlAttribute& a = vertices->attributes[i];
@@ -1015,7 +1527,7 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     GLuint unit_names[NATIVE_GL_BINDING_LIMIT];GLenum unit_targets[NATIVE_GL_BINDING_LIMIT];
     GLint locations[NATIVE_GL_BINDING_LIMIT];unsigned units[NATIVE_GL_BINDING_LIMIT],used=0;
     for(unsigned i=0;i<draw->binding_count;i++) {
-        locations[i]=gl.GetUniformLocation(program->name,draw->bindings[i].sampler);if(locations[i]<0) continue;
+        locations[i]=native_gl_uniform_location(context,program,draw->bindings[i].sampler);if(locations[i]<0) continue;
         unsigned unit=0;while(unit<used&&(unit_names[unit]!=names[i]||unit_targets[unit]!=targets[i])) unit++;
         if(unit==used) {
             if(used>=context->texture_units) {native_gl_error(context,"draw sampler combination exceeds device texture units");return false;}
@@ -1069,47 +1581,134 @@ static void native_gl_resolve(NativeGlContext* context,NativeGlSlot* slot) {
     if(scissor) gl.Enable(GL_SCISSOR_TEST);
     slot->resolve_dirty=false;
 }
+// Brings a drawing buffer's single-sample copy up to date for a reader. Native begins and draws mark it
+// dirty, so a published frame is not resolved again to be upsampled or read back; WebGL draws bypass
+// native_gl_draw, so its buffer always resolves. A copy target has no drawing buffer.
+static void native_gl_resolve_current(NativeGlContext* context, NativeGlSlot* slot) {
+    if (!slot->top_down && (slot->resolve_dirty || slot->webgl)) native_gl_resolve(context, slot);
+}
 #endif
+// A top-down copy of a drawing buffer that snapshots and the presenter read: a scene's sRGB-encoded linear
+// light, or a WebGL buffer's display bytes (`webgl`), stored as they are.
+static NativeGlResource native_gl_copy_target(NativeGlContext* context, unsigned width, unsigned height, bool webgl) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT) {
+        native_gl_error(context, "invalid copy target dimensions"); return {};
+    }
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)width * height * 4);
+    if (!slot) return {};
+    NativeGlFunctions& gl = context->gl;
+    slot->width = width; slot->height = height; slot->samples = 1; slot->top_down = true; slot->webgl = webgl;
+    // a WebGL application's bindings survive a copy target made between its calls
+    GLint texture, read, draw;
+    gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    // no drawing buffer: the copy lives directly in the texture that snapshots read
+    gl.GenFramebuffers(1, &slot->resolve); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->resolve);
+    gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_2D, slot->texture);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, webgl ? GL_RGBA8 : GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0);
+    bool complete = gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    gl.BindTexture(GL_TEXTURE_2D, texture);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, read); gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+    if (complete && native_gl_check(context, "copy target allocation")) return {slot->id};
+    native_gl_error(context, "copy target framebuffer incomplete"); native_gl_release(context, {slot->id});
+#endif
+    return {};
+}
+NativeGlResource native_gl_upscale_target(NativeGlContext* context, unsigned width, unsigned height) {
+    return native_gl_copy_target(context, width, height, false);
+}
+bool native_gl_upscale(NativeGlContext* context, NativeGlResource source, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    NativeGlSlot* from = scope.valid ? native_gl_slot(context, source, NATIVE_GL_TARGET) : nullptr;
+    NativeGlSlot* to = scope.valid ? native_gl_slot(context, target, NATIVE_GL_TARGET) : nullptr;
+    if (!from || !to || from == to || from->layered || from->hdr || !from->initialized || from->top_down || !to->top_down) {
+        native_gl_error(context, "invalid upscale source or target"); return false;
+    }
+    NativeGlFunctions& gl = context->gl;
+    native_gl_resolve_current(context, from);
+    GLint read, draw;
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    bool srgb = gl.IsEnabled(GL_FRAMEBUFFER_SRGB), scissor = gl.IsEnabled(GL_SCISSOR_TEST);
+    gl.Disable(GL_FRAMEBUFFER_SRGB); gl.Disable(GL_SCISSOR_TEST);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, from->resolve); gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, to->resolve);
+    GLenum attachment = GL_COLOR_ATTACHMENT0; gl.ReadBuffer(attachment); gl.DrawBuffers(1, &attachment);
+    // filter the stored bytes, as a CPU scale of the snapshot would, and flip the rows to the snapshot's
+    // top-down order on the GPU; at the same size it is an exact copy
+    bool same = from->width == to->width && from->height == to->height;
+    gl.BlitFramebuffer(0, 0, from->width, from->height, 0, to->height, to->width, 0, GL_COLOR_BUFFER_BIT,
+                       same ? GL_NEAREST : GL_LINEAR);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, read); gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+    if (srgb) gl.Enable(GL_FRAMEBUFFER_SRGB);
+    if (scissor) gl.Enable(GL_SCISSOR_TEST);
+    to->initialized = native_gl_check(context, "upscale blit");
+    return to->initialized;
+#else
+    return false;
+#endif
+}
 ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!slot || !slot->initialized || slot->layered || slot->hdr) return nullptr;
+    ImageSurface* surface = image_surface_create(slot->width, slot->height);
+    if (!surface) { native_gl_error(context,"snapshot readback allocation failed"); return nullptr; }
+    if (native_gl_snapshot_into(context, target, surface)) return surface;
+    image_surface_destroy(surface);
+#else
+    (void)context; (void)target;
+#endif
+    return nullptr;
+}
+
+bool native_gl_snapshot_into(NativeGlContext* context, NativeGlResource target, ImageSurface* surface) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
     // layered targets feed later passes; only the color drawing buffer publishes pixels
-    if (!scope.valid || !slot || !slot->initialized || slot->layered || slot->hdr) return nullptr;
+    if (!scope.valid || !slot || !slot->initialized || slot->layered || slot->hdr || !surface || !surface->pixels ||
+        surface->width != (int)slot->width || surface->height != (int)slot->height) return false; // INT_CAST_OK: pixel extents
     NativeGlFunctions& gl = context->gl;
     NativeGlPixelTransferScope transfer(gl, true);
     GLint read, draw, resolve_read;
     gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
-    native_gl_resolve(context,slot);
+    native_gl_resolve_current(context, slot);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER,slot->resolve);gl.GetIntegerv(GL_READ_BUFFER,&resolve_read);gl.ReadBuffer(GL_COLOR_ATTACHMENT0);
-    ImageSurface* surface = image_surface_create(slot->width, slot->height);
-    if (surface) gl.ReadPixels(0, 0, slot->width, slot->height, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels);
+    gl.ReadPixels(0, 0, slot->width, slot->height, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels);
     bool success = native_gl_check(context, "drawing buffer readback");
     gl.ReadBuffer(resolve_read);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, read); gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-    if (!surface || !success) {
-        if (!surface) native_gl_error(context,"snapshot readback allocation failed");
-        image_surface_destroy(surface); return nullptr;
-    }
+    if (!success) return false;
     uint8_t* pixels = (uint8_t*)surface->pixels;
-    for (unsigned y = 0; y < slot->height / 2; y++) {
+    for (unsigned y = 0; !slot->top_down && y < slot->height / 2; y++) {
         uint8_t* a = pixels + (size_t)y * surface->pitch;
         uint8_t* b = pixels + (size_t)(slot->height - 1 - y) * surface->pitch;
         for (unsigned x = 0; x < slot->width * 4; x++) { uint8_t value = a[x]; a[x] = b[x]; b[x] = value; }
     }
     // resolve contains encoded premultiplied linear light; ImageSurface wants premultiplied sRGB.
-    for (size_t i = 0; !slot->webgl && i < (size_t)slot->width * slot->height; i++) {
-        uint8_t* pixel = pixels + i * 4;
-        // at full alpha the framebuffer's sRGB byte is already the snapshot byte.
-        if (pixel[3] == 255) continue;
-        float alpha = pixel[3] / 255.0f;
-        for (unsigned c = 0; c < 3; c++) {
-            float straight = alpha > 0 ? native_gl_srgb(pixel[c] / 255.0f, false) / alpha : 0;
-            pixel[c] = (uint8_t)lroundf(fminf(1.0f, native_gl_srgb(fminf(1.0f, straight), true)) * alpha * 255.0f);
+    for (unsigned y = 0; !slot->webgl && y < slot->height; y++) {
+        uint8_t* row = pixels + (size_t)y * surface->pitch;
+        // at full alpha the framebuffer's sRGB byte is already the snapshot byte; a scene over an
+        // opaque background skips every row
+        if (render_pixel_row_opaque((const uint32_t*)row, slot->width)) continue;
+        for (unsigned x = 0; x < slot->width; x++) {
+            uint8_t* pixel = row + (size_t)x * 4;
+            if (pixel[3] == 255) continue;
+            float alpha = pixel[3] / 255.0f;
+            for (unsigned c = 0; c < 3; c++) {
+                float straight = alpha > 0 ? native_gl_srgb(pixel[c] / 255.0f, false) / alpha : 0;
+                pixel[c] = (uint8_t)lroundf(fminf(1.0f, native_gl_srgb(fminf(1.0f, straight), true)) * alpha * 255.0f);
+            }
         }
     }
-    surface->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED; context->stats.frames++; return surface;
+    surface->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED; context->stats.frames++; return true;
 #else
-    return nullptr;
+    (void)context; (void)target; (void)surface;
+    return false;
 #endif
 }
 
@@ -1380,7 +1979,7 @@ bool native_gl_webgl_resize(NativeGlContext* context, unsigned width, unsigned h
     context->webgl_options.antialias=target->samples>1;
     target->webgl=true;target->initialized=true;
     native_gl_release(context,context->webgl_target);context->webgl_target=replacement;
-    context->webgl_width=width;context->webgl_height=height;context->webgl_discard=true;
+    context->webgl_width=width;context->webgl_height=height;context->webgl_discard=true;context->webgl_copy_current=false;
     gl.BindRenderbuffer(GL_RENDERBUFFER,renderbuffer);gl.BindTexture(GL_TEXTURE_2D,texture);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER,(!read||read==(GLint)old_name)?target->name:read);
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,(!draw||draw==(GLint)old_name)?target->name:draw);
@@ -1390,6 +1989,21 @@ bool native_gl_webgl_resize(NativeGlContext* context, unsigned width, unsigned h
     return false;
 #endif
 }
+#ifdef NATIVE_GL_ENABLED
+// a drawing buffer's display bytes as an ImageSurface's: opaque without an alpha channel, else premultiplied
+static void webgl_normalize_alpha(const NativeGlContext* context, ImageSurface* surface) {
+    uint8_t* pixels=(uint8_t*)surface->pixels;
+    for (size_t i=0;i<(size_t)surface->width*surface->height;i++) {
+        if (!context->webgl_options.alpha) pixels[i*4+3]=255;
+        else if (!context->webgl_options.premultiplied_alpha)
+            for (unsigned c=0;c<3;c++) pixels[i*4+c]=(unsigned)pixels[i*4+c]*pixels[i*4+3]/255u;
+    }
+}
+// a presentation consumes the frame: without preserveDrawingBuffer the next draw starts from a cleared buffer
+static void webgl_presented(NativeGlContext* context) {
+    context->webgl_dirty=false;context->webgl_discard=!context->webgl_options.preserve;
+}
+#endif
 ImageSurface* native_gl_webgl_snapshot(NativeGlContext* context) {
 #ifdef NATIVE_GL_ENABLED
     if (!context || context->lost || !context->webgl_dirty) return nullptr;
@@ -1397,17 +2011,60 @@ ImageSurface* native_gl_webgl_snapshot(NativeGlContext* context) {
     webgl_collect_errors(context);
     ImageSurface* surface=native_gl_snapshot(context,context->webgl_target);
     if (surface) {
-        uint8_t* pixels=(uint8_t*)surface->pixels;
-        for (size_t i=0;i<(size_t)surface->width*surface->height;i++) {
-            if (!context->webgl_options.alpha) pixels[i*4+3]=255;
-            else if (!context->webgl_options.premultiplied_alpha)
-                for (unsigned c=0;c<3;c++) pixels[i*4+c]=(unsigned)pixels[i*4+c]*pixels[i*4+3]/255u;
-        }
-        context->webgl_dirty=false;context->webgl_discard=!context->webgl_options.preserve;
+        webgl_normalize_alpha(context,surface);
+        // the copy still holds the frame before this one
+        webgl_presented(context);context->webgl_copy_current=false;
     }
     return surface;
 #else
     return nullptr;
+#endif
+}
+ImageSurface* native_gl_webgl_publish(NativeGlContext* context) {
+#ifdef NATIVE_GL_ENABLED
+    if (!context || context->lost) return nullptr;
+    bool fresh=context->webgl_dirty;
+    // a frame a snapshot consumed stays in the buffer until a draw after its discard clears it
+    bool intact=context->webgl_options.preserve || context->webgl_discard;
+    if (!fresh && (context->webgl_copy_current || !intact)) return nullptr;
+    NativeGlScope scope(context); if (!scope.valid) return nullptr;
+    webgl_collect_errors(context);
+    NativeGlSlot* target=native_gl_slot(context,context->webgl_target,NATIVE_GL_TARGET);
+    NativeGlSlot* copy=native_gl_slot(context,context->webgl_copy,NATIVE_GL_TARGET);
+    if (!target) return nullptr;
+    if (copy && (copy->width!=target->width || copy->height!=target->height)) {
+        native_gl_release(context,context->webgl_copy);context->webgl_copy={};copy=nullptr;
+    }
+    if (!copy) context->webgl_copy=native_gl_copy_target(context,target->width,target->height,true);
+    ImageSurface* surface=context->webgl_copy.id ? image_surface_create(target->width,target->height) : nullptr;
+    // the presenter's last draw from the copy ends before the GPU overwrites it
+    if (surface) native_gl_await_presenter(context,context->webgl_copy);
+    if (!surface || !native_gl_upscale(context,context->webgl_target,context->webgl_copy) ||
+        !native_gl_publish(context,context->webgl_copy)) {
+        image_surface_destroy(surface);context->webgl_copy_current=false;return nullptr;
+    }
+    // a deferred snapshot already has the representation its readback will fill
+    surface->alpha_mode=IMAGE_ALPHA_PREMULTIPLIED;
+    context->webgl_copy_current=true;
+    if (fresh) webgl_presented(context);
+    return surface;
+#else
+    (void)context;
+    return nullptr;
+#endif
+}
+NativeGlResource native_gl_webgl_presented(NativeGlContext* context) {
+    return context && !context->lost && context->webgl_copy_current ? context->webgl_copy : NativeGlResource{};
+}
+bool native_gl_webgl_snapshot_into(NativeGlContext* context, ImageSurface* surface) {
+#ifdef NATIVE_GL_ENABLED
+    // the copy keeps its publication after the buffer moves on, until the next one replaces it
+    if (!context || context->lost || !native_gl_snapshot_into(context,context->webgl_copy,surface)) return false;
+    webgl_normalize_alpha(context,surface);
+    return true;
+#else
+    (void)context; (void)surface;
+    return false;
 #endif
 }
 
@@ -1514,12 +2171,13 @@ bool native_gl_webgl_call(NativeGlContext* context, const WebGlCommand* command,
                 if(bytes&&!copy) return fail(GL_OUT_OF_MEMORY);
                 if(command->data&&bytes) memcpy(copy,command->data,bytes);
                 if(!webgl_resize_bytes(context,slot,bytes*2)) { mem_free(copy);break; }
-                mem_free(slot->data);slot->data=copy;slot->length=bytes;
+                mem_free(slot->data);slot->data=copy;slot->length=bytes;slot->index_max_count=0;
                 gl.BufferData(n[0],bytes,copy,n[2]);
             } else {
                 size_t offset=n[1];
                 if(n[1]<0||offset>slot->length||command->bytes>slot->length-offset) return fail(GL_INVALID_VALUE);
                 if(command->bytes) memcpy((uint8_t*)slot->data+offset,command->data,command->bytes);
+                slot->index_max_count=0;
                 gl.BufferSubData(n[0],offset,command->bytes,command->data);
             } break;
         }

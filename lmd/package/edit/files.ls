@@ -37,7 +37,7 @@ pub let focus_surface = controller.focus
 
 // The live text of a dialog field. A click on a label targets its text node;
 // `root_node` answers for any connected node.
-pub fn field_value(node, id) {
+pub fn field_value(node, id) any^ {
   let input_node = dom.get_element_by_id(dom.root_node(node), id)
   if (input_node == null) "" else string(dom.get_state(input_node, "value") or "")
 }
@@ -73,7 +73,7 @@ pub fn dialog_frame(kind, title, text, fields, buttons) =>
 pub let dialog_kinds = ['close', 'changed', 'exists', 'save_as']
 
 // The file dialogs; null for no dialog or another kind.
-pub fn dialog_view(dialog, session) {
+pub fn dialog_view(dialog, session) any^ {
   if (dialog == null) null
   else if (dialog.kind == 'close') {
     dialog_frame("close", "Unsaved changes",
@@ -109,7 +109,7 @@ pub fn dialog_view(dialog, session) {
 // conflict dialog a refused save opens (or null).
 pub pn save_now(session, doc, node) {
   let result = sess.save(session, doc, session.path, false)
-  sync_window(node, result.session, doc)
+  sync_window(node, result.session, doc)^;
   {session: result.session, status: result.status,
    dialog: if (result.conflict != null) {kind: result.conflict, path: result.session.path} else null}
 }
@@ -133,8 +133,8 @@ pub pn dialog_action(action, node, st) {
   }
   if (action == "reload") {
     let result = sess.reload(session)
-    if (not result.ok) { return {*: st, status: result.status, handled: true, reloaded: null} }
-    sync_window(node, result.session, result.doc)
+    if ((not result.ok)^) { return {*: st, status: result.status, handled: true, reloaded: null} }
+    sync_window(node, result.session, result.doc)^
     return {*: st, session: result.session, status: result.status, dialog: null, handled: true,
             reloaded: result.doc}
   }
@@ -146,15 +146,15 @@ pub pn dialog_action(action, node, st) {
                else if (dialog != null and dialog.path != null) dialog.path
                else session.path
   let closing = (dialog != null and dialog.kind == 'close') or st.after_save == 'close'
-  if (target == "") { return {*: st, status: "Choose a file name.", handled: true, reloaded: null} }
+  if ((target == "")^) { return {*: st, status: "Choose a file name.", handled: true, reloaded: null} }
   let result = sess.save(session, st.doc, target, action == "overwrite")
-  sync_window(node, result.session, st.doc)
+  sync_window(node, result.session, st.doc)^
   let saved = {*: st, session: result.session, status: result.status, handled: true, reloaded: null}
-  if (result.ok) {
+  if (result.ok^) {
     if (closing) { dom.request_window_close(node) }
     return {*: saved, dialog: null, after_save: null}
   }
-  if (result.conflict != null) {
+  if ((result.conflict != null)^) {
     return {*: saved, dialog: {kind: result.conflict, path: target}, after_save: if (closing) 'close' else null}
   }
   // a refused Save As keeps its dialog, showing the path it tried

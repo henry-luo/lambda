@@ -15,14 +15,14 @@ fn replace_node(nodes, value) => [for (entry in nodes) if (entry.id == value.id)
 // The `nodes` field takes its type from this function's inferred result, which
 // is a contract rather than a simple array type — that is what selects the
 // `any` lane for the field.
-fn ensure(st, id, properties) {
+fn ensure(st, id, properties) any^ {
   let current = node_at(st.nodes, id);
   if (current == null) { {*: st, nodes: [*st.nodes, {id: id, properties: properties}]} }
   else { {*: st, nodes: replace_node(st.nodes,
     {*: current, properties: [*current.properties, *properties]})} }
 }
 
-fn walk(st, i, n) =>
+fn walk(st, i, n) any^ =>
   if (i >= n) st else walk(ensure(st, "n" ++ string(i % 3), [i]), i + 1, n)
 
 // Unrelated churn so an ordinary run also allocates across the same fields.

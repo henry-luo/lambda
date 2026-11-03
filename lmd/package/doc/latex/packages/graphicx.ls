@@ -5,7 +5,7 @@ import paths: lambda.edit.session
 
 let KEYS = ["width", "height", "scale", "angle", "trim", "clip", "keepaspectratio", "page"]
 
-pub fn options(el) {
+pub fn options(el) any^ {
     let parsed = util.parse_kv_options(util.optional_raw(el))
     if (el.starred == true) {*:parsed, clip: "true"} else parsed
 }
@@ -15,15 +15,15 @@ pub fn unsupported_keys(opts) {
           where not any([for (allowed in KEYS) string(key) == allowed])) string(key)]
 }
 
-pub fn source(el) => trim(util.text_of_skip_brack(el))
+pub fn source(el) any^ => trim(util.text_of_skip_brack(el))
 
-pub fn resolved_source(src, base_uri) {
+pub fn resolved_source(src, base_uri) any^ {
     if (base_uri == null or base_uri == "" or starts_with(src, "/") or
         starts_with(src, "data:") or index_of(src, "://") != null) src
     else paths.resolve_path(base_uri, src)
 }
 
-fn style(opts) {
+fn style(opts) any^ {
     let size = "display:inline-block;vertical-align:middle;" ++
         (if (opts.width != null) "width:" ++ util.css_dimension(opts.width) ++ ";" else "") ++
         (if (opts.height != null) "height:" ++ util.css_dimension(opts.height) ++ ";" else "")
@@ -41,9 +41,9 @@ fn style(opts) {
 }
 
 // graphicx angles turn counterclockwise; CSS rotate() turns clockwise
-pub fn css_rotation(angle) => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
+pub fn css_rotation(angle) any^ => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
 
-fn pdf_style(opts, svg) {
+fn pdf_style(opts, svg) any^ {
     let physical = if (opts.width == null and opts.height == null)
         "width:" ++ string(float(svg.width) * 96.0 / 72.0) ++ "px;height:" ++
         string(float(svg.height) * 96.0 / 72.0) ++ "px;"
@@ -57,9 +57,9 @@ fn pdf_class(opts) {
     else "latex-image-frame"
 }
 
-fn unsupported(message, offset) => util.unsupported_element("graphicx", message, offset)
+fn unsupported(message, offset) any^ => util.unsupported_element("graphicx", message, offset)
 
-fn has_unportable_pdf_content(node) {
+fn has_unportable_pdf_content(node) any^ {
     if (not (node is element)) false
     else if (string(name(node)) == "image" and node.href != null and
              starts_with(node.href, "img:")) true
@@ -67,7 +67,7 @@ fn has_unportable_pdf_content(node) {
     else any([for (child in node) has_unportable_pdf_content(child)])
 }
 
-fn render_pdf(src, opts, id_prefix, offset) {
+fn render_pdf(src, opts, id_prefix, offset) any^ {
     let parsed = pdf_document(src)
     if (parsed == null) unsupported("Cannot read PDF graphic " ++ src, offset)
     else render_pdf_page(parsed, src, if (opts.page != null) int(opts.page) ^ { null } else 1,
@@ -77,10 +77,10 @@ fn render_pdf(src, opts, id_prefix, offset) {
 // a PDF read once for its pages (pdfpages inserts several), or null
 pub fn pdf_document(src) => input(src, "pdf") ^ { null }
 
-pub fn pdf_page_count(parsed) => pdf.pdf_page_count(parsed)
+pub fn pdf_page_count(parsed) any^ => pdf.pdf_page_count(parsed)
 
 // page (from 1) of a read PDF as an inline SVG sized by the graphicx keys in opts
-pub fn render_pdf_page(parsed, src, page, opts, id_prefix, offset) {
+pub fn render_pdf_page(parsed, src, page, opts, id_prefix, offset) any^ {
     if (page == null or page < 1 or page > pdf.pdf_page_count(parsed))
         unsupported("Invalid PDF page for graphic " ++ src, offset)
     else {
@@ -94,7 +94,7 @@ pub fn render_pdf_page(parsed, src, page, opts, id_prefix, offset) {
 }
 
 // `sizing` overrides the image's own keys when a box command sizes a lone image
-pub fn render(el, base_uri, sizing = null) {
+pub fn render(el, base_uri, sizing = null) any^ {
     let opts = if (sizing == null) options(el) else {*:options(el), *:sizing}
     let unknown = unsupported_keys(opts)
     let src = resolved_source(source(el), base_uri)
@@ -128,20 +128,20 @@ pub fn render(el, base_uri, sizing = null) {
 // untransformed, which registry.target_diagnostics reports.
 // the \includegraphics a box holds as its whole content, or null: a box command's
 // last argument, or an environment's body nodes; space and paragraph wrappers aside
-pub fn lone_image(el) {
+pub fn lone_image(el) any^ {
     let args = util.command_args(el)
     sole_image(slice(args, util.last_argument_start(el), len(args)))
 }
 
-pub fn sole_image(nodes) {
+pub fn sole_image(nodes) any^ {
     let solid = [for (node in nodes where not (node is string and trim(node) == "")) node]
     if (len(solid) != 1 or not (solid[0] is element)) null
     else if (string(name(solid[0])) == "includegraphics") solid[0]
-    else if (string(name(solid[0])) == "paragraph") sole_image([for (c in content(solid[0])) c])
+    else if (string(name(solid[0])) == "paragraph") sole_image([for (c in ((content(solid[0])) ^ { [] })) c])
     else null
 }
 
-pub fn render_box(el, items, image, base_uri) {
+pub fn render_box(el, items, image, base_uri) any^ {
     let tag = string(name(el))
     if (tag == "resizebox") render_resizebox(el, items, image, base_uri)
     else if (tag == "scalebox") render_scalebox(el, items, image, base_uri)
@@ -156,7 +156,7 @@ pub fn transformed_box(css_class, style, items) {
 // a \resizebox length; "!" keeps the aspect ratio and is null here
 fn box_length(raw) => if (raw == null or trim(raw) == "!") null else trim(raw)
 
-fn render_resizebox(el, items, image, base_uri) {
+fn render_resizebox(el, items, image, base_uri) any^ {
     let width = box_length(util.raw_argument(el, "required", 0))
     let height = box_length(util.raw_argument(el, "required", 1))
     if ((width != null and util.css_dimension(width) == null) or
@@ -168,7 +168,7 @@ fn render_resizebox(el, items, image, base_uri) {
         (if (height == null) "" else "height:" ++ util.css_dimension(height) ++ ";"), items)
 }
 
-fn render_scalebox(el, items, image, base_uri) {
+fn render_scalebox(el, items, image, base_uri) any^ {
     let horizontal = float(trim(util.raw_argument(el, "required", 0) or "")) ^ { null }
     let raw_vertical = util.optional_raw(el)
     let vertical = if (raw_vertical == null) horizontal else float(trim(raw_vertical)) ^ { null }
@@ -180,7 +180,7 @@ fn render_scalebox(el, items, image, base_uri) {
 }
 
 // \rotatebox[origin=…]{angle}: LaTeX's default origin is the left baseline
-fn render_rotatebox(el, items, image, base_uri) {
+fn render_rotatebox(el, items, image, base_uri) any^ {
     let angle = util.raw_argument(el, "required", 0)
     let opts = util.parse_kv_options(util.optional_raw(el))
     let unknown = [for (key, value at opts where string(key) != "origin") string(key)]
@@ -195,14 +195,14 @@ fn render_rotatebox(el, items, image, base_uri) {
         ";transform-origin:" ++ origin, items)
 }
 
-fn rotation_origin(spec) {
+fn rotation_origin(spec) any^ {
     if (spec == null) "left bottom"
     else {
         let letters = trim(spec)
         let horizontal = if (contains(letters, "l")) "left" else if (contains(letters, "r")) "right" else "center"
         let vertical = if (contains(letters, "t")) "top"
             else if (contains(letters, "b") or contains(letters, "B")) "bottom" else "center"
-        let valid = all([for (i in 0 to len(letters) - 1) contains("lrtbBc", slice(letters, i, i + 1))])
+        let valid = all([for (i in ((0 to len(letters) - 1) ^ { [] })) contains("lrtbBc", slice(letters, i, i + 1))])
         if (letters == "" or not valid) null else horizontal ++ " " ++ vertical
     }
 }

@@ -13,7 +13,7 @@ let deck = <presentation title: "Group reveal", width: 640.0, height: 360.0,
     >
 >
 // assert object visibility in the body, excluding the shared stylesheet's hidden UI labels.
-fn rendered_body(page) => format([for (node in content(page) where name(node)=='body') node], 'html')^
+fn rendered_body(page) any^ => format([for (node in ((content(page)) ^ { [] }) where ((name(node)=='body') ^ { false })) node], 'html')^
 let initial = rendered_body(slide.snapshot(deck)^)
 let final = rendered_body(slide.snapshot(deck, {cue: 'final'})^);
 [

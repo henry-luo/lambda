@@ -13,7 +13,7 @@ pub fn validate(p) bool^ {
         raise error("procart grass: invalid clump, blade, dimension or palette settings") else true
 }
 
-pub fn geometry() element => s.geometry(
+pub fn geometry() element^ => s.geometry(
     [for (j in 0 to 4,let u = float(j)/4.0) for (side in [-0.5,0.5]) *[side*(1.0-u),u,u*u]],
     {id:"grass-blade",normals:[for (j in 0 to 4) for (side in 0 to 1) *camera.unit([0.0,2.0*float(j)/4.0,-1.0])],
      indices:[for (j in 0 to 3,let a = j*2) *[a,a+2,a+1,a+1,a+2,a+3]]})

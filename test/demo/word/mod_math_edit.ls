@@ -6,10 +6,10 @@ import image: lambda.editor.mod_image
 import field: .mod_math_field
 import equation: .mod_equation
 
-pub fn active(st) => st.math!=null and st.math.path==image.selected(st.editor).path and
+pub fn active(st) any^ => st.math!=null and st.math.path==image.selected(st.editor).path and
     st.math.revision==st.editor.model_revision
 // a caret session on the selected equation; point is the click as fractions of the image box.
-pub fn start(editor,point=null,caret=null) {
+pub fn start(editor,point=null,caret=null) any^ {
     let selected = image.selected(editor)
     let p = equation.settings(selected.node)
     let parsed = if (p==null or p.linear) null else (field.parse_field(p.source) ^ { null })
@@ -19,19 +19,19 @@ pub fn start(editor,point=null,caret=null) {
             else if (point!=null) field.nearest(geometry.slots,point.x*geometry.width,point.y*geometry.height)
             else field.positions(parsed.row)[last]}
 }
-pub fn source(row) => field.source(row)
+pub fn source(row) any^ => field.source(row)
 // the caret line as percentages of the equation box, which the object frame overlays.
-pub fn caret(st) {
+pub fn caret(st) any^ {
     let g = if (active(st)) field.caret_box(st.math.geometry.slots,st.math.caret) else null
     let box = st.math.geometry;
     if (g==null) null else {left:100*g.x/box.width,top:100*g.top/box.height,height:100*(g.bottom-g.top)/box.height}
 }
-fn step(m,dir) {
+fn step(m,dir) any^ {
     let next = field.move(m.row,m.caret,dir);
     if (next==null) {kind:"leave",after:dir=="right"} else {kind:"move",caret:next}
 }
 // one key → move, edit (new tree and caret), exit (keep the equation selected) or leave (caret beside it).
-pub fn key(st,evt) {
+pub fn key(st,evt) any^ {
     let m = st.math
     let k = evt.key;
     if (evt.metaKey==true or evt.ctrlKey==true or evt.altKey==true) null
@@ -46,7 +46,7 @@ pub fn key(st,evt) {
     else null
 }
 // leaving puts a text caret on the equation's side, inside a neighbouring run when there is one.
-pub fn beside(editor,after) {
+pub fn beside(editor,after) any^ {
     let path = image.selected(editor).path
     let parent = parent_path(path)
     let i = last_index(path) + (if (after) 1 else -1)

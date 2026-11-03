@@ -18,7 +18,7 @@ fn rotation(m) => [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
 fn delta(a, b) => [for (c in 0 to 2) for (r in 0 to 2) sum([for (k in 0 to 2) a[k * 3 + r] * b[k * 3 + c]])];
 fn gap(a, b) => max([for (i in 0 to len(a) - 1) abs(a[i] - b[i])]);
 fn role_name(c, role) => [for (j in motion.joints(c) where j.humanoid == role) j.name][0];
-fn keys(c, clip_name) => len([for (k in motion.clips_of(c) where k.name == clip_name) k][0].times);
+fn keys(c, clip_name) any^ => len([for (k in motion.clips_of(c) where k.name == clip_name) k][0].times);
 
 "1 rig profiles tag VRM 1.0 roles";
 [len(h.roles), len(h.required), giant.rig, cmu.rig,
@@ -40,7 +40,7 @@ let turned = motion.attach(twisted, {leap: cmu})^
 let posed = motion.attach(apose, {leap: cmu})^
 let rest_from = motion.pose(cmu)^
 let rest_to = motion.pose(twisted)^
-fn rotation_gap(key) {
+fn rotation_gap(key) any^ {
     let a = motion.pose(cmu, "jump", key)^
     let b = motion.pose(turned, "leap", key)^;
     max([for (j in motion.joints(cmu)) (let n = role_name(turned, j.humanoid),
@@ -55,18 +55,18 @@ fn rotation_gap(key) {
     (let k = motion.retarget(motion.clips_of(cmu)[0], cmu, apose)^, [name(k), k.name, len(content(k))])];
 // with `rest_frame`, a source key stands in for the rest pose: that key leaves the target at rest
 let framed = motion.retarget(motion.clips_of(cmu)[0], cmu, apose, {rest_frame: 15})^
-let arm = [for (ch in content(framed) where ch.joint == "mixamorig:LeftArm") ch][0];
+let arm = [for (ch in ((content(framed)) ^ { [] }) where ch.joint == "mixamorig:LeftArm") ch][0];
 (gap(arm.quaternion[60 to 63], [for (j in motion.joints(apose) where j.name == "mixamorig:LeftArm") j][0].quaternion) < 1e-9);
 
 "4 in_place holds the root's horizontal translation";
 let held = motion.in_place(cmu)^
-let hips = [for (ch in content(motion.clips_of(held)[0]) where ch.joint == "Hips") ch][0];
+let hips = [for (ch in ((content(motion.clips_of(held)[0])) ^ { [] }) where ch.joint == "Hips") ch][0];
 [unique([for (k in 0 to 30) hips.position[3 * k]]), unique([for (k in 0 to 30) hips.position[3 * k + 2]]),
     len(unique([for (k in 0 to 30) hips.position[3 * k + 1]])) > 1];
 
 "5 mirror swaps sides and reflects across the YZ plane";
 let flipped = motion.mirror(cmu)^
-fn mirror_gap(key) {
+fn mirror_gap(key) any^ {
     let a = motion.pose(cmu, "jump", key)^
     let b = motion.pose(flipped, "jump", key)^;
     max([for (pair in [["LeftHand", "RightHand"], ["RightFoot", "LeftFoot"], ["Head", "Head"]])

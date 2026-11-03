@@ -13,7 +13,7 @@ pn main() {
     var op_names = []
     var i = 0
     let n = len(ops)
-    while (i < n) {
+    while ((i < n)^) {
         op_names = op_names ++ [ops[i].op]
         i = i + 1
     }

@@ -1278,8 +1278,8 @@ typedef struct TypeFunc : Type {
     TypeParam* param;
     Type* returned;         // established success type used by the current call ABI
     Type* inferred_return;  // precise body success type retained independently of that ABI
-    Type* return_contract;  // declared or implicit success contract
-    Type* error_type;       // error type (NULL if function cannot raise errors)
+    Type* return_contract;  // full declared or implicit outcome contract
+    Type* error_type;       // ordinary error alternatives (NULL when excluded)
     int param_count;
     int required_param_count;   // count of required (non-optional) parameters
     int type_index;
@@ -1287,7 +1287,7 @@ typedef struct TypeFunc : Type {
     bool is_public;
     bool is_proc;
     bool is_variadic;           // function accepts variadic args (...)
-    bool can_raise;             // true if function may raise errors (T^ or T^E)
+    bool can_raise;             // legacy metadata: the outcome contract admits error
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
     // D6.1.3: may the result be an error the signature does not declare (a
     // failed deferred check)? Conservative, set when the body completes

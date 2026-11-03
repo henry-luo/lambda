@@ -140,6 +140,27 @@ static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
                                      ix - ix0, iy - iy0, true, premultiply);
 }
 
+bool render_image_quad_edges(const RdtMatrix* matrix, Rect destination, float edges[4][3]) {
+    float xs[4], ys[4];
+    const float cu[4] = {destination.x, destination.x + destination.width, destination.x + destination.width, destination.x};
+    const float cv[4] = {destination.y, destination.y, destination.y + destination.height, destination.y + destination.height};
+    for (int i = 0; i < 4; i++)
+        if (!rdt_matrix_project_point(matrix, cu[i], cv[i], &xs[i], &ys[i])) return false;
+    float area = 0.0f;
+    for (int i = 0; i < 4; i++) area += xs[i] * ys[(i + 1) % 4] - xs[(i + 1) % 4] * ys[i];
+    if (!(fabsf(area) > 0.01f)) return false;
+    for (int i = 0; i < 4; i++) {
+        float dx = xs[(i + 1) % 4] - xs[i], dy = ys[(i + 1) % 4] - ys[i];
+        float length = sqrtf(dx * dx + dy * dy);
+        if (length < 0.0001f) return false;
+        // signed distance to the edge line, positive inside whatever the winding
+        float sign = area > 0.0f ? 1.0f : -1.0f;
+        edges[i][0] = -dy / length * sign; edges[i][1] = dx / length * sign;
+        edges[i][2] = -(edges[i][0] * xs[i] + edges[i][1] * ys[i]);
+    }
+    return true;
+}
+
 bool render_image_project_pixels(const uint32_t* pixels, int width, int height, int stride,
     Rect destination, const RdtMatrix* transform, Rect viewport, ScaleMode mode,
     bool straight_alpha, uint32_t** output, Rect* output_rect, const Rect* repeated_tile) {
@@ -195,27 +216,9 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
     float footprint_y = fabsf(inverse.e22 / inverse.e33) * height / sampling_rect.height;
     // edge mode: the destination quad's edges carry their own coverage, so a projected
     // layer needs no antialiasing clip; fringe pixels sample the clamped edge texel
-    bool edge_coverage = mode == SCALE_MODE_LINEAR_EDGE && !repeated_tile;
     float edges[4][3] = {};
-    if (edge_coverage) {
-        float xs[4], ys[4];
-        const float cu[4] = {destination.x, destination.x + destination.width, destination.x + destination.width, destination.x};
-        const float cv[4] = {destination.y, destination.y, destination.y + destination.height, destination.y + destination.height};
-        for (int i = 0; i < 4 && edge_coverage; i++)
-            edge_coverage = rdt_matrix_project_point(&matrix, cu[i], cv[i], &xs[i], &ys[i]);
-        float area = 0.0f;
-        for (int i = 0; i < 4 && edge_coverage; i++) area += xs[i] * ys[(i + 1) % 4] - xs[(i + 1) % 4] * ys[i];
-        edge_coverage = edge_coverage && fabsf(area) > 0.01f;
-        for (int i = 0; i < 4 && edge_coverage; i++) {
-            float dx = xs[(i + 1) % 4] - xs[i], dy = ys[(i + 1) % 4] - ys[i];
-            float length = sqrtf(dx * dx + dy * dy);
-            if (length < 0.0001f) { edge_coverage = false; break; }
-            // signed distance to the edge line, positive inside whatever the winding
-            float sign = area > 0.0f ? 1.0f : -1.0f;
-            edges[i][0] = -dy / length * sign; edges[i][1] = dx / length * sign;
-            edges[i][2] = -(edges[i][0] * xs[i] + edges[i][1] * ys[i]);
-        }
-    }
+    bool edge_coverage = mode == SCALE_MODE_LINEAR_EDGE && !repeated_tile &&
+        render_image_quad_edges(&matrix, destination, edges);
     bool area_sample = (mode == SCALE_MODE_LINEAR || mode == SCALE_MODE_LINEAR_EDGE) && !repeated_tile &&
         inverse.e12 == 0.0f && inverse.e21 == 0.0f && inverse.e31 == 0.0f && inverse.e32 == 0.0f &&
         (footprint_x > 1.0f || footprint_y > 1.0f);
@@ -360,11 +363,19 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
         int dy0 = (int)dst_rect->y;       // INT_CAST_OK: whole-pixel destination origin
         int sx0 = (int)src_rect->x;       // INT_CAST_OK: whole-pixel source origin
         int sy0 = (int)src_rect->y;       // INT_CAST_OK: whole-pixel source origin
+        // the columns whose source pixel exists
+        int span_left = std::max(left, dx0 - sx0), span_right = std::min(right, dx0 - sx0 + src_w);
         for (int i = top; i < bottom; i++) {
             int sy = sy0 + (i - dy0);
             if (sy < 0 || sy >= src_h) continue;
             const uint32_t* src_row = (const uint32_t*)((const uint8_t*)src->pixels + (size_t)sy * src->pitch);
             uint32_t* dst_row = (uint32_t*)((uint8_t*)dst->pixels + (size_t)(i - y_off) * dst->pitch);
+            // an opaque span (a scene or canvas snapshot) is a straight copy
+            if (span_left < span_right &&
+                render_pixel_row_opaque(src_row + sx0 + (span_left - dx0), (size_t)(span_right - span_left))) {
+                memcpy(dst_row + span_left, src_row + sx0 + (span_left - dx0), (size_t)(span_right - span_left) * 4);
+                continue;
+            }
             for (int j = left; j < right; j++) {
                 int sx = sx0 + (j - dx0);
                 if (sx < 0 || sx >= src_w) continue;

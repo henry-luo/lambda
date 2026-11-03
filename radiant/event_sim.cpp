@@ -3383,7 +3383,11 @@ void event_sim_render_surface(UiContext* uicon) {
         bool presentation = mode && state && state->presentation_damage.pending &&
             !state->is_dirty && !state->dirty_tracker.full_repaint;
         if (state && !presentation) doc_state_mark_dirty(state);
+        // assertions read the page from `surface`, so the GPU compositor sits this render out
+        bool suspended = uicon->compositor_suspended;
+        uicon->compositor_suspended = true;
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
+        uicon->compositor_suspended = suspended;
         if (state) doc_state_clear_render_flags(state);
         PaintLayerFrameStats layers = render_paint_layer_take_stats();
         if (presentation && mode == 2) sim_verify_presentation_frame(uicon, state);
@@ -3433,6 +3437,8 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
     // consecutive observations share the current pixels; mutations and clocks invalidate them.
     if (ev->pixel_render_if_dirty) render_pending_surface(uicon);
     if (ev->pixel_force_render && uicon) event_sim_render_surface(uicon);
+    // a composited frame left its native viewports out of the surface
+    ui_context_materialize_surface(uicon);
 
     ImageSurface* actual = uicon ? uicon->surface : NULL;
     if (!actual || !actual->pixels) {

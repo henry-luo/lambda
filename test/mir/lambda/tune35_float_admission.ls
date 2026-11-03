@@ -1,5 +1,6 @@
 // S11.4.5: exact float membership is unchanged; numeric conversions remain checked.
-pn admit(value) float { var result: float = value; return result }
+pn admit(value) float^ { let _admitted_result_2: float = value
+    var result: float = _admitted_result_2^; return result }
 pn main() {
     let values = [0.0, -0.0, 1.5, 1.0 / 0.0, 0.0 / 0.0, 3, 9007199254740993i64, "wrong", null]
     for (value in values) {

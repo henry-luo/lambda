@@ -18,8 +18,8 @@ pn upto(i: int, max: int, var out: int[]) {
 pn pyramid(i: int, max: int, var out: int[]) {
     out.push(i)
     if (i < max) {
-        pyramid(i + 1, max, out)
-        out.push(i)
+        pyramid(i + 1, max, out)^
+        out.push(i)^
     }
     return null
 }
@@ -37,25 +37,25 @@ fn raise_value(x: int) int^ {
 }
 
 // "a" * n
-pn repeat_string(s: string, n: int) string {
+pn repeat_string(s: string, n: int) string^ {
     var parts: string[] = []
     var i: int = 0
     while (i < n) {
-        parts.push(s)
+        parts.push(s)^
         i = i + 1
     }
     join(parts, "")
 }
 
 // [foreach range(n) as $x (0; . + $x; extract)]: extract `.` or `$x, .`
-pn cumsum(n: int, both: bool) int[] {
+pn cumsum(n: int, both: bool) int[]^ {
     var acc: int = 0
     var out: int[] = []
     var x: int = 0
     while (x < n) {
         acc = acc + x
-        if (both) { out.push(x) }
-        out.push(acc)
+        if (both) { out.push(x)^ }
+        out.push(acc)^
         x = x + 1
     }
     out
@@ -63,7 +63,7 @@ pn cumsum(n: int, both: bool) int[] {
 
 // [range(.) | {(tostring): .}] | add
 pn kv_object(n: int) map {
-    let singles: array = [for (x in jq_range(0, n, 1)) {[string(x)]: x}]
+    let singles: array = [for (x in ((jq_range(0, n, 1)) ^ { [] })) {[string(x)]: x}]
     var merged: map = {}
     for i of singles {
         for (k, v at singles[i]) { merged[string(k)] = v }
@@ -89,14 +89,14 @@ pn entries_add_one(m: map) map {
 }
 
 // [range(.) | [.]] | add
-pn add_singletons(n: int) int[] {
-    let singles: array = [for (x in jq_range(0, n, 1)) [x]]
+pn add_singletons(n: int) int[]^ {
+    let singles: array = [for (x in jq_range(0, n, 1)^) [x]]
     var out: int[] = []
     var i: int = 0
     while (i < len(singles)) {
         var j: int = 0
-        while (j < len(singles[i])) {
-            out.push(singles[i][j])
+        while ((j < len(singles[i]))^) {
+            out.push(singles[i][j])^
             j = j + 1
         }
         i = i + 1
@@ -105,18 +105,18 @@ pn add_singletons(n: int) int[] {
 }
 
 // [limit(n; repeat(x))]
-pn repeat_limit(x, n: int) array {
+pn repeat_limit(x, n: int) array^ {
     var out: array = []
-    while (len(out) < n) { out.push(x) }
+    while (len(out) < n) { out.push(x)^ }
     out
 }
 
 // [limit(n; 0 | recurse(. + 1))]
-pn recurse_limit(n: int) int[] {
+pn recurse_limit(n: int) int[]^ {
     var out: int[] = []
     var x: int = 0
-    while (len(out) < n) {
-        out.push(x)
+    while ((len(out) < n)^) {
+        out.push(x)^
         x = x + 1
     }
     out
@@ -125,7 +125,7 @@ pn recurse_limit(n: int) int[] {
 // [limit(.; repeat("a"))] | add | explode | implode
 pn ex_implode(n: int) string {
     let text: string = join(repeat_limit("a", n), "")
-    let codes: int[] = [for (i in jq_range(0, len(text), 1)) ord(slice(text, i, i + 1))]
+    let codes: int[] = [for (i in ((jq_range(0, len(text), 1)) ^ { [] })) ord(slice(text, i, i + 1))]
     join([for (cp in codes) chr(cp)], "")
 }
 
@@ -134,8 +134,8 @@ pn ex_implode(n: int) string {
 //   | map(select(.)) | length
 pn range_prop(n: int) int {
     var checks: bool[] = []
-    for (upto in jq_range(0 - n, n, 1)) {
-        for (by in jq_range(0 - n, n, 1)) {
+    for (upto in ((jq_range(0 - n, n, 1)) ^ { [] })) {
+        for (by in ((jq_range(0 - n, n, 1)) ^ { [] })) {
             if (by != 0) {
                 let o = {from: 1, upto: upto, by: by}
                 checks.push(len(jq_range(o.from, o.upto, o.by)) == max([ceil((o.upto - o.from) / o.by), 0]))
@@ -146,61 +146,61 @@ pn range_prop(n: int) int {
 }
 
 // "a" * . | [range(length) as $x | .[$x:], .[:-$x]]
-pn str_slice(n: int) string[] {
-    let s: string = repeat_string("a", n)
+pn str_slice(n: int) string[]^ {
+    let s: string = repeat_string("a", n)^
     var out: string[] = []
     for x of s {
-        out.push(jq_slice_string(s, x, null))
-        out.push(jq_slice_string(s, null, 0 - x))
+        out.push(jq_slice_string(s, x, null))^
+        out.push(jq_slice_string(s, null, 0 - x))^
     }
     out
 }
 
-pn mix_digest() int {
+pn mix_digest() int^ {
     var results: array = []
     var a: int[] = []
-    upto(0, 512, a)
-    results.push(a)
+    upto(0, 512, a)^
+    results.push(a)^
     var acc = [[]]
-    for (x in jq_range(0, 2048, 1)) { acc[0].push(x) }
-    results.push(acc)
-    results.push(reverse(jq_range(0, 65536, 1)))
-    results.push(sort([for (x in jq_range(0, 65536, 1)) 0 - x]))
-    results.push([for (x in jq_range(0, 65536, 1) group by (x % 2) as k into g order by k) g])
-    let mm: int[] = jq_range(0, 65536, 1)
-    results.push(min(mm) + max(mm))
-    results.push(add_singletons(8192))
-    results.push(kv_object(2048))
-    results.push(object_add_one(kv_object(2048)))
-    results.push(entries_add_one(kv_object(2048)))
-    results.push(ex_implode(1024))
+    for (x in jq_range(0, 2048, 1)^) { acc[0].push(x) }
+    results.push(acc)^
+    results.push(reverse(jq_range(0, 65536, 1)))^
+    results.push(sort([for (x in ((jq_range(0, 65536, 1)) ^ { [] })) 0 - x]))^
+    results.push([for (x in ((jq_range(0, 65536, 1)) ^ { [] }) group by (x % 2) as k into g order by k) g])^
+    let mm: int[] = jq_range(0, 65536, 1)^
+    results.push(min(mm) + max(mm))^
+    results.push(add_singletons(8192))^
+    results.push(kv_object(2048))^
+    results.push(object_add_one(kv_object(2048)))^
+    results.push(entries_add_one(kv_object(2048)))^
+    results.push(ex_implode(1024))^
     var total: int = 0
-    for (x in jq_range(0, 65536, 1)) { total = total + x }
-    results.push(total)
-    results.push([for (x in jq_range(0, 65536, 1)) raise_value(x) ^ { int(^.message) ^ { 0 } }])
-    results.push(repeat_limit(1, 1024))
-    results.push(recurse_limit(1024))
-    let lastv: int[] = jq_range(0, 65536, 1)
-    results.push(lastv[len(lastv) - 1])
+    for (x in jq_range(0, 65536, 1)^) { total = total + x }
+    results.push(total)^
+    results.push([for (x in ((jq_range(0, 65536, 1)) ^ { [] })) raise_value(x) ^ { int(^.message) ^ { 0 } }])^
+    results.push(repeat_limit(1, 1024))^
+    results.push(recurse_limit(1024))^
+    let lastv: int[] = jq_range(0, 65536, 1)^
+    results.push(lastv[len(lastv) - 1])^
     var p: int[] = []
-    pyramid(0, 512, p)
-    results.push(len(p))
+    pyramid(0, 512, p)^
+    results.push(len(p))^
     let t = jq_tree(12)
-    results.push([jq_contains(t, t)])
+    results.push([jq_contains(t, t)])^
     var leaves: int[] = []
-    jq_flatten_into(t, leaves)
-    results.push(leaves)
-    results.push(jq_bump_scalars(t, 1))
+    jq_flatten_into(t, leaves)^
+    results.push(leaves)^
+    results.push(jq_bump_scalars(t, 1))^
     var paths: array = []
-    jq_collect_paths(t, [], false, paths)
-    results.push(paths)
-    let json_text: string = "[" ++ join([for (x in jq_range(0, 4096, 1)) format(x, 'json')], ",") ++ "]"
-    results.push(parse(json_text, 'json') ^ { [] })
-    results.push(ack(3, 5))
-    results.push(range_prop(24))
-    results.push(cumsum(65536, false))
-    results.push(cumsum(65536, true))
-    results.push(str_slice(1024))
+    jq_collect_paths(t, [], false, paths)^
+    results.push(paths)^
+    let json_text: string = "[" ++ join([for (x in jq_range(0, 4096, 1)^) format(x, 'json')], ",") ++ "]"
+    results.push(parse(json_text, 'json') ^ { [] })^
+    results.push(ack(3, 5))^
+    results.push(range_prop(24))^
+    results.push(cumsum(65536, false))^
+    results.push(cumsum(65536, true))^
+    results.push(str_slice(1024))^
     sum([for (v in results) jq_digest(v)])
 }
 
@@ -213,7 +213,7 @@ pn main() {
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 98172625) {
+    if ((checksum == 98172625)^) {
         print("jq_mix: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_mix: FAIL checksum=" ++ string(checksum) ++ "\n")

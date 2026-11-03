@@ -14,6 +14,6 @@ let controlled={*:raw,value:{window:{from:0,to:100}}};
  ["view retains activation",changed.state.view=="story" and changed.state.active_id=="a"],
  ["invalid view spacing diagnosed",t.update(t.initial_state({events:[]}),{type:"set_view",view:"axis"},{spec:{events:[]}}) is error],
  ["message interpolation",common.message({messages:{matches:"{count} résultats"}},"matches","",{count:3})=="3 résultats"],
- ["message callback",common.message({messages:{matches:(parameters)=>string(parameters.count) ++ " matches"}},"matches","",{count:2})=="2 matches"],
+ ["message callback",common.message({messages:{matches:(parameters)any^ =>string(parameters.count) ++ " matches"}},"matches","",{count:2})=="2 matches"],
  ["custom toolbar parts",contains(format(t.render({*:raw,toolbar:{buttons:["first"],labels:{first:"Start"}},parts:{toolbar:{class:"custom-toolbar"}}}),'html'),"custom-toolbar")]
 ]

@@ -83,8 +83,7 @@ static inline MIR_reg_t em_ascii_string_byte_at_pointer(MirEmitter* em,
 }
 
 
-static inline MIR_reg_t em_ascii_string_byte(MirEmitter* em, MIR_reg_t ptr,
-        MIR_reg_t index, MIR_label_t slow) {
+static inline MIR_reg_t em_guard_ascii_string(MirEmitter* em, MIR_reg_t ptr, MIR_label_t slow) {
     MIR_reg_t flags = em_new_reg(em, "char_flags", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, flags),
@@ -99,6 +98,12 @@ static inline MIR_reg_t em_ascii_string_byte(MirEmitter* em, MIR_reg_t ptr,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, length),
         MIR_new_mem_op(em->ctx, MIR_T_U32, offsetof(String, len), ptr, 0, 1)));
+    return length;
+}
+
+static inline MIR_reg_t em_ascii_string_byte(MirEmitter* em, MIR_reg_t ptr,
+        MIR_reg_t index, MIR_label_t slow) {
+    MIR_reg_t length = em_guard_ascii_string(em, ptr, slow);
     MIR_reg_t in_range = em_new_reg(em, "char_in_range", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ULT,
         MIR_new_reg_op(em->ctx, in_range), MIR_new_reg_op(em->ctx, index),

@@ -3,7 +3,7 @@
 fn dynamic(value) any { value }
 fn accept(value: int) int { value }
 fn accept_float(value: float) float { value }
-fn return_int(value) int { dynamic(value) }
+fn return_int(value) int^ { dynamic(value) }
 
 type Person = {age: int}
 
@@ -18,10 +18,10 @@ pn main() {
     reassigned = dynamic(6.0)
 
     var person: Person = {age: 1}
-    person.age = dynamic(7.0)
+    person.age = dynamic(7.0)^
 
     var values: int[] = [1, 2]
-    values[1] = dynamic(8.0)
+    values[1] = dynamic(8.0)^
 
     let decimal_value: decimal = dynamic(1.25)
     let signed_value: i8 = dynamic(-128.0)

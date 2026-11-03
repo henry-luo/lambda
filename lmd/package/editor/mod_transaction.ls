@@ -67,13 +67,13 @@ fn find_meta_at(meta, name, i, n) {
   else if (meta[i].name == name) { meta[i].value }
   else { find_meta_at(meta, name, i + 1, n) }
 }
-pub fn tx_get_meta(tx, name) => find_meta_at(tx.meta, name, 0, len(tx.meta))
+pub fn tx_get_meta(tx, name) any^ => find_meta_at(tx.meta, name, 0, len(tx.meta))
 
 // ---------------------------------------------------------------------------
 // Selection mapping (translate a Selection through one Step)
 // ---------------------------------------------------------------------------
 
-pub fn sel_map(step, sel) {
+pub fn sel_map(step, sel) any^ {
   if (sel.kind == 'all') { sel }
   else if (sel.kind == 'node') { sel_map_node(step, sel) }
   else if (sel.kind == 'multi-node') {
@@ -85,7 +85,7 @@ pub fn sel_map(step, sel) {
   else { sel }
 }
 
-fn sel_map_node(step, sel) {
+fn sel_map_node(step, sel) any^ {
   let mapped = step_map(step, pos(sel.path, 0))
   if (len(mapped.path) == len(sel.path)) { node_selection(mapped.path) }
   else { text_selection(mapped, mapped) }
@@ -94,13 +94,13 @@ fn sel_map_node(step, sel) {
 // Map a node path through a step; keep it if the node survives at the same
 // depth, else null (it was deleted / collapsed). Port of mapNodePath in
 // test/editor-js/src/model/transaction.ts.
-fn map_node_path(step, path) {
+fn map_node_path(step, path) any^ {
   let mapped = step_map(step, pos(path, 0))
   if (len(mapped.path) == len(path)) { mapped.path } else { null }
 }
 
 // Map a multi-node path list, dropping paths whose target the step deleted.
-fn map_multinode_at(step, paths, i, n, acc) {
+fn map_multinode_at(step, paths, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let mp = map_node_path(step, paths[i])
@@ -115,7 +115,7 @@ fn map_multinode_at(step, paths, i, n, acc) {
 
 // Build the list of inverted steps in reverse order, walking the original
 // steps forward so each invert sees the doc state it was applied against.
-fn invert_steps_at(steps, doc, i, n, acc) {
+fn invert_steps_at(steps, doc, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let inv = step_invert(steps[i], doc)
@@ -139,8 +139,8 @@ pub fn tx_invert(tx) {
 // ---------------------------------------------------------------------------
 
 // Map a SourcePos through every step in this transaction in order.
-fn map_through_at(steps, p, i, n) {
+fn map_through_at(steps, p, i, n) any^ {
   if (i >= n) { p }
   else { map_through_at(steps, step_map(steps[i], p), i + 1, n) }
 }
-pub fn tx_map_pos(tx, p) => map_through_at(tx.steps, p, 0, len(tx.steps))
+pub fn tx_map_pos(tx, p) any^ => map_through_at(tx.steps, p, 0, len(tx.steps))

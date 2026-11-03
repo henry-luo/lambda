@@ -1,18 +1,20 @@
 // S11.4.10: broad membership proofs do not admit refined elements or shapes.
 type Entry = {value: int}
 
-pn concatenate(left: array, right: array) array {
-    let result: array = left ++ right
+pn concatenate(left: array, right: array) array^ {
+    let _admitted_result_5: array = left ++ right
+    let result: array = _admitted_result_5^
     return result
 }
 
-pn choose(flag: bool, left: array, right: array) array {
+pn choose(flag: bool, left: array, right: array) array^ {
     if (flag) { concatenate(left, right) } else { ["fallback"] }
 }
 
 pn narrow(values: int[]) int { return values[0] }
 pn shaped(value: Entry) int { return value.value }
-pn require_array(value) array { var checked: array = value; return checked }
+pn require_array(value) array^ { let _admitted_checked_15: array = value
+    var checked: array = _admitted_checked_15^; return checked }
 
 pn extend(var value: map, key: string, child) {
     value[key] = child
@@ -22,7 +24,7 @@ pn extend(var value: map, key: string, child) {
 pn main() {
     var source: array = [1, "two", null]
     let snapshot = source
-    source = concatenate(source, [true])
+    source = concatenate(source, [true])^
     print([snapshot, source, choose(false, source, [])]); print("\n")
     var record: map = {value: 1}
     let before = record

@@ -5,7 +5,7 @@ import interp: lambda.doc.pdf.interp
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }
-fn xml_at(items, i) { if (len(items) > i) format(items[i], 'xml') else "" }
+fn xml_at(items, i) any^ { if (len(items) > i) format(items[i], 'xml') else "" }
 
 pn main() {
     let pdf = {}

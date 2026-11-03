@@ -69,7 +69,7 @@ pub pn toggle_from_summary(summary) {
             else {
                 // close the group before opening, so the group is never
                 // momentarily two-open and every peer's toggle precedes ours
-                close_group_peers(details)
+                close_group_peers(details)^
                 dom.set_attribute(details, "open", "")
             }
             // HTML queues `toggle` on the element whose openness changed, which

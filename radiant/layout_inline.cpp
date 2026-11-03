@@ -498,80 +498,7 @@ static bool has_following_content(DomNode* node, bool inline_only) {
     return false;
 }
 
-static void find_last_isolated_inline_text(View* view, int line_number,
-                                           ViewText** text_out,
-                                           TextRect** rect_out) {
-    while (view) {
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
-        if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (rect->line_number == line_number) {
-                    *text_out = text;
-                    *rect_out = rect;
-                }
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            // nested isolates own their boundary whitespace.
-            if (!layout_inline_span_isolate(span) && span->first_child) {
-                find_last_isolated_inline_text(
-                    span->first_child, line_number, text_out, rect_out);
-            }
-        }
-        view = view->next();
-    }
-}
-
-static void trim_isolated_inline_text_edge(LayoutContext* lycon,
-                                           ViewSpan* span) {
-    if (!lycon || !span || !layout_inline_span_isolate(span) ||
-        !has_following_content(span, true)) {
-        return;
-    }
-    ViewText* text = nullptr;
-    TextRect* rect = nullptr;
-    find_last_isolated_inline_text(
-        span->first_child, lycon->block.line_number, &text, &rect);
-    if (!text || !rect || !layout_white_space_collapses(
-            get_white_space_value(static_cast<DomNode*>(text)))) {
-        return;
-    }
-    unsigned char* data = text->text_data();
-    int end = rect->start_index + rect->length;
-    if (!data || end <= rect->start_index || !is_space(data[end - 1])) return;
-
-    FontProp* font = text->font ? text->font : span->font;
-    if (!font) return;
-    float trim = layout_measure_space_advance(
-        lycon, font->font_handle, font) + font->word_spacing + font->letter_spacing;
-    if (trim <= 0.0f || rect->width <= 0.0f) return;
-
-    // cssom keeps the isolated inline's box width while omitting its trailing
-    // collapsed separator from the text rect.
-    rect->width = max(0.0f, rect->width - trim);
-    adjust_text_bounds(text);
-}
-
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
-    while (view) {
-        if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (layout_inline_span_isolate(span)) {
-                trim_isolated_inline_text_edge(lycon, span);
-            }
-            if (span->first_child) {
-                layout_trim_isolated_inline_text_edges(lycon, span->first_child);
-            }
-        }
-        view = view->next();
-    }
-}
-
-static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
+bool layout_inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
     DomNode* source = nullptr;
     uint32_t edge = layout_inline_text_edge_codepoint(inline_node, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
@@ -799,6 +726,8 @@ static void contribute_misparented_ruby_annotation_line_height(
         LayoutContext* lycon, ViewSpan* annotation,
         const Linebox* base_line_before_annotation) {
     if (!lycon || !annotation || !base_line_before_annotation) return;
+    // an empty strut has no annotation line whose inherited leading could enlarge the base line.
+    if (inline_child_is_empty_strut(static_cast<View*>(annotation))) return;
     float annotation_extent = max(annotation->height, annotation->content_height);
     if (annotation_extent <= 0.0f) return;
 
@@ -1417,7 +1346,6 @@ static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
 static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback_fh) {
     if (span->has_collapsed_line_fragment_union()) {
         compute_span_from_collapsed_line_fragment(span);
-        layout_apply_ruby_column_geometry(span);
         return;
     }
     // CSS 2.1 section 9.4.2: only inline-axis decorations keep an empty span present.
@@ -1438,10 +1366,9 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
         span->width = 0.0f;
         span->height = 0.0f;
     }
-    layout_apply_ruby_column_geometry(span);
 }
 
-void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
+static void compute_span_content_bounds(ViewSpan* span, bool is_multi_line, FontHandle* fallback_fh) {
     ViewBlock* source_flow = layout_nearest_block_ancestor(span->parent_view());
     if (!layout_block_inline_axis_is_vertical(source_flow) ||
         (source_flow->blk && source_flow->block()->vertical_geometry_published)) {
@@ -1505,19 +1432,16 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     auto get_child_relative_offset = [source_flow](View* c, float* offset_x, float* offset_y) {
         if (offset_x) *offset_x = 0.0f;
         if (offset_y) *offset_y = 0.0f;
-        if (!c) return;
-        if (ViewBlock* vb = lam::view_as_block(c)) {
-            if (source_flow) {
-                RdtLogicalPoint offset = layout_relative_position_offset_in_flow(vb);
-                if (offset_x) *offset_x = offset.x;
-                if (offset_y) *offset_y = offset.y;
-            } else {
-                layout_relative_position_offset(vb, offset_x, offset_y);
-            }
-        } else if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            layout_relative_position_offset(lam::unsafe_view_block_api_span(elem),
-                                            offset_x, offset_y);
+        if (!c || !c->is_element()) return;
+        // declared atomic insets can still be deferred when an ancestor first measures its bounds.
+        RdtLogicalPoint offset = layout_applied_inline_relative_offset(c, c->parent);
+        ViewBlock* flow = layout_nearest_block_ancestor(c->parent_view());
+        if (!source_flow && layout_block_inline_axis_is_vertical(flow)) {
+            // publication converts the retained source-axis displacement to physical coordinates.
+            offset = {layout_block_writing_mode(flow) == WM_VERTICAL_RL ? -offset.y : offset.y, offset.x};
         }
+        if (offset_x) *offset_x = offset.x;
+        if (offset_y) *offset_y = offset.y;
     };
 
     auto text_child_uses_slice_decoration = [](View* c) -> bool {
@@ -1914,6 +1838,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                                  content_width + left_edge + right_edge,
                                  final_max_y - final_min_y);
     }
+}
+
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, FontHandle* fallback_fh) {
+    compute_span_content_bounds(span, is_multi_line, fallback_fh);
+    // allocated Ruby columns survive every natural-bounds exit, including zero ink and collapsed content.
     layout_apply_ruby_column_geometry(span);
 }
 
@@ -2422,7 +2351,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
-    if (span->position) span->position->inline_relative_y = 0.0f;
+    if (span->position) span->position->inline_relative_x = span->position->inline_relative_y = 0.0f;
     // CSS Position 3 §4.1: preserve the first inline box origin separately
     // because the visible DOM rectangle may start on a later line fragment.
     FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
@@ -2532,7 +2461,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS Ruby §3.4: a unit without a parallel opportunity fits as a complete unbroken run.
         span_is_unbreakable = !layout_ruby_intrinsic_sizes(lycon, span).has_used_content_break;
     }
-    if (span_is_unbreakable && child && !lycon->line.is_line_start &&
+    // a selected interval is placed by its formatter; child wrappers cannot break that interval again.
+    if (!layout_inline_flow_is_kept(lycon) && span_is_unbreakable && child && !lycon->line.is_line_start &&
         line_has_prior_flow_content(&lycon->line)) {
         float line_left = lycon->line.has_float_intrusion
             ? lycon->line.effective_left : lycon->line.left;
@@ -3103,7 +3033,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // nearest common ancestor's wrapping mode, not the inline's own mode.
     if ((span_is_unbreakable || layout_inline_span_isolate(span)) && !lycon->line.is_line_start &&
         has_following_content(elmt, true) &&
-        inline_boundary_allows_soft_wrap(lycon, elmt)) {
+        layout_inline_boundary_allows_soft_wrap(lycon, elmt)) {
         // following normal text needs the candidate too; a nowrap-only flag loses the closing seam.
         layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
             lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);

@@ -18,14 +18,14 @@ pub let defaults = {kind:"rect",width:160,height:100,fill:"#3478cc",stroke:"#245
     weight:2,rotation:0,text:"",text_color:"#ffffff",size:16,font:"Arial",bold:false,italic:false,
     align:"center",vertical:"middle",direction:0,inset:12,text_style:"solid",text_outline:"#243b57",
     dash:"solid",effect:"none",fill_style:"solid",fill2:"#bcd9ff",opacity:100,alt:""}
-pub fn settings(n) {
+pub fn settings(n) any^ {
     let raw = objects.settings(n,"data-word-shape")
     if (not (raw is map)) null else {
         let p = {*:defaults,*:raw}
         if (valid(p)) p else null
     }
 }
-fn valid(p) => contains([for (entry in catalog) entry.id],p.kind) and
+fn valid(p) any^ => contains([for (entry in catalog) entry.id],p.kind) and
     p.width is number and p.width>=16 and p.width<=650 and
     p.height is number and p.height>=16 and p.height<=2000 and (p.fill=="none" or colors.hex_color(p.fill)) and colors.hex_color(p.stroke) and
     p.weight is number and p.weight>=0 and p.weight<=12 and p.rotation is number and p.rotation>=-180 and p.rotation<=180 and

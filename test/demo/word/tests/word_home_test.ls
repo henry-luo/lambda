@@ -45,7 +45,7 @@ model.char_value(boxed,"border","") == home.border_line
 match (model.execute(word,"format.border",{value:"9pt dotted red"}) ^ { ^ }) { case error: true default: false }
 model.char_value(model.execute(word,"format.color",{color:"#7030a0"})^,"color","") == "#7030a0"
 match (model.execute(word,"format.color",{color:"url(x)"}) ^ { ^ }) { case error: true default: false }
-let block_css = (ed) => attrs_get(ed.doc.content[0].attrs,'style')
+let block_css = (ed) any^ => attrs_get(ed.doc.content[0].attrs,'style')
 contains(block_css(model.execute(word,"para.shading",{color:"#fff2cc"})^),"background-color: #fff2cc")
 
 // Line spacing follows Word's menu, including 2.5 and 3.0.
@@ -55,7 +55,7 @@ contains(block_css(model.execute(word,"para.spaceBefore",{value:12})^),"margin-t
 // Paragraph borders toggle a side; Outside boxes a run of paragraphs.
 let three = model.open_editor(node('doc',[node('p',[text("One")]),node('p',[text("Two")]),node('p',[text("Three")])]))
 let span3 = edit_set_selection(three,text_selection(pos([0,0],0),pos([2,0],5)))
-let css_of = (ed,i) => attrs_get(ed.doc.content[i].attrs,'style') or ""
+let css_of = (ed,i) any^ => attrs_get(ed.doc.content[i].attrs,'style') or ""
 let bottom = model.execute(edit_set_selection(three,text_selection(pos([0,0],1),pos([0,0],1))),"para.borders",{preset:"bottom"})^
 contains(css_of(bottom,0),"border-bottom: " ++ home.border_line) and css_of(bottom,1) == ""
 not contains(css_of(model.execute(bottom,"para.borders",{preset:"bottom"})^,0),"border-bottom")

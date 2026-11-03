@@ -4,14 +4,14 @@ import math
 import n: .node
 
 // <p>, <pre> and <article> in document order, each noting an <li> ancestor
-fn text_blocks(e, in_li) => [for (k in e.kids where n.is_el(k))
+fn text_blocks(e, in_li) => [for (k in e.kids where ((n.is_el(k)) ^ { false }))
     for (x in [*(if (k.tag in ["p","pre","article"]) [{node: k, in_li: in_li}] else []),
         *text_blocks(k, in_li or k.tag == "li")]) x]
 // the parent <div> of each <br>, in the order of their <br> children
-fn br_parents(e, path) => [for (i, k in e.kids where n.is_el(k))
+fn br_parents(e, path) => [for (i, k in e.kids where ((n.is_el(k)) ^ { false }))
     for (x in [*(if (k.tag == "br" and e.tag == "div") [{path: path, node: e}] else []),
         *br_parents(k, path ++ "." ++ string(i))]) x]
-fn length_of(b, min_length) {
+fn length_of(b, min_length) any^ {
     let e = b.node
     let length = n.js_len(n.trim_text(e.text));
     if (not n.visible(e, false) or n.unlikely_candidate(n.match_string(e)) or (e.tag == "p" and b.in_li) or

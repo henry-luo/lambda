@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of awfy/permute2.ls. */
 extern int printf(const char *, ...);
 
@@ -21,9 +22,12 @@ static void permute(int values[6], int n, int *count) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int values[6] = {0, 0, 0, 0, 0, 0};
     int count = 0;
     permute(values, 6, &count);
+    BENCH_KERNEL_END();
     printf(count == 8660 ? "Permute: PASS\n" : "Permute: FAIL result=%d\n", count);
+    BENCH_KERNEL_REPORT();
     return count != 8660;
 }

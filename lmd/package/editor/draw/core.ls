@@ -9,32 +9,32 @@ import doc: lambda.editor.mod_doc
 import step: lambda.editor.mod_step
 import tx: lambda.editor.mod_transaction
 
-pub fn finite(v) => geom.finite_number(v)
-fn value(v,fallback) => defaults.value(v,fallback)
-pub fn serializable(v,depth=0) => depth<32 and (v == null or v is string or v is symbol or v is bool or finite(v) or
+pub fn finite(v) any^ => geom.finite_number(v)
+fn value(v,fallback) any^ => defaults.value(v,fallback)
+pub fn serializable(v,depth=0) any^ => depth<32 and (v == null or v is string or v is symbol or v is bool or finite(v) or
     (v is array and all([for (item in v) serializable(item,depth+1)])) or
     (v is map and all([for (key,item in v) (key is string or key is symbol) and serializable(item,depth+1)])))
-pub fn new_document(options=null) => model.with_attrs(model.drawing([]),
+pub fn new_document(options=null) any^ => model.with_attrs(model.drawing([]),
     {profile:"draw",width:value(options.width,1120.0),height:value(options.height,760.0),
      'allow-loops':value(options['allow-loops'],false),'max-objects':value(options['max-objects'],200)})
 pub fn vertices(drawing) => [for (n in model.objects(drawing) where n.tag == 'shape') n]
 pub fn edges(drawing) => [for (n in model.objects(drawing) where n.tag == 'connector') n]
 pub fn incident_edges(drawing,id) => [for (n in edges(drawing) where
-    model.attr(n,"from-shape") == id or model.attr(n,"to-shape") == id) n]
-pub fn incoming_edges(drawing,id) => [for (n in edges(drawing) where model.attr(n,"to-shape") == id) n]
-pub fn outgoing_edges(drawing,id) => [for (n in edges(drawing) where model.attr(n,"from-shape") == id) n]
+    ((model.attr(n,"from-shape") == id or model.attr(n,"to-shape") == id) ^ { false })) n]
+pub fn incoming_edges(drawing,id) => [for (n in edges(drawing) where ((model.attr(n,"to-shape") == id) ^ { false })) n]
+pub fn outgoing_edges(drawing,id) => [for (n in edges(drawing) where ((model.attr(n,"from-shape") == id) ^ { false })) n]
 pub fn neighbors(drawing,id) {
     let adjacent = [for (n in incident_edges(drawing,id))
         model.attr(n,if (model.attr(n,"from-shape") == id) "to-shape" else "from-shape")];
     unique([for (other in adjacent where other != "") other])
 }
-fn port_list(n) => value(model.attr(n,"ports"),value(model.attr(n,"descriptor").ports,[]))
+fn port_list(n) any^ => value(model.attr(n,"ports"),value(model.attr(n,"descriptor").ports,[]))
 fn valid_ports(ports) => ports is array and len(ports)<=64 and
     len(unique([for (p in ports) p.id])) == len(ports) and all([for (p in ports)
         p is map and p.id is string and len(p.id)>0 and not contains(model.ports,p.id) and
         finite(p.x) and finite(p.y) and p.x>=0 and p.x<=1 and p.y>=0 and p.y<=1 and
         (p.direction == null or contains(['in','out','both'],p.direction))])
-fn descriptor_ok(d) => d is map and d.id is string and len(d.id)>0 and d.outline is array and len(d.outline)>=3 and len(d.outline)<=512 and
+fn descriptor_ok(d) any^ => d is map and d.id is string and len(d.id)>0 and d.outline is array and len(d.outline)>=3 and len(d.outline)<=512 and
     all([for (p in d.outline) p is array and len(p)==2 and all([for (n in p) finite(n) and n>=0 and n<=1])]) and
     (d.ports == null or valid_ports(d.ports))
 
@@ -47,7 +47,7 @@ pub fn vertex(id,descriptor,geometry,properties=null) any^ {
     let base = model.make_shape(id,if (custom) "rect" else kind,geometry.x,geometry.y,value(properties.label,""))
     let merged = model.with_attrs(base,{*:geometry,*:value(properties,{}),variant:kind,
         *:(if (custom) {descriptor:descriptor} else {}),rotate:value(properties.rotate,value(properties.rotation,0.0))});
-    {*:merged,attrs:[for (a in merged.attrs where a.name != 'rotation') a]}
+    {*:merged,attrs:[for (a in ((merged.attrs) ^ { [] }) where a.name != 'rotation') a]}
 }
 pub fn endpoint_values(endpoint,side) any^ {
     let checked = if (not contains(['point','boundary','port'],endpoint.kind)) raise error("Draw: invalid endpoint kind")
@@ -66,11 +66,11 @@ pub fn edge(id,source,target,properties=null) any^ =>
         {*:value(properties,{}),*:endpoint_values(source,"from")^,*:endpoint_values(target,"to")^,
          routing:symbol(value(properties.routing,"orthogonal"))})
 
-fn endpoint_issue(drawing,n,side) {
+fn endpoint_issue(drawing,n,side) any^ {
     let target = model.attr(n,side ++ "-shape")
     let port = model.attr(n,side ++ "-port")
     let vertex = model.lookup(drawing,target).shape
-    let matches = [for (p in port_list(vertex) where p.id == port) p]
+    let matches = [for (p in ((port_list(vertex)) ^ { [] }) where ((p.id == port) ^ { false })) p]
     let declared = matches[0];
     if (target == "") (if (finite(model.attr(n,side ++ "-x")) and finite(model.attr(n,side ++ "-y"))) null else "invalid free endpoint")
     else if (vertex.tag != 'shape') "missing endpoint vertex"
@@ -79,10 +79,10 @@ fn endpoint_issue(drawing,n,side) {
     else if ((side == "from" and declared.direction == 'in') or (side == "to" and declared.direction == 'out')) "port direction rejects this connection"
     else null
 }
-fn well_formed(n) => doc.is_node(n) and n.attrs is array and n.content is array and
+fn well_formed(n) any^ => doc.is_node(n) and n.attrs is array and n.content is array and
     all([for (a in n.attrs) a is map and (a.name is symbol or a.name is string)]) and
     len(unique([for (a in n.attrs) string(a.name)])) == len(n.attrs)
-fn object_issue(drawing,n) {
+fn object_issue(drawing,n) any^ {
     let b = model.box(n)
     let size = model.page(drawing)
     let descriptor = model.attr(n,"descriptor")
@@ -121,7 +121,7 @@ fn object_issue(drawing,n) {
         else null)
     else "unsupported drawing object"
 }
-pub fn validate(drawing,options=null) {
+pub fn validate(drawing,options=null) any^ {
     let size = model.page(drawing)
     let objects = model.objects(drawing)
     let ids = [for (n in objects) model.id(n)]
@@ -155,7 +155,7 @@ fn patch(node,properties) any^ {
     let normalized = if (properties.rotate != null or (properties.rotation != null and model.attr(node,"rotate") != null))
         {*:node,attrs:[for (a in node.attrs where a.name != 'rotation') a]} else node
     let values = if (properties.rotation != null and model.attr(node,"rotate") != null)
-        {*:map([for (key,value in properties where string(key) != "rotation") *[key,value]]),rotate:properties.rotation} else properties;
+        {*:map([for (key,value in properties where ((string(key) != "rotation") ^ { false })) *[key,value]]),rotate:properties.rotation} else properties;
     model.with_attrs(normalized,values)
 }
 fn changed(drawing,command) any^ {

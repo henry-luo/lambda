@@ -8,9 +8,9 @@ import bridge: lambda.doc.latex.tikz_bridge
 let BASE = "test/latex/fixtures/tikz_phase4"
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
 fn axis_of(source) any^ => parse(source, {type: "tikz"})^[0]
 
@@ -46,7 +46,7 @@ let symbolic_html = format(tikz.render_with_program("\\begin{tikzpicture}" ++ sy
 // A LaTeX graphics island resolves its tables beside the document.
 let document = input(BASE ++ "/table_plot.tex", {type: "latex"})^
 let islands = [for (child in children_named(document, "document")[0]
-    where child is element and string(name(child)) == "tikzpicture") child]
+    where ((child is element and string(name(child)) == "tikzpicture") ^ { false })) child]
 let rendered = [for (island in islands)
     format(bridge.render_picture(island, [], [], [], [], false, BASE), 'xml')]
 
@@ -55,7 +55,7 @@ let pgf_html = format(tikz.render_document(parse("\\begin{tikzpicture}" ++ file_
     "\\end{tikzpicture}", {type: "tikz"})^, {source_path: BASE ++ "/figure.pgf"})^, 'xml');
 
 [inline_plot.input_kind, inline_plot.table_source, inline_plot.table_offset,
-    [for (option in children_named(children_named(inline_plot, "table_options")[0], "option"))
+    [for (option in ((children_named(children_named(inline_plot, "table_options")[0], "option")) ^ { [] }))
         option.key ++ "=" ++ option.value]];
 series_points(inline_source)^;
 series_points(file_source, file_options)^;

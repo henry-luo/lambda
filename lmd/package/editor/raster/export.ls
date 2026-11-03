@@ -11,11 +11,11 @@ pub fn codec(kind) any^ {
 pub fn destination(path,kind) any^ {
     let format = codec(kind)^
     let extension = if (format == "jpeg") ".jpg" else ".png"
-    let old = [for (suffix in [".png",".jpeg",".jpg"] where ends_with(lower(path),suffix)) suffix][0];
+    let old = [for (suffix in [".png",".jpeg",".jpg"] where ((ends_with(lower(path),suffix)) ^ { false })) suffix][0];
     if (old == null) path ++ extension else slice(path,0,len(path)-len(old)) ++ extension
 }
 // shared by checked export settings and the dialog's aspect-locked draft.
-pub fn proportional_extent(image,extent,from_width) => max(1,int(round(extent*
+pub fn proportional_extent(image,extent,from_width) any^ => max(1,int(round(extent*
     (if (from_width) image.height/image.width else image.width/image.height))))
 pub fn settings(image,kind,options={}) any^ {
     let format = codec(kind)^
@@ -57,6 +57,6 @@ pub fn prepare(image,kind,options={}) any^ {
             {width:config.width,height:config.height}))^)
     // retain source metadata/assets for the encoder's omission report, not its output pixels.
     let document = img.with_children(img.with_properties(image,{width:config.width,height:config.height})^,
-        [*[for (child in content(image) where name(child) in ['assets','metadata']) child],img.stack([img.layer(pixels)])])^;
+        [*[for (child in ((content(image)) ^ { [] }) where ((name(child) in ['assets','metadata']) ^ { false })) child],img.stack([img.layer(pixels)])])^;
     {image:document,settings:config}
 }

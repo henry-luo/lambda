@@ -5,7 +5,7 @@ pn take18(values: int[]) int {
 }
 
 pn main() {
-    var values: int[] = fill(1, 4)
+    var values: int[] = fill(1, 4)^
     var i: int = 0
     var total: int = 0
     while (i < 3) {

@@ -8,7 +8,7 @@ pub let BANDS = 12
 // photos within one cell of this many CSS pixels share a pin (lambda.map: a 512 px world at zoom 0)
 let CELL = 56.0
 
-fn photo(lib, id) => L.photo(lib, id)
+fn photo(lib, id) any^ => L.photo(lib, id)
 
 // Web Mercator world pixels at zoom z
 fn world_x(lon, z) => (lon + 180.0) / 360.0 * 512.0 * math.pow(2.0, z)
@@ -16,26 +16,26 @@ fn world_y(lat, z) {
     let s = math.sin(max(-85.0, min(85.0, lat)) * math.pi / 180.0);
     (0.5 - math.log((1.0 + s) / (1.0 - s)) / (4.0 * math.pi)) * 512.0 * math.pow(2.0, z)
 }
-fn cell(p, z) => floor(world_x(p.gps.lon, z) / CELL) * 100000.0 + floor(world_y(p.gps.lat, z) / CELL)
+fn cell(p, z) any^ => floor(world_x(p.gps.lon, z) / CELL) * 100000.0 + floor(world_y(p.gps.lat, z) / CELL)
 
 fn mean(xs) => sum(xs) / len(xs)
 
 // one band's clusters: photos sorted by cell (then library order), split where the cell changes
-fn band(lib, ids, z) {
-    let keyed = [for (i, id in ids order by cell(photo(lib, id), z), i) {id:id, key:cell(photo(lib, id), z)}]
+fn band(lib, ids, z) any^ {
+    let keyed = [for (i, id in ids order by cell(photo(lib, id), z)^, i) {id:id, key:cell(photo(lib, id), z)}]
     let starts = [for (i, k in keyed where i == 0 or k.key != keyed[i - 1].key) i];
     [for (j, s in starts) (
-        let members = [for (k in slice(keyed, s, if (j + 1 < len(starts)) starts[j + 1] else len(keyed))) k.id],
+        let members = [for (k in ((slice(keyed, s, if (j + 1 < len(starts)) starts[j + 1] else len(keyed))) ^ { [] })) k.id],
         {id:z * 100000 + j + 1, band:z, ids:members,
             lon:mean([for (id in members) photo(lib, id).gps.lon]), lat:mean([for (id in members) photo(lib, id).gps.lat])})]
 }
 
 // {ids, bounds: [west, south, east, north], clusters, features}: `ids` keeps the library's order
-pub fn plan(lib, ids) {
-    let located = [for (id in ids where photo(lib, id).gps != null) id]
+pub fn plan(lib, ids) any^ {
+    let located = [for (id in ids where ((photo(lib, id).gps != null) ^ { false })) id]
     let lons = [for (id in located) photo(lib, id).gps.lon]
     let lats = [for (id in located) photo(lib, id).gps.lat]
-    let clusters = if (len(located) == 0) [] else [for (z in 0 to BANDS - 1, c in band(lib, located, z)) c];
+    let clusters = if (len(located) == 0) [] else [for (z in 0 to BANDS - 1, c in ((band(lib, located, z)) ^ { [] })) c];
     {ids:located, bounds:if (len(located) == 0) [-180.0, -60.0, 180.0, 75.0] else [min(lons), min(lats), max(lons), max(lats)],
         clusters:clusters,
         features:{type:"FeatureCollection", features:[for (c in clusters) {type:"Feature", id:c.id,
@@ -44,11 +44,11 @@ pub fn plan(lib, ids) {
 }
 
 pub fn cluster(places, id) => [for (c in places.clusters where c.id == id) c][0]
-pub fn band_of(zoom) => max(0, min(BANDS - 1, int(floor(zoom))))
-pub fn shown(places, zoom) => [for (c in places.clusters where c.band == band_of(zoom)) c]
+pub fn band_of(zoom) any^ => max(0, min(BANDS - 1, int(floor(zoom))))
+pub fn shown(places, zoom) => [for (c in places.clusters where ((c.band == band_of(zoom)) ^ { false })) c]
 
 // a pin's heading: its photo's title, or how many photos and where
-pub fn label(lib, c) => if (len(c.ids) == 1) photo(lib, c.ids[0]).title
+pub fn label(lib, c) any^ => if (len(c.ids) == 1) photo(lib, c.ids[0]).title
     else string(len(c.ids)) ++ " photos · " ++ L.location_label({gps:{lat:round(c.lat * 10.0) / 10.0, lon:round(c.lon * 10.0) / 10.0}})
 
 // the circle layer: the pins of the band the map shows, sized by how many photos they hold

@@ -11,7 +11,7 @@ fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }
 fn arr(xs) { { kind: "array", value: xs } }
 
-fn xml_at(xs, i) {
+fn xml_at(xs, i) any^ {
     if (i < len(xs)) { format(xs[i], 'xml') }
     else { "" }
 }
@@ -25,10 +25,10 @@ pn drive(ops, page_h) {
     while (i < n) {
         let r = text.apply_op(st, util.IDENTITY, ops[i].op, ops[i].operands, page_h)
         st = r.state
-        if (r.emit != null) {
+        if ((r.emit != null)^) {
             var k = 0
             let m = len(r.emit)
-            while (k < m) {
+            while ((k < m)^) {
                 emits = emits ++ [r.emit[k]]
                 k = k + 1
             }

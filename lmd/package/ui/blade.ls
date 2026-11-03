@@ -13,7 +13,7 @@ import art: .blade.art
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
 pub fn component_names() array => [*catalog.kinds(),"config-provider",*widgets.kinds]
-pub fn icon_names() array => base.icon_names()
+pub fn icon_names() array^ => base.icon_names()
 pub fn rpg_icon_names() array => art.names()
 pub fn palette(seed) array^ => base.palette(seed)^
 pub fn render(root) any^ => shared.render(root,"blade",["page",*component_names()])^
@@ -23,7 +23,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"blade",variables,styles.css,"dtna-root blade-root")
 }
-view blade_page: <blade.page> { page(content(~),c.props(~))^ }
+view blade_page: <blade.page> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => catalog.descriptor('button',props,child)^
 pub fn button_group(props = {}, child = null) element^ => catalog.descriptor('button-group',props,child)^

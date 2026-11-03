@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of jetstream/cube3d.ls. */
 extern int printf(const char *, ...);
 extern double sin(double);
@@ -232,12 +233,15 @@ static int run(void) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int pass = 1;
     int iter;
     /* JetStream runs 8 iterations */
     for (iter = 0; iter < 8; iter++) {
         if (!run()) pass = 0;
     }
+    BENCH_KERNEL_END();
     printf(pass ? "3d-cube: PASS\n" : "3d-cube: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return !pass;
 }

@@ -9,7 +9,7 @@ let models = [
     <dtna.rate id:"rate-no-keyboard",keyboard:false,default_value:2>,
     <dtna.rate id:"rate-small",size:'small',default_value:1>,
     <dtna.rate id:"rate-large",size:'large',default_value:4>,
-    <dtna.rate id:"rate-custom",count:3,character:(star) => string(star.index+1),tooltips:["Poor","Fair","Good"]>]
+    <dtna.rate id:"rate-custom",count:3,character:(star) any^ => string(star.index+1),tooltips:["Poor","Fair","Good"]>]
 let rtl_model = <dtna.rate id:"rate-rtl",allow_half:true,default_value:2>
 let inherited_model = <dtna.rate id:"rate-inherited">
 view rate_examples: <rate_examples> state count:0,request:"",requested_type:"",hover_request:"" {

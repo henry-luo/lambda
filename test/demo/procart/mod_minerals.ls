@@ -17,7 +17,7 @@ pub let COLORWAYS = ["Natural","Twilight","Warm earth"]
 fn faceted(id,points,indices,k) map {
     let faces = [for (i in 0 to (len(indices) div 3-1),
         let ids = slice(indices,i*3,i*3+3),let a = points[ids[0]],let b = points[ids[1]],let c = points[ids[2]],
-        let n = camera.cross(camera.subtract(b,a),camera.subtract(c,a)) where camera.dot(n,n) > 1e-12)
+        let n = camera.cross(camera.subtract(b,a),camera.subtract(c,a)) where ((camera.dot(n,n) > 1e-12) ^ { false }))
         {ids:ids,points:[a,b,c],normal:camera.unit(n),shade:rng.between(rng.at(k,i),0.72,1.0)}]
     let edges = unique([for (f in faces) for (j in 0 to 2) sort([f.ids[j],f.ids[(j+1)%3]])]);
     {tree:s.geometry([for (f in faces) for (p in f.points) *p],
@@ -33,7 +33,7 @@ fn prism(flat,k) map {
     faceted(if (flat) "column" else "crystal",points,indices,k)
 }
 
-pub fn rock(k,detail,id) map {
+pub fn rock(k,detail,id) map^ {
     let rows = 3+detail
     let columns = 6+detail
     let globe = geometry.sphere("source",rows,columns)
@@ -44,7 +44,7 @@ pub fn rock(k,detail,id) map {
     faceted(id,points,globe.indices,k)
 }
 
-fn bowl(k) map {
+fn bowl(k) map^ {
     let globe = geometry.sphere("source",8,16)
     let points = [for (j in 0 to 4,i in 0 to 16,let index = ((j+4)*17+i)*3) slice(globe.positions,index,index+3)];
     faceted("bowl",points,geometry.grid_indices(4,16),k)

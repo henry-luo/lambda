@@ -34,7 +34,7 @@ greet("Lambda");
 [1, 2, 3, 4] |> reduce((acc, x) => acc + x)
 
 // ===== Arrow as argument =====
-fn apply_fn(f, x) => f(x)
+fn apply_fn(f, x) any^ => f(x)
 apply_fn((x) => x * 10, 5)
 
 // ===== Nested arrows =====
@@ -52,7 +52,7 @@ let process = (x) => {
 process(5)
 
 // ===== Arrow composition =====
-let compose = (f, g) => (x) => f(g(x))
+let compose = (f, g) => (x) any^ => f(g(x))
 let double_then_inc = compose((x) => x + 1, (x) => x * 2)
 double_then_inc(5)
 double_then_inc(3)

@@ -4,12 +4,12 @@ import .check_node_module_architecture_core
 pn main() {
     let report = scan_tree()
     var failed = false
-    for (finding in report.violations) {
+    for (finding in report.violations^) {
         print("NODE_MODULE_ARCH: " ++ finding.path ++ ":" ++ string(finding.line) ++
               ": forbidden " ++ finding.token ++ "\n")
         failed = true
     }
-    for (finding in check_node_module_link_inputs()) {
+    for (finding in check_node_module_link_inputs()^) {
         print("NODE_MODULE_ARCH: " ++ finding ++ "\n")
         failed = true
     }

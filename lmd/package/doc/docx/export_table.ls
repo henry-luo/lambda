@@ -2,15 +2,15 @@
 import c: .export_common
 import style: .export_style
 import errors: .common
-fn rows(node,path,header=false) => [for (i,child in c.kids(node) where c.tag(child) in ["tr","thead","tbody","tfoot"])
+fn rows(node,path,header=false) => [for (i,child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) in ["tr","thead","tbody","tfoot"]) ^ { false }))
     if (c.tag(child)=="tr") {node:child,path:[*path,i],header:header or
-        (len(c.kids(child))>0 and all([for (cell in c.kids(child)) c.tag(cell)=="th"]))}
+        (len(c.kids(child))>0 and all([for (cell in ((c.kids(child)) ^ { [] })) c.tag(cell)=="th"]))}
     else *rows(child,[*path,i],c.tag(child)=="thead")]
-fn free_column(column,width,carry) {
+fn free_column(column,width,carry) any^ {
     let conflicts = [for (cell in carry where column<cell.column+cell.width and column+width>cell.column) cell.column+cell.width];
     if (len(conflicts)==0) column else free_column(max(conflicts),width,carry)
 }
-fn place(cells,carry,index=0,column=0,result=[]) {
+fn place(cells,carry,index=0,column=0,result=[]) any^ {
     if (index>=len(cells)) result else {
         let cell = cells[index]
         let width = c.ordinal(cell.node.colspan)
@@ -23,22 +23,22 @@ fn place(cells,carry,index=0,column=0,result=[]) {
 fn grid_rows(source,index=0,carry=[],out=[]) {
     if (index>=len(source)) out else {
         let row = source[index]
-        let own = place([for (i,cell in c.kids(row.node) where c.tag(cell) in ["td","th"]) {node:cell,path:[*row.path,i]}],carry)
+        let own = place([for (i,cell in ((c.kids(row.node)) ^ { [] }) where ((c.tag(cell) in ["td","th"]) ^ { false })) {node:cell,path:[*row.path,i]}],carry)
         let continued = [for (cell in carry) {*:cell,merge:"continue",remaining:cell.remaining-1}]
         let cells = sort([*own,*continued],{by:(cell)=>cell.column})
         let next = [for (cell in cells where cell.remaining>0) cell];
         grid_rows(source,index+1,next,[*out,{source:row,cells:cells}])
     }
 }
-fn column_widths(node,grid,columns,total) {
-    let declared = [for (group in c.kids(node) where c.tag(group)=="colgroup") for (col in c.kids(group) where c.tag(col)=="col")
-        for (i in 1 to min(63,c.ordinal(col.span))) style.length(style.css_get(col.style,"width") or col.width,total/15.0)*15.0]
+fn column_widths(node,grid,columns,total) any^ {
+    let declared = [for (group in ((c.kids(node)) ^ { [] }) where ((c.tag(group)=="colgroup") ^ { false })) for (col in ((c.kids(group)) ^ { [] }) where ((c.tag(col)=="col") ^ { false }))
+        for (i in ((1 to min(63,c.ordinal(col.span))) ^ { [] })) style.length(style.css_get(col.style,"width") or col.width,total/15.0)*15.0]
     // Single-cell constraints take precedence; spanning cells supply equal shares where no narrower constraint exists.
     let widths = [for (column in 0 to columns-1) {
         let cells = sort([for (row in grid,cell in row.cells,
             let width=style.length(style.css_get(cell.node.style,"width") or cell.node.width,total/15.0)
-            where cell.node!=null and cell.merge!="continue" and column>=cell.column and column<cell.column+cell.width and
-                width!=null and width>0) {width:width*15.0/cell.width,span:cell.width}],{by:(cell)=>cell.span});
+            where ((cell.node!=null and cell.merge!="continue" and column>=cell.column and column<cell.column+cell.width and
+                width!=null and width>0) ^ { false })) {width:width*15.0/cell.width,span:cell.width}],{by:(cell)=>cell.span});
         declared[column] or cells[0].width
     }]
     let specified = sum([for (width in widths where width is number and width>0) width])
@@ -55,10 +55,10 @@ pub fn render(node,path,ctx,blocks) map^ {
     let width = if (ends_with(percent or "","%")) null else style.length(percent)
     let total = if (width!=null and width>0) width*15.0 else ctx.page_width
     let widths = if (columns>63) [] else column_widths(node,grid,columns,total)
-    let captions = c.merge([for (i,caption in c.kids(node) where c.tag(caption)=="caption")
+    let captions = c.merge([for (i,caption in ((c.kids(node)) ^ { [] }) where ((c.tag(caption)=="caption") ^ { false }))
         blocks([<p *:c.attrs(caption),*c.kids(caption)>],[*path,i],{*:ctx,numbering:null})^])
-    let omitted = [for (child in c.kids(node) where not (c.tag(child) in ["tr","thead","tbody","tfoot","colgroup","caption"])
-        and not (child is string and trim(child)=="")) child]
+    let omitted = [for (child in ((c.kids(node)) ^ { [] }) where ((not (c.tag(child) in ["tr","thead","tbody","tfoot","colgroup","caption"])
+        and not (child is string and trim(child)=="")) ^ { false })) child]
     let dense = if (columns>63) [] else [for (row in grid) {*:row,cells:[for (column in 0 to columns-1)
         for (cell in (let own=[for (cell in row.cells where cell.column==column) cell],
             if (len(own)>0) own else if (any([for (cell in row.cells) column>=cell.column and column<cell.column+cell.width])) []

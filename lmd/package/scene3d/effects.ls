@@ -84,7 +84,7 @@ void main() {
 pub fn catalog() array => [for (p in PRESETS) {id: p.id, title: p.title, description: p.description}]
 
 pub fn material(kind, texture, uniforms = {}, options = {}) element^ {
-    let matches = [for (p in PRESETS where string(p.id) == string(kind)) p]
+    let matches = [for (p in PRESETS where ((string(p.id) == string(kind)) ^ { false })) p]
     let checked_kind = if (len(matches) != 1) raise error("scene3d.effects: unknown effect")
     let checked_texture = if (not (texture is string or texture is symbol) or len(string(texture)) == 0)
         raise error("scene3d.effects: expected a texture ID")
@@ -94,7 +94,7 @@ pub fn material(kind, texture, uniforms = {}, options = {}) element^ {
     let checked_keys = [for (k, v in uniforms where defaults[k] == null)
         raise error("scene3d.effects: unknown uniform " ++ string(k))]
     let u = {*: defaults, *: uniforms}
-    let checked_numbers = [for (k, v in u where k != 'tint' and not transforms.numeric(v))
+    let checked_numbers = [for (k, v in u where ((k != 'tint' and not transforms.numeric(v)) ^ { false }))
         raise error("scene3d.effects: uniform requires a finite number")]
     let checked_ranges = if (u.aspect <= 0 or u.amount < 0 or
         (u.frequency != null and u.frequency <= 0) or (u.spread != null and u.spread <= 0) or

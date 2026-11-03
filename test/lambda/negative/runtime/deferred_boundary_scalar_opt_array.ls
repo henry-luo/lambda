@@ -3,4 +3,4 @@
 // check decides it -- which the JIT skipped, binding `5`.
 let v = 5
 let w: int[]? = v
-"bound: " ++ string(w)
+"bound: " ++ string(w^)

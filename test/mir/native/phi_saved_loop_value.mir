@@ -1,0 +1,97 @@
+repro: module
+probe: func i64, p:runtime, i64:header, i64:n, i64:witness
+local i64:items, i64:length, i64:i, i64:s, i64:c, i64:slow, i64:cond, i64:idx, i64:offset, i64:address, i64:first, i64:second, i64:third, i64:neg, i64:result, i64:band
+mov items, i64:32(header)
+mov length, i64:40(header)
+mov i, 0
+mov s, 0
+mov c, 0
+mov slow, 0
+fast:
+bt slow, slow
+lt cond, i, n
+bf done, cond
+add i, i, 1
+sub idx, i, 1
+blt fast_missing0, idx, 0
+bge fast_missing0, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov first, i64:(address)
+jmp fast_read0
+fast_missing0:
+mov first, 72057594037927936
+fast_read0:
+lt neg, first, 0
+bt fast, neg
+sub idx, i, 1
+blt fast_missing1, idx, 0
+bge fast_missing1, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov second, i64:(address)
+jmp fast_read1
+fast_missing1:
+mov second, 72057594037927936
+fast_read1:
+add s, second, s
+add band, s, 9007199254740991
+ule slow, band, 18014398509481982
+xor slow, slow, 1
+sub idx, i, 1
+blt fast_missing2, idx, 0
+bge fast_missing2, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov third, i64:(address)
+jmp fast_read2
+fast_missing2:
+mov third, 72057594037927936
+fast_read2:
+sub c, c, third
+jmp fast
+slow:
+lt cond, i, n
+bf done, cond
+add i, i, 1
+sub idx, i, 1
+blt slow_missing0, idx, 0
+bge slow_missing0, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov first, i64:(address)
+jmp slow_read0
+slow_missing0:
+mov first, 72057594037927936
+slow_read0:
+lt neg, first, 0
+bt slow, neg
+sub idx, i, 1
+blt slow_missing1, idx, 0
+bge slow_missing1, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov second, i64:(address)
+jmp slow_read1
+slow_missing1:
+mov second, 72057594037927936
+slow_read1:
+add s, second, s
+sub idx, i, 1
+blt slow_missing2, idx, 0
+bge slow_missing2, idx, length
+lsh offset, idx, 3
+add address, items, offset
+mov third, i64:(address)
+jmp slow_read2
+slow_missing2:
+mov third, 72057594037927936
+slow_read2:
+sub c, c, third
+jmp slow
+done:
+mul result, s, 1000
+add result, result, c
+ret result
+endfunc
+endmodule

@@ -7,7 +7,7 @@ import archive: lambda.archive
 // stopped and the job fails with 319 — and neither leaves a staging folder.
 // The harbour page's thumbnail draws a tiled SVG background slowly, which
 // keeps that job inside its worker when the cancel arrives.
-fn first_index(log, pred) => (let hits = [for (i, m in log where pred(m)) i], if (len(hits) == 0) -1 else hits[0])
+fn first_index(log, pred) => (let hits = [for (i, m in log where ((pred(m)) ^ { false })) i], if (len(hits) == 0) -1 else hits[0])
 
 pn main() {
     // a folder per process: the T0 and JIT runs of this test may overlap

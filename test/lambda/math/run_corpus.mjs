@@ -63,7 +63,7 @@ fn check(formula) {
          html: html}
     }
 }
-format([for (formula in [${literals}]) check(formula)], 'json')
+format([for (formula in [${literals}]) check(formula)], 'json')^
 `;
 }
 

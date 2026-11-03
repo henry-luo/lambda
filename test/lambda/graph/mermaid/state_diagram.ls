@@ -3,12 +3,12 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn descriptions(node) => [
   for (child in model.element_children(node)
-    where model.tag(child) == "state-description") child
+    where ((model.tag(child) == "state-description") ^ { false })) child
 ]
 
 fn by_id(nodes, id) => [for (node in nodes where node.id == id) node][0]
@@ -38,13 +38,13 @@ let processing_note = annotation_for(scene_annotations, "Processing")
   source: [source.kind, source.direction, len(source_nodes), len(source_edges),
     len(source_annotations)],
   states: [for (node in source_nodes) [node.id, node.label, node.shape,
-    node["state-kind"], [for (value in descriptions(node)) value.value]]],
+    node["state-kind"], [for (value in ((descriptions(node)) ^ { [] })) value.value]]],
   transitions: [for (edge in source_edges)
     [edge.from, edge.to, edge.label, edge["arrow-head"]]],
   notes: [for (note in source_annotations)
     [note["owner-id"], note.kind, note.label]],
   canonical: [normalized.valid, len(model.nodes(normalized.graph)),
-    [for (node in model.nodes(normalized.graph))
+    [for (node in ((model.nodes(normalized.graph)) ^ { [] }))
       [node.id, model.tag(model.content_element(node))]]],
   html: [len(html_nodes), len(html_annotations),
     [for (node in html_nodes) [node["data-node-id"], model.tag(node[0])]]],

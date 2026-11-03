@@ -19,7 +19,7 @@ pub fn preferences(prefs) {
         texture:if (prefs.texture in textures) prefs.texture else "none",turn:if (prefs.turn in turns) prefs.turn else defaults.turn}
 }
 // The per-user reading-state directory; library hosts keep their own records beside it.
-pub fn directory() => (let env = sys.proc.self.env#,
+pub fn directory() any^ => (let env = sys.proc.self.env#,
     c.value(env.LAMBDA_EBOOK_STATE_DIR,c.value(env.XDG_STATE_HOME,
         c.value(env.LOCALAPPDATA,c.value(env.HOME,".") ++ "/.local/state")) ++ "/lambda/ebook"))
 pub pn restore(book,options) map {
@@ -30,10 +30,10 @@ pub pn restore(book,options) map {
     let location = if (valid and saved.location != null) locations.resolve(book,saved.location) ^ { null } else null
     let prefs = if (valid and saved.preferences is map) saved.preferences else defaults
     let checked = preferences(prefs)
-    let bookmarks = if (valid and saved.bookmarks is array) [for (item in take(saved.bookmarks,1000),
+    let bookmarks = if (valid and saved.bookmarks is array) [for (item in ((take(saved.bookmarks,1000)) ^ { [] }),
         let verified = locations.resolve(book,item) ^ { null } where verified != null) verified] else []
     // shape only: each chapter load keeps the highlights whose text still matches
-    let highlights = if (valid and saved.highlights is array) [for (item in take(saved.highlights,5000)
+    let highlights = if (valid and saved.highlights is array) [for (item in ((take(saved.highlights,5000)) ^ { [] })
         where item is map and item.id is string and item.spine_occurrence is int and item.start is int and
             item.end is int and item.text is string and item.color in colors) item] else []
     return {path:path,location:location,bookmarks:bookmarks,highlights:highlights,

@@ -1,7 +1,7 @@
 // Source markers may be reused only when they still describe the current task.
 pub let states = ["todo","in-progress","done","waiting","blocked","cancelled","rejected","migrated","custom"]
 import c: lambda.doc.misc.common
-fn decoded(marker,flavor) => if (marker == "[ ]") {state:"todo",lo:0,hi:0,label:null}
+fn decoded(marker,flavor) any^ => if (marker == "[ ]") {state:"todo",lo:0,hi:0,label:null}
     else if ((flavor == "vimwiki" and marker == "[X]") or (flavor == "zimwiki" and marker == "[*]")) {state:"done",lo:100,hi:100,label:null}
     else if (flavor == "vimwiki" and marker in ["[.]","[o]","[O]"]) {
         state:"in-progress",lo:if (marker == "[.]") 1 else if (marker == "[o]") 34 else 67,
@@ -13,14 +13,14 @@ fn decoded(marker,flavor) => if (marker == "[ ]") {state:"todo",lo:0,hi:0,label:
         {state:"custom",lo:null,hi:null,label:marker}
     else null
 fn percentage(value) => value is string and value in [for (i in 0 to 100) string(i)]
-pub fn model(node) {
+pub fn model(node) any^ {
     let status = c.get(node,"data-task-state",if (node["data-checked"] == null) null else if (node["data-checked"] == "true") "done" else "todo")
     let lo = node["data-task-progress-min"]
     let hi = node["data-task-progress-max"]
     let status_label = node["data-task-label"]
     let marker = node["data-task-marker"]
     let flavor = node["data-task-flavor"]
-    let checkboxes = if (node is element) [for (child in content(node) where child is element and string(name(child)) == "input" and child.type == "checkbox") child] else []
+    let checkboxes = if (node is element) [for (child in ((content(node)) ^ { [] }) where ((child is element and string(name(child)) == "input" and child.type == "checkbox") ^ { false })) child] else []
     let projection = all([for (child in checkboxes) (child.checked != null) == (status == "done") and child.disabled != null])
     let valid = projection and (status == null or status in states) and
         (status != "custom" or (status_label is string and status_label != "")) and
@@ -29,7 +29,7 @@ pub fn model(node) {
         (node["data-checked"] == null or node["data-checked"] == if (status == "done") "true" else "false");
     {state:status,label:status_label,lo:if (percentage(lo)) int(lo) else null,hi:if (percentage(hi)) int(hi) else null,marker:marker,flavor:flavor,valid:valid}
 }
-pub fn marker(node,target) {
+pub fn marker(node,target) any^ {
     let task = model(node)
     let saved = decoded(task.marker,task.flavor)
     let reusable = task.flavor == target and saved != null and saved.state == task.state and
@@ -37,8 +37,8 @@ pub fn marker(node,target) {
     let choices = if (target == "vimwiki") ["[ ]","[.]","[o]","[O]","[X]","[-]"]
         else if (target == "zimwiki") ["[ ]","[*]","[x]","[>]","[<]"] else []
     let matches = [for (marker in choices,let value = decoded(marker,target) where
-        value.state == task.state and (task.label == null or value.label == task.label) and
-        ((task.lo == null and task.hi == null and (value.lo == null or task.state in ["todo","done"])) or (value.lo == task.lo and value.hi == task.hi))) marker];
+        ((((((value.state == task.state and (task.label == null or value.label == task.label) and
+        ((task.lo == null and task.hi == null and (value.lo == null or task.state in ["todo","done"])) or (value.lo == task.lo and value.hi == task.hi))) ^ { false })))))) marker];
     if (task.state == null) {text:"",code:null}
     else if (not task.valid) {text:"",code:"invalid-task"}
     else if (reusable) {text:task.marker ++ " ",code:null}

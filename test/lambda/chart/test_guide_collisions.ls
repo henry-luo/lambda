@@ -6,10 +6,10 @@ import scale: lambda.chart.scale
 import config: lambda.chart.config
 import collision: lambda.chart.collision
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn tags(tree, tag) => elements(tree) |: name(~) == tag
-fn with_class(tree, cls) => elements(tree) |: ~.class == cls
-fn tick_labels(tree) => [for (tick in with_class(tree, "tick")) for (label in tags(tick, 'text')) label]
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn tags(tree, tag) any^ => elements(tree) |: name(~) == tag
+fn with_class(tree, cls) any^ => elements(tree) |: ~.class == cls
+fn tick_labels(tree) => [for (tick in ((with_class(tree, "tick")) ^ { [] })) for (label in ((tags(tick, 'text')) ^ { [] })) label]
 fn label_strings(tree) => tick_labels(tree) |> join(content(~), "")
 
 let mapping = scale.linear_scale(0, 1, 0, 100)
@@ -33,7 +33,7 @@ let notes = ann.render_annotations(<annotation
     <text_note px: 20, py: 60, text: "third", label_overlap: "hide">
     <rule_note y: 0.5>>, null, scale.linear_scale(0, 1, 100, 0), 100, 100, config.light_theme)
 
-fn annotated(policy, clipped = false, layered = false) => chart.render(<chart width: 300, height: 200, padding: 0, clip: clipped,
+fn annotated(policy, clipped = false, layered = false) any^ => chart.render(<chart width: 300, height: 200, padding: 0, clip: clipped,
     <data values: [{x: 0, y: 0}, {x: 1, y: 1}]>
     <encoding <x field: "x", dtype: "quantitative", scale: {nice: false},
         axis: {values: [0, 1], title: null, label_overlap: policy}>

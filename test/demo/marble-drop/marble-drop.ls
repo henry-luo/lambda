@@ -47,7 +47,7 @@ pn transition(evt, session, game, command, now_ms) {
     if (game.active != null) {
         let marble = dom.query_selector(dom.root_node(evt.target),"#rolling-marble")
         // the new drop mounts at its origin; subsequent ticks move only its paint, without a page reflow
-        if (marble != null) dom.presentation_style_set_property(marble,"transform",scene.rolling_transform(pose))
+        if (marble != null) dom.presentation_style_set_property(marble,"transform",scene.rolling_transform(pose)^)
     }
     if (not active and session.frame > 0) dom.cancel_frame(owner,session.frame)
     return {*:update(session,game,pose,command),sound:audio,lag:lag,
@@ -60,7 +60,7 @@ pn command(evt, session, action, value, now_ms) {
 }
 
 // Rendering is pure; the view owns all live state and handlers (S12.1.3).
-view <marble_game> state session:initial() {
+view <marble_game> () any^ state session:initial() {
     // semantic redraws retain the current pose; ordinary frames move only the existing leaf
     scene.page(session.shown,session.apparatus,session.sound,session.sketches)
 }
@@ -77,7 +77,7 @@ on marblekey(evt) {
     return 'handled'
 }
 on marbletick(evt) {
-    if (evt.detail.token != session.frame or not running(session.game)) { return 'handled' }
+    if ((evt.detail.token != session.frame or not running(session.game))^) { return 'handled' }
     // keep routing on 40 ms steps and interpolate only the paint between them
     let elapsed = session.lag+max(0.0,evt.detail.time-session.at)
     let next_drop = session.game.active == null and session.game.autoplay
@@ -88,7 +88,7 @@ on marbletick(evt) {
     return 'handled'
 }
 on marbleclose(evt) {
-    if (session.frame > 0) dom.cancel_frame(audio_owner(evt),session.frame)
+    if ((session.frame > 0)^) dom.cancel_frame(audio_owner(evt),session.frame)^
     session = {*:session,sound:sound.silence(audio_owner(evt),session.sound)}
     return 'handled'
 }
@@ -100,7 +100,7 @@ view <marble_shell> {
 on keydown(evt) {
     if (evt.ctrlKey or evt.metaKey or evt.altKey or evt.repeat) { return 'pass' }
     let action = key_action(evt.key)
-    if (action == null) { return 'pass' }
+    if ((action == null)^) { return 'pass' }
     dom.dispatch(dom.query_selector(dom.root_node(evt.target),"#marble-drop"),
         {type:"marblekey",detail:{*:action,time:evt.time_stamp}})
     return 'prevent-default'

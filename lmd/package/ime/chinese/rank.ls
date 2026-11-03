@@ -6,7 +6,7 @@ pub fn quality(value) int =>
     if (value == "exact") 0 else if (value == "fuzzy") 1
     else if (value == "incomplete") 2 else 3
 
-fn ordered(items) array =>
+fn ordered(items) array^ =>
     sort(items,(item)=>[quality(string(item.match)),-item.weight,item.line,item.posting])
 
 pub fn distinct(items) array {
@@ -33,7 +33,7 @@ fn coverage_ranked(sorted,weight_floor,leaders) array {
     [for (group in groups,item in group) item]
 }
 
-fn completion(item,input_length) int {
+fn completion(item,input_length) int^ {
     let match_quality = quality(string(item.match));
     if (input_length != null and item.consumed == input_length and match_quality < 2)
         match_quality else 2
@@ -42,7 +42,7 @@ fn completion(item,input_length) int {
 pub fn ranked(items,weight_floor,leaders,input_length = null) array {
     let sorted = ordered(items)
     let groups = [for (tier in 0 to 2)
-        coverage_ranked([for (item in sorted where completion(item,input_length) == tier) item],
+        coverage_ranked([for (item in sorted where ((completion(item,input_length) == tier) ^ { false })) item],
             weight_floor,leaders)];
     // deduplicate after grouping so a partial route cannot hide a complete reading.
     distinct([for (group in groups,item in group) item])

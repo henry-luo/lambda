@@ -11,6 +11,6 @@ let first: Node = {value: 1, next: null}
 let second: Node = {value: 2, next: first}
 let dynamic: any = {next: second, value: 3}
 let third: Node = dynamic
-let box: Box = wrap(relay(third));
+let box: Box^ = wrap(relay(third));
 
 [read_node(box.node), read_node(box.node.next), read_node(null), box.label]

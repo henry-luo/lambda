@@ -220,6 +220,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
 // exact raw-variant key; validation remains responsible for diagnostics.
 bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         Type** env_out, uint16_t env_count);
+// Resolve an outer binder site/reference against an invocation's type selection.
+Type* lambda_ast_resolve_binder_contract(Type* type, Type** env, int depth = 0);
 
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     const char** destination_label, bool* optional_field = NULL);

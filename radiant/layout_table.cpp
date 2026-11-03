@@ -6442,7 +6442,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
     CssEnum cell_word_break = CSS_VALUE_NORMAL;
-    layout_resolve_inherited_text_wrap(static_cast<DomNode*>(cell),
+    layout_resolve_inherited_text_wrap(lycon, static_cast<DomNode*>(cell),
                                        &cell_overflow_wrap, &cell_word_break);
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     float inline_run_max = 0.0f;  // Running sum for current inline sequence

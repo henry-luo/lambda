@@ -4,7 +4,7 @@ import tikz_opts: lambda.doc.tikz.options
 import util: .util
 import macros: .macros
 
-fn command_end(source, at) {
+fn command_end(source, at) any^ {
     if (at >= len(source)) at
     else if (index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
         slice(source, at, at + 1)) != null)
@@ -12,7 +12,7 @@ fn command_end(source, at) {
     else at
 }
 
-fn skip_space(source, at) =>
+fn skip_space(source, at) any^ =>
     if (at >= len(source)) at
     else if (slice(source, at, at + 1) == " " or
              slice(source, at, at + 1) == "\n" or
@@ -30,14 +30,14 @@ fn macro_arguments(source, at, remaining, acc) any^ {
     }
 }
 
-fn substitute_arguments(source, values, at) {
+fn substitute_arguments(source, values, at) any^ {
     if (at >= len(values)) source
     else substitute_arguments(replace(source, "#" ++ string(at + 1),
         values[at]), values, at + 1)
 }
 
-fn handler_of(key) {
-    let found = [for (suffix in tikz_opts.STYLE_HANDLERS where ends_with(key, suffix)) suffix]
+fn handler_of(key) any^ {
+    let found = [for (suffix in tikz_opts.STYLE_HANDLERS where ((ends_with(key, suffix)) ^ { false })) suffix]
     if (len(found) == 0) null else found[0]
 }
 
@@ -46,7 +46,7 @@ fn handler_of(key) {
 fn declaration_styles(raw) any^ {
     let values = util.parse_kv_options(util.strip_tex_comments(raw))
     let invalid = [for (key, value at values
-        where handler_of(string(key)) == null) string(key)]
+        where ((handler_of(string(key)) == null) ^ { false })) string(key)]
     if (len(invalid) > 0)
         raise error("unsupported TikZ style declaration: " ++ invalid[0])
     else [for (key, value at values)
@@ -63,7 +63,7 @@ fn collect_styles(declarations) any^ {
 // Plain styles expand textually so picture and axis options see them too.
 // Parameterized, appended or defaulted styles, inherited `every ...` styles and
 // pics are left to the TikZ parser.
-fn textual(style, styles) =>
+fn textual(style, styles) any^ =>
     style.handler == "/.style" and not contains(style.source, "#") and
     not starts_with(style.name, "every ") and
     not any([for (other in styles) other.name == style.name and other.handler != "/.style"])
@@ -88,7 +88,7 @@ fn expand_style_part(raw, styles, depth) any^ {
 }
 
 fn expand_style_options(raw, styles, depth) any^ {
-    util.str_join([for (part in util.split_top_level(raw, ","))
+    util.str_join([for (part in ((util.split_top_level(raw, ",")) ^ { [] }))
         expand_style_part(part, styles, depth)^], ",")
 }
 
@@ -157,7 +157,7 @@ fn render_expanded(island, definitions, declarations,
             definitions, 0, 0, "")^
         let styles = collect_styles(declarations)^
         let source = expand_style_brackets(expanded,
-            [for (style in styles where textual(style, styles)) style], 0, "")^
+            [for (style in styles where ((textual(style, styles)) ^ { false })) style], 0, "")^
         let preamble = parser_preamble(declarations, styles)^
         let math_program = expand_math_declarations(math_declarations,
             definitions)^
@@ -169,7 +169,7 @@ fn render_expanded(island, definitions, declarations,
 
 pub fn render_picture(island, definitions = [], declarations = [],
                       math_declarations = [], custom_colors = [],
-                      people_active = false, base_uri = null) {
+                      people_active = false, base_uri = null) any^ {
     render_expanded(island, definitions, declarations,
         math_declarations, custom_colors, people_active, base_uri) ^ {
         let offset = island.source_offset;

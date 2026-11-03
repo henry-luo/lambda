@@ -155,26 +155,26 @@ pn main() {
     print(keys(t))
 
     var r1: R = {v: 1, kid: {n: 0}}
-    both_arms(r1)
+    both_arms(r1)^
     var r2: R = {v: 1, kid: {n: 1}}
-    no_store_back(r2, false)
+    no_store_back(r2, false)^
     print(r2.kid.n)
     var r3: R = {v: 1, kid: {n: 3}}
-    alias_before(r3)
+    alias_before(r3)^
     print(r3.kid.n)
     var r4: R = {v: 1, kid: {n: 2}}
-    read_between(r4)
+    read_between(r4)^
     var r5: R = {v: 1, kid: {n: 10}}
     let keep = r5
-    caller_sees(r5, 5)
+    caller_sees(r5, 5)^
     print(r5.kid.n) print(keep.kid.n)
     var r6: R = {v: 1, kid: {n: 20}}
     error_exit(r6, true) ^ { print("raised") }
     print(r6.kid.n)
     { let __error_outcome_1 = error_exit(r6, false) ^ { ^ }; if (__error_outcome_1 is error) { print("raised") } else match __error_outcome_1 { case any { print(~) } } }
     var r7: R = {v: 1, kid: {n: 3}}
-    declaration_write(r7)
+    declaration_write(r7)^
     var r8: R = {v: 1, kid: {n: 4}}
-    forward_call(r8)
+    forward_call(r8)^
     print(r8.kid.n)
 }

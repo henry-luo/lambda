@@ -3,7 +3,7 @@
 import model: lambda.graph.model
 import compartment: .compartment
 
-fn attribute_text(attribute) {
+fn attribute_text(attribute) any^ {
   let key = if (attribute.key != null and attribute.key != "")
     " [" ++ string(attribute.key) ++ "]" else "";
   let comment = if (attribute.comment != null and attribute.comment != "")
@@ -18,10 +18,10 @@ fn attribute_row(attribute) =>
     attribute_text(attribute)
   >
 
-fn entity_content(node, attributes) =>
+fn entity_content(node, attributes) any^ =>
   compartment.content(node, {
     root_class: "graph-er-content", title_class: "graph-er-title",
     body_class: "graph-er-attributes", min_width: 140
   }, [for (attribute in attributes) attribute_row(attribute)])
 
-pub fn adapt(graph) => compartment.adapt(graph, "er-attribute", entity_content)
+pub fn adapt(graph) any^ => compartment.adapt(graph, "er-attribute", entity_content)

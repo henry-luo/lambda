@@ -35,7 +35,7 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
 void apply_param_contract(TypeParam* param_type, Type* contract, bool is_explicit);
 
 // Declare a fn type's return contract.
-void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit);
+void set_fn_return_contract(Transpiler* tp, TypeFunc* fn_type, Type* contract, bool is_explicit);
 
 // Register a binary type with raw TypeBinary operands over the node's already
 // resolved operands. Declaration return types use this rather than the

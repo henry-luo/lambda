@@ -3,8 +3,8 @@ import latex: .format_latex
 import ascii: .format_ascii
 import mathml: .mathml
 
-pub fn to_latex(ast) => latex.to_latex(ast)
-pub fn to_ascii(ast) => ascii.to_ascii(ast)
+pub fn to_latex(ast) any^ => latex.to_latex(ast)
+pub fn to_ascii(ast) any^ => ascii.to_ascii(ast)
 
 pub fn format(ast, options = null) string^ {
     let valid_options = if (options != null and not (options is map))

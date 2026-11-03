@@ -41,7 +41,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 724) {
+    if ((result == 724)^) {
         print("puzzle: PASS\n")
     } else {
         print("puzzle: FAIL result=")

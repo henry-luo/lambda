@@ -14,6 +14,9 @@ typedef enum DomEventTargetKeyKind {
 } DomEventTargetKeyKind;
 typedef struct DomEventTargetKey { DomEventTargetKeyKind kind; void* ptr; } DomEventTargetKey;
 
+// native wrappers trace listener edges themselves; changes may update keepalive.
+struct DomGcEventOwner { void (*listeners_changed)(DomGcEventOwner*); };
+
 #define DOM_EVENT_RECORD_HOST_OPERATIONS(OP) \
     OP(Item, create, (const char* type, bool bubbles, bool cancelable, bool composed, int class_id), (type, bubbles, cancelable, composed, class_id), ItemNull) \
     OP(bool, is, (Item item), (item), false) \

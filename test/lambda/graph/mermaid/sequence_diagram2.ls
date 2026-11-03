@@ -8,26 +8,26 @@ let html = transform.to_html(graph)
 let svg_element = model.element_children(html)[0]
 let shapes = model.element_children(svg_element)
 let events = [for (child in model.element_children(graph)
-  where contains(["edge", "annotation", "sequence-block"], model.tag(child))) child]
-let edges = [for (event in events where model.tag(event) == "edge") event]
-let blocks = [for (event in events where model.tag(event) == "sequence-block")
+  where ((contains(["edge", "annotation", "sequence-block"], model.tag(child))) ^ { false })) child]
+let edges = [for (event in events where ((model.tag(event) == "edge") ^ { false })) event]
+let blocks = [for (event in events where ((model.tag(event) == "sequence-block") ^ { false }))
   string(event.kind) ++ ":" ++ string(event.phase)]
-let guards = [for (event in events where model.tag(event) == "sequence-block" and
-  event.phase != "end") string(event.label)]
-let notes = [for (event in events where model.tag(event) == "annotation")
+let guards = [for (event in events where ((model.tag(event) == "sequence-block" and
+  event.phase != "end") ^ { false })) string(event.label)]
+let notes = [for (event in events where ((model.tag(event) == "annotation") ^ { false }))
   [string(event.kind), string(event["owner-id"]),
     string(model.optional(event, "to-id"))]]
 let labels = [for (edge in edges) string(edge.label)]
 let activations = [for (edge in edges where
-  model.optional(edge, "activation") != null)
+  ((model.optional(edge, "activation") != null) ^ { false }))
   string(edge.from) ++ ":" ++ string(edge.to) ++ ":" ++
     string(edge.activation)]
-let frame_rects = [for (shape in shapes where model.tag(shape) == "rect" and
-  model.optional(shape, "stroke-dasharray") != null) shape]
-let activation_rects = [for (shape in shapes where model.tag(shape) == "rect" and
-  shape.width == 6) shape]
-let open_arrows = [for (shape in shapes where model.tag(shape) == "path" and
-  model.optional(shape, "fill") == "none") shape]
+let frame_rects = [for (shape in shapes where ((model.tag(shape) == "rect" and
+  model.optional(shape, "stroke-dasharray") != null) ^ { false })) shape]
+let activation_rects = [for (shape in shapes where ((model.tag(shape) == "rect" and
+  shape.width == 6) ^ { false })) shape]
+let open_arrows = [for (shape in shapes where ((model.tag(shape) == "path" and
+  model.optional(shape, "fill") == "none") ^ { false })) shape]
 let svg = transform.render_svg(graph, 1000, 800)
 
 {

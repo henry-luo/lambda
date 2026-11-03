@@ -1,6 +1,6 @@
 import e: lambda.doc.ebook
 import c: lambda.doc.ebook.common
-fn load_error(path) => e.parse(input(path,"zip")^) ^ { ^.code }
+fn load_error(path) any^ => e.parse(input(path,"zip")^) ^ { ^.code }
 let unsafe = e.chapter(e.parse(input("test/input/ebook/unsafe.epub","zip")^)^,0)^;
 [
     load_error("test/input/ebook/missing-spine.epub") == 7802,

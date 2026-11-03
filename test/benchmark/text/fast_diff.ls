@@ -1,11 +1,11 @@
 // Text benchmark: bounded character diff over six source-like edit pairs.
 // The LCS table keeps this port's edit decisions deterministic across engines.
 
-fn score_diff(left, right) int {
+fn score_diff(left, right) int^ {
     let n = len(left)
     let m = len(right)
     let cols = m + 1
-    var table: int[] = fill((n + 1) * cols, 0)
+    var table: int[] = fill((n + 1) * cols, 0)^
     var i: int = n - 1
     while (i >= 0) {
         var j: int = m - 1
@@ -15,7 +15,7 @@ fn score_diff(left, right) int {
             } else {
                 var down: int = table[(i + 1) * cols + j]
                 var across: int = table[i * cols + j + 1]
-                table[i * cols + j] = if (down >= across) down else across
+                table[i * cols + j] = if ((down >= across)^) down else across
             }
             j = j - 1
         }
@@ -82,7 +82,7 @@ pn main() {
     }
     // 748544 is the checksum every engine port must reproduce; a FAIL marker
     // makes the runner exclude a wrong result instead of timing it (T21-5)
-    if (checksum == 748544) {
+    if ((checksum == 748544)^) {
         print("fast_diff: CHECKSUM:" ++ checksum ++ "\n")
     } else {
         print("fast_diff: FAIL checksum=" ++ checksum ++ "\n")

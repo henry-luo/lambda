@@ -55,7 +55,7 @@ edit <todo_list> state new_text: "" {
 }
 on click(evt) {
   if (evt.target_class == "add-btn") {
-    if (new_text != "") {
+    if ((new_text != "")^) {
       let next_id = len(~.items) + 1
       let new_item = {id: next_id, text: new_text, done: false}
       ~.items = ~.items ++ [new_item]
@@ -80,7 +80,7 @@ on keydown(evt) {
     return 'prevent-default'
   }
   if (evt.key == "Enter") {
-    if (new_text != "") {
+    if ((new_text != "")^) {
       let next_id = len(~.items) + 1
       let new_item = {id: next_id, text: new_text, done: false}
       ~.items = ~.items ++ [new_item]

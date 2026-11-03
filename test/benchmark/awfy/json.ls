@@ -129,20 +129,20 @@ pn jv_arr_size(arr) {
 
 pn jv_obj_add(var obj, name, value) {
     var idx = vec_size(obj.names)
-    hit_add(obj.ht, name, idx)
-    vec_add(obj.names, name)
+    hit_add(obj.ht, name, idx)^
+    vec_add(obj.names, name)^
     vec_add(obj.vals, value)
 }
 
-fn jv_obj_get(obj, name) {
+fn jv_obj_get(obj, name) any^ {
     var ht = (obj.ht)
     var idx = hit_get(ht, name)
-    if (idx == -1) {
+    if ((idx == -1)^) {
         return null
     }
     var names = (obj.names)
     var n = vec_at(names, idx)
-    if (n == name) {
+    if ((n == name)^) {
         var vals = (obj.vals)
         var r = vec_at(vals, idx)
         return r
@@ -188,7 +188,7 @@ pn p_read(var p) {
     p.idx = idx
     var inp = (p.inp)
     var inplen = len(inp)
-    if (idx < inplen) {
+    if ((idx < inplen)^) {
         var ch = inp[idx]
         p.cur = ch
     }
@@ -273,7 +273,7 @@ fn p_is_ws(p) {
 pn p_skip_ws(var p) {
     var ws = p_is_ws(p)
     while (ws == 1) {
-        p_read(p)
+        p_read(p)^
         ws = p_is_ws(p)
     }
 }
@@ -313,32 +313,32 @@ fn p_is_end(p) {
 // --- Read functions ---
 
 pn p_read_null(var p) {
-    p_read(p)
-    p_read(p)
-    p_read(p)
+    p_read(p)^
+    p_read(p)^
+    p_read(p)^
     p_read(p)
     return jv_null()
 }
 
 pn p_read_true(var p) {
-    p_read(p)
-    p_read(p)
-    p_read(p)
+    p_read(p)^
+    p_read(p)^
+    p_read(p)^
     p_read(p)
     return jv_true()
 }
 
 pn p_read_false(var p) {
-    p_read(p)
-    p_read(p)
-    p_read(p)
-    p_read(p)
+    p_read(p)^
+    p_read(p)^
+    p_read(p)^
+    p_read(p)^
     p_read(p)
     return jv_false()
 }
 
 pn p_read_escape(var p) {
-    p_read(p)
+    p_read(p)^
     var cur = (p.cur)
     var cbf = (p.cbf)
     var cb = (p.cb)
@@ -392,17 +392,17 @@ pn p_read_escape(var p) {
 }
 
 pn p_read_string_internal(var p) {
-    p_read(p)
+    p_read(p)^
     p_start_capture(p)
     var cur = (p.cur)
     while (cur != "\"") {
         if (cur == "\\") {
             p_pause_capture(p)
-            p_read_escape(p)
+            p_read_escape(p)^
             p_start_capture(p)
         }
         if (cur != "\\") {
-            p_read(p)
+            p_read(p)^
         }
         cur = (p.cur)
     }
@@ -470,7 +470,7 @@ pn p_read_number(var p) {
 }
 
 pn p_read_array(var p) {
-    p_read(p)
+    p_read(p)^
     var arr = jv_array()
     p_skip_ws(p)
     var rc = p_read_char(p, "]")
@@ -479,10 +479,10 @@ pn p_read_array(var p) {
     }
     var cont = 1
     while (cont == 1) {
-        p_skip_ws(p)
+        p_skip_ws(p)^
         var val = p_read_value(p)
-        jv_arr_add(arr, val)
-        p_skip_ws(p)
+        jv_arr_add(arr, val)^
+        p_skip_ws(p)^
         cont = p_read_char(p, ",")
     }
     var rc2 = p_read_char(p, "]")
@@ -490,7 +490,7 @@ pn p_read_array(var p) {
 }
 
 pn p_read_object(var p) {
-    p_read(p)
+    p_read(p)^
     var obj = jv_object()
     p_skip_ws(p)
     var rc = p_read_char(p, "}")
@@ -499,14 +499,14 @@ pn p_read_object(var p) {
     }
     var cont = 1
     while (cont == 1) {
-        p_skip_ws(p)
+        p_skip_ws(p)^
         var name = p_read_string_internal(p)
-        p_skip_ws(p)
+        p_skip_ws(p)^
         var rc2 = p_read_char(p, ":")
-        p_skip_ws(p)
+        p_skip_ws(p)^
         var val = p_read_value(p)
-        jv_obj_add(obj, name, val)
-        p_skip_ws(p)
+        jv_obj_add(obj, name, val)^
+        p_skip_ws(p)^
         cont = p_read_char(p, ",")
     }
     var rc3 = p_read_char(p, "}")
@@ -539,7 +539,7 @@ pn p_read_value(var p) {
 
 pn parse_json(input) {
     var p = p_new(input)
-    p_read(p)
+    p_read(p)^
     p_skip_ws(p)
     var result = p_read_value(p)
     return result
@@ -552,37 +552,37 @@ pn benchmark() {
     var parse_result = parse_json(RAP)
     // Parsing can fail; do not pass its error value into the JSON object helpers.
     var result = match parse_result { case error: null case map: parse_result }
-    if (result == null) {
+    if ((result == null)^) {
         print("FAIL: parse error\n")
         return 0
     }
     var isobj = jv_is_object(result)
-    if (isobj != 1) {
+    if ((isobj != 1)^) {
         print("FAIL: not object\n")
         return 0
     }
     var head = jv_obj_get(result, "head")
-    if (head == null) {
+    if ((head == null)^) {
         print("FAIL: no head\n")
         return 0
     }
     var hobj = jv_is_object(head)
-    if (hobj != 1) {
+    if ((hobj != 1)^) {
         print("FAIL: head not object\n")
         return 0
     }
     var ops = jv_obj_get(result, "operations")
-    if (ops == null) {
+    if ((ops == null)^) {
         print("FAIL: no operations\n")
         return 0
     }
     var oarr = jv_is_array(ops)
-    if (oarr != 1) {
+    if ((oarr != 1)^) {
         print("FAIL: operations not array\n")
         return 0
     }
     var opsz = jv_arr_size(ops)
-    if (opsz == 156) {
+    if ((opsz == 156)^) {
         return 1
     }
     print("FAIL: operations size=")
@@ -595,10 +595,10 @@ pn main() {
     var __t0 = clock()
     var result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("Json: PASS\n")
     }
-    if (result == 0) {
+    if ((result == 0)^) {
         print("Json: FAIL\n")
     }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

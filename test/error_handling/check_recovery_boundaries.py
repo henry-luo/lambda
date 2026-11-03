@@ -20,6 +20,8 @@ VENDORED_PARTS = {"mir", "tree-sitter", "tree-sitter-lambda",
 # These files contain the closed S7.11 execution/transaction boundary or the
 # generated synchronous fault-only wrapper. No language frontend belongs here.
 RECOVERY_CALL_ALLOWLIST = {
+    # activation roots/base-stack calls and the extracted script execution edge.
+    "lambda/runtime/activation.cpp",
     "lambda/runtime/concurrency.cpp",
     "lambda/runtime/interp.cpp",
     "lambda/runtime/lambda-eval.cpp",
@@ -27,6 +29,7 @@ RECOVERY_CALL_ALLOWLIST = {
     "lambda/runtime/recovery_frame.c",
     "lambda/runtime/recovery_frame.h",
     "lambda/runtime/runner.cpp",
+    "lambda/runtime/script_run.cpp",
     "lambda/runtime/sys_func_registry.c",
     "lambda/runtime/transpile-mir.cpp",
     "lambda/js/js_mir_entrypoints_require.cpp",

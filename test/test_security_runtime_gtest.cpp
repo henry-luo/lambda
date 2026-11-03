@@ -551,15 +551,15 @@ TEST_P(SecurityRuntimeTest, InlineParsingCarriesResourceAuthority) {
     seed("part.tex", "SAFE");
     seed("outside/part.tex", "FORBIDDEN", true);
     seed("entry.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
-        "{type: 'tex', base: \"@ROOT@\"})^.text, \"SAFE\")\n");
+        "{type: 'tex', base: \"@ROOT@\"})^.text, \"SAFE\")^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     seed("relative.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
-        "{type: 'tex', base: \".\"})^.text, \"SAFE\")\n");
+        "{type: 'tex', base: \".\"})^.text, \"SAFE\")^\n");
     result = load_file("relative.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     seed("denied.ls", "contains(parse(\"\\\\input{part}\\\\end\", "
-        "{type: 'tex', base: \"@ROOT@/../outside\"})^.text, \"FORBIDDEN\")\n");
+        "{type: 'tex', base: \"@ROOT@/../outside\"})^.text, \"FORBIDDEN\")^\n");
     result = load_file("denied.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_FALSE(result->root.bool_val);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
@@ -602,7 +602,7 @@ TEST_P(SecurityRuntimeTest, CapturedMemberParsingCannotRetainExternalResourceAut
 
 TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     seed("docs/doc.tex", "\\input{part}\\end"); seed("docs/part.tex", "SAFE");
-    seed("entry.ls", "contains(input(\"@ROOT@/docs/doc.tex\", 'tex')^.text, \"SAFE\")\n");
+    seed("entry.ls", "contains(input(\"@ROOT@/docs/doc.tex\", 'tex')^.text, \"SAFE\")^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_TRUE(result->root.bool_val);
     EXPECT_GE(atomic_load32(&capture.data_reads), 2);
@@ -611,7 +611,7 @@ TEST_P(SecurityRuntimeTest, TexLocalIncludesUseTheSameDataGrant) {
     char* linked = file_path_join(directory, "docs/linked.tex");
     ASSERT_EQ(symlink(outside, linked), 0); mem_free(outside); mem_free(linked);
     seed("docs/linked-doc.tex", "\\input{linked}\\end");
-    seed("denied.ls", "contains(input(\"@ROOT@/docs/linked-doc.tex\", 'tex')^.text, \"FORBIDDEN\")\n");
+    seed("denied.ls", "contains(input(\"@ROOT@/docs/linked-doc.tex\", 'tex')^.text, \"FORBIDDEN\")^\n");
     result = load_file("denied.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_BOOL); EXPECT_FALSE(result->root.bool_val);
     EXPECT_GE(atomic_load32(&capture.denied_reads), 1);
@@ -674,18 +674,18 @@ TEST_P(SecurityRuntimeTest, DocumentPrefixProbesNeedReadRatherThanMetadata) {
 
 TEST_P(SecurityRuntimeTest, RecursiveWalksAndForcingUseEnumerationWithoutReadingFiles) {
     seed("tree/a.json", "{\"name\":\"A\"}"); seed("tree/sub/b.json", "{\"name\":\"B\"}");
-    seed("entry.ls", "len((@PATH@[\"tree\"]).**#)\n");
+    seed("entry.ls", "len((@PATH@[\"tree\"]).**#)^\n");
     Input* result = load_file(); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_INT); EXPECT_EQ(it2i(result->root), 4);
-    seed("iteration.ls", "len([for (p in (@PATH@[\"tree\"]).**) p])\n");
+    seed("iteration.ls", "len([for (p in (@PATH@[\"tree\"]).**) p])^\n");
     result = load_file("iteration.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_INT); EXPECT_EQ(it2i(result->root), 4);
     EXPECT_EQ(atomic_load32(&capture.enumerations), 2); // the context-owned snapshot is reused
     EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
     ASSERT_TRUE(security_file_broker_restrict(broker, SECURITY_LOAD_SOURCE | SECURITY_READ));
-    seed("denied.ls", "len((@PATH@[\"tree\"]).**#)\n");
+    seed("denied.ls", "len((@PATH@[\"tree\"]).**#)^\n");
     expect_failed(load_file("denied.ls"));
-    seed("denied-iteration.ls", "len([for (p in (@PATH@[\"tree\"]).**) p])\n");
+    seed("denied-iteration.ls", "len([for (p in (@PATH@[\"tree\"]).**) p])^\n");
     result = load_file("denied-iteration.ls"); ASSERT_NE(result, nullptr);
     ASSERT_EQ(get_type_id(result->root), LMD_TYPE_INT); EXPECT_EQ(it2i(result->root), 0);
     EXPECT_GT(atomic_load32(&capture.enumerations), 2); // refusal is rechecked, not served from the old snapshot

@@ -34,7 +34,7 @@ pub fn plan(spec, viewport = null, snapshot = null) {
     }
 }
 
-pub fn window_action(spec, snapshot, field, fraction) {
+pub fn window_action(spec, snapshot, field, fraction) any^ {
     let overview=plan(spec,null,snapshot);
     if (overview is error) overview else if (not util.finite_number(fraction) or not contains(["from","to","center"],field))
         c.fail("navigator","expected a finite position and from, to, or center handle")

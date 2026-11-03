@@ -20,7 +20,7 @@ pub let levels = [
     {key:"gamma",label:"Midtone gamma",value:1,scale:1},
     {key:"output_black",label:"Output black (0–255)",value:0,scale:255},
     {key:"output_white",label:"Output white (0–255)",value:1,scale:255}]
-pub fn points(curves,channel) => model.value(curves[channel],identity)
+pub fn points(curves,channel) any^ => model.value(curves[channel],identity)
 pub fn checked(points) any^ {
     if (not (points is array) or len(points)<2 or len(points)>32 or
         not all([for (p in points) p is array and len(p)==2 and all([for (n in p) model.finite(n) and n>=0 and n<=1])]))
@@ -52,7 +52,7 @@ pub fn insert(curves,channel,point) any^ {
         let existing = [for (i,p in knots where p[0] == x) i][0]
         let added = if (existing != null) move(curves,channel,existing,point)^
             else with_points(curves,channel,sort([*knots,[x,max(0,min(1,point.y))]],(p) => p[0]))^
-        let index = [for (i,p in points(added,channel) where p[0] == x) i][0];
+        let index = [for (i,p in ((points(added,channel)) ^ { [] }) where p[0] == x) i][0];
         {curves:added,index:index}
     }
 }

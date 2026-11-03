@@ -17,7 +17,7 @@ pub fn pages(pdf) {
     if (pdf and pdf.pages) pdf.pages else []
 }
 
-pub fn page_count(pdf) {
+pub fn page_count(pdf) any^ {
     len(pages(pdf))
 }
 
@@ -55,7 +55,7 @@ fn find_obj(pdf, num) {
 // Resolve an item that may be an indirect_ref Map. Returns the referenced
 // object's `content` (or the content's `dictionary` for stream objects),
 // or the original item if it isn't a ref.
-pub fn deref(pdf, it) {
+pub fn deref(pdf, it) any^ {
     if (it and it is map and it.type == "indirect_ref") {
         let obj = find_obj(pdf, it.object_num);
         if (obj != null) { obj.content } else { null }
@@ -79,7 +79,7 @@ fn _stream_bytes(s) {
 //   - an array of indirect_refs to streams (concatenated with newlines)
 //   - inline (rare)
 // Returns "" when no content is present.
-pub fn page_content_bytes(pdf, page) {
+pub fn page_content_bytes(pdf, page) any^ {
     let cref = if (page and page.dict) page.dict.Contents else null;
     if cref == null { "" }
     else {
@@ -98,7 +98,7 @@ pub fn page_content_bytes(pdf, page) {
 
 // Page resources dict, with indirect-ref resolved one level down.
 // Returns {} when absent.
-pub fn page_resources(pdf, page) {
+pub fn page_resources(pdf, page) any^ {
     let r = if (page and page.dict and page.dict.Resources) page.dict.Resources
             else (if (page and page.resources) page.resources else null);
     if r == null { {} }
@@ -107,7 +107,7 @@ pub fn page_resources(pdf, page) {
 
 // Look up a font dict in the page's /Resources/Font/<name>.
 // Returns null when the name is not declared.
-pub fn page_font(pdf, page, font_name: string) {
+pub fn page_font(pdf, page, font_name: string) any^ {
     let res = page_resources(pdf, page);
     let fonts = if (res and res.Font) deref(pdf, res.Font) else null;
     if fonts == null { null }

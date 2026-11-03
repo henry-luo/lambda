@@ -2,7 +2,7 @@ import transform: lambda.chart.transform
 import vega: lambda.chart.vega
 import chart: lambda.chart.chart
 
-fn process_step(data, step) => transform.apply_transforms(data, [step])
+fn process_step(data, step) any^ => transform.apply_transforms(data, [step])
 let rows = [{g: "a", k: "b", v: 2}, {g: "b", k: "a", v: 5}, {g: "a", k: "a", v: 3}, {g: "a", k: "b", v: 4}];
 let joined = process_step(rows, {type: "joinaggregate", groupby: ["g"], joinaggregate: [{op: "sum", field: "v", as: "total"}]});
 let global = process_step(rows, {type: "joinaggregate", joinaggregate: [{op: "count", as: "count"}]});

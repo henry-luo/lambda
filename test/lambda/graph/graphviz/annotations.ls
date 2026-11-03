@@ -4,7 +4,7 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn annotations(value, owner_kind, owner_id) => [for (entry in model.annotations(value)
@@ -29,7 +29,7 @@ fn box(x, y, width, height) =>
 fn overlap(a, b) =>
   a.left < b.right and a.right > b.left and a.top < b.bottom and a.bottom > b.top
 
-fn label_box(result, spec) {
+fn label_box(result, spec) any^ {
   let value = placement_item(result, spec.index);
   box(value.x, value.y, spec.width, spec.height)
 }
@@ -78,16 +78,16 @@ let label_specs = [
   {index: 7, width: 32, height: 16, owner: edge.id}
 ]
 let label_boxes = [for (spec in label_specs) label_box(measured, spec)]
-let node_boxes = [for (entry in measured.nodes)
+let node_boxes = [for (entry in ((measured.nodes) ^ { [] }))
   box(entry.x - entry.width / 2.0, entry.y - entry.height / 2.0,
     entry.width, entry.height)]
-let route_boxes = [for (routed in measured.edges, i in 1 to (len(routed.points) - 1))
+let route_boxes = [for (routed in ((measured.edges) ^ { [] }), i in ((1 to (len(routed.points) - 1)) ^ { [] }))
   {owner: routed.id, box: segment_box(routed.points[i - 1], routed.points[i])}]
 
 {
   valid: normalized.valid,
   canonical: [annotations(graph, "node", node.id), annotations(graph, "edge", edge.id)],
-  html: [for (entry in children(html, "annotation")) [entry["data-owner-kind"],
+  html: [for (entry in ((children(html, "annotation")) ^ { [] })) [entry["data-owner-kind"],
     entry["data-owner-id"], entry["data-annotation-kind"], entry["data-label-format"],
     entry["data-font-name"], entry["data-font-size"], entry["data-font-color"],
     contains(string(entry.style), "font-family:" ++ string(entry["data-font-name"])),

@@ -2,7 +2,7 @@
 // Takeuchi function - tak(18, 12, 6) = 7
 // Adapted from r7rs-benchmarks/src/tak.scm (scaled down for Lambda JIT)
 
-fn tak(x, y, z) {
+fn tak(x, y, z) any^ {
     if (y >= x) {
         return z
     }
@@ -12,7 +12,7 @@ fn tak(x, y, z) {
     return tak(a, b, c)
 }
 
-fn benchmark() {
+fn benchmark() any^ {
     var result = tak(18, 12, 6)
     return result
 }
@@ -21,7 +21,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 7) {
+    if ((result == 7)^) {
         print("tak: PASS\n")
     } else {
         print("tak: FAIL result=")

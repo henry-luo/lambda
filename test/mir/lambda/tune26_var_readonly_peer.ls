@@ -10,10 +10,10 @@ pn tune26_var_readonly_peer(var dst: float[], src: float[], n: int) any {
 }
 
 pn main() {
-    var dst: float[] = fill(4, 1.0)
+    var dst: float[] = fill(4, 1.0)^
     let snapshot = dst
     let src: float[] = [1.0, 2.0, 3.0, 4.0]
-    tune26_var_readonly_peer(dst, src, 4)
+    tune26_var_readonly_peer(dst, src, 4)^
     print(dst[2]); print(" ")
     print(snapshot[2]); print(" ")
     print(src[2]); print("\n")

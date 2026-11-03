@@ -39,7 +39,7 @@ This proposal adds three capabilities:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| **Schema syntax** | **Explicit binary type `type A : binary & {…} { … }`; optional trailing `& {…}` maps carry root and field layout metadata.** This exception is confined to binary declaration slots (S11.5.1v2); elsewhere `&` remains intersection and `that` remains a predicate (S10.1.1v4). | No new keyword; the map is ordinary Lambda map syntax, compiled separately from the logical type and constraints. |
+| **Schema syntax** | **Explicit binary type `type A : binary & {…} { … }`; optional trailing `& {…}` maps carry root and field layout metadata.** This exception is confined to binary declaration slots (S11.5.1v2); elsewhere `&` remains intersection and `that` remains a predicate (S10.1.1v5). | No new keyword; the map is ordinary Lambda map syntax, compiled separately from the logical type and constraints. |
 | **Endianness** | **Declared once at the schema root (type-level annotation map), inherited by all nested fields, overridable per field.** Mirrors Kaitai's `meta/endian`. | Matches real formats (almost always single-endian); avoids per-field verbosity while staying explicit where it matters. |
 | **Element shape** | Fields → **element attributes** for scalars, nested structs, and **any array with a given/encoded count** (homogeneous or heterogeneous). Fields → **child nodes** only for **sentinel-/EOS-terminated repeating content** (no on-wire count). | Counted data is a value; only open-ended chunked streams are document "body". Preserves declared order and `rec.field` access. |
 | **Velmt decoding** | **Lazy + zero-copy.** `Velmt` holds `{ buffer, schema, base_offset }`; scalar/array fields decode on access; sub-structs and `binary`/array slices are zero-copy sub-views into the parent buffer. | Handles multi-GB / mmap'd inputs; depends on sub-binary slicing from [Lambda_Type_Binary.md §6.1]. |
@@ -80,7 +80,7 @@ type AnimalRecord : binary & {endian: big} {  // ': binary' = explicit binary ty
 ```
 
 - **`type A : binary { … }`** marks an explicit binary (physical-layout) type, so tools/validator distinguish it from a logical type. It is still structurally "a Lambda `type`."
-- **Field annotations are a trailing `& {…}` Lambda map** directly after a binary field's logical type. This is scoped to `: binary` declarations, not a general type intersection with a map pattern (S11.5.1v2, S10.1.1v4). `that` retains its predicate meaning; it never carries physical metadata. Planned keys include `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if`; the implemented subset is listed in §10. Array/blob length remains the bracket expression `T[len]` in the broader proposal.
+- **Field annotations are a trailing `& {…}` Lambda map** directly after a binary field's logical type. This is scoped to `: binary` declarations, not a general type intersection with a map pattern (S11.5.1v2, S10.1.1v5). `that` retains its predicate meaning; it never carries physical metadata. Planned keys include `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if`; the implemented subset is listed in §10. Array/blob length remains the bracket expression `T[len]` in the broader proposal.
 - The **type-level annotation map** (`& {endian: big}` right after `: binary`) sets schema-wide defaults — chiefly `endian` — inherited by all fields and by nested binary types unless they declare their own.
 - Field types are Lambda's existing fixed-width numerics (`uint8`, `int32`, `float64`, …) — already needed by [Lambda_Type_Binary.md §5.3].
 - `T[N]` = fixed-length array of `N` `T`. `uint8[16]` decodes to a zero-copy `binary` sub-view (raw bytes); other element types decode to a typed array view.
@@ -259,7 +259,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 | File | Change |
 |---|---|
-| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **binary-only trailing `& {…}` metadata at a field or after `: binary`**; preserve ordinary intersections and predicate constraints (S10.1.1v4, S11.5.1v2); array-type `T[N]`/`T[field]`. Then `make generate-grammar`. |
+| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **binary-only trailing `& {…}` metadata at a field or after `: binary`**; preserve ordinary intersections and predicate constraints (S10.1.1v5, S11.5.1v2); array-type `T[N]`/`T[field]`. Then `make generate-grammar`. |
 | `lambda/lambda-data.hpp` | Add `BinarySchema`, `BinFieldDesc`, `LMD_TYPE_BINARY_SCHEMA`. |
 | `lambda/lambda.hpp` / `lambda.h` | Add `VElmt`, `VElmtVtable`; reuse `LMD_TYPE_ELEMENT` with an `IS_VIRTUAL` container flag (parallel to `VMap`). |
 | `lambda/build_ast.cpp` | Lower `type … : binary` decls + annotation maps to `BinarySchema`; resolve inherited endianness; precompute fixed-stride offset tables; classify each field as attribute- vs child-mapped. |
@@ -288,7 +288,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 **All folded into the proposal:**
 
-1. **Syntax (USER, revised 2026-10-15).** Explicit `type A : binary & {…} { … }`; per-field non-length layout via trailing `& {…}` metadata. This exception applies directly at binary root and field slots (S11.5.1v2). `&` elsewhere remains intersection and `that` remains a predicate (S10.1.1v4). The initial proposal to overload `that` is superseded in Appendix S.
+1. **Syntax (USER, revised 2026-10-15).** Explicit `type A : binary & {…} { … }`; per-field non-length layout via trailing `& {…}` metadata. This exception applies directly at binary root and field slots (S11.5.1v2). `&` elsewhere remains intersection and `that` remains a predicate (S10.1.1v5). The initial proposal to overload `that` is superseded in Appendix S.
 2. **Array length.** Lives in type position as `T[expr]`; `expr` may be a literal, a const, or the **name of a previously-decoded field** (`int8[len]`). No annotation key, no synthetic counter — a length field exists only if the wire format has one.
 3. **Element shape.** Counted/sized content (scalars, nested structs, `T[N]`, `T[prev_field]`) → **attributes**. Only sentinel-/EOS-terminated content with no on-wire count (`until` / `until_eos`) → **child nodes**.
 4. **Enums.** Ordinary Lambda type declaration `type Name { label: value, … }`, used directly as a field type — decode int → label, encode label → int.
@@ -396,7 +396,7 @@ Superseded by the user's 2026-10-15 selection of `& {…}` at binary declaration
 slots (S11.5.1v2, S11.5.3v3). `that` keeps its predicate role.
 
 ~~S10.1.1v3 described `|`, `&` and `!` as type operators, and only that,
-everywhere.~~ S10.1.1v4 preserves that algebra outside the explicit binary
+everywhere.~~ S10.1.1v5 preserves that algebra outside the explicit binary
 metadata slots and records the scoped exception. The exception avoids making
 a scalar layout such as `u32 & {offset: 4}` an impossible scalar/map
 intersection. No new metadata keyword or script-visible pointer type is added.

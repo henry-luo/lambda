@@ -15,7 +15,7 @@ pn classify_literal(values: int[], index: int) int {
 }
 
 pn main() {
-    var values: int[] = fill(2, 0)
+    var values: int[] = fill(2, 0)^
     values[1] = 2
     print(classify_tune22(values, 1, 1)); print(" ")
     print(classify_tune22(values, 8, 9)); print(" ")

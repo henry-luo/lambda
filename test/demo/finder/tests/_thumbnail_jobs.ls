@@ -22,7 +22,7 @@ on click(evt) {
         let stale = radiant.image_job(root,{action:"start",channel:"thumbnail",path:PATH,width:80,height:60})^
         radiant.image_job(root,{action:"cancel",channel:"thumbnail"})^
         let abandoned = radiant.image_job(root,{action:"poll",channel:"thumbnail",token:stale})^
-        dom.set_attribute(root,"data-stale",string(abandoned == null))
+        dom.set_attribute(root,"data-stale",string(abandoned == null)^)
     }
     let job = radiant.image_job(root,{action:"start",channel:"thumbnail",path:path,width:80,height:60,
         canvas_bytes:if (action == "budget") 33554432 else 0})^

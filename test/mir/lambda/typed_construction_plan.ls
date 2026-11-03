@@ -11,7 +11,7 @@ pn build(value: int, next: Node?) Node {
     return result
 }
 
-pn reject(var trace: int[]) Node {
+pn reject(var trace: int[]) Node^ {
     var result: Node = {value: bump(trace, "bad"), next: bump(trace, null)}
     trace[0] = 99
     return result
@@ -24,7 +24,7 @@ pn update(var node: Node) {
 pn main() {
     var trace: int[] = [0]
     var leaf: Node = {value: bump(trace, 5.0), next: bump(trace, null)}
-    var node = build(2, leaf)
+    var node = build(2, leaf)^
     var snapshot = node
     update(node)
     print([trace[0], node.value, snapshot.value, node.next.value])

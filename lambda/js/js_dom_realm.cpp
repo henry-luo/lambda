@@ -23,6 +23,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../dom/dom.h"
+#include "../dom/dom_websocket.h"
 #include "../dom/dom_core.h"
 #include "../dom/dom_engine.h"
 #include "../dom/dom_canvas.h"
@@ -999,7 +1000,10 @@ static Item _media_field(Item callee, Item receiver, Item* args, int argc, uint6
             return js_throw_value(_media_exception("IndexSizeError", "Volume must be within [0, 1]"));
         if (!strcmp(field.command, "seek") && number < 0) value.set((Item){.item = i2it(0)});
     }
-    JS_RETURN_IF_ERROR(dom_engine_media_command(owner.get(), js_name_item(field.command), value.get()));
+    info.set(dom_engine_media_command(owner.get(), js_name_item(field.command), value.get()));
+    JS_RETURN_IF_ERROR(info.get());
+    if (info.get().item == ITEM_FALSE && (!strcmp(field.command, "volume") || !strcmp(field.command, "muted")))
+        return js_throw_value(_media_exception("NotAllowedError", "Audible media requires document activation"));
     return make_js_undefined();
 }
 
@@ -1143,6 +1147,7 @@ extern "C" void dom_install_collection_globals(void) {
     }
     js_dom_install_interface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
+    js_websocket_install(global, _iface_proto(global, "EventTarget"));
     dom_publish_value_constructor(global, "BroadcastChannel",
         js_new_native_body_constructor(broadcast_call, broadcast_construct, 1), true);
     _link_iface_proto(global, "BroadcastChannel", "EventTarget");

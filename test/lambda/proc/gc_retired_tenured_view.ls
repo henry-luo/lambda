@@ -22,6 +22,6 @@ pn walk(v, var out) {
 pn main() {
     let t = tree(14)
     var leaves = []
-    walk(t, leaves)
+    walk(t, leaves)^
     print("leaves=" ++ string(len(leaves)) ++ " sum=" ++ string(sum(leaves)) ++ "\n")
 }

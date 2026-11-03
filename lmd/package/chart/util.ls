@@ -16,7 +16,7 @@ pub let TAU = 6.283185307179586
 
 // round a number to a "nice" value (1, 2, 5, 10, 20, 50, ...)
 // used for axis tick spacing and domain rounding
-pub fn nice_num(val, rounding) {
+pub fn nice_num(val, rounding) any^ {
     let exponent = floor(math.log10(abs(float(val))));
     let fraction = float(val) / (10.0 ** exponent);
     let nice_fraction = if (rounding)
@@ -37,7 +37,7 @@ pub fn nice_num(val, rounding) {
 // ============================================================
 
 // generate nice tick values for a given domain [lo, hi]
-pub fn nice_ticks(dlo, dhi, count: int) {
+pub fn nice_ticks(dlo, dhi, count: int) any^ {
     let range_span = float(dhi) - float(dlo);
     if (range_span < 0.0) reverse(nice_ticks(dhi, dlo, count))
     else if range_span == 0.0 { [float(dlo)] }
@@ -47,14 +47,14 @@ pub fn nice_ticks(dlo, dhi, count: int) {
         let nice_lo = floor(float(dlo) / step) * step;
         let nice_hi = ceil(float(dhi) / step) * step;
         let n = int((nice_hi - nice_lo) / step) + 1;
-        [for (i in 0 to (n - 1))
+        [for (i in ((0 to (n - 1)) ^ { [] }))
             (let v = nice_lo + float(i) * step,
             round(v * 1e10) / 1e10)]
     }
 }
 
 // extend domain to nice boundaries
-pub fn nice_domain(dlo, dhi) {
+pub fn nice_domain(dlo, dhi) any^ {
     let lo_f = float(dlo);
     let hi_f = float(dhi);
     let range_span = hi_f - lo_f;
@@ -76,15 +76,15 @@ pub fn nice_domain(dlo, dhi) {
 // Numeric helpers
 // ============================================================
 
-pub fn finite_number(value) => numbers.finite_number(value)
+pub fn finite_number(value) any^ => numbers.finite_number(value)
 
 // linear interpolation
-pub fn lerp(a, b, t) {
+pub fn lerp(a, b, t) any^ {
     float(a) + (float(b) - float(a)) * float(t)
 }
 
 // inverse lerp: given a value in [a, b], return t in [0, 1]
-pub fn inv_lerp(a, b, v) {
+pub fn inv_lerp(a, b, v) any^ {
     let af = float(a);
     let bf = float(b);
     let vf = float(v);
@@ -93,7 +93,7 @@ pub fn inv_lerp(a, b, v) {
 }
 
 // clamp value to [lo, hi]
-pub fn clamp_val(v, lo, hi) {
+pub fn clamp_val(v, lo, hi) any^ {
     let vf = float(v);
     let lof = float(lo);
     let hif = float(hi);
@@ -103,23 +103,23 @@ pub fn clamp_val(v, lo, hi) {
 }
 
 // convert degrees to radians
-pub fn deg_to_rad(deg) {
+pub fn deg_to_rad(deg) any^ {
     float(deg) * PI / 180.0
 }
 
 // convert radians to degrees
-pub fn rad_to_deg(rad) {
+pub fn rad_to_deg(rad) any^ {
     float(rad) * 180.0 / PI
 }
 
 // format a number for display: remove trailing zeros from floats
-pub fn fmt_num(value) string {
+pub fn fmt_num(value) string^ {
     if (value is int) string(value)
     else string(round(float(value) * 1000000.0) / 1000000.0)
 }
 
 // One formatter keeps guide, text, and tooltip labels consistent.
-pub fn format_value(value, pattern = null, dtype = null, timezone = 0) {
+pub fn format_value(value, pattern = null, dtype = null, timezone = 0) any^ {
     if (pattern == null) string(value)
     else if (dtype == "temporal") zones.format_timestamp(float(datetime(value).unix), pattern,
         if (timezone != null) timezone else 0)
@@ -138,14 +138,14 @@ fn has_val(arr, val, n) {
 }
 
 // unique helper: build result array recursively
-fn unique_build(arr, i, result) {
+fn unique_build(arr, i, result) any^ {
     if (i >= len(arr)) result
     else if (has_val(result, arr[i], len(result))) unique_build(arr, i + 1, result)
     else unique_build(arr, i + 1, [*result, arr[i]])
 }
 
 // replacement for builtin unique() which is broken for strings
-pub fn unique_vals(arr) {
+pub fn unique_vals(arr) any^ {
     unique_build(arr, 0, [])
 }
 
@@ -166,12 +166,12 @@ pub fn number_sequence(first, stop, step = 1) array | error {
     else if ((stop - first) / step <= 0) []
     else {
         let count = int(ceil((stop - first) / step));
-        if (count is error) count else [for (index in 0 to (count - 1)) first + index * step]
+        if (count is error) count else [for (index in ((0 to (count - 1)) ^ { [] })) first + index * step]
     }
 }
 
 // extract unique values from an array by a key function
-pub fn unique_by(arr, key_fn) {
+pub fn unique_by(arr, key_fn) any^ {
     unique_vals(arr |> key_fn(~))
 }
 
@@ -194,14 +194,14 @@ pub fn field_extent(arr, field: string) {
 }
 
 // get unique values of a field
-pub fn field_values(arr, field: string) {
+pub fn field_values(arr, field: string) any^ {
     unique_vals(arr |> ~[field])
 }
 
 // Reversible value identity avoids collisions across independent SVG resources and generated views.
-pub fn resource_key(value) {
+pub fn resource_key(value) any^ {
     let serialized=format(value,{type:"json",compact:true});
     let encoded=if (serialized is error) serialized else format(binary(serialized),'json');
     if (encoded is error) encoded else replace(replace(replace(slice(encoded,1,len(encoded)-1),"+","-"),"/","_"),"=","")
 }
-pub fn binding_key(value) => replace(replace(resource_key(value),"_","_u"),"-","_h")
+pub fn binding_key(value) any^ => replace(replace(resource_key(value),"_","_u"),"-","_h")

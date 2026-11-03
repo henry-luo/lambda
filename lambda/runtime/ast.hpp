@@ -170,6 +170,10 @@ static inline AstCallNode* ast_pipe_sys_call(AstNode* node, const SysFuncInfo** 
     return (AstCallNode*)right;
 }
 
+// Static admission may use closed expression evidence without removing reification.
+StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
+    Type* proof_type = NULL);
+
 static inline bool ast_block_may_carry_defect(AstNode* node,
     AstCallDefectPredicate call_may_defect, void* ctx, int depth);
 
@@ -187,6 +191,7 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
         return call_may_defect((AstCallNode*)node, ctx);
     case AST_NODE_IDENT: {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry && entry->admission_may_fail) return true;
         AstNode* binding = entry ? entry->node : NULL;
         return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
             !((AstDeclaratorNode*)binding)->declared_type &&
@@ -259,6 +264,16 @@ static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
 // scans (build_ast's and the MIR solve) ask this before their own gates.
 static inline bool ast_node_originates_defect(AstNode* node) {
     switch (node->node_type) {
+    case AST_NODE_UNARY: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        // S7.6.3v3: propagation can complete an otherwise scalar callable.
+        return unary->op == OPERATOR_PROPAGATE && unary->operand &&
+            lambda_type_accepts_error(unary->operand->type);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        return call->propagate && lambda_type_has_proven_error(call->propagated_error_type);
+    }
     case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_CRUD_STAM: case AST_NODE_OPEN_STAM:
     case AST_NODE_START: case AST_NODE_HANDLER_STAM:
@@ -287,6 +302,9 @@ static inline bool ast_call_may_force_virtual_content(AstCallNode* call) {
     return !base || base->type_id == LMD_TYPE_ANY ||
         is_element_family_type_id(base->type_id) || base->type_id == LMD_TYPE_PATH;
 }
+
+// Resolve the callee's conversion target independently of its outcome type.
+Type* ast_called_type_target(AstNode* function);
 
 // LR03-13 (S11.4.1v3, S7.7.1): a call through a declared function-type
 // contract -- a binding or parameter annotated `fn (...) T` -- checks its
@@ -665,6 +683,14 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)stmt;
             AstNode* callee_node = ast_unwrap_primary(call->function);
+            if (call->is_proc_method && callee_node &&
+                    callee_node->node_type == AST_NODE_MEMBER_EXPR) {
+                // S9.1.2: the implicit receiver is a mutable argument too.
+                // Ignoring it lets an alias borrow survive a method write.
+                AstIdentNode* receiver = ast_compound_root_ident(
+                    ((AstFieldNode*)callee_node)->object);
+                if (receiver && receiver->entry == root) return true;
+            }
             AstFuncNode* callee = NULL;
             if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* fn_ident = (AstIdentNode*)callee_node;
@@ -853,6 +879,8 @@ typedef struct AstListNode : AstArrayNode {
     uint16_t interp_proc_decl_count;
     uint16_t interp_proc_stam_count;
     bool interp_proc_scanned;
+    // Result sequencing belongs to the enclosing callable, not branch scope.
+    bool procedural_results;
 } AstListNode;
 
 static inline bool ast_block_may_carry_defect(AstNode* node,
@@ -866,8 +894,7 @@ static inline bool ast_block_may_carry_defect(AstNode* node,
         for (; decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR; decl = decl->next) {
             AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
             if (named->declared_type && !lambda_type_accepts_error(named->declared_type) &&
-                    (lambda_static_boundary_relation(named->init ? named->init->type : NULL,
-                        named->declared_type, false) != STATIC_BOUNDARY_PROVEN ||
+                    (lambda_ast_boundary_relation(named->init, named->declared_type) != STATIC_BOUNDARY_PROVEN ||
                      ast_value_may_carry_defect(named->init, call_may_defect, ctx, depth + 1))) {
                 // S7.7.2: this block may complete with its declaration's error.
                 return true;
@@ -967,6 +994,7 @@ typedef struct AstViewNode : AstNode {
     AstNode* pattern;           // model pattern (type expression)
     AstNamedNode* param;        // optional parameters (linked list)
     AstNode* body;              // functional body
+    TypeFunc* signature;       // S12.1.3v2/S11.4.3: the view's return contract
     struct AstStateEntry* state; // optional state declarations (linked list)
     struct AstEventHandler* handler; // optional event handlers (linked list)
     NameScope* vars;            // scope for params and state
@@ -1396,6 +1424,8 @@ typedef struct Transpiler : Script {
     // closures; `(Script*)this` is valid only during construction.
     Script* script_owner;
     Runtime* runtime;
+    // CW24 candidates belong to this compilation, including late MIR checks.
+    NameEntry* place_copy_pending;
     // The lazy whole-script POC runs MIR Direct while the T0 AST index is
     // still needed by the active interpreter. Ordinary eager loading can
     // release this index after code generation; the POC must retain it.

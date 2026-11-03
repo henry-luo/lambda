@@ -1,14 +1,14 @@
 // S5.1.1–S5.1.2: a dynamic Item compared with a bool literal needs only
 // the bool tag and payload, including when the Item is null or an error.
-pn equals_true(x: any) bool {
+pn equals_true(x: any) bool^ {
     return x == true
 }
 
-pn differs_false(x: any) bool {
+pn differs_false(x: any) bool^ {
     return false != x
 }
 
-pn both_dynamic(x: any, y: any) bool {
+pn both_dynamic(x: any, y: any) bool^ {
     return x == y
 }
 

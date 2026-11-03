@@ -45,14 +45,14 @@ fn customizations(node) {
         let tag = string(name(node))
         let own = if (any([for (command in CUSTOMIZATION_COMMANDS) tag == command]))
             [node] else []
-        own ++ [for (child in node, found in customizations(child)) found]
+        own ++ [for (child in node, found in ((customizations(child)) ^ { [] })) found]
     }
 }
 
 // Select the CSL style for a document's biblatex options. Returns null when no
 // alias applies; otherwise the citeproc request, the biblatex style it replaces,
 // and the diagnostics that report the substitution and what CSL cannot follow.
-pub fn select(opts, ast, offset) {
+pub fn select(opts, ast, offset) any^ {
     let style_name = if (opts == null) null else requested_style(opts)
     let target = if (style_name == null) null else csl_style(style_name)
     if (target == null) null

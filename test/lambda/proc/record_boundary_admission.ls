@@ -8,7 +8,7 @@ let no_kids: Node[] = []
 
 fn leaf(kind: any, label: any) Node => {kind: kind, label: label, kids: no_kids, next: null}
 
-fn weight(n: Node?) int {
+fn weight(n: Node?) int^ {
     if (n == null) 0
     else n.kind + weight(n.next)
 }

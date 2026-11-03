@@ -13,14 +13,14 @@ let preserved = graph_style.parse(
 let class_graph = (input("test/lambda/graph/mermaid/class_metadata.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let class_html = transform.to_html(class_graph)
-let class_nodes = [for (child in content(class_html)
-  where string(name(child)) == "node") child]
+let class_nodes = [for (child in ((content(class_html)) ^ { [] })
+  where ((string(name(child)) == "node") ^ { false })) child]
 
 let metadata_graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let metadata_html = transform.to_html(metadata_graph)
-let metadata_edges = [for (child in content(metadata_html)
-  where string(name(child)) == "edge") child]
+let metadata_edges = [for (child in ((content(metadata_html)) ^ { [] })
+  where ((string(name(child)) == "edge") ^ { false })) child]
 let edge = metadata_edges[0]
 let result = layout.from_velmts(
   {attrs: {'data-direction': "LR"}},

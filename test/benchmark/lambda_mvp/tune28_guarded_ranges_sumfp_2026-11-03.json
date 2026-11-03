@@ -1,0 +1,1349 @@
+{
+  "schema": 2,
+  "date": "2026-11-02T23:29:10.602301+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "18f3879c4cd00513bcb61684718b7d0baf4d3662",
+  "working_tree": "M lambda/runtime/mir_container_access.hpp\n M lambda/runtime/mvp/mvp_internal.hpp\n M lambda/runtime/mvp/mvp_mir.cpp\n M lambda/runtime/mvp/mvp_plan.cpp\n M test/benchmark/lambda_mir_mvp.py\n M test/lambda/mvp/mir_mvp_comparisons.ls\n M test/lambda/mvp/mir_mvp_comparisons.txt\n M test/lambda/mvp/mir_mvp_iterations.ls\n M test/lambda/mvp/mir_mvp_iterations.txt\n M test/lambda/mvp/mir_mvp_region_loops.ls\n M test/lambda/mvp/mir_mvp_region_loops.txt\n M vibe/Lambda_Design_MIR_MVP.md\n M vibe/impl/Lambda_Impl_MIR_MVP.md\n?? test/benchmark/lambda_mvp/tune28_guarded_ranges_2026-11-03.json",
+  "release_confirmed": true,
+  "c2mir_allowance_percent": 20.0,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "6a58e96d81e8f2d3a314493ff6679c12696e75c07fc91efc03ec1abfb9732bda",
+      "file_count": 35,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "267e50fb444e8d4a24a0aa66b52cfeb0a3c8accbaa79440c65527b4b40c1ed9c"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "4a9a95569706fa04d37d859f261477b867584fbd327ad9fb6bebf18f56c84492"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "ed83192f12d1d1906505cb7a72f5b01759e69eb93aeb95a964cdeb3678a33798"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "036af99656c02420989b6a5594c39f8f91474db49aef37287a63fd8502e64f92"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "e4136d7d02df8a70441d66f324830835c4ba1b36336badfe6d66bd8ff47e257e"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "bfd5faee5c814dc10a6f3a63a304c0105158c0522a4087ed9dbfce555371bd5a"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "08b984cfd7fb9869daf12b203520a3e6b765a969920aa53635f2e4d74bcd13bf"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "11a589d89fb1c452a89a030e145cefbbd1bd4bfce65eb5f41892291caac473bd"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "ed661ce36975e8725dc03b61a32cfaa373f06a7354a3236f914851b29dc073b6"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "ee14695fe1b9f0738c7567d725958a539a8502710c54c86890363f69a4bc45af"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "736845465e3777c2beabc7b838eef72d33a6ab233cb8de20ca76eca87ea38164"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "248f975e65fbe06747b13b127b6913f7fc2c9e0dc2b2e97ce63158796ad15991"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "2415769e567d8b179786ffd000b170f8a3b0f46e8cac0c19629c29187b3eb382"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "3abb5aa0411a342aca7d5e11fa518a829099b11d25dd610d838b1feffc64abae"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "dad1dab29e085aec62c5f08c2a04987d48a55725260a017594a3a67f3977de27"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "ab895ffc49d2aa5668d5a6c6ebab4c1cb074acada858787643e40128faf28000"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "1dc5603f0d43aaae21cbc58dfd9a303ff824df3616cead27e30f3fa63458f6c5"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "ccd00f09b53970e9ffbb72ae2f27ae9a7a5de72a7abbbb419a8647cd62362bcc"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "0bddfa937a8e9b19b2f3134a314619b1ab857513f1eaa0a8b714867bd0e6bdc7"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "c058eecd41eef15e07742022c57f24e6aa82d138435b5e8fa4e766c2dcc46cd4"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "21516f75ab65ea88a12a8cda123a5efbcc48de42f4b9c9f74d184a3edf40577f"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "f1490837a786018134965b9b9b5c91c0005be54b70db0da908856aca6ea91c56"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/step10-release.exe",
+      "sha256": "c8ac3031b927e0f01973779f89acc1aa3d213549e1c6ef41ccf10300be0ff026"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/step10-release.exe",
+      "sha256": "c8ac3031b927e0f01973779f89acc1aa3d213549e1c6ef41ccf10300be0ff026"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "bfa99529aa3474e4ad89f2f8b4e635397c74b78e44910b6c8ee88574ace4b118"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/start-release.exe",
+      "sha256": "51457671ba22db43cf304f91ac5aeaa15115feed616fd86a39e71ed4b1042dd9"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "2499093d45e8e53e31704de91a05580760581b14660cabf24031f0e6dc49c81d",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "50de29fc5dda6f869af737b79e4efc2383e90a4819b61b6a6eb6b467b4cf5059"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "reference_helpers": {
+    "sha256": "5d5c5db1b048956a93b7e0981cfd001d9c0fd2b9dc27124e3cb78fc61bba0ec9",
+    "file_count": 1,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_lcg.h",
+        "sha256": "7b28fdea98296e466bc3f44a3d2e102b31009a8a6e96a473bdbe9592b2871f31"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "c5dd9e53323e74a4021553ebcaebf77748f2dcdbfcf0e019821f69d4fdbca79b",
+    "file_count": 4,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "f30157bcbe256da098297bb31dbe24355f0900720b1e87ef9dbc301d0469ca2c"
+      },
+      {
+        "path": "test/benchmark/run_c2mir_benchmarks.py",
+        "sha256": "fb28fa56d48e8dc1ae1cf10102c2d5c076c922425946130817d5507a3e4fe029"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "matched per-row execution boundaries; compilation excluded; see each row for timed output",
+  "runs": 100,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "5579b9a75f242ecb308bc6dbaabd4b41290a780c30fcc8dc803d5872a4c2a4d3",
+      "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded",
+      "c_sha256": "86b95b6620a28345342a0064b5253c8e42587dcacd15bd19578f8fa44eeca8d9",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/step10-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/step10-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28h/start-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.014,
+          0.00999999,
+          0.011,
+          0.013,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.012,
+          0.011,
+          0.013,
+          0.011,
+          0.00999999,
+          0.012,
+          0.01,
+          0.011,
+          0.00999999,
+          0.011,
+          0.013,
+          0.012,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.011,
+          0.01,
+          0.014,
+          0.012,
+          0.041,
+          0.011,
+          0.012,
+          0.017,
+          0.011,
+          0.011,
+          0.013,
+          0.013,
+          0.011,
+          0.011,
+          0.013,
+          0.011,
+          0.012,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.014,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.013,
+          0.013,
+          0.011,
+          0.012,
+          0.00999999,
+          0.011,
+          0.01,
+          0.01,
+          0.012,
+          0.011,
+          0.026,
+          0.00999999,
+          0.011,
+          0.013,
+          0.01,
+          0.012,
+          0.013,
+          0.015,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.01,
+          0.013,
+          0.015,
+          0.01,
+          0.01,
+          0.011,
+          0.01,
+          0.011,
+          0.012,
+          0.015,
+          0.011,
+          0.013,
+          0.011,
+          0.013,
+          0.014,
+          0.013,
+          0.01,
+          0.011,
+          0.011,
+          0.014,
+          0.011,
+          0.011,
+          0.015,
+          0.011,
+          0.011,
+          0.011
+        ],
+        "production": [
+          698.685,
+          766.378,
+          674.707,
+          753.341,
+          751.848,
+          682.67,
+          753.814,
+          757.521,
+          693.418,
+          759.191,
+          714.833,
+          711.988,
+          699.176,
+          736.493,
+          736.71,
+          704.565,
+          727.061,
+          761.946,
+          698.353,
+          747.381,
+          756.489,
+          737.339,
+          753.282,
+          767.773,
+          672.587,
+          748.896,
+          668.241,
+          681.989,
+          747.879,
+          676.625,
+          726.002,
+          731.875,
+          666.59,
+          740.62,
+          741.079,
+          669.25,
+          737.794,
+          746.255,
+          724.641,
+          696.036,
+          741.349,
+          705.877,
+          798.23,
+          779.578,
+          723.55,
+          723.822,
+          715.457,
+          734.859,
+          769.831,
+          677.456,
+          765.255,
+          773.941,
+          666.873,
+          679.421,
+          776.811,
+          683.644,
+          700.805,
+          797.936,
+          708.194,
+          774.195,
+          812.652,
+          749.86,
+          731.955,
+          701.365,
+          828.897,
+          744.699,
+          687.846,
+          715.174,
+          748.317,
+          668.374,
+          671.204,
+          765.316,
+          667.199,
+          777.179,
+          808.156,
+          676.181,
+          679.228,
+          757.685,
+          675.647,
+          765.789,
+          776.51,
+          771.223,
+          689.744,
+          772.155,
+          768.703,
+          673.516,
+          768.922,
+          770.183,
+          672.342,
+          766.61,
+          767.186,
+          678.389,
+          766.787,
+          763.265,
+          773.773,
+          777.283,
+          676.775,
+          773.019,
+          822.152,
+          754.996
+        ],
+        "c2mir": [
+          730.381104,
+          748.557861,
+          752.800781,
+          698.513184,
+          748.166992,
+          740.784912,
+          690.703125,
+          728.120117,
+          745.302002,
+          698.195801,
+          779.75,
+          695.572021,
+          742.661865,
+          723.390869,
+          676.37915,
+          698.496094,
+          698.852051,
+          696.562988,
+          719.929932,
+          722.698975,
+          710.593994,
+          689.117188,
+          759.046875,
+          684.209961,
+          748.346924,
+          753.595947,
+          753.929199,
+          735.561035,
+          751.850098,
+          745.429932,
+          699.259033,
+          742.966064,
+          736.637939,
+          673.093018,
+          748.756104,
+          740.321045,
+          681.788818,
+          739.644043,
+          681.74707,
+          745.01709,
+          719.39917,
+          725.968994,
+          725.838135,
+          720.791992,
+          729.708008,
+          772.724121,
+          770.97583,
+          716.215088,
+          748.417969,
+          773.319092,
+          676.15918,
+          763.556885,
+          767.406006,
+          772.298828,
+          773.197021,
+          761.888916,
+          772.700928,
+          736.593018,
+          734.021973,
+          718.138184,
+          732.214844,
+          708.365967,
+          781.453857,
+          775.900146,
+          706.713135,
+          704.687012,
+          719.046875,
+          716.881836,
+          730.043945,
+          788.270996,
+          779.690918,
+          760.920898,
+          763.676025,
+          679.121094,
+          771.568115,
+          783.256104,
+          758.125,
+          804.251953,
+          778.888184,
+          678.061035,
+          767.643066,
+          681.677002,
+          764.847168,
+          785.39502,
+          689.201172,
+          748.867188,
+          779.231934,
+          681.305908,
+          771.48291,
+          770.524902,
+          674.682129,
+          770.249023,
+          789.873047,
+          682.305176,
+          682.863037,
+          759.274902,
+          753.065186,
+          690.476807,
+          753.215088,
+          685.002197
+        ],
+        "previous_mvp": [
+          0.011,
+          0.00999999,
+          0.011,
+          0.013,
+          0.013,
+          0.012,
+          0.013,
+          0.011,
+          0.012,
+          0.01,
+          0.00900001,
+          0.013,
+          0.01,
+          0.011,
+          0.013,
+          0.014,
+          0.011,
+          0.023,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.00999999,
+          0.011,
+          0.01,
+          0.00999999,
+          0.011,
+          0.011,
+          0.011,
+          0.014,
+          0.012,
+          0.011,
+          0.01,
+          0.011,
+          0.011,
+          0.01,
+          0.015,
+          0.01,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.01,
+          0.011,
+          0.014,
+          0.014,
+          0.011,
+          0.01,
+          0.01,
+          0.015,
+          0.00999999,
+          0.011,
+          0.011,
+          0.012,
+          0.024,
+          0.012,
+          0.01,
+          0.014,
+          0.01,
+          0.01,
+          0.00999999,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.012,
+          0.01,
+          0.012,
+          0.01,
+          0.011,
+          0.01,
+          0.01,
+          0.013,
+          0.00999999,
+          0.011,
+          0.016,
+          0.015,
+          0.01,
+          0.011,
+          0.01,
+          0.011,
+          0.013,
+          0.013,
+          0.01,
+          0.011,
+          0.011,
+          0.013,
+          0.013,
+          0.013,
+          0.01,
+          0.011,
+          0.011
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.011,
+        "production": 739.207,
+        "c2mir": 739.982544,
+        "previous_mvp": 0.011
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ]
+      ],
+      "mvp_over_c2mir": 1.4865215523246181e-05,
+      "mvp_over_production": 1.4880811464177152e-05,
+      "timer_resolution_limited": {
+        "mvp": false,
+        "production": false,
+        "c2mir": false,
+        "previous_mvp": false
+      },
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.5129404547899005e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.4630616826805418e-05,
+          "two_sided_upper_bound": 1.517993047591842e-05
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.506758610264208e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.4694922828417134e-05,
+          "two_sided_upper_bound": 1.5107397451566358e-05
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.0,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.0,
+          "two_sided_upper_bound": 1.0
+        }
+      },
+      "derived_workload": {
+        "count": 10000,
+        "lambda_sha256": "f504ae568e039038de1b8f6652c72fff465c18e23f00a5446a940102593934d6",
+        "c_sha256": "a89c77a0f9de7568750ada47d673d06c3acf9a766f31c50eafa9710143053049",
+        "lambda_source": "// R7RS Benchmark: sumfp (Typed version)\n// Sum of floats from 0.0 to 100000.0, repeated 1 time\n// Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)\n\npn run(n: float) float {\n    var s: float = 0.0\n    while (n >= 0.0) {\n        s = s + n\n        n = n - 1.0\n    }\n    return s\n}\n\npn benchmark() float {\n    var result = run(100000.0)\n    return result\n}\n\npn main() {\n    let t0 = clock()\n    var total: float = 0.0\n    var i: int = 0\n    while (i < 10000) { total = total + benchmark(); i = i + 1 }\n    let elapsed = (clock() - t0) * 1000.0\n    if (abs(total - 5000050000.0 * 10000.0) < 1.0) { print(\"sumfp: PASS\\n\") }\n    else { print(\"sumfp: FAIL\\n\") }\n    print(\"__TIMING__:\" ++ elapsed ++ \"\\n\")\n}\n",
+        "c_source": "/* Native C2MIR port of r7rs/sumfp2.ls. */\nextern int printf(const char *, ...);\n#include \"/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_kernel_timer.h\"\n\nstatic double run_sumfp(double n) {\n    double sum = 0.0;\n    while (n >= 0.0) {\n        sum += n;\n        n -= 1.0;\n    }\n    return sum;\n}\n\nint main(void) {\n    BENCH_KERNEL_BEGIN();\n    double total = 0.0;\n    long i;\n    for (i = 0; i < 10000; i++) total += run_sumfp(100000.0);\n    BENCH_KERNEL_END();\n    double diff = total - 5000050000.0 * 10000.0;\n    if (diff < 0.0) diff = -diff;\n    printf(diff < 1.0 ? \"sumfp: PASS\\n\" : \"sumfp: FAIL\\n\");\n    BENCH_KERNEL_REPORT();\n    return diff >= 1.0;\n}\n",
+        "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded"
+      },
+      "mvp_over_previous": 1.0,
+      "performance_gates": {
+        "faster_than_full_mir": true,
+        "within_c2mir_allowance": true,
+        "within_10_percent_of_c2mir": true
+      }
+    }
+  ],
+  "geomean_mvp_over_production": 1.4880811464177142e-05,
+  "geomean_mvp_over_c2mir": 1.4865215523246191e-05,
+  "geomean_mvp_over_previous_mvp": 1.0,
+  "qualification": "all subset; coverage and per-row performance qualification are separate; matched workload boundaries, paired bootstrap per row"
+}

@@ -50,7 +50,7 @@ let tx = cmd_paste_html(st(node('doc', [node('p', [text("x")])]), all_selection(
 //    sibling between the halves (parity with the JS reference)
 let mid = cmd_paste_html(st(node('doc', [node('p', [text("abcd")])]), text_selection(pos([0,0],2), pos([0,0],2))),
   "<ul><li>x<ul><li>y</li></ul></li></ul>", "")
-"mid_tags:"; [for (b in mid.doc_after.content) b.tag]
+"mid_tags:"; [for (b in ((mid.doc_after.content) ^ { [] })) b.tag]
 "mid_head:"; doc_text(mid.doc_after.content[0]) == "ab"
 "mid_list:"; mid.doc_after.content[1].tag == 'ul'
 "mid_y_indent:"; attrs_get(node_at(mid.doc_after,[1,1]).attrs, 'indent') == 1
@@ -59,7 +59,7 @@ let mid = cmd_paste_html(st(node('doc', [node('p', [text("abcd")])]), text_selec
 // end-of-paragraph paste appends the list (no empty tail paragraph)
 let endp = cmd_paste_html(st(node('doc', [node('p', [text("abcd")])]), text_selection(pos([0,0],4), pos([0,0],4))),
   "<ul><li>x</li></ul>", "")
-"end_tags:"; [for (b in endp.doc_after.content) b.tag]
+"end_tags:"; [for (b in ((endp.doc_after.content) ^ { [] })) b.tag]
 
 // a single paragraph pasted mid-text still merges inline (no split)
 let parap = cmd_paste_html(st(node('doc', [node('p', [text("abcd")])]), text_selection(pos([0,0],2), pos([0,0],2))),

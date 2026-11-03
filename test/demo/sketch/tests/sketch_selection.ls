@@ -60,7 +60,7 @@ let deleted = m.remove(selected)
 len(m.objects(deleted.doc)) == 4 and len(m.selected_ids(deleted)) == 0
 len(deleted.hist.undo) == 1 and m.step_history(deleted).doc == selected.doc
 let styled = m.finish_edit(m.property(selected,"fill","#7665d9")^)
-all([for (id in m.selected_ids(styled)) m.lookup(styled.doc,id).object.fill == "#7665d9"])
+all([for (id in ((m.selected_ids(styled)) ^ { [] })) m.lookup(styled.doc,id).object.fill == "#7665d9"])
 m.lookup(styled.doc,"o4").object.fill == partial.fill and len(styled.hist.undo) == 1
 m.step_history(styled).doc == selected.doc
 m.finish_edit(m.property(selected,"x",999)^).doc == selected.doc

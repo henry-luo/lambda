@@ -29,7 +29,7 @@ fn create_api() {
     let internal_helper = (x) => x * 2
     {
         double: internal_helper,
-        quadruple: (x) => internal_helper(internal_helper(x))
+        quadruple: (x) any^ => internal_helper(internal_helper(x))
     }
 }
 let api = create_api()

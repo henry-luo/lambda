@@ -3,7 +3,7 @@ import normalize: lambda.graph.normalize
 import transform: lambda.graph.transform
 
 fn direct_children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 let source = (input(
@@ -28,12 +28,12 @@ let html_ports = direct_children(html, "port")
   row: [rows[0].align, rows[0].valign, rows[0].style],
   cells: [[first_cells[0].align, first_cells[0].valign, first_cells[0].colspan,
       first_cells[0].rowspan, first_cells[0]["data-record-port"], first_cells[0].style,
-      [for (child in model.element_children(first_cells[0])) model.tag(child)]],
+      [for (child in ((model.element_children(first_cells[0])) ^ { [] })) model.tag(child)]],
     [second_cells[0].align, second_cells[0].valign, second_cells[0].colspan,
       second_cells[0].rowspan],
     [second_cells[1].align, second_cells[1].colspan]],
-  ports: [for (port in model.ports(node)) [port.id, port.side, port.offset]],
-  interactions: [for (entry in model.interactions(graph)) [entry.target, entry.action,
+  ports: [for (port in ((model.ports(node)) ^ { [] })) [port.id, port.side, port.offset]],
+  interactions: [for (entry in ((model.interactions(graph)) ^ { [] })) [entry.target, entry.action,
     entry.href, entry.tooltip, entry["target-window"]]],
   html_node: [html_nodes[0]["data-interaction-action"], html_nodes[0]["data-href"],
     html_nodes[0]["data-tooltip"], html_nodes[0]["data-link-target"]],

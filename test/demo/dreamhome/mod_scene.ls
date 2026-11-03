@@ -50,14 +50,14 @@ let GEOMETRY = {box: "g-box", cyl: "g-cyl", cone: "g-cone", ball: "g-ball"}
 let ROUGHNESS = {paint: .82, wood: .48, stone: .4, fabric: .95, metal: .22, glass: .08,
     oak: .48, walnut: .4, ash: .5, herringbone: .48, tile: .32, marble: .2,
     terracotta: .88, slate: .72, carpet: .95, 'blue-carpet': .95, concrete: .28, cork: .9}
-fn mat(color, glow = false, finish = "paint") => (let shade = lower(color), "m-" ++ slice(shade, 1, 7) ++ ":" ++
+fn mat(color, glow = false, finish = "paint") any^ => (let shade = lower(color), "m-" ++ slice(shade, 1, 7) ++ ":" ++
     (if (shade == C.GLASS) "glass" else if (shade == C.METAL) "metal" else finish) ++ (if (glow) ":g" else ""))
 fn material_of(id) => (let parts = split(id, ":"), let color = "#" ++ slice(parts[0], 2, 8), let finish = parts[1], let glow = ends_with(id, ":g"),
     <material id: id, type: 'standard', color: color, metalness: if (finish == "metal") 1.0 else 0.0,
         roughness: ROUGHNESS[finish] or .82, side: 'double',
         *: (if (finish == "glass") {opacity: .25, transparent: true} else {}),
         *: (if (glow) {emissive: color, 'emissive-intensity': .9} else {})>)
-fn materials_in(node) => [for (c in content(node) where c is element) *(if (name(c) == 'mesh') [c.material] else materials_in(c))]
+fn materials_in(node) => [for (c in ((content(node)) ^ { [] }) where c is element) *(if (name(c) == 'mesh') [c.material] else materials_in(c))]
 
 fn cube(at, size, material, rot = null) => if (rot == null) <mesh geometry: "g-box", material: material, position: r3(at), scale: r3(size)>
     else <mesh geometry: "g-box", material: material, position: r3(at), rotation: [0.0, rot, 0.0], scale: r3(size)>
@@ -72,18 +72,18 @@ fn part_mesh(p, it, glow) => (let color = P.paint(p.c, it.color), let lit = glow
         position: r3([m(((p.u0 + p.u1) / 2.0 - .5) * it.w), m((p.t0 + p.t1) / 2.0 * it.h), m(((p.v0 + p.v1) / 2.0 - .5) * it.d)]),
         scale: r3([max(.002, m((p.u1 - p.u0) * it.w)), max(.002, m((p.t1 - p.t0) * it.h)), max(.002, m((p.v1 - p.v0) * it.d))])>)
 fn item_node(it, glow) => <group id: "3d-" ++ it.id, position: r3([m(it.x), m(it.elev), m(it.y)]), rotation: [0.0, 0.0 - it.rot / M.DEG, 0.0],
-    for (p in C.item_of(it.key).parts) part_mesh(p, it, glow)>
+    for (p in ((C.item_of(it.key).parts) ^ { [] })) part_mesh(p, it, glow)>
 
 // ---- walls, doors and windows --------------------------------------------------------------
 
 // a stretch of wall along w from s0 to s1, between heights y0 and y1 (cm)
-fn wall_piece(w, s0, s1, y0, y1, material) => (let u = M.wall_dir(w), let c = (s0 + s1) / 2.0,
+fn wall_piece(w, s0, s1, y0, y1, material) any^ => (let u = M.wall_dir(w), let c = (s0 + s1) / 2.0,
     cube([m(w.x1 + u.x * c), m((y0 + y1) / 2.0), m(w.y1 + u.y * c)], [m(s1 - s0), m(y1 - y0), m(w.thick)], material, 0.0 - M.wall_angle(w) / M.DEG))
 fn wall_node(home, w, height) {
     let paint = mat(w.color)
     let solid = [for (s in M.solid_spans(home, w)) wall_piece(w, s[0], s[1], 0.0, height, paint)]
     // above and below each opening, as far as the (possibly cut-away) wall reaches
-    let around = [for (o in M.openings_on(home, w.id), let s0 = o.at - o.w / 2.0, let s1 = o.at + o.w / 2.0) *[
+    let around = [for (o in ((M.openings_on(home, w.id)) ^ { [] }), let s0 = o.at - o.w / 2.0, let s1 = o.at + o.w / 2.0) *[
         *(if (o.elev > 1.0) [wall_piece(w, s0, s1, 0.0, min(o.elev, height), paint)] else []),
         *(if (o.elev + o.h < height - 1.0) [wall_piece(w, s0, s1, o.elev + o.h, height, paint)] else [])]]
     let ends = M.wall_ends(home, w)
@@ -131,13 +131,13 @@ fn ears(poly, acc) {
     if (k < 3) acc
     else if (k == 3) [*acc, poly]
     else (let found = [for (i in 0 to k - 1, let a = poly[(i + k - 1) % k], let b = poly[i], let c = poly[(i + 1) % k]
-            where turn(a, b, c) > 0 and not any([for (j, p in poly where j != i and j != (i + 1) % k and j != (i + k - 1) % k) in_triangle(p, a, b, c)])) i],
+            where ((turn(a, b, c) > 0 and not any([for (j, p in poly where j != i and j != (i + 1) % k and j != (i + k - 1) % k) in_triangle(p, a, b, c)])) ^ { false })) i],
         let i = if (len(found) == 0) 0 else found[0],
         ears([for (j, p in poly where j != i) p], [*acc, [poly[(i + k - 1) % k], poly[i], poly[(i + 1) % k]]]))
 }
 fn signed(pts) => sum([for (i, p in pts) (let q = pts[(i + 1) % len(pts)], p[0] * q[1] - q[0] * p[1])])
 // triangles of a room's floor, wound to face up
-pub fn floor_triangles(pts) => ears(if (signed(pts) > 0) pts else reverse(pts), [])
+pub fn floor_triangles(pts) any^ => ears(if (signed(pts) > 0) pts else reverse(pts), [])
 fn floor_node(r) {
     let tris = floor_triangles(r.pts)
     let positions = [for (t in tris, p in [t[0], t[2], t[1]]) *[m(p[0]), .005, m(p[1])]];
@@ -152,7 +152,7 @@ pub fn orbit_camera(o) => (let cp = math.cos(o.pitch), {position: r3([o.tx + o.d
     target: r3([o.tx, .6, o.tz])})
 pub fn walk_camera(wk) => (let a = wk.yaw / M.DEG, let eye = [m(wk.x), 1.6, m(wk.y)],
     {position: r3(eye), target: r3([eye[0] + math.cos(a) * math.cos(wk.pitch), 1.6 + math.sin(wk.pitch), eye[2] + math.sin(a) * math.cos(wk.pitch)])})
-pub fn camera_of(st) => if (st.mode3d == "walk") walk_camera(st.walker) else orbit_camera(st.orbit)
+pub fn camera_of(st) any^ => if (st.mode3d == "walk") walk_camera(st.walker) else orbit_camera(st.orbit)
 // the orbit target and distance that frame the whole home
 pub fn framing(home) => (let b = M.bounds(home), let span = max(b.x1 - b.x0, b.y1 - b.y0),
     {tx: m((b.x0 + b.x1) / 2.0), tz: m((b.y0 + b.y1) / 2.0), dist: max(6.0, m(span) * 1.25)})
@@ -160,16 +160,16 @@ pub fn framing(home) => (let b = M.bounds(home), let span = max(b.x1 - b.x0, b.y
 // Seven lamps at most can shine (the renderer takes eight lights, and the sun is
 // one): the ones nearest where the camera looks.
 fn lamp_lights(home, st, look) {
-    let lamps = [for (it in M.furniture(home), let l = C.item_of(it.key).light where l != null)
+    let lamps = [for (it in M.furniture(home), let l = C.item_of(it.key).light where ((l != null) ^ { false }))
         {at: [m(it.x), m(it.elev + it.h * l.at), m(it.y)], color: l.color, power: l.intensity}]
     let near = sort(lamps, (l) => math.hypot(l.at[0] - look[0], l.at[2] - look[2])) ^ { lamps }
     let gain = if (st.evening) 3.2 else 1.0;
-    [for (l in slice(near, 0, min(7, len(near)))) <light type: 'point', color: l.color, intensity: l.power * gain, distance: 7.0, position: r3(l.at)>]
+    [for (l in ((slice(near, 0, min(7, len(near)))) ^ { [] })) <light type: 'point', color: l.color, intensity: l.power * gain, distance: 7.0, position: r3(l.at)>]
 }
 
 // ---- the scene ----------------------------------------------------------------------------
 
-pub fn scene(home, st, width, height) {
+pub fn scene(home, st, width, height) any^ {
     let cut = st.cutaway and st.mode3d != "walk"
     let wall_h = if (cut) min(home.wall_height, 105.0) else home.wall_height
     let glow = st.evening
@@ -194,7 +194,7 @@ pub fn scene(home, st, width, height) {
             position: [m((b.x0 + b.x1) / 2.0) + 8.0, 10.0, m((b.y0 + b.y1) / 2.0) + 6.0],
             target: [m((b.x0 + b.x1) / 2.0), 0.0, m((b.y0 + b.y1) / 2.0)],
             'cast-shadow': true, 'shadow-map-size': 2048, 'shadow-normal-bias': .015, 'shadow-softness': 1.5>
-        for (l in lamp_lights(home, st, cam.target)) l;
+        for (l in ((lamp_lights(home, st, cam.target)) ^ { [] })) l;
         <resources *[*SHAPES, *[for (id in mats) material_of(id)], s.environment('room', {id: "interior"})^]>
         body>
 }
@@ -220,15 +220,15 @@ fn box_hit(ray, c, half, rot) {
 }
 // The thing under a click in the 3D view: the nearest piece or wall the ray
 // meets, else the room whose floor it reaches.
-pub fn pick(home, st, width, height, x, y) {
+pub fn pick(home, st, width, height, x, y) any^ {
     let cam = camera_of(st)
     let eye = lens.prepare({position: cam.position, target: cam.target, fov: if (st.mode3d == "walk") 70.0 else 45.0, near: .05, far: 200.0}, width, height)
     let ray = lens.ray(eye, x, y)
     let walls = if (st.cutaway and st.mode3d != "walk") [] else home.walls
     let hits = [*[for (it in M.furniture(home), let t = box_hit(ray, [m(it.x), m(it.elev + it.h / 2.0), m(it.y)], [m(it.w / 2.0), m(it.h / 2.0), m(it.d / 2.0)], it.rot)
-            where t != null) {id: it.id, t: t}],
+            where ((t != null) ^ { false })) {id: it.id, t: t}],
         *[for (w in walls, let t = box_hit(ray, [m((w.x1 + w.x2) / 2.0), m(home.wall_height / 2.0), m((w.y1 + w.y2) / 2.0)],
-            [m(M.wall_len(w) / 2.0), m(home.wall_height / 2.0), m(w.thick / 2.0)], M.wall_angle(w)) where t != null) {id: w.id, t: t}]];
+            [m(M.wall_len(w) / 2.0), m(home.wall_height / 2.0), m(w.thick / 2.0)], M.wall_angle(w)) where ((t != null) ^ { false })) {id: w.id, t: t}]];
     if (len(hits) > 0) hits[argmin([for (h in hits) h.t])].id
     else if (ray.direction[1] >= 0.0) null
     else (let t = (0.0 - ray.origin[1]) / ray.direction[1], let r = M.room_at(home, (ray.origin[0] + ray.direction[0] * t) * 100.0,

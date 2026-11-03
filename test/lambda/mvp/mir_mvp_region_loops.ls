@@ -8,7 +8,7 @@ pn evolve(var a: int[], b: int[], repeats: int) int {
 }
 pn replacing(var a: int[]) {
     for pass in 0 to 1 {
-        a = fill(4, pass)
+        a = fill(4, pass)^
         for i in 0 to 3 { a[i] = a[i] + 2 }
     }
 }
@@ -39,7 +39,7 @@ pn changed_after_condition() int {
     }
     return 0
 }
-pn conditional_indices(var a: int[]) int {
+pn conditional_indices(var a: int[]) int^ {
     var marker: int[] = [1]
     var sum: int = 0
     for i in 0 to 4 {
@@ -99,18 +99,58 @@ pn float_branches(x: float) int {
 }
 pn multiply_two(x: int) int { return x * 2 }
 pn multiply_zero(x: int) int { return x * 0 }
+pn nested_count() int {
+    var total: int = 0
+    for i in 0 to 2 {
+        var j: int = 0
+        while (j < 4) { total = total + 1; j = j + 1 }
+    }
+    return total
+}
+pn nested_overflow() int {
+    var total: int = 9007199254740989
+    for i in 0 to 1 {
+        var j: int = 0
+        while (j < 3) { total = total + 1; j = j + 1 }
+    }
+    return total
+}
+pn reset_overflow() int {
+    var total: int = 0
+    var seen: int = 0
+    for i in 0 to 1 {
+        total = total + 1
+        seen = total
+        total = 9007199254740991
+    }
+    return seen
+}
+pn contracting_difference() int {
+    var i: int = 0
+    var j: int = 0
+    while (i < 8) {
+        var m: int = 8
+        while (m >= 1 and j >= m) {
+            j = j - m
+            m = int(m div 2)
+        }
+        j = j + 3
+        i = i + 1
+    }
+    return j
+}
 pn main() {
     var a: int[] = [1, 2, 3, 4]
     var b: int[] = [1, 2, 3, 4]
     let saved: int[] = a
-    evolve(a, b, 2)
+    evolve(a, b, 2)^
     print(a); print(" "); print(saved); print("\n")
     var short: int[] = [1, 2]
-    evolve(short, b, 2)
+    evolve(short, b, 2)^
     print(short); print("\n")
-    evolve(a, short, 0)
+    evolve(a, short, 0)^
     print(a); print("\n")
-    replacing(a)
+    replacing(a)^
     print(a); print("\n")
     print(triangular(8)); print(" "); print(triangular(0)); print(" "); print(triangular(-1)); print("\n")
     print(shifted(3, 7)); print(" "); print(shifted(-3, 7)); print("\n")
@@ -138,4 +178,6 @@ pn main() {
     print(float_branches(-1.0)); print(" "); print(float_branches(0.0 / 0.0)); print("\n")
     print(multiply_two(int(1.0 / 0.0))); print(" "); print(multiply_two(int(-1.0 / 0.0))); print(" ")
     print(multiply_two(int(0.0 / 0.0))); print(" "); print(multiply_zero(int(1.0 / 0.0))); print("\n")
+    print(nested_count()); print(" "); print(nested_overflow()); print(" ")
+    print(reset_overflow()); print(" "); print(contracting_difference()); print("\n")
 }

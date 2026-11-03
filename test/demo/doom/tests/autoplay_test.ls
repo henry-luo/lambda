@@ -6,7 +6,7 @@ let level = fixture.level([fixture.thing(3004, 0, 200)])
 let arena = fixture.map_data(level)
 let game = sim.action(arena, fixture.game(level), "auto", rules, fixture.visuals)
 let aiming = autoplay.decide(arena, game, sim.STEP, rules)
-let played = reduce([game, *[for (i in 1 to 175) i]], (acc, unused) =>
+let played = reduce([game, *[for (i in 1 to 175) i]], (acc, unused) any^ =>
     sim.step(arena, acc, autoplay.decide(arena, acc, sim.STEP, rules), sim.STEP, rules))
 let wall = {start: {x: -100, y: 40}, end: {x: 100, y: 40}, isSolid: true, bottomHeight: 0, topHeight: 128}
 let blocked_level = fixture.level([], [wall])

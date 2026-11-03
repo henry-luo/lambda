@@ -1,6 +1,6 @@
 // LR12-25 (S7.9.3): print participates in an error -- it renders the error
 // instead of printing nothing, and a `++` chain over an error is that error.
-fn check(x) {
+fn check(x) any^ {
     let n: int = x
     n + 1
 }

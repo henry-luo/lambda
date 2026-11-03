@@ -58,7 +58,7 @@ let only = model.execute(empty,"text.insert",{data:"New"})^
 let empty_again = model.execute(only,"review.rejectAll")^
 model.plain_text(empty_again.doc)==""
 model.plain_text(model.execute(empty_again,"text.insert",{data:"Again"})^.doc)=="Again"
-fn typing(ed,n) => if (n==0) ed else typing(model.execute(ed,"text.insert",{data:"a"})^,n-1)
+fn typing(ed,n) any^ => if (n==0) ed else typing(model.execute(ed,"text.insert",{data:"a"})^,n-1)
 let typed = typing(empty,20)
 len(changes.entries(typed.doc))==1
 len(node_at(typed.doc,[0]).content)==1

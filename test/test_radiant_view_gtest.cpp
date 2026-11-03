@@ -530,6 +530,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"scene3d", ".scene3d-index .demo-tile"},
         {"aquarium", "#aquarium #tank-scene", true},
         {"hamster", "#hamster #cage-scene", true},
+        {"midtown", "#midtown #city", true},
         {"slides", "#slides-editor #stage"},
         {"sheet", "#sheet-grid"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
@@ -3606,7 +3607,7 @@ TEST(RadiantViewTest, SerializedScriptDocumentsPreserveUtf8AndCallerUrl) {
     const char* svg_path = "./temp/ui_serialized_script_utf8.svg";
     const char* sources[] = {
         "<svg width: 300, height: 80, <text x: 10, y: 30, \"café 中文\">>\n",
-        "format(<svg width: 300, height: 80, <text x: 10, y: 30, \"café 中文\">>, 'xml')\n",
+        "format(<svg width: 300, height: 80, <text x: 10, y: 30, \"café 中文\">>, 'xml')^\n",
         "\"<html><head><meta charset='utf-8'></head><body>café 中文</body></html>\"\n",
     };
     for (const char* source : sources) {

@@ -11,7 +11,7 @@ let ROD_Y = 0.075          // the actuator's centreline above the plate
 let PITCH = rig.PI * rig.MODULE
 
 fn piece(id, material, mesh) => {id: id, material: material, mesh: mesh}
-fn along(k) => rig.add(rig.JOINT, rig.scale(rig.AXIS, k))
+fn along(k) any^ => rig.add(rig.JOINT, rig.scale(rig.AXIS, k))
 // a starboard body, or its port reflection with "-r" ids renamed "-l"
 pub fn sided(pieces, port) => if (not port) pieces else
     [for (q in pieces) {id: replace(q.id, "-r", "-l"), material: q.material, mesh: m.mirrored(q.mesh)}]
@@ -25,9 +25,9 @@ let PLATE = [
     [[-0.95, 0.12], [-0.80, 0.20], [-0.68, 0.20], [-0.74, 0.40], [-0.88, 0.40]]]
 // plate pieces lie in the (x, z) plane; the extrusion runs down from the top face at y = 0
 let FLAT = {u: X, v: Z, w: [0.0, -1.0, 0.0]}
-fn plate_half(port) => m.merge([for (poly in PLATE)
+fn plate_half(port) any^ => m.merge([for (poly in PLATE)
     m.extrude([for (pt in poly) [pt[0], if (port) 0.0 - pt[1] else pt[1]]], FLAT, 0.0, 0.025)])
-fn rivets(z) => m.merge([for (k in 0 to 9) m.cylinder([-0.28 + k * 0.1, 0.045, z], [-0.28 + k * 0.1, 0.045, z + (if (z > 0) 0.004 else -0.004)], 0.007, 10)])
+fn rivets(z) any^ => m.merge([for (k in 0 to 9) m.cylinder([-0.28 + k * 0.1, 0.045, z], [-0.28 + k * 0.1, 0.045, z + (if (z > 0) 0.004 else -0.004)], 0.007, 10)])
 
 pub fn airframe() => [
     piece("plate-near", "m-plate", plate_half(false)),
@@ -88,7 +88,7 @@ pub fn pinion() => [
 // ---- one side: the spinning side tube, its spring leg and the wheel ----
 
 // the tube-side fork of a U-joint; the shaft-side fork's prongs stand at right angles to it
-fn fork(f, sign) => m.cuboid(rig.add(along(0.02), rig.scale(f.u, 0.023 * sign)), [0.006, 0.012, 0.016], f)
+fn fork(f, sign) any^ => m.cuboid(rig.add(along(0.02), rig.scale(f.u, 0.023 * sign)), [0.006, 0.012, 0.016], f)
 pub fn side(port) {
     let f = m.frame(rig.AXIS);
     sided([

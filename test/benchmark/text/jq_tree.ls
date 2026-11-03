@@ -16,9 +16,9 @@ pn main() {
     while (r < rounds) {
         let u = jq_bump_scalars(t, 1 + r)
         var paths = []
-        jq_collect_paths(u, [], false, paths)
+        jq_collect_paths(u, [], false, paths)^
         var leaves = []
-        jq_flatten_into(u, leaves)
+        jq_flatten_into(u, leaves)^
         checksum = (checksum * 31 + len(paths) + sum(leaves)) % jq_modulus
         r = r + 1
     }

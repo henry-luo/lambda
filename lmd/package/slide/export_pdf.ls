@@ -11,10 +11,10 @@ import html: lambda.slide.html
 // the slide stage is the whole page: no player chrome, letterboxing or page margin
 let PAGE_CSS = "html, body { margin: 0; padding: 0; background: #ffffff; } .slide-stage { margin: 0; }"
 
-fn base_name(path) { let parts = split(path, "/"); parts[len(parts) - 1] }
-fn dir_part(path) => slice(path, 0, len(path) - len(base_name(path)))
-fn stem(file) => if (ends_with(lower(file), ".slides")) slice(file, 0, len(file) - len(".slides")) else file
-fn tail_line(text) {
+fn base_name(path) any^ { let parts = split(path, "/"); parts[len(parts) - 1] }
+fn dir_part(path) any^ => slice(path, 0, len(path) - len(base_name(path)))
+fn stem(file) any^ => if (ends_with(lower(file), ".slides")) slice(file, 0, len(file) - len(".slides")) else file
+fn tail_line(text) any^ {
     let lines = if (text == null) [] else [for (l in split(trim(string(text)), "\n") where trim(l) != "") l]
     if (len(lines) == 0) "" else lines[len(lines) - 1]
 }

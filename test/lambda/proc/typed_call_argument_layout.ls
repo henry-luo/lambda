@@ -26,7 +26,7 @@ pn piped_borrow(var value: IntRecord, amount: int) int {
 fn piped_tail(value: IntRecord, remaining: int) int {
     if (remaining == 0) value.value else value |> piped_tail(remaining - 1)
 }
-pn mark(var trace: array, value: int) int {
+pn mark(var trace: array, value: int) int^ {
     push(trace, value)
     return value
 }

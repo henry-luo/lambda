@@ -1,7 +1,7 @@
 import ui: lambda.ui.blade
 import c: lambda.ui.core.component
 
-fn empty_image(props) => content(content(ui.render(<blade.empty *:props>)^)[0])[0]
+fn empty_image(props) any^ => content(content(ui.render(<blade.empty *:props>)^)[0])[0]
 let source = <blade.page direction:'rtl',title:"Armory",<blade.panel title:"Inventory",<blade.item_slot icon:'sword',label:"Sword",selected:true>>>
 let document = apply(source)
 let root = content(content(document)[1])[0]

@@ -3,8 +3,8 @@ pn tune26_fill_contract_take(values: int[]) int {
     return len(values)
 }
 
-pn tune26_fill_contract_reify(n: int) int {
-    var values: int[] = fill(n, 7)
+pn tune26_fill_contract_reify(n: int) int^ {
+    var values: int[] = fill(n, 7)^
     if (n == 0) {
         return tune26_fill_contract_take(values)
     }
@@ -18,8 +18,8 @@ pn tune26_fill_contract_mutate(var values: float[]) float {
     return values[0]
 }
 
-pn tune26_fill_contract_float_reify(n: int) float {
-    var values: float[] = fill(n, 0.0)
+pn tune26_fill_contract_float_reify(n: int) float^ {
+    var values: float[] = fill(n, 0.0)^
     if (n == 0) {
         return float(len(values))
     }

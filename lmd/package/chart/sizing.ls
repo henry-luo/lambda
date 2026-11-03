@@ -3,8 +3,8 @@ import parse: .parse
 import scale: .scale
 import util: .util
 
-fn positive(value) => util.finite_number(value) and value > 0
-pub fn viewport(value) {
+fn positive(value) any^ => util.finite_number(value) and value > 0
+pub fn viewport(value) any^ {
     if (value == null) {} else if (not (value is map) or
         (value.width != null and not positive(value.width)) or
         (value.height != null and not positive(value.height))) error("chart: viewport width/height must be finite and positive")
@@ -20,17 +20,17 @@ fn request(spec, key) {
     else spec[key]
 }
 fn default_size(key) => if (key == "width") 400.0 else 300.0
-pub fn normalize_padding(raw) {
+pub fn normalize_padding(raw) any^ {
     let value = if (raw == null) 20 else raw;
     let resolved = if (value is number) {top: value, right: value, bottom: value, left: value}
     else {top: if (value.top != null) value.top else 0, right: if (value.right != null) value.right else 0,
         bottom: if (value.bottom != null) value.bottom else 0, left: if (value.left != null) value.left else 0};
     if (not (value is number or value is map) or
-        len([for (key, item in resolved where not util.finite_number(item) or item < 0) true]) > 0)
+        len([for (key, item in resolved where ((not util.finite_number(item) or item < 0) ^ { false })) true]) > 0)
         error("chart: padding must be finite and nonnegative")
     else resolved
 }
-fn discrete_size(spec, key, value) {
+fn discrete_size(spec, key, value) any^ {
     let channel = spec.encoding[if (key == "width") "x" else "y"];
     let mapping = scale.position_scale(channel, spec.data, 0.0, 1.0, spec.mark.kind, key == "width");
     let step = if (value is map) value.step else if (spec.config.view.step != null) spec.config.view.step else 20;
@@ -40,7 +40,7 @@ fn discrete_size(spec, key, value) {
         if (value is map) error("chart: step sizing requires a discrete position scale") else null
     } else float(max([1, len(mapping.domain)])) * float(step)
 }
-fn dimension(spec, key, value) {
+fn dimension(spec, key, value) any^ {
     if (value == "container") {size: if (spec._viewport[key] != null) spec._viewport[key] else default_size(key), fit: true}
     else if (value == "auto" or value is map) {
         let plot = if (value is map or spec._viewport[key] == null) discrete_size(spec, key, value) else null;
@@ -52,7 +52,7 @@ fn dimension(spec, key, value) {
     else error("chart: dimensions must be positive numbers, auto, container, or a discrete step")
 }
 
-pub fn resolve_view(spec) {
+pub fn resolve_view(spec) any^ {
     let ratio = spec.aspect_ratio;
     let width_request = request(spec, "width");
     let height_request = request(spec, "height");
@@ -81,7 +81,7 @@ pub fn resolve_view(spec) {
 }
 
 // Composition budgets constrain flexible children; explicit numeric/step sizes retain their own extent.
-fn budget(spec, key) {
+fn budget(spec, key) any^ {
     let value = request(spec, key);
     if (value == "container") (if (spec._viewport[key] != null) spec._viewport[key] else default_size(key))
     else if (value == "auto" or not specified(spec, key)) spec._viewport[key]
@@ -89,7 +89,7 @@ fn budget(spec, key) {
     else if (value is map) null else if (value == null) null
     else error("chart: invalid composition dimension")
 }
-pub fn composition(spec, children) {
+pub fn composition(spec, children) any^ {
     let w = budget(spec, "width");
     let h = budget(spec, "height");
     let ratio = spec.aspect_ratio;
@@ -112,7 +112,7 @@ pub fn inherit_requests(parent, child) {
     {*:child, *:map([for (key in ["width", "height"] where parent[key] is map and not specified(child, key))
         for (item in [key, parent[key], "_" ++ key ++ "_specified", true]) item])}
 }
-pub fn allocate(plan, fixed, spacing) {
+pub fn allocate(plan, fixed, spacing) any^ {
     let dimension = plan[plan.key];
     let flexible_count = len(plan.flexible |: ~ == true);
     let available = if (dimension != null) float(dimension) -
@@ -125,7 +125,7 @@ pub fn allocate(plan, fixed, spacing) {
     }]
 }
 
-pub fn repeat_viewport(spec, rows, columns, spacing) {
+pub fn repeat_viewport(spec, rows, columns, spacing) any^ {
     let plan = composition({*:spec, concat: "horizontal"}, []);
     if (plan is error) plan else if (rows <= 0 or columns <= 0) error("chart: repeat requires nonempty rows and columns") else {
         let width = if (plan.width != null) (plan.width - max([0, columns - 1]) * spacing) / float(columns) else null;

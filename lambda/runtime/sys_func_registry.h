@@ -423,10 +423,10 @@ static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
     }
 }
 
-// S7.9.1: a type-family row answers for an error operand (`type(e)` is
-// `error`) instead of passing it through as every other row does (S7.9.3).
+// Error observers receive the operand as data: type answers its kind and
+// print renders it. Other rows retain their S7.9.3 error-through behavior.
 static inline bool sysfunc_observes_error(const SysFuncInfo* info) {
-    return info && info->fn == SYSFUNC_TYPE;
+    return info && (info->fn == SYSFUNC_TYPE || info->fn == SYSPROC_PRINT);
 }
 
 // Search and ordinal rows return either a finite integer or semantic null.

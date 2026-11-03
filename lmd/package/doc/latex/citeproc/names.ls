@@ -3,7 +3,7 @@ import c: .common
 import locale: .locale
 import out: .output
 
-fn capital_prefix(word, index = 0) {
+fn capital_prefix(word, index = 0) any^ {
     if (index >= len(word)) index
     else {
         let ch = slice(word, index, index + 1)
@@ -11,7 +11,7 @@ fn capital_prefix(word, index = 0) {
     }
 }
 
-fn initial(word) {
+fn initial(word) any^ {
     let capitals = capital_prefix(word)
     if (capitals > 1 and capitals < len(word))
         upper(slice(word, 0, 1)) ++ lower(slice(word, 1, capitals))
@@ -19,26 +19,26 @@ fn initial(word) {
 }
 
 fn initials_word(word, initialize_with, hyphen) {
-    let pieces = [for (i, piece in split(word, "-") where piece != "" and
-        (i == 0 or slice(piece, 0, 1) != lower(slice(piece, 0, 1)))) piece]
+    let pieces = [for (i, piece in ((split(word, "-")) ^ { [] }) where ((piece != "" and
+        (i == 0 or slice(piece, 0, 1) != lower(slice(piece, 0, 1)))) ^ { false })) piece]
     join([for (i, piece in pieces)
         initial(piece) ++ (if (i + 1 < len(pieces)) trim(initialize_with) else initialize_with)],
         if (hyphen) "-" else "")
 }
 
 fn initials(given, initialize_with, hyphen) =>
-    join([for (i, word in c.words(replace(given, ".", " ")))
+    join([for (i, word in ((c.words(replace(given, ".", " "))) ^ { [] }))
         if (i > 0 and word == lower(word) and len(word) > 1)
             (if (ends_with(initialize_with, " ")) "" else " ") ++ word ++ " "
         else initials_word(word, initialize_with, hyphen)], "")
 
-fn particle_join(particle, family) => if (particle == "") family
+fn particle_join(particle, family) any^ => if (particle == "") family
     else particle ++ (if (ends_with(particle, "’") or ends_with(particle, "'")) "" else " ") ++ family
 
-fn person_text(person, options, index, context) {
-    let family_parts = [for (node in c.children(context.name_node, "name-part")
+fn person_text(person, options, index, context) any^ {
+    let family_parts = [for (node in ((c.children(context.name_node, "name-part")) ^ { [] })
         where node["name"] == "family") node]
-    let given_parts = [for (node in c.children(context.name_node, "name-part")
+    let given_parts = [for (node in ((c.children(context.name_node, "name-part")) ^ { [] })
         where node["name"] == "given") node]
     if (person.literal != null)
         out.decorate(family_parts[0], out.result([person.literal]), context).content
@@ -107,7 +107,7 @@ fn joined(people, options, context, truncated, etal) {
     }
 }
 
-pub fn render(node, people, context) {
+pub fn render(node, people, context) any^ {
     let name_node = c.child(node, "name")
     let options = {*:context.options, *:c.attrs(node), *:c.attrs(name_node)}
     let subsequent = context.position != null and context.position != "first"

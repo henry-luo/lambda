@@ -130,7 +130,7 @@ pub fn description(key) {
      objects: if (key == "physical_maps") physical_maps() else if (key == "coat" or key == "coat_hdr") physical_grid(false) else if (key == "sheen" or key == "sheen_hdr") physical_grid(true) else if (textured) showcase() else if (staged) stage() else if (lamp) room() else grid()}
 }
 
-fn material(m) element {
+fn material(m) element^ {
     let kind = m.type
     let physical = kind is string and kind == "physical";
     s.material(if (physical) 'physical' else 'standard', {color: m.color, metalness: m.metalness or 0.0, roughness: m.roughness or 1.0,
@@ -157,7 +157,7 @@ fn light(l) => if (l.type == "point") s.light('point', {color: l.color, intensit
         angle: l.angle, penumbra: l.penumbra, distance: l.distance, *: shadow(l)})
     else s.light('directional', {color: l.color, intensity: l.intensity, position: l.position, target: [0.0, 0.0, 0.0], *: shadow(l)})
 
-pub fn scene(d) => s.scene([
+pub fn scene(d) any^ => s.scene([
     s.camera({id: "camera", position: d.camera.position, target: d.camera.target, fov: d.camera.fov}),
     s.light('ambient', {intensity: d.ambient}),
     *(if (d.hemisphere != null) [s.light('hemisphere', {color: d.hemisphere.sky, 'ground-color': d.hemisphere.ground,

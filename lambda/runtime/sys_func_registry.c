@@ -1387,6 +1387,32 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_LOOPBACK_ACCEPT, "io_loopback_accept", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_loopback_accept", PROFILE_NETWORK_FPTR(pn_io_loopback_accept), NULL, NULL, false, 0, true},
 
+    // task-aware WS/WSS IO, imported only as lambda.io.websocket (D7.2.4v4).
+    {SYSPROC_IO_WEBSOCKET_OPEN, "io_websocket_open", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_open1", PROFILE_NETWORK_FPTR(pn_io_websocket_open1), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_OPEN, "io_websocket_open", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_open2", PROFILE_NETWORK_FPTR(pn_io_websocket_open2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_SEND, "io_websocket_send", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_send", PROFILE_NETWORK_FPTR(pn_io_websocket_send), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_RECEIVE, "io_websocket_receive", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_receive1", PROFILE_NETWORK_FPTR(pn_io_websocket_receive1), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_RECEIVE, "io_websocket_receive", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_receive2", PROFILE_NETWORK_FPTR(pn_io_websocket_receive2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_CLOSE, "io_websocket_close", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_close", PROFILE_NETWORK_FPTR(pn_io_websocket_close), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_CLOSE, "io_websocket_close", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_close2", PROFILE_NETWORK_FPTR(pn_io_websocket_close2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_CLOSE, "io_websocket_close", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_close3", PROFILE_NETWORK_FPTR(pn_io_websocket_close3), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_LISTEN, "io_websocket_listen", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_listen", PROFILE_NETWORK_FPTR(pn_io_websocket_listen), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_LISTEN, "io_websocket_listen", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_listen2", PROFILE_NETWORK_FPTR(pn_io_websocket_listen2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_ACCEPT, "io_websocket_accept", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_accept1", PROFILE_NETWORK_FPTR(pn_io_websocket_accept1), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_WEBSOCKET_ACCEPT, "io_websocket_accept", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_websocket_accept2", PROFILE_NETWORK_FPTR(pn_io_websocket_accept2), NULL, NULL, false, 0, true},
+
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
     {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
@@ -2355,6 +2381,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_strcat5", FPTR(fn_strcat5)},
     {"fn_strcat6", FPTR(fn_strcat6)},
     {"fn_strcat_many", FPTR(fn_strcat_many)},
+    {"fn_strcat_values", FPTR(fn_strcat_values)},
     {"fn_string_freeze", FPTR(fn_string_freeze),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER), JIT_IMPORT_ARGS_BORROWED_AUDITED}},
@@ -2480,6 +2507,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
     {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
+    {"lambda_array_set_checked_preplanned", FPTR(lambda_array_set_checked_preplanned)},
     {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"lambda_array_path_set_checked", FPTR(lambda_array_path_set_checked)},
     {"lambda_array_path_set_checked_inplace", FPTR(lambda_array_path_set_checked_inplace)},
@@ -2623,6 +2651,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"lambda_fill_primitive_bits", FPTR(lambda_fill_primitive_bits),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
@@ -4060,7 +4095,15 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     static const char* const mail_command_options[] = {"to", NULL};
     static const char* const mail_send_options[] = {"user", "password", "token", "pin", "timeout", "tls",
         "from", "to", NULL};
+    static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
+    static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", NULL};
     switch (fn) {
+    case SYSPROC_IO_WEBSOCKET_LISTEN:
+        if (options_arg_index) *options_arg_index = 1;
+        return websocket_listen_options;
+    case SYSPROC_IO_WEBSOCKET_OPEN:
+        if (options_arg_index) *options_arg_index = 1;
+        return websocket_options;
     case SYSPROC_IO_EXEC:
         if (options_arg_index) *options_arg_index = 2;
         return exec_options;

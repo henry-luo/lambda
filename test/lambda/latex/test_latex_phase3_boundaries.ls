@@ -2,7 +2,7 @@ import latex: lambda.doc.latex.latex
 import util: lambda.doc.latex.util
 import html: lambda.doc.latex.to_html
 
-fn render(source, options = null) => latex.render_result(parse(source, "latex") ^ { null }, options)
+fn render(source, options = null) any^ => latex.render_result(parse(source, "latex") ^ { null }, options)
 fn issue(result, code) => any([for (entry in result.diagnostics) entry.code == code])
 
 let accents = render("\\newcommand \\course{Caf\\'e}\\course \\H o \\v{c}")

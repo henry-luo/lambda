@@ -4,7 +4,7 @@ import tokens: .tokens
 // pinned, licensed SVG data is Input-owned; no mutable catalog or native widget state.
 let assets = input(sys.lambda.home# ++ "/package/ui/dtna/icon_assets.json",'json')^
 let aliases = {["chevron-down"]:"down",info:"info-circle",warning:"warning"}
-fn icon_name(props) {
+fn icon_name(props) any^ {
     let requested = c.text(c.option(props,"name","info"));
     c.option(aliases,requested,requested)
 }
@@ -27,7 +27,7 @@ pub fn descriptor(props) element^ {
     let valid = validate(props)^;
     c.node('icon',props,null,["name","width","height","theme","rotate","spin","primary_color","secondary_color"])^
 }
-fn attributes(values, props) => map([for (key,value in values)
+fn attributes(values, props) any^ => map([for (key,value in values)
     (key,if (value == "__dtna_primary__") c.option(props,"primary_color","var(--dtna-primary)")
         else if (value == "__dtna_secondary__") (if (c.has(props,"secondary_color")) props.secondary_color
             else if (props.primary_color != null) (tokens.palette(props.primary_color)^)[0] else "var(--dtna-primary-background)") else value)])

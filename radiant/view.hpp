@@ -107,6 +107,9 @@ String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
 CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
     CssEnum fallback);
+// selected fragments may inherit through an originating pseudo without changing ordinary CSSOM ancestry.
+CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
+    CssEnum fallback, DomElement* inherited_pseudo_origin, int inherited_pseudo_type);
 CssEnum css_prop_compute_cascaded_text_combine(DomElement* element, float* digit_limit);
 uint8_t css_prop_compute_cascaded_containment(DomElement* element);
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
@@ -2027,7 +2030,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
-    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
+    float inline_relative_x, inline_relative_y; // offsets already applied in the parent inline frame
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
@@ -4620,6 +4623,10 @@ typedef struct UiContext {
     // since the last present lay inside it; false (the zeroed default) uploads the whole surface.
     bool present_partial;
     Bound present_rect;
+    // GPU compositing (vibe/radiant/Radiant_Design_GPU_Compositor.md): the viewports the last render cut
+    // out of `surface`, and a switch CPU consumers use to get the whole page into it
+    struct UiCompositorState* compositor;
+    bool compositor_suspended;
     bool export_native_graphics;    // file export may lazily create a hidden graphics host for scene snapshots
 
     // font handling
@@ -4731,6 +4738,12 @@ inline RdtDevicePoint ui_context_logical_to_device_point(
 bool ui_context_set_device_scale(UiContext* uicon,
                                  float scale_x,
                                  float scale_y);
+// Adds device pixels a surface write touched to the next partial present's upload.
+void ui_context_add_present_damage(UiContext* uicon, Bound damage);
+// a live window whose compositor no CPU consumer has suspended; RADIANT_GPU_COMPOSITOR=off (or 0) turns it off
+bool ui_context_gpu_compositor(UiContext* uicon);
+// After a composited render `surface` lacks its native viewports; re-render it whole for a CPU consumer.
+void ui_context_materialize_surface(UiContext* uicon);
 // Recompute one document's derived raster scale from its explicit page/output
 // inputs and the UI's device scale. The top-level call also refreshes physical
 // font resources; logical layout remains unchanged.
@@ -4752,6 +4765,7 @@ typedef struct DocumentJsHostConfig {
     InputResourcePolicy resource_policy;
     const struct RenderPagedOptions* paged_media;
     bool scripting_disabled;    // DomDocument::scripting_disabled for the loaded document
+    bool microphone_granted;   // D7.5.10: initial document only, never inherited
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);

@@ -12,7 +12,7 @@ let CHROME_W = 180.0 + 280.0 + 48.0
 let CHROME_H = 52.0 + 48.0
 
 fn node(owner, id) => dom.get_element_by_id(owner, id)
-pub fn lay(ctx, m) => C.layout(m, C.slot_aspects(ctx.lib, m))
+pub fn lay(ctx, m) any^ => C.layout(m, C.slot_aspects(ctx.lib, m))
 
 // the canvas fits the stage; the stage is measured from the viewport because the layer may still be hidden
 pn fit(owner, lay) {
@@ -26,14 +26,14 @@ pn render(owner, ctx, cs) {
     let l = lay(ctx, cs.model)
     let scale = fit(owner, l)
     updates.markup(node(owner, "cl-canvas-host"), format([CU.canvas(ctx.lib, cs.model, l,
-        {scale:scale, source:"thumb", selected:cs.selected, handles:true})], 'html'))
-    updates.markup(node(owner, "cl-tray"), format([CU.tray(ctx.lib, cs.source, cs.model)], 'html'))
+        {scale:scale, source:"thumb", selected:cs.selected, handles:true})], 'html'))^
+    updates.markup(node(owner, "cl-tray"), format([CU.tray(ctx.lib, cs.source, cs.model)], 'html'))^
     let m = cs.model
     for (b in dom.query_selector_all(owner, "[data-collage-template]")) updates.attr(b, "aria-pressed", dom.get_attribute(b, "data-collage-template") == m.template)
     for (b in dom.query_selector_all(owner, "[data-collage-bg]")) updates.attr(b, "aria-pressed", dom.get_attribute(b, "data-collage-bg") == m.background)
-    updates.attr(node(owner, "collage"), "data-template", m.template)
-    if (len(cs.history.past) == 0) dom.set_attribute(node(owner, "cl-undo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-undo"), "disabled")
-    if (len(cs.history.future) == 0) dom.set_attribute(node(owner, "cl-redo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-redo"), "disabled")
+    updates.attr(node(owner, "collage"), "data-template", m.template)^
+    if ((len(cs.history.past) == 0)^) dom.set_attribute(node(owner, "cl-undo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-undo"), "disabled")
+    if ((len(cs.history.future) == 0)^) dom.set_attribute(node(owner, "cl-redo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-redo"), "disabled")
     updates.show(owner, "cl-shuffle", C.template(m).layout == "prints")
     return {*:cs, scale:scale}
 }
@@ -41,12 +41,12 @@ pn render(owner, ctx, cs) {
 // form controls mirror the model when it is opened, undone or redone
 pn sync_controls(owner, m) {
     // select values are set by index: set_state("value") is defined on text controls only
-    dom.set_selected_index(node(owner, "cl-aspect"), index_of([for (a in C.ASPECTS) a.key], m.aspect) or 0)
-    dom.set_selected_index(node(owner, "cl-font"), index_of([for (f in C.FONTS) f.key], C.font(m).key) or 0)
+    dom.set_selected_index(node(owner, "cl-aspect"), index_of([for (a in C.ASPECTS) a.key], m.aspect)^ or 0)
+    dom.set_selected_index(node(owner, "cl-font"), index_of([for (f in C.FONTS) f.key], C.font(m)^.key)^ or 0)
     // set_state("value") commits a range's live value and moves its thumb
-    dom.set_state(node(owner, "cl-gutter"), "value", string(m.gutter))
-    dom.set_state(node(owner, "cl-radius"), "value", string(m.radius))
-    dom.set_state(node(owner, "cl-border"), "value", string(m.border))
+    dom.set_state(node(owner, "cl-gutter"), "value", string(m.gutter)^)
+    dom.set_state(node(owner, "cl-radius"), "value", string(m.radius)^)
+    dom.set_state(node(owner, "cl-border"), "value", string(m.border)^)
     dom.set_state(node(owner, "cl-caption"), "value", m.caption or "")
     dom.set_state(node(owner, "cl-note"), "value", m.note or "")
     dom.set_state(node(owner, "cl-credits"), "checked", m.credits)
@@ -54,8 +54,8 @@ pn sync_controls(owner, m) {
 
 pn saved_list(owner, ctx) {
     let dir = ctx.dir ++ "collages"
-    let names = if (exists(dir)) [for (e in (input(dir, 'dir') ^ { [] }) where ends_with(e.name, ".mark")) e.name] else []
-    updates.markup(node(owner, "cl-saved"), join([for (n in sort(names)) format([<option value:n, slice(n, 0, len(n) - 5)>], 'html')], ""))
+    let names = if (exists(dir)) [for (e in (input(dir, 'dir') ^ { [] }) where ends_with(e.name, ".mark")^) e.name] else []
+    updates.markup(node(owner, "cl-saved"), join([for (n in sort(names)) format([<option value:n, slice(n, 0, len(n) - 5)>], 'html')], ""))^
     if (len(names) == 0) dom.set_attribute(node(owner, "cl-open"), "disabled", "")
     else {
         dom.remove_attribute(node(owner, "cl-open"), "disabled")
@@ -65,8 +65,8 @@ pn saved_list(owner, ctx) {
 
 pub pn start(owner, ctx, ids, title) {
     let model = C.create(ids, title)
-    sync_controls(owner, model)
-    saved_list(owner, ctx)
+    sync_controls(owner, model)^
+    saved_list(owner, ctx)^
     updates.text(owner, "cl-status", "")
     return render(owner, ctx, {model:model, history:C.history(), source:ids, selected:-1, scale:1.0, drag:null})
 }
@@ -91,7 +91,7 @@ pub pn preview(owner, ctx, cs, model) {
 
 pub pn undo(owner, ctx, cs, forward) {
     let step = if (forward) C.redo(cs.history, cs.model) else C.undo(cs.history, cs.model)
-    if (step == null) { return cs }
+    if ((step == null)^) { return cs }
     sync_controls(owner, step.model)
     return render(owner, ctx, {*:cs, model:step.model, history:step.history})
 }
@@ -119,8 +119,8 @@ pub pn press(owner, ctx, cs, evt) {
 
 pn ghost(owner, x, y, visible) {
     let el = node(owner, "cl-ghost")
-    updates.style(el, "display", if (visible) "block" else "none")
-    updates.style(el, "left", string(x - 30) ++ "px")
+    updates.style(el, "display", if (visible) "block" else "none")^
+    updates.style(el, "left", string(x - 30) ++ "px")^
     updates.style(el, "top", string(y - 30) ++ "px")
 }
 
@@ -134,13 +134,13 @@ pub pn move(owner, ctx, cs, evt) {
     if (not moved) { return cs }
     let drag = {*:d, moved:true}
     if (d.kind == "tray" or d.kind == "swap") {
-        ghost(owner, evt.clientX, evt.clientY, true)
+        (ghost(owner, evt.clientX, evt.clientY, true))^
         return {*:cs, drag:drag}
     }
     if (d.kind == "cell") {
         let outside = evt.clientX < d.rect.x or evt.clientX > d.rect.x + d.rect.w or evt.clientY < d.rect.y or evt.clientY > d.rect.y + d.rect.h
         if (outside) {
-            ghost(owner, evt.clientX, evt.clientY, true)
+            ghost(owner, evt.clientX, evt.clientY, true)^
             return render(owner, ctx, {*:cs, model:d.start, drag:{*:drag, kind:"swap"}})
         }
         let zoom = d.start.slots[d.slot].zoom
@@ -195,7 +195,7 @@ pub pn load_saved(owner, ctx, cs) any^ {
     let file = dom.get_state(node(owner, "cl-saved"), "value")
     let model = input(ctx.dir ++ "collages/" ++ file, 'mark')^
     // a collage may only name photos this library has
-    if (not C.valid(model) or any([for (s in model.slots) not (s.id is int) or s.id < 1 or s.id > len(ctx.lib.photos)]))
+    if ((not C.valid(model) or any([for (s in model.slots) not (s.id is int) or s.id < 1 or s.id > len(ctx.lib.photos)]))^)
         raise error("Collage: " ++ file ++ " is not a collage of this library")
     sync_controls(owner, model)
     return change(owner, ctx, {*:cs, selected:-1}, model)

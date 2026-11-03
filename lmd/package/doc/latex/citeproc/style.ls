@@ -45,20 +45,20 @@ let ATTRIBUTES = {
 
 fn namespace_for(node, inherited) => {*:inherited,
     *:c.dictionary([for (key, value in c.attrs(node)
-        where string(key) == "xmlns" or starts_with(string(key), "xmlns:"))
+        where ((string(key) == "xmlns" or starts_with(string(key), "xmlns:")) ^ { false }))
         {key: string(key), value: value}])}
 
-fn check(node, inherited, source, macros, macro_stack, depth) {
+fn check(node, inherited, source, macros, macro_stack, depth) any^ {
     let tag = c.tag(node)
     let bindings = namespace_for(node, inherited)
     let allowed = c.get(ATTRIBUTES, tag, []) ++ (if (c.has(FORMAT_TAGS, tag)) FORMATTING else []) ++
         (if (c.has(OPTION_TAGS, tag)) NAME_OPTIONS else [])
     let unknown = [for (key, value in c.attrs(node)
-        where not c.has(allowed, string(key)) and
-            not starts_with(string(key), "xmlns:") and string(key) != "xmlns")
+        where ((not c.has(allowed, string(key)) and
+            not starts_with(string(key), "xmlns:") and string(key) != "xmlns") ^ { false }))
         c.issue("unsupported-csl-attribute", "Unsupported CSL attribute " ++ string(key), source, tag)]
     let invalid = [for (key, value in c.attrs(node)
-        where ENUMS[string(key)] != null and not c.has(ENUMS[string(key)], value))
+        where ((ENUMS[string(key)] != null and not c.has(ENUMS[string(key)], value)) ^ { false }))
         c.issue("invalid-csl-attribute", "Invalid CSL value for " ++ string(key), source, tag)]
     let own = if (depth > 128)
         [c.issue("csl-depth", "CSL graph exceeds 128 levels", source, tag)]
@@ -78,16 +78,16 @@ fn check(node, inherited, source, macros, macro_stack, depth) {
         (node["subsequent-author-substitute-rule"] != null and node["subsequent-author-substitute-rule"] != "complete-all"))
         [c.issue("unsupported-csl-feature", "Unsupported CSL collapse or name-disambiguation policy", source, tag)] else []
     own ++ macro_issues ++ limited ++ (if (tag == "info" or depth > 128) [] else
-        [for (child in c.children(node), issue in check(child, bindings, source, macros, macro_stack, depth + 1)) issue])
+        [for (child in c.children(node), issue in ((check(child, bindings, source, macros, macro_stack, depth + 1)) ^ { [] })) issue])
 }
 
 fn dependencies(node) => unique((if (node.macro == null) [] else [node.macro]) ++
-    [for (child in c.children(node), dep in dependencies(child)) dep])
+    [for (child in c.children(node), dep in ((dependencies(child)) ^ { [] })) dep])
 
-fn uses_variable(node, key) => (c.has(c.words(node.variable), key) ^ { false }) or
+fn uses_variable(node, key) any^ => (c.has(c.words(node.variable), key) ^ { false }) or
     any([for (child in c.children(node)) uses_variable(child, key)])
 
-fn visit(deps, key, trail, done, source) {
+fn visit(deps, key, trail, done, source) any^ {
     if (c.has(trail, key)) {done: done,
         issues: [c.issue("cyclic-csl-macro", "Recursive CSL macro " ++ key, source, key)]}
     else if (len(trail) > 128) {done: done,
@@ -148,7 +148,7 @@ fn compile_root(xml, parents, source, seen, depth) map^ {
     if (c.tag(root) != "style" or root.version != "1.0" or c.namespace_uri(root) != c.NS)
         raise c.failure("invalid-csl-style", "Expected a CSL 1.0 style", source)
     else if (c.child(root, "citation") == null) {
-        let links = [for (node in c.children(c.child(root, "info"), "link")
+        let links = [for (node in ((c.children(c.child(root, "info"), "link")) ^ { [] })
             where node.rel == "independent-parent") node.href]
         if (len(links) != 1 or parents[links[0]] == null)
             raise c.failure("missing-csl-parent", "Dependent style requires a supplied independent parent", source)

@@ -45,7 +45,7 @@ pub pn write_recipe(path, source, recipe) any^ {
 }
 pub pn prepare_export(path,source,recipe) any^ {
     let target=destination(path,source,".png")^
-    if (not model.valid(recipe) or recipe.output_width*recipe.output_height>16000000)
+    if ((not model.valid(recipe) or recipe.output_width*recipe.output_height>16000000)^)
         raise error("Photo: output must be at most 16 megapixels")
     let pending=target ++ ".photo-" ++ string(int(clock()*1000000)) ++ ".png"
     let background=pending ++ ".base.png";
@@ -58,7 +58,7 @@ pub pn abort_export(request) {
 }
 pub pn finish_export(request,dimensions) any^ {
     var problem=null
-    if (len(request.recipe.layers)>0) {
+    if ((len(request.recipe.layers)>0)^) {
         let svg=layers.svg(request.recipe,dimensions[1],dimensions[0],
             url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",request.background))
         let html=<html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>

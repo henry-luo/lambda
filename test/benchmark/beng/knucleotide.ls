@@ -6,24 +6,24 @@
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // extract >THREE section from fasta input
-fn extract_three(text) {
+fn extract_three(text) any^ {
     let lines = split(text, "\n")
     var num_lines = len(lines)
     var seq = ""
     var in_three = 0
     var i = 0
-    while (i < num_lines) {
+    while ((i < num_lines)^) {
         let line = lines[i]
-        if (len(line) > 0 and slice(line, 0, 1) == ">") {
+        if ((len(line) > 0 and slice(line, 0, 1) == ">")^) {
             if (in_three == 1) {
                 // hit next header, stop
                 return seq
             }
-            if (starts_with(line, ">THREE")) {
+            if (starts_with(line, ">THREE")^) {
                 in_three = 1
             }
         } else {
-            if (in_three == 1 and len(line) > 0) {
+            if ((in_three == 1 and len(line) > 0)^) {
                 seq = seq ++ upper(line)
             }
         }
@@ -60,19 +60,19 @@ pn count_small_kmers(seq) {
 }
 
 // format float to 3 decimal places
-fn format3(x) {
+fn format3(x) any^ {
     var int_part = int(floor(x))
     var frac = x - float(int_part)
     var frac_f = floor(frac * 1000.0 + 0.5)
     var frac_int = int(frac_f)
-    if (frac_int >= 1000) {
+    if ((frac_int >= 1000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
     var frac_str = string(frac_int)
     var pad = 3 - len(frac_str)
     var prefix = ""
-    while (pad > 0) {
+    while ((pad > 0)^) {
         prefix = prefix ++ "0"
         pad = pad - 1
     }
@@ -149,15 +149,15 @@ pn main() {
     let counts = count_small_kmers(seq)
 
     // print frequency tables for 1-mers and 2-mers
-    print_frequency_table(counts, 0, 1, len(seq))
-    print_frequency_table(counts, 4, 2, len(seq) - 1)
+    print_frequency_table(counts, 0, 1, len(seq))^
+    print_frequency_table(counts, 4, 2, len(seq) - 1)^
 
     // print counts of specific sequences
-    print_count(seq, "GGT")
-    print_count(seq, "GGTA")
-    print_count(seq, "GGTATT")
-    print_count(seq, "GGTATTTTAATT")
-    print_count(seq, "GGTATTTTAATTTATAGT")
+    print_count(seq, "GGT")^
+    print_count(seq, "GGTA")^
+    print_count(seq, "GGTATT")^
+    print_count(seq, "GGTATTTTAATT")^
+    print_count(seq, "GGTATTTTAATTTATAGT")^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

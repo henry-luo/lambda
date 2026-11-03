@@ -23,10 +23,10 @@ pn drive(ops, page_h) {
     while (i < n) {
         let r = text.apply_op(st, util.IDENTITY, ops[i].op, ops[i].operands, page_h)
         st = r.state
-        if (r.emit != null) {
+        if ((r.emit != null)^) {
             var k = 0
             let m = len(r.emit)
-            while (k < m) {
+            while ((k < m)^) {
                 emits = emits ++ [r.emit[k]]
                 k = k + 1
             }
@@ -84,8 +84,8 @@ pn main() {
 
     print({
         A_state: rA.state,
-        A_emits: [for (e in rA.emits) format(e, 'xml')],
-        B_emits: [for (e in rB.emits) format(e, 'xml')],
+        A_emits: [for (e in ((rA.emits) ^ { [] })) format(e, 'xml')],
+        B_emits: [for (e in ((rB.emits) ^ { [] })) format(e, 'xml')],
         C_emit_count: rC.emit_count
     })
 }

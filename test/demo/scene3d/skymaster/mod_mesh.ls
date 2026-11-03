@@ -11,7 +11,7 @@ let Z = [0.0, 0.0, 1.0]
 pub let WORLD = {u: X, v: Y, w: Z}
 
 fn mix3(a: any, b: any, ka: any, kb: any) => [a[0] * ka + b[0] * kb, a[1] * ka + b[1] * kb, a[2] * ka + b[2] * kb]
-fn at(f, o, a, b, w) => rig.add(o, rig.add(mix3(f.u, f.v, a, b), rig.scale(f.w, w)))
+fn at(f, o, a, b, w) any^ => rig.add(o, rig.add(mix3(f.u, f.v, a, b), rig.scale(f.w, w)))
 // a right-handed frame whose w follows the given direction
 pub fn frame(direction) {
     let w = rig.unit(direction)
@@ -29,8 +29,8 @@ pub fn merge(parts) {
 }
 // the port side is the starboard side reflected in z, with its triangles rewound
 pub fn mirrored(m) => {p: [for (v in m.p) rig.mirror_point(v)], n: [for (v in m.n) rig.mirror_point(v)],
-    i: [for (k in 0 to (len(m.i) div 3 - 1)) *[m.i[3 * k], m.i[3 * k + 2], m.i[3 * k + 1]]]}
-pub fn geometry(id, m) element => s.geometry([for (v in m.p, x in v) x],
+    i: [for (k in ((0 to (len(m.i) div 3 - 1)) ^ { [] })) *[m.i[3 * k], m.i[3 * k + 2], m.i[3 * k + 1]]]}
+pub fn geometry(id, m) element^ => s.geometry([for (v in m.p, x in v) x],
     {id: id, normals: [for (v in m.n, x in v) x], indices: m.i})
 
 // a quad strip between two rings of k + 1 points, ring a at the start
@@ -80,10 +80,10 @@ pub fn extrude(poly, f, w0, w1) {
     let k = len(ring)
     let near = [for (pt in ring) at(f, [0.0, 0.0, 0.0], pt[0], pt[1], w0)]
     let far = [for (pt in ring) at(f, [0.0, 0.0, 0.0], pt[0], pt[1], w1)]
-    let sides = [for (j in 0 to (k - 1), let nj = (j + 1) % k, let e = rig.sub(far[nj], far[j]))
+    let sides = [for (j in ((0 to (k - 1)) ^ { [] }), let nj = (j + 1) % k, let e = rig.sub(far[nj], far[j]))
         {p: [near[j], near[nj], far[nj], far[j]], n: (let o = rig.unit(rig.cross(e, f.w)), [o, o, o, o]), i: [0, 1, 2, 0, 2, 3]}];
-    merge([{p: far, n: [for (pt in far) f.w], i: [for (j in 1 to (k - 2)) *[0, j, j + 1]]},
-        {p: near, n: [for (pt in near) rig.scale(f.w, -1.0)], i: [for (j in 1 to (k - 2)) *[0, j + 1, j]]}, *sides])
+    merge([{p: far, n: [for (pt in far) f.w], i: [for (j in ((1 to (k - 2)) ^ { [] })) *[0, j, j + 1]]},
+        {p: near, n: [for (pt in near) rig.scale(f.w, -1.0)], i: [for (j in ((1 to (k - 2)) ^ { [] })) *[0, j + 1, j]]}, *sides])
 }
 // a spur gear around the frame's w axis: `teeth` trapezoid teeth between the root and tip circles
 pub fn gear(center, f, teeth, root, tip, half_width, phase = 0.0) {
@@ -101,9 +101,9 @@ pub fn gear(center, f, teeth, root, tip, half_width, phase = 0.0) {
         {p: [back, *[for (q in profile) rig.add(back, q)]], n: [for (j in 0 to n) rig.scale(f.w, -1.0)],
             i: [for (j in 0 to (n - 1)) *[0, (j + 1) % n + 1, j + 1]]}, *sides])
 }
-fn bezier(c0, c1, c2, c3, u) => (let v = 1.0 - u,
+fn bezier(c0, c1, c2, c3, u) any^ => (let v = 1.0 - u,
     rig.add(rig.add(rig.scale(c0, v * v * v), rig.scale(c1, 3.0 * v * v * u)), rig.add(rig.scale(c2, 3.0 * v * u * u), rig.scale(c3, u * u * u))))
-fn bezier_tangent(c0, c1, c2, c3, u) => (let v = 1.0 - u,
+fn bezier_tangent(c0, c1, c2, c3, u) any^ => (let v = 1.0 - u,
     rig.unit(rig.add(rig.add(rig.scale(rig.sub(c1, c0), 3.0 * v * v), rig.scale(rig.sub(c2, c1), 6.0 * v * u)), rig.scale(rig.sub(c3, c2), 3.0 * u * u))))
 fn transport(normals, tangents, k) => if (k >= len(tangents)) normals else
     transport([*normals, rig.unit(rig.sub(normals[k - 1], rig.scale(tangents[k], rig.dot(normals[k - 1], tangents[k]))))], tangents, k + 1)

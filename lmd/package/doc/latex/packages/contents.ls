@@ -20,7 +20,7 @@ pub let TOCLOFT_OPTIONS = ["titles", "subfigure", "subfig", "float", "memoir", "
     "tocloftpagestyle", "notoc", "notocbasic", "nolof", "nolot", "nofloats", "fixtitles"]
 
 // a hook the document redefined, as source text, or null
-fn hook(info, name) {
+fn hook(info, name) any^ {
     let found = macros.last_macro(info.macros, name)
     if (found == null) null else found.source
 }
@@ -28,7 +28,7 @@ fn hook(info, name) {
 // The style of a contents entry of tocloft entry `entry`, or null when nothing
 // changes it: {css (the entry), number_css, before, after (text around the number),
 // after_box (text after the number's box)}
-pub fn entry_style(info, entry) {
+pub fn entry_style(info, entry) any^ {
     let font = hook(info, "cft" ++ entry ++ "font")
     let presnum = hook(info, "cft" ++ entry ++ "presnum")
     let aftersnum = hook(info, "cft" ++ entry ++ "aftersnum")
@@ -61,7 +61,7 @@ pub fn title(info, name_macro, fallback, file) {
 }
 
 // \cftsetindents{entry}{indent}{numwidth}: {key, value} for the settings list
-pub fn indents(el) {
+pub fn indents(el) any^ {
     let entry = util.raw_argument(el, "required", 0)
     if (entry == null) null
     else {key: "cftindents:" ++ trim(entry),

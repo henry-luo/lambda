@@ -22,7 +22,7 @@ arith
 parse("1 + 2 + 3", arith)^
 sum_tree("4 + 5")
 
-fn digits(text) {
+fn digits(text) any^ {
     grammar d { n := "\d"+ }
     parse(text, d)^
 }

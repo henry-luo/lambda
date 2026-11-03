@@ -16,14 +16,14 @@ pn main() {
     while (r < rounds) {
         let u = jq_bump_scalars(t, 1 + r)
         var paths: array = []
-        jq_collect_paths(u, [], false, paths)
+        jq_collect_paths(u, [], false, paths)^
         var leaves: int[] = []
-        jq_flatten_into(u, leaves)
+        jq_flatten_into(u, leaves)^
         checksum = (checksum * 31 + len(paths) + sum(leaves)) % jq_modulus
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 313746104) {
+    if ((checksum == 313746104)^) {
         print("jq_tree: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_tree: FAIL checksum=" ++ string(checksum) ++ "\n")

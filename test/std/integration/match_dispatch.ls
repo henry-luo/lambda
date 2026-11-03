@@ -8,7 +8,7 @@ type NegOp { value: int }
 type SquareOp { value: int }
 
 // ===== Dispatch function =====
-fn evaluate(op) => match op {
+fn evaluate(op) any^ => match op {
     case AddOp: op.a + op.b
     case MulOp: op.a * op.b
     case NegOp: -op.value
@@ -76,7 +76,7 @@ let handlers = {
     farewell: (name) => "Goodbye, " ++ name,
     shout: (name) => upper(name) ++ "!"
 }
-fn dispatch(action: string, arg: string) => handlers[action](arg)
+fn dispatch(action: string, arg: string) any^ => handlers[action](arg)
 dispatch("greet", "Alice")
 dispatch("farewell", "Bob")
 dispatch("shout", "Charlie")

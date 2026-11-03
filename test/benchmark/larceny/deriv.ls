@@ -26,7 +26,7 @@ fn deriv(e) {
     return {t: 2, l: p1, r: p2}
 }
 
-fn count_nodes(e) {
+fn count_nodes(e) any^ {
     if (e.t == 0 or e.t == 1) {
         return 1
     }
@@ -55,7 +55,7 @@ fn make_expr() {
     return a3
 }
 
-fn benchmark() {
+fn benchmark() any^ {
     var result = 0
     var iter = 0
     while (iter < 5000) {
@@ -71,7 +71,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 45) {
+    if ((result == 45)^) {
         print("deriv: PASS\n")
     } else {
         print("deriv: FAIL result=")

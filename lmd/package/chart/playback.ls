@@ -3,7 +3,7 @@ import util: .util
 import parse: .parse
 import cfg: .config
 
-fn nested(spec) {
+fn nested(spec) any^ {
     let node = if (spec is element) parse.parse_top(spec) else spec;
     node.timeline != null or any([for (child in [*node.children, *node.layer, node.template] where child != null) nested(child)])
 }
@@ -37,7 +37,7 @@ pub fn inherit(base, keyframe) {
     {*:base, *:spec, timeline: null, encoding: {*:parse.attributes(base.encoding), *:parse.attributes(spec.encoding)},
         config: cfg.inherit(base.config, spec.config)}
 }
-pub fn target(raw) {
+pub fn target(raw) any^ {
     let spec = if (raw is element) parse.parse_top(raw) else raw;
     if (spec.timeline == null) spec else {
         let plan = configure(spec);
@@ -56,12 +56,12 @@ pub fn position(plan, elapsed) {
         (if (reverse) 1.0 - local / (if (plan.duration == 0) 1.0 else plan.duration) else local / (if (plan.duration == 0) 1.0 else plan.duration)) * plan.length;
     {at: position, complete: completed, cycle: cycle, reversed: reverse}
 }
-pub fn segment(spec, elapsed, exact = false) {
+pub fn segment(spec, elapsed, exact = false) any^ {
     let plan = configure(spec);
     if (plan is error) plan else if (not util.finite_number(elapsed) or elapsed < 0) error("chart: timeline time must be finite and nonnegative") else {
     let point = if (exact) {at: util.clamp_val(elapsed, 0.0, plan.length), complete: false, cycle: 0}
         else position(plan, elapsed);
-    let indices = [for (i, frame in plan.keyframes where frame.at <= point.at) i];
+    let indices = [for (i, frame in plan.keyframes where ((frame.at <= point.at) ^ { false })) i];
     let index = if (len(indices) > 0) indices[len(indices) - 1] else 0;
     let first = plan.keyframes[index];
     let destination = plan.keyframes[min(index + 1, len(plan.keyframes) - 1)];
@@ -76,7 +76,7 @@ pub fn initial(spec) {
     if (plan is error) plan else {phase: if (plan.autoplay) "playing" else "idle", elapsed: 0.0,
         anchor: null, reversed: false, token: 0, position: null, generation: 0}
 }
-pub fn command(playback, action, now, plan) {
+pub fn command(playback, action, now, plan) any^ {
     let command = action.command;
     let known = contains(["play", "pause", "resume", "seek", "reverse", "cancel", "frame"], command);
     let elapsed = if (playback.phase == "playing" and playback.anchor != null and util.finite_number(now))

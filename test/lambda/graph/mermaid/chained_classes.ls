@@ -4,8 +4,8 @@ import transform: lambda.graph.transform
 let source = (input("test/lambda/graph/mermaid/chained_classes.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let html = transform.to_html(source)
-let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
-  where string(name(child)) == "node") child]
+let html_nodes = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[i]
+  where ((string(name(child)) == "node") ^ { false })) child]
 
 {
   source_counts: [len(model.nodes(source)), len(model.edges(source))],

@@ -13,11 +13,11 @@ import .mod_history
 // Text leaves covered by a selection
 // ---------------------------------------------------------------------------
 
-fn sel_lo(sel) => pos_min(sel.anchor, sel.head)
-fn sel_hi(sel) => pos_max(sel.anchor, sel.head)
+fn sel_lo(sel) any^ => pos_min(sel.anchor, sel.head)
+fn sel_hi(sel) any^ => pos_max(sel.anchor, sel.head)
 
 // A leaf at `path` contributes when the selected part of it is non-empty.
-fn leaf_selected(path, leaf, lo, hi) {
+fn leaf_selected(path, leaf, lo, hi) any^ {
   let after_lo = path_compare(path, lo.path) > 0 or
                  (path_equal(path, lo.path) and lo.offset < len(leaf.text))
   let before_hi = path_compare(path, hi.path) < 0 or
@@ -25,29 +25,29 @@ fn leaf_selected(path, leaf, lo, hi) {
   after_lo and before_hi
 }
 
-fn collect_leaves(n, path, lo, hi) {
+fn collect_leaves(n, path, lo, hi) any^ {
   if (is_text(n)) { if (leaf_selected(path, n, lo, hi)) [n] else [] }
   else if (is_node(n)) {
     [for (i, child of n.content)
-       for (leaf in collect_leaves(child, [*path, i], lo, hi)) leaf]
+       for (leaf in ((collect_leaves(child, [*path, i], lo, hi)) ^ { [] })) leaf]
   }
   else []
 }
 
 // Every non-empty text leaf the selection spans, in document order.
-pub fn selected_leaves(doc, sel) {
+pub fn selected_leaves(doc, sel) any^ {
   if (sel == null or sel.kind != 'text') []
-  else [for (leaf in collect_leaves(doc, [], sel_lo(sel), sel_hi(sel)) where len(leaf.text) > 0) leaf]
+  else [for (leaf in ((collect_leaves(doc, [], sel_lo(sel), sel_hi(sel))) ^ { [] }) where ((((len(leaf.text) > 0) ^ { false })))) leaf]
 }
 
-fn caret_leaf(doc, sel) {
+fn caret_leaf(doc, sel) any^ {
   let leaf = if (sel == null or sel.kind != 'text') null else node_at(doc, sel.head.path)
   if (leaf != null and is_text(leaf)) leaf else null
 }
 
 // True when `mark` applies at the selection: every selected leaf carries it,
 // or, at a caret, the stored marks (else the caret leaf's marks) do.
-pub fn mark_active(editor, mark) {
+pub fn mark_active(editor, mark) any^ {
   let sel = editor.selection
   if (sel == null or sel.kind != 'text') { false }
   else if (pos_equal(sel.anchor, sel.head)) {
@@ -66,7 +66,7 @@ pub fn mark_active(editor, mark) {
 // Enclosing nodes
 // ---------------------------------------------------------------------------
 
-fn ancestor_tags_at(doc, path, acc) {
+fn ancestor_tags_at(doc, path, acc) any^ {
   if (len(path) == 0) acc
   else {
     let n = node_at(doc, path)
@@ -76,7 +76,7 @@ fn ancestor_tags_at(doc, path, acc) {
 }
 
 // Tags enclosing the selection head, innermost first (the head node included).
-pub fn enclosing_tags(editor) {
+pub fn enclosing_tags(editor) any^ {
   let sel = editor.selection
   if (sel == null) []
   else if (sel.kind == 'text') ancestor_tags_at(editor.doc, sel.head.path, [])
@@ -86,7 +86,7 @@ pub fn enclosing_tags(editor) {
 
 // The innermost enclosing tag that is one of `tags`, or null.
 pub fn enclosing_tag_in(editor, tags) {
-  let found = [for (tag in enclosing_tags(editor) where contains(tags, tag)) tag]
+  let found = [for (tag in ((enclosing_tags(editor)) ^ { [] }) where ((contains(tags, tag)) ^ { false })) tag]
   if (len(found) == 0) null else found[0]
 }
 
@@ -96,5 +96,5 @@ pub fn inside_tag(editor, tag) => contains(enclosing_tags(editor), tag) ^ { fals
 // History
 // ---------------------------------------------------------------------------
 
-pub fn history_can_undo(editor) => editor.history != null and can_undo(editor.history) or false
-pub fn history_can_redo(editor) => editor.history != null and can_redo(editor.history) or false
+pub fn history_can_undo(editor) any^ => editor.history != null and can_undo(editor.history) or false
+pub fn history_can_redo(editor) any^ => editor.history != null and can_redo(editor.history) or false

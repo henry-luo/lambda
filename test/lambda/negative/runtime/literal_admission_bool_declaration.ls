@@ -2,4 +2,4 @@
 // value, so it admitted `false` as well.
 let src = [true, false]
 let c: true = src[1]
-"bound: " ++ string(c)
+"bound: " ++ string(c^)

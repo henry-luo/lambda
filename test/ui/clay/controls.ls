@@ -1,6 +1,6 @@
 import ui: lambda.ui.clay
 
-view clay_control_example: <clay_control_example> state accepted:"", count:0, request:"", action_name:"" {
+view clay_control_example: <clay_control_example> () any^ state accepted:"", count:0, request:"", action_name:"" {
     ui.render(<clay.flex direction:'vertical',align:"flex-start",gap:16,
         <clay.input id:"draft",default_value:"",label:"Draft">
         <clay.text_area id:"notes",rows:2,label:"Notes">

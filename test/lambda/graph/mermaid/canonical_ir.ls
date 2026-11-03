@@ -4,7 +4,7 @@ import transform: lambda.graph.transform
 
 fn item_kind(value) => if (value is element) string(name(value)) else "text"
 
-fn content_kinds(value) => [for (child in model.content_items(value)) item_kind(child)]
+fn content_kinds(value) => [for (child in ((model.content_items(value)) ^ { [] })) item_kind(child)]
 
 let legacy = <graph direction: "TB", custom: "graph-meta",
   <subgraph id: "group", label: "Group **One**", 'label-format': "markdown",
@@ -23,8 +23,8 @@ let nodes = model.nodes(once.graph)
 let edges = model.edges(once.graph)
 let groups = model.subgraphs(once.graph)
 let html = transform.to_html(once.graph)
-let html_nodes = [for (child in content(html)
-  where child is element and string(name(child)) == "node") child]
+let html_nodes = [for (child in ((content(html)) ^ { [] })
+  where ((child is element and string(name(child)) == "node") ^ { false })) child]
 
 let authored = <graph direction: "LR",
   <node id: "C", custom: "preserved",
@@ -49,7 +49,7 @@ let authored_result = normalize.normalize(authored)
     model.label_format(edges[0]), content_kinds(edges[0])],
   html_node_content: [for (node in html_nodes) [
     node["data-node-id"],
-    [for (item in content(node)) item_kind(item)]
+    [for (item in ((content(node)) ^ { [] })) item_kind(item)]
   ]],
   authored_unchanged: authored_result.graph == authored,
   authored_custom: model.nodes(authored_result.graph)[0].custom

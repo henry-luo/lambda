@@ -3,25 +3,25 @@
 import shapes: .shapes
 import colors: .colors
 
-fn property_matches(entry, name) => lower(string(entry.name)) == name
+fn property_matches(entry, name) any^ => lower(string(entry.name)) == name
 
 pub fn last_entry(properties, name) {
-  let matches = [for (entry in properties where property_matches(entry, name)) entry];
+  let matches = [for (entry in properties where ((property_matches(entry, name)) ^ { false })) entry];
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
 
-fn last_named_entry(properties, names) {
+fn last_named_entry(properties, names) any^ {
   let matches = [for (entry in properties
-    where contains(names, lower(string(entry.name)))) entry];
+    where ((contains(names, lower(string(entry.name)))) ^ { false })) entry];
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
 
-pub fn value(properties, name, fallback = null) {
+pub fn value(properties, name, fallback = null) any^ {
   let entry = last_entry(properties, name);
   if (entry != null) string(entry.value) else fallback
 }
 
-fn number_chars(text, i, dots, digits) {
+fn number_chars(text, i, dots, digits) any^ {
   if (i >= len(text)) digits > 0
   else {
     let ch = slice(text, i, i + 1);
@@ -31,7 +31,7 @@ fn number_chars(text, i, dots, digits) {
   }
 }
 
-fn number_text(raw) {
+fn number_text(raw) any^ {
   if (raw == null) null
   else {
     let text = trim(string(raw));
@@ -41,14 +41,14 @@ fn number_text(raw) {
   }
 }
 
-fn number_value(properties, name, scale = 1.0) {
+fn number_value(properties, name, scale = 1.0) any^ {
   let text = number_text(value(properties, name));
   if (text == null) null else float(text) * scale
 }
 
 fn number_pair_result(x, y) => {x: x, y: y}
 
-fn number_pair(properties, name, scale = 1.0) {
+fn number_pair(properties, name, scale = 1.0) any^ {
   let raw = value(properties, name);
   if (raw == null) number_pair_result(null, null)
   else {
@@ -60,7 +60,7 @@ fn number_pair(properties, name, scale = 1.0) {
   }
 }
 
-fn bounded_integer(properties, name, low, high, fallback = null) {
+fn bounded_integer(properties, name, low, high, fallback = null) any^ {
   let numeric = number_value(properties, name);
   if (numeric == null) fallback else min([high, max([low, int(numeric)])])
 }
@@ -72,7 +72,7 @@ fn bool_value(properties, name) {
   else null
 }
 
-fn fixed_shape(properties) =>
+fn fixed_shape(properties) any^ =>
   lower(trim(string(value(properties, "fixedsize", "")))) == "shape"
 
 fn attr(name, value) => if (value == null) [] else [name, value]

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.4/S7.1.3v2: shrinking indices use the shared inclusive dense extent guard, with checked stores on a miss and invalidation across growth.",
+  "description": "D3.3.4/S7.1.3v2: shrinking indices use the shared inclusive dense extent guard, with checked stores on a miss and invalidation across growth. Match comparison opcodes exactly: a scalar boxing blt is not an index lt.",
   "checks": [
     {
       "in_func": "_reverse_span_#",
@@ -27,8 +27,8 @@
         }
       ],
       "forbid": [
-        "ge\t",
-        "lt\t",
+        "\tge\t",
+        "\tlt\t",
         "call\tfn_index"
       ]
     },

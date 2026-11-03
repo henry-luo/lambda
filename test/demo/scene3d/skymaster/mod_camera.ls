@@ -12,7 +12,7 @@ pub let VIEWS = [
     {id: "tube", label: "SIDE TUBE", yaw: 0.95, pitch: 0.32, dist: 1.8, target: [-0.06, -0.2, 0.33], fov: 30.0}]
 pub fn preset(id) => [for (v in VIEWS where v.id == id) {yaw: v.yaw, pitch: v.pitch, dist: v.dist, target: v.target, fov: v.fov}][0]
 
-pub fn position(cam) => rig.add(cam.target, [cam.dist * cos(cam.pitch) * sin(cam.yaw), cam.dist * sin(cam.pitch),
+pub fn position(cam) any^ => rig.add(cam.target, [cam.dist * cos(cam.pitch) * sin(cam.yaw), cam.dist * sin(cam.pitch),
     cam.dist * cos(cam.pitch) * cos(cam.yaw)])
 // the shorter way round between two headings
 fn turn_toward(from, to) => (let d = to - from, from + d - 2.0 * rig.PI * round(d / (2.0 * rig.PI)))
@@ -23,7 +23,7 @@ pub fn orbit(cam, yaw, pitch) => {*: cam, yaw: cam.yaw + yaw, pitch: rig.clamp(c
 pub fn zoom(cam, factor) => {*: cam, dist: rig.clamp(cam.dist * factor, 0.7, 7.0)}
 
 // the scene's viewBox is 1280 × 720, sliced to cover the stage: project there, then scale and centre
-pub fn frame(cam) => c.prepare({position: position(cam), target: cam.target, fov: cam.fov, near: 0.05, far: 80.0}, 1280.0, 720.0)
+pub fn frame(cam) any^ => c.prepare({position: position(cam), target: cam.target, fov: cam.fov, near: 0.05, far: 80.0}, 1280.0, 720.0)
 pub fn screen(prepared, stage, point) {
     let k = max(stage.width / 1280.0, stage.height / 720.0)
     let p = c.project(prepared, point);

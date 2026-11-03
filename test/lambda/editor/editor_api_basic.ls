@@ -63,7 +63,7 @@ let cross_delete_editor = edit_exec(cross_editor, edit_cmd_delete_backward())
 "exec cross delete doc:"; doc_text(cross_delete_editor.doc) == "Alega"
 let cross_paste_editor = edit_exec(cross_editor, edit_cmd_paste_html("<p>One</p><p>Two</p>", "One\nTwo"))
 "exec cross paste count:"; len(cross_paste_editor.doc.content) == 2
-"exec cross paste doc:"; [for (n in cross_paste_editor.doc.content) doc_text(n)] == ["AlOne", "Twoega"]
+"exec cross paste doc:"; [for (n in ((cross_paste_editor.doc.content) ^ { [] })) doc_text(n)] == ["AlOne", "Twoega"]
 let cross_bold_editor = edit_exec(cross_editor, edit_cmd_toggle_mark('strong', true))
 "exec cross bold first:"; has_mark(node_at(cross_bold_editor.doc, [0, 0]).marks, 'strong')
 "exec cross bold second:"; has_mark(node_at(cross_bold_editor.doc, [1, 0]).marks, 'strong')

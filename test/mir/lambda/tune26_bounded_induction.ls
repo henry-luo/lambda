@@ -1,8 +1,8 @@
 // Tune26 T26-3: guarded bounded induction keeps square and stride counters
 // in their finite native integer interval; the source path handles all others.
 
-pn tune26_bounded_sieve(limit: int) int {
-    var flags: bool[] = fill(limit + 1, true)
+pn tune26_bounded_sieve(limit: int) int^ {
+    var flags: bool[] = fill(limit + 1, true)^
     flags[0] = false
     flags[1] = false
     var i: int = 2

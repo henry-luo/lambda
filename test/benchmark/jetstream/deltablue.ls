@@ -167,7 +167,7 @@ pn constraint_choose_method(p, ci: int, mark: int) {
         // unary: only output is v1
         var v = (p.vars)[c.v1]
         if (v.mark != mark) {
-            if (stronger(c.strength, v.walk_str)) {
+            if (stronger(c.strength, v.walk_str)^) {
                 c.direction = FORWARD
                 c.satisfied = true
                 return 0
@@ -180,7 +180,7 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     if (c.kind == C_EDIT) {
         var v = (p.vars)[c.v1]
         if (v.mark != mark) {
-            if (stronger(c.strength, v.walk_str)) {
+            if (stronger(c.strength, v.walk_str)^) {
                 c.direction = FORWARD
                 c.satisfied = true
                 return 0
@@ -195,7 +195,7 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     var v2 = (p.vars)[c.v2]
     if (v1.mark == mark) {
         if (v2.mark != mark) {
-            if (stronger(c.strength, v2.walk_str)) {
+            if (stronger(c.strength, v2.walk_str)^) {
                 c.direction = FORWARD
                 c.satisfied = true
                 return 0
@@ -204,7 +204,7 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     }
     if (v2.mark == mark) {
         if (v1.mark != mark) {
-            if (stronger(c.strength, v1.walk_str)) {
+            if (stronger(c.strength, v1.walk_str)^) {
                 c.direction = BACKWARD
                 c.satisfied = true
                 return 0
@@ -212,14 +212,14 @@ pn constraint_choose_method(p, ci: int, mark: int) {
         }
     }
     // Try both
-    if (weaker(v1.walk_str, v2.walk_str)) {
-        if (stronger(c.strength, v1.walk_str)) {
+    if (weaker(v1.walk_str, v2.walk_str)^) {
+        if (stronger(c.strength, v1.walk_str)^) {
             c.direction = BACKWARD
             c.satisfied = true
             return 0
         }
     } else {
-        if (stronger(c.strength, v2.walk_str)) {
+        if (stronger(c.strength, v2.walk_str)^) {
             c.direction = FORWARD
             c.satisfied = true
             return 0
@@ -233,7 +233,7 @@ pn constraint_choose_method(p, ci: int, mark: int) {
 pn incremental_add(p, ci: int) {
     p.current_mark = p.current_mark + 1
     var mark = p.current_mark
-    constraint_choose_method(p, ci, mark)
+    constraint_choose_method(p, ci, mark)^
     var c = (p.constraints)[ci]
     if (c.satisfied == false) {
         return 0
@@ -248,7 +248,7 @@ pn incremental_add(p, ci: int) {
         if (oci != ci) {
             var oc = (p.constraints)[oci]
             if (oc.satisfied == true) {
-                constraint_recalc(p, oci)
+                constraint_recalc(p, oci)^
             }
         }
     }
@@ -276,8 +276,8 @@ pn incremental_remove(p, ci: int) {
 pn chain_test(n: int) {
     var p = create_planner()
     // Allocate large enough arrays
-    p.vars = fill(n + 10, null)
-    p.constraints = fill(n * 2 + 10, null)
+    p.vars = fill(n + 10, null)^
+    p.constraints = fill(n * 2 + 10, null)^
 
     // Create n+1 variables
     var i: int = 0
@@ -290,7 +290,7 @@ pn chain_test(n: int) {
     i = 0
     while (i <= n) {
         var ci = planner_add_constraint(p, C_STAY, WEAK_DEFAULT, i, -1, 0, 0)
-        incremental_add(p, ci)
+        incremental_add(p, ci)^
         i = i + 1
     }
 
@@ -298,7 +298,7 @@ pn chain_test(n: int) {
     i = 0
     while (i < n) {
         var ci = planner_add_constraint(p, C_EQUAL, STRONG_PREFERRED, i, i + 1, 0, 0)
-        incremental_add(p, ci)
+        incremental_add(p, ci)^
         i = i + 1
     }
 
@@ -328,8 +328,8 @@ pn chain_test(n: int) {
 // --- Projection test ---
 pn projection_test(n: int) {
     var p = create_planner()
-    p.vars = fill(n * 4 + 10, null)
-    p.constraints = fill(n * 8 + 10, null)
+    p.vars = fill(n * 4 + 10, null)^
+    p.constraints = fill(n * 8 + 10, null)^
 
     var scale = create_variable("scale", 10)
     var offset = create_variable("offset", 1000)
@@ -345,15 +345,15 @@ pn projection_test(n: int) {
 
         // Stay constraint on src
         var stay_ci = planner_add_constraint(p, C_STAY, NORMAL, src_idx, -1, 0, 0)
-        incremental_add(p, stay_ci)
+        incremental_add(p, stay_ci)^
 
         // Scale constraint: dst = src * 10 + 1000
         var sc_ci = planner_add_constraint(p, C_SCALE, STRONG_PREFERRED, src_idx, dst_idx, 10, 1000)
-        incremental_add(p, sc_ci)
+        incremental_add(p, sc_ci)^
 
         // Stay constraint on dst
         var stay_ci2 = planner_add_constraint(p, C_STAY, NORMAL, dst_idx, -1, 0, 0)
-        incremental_add(p, stay_ci2)
+        incremental_add(p, stay_ci2)^
 
         i = i + 1
     }
@@ -370,7 +370,7 @@ pn projection_test(n: int) {
 }
 
 pn benchmark() {
-    chain_test(100)
+    chain_test(100)^
     projection_test(100)
     return 0
 }
@@ -380,7 +380,7 @@ pn main() {
     // Original JetStream workload: 20 iterations
     var i: int = 0
     while (i < 20) {
-        benchmark()
+        benchmark()^
         i = i + 1
     }
     var __t1 = clock()

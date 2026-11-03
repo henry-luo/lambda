@@ -3,7 +3,7 @@
 import rd: lambda.doc.readability
 
 fn page(page_name) => "test/lambda/readability/pages/" ++ page_name ++ "/source.html"
-fn source(page_name) => trim(input(page(page_name), 'text')^)
+fn source(page_name) any^ => trim(input(page(page_name), 'text')^)
 fn hrefs(e) => [for (a in [*(e?<a>)]) a.href]
 fn classes(e) => [for (d in [e, *(e?element)] where d.class != null) d.class]
 fn iframes(e) => [for (f in [*(e?<iframe>)]) f.src]

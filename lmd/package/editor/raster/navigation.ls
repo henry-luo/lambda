@@ -44,7 +44,7 @@ pub fn navigator_point(size,box,point) => {
     y:max(0,min(size.height,(point.y-box.y)*size.height/box.height))}
 // limit line generation to the visible interval, including when a large image is deeply zoomed.
 pub fn positions(start,end,step) => if (step<=0 or end<start) [] else
-    [for (i in int(ceil(start/step)) to int(floor(end/step))) i*step]
+    [for (i in ((int(ceil(start/step)) to int(floor(end/step))) ^ { [] })) i*step]
 pub fn tick_step(scale) {
     let requested = 64/scale
     let decade = math.pow(10,floor(math.log10(requested)))
@@ -53,7 +53,7 @@ pub fn tick_step(scale) {
 }
 pub fn ticks(origin,length,scale) {
     let step = tick_step(scale);
-    [for (value in positions(-origin/scale,(length-origin)/scale,step))
+    [for (value in ((positions(-origin/scale,(length-origin)/scale,step)) ^ { [] }))
         {position:origin+value*scale,value:value}]
 }
 pub fn grid_lines(st,bounds) {
@@ -62,7 +62,7 @@ pub fn grid_lines(st,bounds) {
     let minor = st.grid_spacing/st.grid_subdivisions
     let step = if (minor*camera_box.scale>=6) minor else st.grid_spacing;
     if (not st.grid_visible or rect.width<=0 or rect.height<=0 or step*camera_box.scale<6) [] else
-        [for (axis in ["x","y"]) for (value in positions(rect[axis],rect[axis]+rect[if (axis == "x") "width" else "height"],step))
+        [for (axis in ["x","y"]) for (value in ((positions(rect[axis],rect[axis]+rect[if (axis == "x") "width" else "height"],step)) ^ { [] }))
             {axis:axis,value:value,major:abs(value/st.grid_spacing-round(value/st.grid_spacing))<0.000001}]
 }
 pub fn grid_targets(st,anchors,delta,extent) => if (not st.snap_grid) [] else (

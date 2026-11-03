@@ -9,17 +9,17 @@ fn span_attrs(marks) {
     let value = mark_value(marks,'span')
     if (value is array) value else []
 }
-pub fn ids(marks) => [for (id in split((attrs_get(span_attrs(marks),'data-word-comment') ^ { null }) or ""," ") where id!="") id]
+pub fn ids(marks) any^ => [for (id in ((split((attrs_get(span_attrs(marks),'data-word-comment') ^ { null }) or ""," ")) ^ { [] }) where id!="") id]
 pub fn has_anchor(marks,id) => (contains(ids(marks),id) ^ { null }) or false
-pub fn anchor(marks,id) => with_mark(marks,'span',attrs_set(span_attrs(marks),'data-word-comment',join([*ids(marks),id]," ")))
-pub fn without_anchor(marks,id) {
-    let kept = [for (value in ids(marks) where value!=id) value]
+pub fn anchor(marks,id) any^ => with_mark(marks,'span',attrs_set(span_attrs(marks),'data-word-comment',join([*ids(marks),id]," ")))
+pub fn without_anchor(marks,id) any^ {
+    let kept = [for (value in ((ids(marks)) ^ { [] }) where value!=id) value]
     let attrs = attrs_set(span_attrs(marks),'data-word-comment',if (len(kept)==0) null else join(kept," "))
     if (len(attrs)==0) without_mark(marks,'span') else with_mark(marks,'span',attrs)
 }
 // clearing character formatting must retain review anchors.
-pub fn clear_format(marks) {
-    let kept = [for (a in span_attrs(marks) where contains(['data-word-comment','data-word-change','data-word-change-kind','data-word-change-author'],a.name)) a]
+pub fn clear_format(marks) any^ {
+    let kept = [for (a in span_attrs(marks) where ((contains(['data-word-comment','data-word-change','data-word-change-kind','data-word-change-author'],a.name)) ^ { false })) a]
     if (len(kept)==0) [] else [mark('span',kept)]
 }
 pub fn with_comments(tx,entries) map^ => tx_step(tx,step_set_attr([],'data-word-comments',format(entries,'json')^))

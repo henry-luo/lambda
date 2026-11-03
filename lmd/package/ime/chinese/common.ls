@@ -5,7 +5,7 @@ pub fn get(value,key,fallback) => if (value[key] == null) fallback else value[ke
 pub fn options(value,allowed) map^ {
     let opts = if (value == null) {} else value
     let valid = require(opts is map,"options must be a map")^
-    let unknown = [for (key,item in opts where not (string(key) in allowed)) string(key)]
+    let unknown = [for (key,item in opts where ((not (string(key) in allowed)) ^ { false })) string(key)]
     let names = require(len(unknown) == 0,"unknown option: " ++ join(unknown,", ") ++
         "; supported: " ++ join(allowed,", "))^;
     opts

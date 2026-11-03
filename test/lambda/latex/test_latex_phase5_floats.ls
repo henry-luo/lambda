@@ -6,15 +6,15 @@ import latex: lambda.doc.latex.latex
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"
 
-fn run(src, target = null) {
+fn run(src, target = null) any^ {
     let ast = latex.parse_source(src, "test/lambda/latex/fixtures") ^ { null }
     let options = if (target == null) null else {target: target}
     {html: latex.render_to_html(ast, null),
-     issues: [for (issue in latex.render_result(ast, options).diagnostics) issue.code ++ " " ++ string(issue.item)]}
+     issues: [for (issue in ((latex.render_result(ast, options).diagnostics) ^ { [] })) issue.code ++ " " ++ string(issue.item)]}
 }
 
 fn has(text, part) => index_of(text, part) != null
-fn count(text, part) => len(split(text, part)) - 1
+fn count(text, part) any^ => len(split(text, part)) - 1
 
 // ---- placement options no longer leak into the float ----
 let placed = run(doc("", "\\begin{figure}[htbp]X\\caption{C}\\end{figure}"))

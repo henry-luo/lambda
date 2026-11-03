@@ -8,9 +8,9 @@ import shapes: lambda.doc.tikz.shapes
 
 let PT_PX = 96.0 / 72.27
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
-fn failure(source) => tikz.render(source) ^ { ^.message }
+fn failure(source) any^ => tikz.render(source) ^ { ^.message }
 
 fn tip_summary(key) any^ {
     let parsed = arrows.parse_key(key)
@@ -44,7 +44,7 @@ fn outline(node_source) any^ {
     let geom = shapes.geometry(shapes.shape_spec(node)^, box[0], box[1]);
     geom.kind ++ " " ++ (if (geom.vertices == null) "rx=" ++ string(r3(geom.rx)) ++ " ry=" ++
         string(r3(geom.ry))
-        else string(len(geom.vertices)) ++ " vertices " ++ string([for (vertex in geom.vertices)
+        else string(len(geom.vertices)) ++ " vertices " ++ string([for (vertex in ((geom.vertices) ^ { [] }))
             [r3(vertex[0]), r3(vertex[1])]])) ++
         " half=" ++ string(r3(geom.half_w)) ++ "x" ++ string(r3(geom.half_h))
 }

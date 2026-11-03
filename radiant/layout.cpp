@@ -481,8 +481,8 @@ void layout_shift_inline_descendants(ViewElement* view, float offset_x, float of
                     lam::view_require<RDT_VIEW_TEXT>(child), offset_x, offset_y);
             }
         }
-        // block descendants establish their own coordinate space for inline layout.
-        if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
+        // atomic inline descendants also establish independent local coordinates.
+        if (child->view_type == RDT_VIEW_INLINE) {
             layout_shift_inline_descendants(
                 lam::view_require_element(child), offset_x, offset_y);
         }
@@ -1942,27 +1942,16 @@ float layout_document_missing_glyph_advance(FontHandle* handle, uint32_t codepoi
         (raster_scale > 0.0f ? raster_scale : 1.0f);
 }
 
-void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
-                                        CssEnum* word_break) {
-    if (overflow_wrap) *overflow_wrap = CSS_VALUE_NORMAL;
-    if (word_break) *word_break = CSS_VALUE_NORMAL;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (!current->is_element()) continue;
-        DomElement* element = lam::dom_require_element(current);
-        if (!element->blk) continue;
-        if (word_break && *word_break == CSS_VALUE_NORMAL &&
-            element->block()->word_break != 0) {
-            *word_break = element->block()->word_break;
-        }
-        if (overflow_wrap && element->block()->overflow_wrap != 0) {
-            *overflow_wrap = element->block()->overflow_wrap;
-            return;
-        }
-        if (overflow_wrap && element->block()->word_break == CSS_VALUE_BREAK_WORD) {
-            *overflow_wrap = CSS_VALUE_ANYWHERE;
-            return;
-        }
-    }
+void layout_resolve_inherited_text_wrap(LayoutContext* context, DomNode* node,
+                                        CssEnum* overflow_wrap, CssEnum* word_break) {
+    // inherited properties resolve independently; an unrelated default field cannot stop the other lookup.
+    CssEnum word = get_inherited_text_enum(context, CSS_PROPERTY_WORD_BREAK,
+        &BlockProp::word_break, CSS_VALUE_NORMAL, node);
+    CssEnum overflow = get_inherited_text_enum(context, CSS_PROPERTY_OVERFLOW_WRAP,
+        &BlockProp::overflow_wrap, CSS_VALUE_NORMAL, node);
+    if (word == CSS_VALUE_BREAK_WORD) overflow = CSS_VALUE_ANYWHERE;
+    if (word_break) *word_break = word;
+    if (overflow_wrap) *overflow_wrap = overflow;
 }
 
 float layout_measure_utf8_text_width(FontHandle* handle, FontProp* style,
@@ -3161,7 +3150,7 @@ void layout_apply_inline_edge_extents(float top_extent, float bottom_extent,
     *line_after = max(*line_after, top_extent - *line_before);
 }
 
-static bool layout_line_over_is_block_end(ViewBlock* block) {
+bool layout_line_over_is_block_end(ViewBlock* block) {
     return block && layout_block_writing_mode(block) == WM_VERTICAL_LR &&
         layout_element_css_writing_mode(block->as_element()) != CSS_VALUE_SIDEWAYS_LR;
 }
@@ -3196,6 +3185,8 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top) {
     layout_apply_dominant_font_baseline(lycon->block.flow_box, &ascender, &descender);
+    // CSS Ruby §3.3 excludes an annotation's line-height from its own font box.
+    if (span->display.inner == CSS_VALUE_RUBY_TEXT) span_line_height = ascender + descender;
     CssEnum align = span->in_line && span->inl()->vertical_align
         ? span->inl()->vertical_align : lycon->line.vertical_align;
     float align_offset = span->in_line && span->inl()->vertical_align
@@ -3240,13 +3231,27 @@ bool layout_inline_span_has_content_on_line(View* view, int line_number) {
     return view->inline_line_number == line_number;
 }
 
-static float layout_applied_inline_relative_y(View* view) {
-    float offset = 0.0f;
-    for (View* parent = view->parent; parent && parent->view_type == RDT_VIEW_INLINE; parent = parent->parent) {
-        ViewElement* span = lam::view_require_element(parent);
-        if (span->position) offset += span->positionp()->inline_relative_y;
+RdtLogicalPoint layout_applied_inline_relative_offset(View* first, View* stop) {
+    RdtLogicalPoint offset = {};
+    for (View* view = first; view && view != stop; view = view->parent) {
+        // only the starting atomic box belongs to this frame; its ancestors must be inlines.
+        if (view != first && view->view_type != RDT_VIEW_INLINE) break;
+        ViewBlock* block = lam::view_as_block(view);
+        if (ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(view))
+            block = lam::unsafe_view_block_api_span(span);
+        if (!block) continue;
+        if (block->position) {
+            offset.x += block->positionp()->inline_relative_x;
+            offset.y += block->positionp()->inline_relative_y;
+        }
     }
     return offset;
+}
+
+static float layout_applied_inline_relative_y(View* view) {
+    View* parent = view->parent;
+    if (!parent || parent->view_type != RDT_VIEW_INLINE) return 0.0f;
+    return layout_applied_inline_relative_offset(parent).y;
 }
 
 void view_vertical_align(LayoutContext* lycon, View* view) {
@@ -3524,6 +3529,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         if (block->position && block->positionp()->position == CSS_VALUE_RELATIVE) {
+            // vertical alignment resets Y, but repeated alignment retains the already shifted X.
+            block->x -= block->positionp()->inline_relative_x;
             layout_relative_positioned(lycon, block);
         }
     }
@@ -3542,9 +3549,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // not be realigned against a later line box.
             return;
         }
-        if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element() &&
-            resolve_display_value(span->parent).inner == CSS_VALUE_RUBY) {
-            return;
+        if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element()) {
+            CssEnum parent_role = resolve_display_value(span->parent).inner;
+            // a shared annotation level must not realign a column already placed in its independent line.
+            if ((parent_role == CSS_VALUE_RUBY || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER) &&
+                    !layout_ruby_active_annotation(lycon, span)) return;
         }
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
@@ -3715,13 +3724,26 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
     }
 }
-// CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
-static bool shift_text_current_line_rects(float offset, int line_number, ViewText* text) {
+static void shift_span_line_fragment_unions(ViewSpan* span, float offset_x, float offset_y,
+        bool all_kinds = false) {
+    const FragmentUnionKind kinds[] = {FRAGMENT_UNION_INLINE, FRAGMENT_UNION_ANCESTOR,
+        FRAGMENT_UNION_COLLAPSED_LINE, FRAGMENT_UNION_SPLIT_INLINE};
+    for (FragmentUnionKind kind : kinds) {
+        if ((!all_kinds && kind == FRAGMENT_UNION_SPLIT_INLINE) || !span->has_fragment_union(kind)) continue;
+        FragmentUnion* bounds = span->ensure_fragment_union(kind);
+        bounds->min_x += offset_x; bounds->max_x += offset_x;
+        bounds->min_y += offset_y; bounds->max_y += offset_y;
+    }
+}
+
+// CSS 2.1 §16.2: translate selected inline-flow rectangles without entering independent contexts.
+static bool shift_text_inline_rects(float offset, float offset_y, int line_number, ViewText* text) {
     bool shifted = false;
     TextRect* rect = text->rect;
     while (rect) {
-        if (rect->line_number == line_number) {
+        if (line_number < 0 || rect->line_number == line_number) {
             rect->x += offset;
+            rect->y += offset_y;
             shifted = true;
         }
         rect = rect->next;
@@ -3730,17 +3752,21 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
     return shifted;
 }
 
-static bool shift_inline_current_line_view(float offset, int line_number, View* view) {
+static bool shift_inline_flow_view(float offset, float offset_y, int line_number, View* view) {
     if (layout_view_is_out_of_flow(view)) return false;
     if (view->view_type == RDT_VIEW_TEXT)
-        return shift_text_current_line_rects(offset,line_number,lam::view_require_text(view));
+        return shift_text_inline_rects(offset,offset_y,line_number,lam::view_require_text(view));
     bool atomic = view->is_element() && layout_intrinsic_element_is_atomic_inline(view->as_element());
     bool empty_inline = view->view_type == RDT_VIEW_INLINE && !view->as_element()->first_child;
-    if ((atomic || empty_inline || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
-        view->inline_line_number == line_number) {
+    bool whole_inline = line_number < 0 && view->view_type == RDT_VIEW_INLINE;
+    if ((atomic || empty_inline || whole_inline || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
+        (line_number < 0 || view->inline_line_number == line_number)) {
         // an atomic box moves in its parent's line; its internal coordinates
         // already belong to its independent formatting context.
         view->x += offset;
+        view->y += offset_y;
+        if (whole_inline) shift_span_line_fragment_unions(
+            lam::view_require<RDT_VIEW_INLINE>(view), offset, offset_y, true);
         return true;
     }
     return false;
@@ -3754,11 +3780,34 @@ static void recompute_inline_view_bounds_after_line_layout(View* view) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y,
+                                  float break_offset_x) {
+    auto visit = [&](View* view, int) {
+        // break cursors can retain the paragraph's inline frame while ink moves to a fragment.
+        float inline_offset = view->view_type == RDT_VIEW_BR ? break_offset_x : offset_x;
+        shift_inline_flow_view(inline_offset, offset_y, line_number, view);
+        return view->view_type == RDT_VIEW_INLINE;
+    };
+    layout_walk_view_tree(root, visit, [&](View* view, int) {
+        // whole-flow translation preserves the wrapper's font box, including annotation leading.
+        if (line_number >= 0) recompute_inline_view_bounds_after_line_layout(view);
+    }, true, 0, false, root->next());
+}
+
+void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y) {
+    layout_shift_inline_fragment(root, line_number, offset_x, offset_y, offset_x);
+}
+
+void layout_shift_inline_flow(View* root, float offset_x, float offset_y) {
+    // a whole inline flow may move across several lines; atomic descendants keep their local frame.
+    layout_shift_inline_fragment(root, -1, offset_x, offset_y);
+}
+
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span) {
     int line_number = context->block.line_number;
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     auto shift_view = [&](View* view) -> bool {
-        return shift_inline_current_line_view(offset,line_number,view);
+        return shift_inline_flow_view(offset,0.0f,line_number,view);
     };
     bool shifted = layout_walk_inline_views(
         static_cast<View*>(span->first_child), shift_view,
@@ -3777,17 +3826,23 @@ bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSp
 }
 
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
-                                              View* view, float offset) {
+        View* view, float offset, bool include_inline_ancestors) {
     if (!lycon || !view) return;
     int line_number = lycon->block.line_number;
-    View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
-    while (prev) {
-        if (prev->view_type == RDT_VIEW_INLINE) {
-            layout_shift_span_current_line(
-                lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
-        } else shift_inline_current_line_view(offset,line_number,prev);
-        prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
-    }
+    do {
+        View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
+        while (prev) {
+            if (prev->view_type == RDT_VIEW_INLINE) {
+                layout_shift_span_current_line(
+                    lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
+            } else shift_inline_flow_view(offset,0.0f,line_number,prev);
+            prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
+        }
+        // a new float band also reaches earlier siblings of enclosing non-atomic inlines.
+        DomNode* parent = view->parent;
+        view = include_inline_ancestors && parent && parent->view_type == RDT_VIEW_INLINE
+            ? static_cast<View*>(parent) : nullptr;
+    } while (view);
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view);
@@ -3798,7 +3853,7 @@ static void align_inline_line_from_fragment(LayoutContext* lycon, float offset, 
         layout_shift_span_current_line(
             lycon, offset,
             lam::view_require<RDT_VIEW_INLINE>(fragment));
-    } else shift_inline_current_line_view(offset,lycon->block.line_number,fragment);
+    } else shift_inline_flow_view(offset,0.0f,lycon->block.line_number,fragment);
 
     while (cursor) {
         if (View* next = cursor->next()) {
@@ -3844,21 +3899,6 @@ static bool view_is_wrapped_continuation(View* view, int line_number) {
 static bool inline_fragment_has_inline_parent(const View* fragment) {
     return fragment && fragment->parent && fragment->parent->is_element() &&
         fragment->parent->as_element()->view_type == RDT_VIEW_INLINE;
-}
-
-static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
-    if (span->has_inline_fragment_union()) {
-        span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x += offset;
-        span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x += offset;
-    }
-    if (span->has_ancestor_fragment_union()) {
-        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x += offset;
-        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x += offset;
-    }
-    if (span->has_collapsed_line_fragment_union()) {
-        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x += offset;
-        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x += offset;
-    }
 }
 
 static void rtl_initial_letter_line_metrics(View* view, int line_number,
@@ -3976,7 +4016,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
-            shift_span_line_fragment_unions(sp, offset);
+            shift_span_line_fragment_unions(sp, offset, 0.0f);
         }
         return true;
     };
@@ -6472,6 +6512,12 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         bool environment_changed = engine->context.viewport_width != viewport_width ||
             engine->context.viewport_height != viewport_height;
         environment_changed = css_engine_set_input_capabilities(engine, &uicon->input_capabilities) || environment_changed;
+        // resolution media queries follow the window's backing scale; the engine is created at 1x.
+        double density = uicon->device_scale > 0 ? uicon->device_scale : 1.0;
+        if (engine->context.device_pixel_ratio != density) {
+            engine->context.device_pixel_ratio = density;
+            environment_changed = true;
+        }
         css_engine_set_viewport(engine, viewport_width, viewport_height);
         if (environment_changed) {
             radiant_recascade_document_styles(doc, doc->root);

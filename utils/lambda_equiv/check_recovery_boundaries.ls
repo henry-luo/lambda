@@ -24,12 +24,12 @@ fn allowed(path: string) bool => contains([
 // Match the source gate's optional whitespace between a name and its call.
 pn has_call(source: string, name: string) {
     var position = index_of(source, name)
-    while (position != null) {
+    while ((position != null)^) {
         var tail = position + len(name)
-        while (tail < len(source) and contains(" \t\r\n", slice(source, tail, tail + 1))) {
+        while ((tail < len(source) and contains(" \t\r\n", slice(source, tail, tail + 1)))^) {
             tail = tail + 1
         }
-        if (slice(source, tail, tail + 1) == "(") { return true }
+        if ((slice(source, tail, tail + 1) == "(")^) { return true }
         let next_start = position + len(name)
         let next = index_of(slice(source, next_start), name)
         position = if (next == null) null else next_start + next
@@ -49,12 +49,12 @@ pn main() {
                            contains(source, "LAMBDA_RECOVERY_FRAME_SETJMP") or
                            has_call(source, "lambda_recovery_frame_arm") or
                            has_call(source, "lambda_recovery_frame_end")
-            if (direct and not allowed(rel)) {
+            if ((direct and not allowed(rel))^) {
                 print("error-recovery-gate: " ++ rel ++
                       ": direct recovery call is outside the native-fault allowlist\n")
                 failures = failures + 1
             }
-            if (boundary and not allowed(rel)) {
+            if ((boundary and not allowed(rel))^) {
                 print("error-recovery-gate: " ++ rel ++
                       ": recovery boundary is outside the native-fault allowlist\n")
                 failures = failures + 1

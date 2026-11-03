@@ -15,22 +15,22 @@ pub fn content(node, config, rows) =>
     >
   >
 
-fn source_values(node, source_tag) => [
+fn source_values(node, source_tag) any^ => [
   for (child in model.element_children(node)
-    where model.tag(child) == source_tag) child
+    where ((model.tag(child) == source_tag) ^ { false })) child
 ]
 
-fn adapt_node(node, source_tag, make_content, include_empty) {
+fn adapt_node(node, source_tag, make_content, include_empty) any^ {
   let attrs = map(node);
   let values = source_values(node, source_tag);
   <node *:attrs,
     if (include_empty or len(values) > 0) { make_content(node, values) }
     for (child in model.child_items(node)
-      where not (child is element and model.tag(child) == source_tag)) child
+      where ((not (child is element and model.tag(child) == source_tag)) ^ { false })) child
   >
 }
 
-fn adapt_child(child, source_tag, make_content, include_empty) {
+fn adapt_child(child, source_tag, make_content, include_empty) any^ {
   if (not (child is element)) child
   else if (model.tag(child) == "node") adapt_node(child, source_tag, make_content, include_empty)
   else if (model.tag(child) == "subgraph") {

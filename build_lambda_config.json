@@ -1060,6 +1060,7 @@
         "lambda/module/radiant/*.cpp"
       ],
       "objcxx_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
@@ -1622,6 +1623,7 @@
         "lambda/runtime/lambda-physics.cpp",
         "lambda/core/physics_scene.cpp",
         "lambda/runtime/io_mail.cpp",
+        "lambda/runtime/io_websocket.cpp",
         "lambda/io/mcp*.cpp",
         "lambda/runtime/io_grep.cpp",
         "lambda/runtime/io_text_search.cpp"
@@ -2390,6 +2392,7 @@
     },
     "macos": {
       "exclude_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
@@ -2408,6 +2411,7 @@
       "linker_flags": [
         "mmacosx-version-min=15.7"
       ],
+      "info_plist": "radiant/host_info.plist",
       "libraries": [
         {
           "name": "CoreFoundation",
@@ -4254,6 +4258,10 @@
               "gtest_main"
             ],
             "macos": {
+              "additional_sources": [
+                "test/test_window_fullscreen_gtest.cpp",
+                "radiant/rdt_video_avf.mm"
+              ],
               "libraries": [
                 "CoreFoundation",
                 "Security",
@@ -4519,6 +4527,13 @@
             "additional_sources": [
               "radiant/rdt_video_stub.cpp"
             ],
+            "additional_files": [
+              "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
+              "radiant/audio_reverb.cpp",
+              "radiant/rdt_audio.cpp",
+              "radiant/audio_stream.cpp"
+            ],
             "macos": {
               "additional_sources": [
                 "radiant/rdt_video_avf.mm"
@@ -4527,6 +4542,7 @@
                 "CoreFoundation",
                 "Security",
                 "AVFoundation",
+                "AudioToolbox",
                 "CoreMedia",
                 "CoreVideo",
                 "Cocoa"
@@ -4569,6 +4585,8 @@
               "radiant/audio_bus.cpp",
               "radiant/audio_graph.cpp",
               "radiant/audio_cues.cpp",
+              "radiant/audio_stream.cpp",
+              "radiant/audio_capture_pcm.cpp",
               "radiant/audio_reverb.cpp"
             ],
             "macos": {

@@ -1,21 +1,36 @@
 {
   "schema_version": 1,
-  "description": "Tune26 / S4.1 / D5.2 / D5.3: each float[] read retains a cold lambda_type_check for its semantic OOB rejection, and that known-failing edge still does not tag-test the guaranteed error or rebuild typed-array caches. LR12-24/TE-15: the rejection now leaves on the error lane instead of being converted back to a double -- an `it2d` on this arm is the NaN republication the defect channel exists to remove, so it is forbidden outright.",
+  "description": "S7.7.2v2/S7.6.3v3/D2.8.3: sole immediate propagation may fuse each float[] read's admission. Pin both native null guards before their exact values reach arithmetic, retain both cold diagnostics, and test negative, left-OOB and right-OOB outcomes at runtime.",
   "checks": [
     {
       "in_func": "_read_sum_#",
       "expect": [
+        "func\td, i64, p:runtime",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ],
+      "forbid": ["call\tit2d_p, it2d", "call\tpush_d_p, push_d"],
       "expect_seq": [
-        ", 72057594037927936",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
-      ],
-      "forbid": [
-        "call\tit2d_p, it2d"
+        "dmov\t{{r:left_loaded}}, d:(",
+        {"pattern": "dmov\t{{r:left_lane}}, {{r:left_loaded}}", "next_line": true},
+        "runtime), {{r:left_lane}}",
+        {"pattern": "mov\t{{r:left_bits}}, i64:", "next_line": true},
+        {"pattern": "eq\t{{r:left_null}}, {{r:left_bits}}, 9221120237041090561", "next_line": true},
+        {"pattern": ", {{r:left_null}}", "next_line": true},
+        {"pattern": "dmov\t{{r:left_admitted}}, {{r:left_lane}}", "next_line": true},
+        {"pattern": "dmov\t{{r:left_value}}, {{r:left_admitted}}", "next_line": true},
+        "dmov\t{{r:right_loaded}}, d:(",
+        {"pattern": "dmov\t{{r:right_lane}}, {{r:right_loaded}}", "next_line": true},
+        "runtime), {{r:right_lane}}",
+        {"pattern": "mov\t{{r:right_bits}}, i64:", "next_line": true},
+        {"pattern": "eq\t{{r:right_null}}, {{r:right_bits}}, 9221120237041090561", "next_line": true},
+        {"pattern": ", {{r:right_null}}", "next_line": true},
+        {"pattern": "dmov\t{{r:right_admitted}}, {{r:right_lane}}", "next_line": true},
+        {"pattern": "dmov\t{{r:right_value}}, {{r:right_admitted}}", "next_line": true},
+        "dadd\t{{r}}, {{r:left_value}}, {{r:right_value}}"
       ],
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 4
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 4,
+        "9221120237041090561": 2
       }
     }
   ]

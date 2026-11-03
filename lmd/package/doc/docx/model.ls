@@ -16,7 +16,7 @@ fn warning(pkg, code, message) map^ => c.issue(code,pkg.main,message)
 fn unwrap_controls(nodes, pkg) array^ => [for (node in nodes)
     if (node.uri == c.W and node.tag == "sdt") {
         let cached = c.children(node,"sdtContent")
-        let invalid = any([for (child in c.children(node,null,null)) child.uri != c.W or
+        let invalid = any([for (child in ((c.children(node,null,null)) ^ { [] })) child.uri != c.W or
             not contains(["sdtPr","sdtEndPr","sdtContent"],child.tag)]);
         if (len(cached) != 1 or invalid) node
         else *unwrap_controls(c.children(cached[0],null,null),pkg)^
@@ -75,8 +75,8 @@ fn embedded_object(node, pkg, options) map^ {
     let label = "Embedded object" ++ (if (c.attr(ole,"ProgID","") == null) ""
         else " (" ++ c.attr(ole,"ProgID","") ++ ")")
     // shapetype/formulas describe the preview; they are not independently visible content.
-    let shape = c.first([for (shape in c.children(node,"shape",c.V)
-        where c.attr(shape,"id","") == c.attr(ole,"ShapeID","")) shape])
+    let shape = c.first([for (shape in ((c.children(node,"shape",c.V)) ^ { [] })
+        where ((c.attr(shape,"id","") == c.attr(ole,"ShapeID","")) ^ { false })) shape])
     let image = c.child(shape,"imagedata",c.V)
     let preview = if (image == null) result() else image_reference(pkg,options,c.attr(image,"id",c.R),false,
         c.pixels(c.attr(node,"dxaOrig"),15.0),c.pixels(c.attr(node,"dyaOrig"),15.0),label)^;
@@ -104,14 +104,14 @@ fn drawing_node(node, pkg, sheet, options) map^ {
         else picture(node,pkg,options,width,height,properties)^
     let placement = drawing.placement(node,width,height)
     let crop = drawing.crop(node,width,height);
-    result([for (value in contents.nodes) {*:value,placement:placement.value,
+    result([for (value in ((contents.nodes) ^ { [] })) {*:value,placement:placement.value,
         crop:if (value.kind == "image") crop.value else null}],
         contents.diagnostics ++ (if (reference != null and (len(references) > 1 or
             len(c.descendants(node,"blip",c.A)) > 0 or len(c.descendants(node,"txbxContent",c.W)) > 0))
             [warning(pkg,"unsupported-drawing-content","Only the first chart in the drawing is supported")^] else []) ++
         (if (placement.unsupported and len(contents.nodes) > 0)
             [warning(pkg,"unsupported-floating-image","Drawing position or wrapping is outside the paragraph-relative profile")^] else []) ++
-        (if (crop.unsupported and any([for (value in contents.nodes) value.kind == "image"]))
+        (if (crop.unsupported and any([for (value in ((contents.nodes) ^ { [] })) value.kind == "image"]))
             [warning(pkg,"unsupported-image-crop","Image crop is outside the bounded inset profile")^] else []))
 }
 
@@ -175,8 +175,8 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
     else if (node.uri == c.W and node.tag == "object") embedded_object(node,pkg,options)^
     else if (node.uri == c.MC and node.tag == "AlternateContent") {
         // choose a single representation, so fallback material never duplicates the choice.
-        let modern = c.first([for (branch in c.children(node,"Choice",c.MC)
-            where drawing.shape_choice(branch,sheet.theme)) branch])
+        let modern = c.first([for (branch in ((c.children(node,"Choice",c.MC)) ^ { [] })
+            where ((drawing.shape_choice(branch,sheet.theme)) ^ { false })) branch])
         let fallback = c.child(node,"Fallback",c.MC)
         let chosen = if (modern != null) modern else if (fallback != null) fallback else c.child(node,"Choice",c.MC)
         let contents = inline_many(c.children(chosen,null,null),pkg,sheet,marks,options)^;
@@ -195,15 +195,15 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
 // text boxes contain blocks; lifting them avoids invalid block elements inside a paragraph/link.
 fn without_boxes(nodes) => [for (node in nodes where node.kind != "text-box")
     if (node.kind == "link") {*:node,children:without_boxes(node.children)} else node]
-fn box_blocks(nodes) => [for (node in nodes, block in
-    (if (node.kind == "text-box") node.blocks else if (node.kind == "link") box_blocks(node.children) else [])) block]
+fn box_blocks(nodes) any^ => [for (node in nodes, block in
+    (((if (node.kind == "text-box") node.blocks else if (node.kind == "link") box_blocks(node.children) else [])) ^ { [] })) block]
 fn paragraph(node, pkg, sheet, options) map^ {
     let properties = c.child(node,"pPr")
     let resolved = styles.paragraph(sheet,properties)^
     let numbering = styles.list_info(sheet,resolved.props)
     let tag = paragraph_tag(resolved,options)
     let paragraph_mark = styles.run(sheet,resolved.run,c.child(properties,"rPr"))^
-    let contents = inline_many([for (child in c.children(node,null,null)
+    let contents = inline_many([for (child in ((c.children(node,null,null)) ^ { [] })
         where not (child.uri == c.W and child.tag == "pPr")) child],pkg,sheet,resolved.run,options)^;
     result([{kind:"paragraph",tag:tag.tag,attrs:tag.attrs,children:without_boxes(contents.nodes),list:numbering.value,
         props:resolved.props,run:resolved.run,empty_run:paragraph_mark.props,
@@ -228,7 +228,7 @@ fn row(node, pkg, sheet, options) map^ {
         before:before,after:max(0,c.as_int(c.attr(c.child(properties,"gridAfter"),"val"),0)),
         cells:[for (i,cell in cells) {*:cell,column:before+sum([for (j,prior in cells where j < i) prior.span])}],
         diagnostics:c.collect(cells,"diagnostics") ++ [for (child in children
-            where child.uri != c.W or not contains(["trPr","tc"],child.tag))
+            where ((child.uri != c.W or not contains(["trPr","tc"],child.tag)) ^ { false }))
             warning(pkg,"unsupported-element","Unsupported table-row child " ++ child.tag)^]}
 }
 fn block_many(nodes, pkg, sheet, options) map^ {
@@ -241,9 +241,9 @@ fn block(node, pkg, sheet, options) map^ {
         let children = unwrap_controls(c.children(node,null,null),pkg)^
         let resolved = styles.table(sheet,c.child(node,"tblPr"))^
         let rows = [for (child in children where child.uri == c.W and child.tag == "tr") row(child,pkg,resolved.sheet,options)^]
-        let grid = [for (col in c.children(c.child(node,"tblGrid"),"gridCol")) c.pixels(c.attr(col,"w"),15.0)];
+        let grid = [for (col in ((c.children(c.child(node,"tblGrid"),"gridCol")) ^ { [] })) c.pixels(c.attr(col,"w"),15.0)];
         result([{kind:"table",rows:rows,props:resolved.props,grid:grid}],resolved.diagnostics ++ c.collect(rows,"diagnostics") ++ [for (child in children
-            where child.uri != c.W or not contains(["tblPr","tblGrid","tr"],child.tag))
+            where ((child.uri != c.W or not contains(["tblPr","tblGrid","tr"],child.tag)) ^ { false }))
             warning(pkg,"unsupported-element","Unsupported table child " ++ child.tag)^])
     } else if (node.uri == c.W and contains(["sectPr","tcPr"],node.tag)) result()
     else {

@@ -27,9 +27,9 @@ model.inbox_path([])
 let tree = [*boxes, {path: "Work", name: "Work", delimiter: "/", role: null, selectable: true},
     {path: "Work/2026/Q4", name: "Work/2026/Q4", delimiter: "/", role: null, selectable: true}]
 let tst = {*: st, mailboxes: {ada: tree}};
-[for (r in model.sidebar(tst, "ada")) [r.name, r.depth, r.parent, r.collapsed]];
-[for (r in model.sidebar({*: tst, collapsed: ["ada/Work"]}, "ada")) r.path];
-[for (r in model.sidebar({*: tst, collapsed: ["ada/Work/2026"]}, "ada")) r.path];
+[for (r in ((model.sidebar(tst, "ada")) ^ { [] })) [r.name, r.depth, r.parent, r.collapsed]];
+[for (r in ((model.sidebar({*: tst, collapsed: ["ada/Work"]}, "ada")) ^ { [] })) r.path];
+[for (r in ((model.sidebar({*: tst, collapsed: ["ada/Work/2026"]}, "ada")) ^ { [] })) r.path];
 [model.toggled(["a"], "b"), model.toggled(["a", "b"], "a")]
 model.new_mailbox_path(tst, "ada", "Work", " Ideas ")
 model.new_mailbox_path(tst, "ada", "", " ")
@@ -45,7 +45,7 @@ model.window(50000, 86000.0, 640.0)
 model.window(50000, 4300000.0, 640.0)
 model.window(3, 0.0, 640.0)
 let entries = [for (u in 1 to 5) {uid: u, flags: if (u % 2 == 0) ["\\Seen"] else []}];
-[for (e in model.rows_in(entries, model.window(5, 0.0, 128.0))) e.uid]
+[for (e in ((model.rows_in(entries, model.window(5, 0.0, 128.0))) ^ { [] })) e.uid]
 model.counts_of(entries)
 
 "=== labels ==="

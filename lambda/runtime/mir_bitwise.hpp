@@ -2,6 +2,11 @@
 
 #include "mir_emitter_shared.hpp"
 
+static inline MIR_insn_code_t em_integer_bitwise_opcode(SysFunc fn) {
+    return fn == SYSFUNC_BAND ? MIR_AND : fn == SYSFUNC_BOR ? MIR_OR :
+        fn == SYSFUNC_BXOR ? MIR_XOR : fn == SYSFUNC_SHL ? MIR_LSH : MIR_RSH;
+}
+
 // Shared compact-int fast path. The caller chooses the semantic operation and
 // fallback; native inputs avoid a box/unbox round trip on the successful arm.
 static inline MIR_reg_t em_guarded_int_bitwise(MirEmitter* em, SysFunc fn,
@@ -16,8 +21,7 @@ static inline MIR_reg_t em_guarded_int_bitwise(MirEmitter* em, SysFunc fn,
         if (inputs[i].rep != VALUE_REP_INT_LANE)
             inputs[i] = em_require_rep(em, inputs[i], VALUE_REP_ITEM);
     for (int i = 0; i < 2; i++) lanes[i] = em_guard_finite_int(em, inputs[i], fallback);
-    MIR_insn_code_t op = fn == SYSFUNC_BAND ? MIR_AND : fn == SYSFUNC_BOR ? MIR_OR :
-        fn == SYSFUNC_BXOR ? MIR_XOR : fn == SYSFUNC_SHL ? MIR_LSH : MIR_RSH;
+    MIR_insn_code_t op = em_integer_bitwise_opcode(fn);
     if (fn == SYSFUNC_SHL || fn == SYSFUNC_SHR)
         em_emit_insn(em, MIR_new_insn(ctx, MIR_UBGE, MIR_new_label_op(ctx, fallback),
             MIR_new_reg_op(ctx, lanes[1]), MIR_new_int_op(ctx, 64)));

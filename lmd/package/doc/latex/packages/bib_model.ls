@@ -17,7 +17,7 @@ fn cite_items(groups, index, notes, items, issues, offset) {
             cite_items(groups, index + 1, notes ++ [replace(group.raw, "~", " ")],
                 items, issues, offset)
         else if (group.kind == "required") {
-            let keys = [for (key in util.split_top_level(group.raw, ",")
+            let keys = [for (key in ((util.split_top_level(group.raw, ",")) ^ { [] })
                 where trim(key) != "") trim(key)]
             let pre = if (len(notes) > 1) notes[0] else ""
             let post = if (len(notes) > 1) notes[1]
@@ -49,13 +49,13 @@ fn citation(node, tag, section, segment) {
      diagnostics: parsed.diagnostics ++ missing}
 }
 
-fn walk_children(node, index, cursor, section, segment) {
+fn walk_children(node, index, cursor, section, segment) any^ {
     if (index >= len(node)) cursor
     else walk_children(node, index + 1,
         walk(node[index], cursor, section, segment), section, segment)
 }
 
-fn walk(node, cursor, section, segment) {
+fn walk(node, cursor, section, segment) any^ {
     if (not (node is element)) cursor
     else {
         let tag = string(name(node))
@@ -85,7 +85,7 @@ fn walk(node, cursor, section, segment) {
 
 fn key_in(keys, key) => any([for (item in keys) item == key])
 
-fn add_keys(keys, additions) {
+fn add_keys(keys, additions) any^ {
     if (len(additions) == 0) keys
     else {
         let key = additions[0]
@@ -96,7 +96,7 @@ fn add_keys(keys, additions) {
 
 fn request_keys(request) => [for (item in request.items, key in item.keys) key]
 
-pub fn selected_keys(requests, entries, section, index, keys) {
+pub fn selected_keys(requests, entries, section, index, keys) any^ {
     if (index >= len(requests)) keys
     else {
         let request = requests[index]
@@ -122,7 +122,7 @@ fn entry_for(entries, key) {
 
 fn labels_for_section(entries, requests, section, settings) {
     let keys = selected_keys(requests, entries, section, 0, [])
-    let selected = [for (key in keys where entry_for(entries, key) != null)
+    let selected = [for (key in keys where ((entry_for(entries, key) != null) ^ { false }))
         entry_for(entries, key)]
     let ordered = style.sort_entries(selected, settings.sorting)
     {section: section,
@@ -145,24 +145,24 @@ fn section_bib_entries(sections, section) {
     if (len(found) == 0) [] else found[0]
 }
 
-pub fn labelled_entry(context, section, key) =>
+pub fn labelled_entry(context, section, key) any^ =>
     entry_for(section_entries(context.sections, section), key)
 
-fn keyword_match(entry, wanted) {
+fn keyword_match(entry, wanted) any^ {
     let words = if (entry.fields.keywords == null) []
-        else [for (word in util.split_top_level(entry.fields.keywords, ","))
+        else [for (word in ((util.split_top_level(entry.fields.keywords, ",")) ^ { [] }))
             lower(trim(word))]
     key_in(words, lower(trim(wanted)))
 }
 
-fn passes_filters(entry, opts) {
+fn passes_filters(entry, opts) any^ {
     (opts.type == null or entry.kind == opts.type) and
     (opts.nottype == null or entry.kind != opts.nottype) and
     (opts.keyword == null or keyword_match(entry, opts.keyword)) and
     (opts.notkeyword == null or not keyword_match(entry, opts.notkeyword))
 }
 
-fn print_section(record) {
+fn print_section(record) any^ {
     let specified = record.options.section
     if (specified == null) record.section else int(specified) ^ { record.section }
 }
@@ -174,20 +174,20 @@ fn print_segment(record) {
 
 fn entry_in_segment(requests, section, segment, key) {
     any([for (request in requests
-        where request.section == section and request.segment == segment and
-            key_in(request_keys(request), key)) true])
+        where ((request.section == section and request.segment == segment and
+            key_in(request_keys(request), key)) ^ { false })) true])
 }
 
 fn print_entries(record, sections, requests) {
     let section = print_section(record)
     let segment = print_segment(record);
-    [for (entry in section_bib_entries(sections, section)
-        where passes_filters(entry, record.options) and
-            (segment == null or entry_in_segment(requests, section, segment, entry.key)))
+    [for (entry in ((section_bib_entries(sections, section)) ^ { [] })
+        where ((passes_filters(entry, record.options) and
+            (segment == null or entry_in_segment(requests, section, segment, entry.key))) ^ { false }))
         entry]
 }
 
-fn target_id(record, key) {
+fn target_id(record, key) any^ {
     if (record.index == 1 and print_section(record) == 0) "bib-" ++ key
     else "bib-s" ++ string(print_section(record)) ++ "-p" ++
         string(record.index) ++ "-" ++ key
@@ -202,13 +202,13 @@ pub fn prepare_prints(prints, sections, requests) {
 
 fn request_issue(request, entries, settings) {
     let missing = [for (key in request_keys(request)
-        where (key != "*" or request.tag != "nocite") and
-            source_entry_for(entries, key) == null)
+        where (((key != "*" or request.tag != "nocite") and
+            source_entry_for(entries, key) == null) ^ { false }))
         util.diagnostic("unresolved-citation", "biblatex", key,
             "Unresolved citation " ++ key, request.offset)]
     let data_only = [for (key in request_keys(request)
-        where source_entry_for(entries, key) != null and
-            source_entry_for(entries, key).kind == "xdata")
+        where ((source_entry_for(entries, key) != null and
+            source_entry_for(entries, key).kind == "xdata") ^ { false }))
         util.diagnostic("data-only-bib-citation", "biblatex", key,
             "xdata cannot be cited or printed directly: " ++ key, request.offset)]
     let star = if (request.starred)
@@ -222,11 +222,11 @@ fn request_issue(request, entries, settings) {
 }
 
 fn request_issues(requests, entries, settings) {
-    [for (request in requests, issue in request_issue(request, entries, settings)) issue]
+    [for (request in requests, issue in ((request_issue(request, entries, settings)) ^ { [] })) issue]
 }
 
 // Collection is independent of the selected bibliography processor.
-pub fn collect(ast) {
+pub fn collect(ast) any^ {
     walk(ast,
         {requests: [], prints: [], diagnostics: [], next_section: 0,
             segment_counts: []},
@@ -235,7 +235,7 @@ pub fn collect(ast) {
 
 pub fn prepare(ast, entries, settings) {
     let walked = collect(ast)
-    let found = {*:walked, requests: [for (request in walked.requests)
+    let found = {*:walked, requests: [for (request in ((walked.requests) ^ { [] }))
         if (settings.bibtex == true and request.original_tag == "cite")
             {*:request, tag: if (settings.citestyle == "authoryear" and
                 all([for (item in request.items) item.prenote == "" and
@@ -257,7 +257,7 @@ pub fn print_at(context, offset) {
     if (len(found) == 0) null else found[0]
 }
 
-pub fn target_for(context, request, key) {
+pub fn target_for(context, request, key) any^ {
     let candidates = [for (record in context.prints
         where record.valid != false and record.scope_section == request.section and
             any([for (entry in record.entries) entry.key == key])) record]
@@ -270,4 +270,4 @@ pub fn target_for(context, request, key) {
     if (chosen == null) null else "#" ++ target_id(chosen, key)
 }
 
-pub fn target_for_print(record, key) => target_id(record, key)
+pub fn target_for_print(record, key) any^ => target_id(record, key)

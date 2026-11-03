@@ -6,13 +6,13 @@ fn first(values) => if (len(values) > 0) values[0] else null
 
 fn values(value, key) => if (value[key] != null) value[key] else []
 
-fn text(value, key, fallback = null) =>
+fn text(value, key, fallback = null) any^ =>
   if (value[key] != null and value[key] != "") string(value[key]) else fallback
 
 fn numbers(raw) => [for (part in split(replace(trim(string(raw)), ",", " "), " ")
   where part != "") float(part)]
 
-fn graph_height(value) {
+fn graph_height(value) any^ {
   let box = numbers(text(value, "bb", "0 0 0 0"));
   if (len(box) >= 4) box[3] - box[1] else 0.0
 }
@@ -31,7 +31,7 @@ fn box_geometry(raw, height) {
   }
 }
 
-fn node_geometry(value, height) {
+fn node_geometry(value, height) any^ {
   let position = numbers(text(value, "pos", ""));
   if (len(position) < 2 or value.width == null or value.height == null) null
   else {
@@ -67,7 +67,7 @@ fn object_by_gvid(objects, id) => first([
   for (value in objects where value["_gvid"] == id) value
 ])
 
-fn label_text(raw, fallback, graph_name, edge_name = null) {
+fn label_text(raw, fallback, graph_name, edge_name = null) any^ {
   if (raw == null or raw == "") fallback
   else replace(replace(replace(replace(string(raw), "\\N", fallback),
     "\\G", graph_name), "\\E", if (edge_name != null) edge_name else ""),
@@ -76,34 +76,34 @@ fn label_text(raw, fallback, graph_name, edge_name = null) {
 
 fn label_element(value) => if (value == null or value == "") null else <label value>
 
-fn graphviz_style(value) {
+fn graphviz_style(value) any^ {
   let style = lower(text(value, "style", ""));
   if (contains(style, "dashed")) "6 4"
   else if (contains(style, "dotted")) "2 3"
   else null
 }
 
-fn stroke_width(value) =>
+fn stroke_width(value) any^ =>
   if (value.penwidth != null) float(value.penwidth) * 96.0 / 72.0 else null
 
-fn cluster_parent(clusters, id) => first([
-  for (value in clusters where contains(values(value, "subgraphs"), id)) value.name
+fn cluster_parent(clusters, id) any^ => first([
+  for (value in clusters where ((contains(values(value, "subgraphs"), id)) ^ { false })) value.name
 ])
 
-fn node_group(clusters, id) {
-  let matches = [for (value in clusters where contains(values(value, "nodes"), id)) value.name];
+fn node_group(clusters, id) any^ {
+  let matches = [for (value in clusters where ((contains(values(value, "nodes"), id)) ^ { false })) value.name];
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
 
-fn direction(value) {
+fn direction(value) any^ {
   let rankdir = upper(text(value, "rankdir", "TB"));
   if (contains(["TB", "BT", "LR", "RL"], rankdir)) rankdir else "TB"
 }
 
-fn edge_direction(edge, directed) => lower(text(edge, "dir",
+fn edge_direction(edge, directed) any^ => lower(text(edge, "dir",
   if (directed) "forward" else "none"))
 
-fn marker(edge, directed, start) {
+fn marker(edge, directed, start) any^ {
   let dir = edge_direction(edge, directed);
   let enabled = if (start) dir == "back" or dir == "both"
     else dir == "forward" or dir == "both";
@@ -139,7 +139,7 @@ fn graphviz_node(value, clusters, graph_name, height, geometry) {
   >
 }
 
-fn graphviz_edge(value, index, objects, directed, graph_name, height, geometry, edge_ids) {
+fn graphviz_edge(value, index, objects, directed, graph_name, height, geometry, edge_ids) any^ {
   let tail = object_by_gvid(objects, value.tail);
   let head = object_by_gvid(objects, value.head);
   let from = if (tail != null) string(tail.name) else "";
@@ -153,7 +153,7 @@ fn graphviz_edge(value, index, objects, directed, graph_name, height, geometry, 
       'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value),
     if (label != null) { label }
     if (geometry and value.pos != null) {
-      <route for (point in route_points(value.pos, height))
+      <route for (point in ((route_points(value.pos, height)) ^ { [] }))
         <point x: point.x, y: point.y>
       >
     }
@@ -176,7 +176,7 @@ pub fn from_dot_json(value, geometry = false, edge_ids = null) {
   >
 }
 
-fn canonical_label(value) => label_element(model.label_source(value))
+fn canonical_label(value) any^ => label_element(model.label_source(value))
 
 fn canonical_cluster(entry) {
   let value = entry.value;

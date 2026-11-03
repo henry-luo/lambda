@@ -10,7 +10,7 @@ fn overlaps(parts) => [for (i in 1 to (len(parts) - 1))
     min(parts[i - 1].end_connector, parts[i].start_connector)]
 
 // TeX82 var_delimiter: butt logical char boxes together and use the fewest repeats.
-pub fn tex_assembly(recipe, target, scale, atom) {
+pub fn tex_assembly(recipe, target, scale, atom) any^ {
     let module = bx.glyph(recipe.repeat,scale,atom)
     let step = module.height + module.depth
     let fixed = sum([for (g in [recipe.top,recipe.middle,recipe.bottom] where g != null)
@@ -18,8 +18,8 @@ pub fn tex_assembly(recipe, target, scale, atom) {
     let count = if (step <= 0.0) 0 else max(0,int(ceil((target - fixed) /
         (step * (if (recipe.middle != null) 2.0 else 1.0)))))
     let pieces = [*if (recipe.top != null) [recipe.top] else [],
-        *[for (i in 1 to count) recipe.repeat],
-        *if (recipe.middle != null) [recipe.middle,*[for (i in 1 to count) recipe.repeat]] else [],
+        *[for (i in ((((((1 to count) ^ { [] })))))) recipe.repeat],
+        *if (recipe.middle != null) [recipe.middle,*[for (i in ((((((1 to count) ^ { [] })))))) recipe.repeat]] else [],
         *if (recipe.bottom != null) [recipe.bottom] else []]
     let boxes = [for (g in pieces) bx.glyph(g,scale,atom)]
     let entries = [for (i,b in boxes) {box:b, x:0.0,

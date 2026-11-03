@@ -9,7 +9,7 @@ pub fn from_bytes(source) map^ {
     }
 }
 
-pub fn line_end(table, line: int) int =>
+pub fn line_end(table, line: int) int^ =>
     if (line + 1 < len(table.offsets)) int(table.offsets[line + 1]) - 1
     else len(table.bytes) - 1
 

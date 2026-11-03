@@ -57,7 +57,7 @@ fn set_at(arr, i, x, j, n, acc) {
 }
 pub fn list_set(arr, i, x) => set_at(arr, i, x, 0, len(arr), [])
 
-pub fn list_splice(arr, start, delete_count, items) {
+pub fn list_splice(arr, start, delete_count, items) any^ {
   let head = list_take(arr, start)
   let tail = list_drop(arr, start + delete_count)
   list_concat(list_concat(head, items), tail)
@@ -67,17 +67,17 @@ pub fn list_splice(arr, start, delete_count, items) {
 // Tree navigation
 // ---------------------------------------------------------------------------
 
-fn at_step(node, path, i) {
+fn at_step(node, path, i) any^ {
   if (i >= len(path)) { node }
   else if (not is_node(node)) { null }
   else if (path[i] >= len(node.content)) { null }
   else { at_step(node.content[path[i]], path, i + 1) }
 }
-pub fn node_at(doc, path) => at_step(doc, path, 0)
+pub fn node_at(doc, path) any^ => at_step(doc, path, 0)
 
 // preorder paths are shared by leaf, task and image projections.
 pub fn descendants(n, path=[]) => [{path:path,node:n},
-  *if (is_node(n)) [for (i,child in n.content) for (entry in descendants(child,[*path,i])) entry] else []]
+  *if (is_node(n)) [for (i,child in n.content) for (entry in ((descendants(child,[*path,i])) ^ { [] })) entry] else []]
 
 pub fn parent_path(path) =>
   if (len(path) == 0) { [] } else { list_take(path, len(path) - 1) }
@@ -92,7 +92,7 @@ pub fn last_index(path) =>
 pub fn with_content(n, new_content) =>
   {kind: n.kind, tag: n.tag, attrs: n.attrs, content: new_content}
 
-fn replace_at_step(node, path, i, new_node) {
+fn replace_at_step(node, path, i, new_node) any^ {
   if (i >= len(path)) { new_node }
   else {
     let idx = path[i]
@@ -101,10 +101,10 @@ fn replace_at_step(node, path, i, new_node) {
     with_content(node, list_set(node.content, idx, child2))
   }
 }
-pub fn replace_node_at(doc, path, new_node) =>
+pub fn replace_node_at(doc, path, new_node) any^ =>
   replace_at_step(doc, path, 0, new_node)
 
-pub fn splice_children_at(doc, parent_path, start, delete_count, items) {
+pub fn splice_children_at(doc, parent_path, start, delete_count, items) any^ {
   let parent = node_at(doc, parent_path)
   let new_content = list_splice(parent.content, start, delete_count, items)
   replace_node_at(doc, parent_path, with_content(parent, new_content))
@@ -114,12 +114,12 @@ pub fn splice_children_at(doc, parent_path, start, delete_count, items) {
 // Text content extraction
 // ---------------------------------------------------------------------------
 
-fn concat_strings_at(arr, i, n, acc) {
+fn concat_strings_at(arr, i, n, acc) any^ {
   if (i >= n) { acc }
   else { concat_strings_at(arr, i + 1, n, acc ++ arr[i]) }
 }
 
-pub fn doc_text(node) {
+pub fn doc_text(node) any^ {
   if (is_text(node)) { node.text }
   else if (is_node(node)) {
     let parts = [for (c in node.content) doc_text(c)]

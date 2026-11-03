@@ -21,7 +21,7 @@ fn run(src) {
 }
 
 fn has(text, part) => index_of(text, part) != null
-fn count(text, part) => len(split(text, part)) - 1
+fn count(text, part) any^ => len(split(text, part)) - 1
 
 // ---- physics: bracing, vectors, operators, derivatives, Dirac notation, matrices ----
 let p = "\\usepackage{physics}"

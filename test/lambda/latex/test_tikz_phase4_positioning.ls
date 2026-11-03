@@ -6,10 +6,10 @@ import named: lambda.doc.tikz.named
 import coords: lambda.doc.tikz.coords
 import latex: lambda.doc.latex.latex
 
-fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+fn children_named(node, tag) any^ => [for (child in node
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
 fn failure(source) => tikz.render(source) ^ { ^.message }
 
@@ -57,8 +57,8 @@ let shaped = scene_of("\\begin{tikzpicture}" ++
     "\\end{tikzpicture}")^
 
 let reference_text = input("test/latex/fixtures/tikz_phase4/positioning_reference.ref", "text")^
-let references = [for (line in split(reference_text, "\n")
-    where trim(line) != "" and not starts_with(trim(line), "#"))
+let references = [for (line in ((split(reference_text, "\n")) ^ { [] })
+    where ((trim(line) != "" and not starts_with(trim(line), "#")) ^ { false }))
     (let parts = split(trim(line), "|"),
      {id: parts[0], anchor: parts[1], x: float(parts[2]), y: float(parts[3])})]
 

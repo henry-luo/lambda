@@ -1,8 +1,8 @@
 import chart: lambda.chart.chart
 import network: lambda.chart.network
 import util: lambda.chart.util
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
 let graph = {nodes: [{id: "a"}, {id: "b"}, {id: "c"}, {id: "d"}], links: [
     {source: "a", target: "b", value: 3}, {source: "a", target: "c", value: 1},
@@ -25,7 +25,7 @@ let checks = {
     chord_matrix: len(network.layout({nodes: [{id: 1}, {id: 2}], matrix: [[0, 2], [3, 0]]}, 200, 200, {kind: "chord"}).links) == 2,
     deterministic_force: force == network.layout(graph, 300, 200, {kind: "force_graph", seed: 17, iterations: 20}),
     different_seed: force != network.layout(graph, 300, 200, {kind: "force_graph", seed: 18, iterations: 20}),
-    force_bounds: all([for (node in force.nodes) node.x >= 0 and node.x <= 300 and node.y >= 0 and node.y <= 200]),
+    force_bounds: all([for (node in ((force.nodes) ^ { [] })) node.x >= 0 and node.x <= 300 and node.y >= 0 and node.y <= 200]),
     pinned: pinned.nodes[0].x == 27 and pinned.nodes[0].y == 49,
     svg_families: all([for (kind in ["sankey", "chord", "force_graph"],
         let image = chart.render_spec({*:spec, mark: {kind: kind, iterations: 10, labels: false}}))

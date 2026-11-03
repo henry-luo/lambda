@@ -22,7 +22,7 @@ pn main() {
     var x = ["q"]
     m.a = x
     m.b = x
-    push(m.a, 1)
+    push(m.a, 1)^
     print([m.a, m.b, x])
     print("\n")
 
@@ -31,28 +31,28 @@ pn main() {
     var y = ["q"]
     arr[0] = y
     arr[1] = y
-    push(arr[0], 1)
+    push(arr[0], 1)^
     print([arr[0], arr[1], y])
     print("\n")
 
     // a snapshot of the root, through a nested member/index/member place
     var n = {rows: [{tags: ["a"]}, {tags: []}]}
     let n_snap = n
-    push(n.rows[0].tags, "b")
+    push(n.rows[0].tags, "b")^
     print([n.rows[0].tags, n_snap.rows[0].tags])
     print("\n")
 
     // a typed int[] field keeps its checked append
     var tr: Row = {tags: [], vals: [1, 2]}
     let tr_snap = tr
-    push(tr.vals, 3)
+    push(tr.vals, 3)^
     print([tr.vals, tr_snap.vals])
     print("\n")
 
     // a var-parameter root writes through to the caller only
     var r: Row = {tags: ["x"], vals: [0]}
     let r_snap = r
-    add_tag(r, "y")
+    add_tag(r, "y")^
     print([r.tags, r_snap.tags])
     print("\n")
 
@@ -65,7 +65,7 @@ pn main() {
     var acc = {items: []}
     var i = 0
     while (i < 1000) {
-        push(acc.items, i)
+        push(acc.items, i)^
         i = i + 1
     }
     print([len(acc.items), acc.items[999]])
@@ -73,7 +73,7 @@ pn main() {
 
     var s = {xs: ["p", "q", "r", "s"]}
     let s_snap = s
-    splice(s.xs, 1, 2)
+    splice(s.xs, 1, 2)^
     print([s.xs, s_snap.xs])
     print("\n")
 

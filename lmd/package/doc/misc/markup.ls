@@ -2,23 +2,23 @@
 import c: .common
 import tasks: lambda.doc.wiki.tasks
 import grid: .grid
-fn quoted(value) => "\"" ++ replace(replace(replace(replace(c.newline(value),"\\","\\\\"),"\"","\\\""),"\n","\\n"),"\t","\\t") ++ "\""
-fn escaped(value,target) {
+fn quoted(value) any^ => "\"" ++ replace(replace(replace(replace(c.newline(value),"\\","\\\\"),"\"","\\\""),"\n","\\n"),"\t","\\t") ++ "\""
+fn escaped(value,target) any^ {
     let normalized = c.newline(value);
     if (target == "typst") "#text(" ++ quoted(normalized) ++ ")"
-    else if (target == "man") join([for (line in split(normalized,"\n"))
+    else if (target == "man") join([for (line in ((split(normalized,"\n")) ^ { [] }))
         "\\&" ++ replace(replace(line,"\\","\\e"),"-","\\-")],"\n")
     else {
         let entities = replace(replace(replace(normalized,"&","&amp;"),"<","&lt;"),">","&gt;")
-        let safe = join([for (ch in split(entities,"")) if (contains("\\*_`#^~{}[]+|",ch)) "\\" ++ ch else ch],"");
-        join([for (line in split(safe,"\n")) if (starts_with(line,"include::") or starts_with(line,"ifdef::") or
+        let safe = join([for (ch in ((split(entities,"")) ^ { [] })) if (contains("\\*_`#^~{}[]+|",ch)) "\\" ++ ch else ch],"");
+        join([for (line in ((split(safe,"\n")) ^ { [] })) if (starts_with(line,"include::") or starts_with(line,"ifdef::") or
             starts_with(line,"ifndef::") or starts_with(line,"endif::") or starts_with(line,"ifeval::") or
             starts_with(line,"//") or starts_with(line,"= ") or starts_with(line,". ") or
             starts_with(line,"- ") or starts_with(line,"----") or starts_with(line,"....")) "\\" ++ line else line],"\n")
     }
 }
-fn children(node,context) map^ => c.merge([for (child in c.kids(node)) render(child,context)^])^
-fn fence_for(source,marker) => c.times(marker,max(4,1+max([0,*[for (line in split(source,"\n"))
+fn children(node,context) map^ => c.merge([for (child in ((c.kids(node)) ^ { [] })) render(child,context)^])^
+fn fence_for(source,marker) any^ => c.times(marker,max(4,1+max([0,*[for (line in ((split(source,"\n")) ^ { [] }))
     if (replace(line,marker,"") == "") len(line) else 0]])))
 fn wrapped(node,context,kind) map^ {
     let target = context.type
@@ -86,7 +86,7 @@ fn heading(node,context) map^ {
 fn list_item(node,context,index) map^ {
     let task = tasks.model(node)
     let target = context.type
-    let body = c.merge([for (i,child in c.kids(node) where not (c.tag(child) == "input" and child.type == "checkbox")) {
+    let body = c.merge([for (i,child in ((c.kids(node)) ^ { [] }) where ((not (c.tag(child) == "input" and child.type == "checkbox")) ^ { false })) {
         let value = render(child,{*:context,in_item:true})^
         let kind = c.tag(child)
         let block = kind in ["p","ul","ol","dl","table","blockquote","div","pre"] or (kind == "code" and child.type == "block")
@@ -111,8 +111,8 @@ fn render_list(node,context) map^ {
     let ordered = c.tag(node) == "ol"
     let start = int(c.get(node,"start",1));
     let valid_list = if (start == null or start < 1) raise c.fail("ordered list start must be positive")
-    else if (any([for (item in c.kids(node)) c.tag(item) != "li"])) raise c.fail("list children must be li elements")
-    let body = c.merge([for (i,item in c.kids(node)) list_item(item,{*:context,depth:context.depth+1,ordered:ordered},start+i)^],
+    else if (any([for (item in ((c.kids(node)) ^ { [] })) c.tag(item) != "li"])) raise c.fail("list children must be li elements")
+    let body = c.merge([for (i,item in ((c.kids(node)) ^ { [] })) list_item(item,{*:context,depth:context.depth+1,ordered:ordered},start+i)^],
         if (context.type == "typst") ", " else "")^
     let issues = body.diagnostics ++ (if (context.type == "asciidoc" and ordered and start != 1 and context.depth > 0)
         [c.issue("nested-list-start",node,"Nested AsciiDoc start values are outside this writer profile")] else []);
@@ -120,8 +120,8 @@ fn render_list(node,context) map^ {
     else if (context.type == "man") c.result(".RS\n" ++ body.text ++ ".RE\n",issues)
     else c.result((if (ordered and start != 1) "[start=" ++ string(start) ++ "]\n" else "") ++ body.text ++ "\n",issues)
 }
-fn table_rows(node) => [for (child in c.kids(node)) if (c.tag(child) == "tr") child
-    else if (c.tag(child) in ["thead","tbody","tfoot"]) for (row in c.kids(child) where c.tag(row) == "tr") row]
+fn table_rows(node) any^ => [for (child in ((c.kids(node)) ^ { [] })) if (c.tag(child) == "tr") child
+    else if (c.tag(child) in ["thead","tbody","tfoot"]) for (row in ((c.kids(child)) ^ { [] }) where ((c.tag(row) == "tr") ^ { false })) row]
 fn span_count(cell,key) int^ {
     let value = int(c.get(cell,key,1));
     if (value == null or value < 1 or value > 1000) raise c.fail("invalid table " ++ key) else value
@@ -151,9 +151,9 @@ fn place_rows(rows,index,blocked) map^ {
         {rows:[row,*rest.rows],columns:max(len(row.occupied),rest.columns)}
     }
 }
-fn positioned_cells(row,columns,target) => [for (column in range(0,columns,1),
+fn positioned_cells(row,columns,target) any^ => [for (column in range(0,columns,1),
     let starts = [for (cell in row.cells where cell.column == column) cell]
-    where len(starts) > 0 or target == "man" or column >= len(row.occupied) or row.occupied[column] == 0)
+    where ((len(starts) > 0 or target == "man" or column >= len(row.occupied) or row.occupied[column] == 0) ^ { false }))
     if (len(starts) > 0) starts[0] else {node:<td>,column:column}]
 fn table_cell(cell,context) map^ {
     let body = children(cell,{*:context,in_cell:true})^
@@ -173,16 +173,16 @@ fn table(node,context) map^ {
     let layout = place_rows(rows,0,[])^
     let columns = max(1,layout.columns)
     let target = context.type
-    let values = [for (i,row in layout.rows) c.merge([for (cell in positioned_cells(row,columns,target))
+    let values = [for (i,row in layout.rows) c.merge([for (cell in ((positioned_cells(row,columns,target)) ^ { [] }))
         table_cell(cell.node,{*:context,row:i,column:cell.column})^],if (target == "man") "\t" else if (target == "typst") ", " else "")^]
     let body = c.merge(if (target == "typst") [for (value in values where value.text != "") value] else values,
         if (target == "typst") ",\n" else "\n")^
-    let captions = [for (child in c.kids(node) where c.tag(child) == "caption") child]
+    let captions = [for (child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) == "caption") ^ { false })) child]
     let caption = c.merge([for (child in captions) children(child,context)^])^
-    let headers = len(rows) > 0 and len(c.kids(rows[0])) > 0 and all([for (cell in c.kids(rows[0])) c.tag(cell) == "th"])
-    let attribute_issues = [for (row in rows,issue in c.unknown(row,["sourcepos"],"table row attribute")) issue] ++
-        [for (group in c.kids(node),issue in if (c.tag(group) in ["thead","tbody","tfoot","caption"])
-            c.unknown(group,["sourcepos"],"table group attribute") else []) issue]
+    let headers = len(rows) > 0 and len(c.kids(rows[0])) > 0 and all([for (cell in ((c.kids(rows[0])) ^ { [] })) c.tag(cell) == "th"])
+    let attribute_issues = [for (row in rows,issue in ((c.unknown(row,["sourcepos"],"table row attribute")) ^ { [] })) issue] ++
+        [for (group in ((c.kids(node)) ^ { [] }),issue in ((if (c.tag(group) in ["thead","tbody","tfoot","caption"])
+            c.unknown(group,["sourcepos"],"table group attribute") else []) ^ { [] })) issue]
     let all_issues = body.diagnostics ++ caption.diagnostics ++ attribute_issues;
     if (target == "typst") c.result((if (len(captions) > 0) "#figure(" else "") ++ (if (len(captions) > 0) "table(columns: " else "#table(columns: ") ++ string(columns) ++ ",\n" ++ body.text ++ ")" ++
         (if (len(captions) > 0) ", caption: [" ++ caption.text ++ "])" else "") ++ "\n\n",all_issues)
@@ -192,7 +192,7 @@ fn table(node,context) map^ {
         join([for (i in range(0,columns,1)) "l"]," ") ++ ".\n" ++ body.text ++ "\n.TE\n",all_issues)
 }
 fn definition(node,context) map^ {
-    let body = c.merge([for (child in c.kids(node)) {
+    let body = c.merge([for (child in ((c.kids(node)) ^ { [] })) {
         let value = children(child,context)^;
         c.result((if (c.tag(child) == "dt") (if (context.type == "man") ".TP\n" else if (context.type == "typst") "/ " else "") else "") ++
             value.text ++ (if (c.tag(child) == "dt") (if (context.type == "man") "\n" else if (context.type == "typst") ": " else ":: ") else "\n"),value.diagnostics)
@@ -279,7 +279,7 @@ pub fn render_document(node,options) map^ {
     let value = render(node,{*:options,depth:0,nesting:0,font:"R",in_item:false,in_cell:false})^;
     if (options.type != "man") value
     else {
-        let metas = [for (child in c.kids(node) where c.tag(child) == "meta") child]
+        let metas = [for (child in ((c.kids(node)) ^ { [] }) where ((c.tag(child) == "meta") ^ { false })) child]
         let title = c.get(options,"title",c.get(metas[0],"title","UNTITLED"))
         let args = [title,c.get(options,"section","1"),c.get(options,"date",""),c.get(options,"source",""),c.get(options,"manual","")]
         let safe = [for (arg in args) replace(replace(c.single_line(if (arg is element) c.text(arg) else string(arg),"man title argument")^,"\\","\\e"),"\"","\\(dq")];

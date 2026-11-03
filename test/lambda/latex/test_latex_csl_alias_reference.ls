@@ -39,49 +39,49 @@ let references = [
 ]
 
 // collapse runs of whitespace and drop the footnote back-link arrow
-fn normalized(text) => trim(replace(replace(replace(text, "↩", ""), "\n", " "), "  ", " "))
+fn normalized(text) any^ => trim(replace(replace(replace(text, "↩", ""), "\n", " "), "  ", " "))
 
 fn has_class(node, wanted) => node is element and node.class != null and
     (contains(" " ++ string(node.class) ++ " ", " " ++ wanted ++ " ") ^ { false })
 
 // rendered elements may hold their children in nested arrays
-fn items_with_class(node, wanted) {
-    if (node is array or node is list) [for (child in node, found in items_with_class(child, wanted)) found]
+fn items_with_class(node, wanted) any^ {
+    if (node is array or node is list) [for (child in node, found in ((items_with_class(child, wanted)) ^ { [] })) found]
     else if (not (node is element)) []
     else if (has_class(node, wanted)) [node]
-    else [for (child in node, found in items_with_class(child, wanted)) found]
+    else [for (child in node, found in ((items_with_class(child, wanted)) ^ { [] })) found]
 }
 
-fn footnote_items(node) {
-    if (node is array or node is list) [for (child in node, found in footnote_items(child)) found]
+fn footnote_items(node) any^ {
+    if (node is array or node is list) [for (child in node, found in ((footnote_items(child)) ^ { [] })) found]
     else if (not (node is element)) []
     else if (has_class(node, "latex-footnotes"))
-        [for (child in node, item in items_named(child, "li")) item]
-    else [for (child in node, found in footnote_items(child)) found]
+        [for (child in node, item in ((items_named(child, "li")) ^ { [] })) item]
+    else [for (child in node, found in ((footnote_items(child)) ^ { [] })) found]
 }
 
-fn items_named(node, tag) {
-    if (node is array or node is list) [for (child in node, found in items_named(child, tag)) found]
+fn items_named(node, tag) any^ {
+    if (node is array or node is list) [for (child in node, found in ((items_named(child, tag)) ^ { [] })) found]
     else if (not (node is element)) []
     else if (string(name(node)) == tag) [node]
-    else [for (child in node, found in items_named(child, tag)) found]
+    else [for (child in node, found in ((items_named(child, tag)) ^ { [] })) found]
 }
 
 fn compare(reference, lambda_text) =>
     if (reference == lambda_text) "same" else {reference: reference, lambda: lambda_text}
 
-fn check(ref) {
+fn check(ref) any^ {
     let path = dir ++ ref.name ++ ".tex"
     let result = latex.render_result(latex.parse_file(path), {source_path: path})
     let body = util.text_of(result.body)
     let citations = normalized(slice(body, index_of(body, "First"), index_of(body, "References")))
-    let entries = [for (item in items_with_class(result.elements, "csl-entry")) normalized(util.text_of(item))]
-    let notes = [for (item in footnote_items(result.elements)) normalized(util.text_of(item))];
+    let entries = [for (item in ((items_with_class(result.elements, "csl-entry")) ^ { [] })) normalized(util.text_of(item))]
+    let notes = [for (item in ((footnote_items(result.elements)) ^ { [] })) normalized(util.text_of(item))];
     {name: ref.name,
-     diagnostics: [for (issue in result.diagnostics) issue.code],
+     diagnostics: [for (issue in ((result.diagnostics) ^ { [] })) issue.code],
      citations: compare(ref.citations, citations),
-     entries: [for (i in 0 to len(ref.entries) - 1) compare(ref.entries[i], entries[i])],
-     notes: [for (i in 0 to len(ref.notes) - 1) compare(ref.notes[i], notes[i])]}
+     entries: [for (i in ((0 to len(ref.entries) - 1) ^ { [] })) compare(ref.entries[i], entries[i])],
+     notes: [for (i in ((0 to len(ref.notes) - 1) ^ { [] })) compare(ref.notes[i], notes[i])]}
 }
 
 [for (ref in references) check(ref)]

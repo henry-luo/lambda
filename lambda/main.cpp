@@ -30,7 +30,6 @@
 #ifndef _WIN32
 #include <setjmp.h>
 #include <errno.h>
-#include <signal.h>
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -51,6 +50,8 @@
 #include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
 #include "runtime/terminal_host.h"
+#include "runtime/concurrency.h"
+#include <signal.h>
 #include "devtools/scratch.hpp"
 
 // Error handling with stack traces
@@ -896,6 +897,7 @@ struct DocWindowLaunchOptions {
     bool state_dump;
     bool fullscreen;
     bool autoplay;
+    bool microphone;
     const char* graph_view_key;
     bool source_surface;
     bool browse_archive;
@@ -953,6 +955,8 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
         } else if (is_view && strcmp(argv[i], "--autoplay") == 0) {
             // D7.5.4: only the host grants audio activation up front.
             out->autoplay = true;
+        } else if (is_view && strcmp(argv[i], "--microphone") == 0) {
+            out->microphone = true;
         } else if (strcmp(argv[i], "--event-log") == 0) {
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
@@ -1030,7 +1034,7 @@ extern int view_doc_in_window_with_events(const char* doc_file, const char* even
                                            bool enable_event_log = false,
                                            bool enable_state_dump = false,
                                            const RenderPagedOptions* paged_options = nullptr,
-                                           bool fullscreen = false);
+                                           bool fullscreen = false, bool microphone_granted = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
@@ -2537,6 +2541,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
+    {"midtown", "test/demo/midtown/midtown.ls"},
     {"photo", "test/demo/photo/photo.ls"},
     {"photos", "test/demo/photos/photos.ls"},
     {"draw", "test/demo/draw/draw.ls"},
@@ -2556,6 +2561,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
     {"mail", "test/demo/mail/mail.ls"},
+    {"chat", "test/demo/chat/chat.ls"},
     {"music", "test/demo/music/music.ls"},
     {"soundflow", "test/demo/soundflow/soundflow.ls"},
     {"greetings", "test/demo/greetings/greetings.ls"},
@@ -2585,7 +2591,52 @@ static void print_demo_help(FILE* stream) {
         fprintf(stream, "  %-18s %s\n", demo->name, demo->path); // PRINTF_OK: user-facing CLI help.
     }
     fputs("\n  --list, --help, -h  Show this list\n"
+          "  chat user=maya,alex  Start a shared server and one window per user\n"
           "Other options are passed to 'lambda view'.\n", stream);
+}
+
+static int run_chat_demo(Runtime* runtime, const char* script_path) {
+#ifndef LAMBDA_NO_TASKS
+    // deliver terminal interrupts on the loop so structured cancellation can
+    // terminate/reap viewer processes before the server's owner goes away.
+    struct Signals { uv_signal_t handles[2]; int count; int closing; int interrupted; } signals = {};
+    const int numbers[] = {SIGINT, SIGTERM};
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop && lambda_uv_init() == 0) loop = lambda_uv_loop();
+    bool ok = loop != NULL;
+    for (int number : numbers) {
+        if (!ok) break;
+        uv_signal_t* handle = &signals.handles[signals.count];
+        int status = uv_signal_init(loop, handle);
+        if (status == 0) {
+            signals.count++;
+            handle->data = &signals;
+            status = uv_signal_start(handle, [](uv_signal_t* handle, int number) {
+                auto* signals = (Signals*)handle->data;
+                signals->interrupted = number;
+                LambdaTask* owner = lambda_task_running();
+                if (owner) lambda_task_cancel(owner);
+            }, number);
+            uv_unref((uv_handle_t*)handle);
+        }
+        if (status != 0) {
+            log_error("chat launcher: cannot watch terminal signal: %s", uv_strerror(status));
+            ok = false;
+        }
+    }
+    int result = ok ? run_script_file(runtime, script_path, true) : 1;
+    signals.closing = signals.count;
+    for (int i = 0; i < signals.count; i++) {
+        uv_signal_stop(&signals.handles[i]);
+        uv_close((uv_handle_t*)&signals.handles[i], [](uv_handle_t* handle) {
+            ((Signals*)handle->data)->closing--;
+        });
+    }
+    while (signals.closing > 0) uv_run(loop, UV_RUN_NOWAIT);
+    return signals.interrupted ? 128 + signals.interrupted : result;
+#else
+    return run_script_file(runtime, script_path, true);
+#endif
 }
 
 static int lambda_main_impl(int argc, char *argv[]) {
@@ -2706,6 +2757,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
     // demos share view's launch options; with no name the demo index opens.
     // allocate after tracker initialization so teardown uses the same headers.
+    bool demo_chat_multi = false;
     if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
         const char* path = nullptr;
         int first_option = 2;
@@ -2727,6 +2779,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
         }
         if (!path) path = LAMBDA_DEMO_INDEX;
+        demo_chat_multi = first_option == 3 && !strcmp(argv[2], "chat") && argc > 3 &&
+            !strncmp(argv[3], "user=", 5);
         char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
         g_lambda_main_demo_argv = demo_argv;
         if (!demo_argv) {
@@ -2734,8 +2788,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
         demo_argv[0] = argv[0];
-        demo_argv[1] = (char*)"view";
-        demo_argv[2] = (char*)path;
+        demo_argv[1] = (char*)(demo_chat_multi ? "run" : "view");
+        demo_argv[2] = (char*)(demo_chat_multi ? "test/demo/chat/launch.ls" : path);
         int demo_argc = 3;
         for (int i = first_option; i < argc; i++) demo_argv[demo_argc++] = argv[i];
         argc = demo_argc;
@@ -4288,6 +4342,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                   "  --block-remote-resources Disable remote subresources\n", stdout);
             fputs("  --fullscreen              Start in fullscreen (F11 toggles)\n", stdout);
             fputs("  --autoplay                Grant audio activation up front: network documents may start sound without a click (D7.5.4)\n", stdout);
+            fputs("  --microphone              Grant input to the initial document; explicit capture also requires OS permission (D7.5.10)\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
@@ -4351,7 +4406,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,
-                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options, launch.fullscreen);
+                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options, launch.fullscreen, launch.microphone);
             lambda_view_log_completion(result);
             return lambda_main_finish(result);
         }
@@ -4445,7 +4500,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
-                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen);
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
         } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("graph");
@@ -4459,7 +4514,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("GRAPH_VIEW_TRANSFORM: viewing '%s' through Lambda graph transform", filename);
             exit_code = view_lambda_document_transform_with_events(filename, transform,
                 &option, 1, event_file, headless, font_dirs, font_dir_count,
-                event_log, state_dump, launch.fullscreen);
+                event_log, state_dump, launch.fullscreen, launch.microphone);
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
@@ -4484,7 +4539,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
             exit_code = view_doc_in_window_with_events(filename, event_file, headless,
                                                        font_dirs, font_dir_count, event_log,
-                                                       state_dump, nullptr, launch.fullscreen);
+                                                       state_dump, nullptr, launch.fullscreen, launch.microphone);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .epub, .docx, .pptx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
@@ -5809,9 +5864,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         // Parse run command arguments
-        char* script_file = NULL;
+        char* script_file = demo_chat_multi ? argv[2] : NULL;
 
-        for (int i = 2; i < argc; i++) {
+        // the chat launcher consumes its user list and forwards viewer options
+        // through sys.proc.self.argv; ordinary run retains strict parsing.
+        for (int i = demo_chat_multi ? argc : 2; i < argc; i++) {
             if (apply_common_mir_option(argv[i], &runtime)) {
             } else if (strcmp(argv[i], "--dry-run") == 0) {
                 // Keep `run` hermetic like ordinary script execution; fuzz
@@ -5848,7 +5905,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         log_debug("Running script '%s' with run_main=true", script_file);
 
         // Execute script with run_main enabled
-        int result = run_script_file(&runtime, script_file, true);  // true for run_main
+        int result = demo_chat_multi ? run_chat_demo(&runtime, script_file)
+            : run_script_file(&runtime, script_file, true);
         emit_lambda_compiler_timing(script_file);
 
         runtime_cleanup(&runtime);

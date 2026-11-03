@@ -9,7 +9,7 @@ let pl: int[] = [2, 6, 6, 7, 2, 3, 1, 1, 1, 2]
 let fl: float[] = [1.5, 2.5, 3.5]
 let ua = [10, 20, 30]
 
-pn sum_ints() int {
+pn sum_ints() int^ {
     var s: int = 0
     var i: int = 0
     while (i < len(pl)) {
@@ -19,7 +19,7 @@ pn sum_ints() int {
     return s
 }
 
-pn sum_floats() float {
+pn sum_floats() float^ {
     var s: float = 0.0
     var i: int = 0
     while (i < len(fl)) {
@@ -29,7 +29,7 @@ pn sum_floats() float {
     return s
 }
 
-pn sum_unannotated() int {
+pn sum_unannotated() int^ {
     var s: int = 0
     var i: int = 0
     while (i < len(ua)) {

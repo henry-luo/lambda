@@ -10,15 +10,15 @@ let FONTS = {small: "font-size:90%;", footnotesize: "font-size:80%;",
     sf: font_decl.SANS_CSS ++ ";", rm: font_decl.SERIF_CSS ++ ";",
     tt: font_decl.MONO_CSS ++ ";", normalfont: "font-style:normal;font-weight:normal;"}
 
-fn font_parts(value) {
+fn font_parts(value) any^ {
     if (value == null) [] else util.split_top_level(util.unwrap_braces(value), ",")
 }
 
-pub fn invalid_options(opts) {
+pub fn invalid_options(opts) any^ {
     [for (key, value at opts where not any([for (allowed in OPTIONS)
         string(key) == allowed])) string(key)] ++
     [for (key in ["font", "labelfont", "textfont"],
-        token in font_parts(opts[key]) where FONTS[trim(token)] == null) key] ++
+        token in ((font_parts(opts[key])) ^ { [] }) where FONTS[trim(token)] == null) key] ++
     (if (opts.labelsep == null or any([for (item in ["colon", "period", "space", "quad", "newline", "none"])
         item == opts.labelsep])) [] else ["labelsep"]) ++
     (if (opts.justification == null or any([for (item in ["centering", "raggedright", "raggedleft", "justified"])
@@ -28,7 +28,7 @@ pub fn invalid_options(opts) {
         item == opts.labelformat])) [] else ["labelformat"])
 }
 
-pub fn issues(opts, offset) => [for (key in invalid_options(opts))
+pub fn issues(opts, offset) => [for (key in ((invalid_options(opts)) ^ { [] }))
     util.diagnostic("unsupported-caption-option", "caption", key,
         "Unsupported caption option or value: " ++ key, offset)]
 
@@ -36,9 +36,9 @@ pub fn initial(caption, subcaption) => {global: if (caption == null) {} else cap
     figure: {}, table: {}, subfigure: if (subcaption == null) {} else subcaption,
     subtable: if (subcaption == null) {} else subcaption}
 
-pub fn setup(node) => util.parse_kv_options(util.raw_argument(node, "required", 0))
+pub fn setup(node) any^ => util.parse_kv_options(util.raw_argument(node, "required", 0))
 
-pub fn update(config, node, current_type) {
+pub fn update(config, node, current_type) any^ {
     let requested = util.optional_raw(node)
     let target = if (requested != null) trim(requested)
         else if (current_type != null) current_type else "global"
@@ -53,7 +53,7 @@ pub fn update(config, node, current_type) {
     }
 }
 
-fn font_css(value) => join([for (token in font_parts(value)) FONTS[trim(token)]], "")
+fn font_css(value) => join([for (token in ((font_parts(value)) ^ { [] })) FONTS[trim(token)]], "")
 
 fn separator(value, sub) {
     match value {
@@ -67,7 +67,7 @@ fn separator(value, sub) {
 }
 
 // kinds: the document's float kinds, for the caption name of package and \newfloat floats
-pub fn render(content, kind, ordinal_text, config, starred, offset, kinds = null) {
+pub fn render(content, kind, ordinal_text, config, starred, offset, kinds = null) any^ {
     let sub = starts_with(kind, "sub")
     let parent = if (kind == "subfigure") "figure" else if (kind == "subtable") "table" else kind
     // package and \newfloat kinds have no kind-specific caption options

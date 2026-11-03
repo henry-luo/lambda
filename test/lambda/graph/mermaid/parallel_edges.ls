@@ -31,9 +31,9 @@ let labeled = layout.from_velmts(
 
 {
   routed_size: [routed.width, routed.height],
-  routed_nodes: [for (node in routed.nodes) [node.id, node.x, node.y]],
-  routed_edges: [for (edge in routed.edges) [edge.id, edge.points]],
-  labeled_edges: [for (edge in labeled.edges) [edge.id, edge.points]],
-  label_placements: [for (place in labeled.placements
+  routed_nodes: [for (node in ((routed.nodes) ^ { [] })) [node.id, node.x, node.y]],
+  routed_edges: [for (edge in ((routed.edges) ^ { [] })) [edge.id, edge.points]],
+  labeled_edges: [for (edge in ((labeled.edges) ^ { [] })) [edge.id, edge.points]],
+  label_placements: [for (place in ((labeled.placements) ^ { [] })
     where place.index == 2 or place.index == 3) place]
 }

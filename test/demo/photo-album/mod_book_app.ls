@@ -16,9 +16,9 @@ let CHROME_H = 52.0 + 112.0 + 40.0
 let SHADE = 0.45
 
 fn node(owner, id) => dom.get_element_by_id(owner, id)
-fn px(v) => string(round(v * 100) / 100) ++ "px"
+fn px(v) any^ => string(round(v * 100) / 100) ++ "px"
 fn leaf_node(owner, i) => dom.get_element_by_id(owner, "bk-leaf-" ++ string(i))
-fn count(bs) => len(bs.book.leaves)
+fn count(bs) any^ => len(bs.book.leaves)
 // a turn's clock starts at the input's time stamp, or (without one) at its first frame; a frame
 // advances it by at most MAX_STEP_MS, so a slow frame slows the turn instead of skipping it
 let MAX_STEP_MS = 50.0
@@ -38,7 +38,7 @@ fn near(bs, i) => i >= bs.turned - 2 and i <= bs.turned + 1
 // the layout it costs); mounted leaves stay (SLD3/SLD4 policy), off-spread ones are hidden
 pn mount(owner, ctx, bs) {
     let host = node(owner, "bk-leaves")
-    let missing = [for (i in max(0, bs.turned - 2) to min(count(bs) - 1, bs.turned + 2) where not contains(bs.mounted, i)) i]
+    let missing = [for (i in max(0, bs.turned - 2) to min(count(bs)^ - 1, bs.turned + 2) where (not contains(bs.mounted, i))^) i]
     if (len(missing) > 0) {
         let html = join([for (i in missing) format([BU.leaf(ctx.lib, bs.book, i, bs.scale, bs.options)], 'html')], "")
         dom.append_child(host, dom.parse_fragment(host, html))
@@ -49,7 +49,7 @@ pn mount(owner, ctx, bs) {
 // turned leaves stack on the left, later ones on top; unturned ones on the right, earlier on top.
 // The two leaves a turn can lift (each stack's top) already rest above the rest, so starting a
 // turn writes no z-index: an inline-style write would relay out and repaint the whole window.
-fn rest_z(bs, i) => if (i == bs.turned) count(bs) + 10 else if (i == bs.turned - 1) count(bs) + 9
+fn rest_z(bs, i) any^ => if (i == bs.turned) count(bs) + 10 else if (i == bs.turned - 1) count(bs) + 9
     else if (i < bs.turned) i + 1 else count(bs) - i
 
 // Per-frame transform and shading go through the presentation channel (RAD_16): such writes
@@ -58,16 +58,16 @@ fn rest_z(bs, i) => if (i == bs.turned) count(bs) + 10 else if (i == bs.turned -
 pn shade(owner, i, angle) {
     let a = abs(angle)
     let leaf = leaf_node(owner, i)
-    dom.presentation_style_set_property(dom.query_selector(leaf, ".bk-shade-front"), "opacity", string(round(SHADE * min(1.0, a / 90.0) * 100) / 100))
+    dom.presentation_style_set_property(dom.query_selector(leaf, ".bk-shade-front"), "opacity", string(round(SHADE * min(1.0, a / 90.0) * 100) / 100)^)
     dom.presentation_style_set_property(dom.query_selector(leaf, ".bk-shade-back"), "opacity", string(round(SHADE * min(1.0, (180.0 - a) / 90.0) * 100) / 100))
 }
 
 pn pose(owner, i, angle, z) {
     let leaf = leaf_node(owner, i)
     if (leaf == null) { return null }
-    dom.presentation_style_set_property(leaf, "transform", "rotateY(" ++ string(round(angle * 100) / 100) ++ "deg)")
-    updates.style(leaf, "z-index", string(z))
-    updates.style(leaf, "display", "block")
+    dom.presentation_style_set_property(leaf, "transform", "rotateY(" ++ string(round(angle * 100) / 100)^ ++ "deg)")
+    updates.style(leaf, "z-index", string(z))^
+    updates.style(leaf, "display", "block")^
     shade(owner, i, angle)
     return null
 }
@@ -79,14 +79,14 @@ pn settle(owner, bs) {
         else { updates.style(leaf_node(owner, i), "display", "none") }
     }
     // page-edge stacks show how much of the book lies on each side
-    updates.style(node(owner, "bk-edge-left"), "width", string(min(14.0, bs.turned * 0.5)) ++ "px")
-    updates.style(node(owner, "bk-edge-right"), "width", string(min(14.0, (count(bs) - bs.turned) * 0.5)) ++ "px")
+    updates.style(node(owner, "bk-edge-left"), "width", string(min(14.0, bs.turned * 0.5)) ++ "px")^
+    updates.style(node(owner, "bk-edge-right"), "width", string(min(14.0, (count(bs) - bs.turned) * 0.5)) ++ "px")^
     for (b in dom.query_selector_all(owner, "[data-spread]")) updates.attr(b, "aria-current", dom.get_attribute(b, "data-spread") == string(bs.turned))
-    updates.text(owner, "bk-position", B.spread_label(bs.book, bs.turned))
-    updates.attr(node(owner, "book"), "data-turned", bs.turned)
+    updates.text(owner, "bk-position", B.spread_label(bs.book, bs.turned))^
+    updates.attr(node(owner, "book"), "data-turned", bs.turned)^
     updates.attr(node(owner, "book"), "data-closed", bs.turned == 0 or bs.turned == count(bs))
     if (bs.turned == 0) dom.set_attribute(node(owner, "bk-prev"), "disabled", "") else dom.remove_attribute(node(owner, "bk-prev"), "disabled")
-    if (bs.turned == count(bs)) dom.set_attribute(node(owner, "bk-next"), "disabled", "") else dom.remove_attribute(node(owner, "bk-next"), "disabled")
+    if ((bs.turned == count(bs))^) dom.set_attribute(node(owner, "bk-next"), "disabled", "") else dom.remove_attribute(node(owner, "bk-next"), "disabled")
     return bs
 }
 
@@ -98,8 +98,8 @@ pn build(owner, ctx, bs) {
     updates.markup(node(owner, "bk-stage"), format([<div class:"bk-book", id:"bk-book", style:"width:" ++ px(w) ++ ";height:" ++ px(h) ++ ";",
         <div class:"bk-edge bk-edge-left", id:"bk-edge-left">;
         <div class:"bk-edge bk-edge-right", id:"bk-edge-right">;
-        <div class:"bk-leaves", id:"bk-leaves", style:"left:" ++ px(w / 2.0) ++ ";width:" ++ px(w / 2.0) ++ ";height:" ++ px(h) ++ ";">>], 'html'))
-    updates.markup(node(owner, "bk-bar"), format([BU.spread_bar(ctx.lib, bs.book)], 'html'))
+        <div class:"bk-leaves", id:"bk-leaves", style:"left:" ++ px(w / 2.0) ++ ";width:" ++ px(w / 2.0) ++ ";height:" ++ px(h) ++ ";">>], 'html'))^
+    updates.markup(node(owner, "bk-bar"), format([BU.spread_bar(ctx.lib, bs.book)], 'html'))^
     // an unchanged frame keeps its element, leaves included: a rebuild starts from no leaves
     dom.set_inner_html(node(owner, "bk-leaves"), "")
     let fresh = mount(owner, ctx, {*:bs, scale:s, mounted:[]})
@@ -125,11 +125,11 @@ pub pn restyle(owner, ctx, bs, options) {
 // starts (or queues) one turn; a turn runs from an angle, so a released drag continues from it
 pn begin(owner, ctx, bs, forward, seconds, from, now_ms) {
     let i = if (forward) bs.turned else bs.turned - 1
-    if (i < 0 or i >= count(bs)) { return bs }
+    if ((i < 0 or i >= count(bs))^) { return bs }
     // settle mounted and posed the leaves a turn shows: these writes normally change nothing
     let shown = mount(owner, ctx, bs)
     // the page the leaf uncovers must be displayed beneath it
-    for (j in shown.mounted) { if (j >= i - 1 and j <= i + 1) { pose(owner, j, if (j < i or (j == i and not forward)) -180.0 else 0.0, rest_z(shown, j)) } }
+    for (j in ((((((shown.mounted) ^ { [] })))))) { if (j >= i - 1 and j <= i + 1) { pose(owner, j, if (j < i or (j == i and not forward)) -180.0 else 0.0, rest_z(shown, j)) } }
     let anim = {leaf:i, forward:forward, from:from, to:if (forward) -180.0 else 0.0, *:turn_clock(now_ms), seconds:seconds}
     pose(owner, i, from, rest_z(shown, i))
     return {*:shown, anim:anim, frame:dom.request_frame(owner, "book_frame")}
@@ -148,7 +148,7 @@ pub pn jump(owner, ctx, bs, target, now_ms = 0.0) {
     let steps = to - pending
     let more = [for (k in 1 to abs(steps) where steps != 0) steps > 0]
     let queued = {*:bs, queue:[*bs.queue, *more]}
-    if (queued.anim != null or len(queued.queue) == 0) { return queued }
+    if ((queued.anim != null or len(queued.queue) == 0)^) { return queued }
     return begin(owner, ctx, {*:queued, queue:slice(queued.queue, 1, len(queued.queue))}, queued.queue[0], JUMP_SECONDS,
         if (queued.queue[0]) 0.0 else -180.0, now_ms)
 }
@@ -166,7 +166,7 @@ pub pn frame(owner, ctx, bs, now_ms) {
     // a leaf that lands on the left is turned
     let landed = if (a.to < -90.0) a.leaf + 1 else a.leaf
     let done = settle(owner, mount(owner, ctx, {*:bs, anim:null, frame:0, turned:landed}))
-    if (len(done.queue) == 0) { return done }
+    if ((len(done.queue) == 0)^) { return done }
     let next = done.queue[0]
     return begin(owner, ctx, {*:done, queue:slice(done.queue, 1, len(done.queue))}, next,
         if (len(done.queue) > 1) JUMP_SECONDS else TURN_SECONDS, if (next) 0.0 else -180.0, now_ms)
@@ -179,7 +179,7 @@ pub pn press(owner, bs, evt) {
     if (bs.anim != null) { return bs }
     let book = dom.bounding_box(node(owner, "bk-book"))
     let forward = evt.clientX >= book.x + book.width / 2.0
-    if ((forward and bs.turned >= count(bs)) or (not forward and bs.turned <= 0)) { return bs }
+    if (((forward and bs.turned >= count(bs)) or (not forward and bs.turned <= 0))^) { return bs }
     return {*:bs, drag:{forward:forward, x:evt.clientX, edge:if (forward) book.x + book.width else book.x, width:book.width, moved:false, angle:if (forward) 0.0 else -180.0}}
 }
 
@@ -190,7 +190,7 @@ pub pn drag(owner, ctx, bs, evt) {
     let leaf = if (d.forward) bs.turned else bs.turned - 1
     let prepared = if (d.moved) bs else mount(owner, ctx, bs)
     if (not d.moved) {
-        for (j in prepared.mounted) { if (j >= leaf - 1 and j <= leaf + 1) { pose(owner, j, if (j < leaf or (j == leaf and not d.forward)) -180.0 else 0.0, rest_z(prepared, j)) } }
+        for (j in ((((((prepared.mounted) ^ { [] })))))) { if (j >= leaf - 1 and j <= leaf + 1) { pose(owner, j, if (j < leaf or (j == leaf and not d.forward)) -180.0 else 0.0, rest_z(prepared, j)) } }
     }
     // the angle follows the pointer across the spread
     let travelled = if (d.forward) d.edge - evt.clientX else evt.clientX - d.edge

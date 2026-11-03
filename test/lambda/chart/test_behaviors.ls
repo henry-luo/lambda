@@ -7,7 +7,7 @@ import s: lambda.chart.scale
 import coord: lambda.chart.coordinate
 import parse: lambda.chart.parse
 fn check(label, valid) => if (valid) null else label
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
 let rows=[{id:"a",x:2,y:3,group:"one"},{id:"b",x:7,y:8,group:"two"}]
 let encoding={x:{field:"x",dtype:"quantitative"},y:{field:"y",dtype:"quantitative"},key:{field:"id"},color:{field:"group",dtype:"nominal"}}
 let spec=b.prepare({data:rows,mark:{kind:"point"},encoding:encoding,

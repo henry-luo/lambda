@@ -31,14 +31,14 @@ let acting_attrs = ["href", "action", "formaction", "srcdoc", "ping"]
 
 fn script_url(value) => starts_with(lower(trim(value)), "javascript:") ^ { false }
 
-fn attr_html(name, value) => " " ++ name ++ "=\"" ++ escape_attr(value) ++ "\""
+fn attr_html(name, value) any^ => " " ++ name ++ "=\"" ++ escape_attr(value) ++ "\""
 
 // A link shows its target as a tooltip; a control is disabled.
-fn safe_attrs(el, tag) {
+fn safe_attrs(el, tag) any^ {
   // an empty attribute value reads back as null
   let pairs = [for (k, v at map(el)) {name: lower(string(k)), value: if (v == null) "" else string(v)}]
-  let kept = [for (p in pairs where not (starts_with(p.name, "on") or member(acting_attrs, p.name) or
-                                          contains(p.name, " ") or script_url(p.value))) p]
+  let kept = [for (p in pairs where ((not (starts_with(p.name, "on") or member(acting_attrs, p.name) or
+                                          contains(p.name, " ") or script_url(p.value))) ^ { false })) p]
   let href = [for (p in pairs where p.name == "href") p.value]
   let titled = any([for (p in kept) p.name == "title"]) or false
   let link_title = if (len(href) > 0 and not titled) attr_html("title", href[0]) else ""
@@ -49,7 +49,7 @@ fn safe_attrs(el, tag) {
 
 // HTML text for parsed HTML items (an element, a run, or text), without what
 // acts: scripts, styles, frames, handlers, navigation.
-pub fn safe_html(item) {
+pub fn safe_html(item) any^ {
   if (type(item) == string) { escape_text(item) }
   else if (type(item) == array or type(item) == list) { join([for (x in item) safe_html(x)], "") }
   else if (type(item) != element) { "" }
@@ -64,26 +64,26 @@ pub fn safe_html(item) {
 }
 
 fn first_named(items, tag) {
-  let found = [for (c in items where type(c) == element and name(c) == tag) c]
+  let found = [for (c in items where ((type(c) == element and name(c) == tag) ^ { false })) c]
   if (len(found) > 0) found[0] else null
 }
 
 // The body content of a parsed HTML document.
-fn body_items(doc) {
+fn body_items(doc) any^ {
   let html = if (doc == null) null else first_named(content(doc), 'html')
   let body = if (html == null) null else first_named(content(html), 'body')
-  if (body == null) [] else [for (c in content(body)) c]
+  if (body == null) [] else [for (c in ((content(body)) ^ { [] })) c]
 }
 
 // The items of an HTML fragment.
-fn parsed_body(html_text) =>
+fn parsed_body(html_text) any^ =>
   if (trim(html_text) == "") [] else body_items(parse("<body>" ++ html_text ++ "</body>", 'html') ^ { null })
 
 // Elements that show something without text content.
 let replaced_tags = ["img", "input", "br", "hr", "video", "audio", "canvas", "svg", "math", "picture",
                      "meter", "progress", "select", "textarea", "button"]
 
-fn shows_something(item) {
+fn shows_something(item) any^ {
   if (type(item) == string) { trim(item) != "" }
   else if (type(item) == array or type(item) == list) { any([for (x in item) shows_something(x)]) or false }
   else if (type(item) != element) { false }
@@ -93,7 +93,7 @@ fn shows_something(item) {
 // The view of retained HTML: parsed items (the HTML adapter) or source text
 // (Markdown's raw HTML). A part that shows nothing on its own — a lone tag,
 // a comment — has no view.
-pub fn html_view(source) {
+pub fn html_view(source) any^ {
   let items = parsed_body(safe_html(if (type(source) == string) parsed_body(source) else source))
   if (shows_something(items)) items else []
 }
@@ -108,7 +108,7 @@ pub fn math_view(source, display) {
   else [rendered]
 }
 
-fn math_html(item) {
+fn math_html(item) any^ {
   let display = item.type == "block"
   let source = plain_text(item)
   let shown = math_view(source, display)
@@ -127,16 +127,16 @@ let md_html_tags = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul",
                     "thead", "tbody", "tfoot", "tr", "th", "td", "strong", "b", "em", "i", "del", "s",
                     "strike", "sup", "sub", "dl", "dt", "dd", "div", "mark", "ins", "kbd", "abbr"]
 
-fn md_attrs(item, tag) {
+fn md_attrs(item, tag) any^ {
   let align = if (tag == "th" or tag == "td") item.align else null
   let start = if (tag == "ol") item.start else null;
   (if (align == null) "" else attr_html("style", "text-align: " ++ string(align))) ++
   (if (start == null) "" else attr_html("start", string(start)))
 }
 
-fn md_children(item, slots) => join([for (c in content(item)) md_html(c, slots)], "")
+fn md_children(item, slots) => join([for (c in ((content(item)) ^ { [] })) md_html(c, slots)], "")
 
-fn md_html(item, slots) {
+fn md_html(item, slots) any^ {
   if (type(item) == string) { escape_text(item) }
   else if (type(item) == symbol) { format([item], 'html') }
   else if (type(item) != element) { "" }
@@ -166,17 +166,17 @@ fn md_html(item, slots) {
   }
 }
 
-fn math_nodes(item) => if (type(item) != element) []
+fn math_nodes(item) any^ => if (type(item) != element) []
   else if (name(item) == 'math') [item]
-  else [for (child in content(item), formula in math_nodes(child)) formula]
+  else [for (child in ((content(item)) ^ { [] }), formula in ((math_nodes(child)) ^ { [] })) formula]
 
-fn unused_math_marker(source, marker) => if (contains(source, marker)) unused_math_marker(source, marker ++ "-") else marker
+fn unused_math_marker(source, marker) any^ => if (contains(source, marker)) unused_math_marker(source, marker ++ "-") else marker
 fn math_slot(slots, index) => "<span " ++ slots.marker ++ "=\"" ++ string(index) ++ "\"></span>"
-fn restore_math(markup, slots, index) => if (index >= len(slots.formulas)) markup
+fn restore_math(markup, slots, index) any^ => if (index >= len(slots.formulas)) markup
   else restore_math(replace(markup, math_slot(slots, index), math_html(slots.formulas[index])), slots, index + 1)
 
 // Sanitize each complete block so raw opening/closing tags keep their pairing.
-pub fn markdown_view(item) {
+pub fn markdown_view(item) any^ {
   let formulas = math_nodes(item)
   // Sanitize authored HTML before inserting generated SVG: its font declarations are required.
   // A marker absent from the source keeps authored tags from claiming a generated projection.

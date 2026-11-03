@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "description": "S7.6.3v3/S7.7.2v2/D5.2.1v5: validated scalar success uses a native lane and error companion; unions, nullable values and captures retain their Item contract.",
+  "checks": [
+    {
+      "in_func": "_checked_float_#",
+      "expect": ["func\td, i64, p:runtime", "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+    },
+    {
+      "in_func": "_accumulate_#",
+      "expect": ["func\td, i64, p:runtime"],
+      "forbid": ["call\tpush_d_p, push_d", "call\tlambda_report_boundary_failure_p"]
+    },
+    {
+      "in_func": "_read_int_#",
+      "expect": ["func\ti64, i64, p:runtime"],
+      "forbid": ["call\tint2it_lane_p, int2it_lane"]
+    },
+    {
+      "in_func": "_preserved_union_#",
+      "expect": ["func\ti64, i64, p:runtime"],
+      "forbid": ["func\td, i64, p:runtime"]
+    },
+    {
+      "in_func": "_inner_#",
+      "expect": ["func\ti64, i64, p:runtime"],
+      "forbid": ["func\td, i64, p:runtime"]
+    },
+    {
+      "in_func": "_nullable_#",
+      "expect": ["func\ti64, i64, p:runtime"],
+      "forbid": ["func\td, i64, p:runtime"]
+    }
+  ]
+}

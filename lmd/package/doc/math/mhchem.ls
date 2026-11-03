@@ -22,7 +22,7 @@ let DIGITS = "0123456789"
 fn is_in(ch, set) => ch != null and ch != "" and (contains(set, ch) ^ { false })
 
 // the parsed math of a <chemistry> node: the items of its formula
-pub fn items(n) {
+pub fn items(n) any^ {
     let source = if (n.source == null) "" else string(n.source)
     let tex = if (string(n.cmd) == "\\pu") quantity(source) else equation(source)
     let ast = parse(tex, {type: "math", flavor: "latex"}) ^ { null }
@@ -32,9 +32,9 @@ pub fn items(n) {
 // ---- \ce ----------------------------------------------------------------------
 
 // whitespace separates tokens, except inside braces, brackets and $...$
-pub fn equation(source) => join([for (token in tokens(split(source, ""), 0, 0, false, "", [])) token_tex(token)], " ")
+pub fn equation(source) => join([for (token in ((tokens(split(source, ""), 0, 0, false, "", [])) ^ { [] })) token_tex(token)], " ")
 
-fn tokens(chars, i, depth, in_math, current, found) {
+fn tokens(chars, i, depth, in_math, current, found) any^ {
     if (i >= len(chars)) (if (current == "") found else found ++ [current])
     else {
         let ch = chars[i]
@@ -47,8 +47,8 @@ fn tokens(chars, i, depth, in_math, current, found) {
     }
 }
 
-fn token_tex(token) {
-    let arrow = [for (a in ARROWS where starts_with(token, a.text) or false) a][0]
+fn token_tex(token) any^ {
+    let arrow = [for (a in ARROWS where ((starts_with(token, a.text) or false) ^ { false })) a][0]
     if (token == "+") "+"
     else if (token == "v") "\\downarrow"
     else if (token == "^") "\\uparrow"
@@ -57,13 +57,13 @@ fn token_tex(token) {
 }
 
 // ->[above][below]: each label is itself \ce notation
-fn arrow_tex(arrow, rest) {
+fn arrow_tex(arrow, rest) any^ {
     let labels = brackets(split(rest, ""), 0, 0, "", [])
     let below = if (len(labels) > 1) "[" ++ equation(labels[1]) ++ "]" else ""
     arrow.tex ++ below ++ "{" ++ (if (len(labels) > 0) equation(labels[0]) else "") ++ "}"
 }
 
-fn brackets(chars, i, depth, current, found) {
+fn brackets(chars, i, depth, current, found) any^ {
     if (i >= len(chars)) found
     else {
         let ch = chars[i]
@@ -75,9 +75,9 @@ fn brackets(chars, i, depth, current, found) {
 }
 
 // the index after the run of characters from set starting at i
-fn run_end(chars, i, set) => if (i < len(chars) and is_in(chars[i], set)) run_end(chars, i + 1, set) else i
+fn run_end(chars, i, set) any^ => if (i < len(chars) and is_in(chars[i], set)) run_end(chars, i + 1, set) else i
 
-fn text_of(chars, from, to) => join(slice(chars, from, to), "")
+fn text_of(chars, from, to) any^ => join(slice(chars, from, to), "")
 
 // the end of a brace group opening at i (the index after its closing brace)
 fn group_end(chars, i, depth) {
@@ -102,7 +102,7 @@ fn script_arg(chars, i) {
 
 // one formula, read left to right; prev says what came last ("start" admits a
 // coefficient or an isotope prefix)
-fn species(chars, i, prev, out) {
+fn species(chars, i, prev, out) any^ {
     if (i >= len(chars)) out
     else {
         let ch = chars[i]
@@ -167,12 +167,12 @@ fn species(chars, i, prev, out) {
 }
 
 // a run of + and - is a charge when nothing but a state follows it
-fn charge_at(chars, i) {
+fn charge_at(chars, i) any^ {
     let end = run_end(chars, i, "+-");
     (end >= len(chars) or (chars[end] == "(" and state_at(chars, end)))
 }
 
-fn state_at(chars, i) {
+fn state_at(chars, i) any^ {
     let end = close_index(chars, i, ")");
     (end < len(chars) and (contains(STATES, text_of(chars, i + 1, end)) or false))
 }
@@ -180,7 +180,7 @@ fn state_at(chars, i) {
 // ---- \pu ----------------------------------------------------------------------
 
 // a number, an optional e-exponent, then units: 1.2e3 kJ/mol -> 1.2\cdot10^{3}\,\mathrm{kJ}/\mathrm{mol}
-pub fn quantity(source) {
+pub fn quantity(source) any^ {
     let chars = split(trim(source), "")
     let end = run_end(chars, 0, DIGITS ++ ".,+-")
     let exponent = if (end < len(chars) and (chars[end] == "e" or chars[end] == "E") and
@@ -194,7 +194,7 @@ pub fn quantity(source) {
 }
 
 // unit names are upright; digits after a unit (mol-1, m2) are its power
-fn units(chars, i, out) {
+fn units(chars, i, out) any^ {
     if (i >= len(chars)) out
     else {
         let ch = chars[i]

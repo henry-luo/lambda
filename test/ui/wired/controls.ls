@@ -1,7 +1,7 @@
 import ui: lambda.ui.wired
 import bold: lambda.ui.bold
 
-view wired_controls_test: <wired_controls_test> state count:0, accepted:"", request:"", last_source:"", selected_type:"" {
+view wired_controls_test: <wired_controls_test> () any^ state count:0, accepted:"", request:"", last_source:"", selected_type:"" {
     ui.render(<wired.flex direction:'vertical',align:"flex-start",gap:14,
         <wired.input id:"draft",label:"Draft",default_value:"">
         <wired.text_area id:"notes",label:"Notes",rows:2>

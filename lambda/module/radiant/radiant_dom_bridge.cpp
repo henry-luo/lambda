@@ -1781,7 +1781,7 @@ static Url* radiant_dom_url_attribute(Item receiver, const char* attribute) {
     return resolved;
 }
 
-static int radiant_dom_url_attribute_get(Item receiver, Item* out, const char* attribute) {
+int radiant_dom_url_attribute_get(Item receiver, Item* out, const char* attribute) {
     RootFrame roots(1);
     Rooted<Item> owner(roots, receiver);
     DomElement* elem = radiant_dom_member_elem(owner.get());

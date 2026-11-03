@@ -1,11 +1,11 @@
 // the starter is editable vector data, using the same objects as user drawings.
 import m: .mod_model
 
-fn ellipse(id,x,y,w,h,fill) => m.make_object(id,"ellipse",{x:x,y:y,width:w,height:h},{fill:fill,stroke:"none"})
-fn polygon(id,pts,fill) => m.path_object(id,pts,{fill:fill,stroke:"none",closed:true})
-fn caption(id,x,y,text,size,color) => m.make_object(id,"text",{x:x,y:y,width:len(text)*size*.64,height:size*1.25},
+fn ellipse(id,x,y,w,h,fill) any^ => m.make_object(id,"ellipse",{x:x,y:y,width:w,height:h},{fill:fill,stroke:"none"})
+fn polygon(id,pts,fill) any^ => m.path_object(id,pts,{fill:fill,stroke:"none",closed:true})
+fn caption(id,x,y,text,size,color) any^ => m.make_object(id,"text",{x:x,y:y,width:len(text)*size*.64,height:size*1.25},
     {text:text,font_size:size,fill:color,stroke:"none"})
-fn hill(id,base,amplitude,phase,color) => polygon(id,[
+fn hill(id,base,amplitude,phase,color) any^ => polygon(id,[
     *[for (i in 0 to 48) {x:80.0+i*800.0/48.0,y:base+amplitude*math.sin(i/48.0*math.pi*1.5+phase)}],
     {x:880.0,y:654.0},{x:80.0,y:654.0}],color)
 

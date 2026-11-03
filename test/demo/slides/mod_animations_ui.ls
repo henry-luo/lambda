@@ -55,7 +55,7 @@ pub fn pane() => <aside id:"animation-pane",class:"animation-pane",
     <button id:"clear-animations",type:"button",'data-action':"clear-animations","Clear slide animations">>
 pub fn rows(st) {
     let active = model.selected(st);
-    [for (i,row in model.entries(st)) <button type:"button",class:"animation-row",'data-action':"animation-select:" ++ string(row.key),
+    [for (i,row in ((model.entries(st)) ^ { [] })) <button type:"button",class:"animation-row",'data-action':"animation-select:" ++ string(row.key),
         'data-animation':string(row.key),'aria-pressed':row.key == active.key,
         <b string(i+1) ++ ". " ++ row.label>;<span string(row.target_label)>;
         <small if (row.cue.trigger != null) "Click " ++ string(row.cue.trigger) else string(c.value(row.cue.start,'click'))>>]

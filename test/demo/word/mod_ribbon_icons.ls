@@ -150,13 +150,13 @@ fn dotted_edge(edge) {
     join([for (t in [3,6,9,12,15,18,21]) if (edge=="top" or edge=="middle" or edge=="bottom")
         "M" ++ string(t-0.4) ++ " " ++ string(fixed) ++ "h0.8" else "M" ++ string(fixed) ++ " " ++ string(t-0.4) ++ "v0.8"]," ")
 }
-fn border_detail(set) => {outline:join([for (edge,_ in border_edges where not contains(set,string(edge))) dotted_edge(string(edge))]," "),
-    accent:if (len(set)==0) null else join([for (edge,line in border_edges where contains(set,string(edge))) line]," ")}
+fn border_detail(set) any^ => {outline:join([for (edge,_ in border_edges where ((not contains(set,string(edge))) ^ { false })) dotted_edge(string(edge))]," "),
+    accent:if (len(set)==0) null else join([for (edge,line in border_edges where ((contains(set,string(edge))) ^ { false })) line]," ")}
 fn column_detail(count) => {fill:"M3 2h18v20H3z",outline:"M3 2h18v20H3z",
     accent:join([for (c in 0 to count-1) for (row in 0 to 3)
         "M" ++ string(6+c*14/count) ++ " " ++ string(6+row*4) ++ "h" ++ string(14/count-2)]," ")}
-pub fn icon(graphic,size=20) {
-    let tone = [for (family in families where contains(family.names,graphic)) family.tone][0] or "slate"
+pub fn icon(graphic,size=20) any^ {
+    let tone = [for (family in families where ((contains(family.names,graphic)) ^ { false })) family.tone][0] or "slate"
     let p = palettes[tone]
     let detail = if (graphic=="columns") column_detail(2) else if (starts_with(graphic,"columns_")) column_detail(int(slice(graphic,8))) else if (starts_with(graphic,"border_") and border_sets[slice(graphic,7)]!=null) border_detail(border_sets[slice(graphic,7)])
         else details[graphic]

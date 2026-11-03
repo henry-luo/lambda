@@ -14,7 +14,7 @@ let picture = model.execute(empty,"insert.picture",{src:"data:image/svg+xml;base
 let shape = model.execute(empty,"insert.shape",{*:shapes.defaults,kind:"diamond",rotation:45,text:"Move me"})^
 let lettering = model.execute(empty,"insert.wordArt",{*:art.defaults,text:"Move the words",rotation: -30})^
 let objects = [for (editor in [picture,shape,lettering]) image.selected(editor).node]
-fn original(n) => image.select_image(model.open_editor(node('doc',[
+fn original(n) any^ => image.select_image(model.open_editor(node('doc',[
     node('p',[text("Before"),n,text("After")]),node('p',[text_marked("Target words",[mark('strong',true)])]),
     node('p',[]),node('ul',[node('li',[node('p',[text("List")])])]),node('table',[node('tr',[node('td',[text("Cell")])])])])),[0,1])
 let selected = original(objects[0])

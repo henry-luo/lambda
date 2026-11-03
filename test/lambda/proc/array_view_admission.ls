@@ -50,10 +50,10 @@ pn main() {
     let q: int[][] = reshape([1, 2, 3, 4, 5, 6], [3, 2])
     var i = 0
     var s = 0
-    while (i < len(q)) {
+    while ((i < len(q))^) {
         s = s + q[i][1]
         i = i + 1
     }
-    print([len(p), p.len(), len(q), s, [for (k in 0 to len(p) - 1) p[k][0]]])
+    print([len(p), p.len(), len(q), s, [for (k in ((0 to len(p) - 1) ^ { [] })) p[k][0]]])
     print("\n")
 }

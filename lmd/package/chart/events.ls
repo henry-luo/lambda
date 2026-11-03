@@ -8,7 +8,7 @@ import behavior: .behavior
 fn dom_element(node) { if (node == null or dom.node_type(node) == 1) node else dom.parent_element(node) }
 pub fn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
 pub fn attribute(node, key) { if (node == null) null else dom.get_attribute(node, key) }
-fn metadata(node, key) {
+fn metadata(node, key) any^ {
     let carrier = closest(node, "[" ++ key ++ "]");
     let text = attribute(carrier, key);
     if (text == null) null else parse(text, 'json') ^ {null}
@@ -59,8 +59,8 @@ pub pn dispatch(st, evt, definitions, behaviors = []) {
             x: if (box == null or box.width == 0 or not util.finite_number(cx)) null else (cx - box.left) * frame.svg_width / box.width - frame.x,
             y: if (box == null or box.height == 0 or not util.finite_number(cy)) null else (cy - box.top) * frame.svg_height / box.height - frame.y};
         let next = interaction.update(st, event);
-        if (evt.type == "pointerdown" and next.gesture != null and host != null and evt.pointerId != null) {
-            host.set_pointer_capture(evt.pointerId)
+        if ((evt.type == "pointerdown" and next.gesture != null and host != null and evt.pointerId != null)^) {
+            host.set_pointer_capture(evt.pointerId)^
         }
         next
     }
@@ -91,12 +91,12 @@ fn input_control(definition, field, binding, value) {
     >
 }
 
-pub fn controls(definitions, st) => <div class: "chart-controls",
+pub fn controls(definitions, st) any^ => <div class: "chart-controls",
     for (definition in definitions where definition.bind is map and definition.expr == null)
         if (parameter.selection(definition) == null)
             input_control(definition, null, definition.bind, st.values[definition.name])
-        else for (field in (if (parameter.selection(definition).fields != null) parameter.selection(definition).fields
-            else [for (key in parameter.selection(definition).encodings) definition._encoding[key].field]))
+        else for (field in (((if (parameter.selection(definition).fields != null) parameter.selection(definition).fields
+            else [for (key in ((parameter.selection(definition).encodings) ^ { [] })) definition._encoding[key].field])) ^ { [] }))
             input_control(definition, field, if (definition.bind.input != null) definition.bind else definition.bind[field],
                 (let entries = [for (view_key, store in st.values[definition.name].stores) for (tuple in store) tuple],
                     entries[0][field]))

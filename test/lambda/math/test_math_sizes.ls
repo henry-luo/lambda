@@ -1,9 +1,9 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn box(source) => math.render_box(ast(source))^
-fn glyphs(source) => [for (g in svg.geometry(box(source).element) where name(g.node) == 'text') g]
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
+fn glyphs(source) => [for (g in ((svg.geometry(box(source).element)) ^ { [] }) where ((name(g.node) == 'text') ^ { false })) g]
 fn close(a,b) => abs(a - b) < 0.00001
 let names = ["tiny", "scriptsize", "footnotesize", "small", "normalsize", "large", "Large", "LARGE", "huge", "Huge"]
 let ems = [0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488]
@@ -12,7 +12,7 @@ let reset = glyphs("\\Huge a{\\tiny b}c\\normalsize d")
 let huge_script = glyphs("\\Huge x^{y_z}")
 let large_script = glyphs("\\large x^{y_z}")
 let script_reset = glyphs("x^{\\Huge y}")
-let tiny_rule = [for (g in svg.geometry(box("\\tiny\\rule{1em}{1em}").element) where name(g.node) == 'rect') g][0]
+let tiny_rule = [for (g in ((svg.geometry(box("\\tiny\\rule{1em}{1em}").element)) ^ { [] }) where ((name(g.node) == 'rect') ^ { false })) g][0]
 let checks = [
     {name:"named sizes paint scaled glyphs without command text", ok:all([for (i, cmd in names) (
         let g = glyphs("\\" ++ cmd ++ " x"),

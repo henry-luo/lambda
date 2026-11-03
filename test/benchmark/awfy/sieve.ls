@@ -26,7 +26,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 669) {
+    if ((result == 669)^) {
         print("Sieve: PASS\n")
     } else {
         print("Sieve: FAIL result=")

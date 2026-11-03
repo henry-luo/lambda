@@ -27,7 +27,7 @@ pn region(owner,id,markup) {
     let target = node(owner,id)
     // avoid retiring the clicked row between the first and second click of a double-click.
     if (dom.get_attribute(target,"data-markup") != markup) {
-        thumbs.release(target)
+        thumbs.release(target)^
         dom.set_inner_html(target,markup)
         dom.set_attribute(target,"data-markup",markup)
     }
@@ -65,7 +65,7 @@ pn publish_columns(owner,st,listing) {
         // retain ancestor rows so opening a child preserves scroll positions and double-click targets.
         for (i,target in dom.query_selector_all(container,".file-column")) {
             if (i>=len(st.columns) or dom.get_attribute(target,"data-folder") != st.columns[i].path) {
-                thumbs.release(target)
+                thumbs.release(target)^
                 dom.remove_child(container,target)
             }
         }
@@ -82,92 +82,92 @@ pn publish_columns(owner,st,listing) {
 pn publish(owner,st) {
     var next = model.prepare(st)
     if (dom.get_attribute(owner,"data-path") != st.path) { next = {*:next,thumbnails:thumbs.cancel_jobs(owner,next.thumbnails)} }
-    if (st.preview_data == null and model.preview_entry(st) != null and (st.preview or st.look)) {
+    if ((st.preview_data == null and model.preview_entry(st) != null and (st.preview or st.look))^) {
         let data = files.preview(model.preview_entry(st)) ^ { {kind:"error",message:^.message} }
         next = {*:next,preview_data:data}
     }
     for (key,value in {path:next.path,mode:next.mode,selected:len(next.selected),hidden:next.hidden,dialog:next.dialog,look:next.look,
         menu:next.menu != null,operation:next.operation.action or "",dragging:next.drag != null,readonly:model.read_only(next)}) updates.attr(owner,"data-" ++ string(key),value)
-    updates.text(owner,"folder-title",if (next.path == START) "Demo Files" else model.basename(next.path))
-    updates.text(owner,"status",model.status(next))
-    region(owner,"breadcrumbs",format(ui.breadcrumb(next),'html'))
+    updates.text(owner,"folder-title",if (next.path == START) "Demo Files" else model.basename(next.path))^
+    updates.text(owner,"status",model.status(next))^
+    region(owner,"breadcrumbs",format(ui.breadcrumb(next),'html'))^
     let listing = {*:listing_key(next),columns:if (next.mode == "columns") [for (i,c in next.columns) listing_key(model.column(next,i))] else null}
     // selection and dialogs reuse the published listing instead of rebuilding every SVG and row.
     let replaced = next.published == null or next.published != listing
-    if (next.mode == "columns") publish_columns(owner,next,listing)
-    else if (replaced) region(owner,"files",format(ui.files(next),'html'))
+    if (next.mode == "columns") publish_columns(owner,next,listing)^
+    else if (replaced) region(owner,"files",format(ui.files(next),'html'))^
     if (next.mode == "columns" or not replaced) for (row in dom.query_selector_all(node(owner,"files"),"[data-path]")) {
         let path = dom.get_attribute(row,"data-path")
         let index = if (next.mode == "columns") int(dom.get_attribute(row,"data-column")) else -1
         let column = if (index>=0) model.column(next,index) else next
-        updates.attr(row,"aria-selected",contains(column.selected,path))
-        updates.attr(row,"data-focused",path == column.focus)
+        updates.attr(row,"aria-selected",contains(column.selected,path))^
+        updates.attr(row,"data-focused",path == column.focus)^
         if (index>=0) updates.attr(row,"data-trail",index<len(next.columns)-1 and contains(column.selected,path))
     }
     if (next.mode == "columns" and (next.published == null or next.published.mode != "columns" or next.published.path != next.path))
-        dom.scroll_into_view_options(node(owner,"column-" ++ string(len(next.columns)-1)),{block:"nearest",inline:"end"})
+        dom.scroll_into_view_options(node(owner,"column-" ++ string(len(next.columns)-1))^,{block:"nearest",inline:"end"})
     let focused = dom.query_selector(node(owner,"files"),"[data-focused='true']")
     if (next.reveal and focused != null) dom.scroll_into_view_options(focused,{block:"nearest",inline:"nearest"})
-    if (focused != null) updates.attr(node(owner,"files"),"aria-activedescendant",dom.get_attribute(focused,"id"))
+    if (focused != null) updates.attr(node(owner,"files"),"aria-activedescendant",dom.get_attribute(focused,"id"))^
     else if (dom.get_attribute(node(owner,"files"),"aria-activedescendant") != null) dom.remove_attribute(node(owner,"files"),"aria-activedescendant")
     for (place in dom.query_selector_all(owner,".place")) updates.attr(place,"aria-current",if (dom.get_attribute(place,"data-location") == next.path) "page" else "false")
     for (id,pressed in {icons:next.mode == "icons",list:next.mode == "list",columns:next.mode == "columns",preview:next.preview,hidden:next.hidden}) updates.attr(node(owner,string(id)),"aria-pressed",pressed)
-    disabled(owner,"back",next.cursor == 0)
-    disabled(owner,"forward",next.cursor >= len(next.history)-1)
-    disabled(owner,"direction",len(next.entries)==0)
-    disabled(owner,"new-folder",not model.writable(next,"new-folder"))
-    updates.text(owner,"direction",if (next.descending) "↓" else "↑")
-    updates.text(owner,"hidden",if (next.hidden) "Hide hidden files" else "Show hidden files")
-    updates.show(owner,"list-heading",next.mode == "list","grid")
-    updates.show(owner,"preview-pane",next.preview)
-    updates.show(owner,"preview-divider",next.preview)
+    disabled(owner,"back",next.cursor == 0)^
+    disabled(owner,"forward",next.cursor >= len(next.history)-1)^
+    disabled(owner,"direction",len(next.entries)==0)^
+    disabled(owner,"new-folder",not model.writable(next,"new-folder"))^
+    updates.text(owner,"direction",if (next.descending) "↓" else "↑")^
+    updates.text(owner,"hidden",if (next.hidden) "Hide hidden files" else "Show hidden files")^
+    updates.show(owner,"list-heading",next.mode == "list","grid")^
+    updates.show(owner,"preview-pane",next.preview)^
+    updates.show(owner,"preview-divider",next.preview)^
     if (next.preview_width != null) { next = resize_preview(owner,next,next.preview_width) }
-    updates.show(owner,"error",next.error != "" and not next.dialog and next.operation == null,"flex")
-    updates.text(owner,"error-text",next.error)
-    updates.text(owner,"go-error",next.error)
-    updates.show(owner,"go-dialog",next.dialog,"flex")
-    updates.show(owner,"quick-look",next.look,"flex")
-    updates.show(owner,"context-menu",next.menu != null)
-    updates.attr(node(owner,"actions"),"aria-expanded",next.menu != null)
-    if (next.menu != null) {
+    updates.show(owner,"error",next.error != "" and not next.dialog and next.operation == null,"flex")^
+    updates.text(owner,"error-text",next.error)^
+    updates.text(owner,"go-error",next.error)^
+    updates.show(owner,"go-dialog",next.dialog,"flex")^
+    updates.show(owner,"quick-look",next.look,"flex")^
+    updates.show(owner,"context-menu",next.menu != null)^
+    updates.attr(node(owner,"actions"),"aria-expanded",next.menu != null)^
+    if ((next.menu != null)^) {
         for (action in ["open","look"]) disabled(owner,"menu-" ++ action,len(next.selected)==0)
         for (action in ["rename","move","delete","new-file","new-folder"]) {
             let selected = if (action == "rename") len(next.selected)==1 else if (contains(["move","delete"],action)) len(next.selected)>0 else true
             disabled(owner,"menu-" ++ action,not selected or not model.writable(next,action))
         }
-        dom.style_set_property(node(owner,"context-menu"),"left",string(next.menu.x) ++ "px")
-        dom.style_set_property(node(owner,"context-menu"),"top",string(next.menu.y) ++ "px")
+        dom.style_set_property(node(owner,"context-menu"),"left",string(next.menu.x)^ ++ "px")
+        dom.style_set_property(node(owner,"context-menu"),"top",string(next.menu.y)^ ++ "px")
     }
-    updates.show(owner,"operation-dialog",next.operation != null,"flex")
-    updates.show(owner,"move-picker",next.operation.action == "move")
-    if (next.operation != null) {
+    updates.show(owner,"operation-dialog",next.operation != null,"flex")^
+    updates.show(owner,"move-picker",next.operation.action == "move")^
+    if ((next.operation != null)^) {
         let action = next.operation.action
         let titles = {'new-file':"New File",'new-folder':"New Folder",rename:"Rename",move:"Move to Folder",delete:"Delete Permanently"}
-        updates.text(owner,"operation-title",titles[action])
+        updates.text(owner,"operation-title",titles[action])^
         updates.text(owner,"operation-description",if (action == "delete") "Permanently delete " ++ string(len(next.operation.paths)) ++
             " selected item(s), including any folder contents? This cannot be undone."
             else if (action == "rename") "Rename “" ++ model.basename(next.operation.paths[0]) ++ "”."
             else if (action == "move") "Choose a destination folder for the selected items."
-            else "Create an empty " ++ (if (action == "new-folder") "folder" else "file") ++ " in “" ++ model.basename(next.operation.folder) ++ "”.")
-        updates.text(owner,"operation-label",if (action == "move") "Destination folder" else "Name")
-        updates.text(owner,"operation-error",next.error)
-        updates.text(owner,"operation-confirm",if (action == "delete") "Delete Permanently" else if (action == "rename") "Rename" else if (action == "move") "Move" else "Create")
-        updates.attr(node(owner,"operation-confirm"),"class",if (action == "delete") "danger" else "primary")
-        updates.show(owner,"operation-field",action != "delete")
-        if (action == "move") {
+            else "Create an empty " ++ (if (action == "new-folder") "folder" else "file") ++ " in “" ++ model.basename(next.operation.folder) ++ "”.")^
+        updates.text(owner,"operation-label",if (action == "move") "Destination folder" else "Name")^
+        updates.text(owner,"operation-error",next.error)^
+        updates.text(owner,"operation-confirm",if (action == "delete") "Delete Permanently" else if (action == "rename") "Rename" else if (action == "move") "Move" else "Create")^
+        updates.attr(node(owner,"operation-confirm"),"class",if (action == "delete") "danger" else "primary")^
+        updates.show(owner,"operation-field",action != "delete")^
+        if ((action == "move")^) {
             let picker = next.operation.picker
-            region(owner,"destination-breadcrumbs",if (picker == null) "" else format(ui.breadcrumb(picker,true),'html'))
-            region(owner,"destination-folders",format(ui.destination_folders(picker),'html'))
-            disabled(owner,"destination-parent",picker == null or picker.path == "/")
+            region(owner,"destination-breadcrumbs",if (picker == null) "" else format(ui.breadcrumb(picker,true),'html'))^
+            region(owner,"destination-folders",format(ui.destination_folders(picker),'html'))^
+            disabled(owner,"destination-parent",picker == null or picker.path == "/")^
         }
     }
     // retaining the same frame keeps its browsing context and scroll position during panel resizing.
     region(owner,"preview-body",if (next.preview) format(ui.preview(next),'html') else "")
-    if (next.look) {
-        updates.text(owner,"look-title",model.focused(next).name)
-        region(owner,"look-body",format(ui.preview(next,true),'html'))
-    } else region(owner,"look-body","")
-    if (dom.get_state(node(owner,"search"),"value") != next.query) dom.set_state(node(owner,"search"),"value",next.query)
+    if ((next.look)^) {
+        updates.text(owner,"look-title",model.focused(next).name)^
+        region(owner,"look-body",format(ui.preview(next,true),'html'))^
+    } else region(owner,"look-body","")^
+    if ((dom.get_state(node(owner,"search"),"value") != next.query)^) (dom.set_state(node(owner,"search"),"value",next.query))^
     return {*:next,published:listing,reveal:false,thumbnails:thumbs.schedule(owner,next.thumbnails),
         measure_frame:if (replaced and next.measure_frame==0) dom.request_frame(owner,"finder_measure") else next.measure_frame}
 }
@@ -183,9 +183,9 @@ fn open_selected(st) map^ {
     if (entry == null) st else if (model.browsable(entry)) navigate(st,entry.path)^ else {*:st,look:true,preview_data:null}
 }
 pn begin_operation(owner,st,action) map^ {
-    if (action == "rename" and len(st.selected)!=1) raise error("Select one item to rename.")
-    if (contains(["move","delete"],action) and len(st.selected)==0) raise error("Select an item first.")
-    if (not model.writable(st,action)) raise error("Archive contents are read-only.")
+    if ((action == "rename" and len(st.selected)!=1)^) raise error("Select one item to rename.")
+    if ((contains(["move","delete"],action) and len(st.selected)==0)^) raise error("Select an item first.")
+    if ((not model.writable(st,action))^) raise error("Archive contents are read-only.")
     let value = if (action == "rename") model.basename(st.selected[0]) else if (action == "move") model.parent(st.path)
         else if (action == "new-folder") "New Folder" else "Untitled.txt"
     dom.set_state(node(owner,"operation-value"),"value",value)
@@ -210,7 +210,7 @@ pn perform_files(owner,st,request) map^ {
     let selecting = if (len(result.created)>0) result.created[0] else if (request.action == "rename" and len(result.changes)>0) result.changes[0].to else ""
     var next = files.reload({*:relocated,thumbnails:thumbnails,operation:null,menu:null,drag:null,look:false,
         query:if (selecting != "") "" else relocated.query,hidden:relocated.hidden or (selecting != "" and starts_with(model.basename(selecting),"."))})
-    if (selecting != "") { next = model.choose(next,selecting) }
+    if ((selecting != "")^) { next = model.choose(next,selecting) }
     return {*:next,error:result.error or next.error}
 }
 fn menu_position(owner,x,y) {
@@ -231,7 +231,7 @@ pn open_menu(owner,st,target,x,y) {
 pn command(owner,st,action,destination=null) map^ {
     if (contains(["new-file","new-folder","rename","move","delete"],action)) { return begin_operation(owner,st,action)^ }
     if (action == "operation-cancel") { return {*:st,operation:null,error:""} }
-    if (starts_with(action,"destination-") and st.operation.action == "move") {
+    if ((starts_with(action,"destination-") and st.operation.action == "move")^) {
         let value = if (action == "destination-folder") destination else if (action == "destination-parent") model.parent(st.operation.picker.path)
             else if (action == "destination-home") HOME else if (action == "destination-current") st.operation.folder
             else dom.get_state(node(owner,"operation-value"),"value")
@@ -248,7 +248,7 @@ pn command(owner,st,action,destination=null) map^ {
     }
     if (action == "menu-cancel") { return {*:st,menu:null} }
     if (action == "back" and st.cursor>0) { return navigate(st,st.history[st.cursor-1],st.cursor-1)^ }
-    if (action == "forward" and st.cursor<len(st.history)-1) { return navigate(st,st.history[st.cursor+1],st.cursor+1)^ }
+    if ((action == "forward" and st.cursor<len(st.history)-1)^) { return navigate(st,st.history[st.cursor+1],st.cursor+1)^ }
     if (action == "parent") {
         return if (st.mode == "columns" and len(st.columns)>1) model.previous_column(st) else navigate(st,model.parent(st.path))^
     }
@@ -277,7 +277,7 @@ pn command(owner,st,action,destination=null) map^ {
     if (action == "go-confirm") { return navigate(st,dom.get_state(node(owner,"folder-path"),"value"))^ }
     if (action == "cancel") { return {*:st,dialog:false,error:""} }
     if (action == "dismiss") { return {*:st,error:""} }
-    if (action == "all") { return {*:st,selected:[for (e in model.visible(st)) e.path],focus:model.visible(st)[0].path or "",preview_data:null} }
+    if (action == "all") { return {*:st,selected:[for (e in ((model.visible(st)) ^ { [] })) e.path],focus:model.visible(st)[0].path or "",preview_data:null} }
     return st
 }
 pn dispatch(owner,st,action,destination=null) {
@@ -286,14 +286,14 @@ pn dispatch(owner,st,action,destination=null) {
     var result = current
     { let __error_outcome_2 = command(owner,current,action,destination) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:current,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     let next = publish(owner,result)
-    if (next.operation != null and st.operation == null) dom.focus_set(node(owner,if (next.operation.action == "delete") "operation-cancel" else "operation-value"),false)
-    else if (st.operation != null and next.operation == null) dom.focus_set(node(owner,"files"),false)
-    else if (next.menu != null and st.menu == null) dom.focus_set(dom.query_selector(node(owner,"context-menu"),"button:not([disabled])"),false)
+    if ((next.operation != null and st.operation == null)^) dom.focus_set(node(owner,if (next.operation.action == "delete") "operation-cancel" else "operation-value")^,false)
+    else if ((st.operation != null and next.operation == null)^) dom.focus_set(node(owner,"files"),false)
+    else if ((next.menu != null and st.menu == null)^) dom.focus_set(dom.query_selector(node(owner,"context-menu"),"button:not([disabled])"),false)
     else if (action == "menu-cancel") dom.focus_set(node(owner,"files"),false)
-    else if (next.dialog and not st.dialog) dom.focus_set(node(owner,"folder-path"),false)
-    else if (next.look and not st.look) dom.focus_set(node(owner,"look-close"),false)
-    else if (st.dialog and not next.dialog) dom.focus_set(node(owner,if (action == "cancel") "go" else "files"),false)
-    else if (st.look and not next.look) dom.focus_set(node(owner,"files"),false)
+    else if ((next.dialog and not st.dialog)^) dom.focus_set(node(owner,"folder-path"),false)
+    else if ((next.look and not st.look)^) dom.focus_set(node(owner,"look-close"),false)
+    else if ((st.dialog and not next.dialog)^) dom.focus_set(node(owner,if (action == "cancel") "go" else "files")^,false)
+    else if ((st.look and not next.look)^) dom.focus_set(node(owner,"files"),false)
     else if (contains(["icons","list","columns"],action)) dom.focus_set(node(owner,"files"),false)
     return next
 }
@@ -306,22 +306,22 @@ on finder_activate(evt) {
 }
 on finder_thumbnails(evt) {
     if (evt.event_phase != 2) { return 'pass' }
-    if (session.thumbnails.frame>0 and evt.detail != session.thumbnails.frame) dom.cancel_frame(evt.target,session.thumbnails.frame)
+    if ((session.thumbnails.frame>0 and evt.detail != session.thumbnails.frame)^) dom.cancel_frame(evt.target,session.thumbnails.frame)^
     session = {*:session,thumbnails:thumbs.tick(evt.target,session.thumbnails)}
     return 'handled'
 }
 on finder_viewport(evt) {
     if (evt.event_phase != 2) { return 'pass' }
-    if (session.measure_frame>0) dom.cancel_frame(evt.target,session.measure_frame)
+    if ((session.measure_frame>0)^) dom.cancel_frame(evt.target,session.measure_frame)^
     let geometry_changed = any([for (v in evt.detail.viewports) (
-        let old = [for (p in session.viewports or [] where p.path == v.path and p.mode == v.mode) p][0],
+        let old = [for (p in ((session.viewports or []) ^ { [] }) where p.path == v.path and p.mode == v.mode) p][0],
         old == null or old.columns != v.columns or old.row_height != v.row_height or old.height != v.height)])
     let measured = {*:session,viewports:evt.detail.viewports,measure_frame:0,reveal:geometry_changed and session.focus != ""}
-    let before = [for (i,c in session.columns) model.window(model.column(session,i))]
+    let before = [for (i,c in ((session.columns) ^ { [] })) model.window(model.column(session,i))]
     let after = [for (i,c in measured.columns) model.window(model.column(measured,i))]
     session = if (before != after) publish(evt.target,measured) else measured
-    if (session.preview_width != null) { session = resize_preview(evt.target,session,session.preview_width) }
-    if (session.thumbnails.frame>0) dom.cancel_frame(evt.target,session.thumbnails.frame)
+    if ((session.preview_width != null)^) { session = resize_preview(evt.target,session,session.preview_width) }
+    if ((session.thumbnails.frame>0)^) dom.cancel_frame(evt.target,session.thumbnails.frame)^
     session = {*:session,thumbnails:thumbs.tick(evt.target,session.thumbnails,true)}
     return 'handled'
 }
@@ -330,7 +330,7 @@ on finder_resize(evt) {
     let owner = owner_of(evt)
     session = finish_preview_resize(owner,session)
     let thumbnails = thumbs.cancel_jobs(owner,session.thumbnails)
-    thumbs.release(owner)
+    thumbs.release(owner)^
     session = publish(owner,{*:session,thumbnails:thumbnails,menu:null})
     // responsive sidebar sizing settles after the resize event; clamp against that frame's geometry.
     dom.request_frame(owner,"finder_measure")
@@ -341,22 +341,22 @@ on closerequest(evt) {
     return 'pass'
 }
 on finder_drag_start(evt) {
-    if (evt.event_phase != 2 or modal_id(session) != "") { return 'pass' }
+    if ((evt.event_phase != 2 or modal_id(session) != "")^) { return 'pass' }
     let index = evt.detail.column
     let active = if (session.mode == "columns" and index>=0) model.column(session,index) else session
     let path = evt.detail.path
-    if (not contains([for (e in active.entries) e.path],path)) { return 'pass' }
-    if (model.read_only(active)) { return 'pass' }
+    if ((not contains([for (e in ((active.entries) ^ { [] })) e.path],path))^) { return 'pass' }
+    if (model.read_only(active)^) { return 'pass' }
     // keep the native source row alive throughout the drag; selection context is captured without navigating.
     session = {*:session,menu:null,drag:{folder:active.path,paths:if (contains(active.selected,path)) active.selected else [path]}}
-    updates.attr(evt.target,"data-dragging",true)
-    updates.attr(evt.target,"data-menu",false)
-    updates.attr(node(evt.target,"actions"),"aria-expanded",false)
+    updates.attr(evt.target,"data-dragging",true)^
+    updates.attr(evt.target,"data-menu",false)^
+    updates.attr(node(evt.target,"actions"),"aria-expanded",false)^
     updates.show(evt.target,"context-menu",false)
     return 'handled'
 }
 on finder_drop(evt) {
-    if (evt.event_phase != 2 or session.drag == null or modal_id(session) != "") { return 'pass' }
+    if ((evt.event_phase != 2 or session.drag == null or modal_id(session) != "")^) { return 'pass' }
     let owner = evt.target
     let request = {action:"move",folder:session.drag.folder,paths:session.drag.paths,value:model.absolute(evt.detail.folder,session.path,HOME)}
     var next = session
@@ -372,7 +372,7 @@ on finder_drag_end(evt) {
     return 'handled'
 }
 on contextmenu(evt) {
-    if (modal_id(session) != "" or dom.closest(evt.target,"#files") == null) { return 'pass' }
+    if ((modal_id(session) != "" or dom.closest(evt.target,"#files") == null)^) { return 'pass' }
     session = open_menu(owner_of(evt),session,evt.target,evt.clientX,evt.clientY)
     return 'prevent-default'
 }
@@ -381,55 +381,55 @@ on click(evt) {
     let owner = owner_of(evt)
     let button = dom.closest(evt.target,"button")
     if (button == null) {
-        if (session.menu != null) { session = dispatch(owner,session,"menu-cancel"); return 'handled' }
+        if ((session.menu != null)^) { session = dispatch(owner,session,"menu-cancel"); return 'handled' }
         return 'pass'
     }
-    if (session.operation != null and dom.closest(button,"#operation-dialog") == null) { return 'prevent-default' }
-    if (session.dialog and dom.closest(button,"#go-dialog") == null) { return 'prevent-default' }
-    if (session.look and dom.closest(button,"#quick-look") == null) { return 'prevent-default' }
+    if ((session.operation != null and dom.closest(button,"#operation-dialog") == null)^) { return 'prevent-default' }
+    if ((session.dialog and dom.closest(button,"#go-dialog") == null)^) { return 'prevent-default' }
+    if ((session.look and dom.closest(button,"#quick-look") == null)^) { return 'prevent-default' }
     let path = dom.get_attribute(button,"data-path")
     let location = dom.get_attribute(button,"data-location")
     let action = dom.get_attribute(button,"data-action")
     let destination = dom.get_attribute(button,"data-destination")
-    if (session.operation.action == "move" and destination != null) {
+    if ((session.operation.action == "move" and destination != null)^) {
         session = dispatch(owner,session,"destination-folder",destination)
-        dom.focus_set(node(owner,"destination-folders"),false)
+        dom.focus_set(node(owner,"destination-folders")^,false)
         return 'handled'
     }
-    if (session.menu != null and dom.closest(button,"#context-menu") == null and action != "actions") { session = {*:session,menu:null} }
+    if ((session.menu != null and dom.closest(button,"#context-menu") == null and action != "actions")^) { session = {*:session,menu:null} }
     if (path != null) {
-        if (session.mode == "columns" and path == session.path and not (evt.metaKey or evt.ctrlKey or evt.shiftKey)) {
-            dom.focus_set(node(owner,"files"),false)
+        if ((session.mode == "columns" and path == session.path and not (evt.metaKey or evt.ctrlKey or evt.shiftKey))^) {
+            dom.focus_set(node(owner,"files")^,false)
             return 'handled'
         }
         let index = dom.get_attribute(button,"data-column")
         let active = if (session.mode == "columns" and index != null) model.activate_column(session,int(index)) else session
         var next = model.choose(active,path,evt.metaKey or evt.ctrlKey,evt.shiftKey)
         let entry = model.focused(next)
-        if (session.mode == "columns" and model.browsable(entry) and not (evt.metaKey or evt.ctrlKey or evt.shiftKey)) {
+        if ((session.mode == "columns" and model.browsable(entry) and not (evt.metaKey or evt.ctrlKey or evt.shiftKey))^) {
             // activating an ancestor is selection context; record only the final folder in navigation history.
             next = {*:next,history:session.history,cursor:session.cursor}
             next = navigate(next,path) ^ { {*:next,error:^.message} }
         }
         session = publish(owner,next)
-        dom.focus_set(node(owner,"files"),false)
+        dom.focus_set(node(owner,"files")^,false)
     } else if (location != null) {
         session = publish(owner,navigate(session,location) ^ { {*:session,error:^.message} })
-        dom.focus_set(node(owner,"files"),false)
+        dom.focus_set(node(owner,"files")^,false)
     } else if (action != null) { session = dispatch(owner,session,action) }
     else { return 'pass' }
     return 'handled'
 }
 on pointerdown(evt) {
     let divider = dom.closest(evt.target,"#preview-divider")
-    if (divider == null or evt.button != 0 or modal_id(session) != "") { return 'pass' }
+    if ((divider == null or evt.button != 0 or modal_id(session) != "")^) { return 'pass' }
     let owner = owner_of(evt)
     session = {*:session,preview_drag:splitter.start(node(owner,"preview-pane"),divider,evt)}
     updates.attr(owner,"data-preview-resizing",true)
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.preview_drag == null) { return 'pass' }
+    if ((session.preview_drag == null)^) { return 'pass' }
     let owner = owner_of(evt)
     let gesture = session.preview_drag
     session = resize_preview(owner,session,splitter.pointer_width(gesture,evt.clientX,-1.0))
@@ -437,7 +437,7 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.preview_drag == null) { return 'pass' }
+    if ((session.preview_drag == null)^) { return 'pass' }
     session = finish_preview_resize(owner_of(evt),session)
     return 'prevent-default'
 }
@@ -450,19 +450,19 @@ on lostpointercapture(evt) {
     return 'pass'
 }
 on dblclick(evt) {
-    if (modal_id(session) != "" or dom.closest(evt.target,"[data-path]") == null) { return 'pass' }
+    if ((modal_id(session) != "" or dom.closest(evt.target,"[data-path]") == null)^) { return 'pass' }
     // a folder's first click already opens its child column; the second must not open a different row.
-    if (session.mode == "columns" and dom.get_attribute(dom.closest(evt.target,"[data-path]"),"data-path") != session.focus) { return 'prevent-default' }
+    if ((session.mode == "columns" and dom.get_attribute(dom.closest(evt.target,"[data-path]"),"data-path") != session.focus)^) { return 'prevent-default' }
     session = dispatch(owner_of(evt),session,"open")
     return 'prevent-default'
 }
 on input(evt) {
-    if (dom.get_attribute(evt.target,"id") != "search" or modal_id(session) != "") { return 'pass' }
+    if ((dom.get_attribute(evt.target,"id") != "search" or modal_id(session) != "")^) { return 'pass' }
     session = publish(owner_of(evt),model.reconcile({*:session,query:dom.get_state(evt.target,"value"),reveal:true}))
     return 'handled'
 }
 on change(evt) {
-    if (dom.get_attribute(evt.target,"id") != "sort" or modal_id(session) != "") { return 'pass' }
+    if ((dom.get_attribute(evt.target,"id") != "sort" or modal_id(session) != "")^) { return 'pass' }
     session = publish(owner_of(evt),{*:session,sort:dom.get_state(evt.target,"value"),reveal:true})
     return 'handled'
 }
@@ -471,26 +471,26 @@ on keydown(evt) {
     let key = evt.key
     let modifier = evt.metaKey or evt.ctrlKey
     let modal = modal_id(session)
-    if (session.preview_drag != null and key == "Escape") {
+    if ((session.preview_drag != null and key == "Escape")^) {
         session = finish_preview_resize(owner,session,true)
         return 'prevent-default'
     }
-    if (modal == "" and dom.closest(evt.target,"#preview-divider") != null and contains(["ArrowLeft","ArrowRight","Home","End"],key)) {
+    if ((modal == "" and dom.closest(evt.target,"#preview-divider") != null and contains(["ArrowLeft","ArrowRight","Home","End"],key))^) {
         let limits = model.preview_limits(dom.bounding_box(node(owner,"content")).width)
         let width = dom.bounding_box(node(owner,"preview-pane")).width
         session = resize_preview(owner,session,splitter.key_width(width,key,limits,-1.0))
         session = {*:session,thumbnails:thumbs.schedule(owner,session.thumbnails)}
         return 'prevent-default'
     }
-    if (modal != "") {
-        if (key == "Escape" or (session.look and key == " ")) {
+    if ((modal != "")^) {
+        if ((key == "Escape" or (session.look and key == " "))^) {
             session = dispatch(owner,session,if (session.operation != null) "operation-cancel" else if (session.dialog) "cancel" else "close-look")
             return 'prevent-default'
         }
-        if ((session.dialog or session.operation != null) and key == "Enter" and
-            not contains(["cancel","operation-cancel"],dom.get_attribute(evt.target,"data-action"))) {
+        if (((session.dialog or session.operation != null) and key == "Enter" and
+            not contains(["cancel","operation-cancel"],dom.get_attribute(evt.target,"data-action")))^) {
             // folder-browser buttons activate navigation through their ordinary click, never a move.
-            if (session.operation.action == "move" and dom.closest(evt.target,"#move-picker") != null) { return 'pass' }
+            if ((session.operation.action == "move" and dom.closest(evt.target,"#move-picker") != null)^) { return 'pass' }
             session = dispatch(owner,session,if (session.operation != null) "operation-confirm" else "go-confirm")
             return 'prevent-default'
         }
@@ -507,9 +507,9 @@ on keydown(evt) {
         }
         return 'pass'
     }
-    if (session.menu != null) {
+    if ((session.menu != null)^) {
         if (key == "Escape" or key == "Tab") { session = dispatch(owner,session,"menu-cancel"); return 'prevent-default' }
-        if (contains(["ArrowUp","ArrowDown","Home","End"],key)) {
+        if (contains(["ArrowUp","ArrowDown","Home","End"],key)^) {
             let controls = dom.query_selector_all(node(owner,"context-menu"),"button:not([disabled])")
             let at = model.position([for (c in controls) c],evt.target)
             let next = if (key == "Home") 0 else if (key == "End") len(controls)-1
@@ -518,7 +518,7 @@ on keydown(evt) {
             return 'prevent-default'
         }
     }
-    if (modifier and lower(key)=="f") { dom.focus_set(node(owner,"search"),false); return 'prevent-default' }
+    if (modifier and lower(key)=="f") { dom.focus_set(node(owner,"search")^,false); return 'prevent-default' }
     if (modifier and evt.shiftKey and lower(key)=="g") { session = dispatch(owner,session,"go"); return 'prevent-default' }
     if (dom.closest(evt.target,"input,textarea,select") != null) { return 'pass' }
     if (modifier and evt.shiftKey and lower(key) == "m") {
@@ -540,8 +540,8 @@ on keydown(evt) {
         else if (session.mode == "columns" and contains(["ArrowLeft","ArrowRight"],key) and not (modifier or evt.altKey or evt.shiftKey) and dom.closest(evt.target,"#files") != null)
             (if (key=="ArrowLeft") "column-left" else if (key=="ArrowRight") "column-right" else "")
         else if (key==" ") "look" else ""
-    if (action != "") { session = dispatch(owner,session,action); return 'prevent-default' }
-    if (contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End"],key) and dom.closest(evt.target,"#files") != null) {
+    if ((action != "")^) { session = dispatch(owner,session,action); return 'prevent-default' }
+    if ((contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End"],key) and dom.closest(evt.target,"#files") != null)^) {
         let rows = dom.query_selector_all(if (session.mode == "columns") node(owner,"column-files-" ++ string(len(session.columns)-1)) else node(owner,"files"),".file")
         let top = dom.bounding_box(rows[0]).y
         // derive the grid stride from rendered rows, including responsive layouts.

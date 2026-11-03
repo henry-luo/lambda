@@ -8,17 +8,17 @@ pn run() {
     var keys: int[] = [1, 3, -1, 9, 0]
     var got = []
     var i = 0
-    while (i < 5) { push(got, vals[keys[i]]); i = i + 1 }
+    while (i < 5) { push(got, vals[keys[i]])^; i = i + 1 }
     var wr = null
     wr_at(vals, keys[3]) ^ { wr = "raised" }
     var wr2 = null
     wr_at(vals, keys[2]) ^ { wr2 = "raised" }
     wr_at(vals, keys[0])^
-    var m: int[] = fill(4, 2)
+    var m: int[] = fill(4, 2)^
     var s = 0
     i = 0
     while (i < 4) { s = s + vals[m[i] * 1] + vals[i * 1]; i = i + 1 }
-    var flags: bool[] = fill(4, true)
+    var flags: bool[] = fill(4, true)^
     flags[2] = false
     var t = 0
     i = 0

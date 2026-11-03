@@ -60,18 +60,18 @@ let PRINT_BORDER = 0.05   // print margin, of the print width
 let PRINT_CAPTION = 0.16
 
 fn find(items, key) => [for (it in items where it.key == key) it][0] or items[0]
-pub fn template(m) => find(TEMPLATES, m.template)
-pub fn aspect(m) => find(ASPECTS, m.aspect)
-pub fn background(m) => find(BACKGROUNDS, m.background)
+pub fn template(m) any^ => find(TEMPLATES, m.template)
+pub fn aspect(m) any^ => find(ASPECTS, m.aspect)
+pub fn background(m) any^ => find(BACKGROUNDS, m.background)
 pub fn find_font(key) => find(FONTS, key)
-pub fn font(m) => find_font(m.font)
+pub fn font(m) any^ => find_font(m.font)
 fn has(items, key) => contains([for (it in items) it.key], key) ^ { false }
 
 pub fn create(ids, title) => {template:"mosaic", aspect:"square", gutter:16, radius:6, border:0, background:"white",
     font:"sans", caption:title, note:"", credits:true, seed:1,
-    slots:[for (id in slice(ids, 0, MAX_PHOTOS)) {id:id, fx:0.5, fy:0.5, zoom:1.0, free:null}]}
+    slots:[for (id in ((slice(ids, 0, MAX_PHOTOS)) ^ { [] })) {id:id, fx:0.5, fy:0.5, zoom:1.0, free:null}]}
 
-pub fn valid(m) => m is map and len(m.slots) >= MIN_PHOTOS and len(m.slots) <= MAX_PHOTOS and (has(TEMPLATES, m.template) ^ { false }) and (has(ASPECTS, m.aspect) ^ { false })
+pub fn valid(m) any^ => m is map and len(m.slots) >= MIN_PHOTOS and len(m.slots) <= MAX_PHOTOS and (has(TEMPLATES, m.template) ^ { false }) and (has(ASPECTS, m.aspect) ^ { false })
 
 // ---------------------------------------------------------------- layouts
 
@@ -79,7 +79,7 @@ fn rect(x, y, w, h) => {x:x, y:y, w:w, h:h}
 fn inset(r, d) => {x:r.x + d, y:r.y + d, w:max(1.0, r.w - 2.0 * d), h:max(1.0, r.h - 2.0 * d)}
 fn cell(slot, r) => {slot:slot, kind:"cell", x:r.x, y:r.y, w:r.w, h:r.h, rot:0.0, clip:null}
 // + 0.0 turns a rounded -0 into 0
-fn pct(v) => string(round(v * 1000.0) / 10.0 + 0.0) ++ "%"
+fn pct(v) any^ => string(round(v * 1000.0) / 10.0 + 0.0) ++ "%"
 // a clip-path polygon from [x, y] points in the unit box
 fn polygon(points) => "polygon(" ++ join([for (p in points) pct(p[0]) ++ " " ++ pct(p[1])], ", ") ++ ")"
 
@@ -99,7 +99,7 @@ fn grid(slots, r) {
 
 // Recursive split: the wider side divides; each half's share follows its photos' shapes, so wide
 // photos get wide cells. Every split covers its rectangle exactly.
-fn mosaic(slots, aspects, r) {
+fn mosaic(slots, aspects, r) any^ {
     let n = len(slots);
     if (n == 1) [cell(slots[0], r)]
     else (
@@ -161,23 +161,23 @@ fn sites(shape, w, h, u) {
     if (shape == "diamond") (
         let ax = int(floor(w / (2.0 * u) - 1.0)),
         let by = int(floor(h / (2.0 * u) - 1.0)),
-        [for (a in (0 - ax) to ax, b in (0 - by) to by where (a + b) % 2 != 0 and abs(a) + abs(b) > 1)
+        [for (a in (((0 - ax) to ax) ^ { [] }), b in (((0 - by) to by) ^ { [] }) where (a + b) % 2 != 0 and abs(a) + abs(b) > 1)
             {x:a * u, y:b * u, w:2.0 * u, h:2.0 * u}])
     else (
         let rows = int(floor((h / 2.0 - u) / (1.5 * u))),
         let cols = int(ceil(w / (ROOT3 * u))),
-        [for (row in (0 - rows) to rows, q in (0 - cols) to cols,
+        [for (row in (((0 - rows) to rows) ^ { [] }), q in (((0 - cols) to cols) ^ { [] }),
             let x = (q + 0.5 * abs(row % 2)) * ROOT3 * u
             where abs(x) + ROOT3 * u / 2.0 <= w / 2.0)
             {x:x, y:row * 1.5 * u, w:ROOT3 * u, h:2.0 * u}])
 }
 
 // the largest pitch, shrinking from a first guess, whose lattice holds `need` sites
-fn pitch(shape, w, h, need, u) => if (len(sites(shape, w, h, u)) >= need or u < 4.0) u else pitch(shape, w, h, need, u * 0.94)
+fn pitch(shape, w, h, need, u) any^ => if (len(sites(shape, w, h, u)) >= need or u < 4.0) u else pitch(shape, w, h, need, u * 0.94)
 
 // Shaped cells on a lattice: the sites nearest the centre, so the cluster stays round; corners
 // the cluster leaves free show the background.
-fn lattice(n, shape, r) {
+fn lattice(n, shape, r) any^ {
     let diamond = shape == "diamond"
     let need = if (diamond) n - 1 else n
     // first guess: n cells' area fills the rectangle; the hero diamond needs a quarter of the short side
@@ -187,7 +187,7 @@ fn lattice(n, shape, r) {
     let cx = r.x + r.w / 2.0
     let cy = r.y + r.h / 2.0
     let clip = if (diamond) DIAMOND else HEXAGON
-    let near = [for (s in sites(shape, r.w, r.h, u), let d = s.x * s.x + s.y * s.y order by d, s.y, s.x limit need) s];
+    let near = [for (s in ((sites(shape, r.w, r.h, u)) ^ { [] }), let d = s.x * s.x + s.y * s.y order by d, s.y, s.x limit need) s];
     [*(if (diamond) [{slot:0, kind:"cell", x:cx - 2.0 * u, y:cy - 2.0 * u, w:4.0 * u, h:4.0 * u, rot:0.0, clip:clip}] else []),
         *[for (j, s in near) (let slot = if (diamond) j + 1 else j,
             {slot:slot, kind:"cell", x:cx + s.x - s.w / 2.0, y:cy + s.y - s.h / 2.0, w:s.w, h:s.h, rot:0.0, clip:clip})]]
@@ -210,10 +210,10 @@ fn window(p, aspects, i) => if (p.square) 1.0 else aspects[i]
 
 // Free-form prints dealt on a jittered grid in the style `p`, each slightly rotated. A hero (slot 0)
 // is dealt last, so it lies on top in the middle.
-fn prints(m, p, aspects, r) {
+fn prints(m, p, aspects, r) any^ {
     let n = len(m.slots)
     let hero = p.hero and n > 1
-    let rest = if (hero) [for (i in 1 to (n - 1)) i] else [for (i in 0 to (n - 1)) i]
+    let rest = if (hero) [for (i in ((1 to (n - 1)) ^ { [] })) i] else [for (i in ((0 to (n - 1)) ^ { [] })) i]
     let cols = max(1, int(ceil(math.sqrt(len(rest) * r.w / r.h))))
     let rows = int(ceil(len(rest) / cols))
     let cw = r.w / cols
@@ -333,12 +333,12 @@ fn with_slots(m, slots) => {*:m, slots:slots}
 fn clamp(v, lo, hi) => max(lo, min(hi, v))
 
 // swapping moves the photos and their crops; positions (and scrapbook boxes) stay with the slot
-pub fn swap(m, a, b) => if (a == b or a < 0 or b < 0 or a >= len(m.slots) or b >= len(m.slots)) m
+pub fn swap(m, a, b) any^ => if (a == b or a < 0 or b < 0 or a >= len(m.slots) or b >= len(m.slots)) m
     else with_slots(m, [for (i, s in m.slots) if (i == a) {*:m.slots[b], free:s.free}
         else if (i == b) {*:m.slots[a], free:s.free} else s])
 
 // a photo already in the collage swaps places; a new photo replaces the slot's photo
-pub fn assign(m, slot, id) {
+pub fn assign(m, slot, id) any^ {
     let at = index_of([for (s in m.slots) s.id], id);
     if (at != null) swap(m, slot, at)
     else with_slots(m, [for (i, s in m.slots) if (i == slot) {*:s, id:id, fx:0.5, fy:0.5, zoom:1.0} else s])
@@ -375,9 +375,9 @@ pub fn apply_template(m, key) => if (not has(TEMPLATES, key)) m
 // history: the models before (past) and after (future) the current one; at most 50 undo steps
 pub fn history() => {past:[], future:[]}
 pub fn record(h, before) => {past:[*slice(h.past, max(0, len(h.past) - 49), len(h.past)), before], future:[]}
-pub fn undo(h, current) => if (len(h.past) == 0) null
+pub fn undo(h, current) any^ => if (len(h.past) == 0) null
     else {model:h.past[last], history:{past:slice(h.past, 0, len(h.past) - 1), future:[current, *h.future]}}
-pub fn redo(h, current) => if (len(h.future) == 0) null
+pub fn redo(h, current) any^ => if (len(h.future) == 0) null
     else {model:h.future[0], history:{past:[*h.past, current], future:slice(h.future, 1, len(h.future))}}
 
 // ---------------------------------------------------------------- credits

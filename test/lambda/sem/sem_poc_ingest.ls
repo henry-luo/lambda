@@ -15,8 +15,8 @@ let term = normalize(dump) ^ { <unsupported kind: "normalize", why: string(^)> }
 let golden = input("test/lambda/closure.txt", 'mark') ^ { null }
 
 // how many lowered nodes fell outside the modelled core
-fn unsupported_in(t) => if (type(t) != element) 0
-  else (if (name(t) == 'unsupported') 1 else 0) + len([for (c in content(t)) for (k in 1 to unsupported_in(c)) k])
+fn unsupported_in(t) any^ => if (type(t) != element) 0
+  else (if (name(t) == 'unsupported') 1 else 0) + len([for (c in ((content(t)) ^ { [] })) for (k in ((1 to unsupported_in(c)) ^ { [] })) k])
 
 // closure.ls lowers entirely into the modelled core
 unsupported_in(term) == 0;

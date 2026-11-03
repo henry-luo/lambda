@@ -1,1 +1,1 @@
-error from 'risky' must be handled
+error from 'f' must be handled

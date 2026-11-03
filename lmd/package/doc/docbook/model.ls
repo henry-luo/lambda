@@ -17,12 +17,12 @@ fn adapt(value,scope,context,key,depth = 0) any^ {
         let next = {*:context,language:lang,base_uri:if (base == null) context.base_uri
             else c.resolve_uri(context.base_uri,base)};
         if (expanded_name.uri == null or any([for (attr_key,attr_value in map(value) where
-                string(attr_key) != "xmlns" and not starts_with(string(attr_key),"xmlns:"))
+                ((string(attr_key) != "xmlns" and not starts_with(string(attr_key),"xmlns:")) ^ { false }))
                 xml.expanded(attr_key,bindings,true).uri == null]))
             raise c.fail("invalid-namespace","Unbound XML prefix",context.source_uri)
         else {tag:expanded_name.local,uri:expanded_name.uri,attrs:attrs,key:key,source_uri:context.source_uri,
             base_uri:next.base_uri,language:lang,space:c.get(attrs,c.XML ++ "#space",context.space),
-            raw:value,children:[for (i,child in content(value))
+            raw:value,children:[for (i,child in ((content(value)) ^ { [] }))
                 adapt(child,bindings,{*:next,space:c.get(attrs,c.XML ++ "#space",context.space)},
                     key ++ "/" ++ string(i+1),depth+1)^]}
     }
@@ -42,7 +42,7 @@ pub fn prepare(source) map^ {
         let root = adapt(document,{}, {source_uri:snapshot.source_uri,
             base_uri:c.get(snapshot,"base_uri","./"),language:"en",space:"default"},"1")^
         let flat = c.nodes(root)
-        let ids = [for (node in flat,let id = c.attr(node,"id",c.XML) where id != null) {key:id,value:node}]
+        let ids = [for (node in flat,let id = c.attr(node,"id",c.XML) where ((id != null) ^ { false })) {key:id,value:node}]
         let duplicates = [for (i,entry in ids where entry.key == "" or
             any([for (j,prior in ids where j < i) prior.key == entry.key])) entry.key];
         if (root.uri != c.DB or not contains(["article","book","set","part","reference"],root.tag))
@@ -66,7 +66,7 @@ fn analyzed(node,ancestors,siblings,index,options) {
             // xslTNG 2.8.5 uses sections-inherit-from; the older *-numbers-inherit parameters are inert.
             (if (parent.number != null and c.is_section(parent) and
                 options.parameters["sections-inherit-from"] == "section") parent.number ++ "." else "") ++
-                string(len([for (n in prior where c.is_section(n)) n])+1)
+                string(len([for (n in prior where ((c.is_section(n)) ^ { false })) n])+1)
         else null
     let numbered = if (section) options.parameters["section-numbers"] and
         not any([for (p in ancestors) p.tag == "preface"]) else options.parameters["component-numbers"]
@@ -77,7 +77,7 @@ fn analyzed(node,ancestors,siblings,index,options) {
     let resolved = if (id != null) id else available_id(generated,options.source_ids)
     let current = {*:node,id:resolved,explicit_id:id != null,number:if (numbered) ordinal else null,
         ancestors:[for (ancestor in ancestors) ancestor.key],parent:parent.key,
-        heading:if (section) min(5,len([for (p in ancestors where c.is_section(p)) p])+2)
+        heading:if (section) min(5,len([for (p in ancestors where ((c.is_section(p)) ^ { false })) p])+2)
             else if (node.tag in ["chapter","appendix","preface"] and parent.tag in ["book","article"]) 2 else 1,
         division:if (contains(["chapter","appendix","preface","article"],node.tag)) node.key else parent.division}
     let elements = [for (child in node.children where child is map) child];
@@ -99,5 +99,5 @@ pub fn analyze(source,options) {
         notes:c.dictionary([for (i,node in notes) {key:node.key,value:i+1}]),
         formal_numbers:c.dictionary([for (i,node in objects,let parent = by_key[node.division])
             {key:node.key,value:(if (parent.number == null) "" else parent.number ++ ".") ++
-                string(len([for (prior in take(objects,i) where prior.tag == node.tag and prior.division == node.division) prior])+1)}])}
+                string(len([for (prior in ((take(objects,i)) ^ { [] }) where prior.tag == node.tag and prior.division == node.division) prior])+1)}])}
 }

@@ -5,5 +5,5 @@ let rebuilt = <node *:attrs, "new content">
 {
   attrs: attrs,
   rebuilt_attrs: [rebuilt.id, rebuilt.label, rebuilt.custom],
-  rebuilt_content: [for (item in content(rebuilt)) item]
+  rebuilt_content: [for (item in ((content(rebuilt)) ^ { [] })) item]
 }

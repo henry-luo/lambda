@@ -100,7 +100,7 @@ fn msg(from: any, subject: any, age: any, text: any) => {from: from, to: [ME], c
     html: null, plain: false, inline: null, files: [], unread: null, flagged: false}
 fn lines(parts) => join(parts, "\n")
 fn pick(items, i) => items[i % len(items)]
-fn first_name(p) => split(p.name, " ")[0]
+fn first_name(p) any^ => split(p.name, " ")[0]
 
 // hand-written threads, newest first by age
 fn stories() => [
@@ -242,7 +242,7 @@ let PR_TITLES = ["Fix scrollbar gutter in intrinsic sizing", "Add POP3 read stat
 let COMMENTS = ["Could we keep the old fast path behind the flag for one release?", "Nit: this comment explains what, not why.",
     "Do we have a test for the empty case?", "This reads much better now, thanks."]
 
-fn escaped(text) => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+fn escaped(text) any^ => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
 
 fn review(i) {
     let n = 912 - i
@@ -457,7 +457,7 @@ fn html_part(s, html) => (let part = {content: html, type: "text/html; charset=U
     else {type: "multipart/related", parts: [part, {*: s.inline.file, disposition: "inline", content_id: "<" ++ s.inline.cid ++ ">"}]})
 
 // plain text alone, or multipart/alternative with the spec's HTML or the text's own
-fn body(s) => if (s.plain) text_part(s.text)
+fn body(s) any^ => if (s.plain) text_part(s.text)
     else {type: "multipart/alternative", parts: [text_part(s.text), html_part(s, s.html or compose.html_of_text(s.text))]}
 
 fn rfc5322(s, message_id, sent_at) string^ => misc.format({from: s.from, to: s.to, *: (if (len(s.cc) > 0) {cc: s.cc} else {}),
@@ -541,10 +541,10 @@ pub pn file_into(dir, path, text, flag_list) map^ {
 }
 
 // Get Mail: the next arrival lands in the Inbox, dated now; null once all have arrived.
-pub pn deliver(dir) map^ {
+pub pn deliver(dir) map?^ {
     let inbox = load(dir, "INBOX")
     let n = inbox.delivered or 0
-    if (n >= len(ARRIVALS)) { return null }
+    if ((n >= len(ARRIVALS))^) { return null }
     let now_ms = datetime().unix
     let text = rfc5322(ARRIVALS[n], "<arrival-" ++ string(now_ms) ++ "@" ++ DOMAIN ++ ">", compose.rfc5322_date(now_ms))^
     let filed = file_into(dir, "INBOX", text, [])^
@@ -558,25 +558,25 @@ pub pn set_flag(dir, path, uid, flag, enabled) map^ {
 
 // Moves one message to another mailbox under a new UID; [source, target]
 // indexes, or null when the message is gone.
-pub pn move(dir, path, uid, to_path) array^ {
+pub pn move(dir, path, uid, to_path) array?^ {
     let source = load(dir, path)
-    let found = [for (e in source.entries where e.uid == uid) e]
+    let found = [for (e in ((source.entries) ^ { [] }) where e.uid == uid) e]
     if (len(found) == 0 or to_path == path) { return null }
     let target = load(dir, to_path)
-    let left = saved(dir, source, [for (e in source.entries where e.uid != uid) e])^;
+    let left = saved(dir, source, [for (e in ((source.entries) ^ { [] }) where e.uid != uid) e])^;
     [left, saved(dir, target, [*target.entries, {*: found[0], uid: next_uid(target)}])^]
 }
 
 // Deletes one message for good, with its files.
 pub pn erase(dir, path, uid) map^ {
     let index = load(dir, path)
-    for (e in index.entries) {
+    for (e in ((index.entries) ^ { [] })) {
         if (e.uid == uid) {
             io.delete(store.message_path(dir, e.file)) ^ { null }
             io.delete(store.text_path(dir, e.file)) ^ { null }
         }
     }
-    saved(dir, index, [for (e in index.entries where e.uid != uid) e])
+    saved(dir, index, [for (e in ((index.entries) ^ { [] }) where e.uid != uid) e])
 }
 
 // A new mailbox (a child when `path` has a "/"); the account's mailboxes.

@@ -17,15 +17,15 @@
 
 // --- Function with untyped parameter (the actual bug trigger) ---
 
-fn widths(items) {
+fn widths(items) any^ {
     items |> len(string(~))
 }
 
-fn max_width(items) {
+fn max_width(items) any^ {
     max(items |> len(string(~)))
 }
 
-fn to_strings(items) {
+fn to_strings(items) any^ {
     items |> string(~)
 }
 
@@ -35,7 +35,7 @@ fn to_strings(items) {
 
 // --- Chained pipe with ~ and sysfunc in function context ---
 
-fn transform(data) {
+fn transform(data) any^ {
     data |> ~ * 2 |> string(~)
 }
 

@@ -1,0 +1,9 @@
+{
+  "name": "Listener growth preserves dispatch snapshots, once lookup and IDL cancellation",
+  "html": "test/browse/repro/event-listener-mutation-realloc.html",
+  "events": [
+    {"type": "assert_script", "js": "growthAccepted&&growthCounts.first===1&&growthCounts.existing===7&&growthCounts.added===0"},
+    {"type": "assert_script", "js": "onceCounts.getters===1&&onceCounts.calls===1&&onceCounts.peers===2"},
+    {"type": "assert_script", "js": "idlCancelled"}
+  ]
+}

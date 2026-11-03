@@ -45,8 +45,8 @@ pub fn find(lib, id) => [for (e in lib where e.id == id) e][0]
 fn flatten(nodes) => [for (node in nodes, found in [node, *flatten(node.children)]) found]
 
 // the contents label of a saved chapter, or its spine position when the book has none
-fn chapter_label(e, occurrence) => (let href = e.book.reading_order[occurrence].href,
-    let labels = [for (node in flatten(e.book.navigation.toc) where node.target != null and node.target.href == href) node.label],
+fn chapter_label(e, occurrence) any^ => (let href = e.book.reading_order[occurrence].href,
+    let labels = [for (node in ((flatten(e.book.navigation.toc)) ^ { [] }) where node.target != null and node.target.href == href) node.label],
     if (len(labels) > 0) labels[0] else "Chapter " ++ string(occurrence + 1) ++ " of " ++ string(e.chapters))
 
 // A saved place as a share of the book: chapters before it count by their
@@ -59,19 +59,19 @@ pub fn place(e, location) => if (e.book == null or location == null) null else (
     {fraction: min(1.0, (float(sum(take(e.sizes, occurrence))) + float(e.sizes[occurrence]) * within) / float(e.total)),
      chapter: chapter_label(e, occurrence)})
 
-pub fn percent(place) => if (place == null) "0%" else string(int(round(place.fraction * 100))) ++ "%"
+pub fn percent(place) any^ => if (place == null) "0%" else string(int(round(place.fraction * 100))) ++ "%"
 
 // the reader's saved place, when the reader keeps one (persist: false keeps none)
-pub pn saved(e, persist) map {
+pub pn saved(e, persist) map?^ {
     if (e.book == null) { return null }
     return store.restore(e.book, {persist: persist})
 }
 // places maps a book id to its saved place; refresh re-reads one book's
-pub pn refresh(places, e, persist) map {
+pub pn refresh(places, e, persist) map^ {
     let kept = saved(e, persist)
     return if (kept == null or kept.location == null) places else {*: places, [e.id]: place(e, kept.location)}
 }
-pub pn places(lib, persist) map {
+pub pn places(lib, persist) map^ {
     var found = {}
     for (e in lib) { found = refresh(found, e, persist) }
     return found
@@ -79,7 +79,7 @@ pub pn places(lib, persist) map {
 
 // The ids of opened books, most recent first, beside the reader's own reading
 // state; an order rather than timestamps, so books opened together never tie.
-fn record_path() => store.directory() ++ "/books-library.json"
+fn record_path() any^ => store.directory() ++ "/books-library.json"
 pub pn opened(persist) array {
     if (not persist) { return [] }
     let path = record_path()

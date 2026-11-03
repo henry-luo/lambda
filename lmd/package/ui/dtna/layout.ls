@@ -6,20 +6,20 @@ pub let breakpoints = responsive.breakpoints
 let column_fields = ["span","offset","order","push","pull","flex"]
 let align_values = {top:"flex-start",middle:"center",bottom:"flex-end",stretch:"stretch"}
 let justify_values = {start:"flex-start",end:"flex-end",center:"center",["space-around"]:"space-around",["space-between"]:"space-between",["space-evenly"]:"space-evenly"}
-fn valid_align(value) => (value is string or value is symbol) and c.has(align_values,c.text(value))
-fn valid_justify(value) => (value is string or value is symbol) and c.has(justify_values,c.text(value))
-fn flex_parts(value) => [for (part in split(trim(value)," ") where part != "") part]
-fn flex_factor(value) => c.css_number(value)
-fn valid_flex(value) => if (value is number) c.finite(value) and value >= 0 else if (not (value is string)) false
+fn valid_align(value) any^ => (value is string or value is symbol) and c.has(align_values,c.text(value))
+fn valid_justify(value) any^ => (value is string or value is symbol) and c.has(justify_values,c.text(value))
+fn flex_parts(value) => [for (part in ((split(trim(value)," ")) ^ { [] }) where part != "") part]
+fn flex_factor(value) any^ => c.css_number(value)
+fn valid_flex(value) any^ => if (value is number) c.finite(value) and value >= 0 else if (not (value is string)) false
     else if (contains(["auto","none","initial"],trim(value)) or c.css_length(value)) true
     else (let parts = flex_parts(value),
         len(parts) >= 1 and len(parts) <= 3 and flex_factor(parts[0]) and
         (len(parts) < 2 or flex_factor(parts[1])) and
         (len(parts) < 3 or parts[2] == "auto" or c.css_length(parts[2])))
-fn flex_value(value) => if (value is number) string(value) ++ " " ++ string(value) ++ " auto"
+fn flex_value(value) any^ => if (value is number) string(value) ++ " " ++ string(value) ++ " auto"
     else if (trim(value) == "auto") "1 1 auto"
     else if (c.css_length(value)) "0 0 " ++ c.length(value) else trim(value)
-fn valid_column(field, value) => if (field == "flex") valid_flex(value)
+fn valid_column(field, value) any^ => if (field == "flex") valid_flex(value)
     else value is int and (field == "order" or (value >= 0 and value <= 24))
 fn column_values(value) => if (value is int) {span:value} else value
 fn validate_column(values) bool^ {
@@ -27,7 +27,7 @@ fn validate_column(values) bool^ {
     if (not all([for (key,value in values) valid_column(string(key),value)]))
         raise c.fail("col","span/offset/push/pull must be ints from 0 to 24; order must be int; flex must be a nonnegative factor or CSS flex value") else true
 }
-fn valid_gap(value) => c.css_length(value)
+fn valid_gap(value) any^ => c.css_length(value)
 fn validate_gap(value) bool^ => responsive.validate(value,valid_gap,"row.gutter")^
 fn gaps(props) => if (props.gutter is array) props.gutter else [c.option(props,"gutter",0),0]
 pub fn row(props, child) element^ {
@@ -42,12 +42,12 @@ pub fn row(props, child) element^ {
     )
 }
 pub fn col(props, child) element^ {
-    let base = validate_column(map([for (key,value in props where contains(column_fields,string(key))) (key,value)]))^
-    let sizes = [for (bp in breakpoints where c.has(props,bp.key)) validate_column(column_values(props[bp.key]))^];
+    let base = validate_column(map([for (key,value in props where ((contains(column_fields,string(key))) ^ { false })) (key,value)]))^
+    let sizes = [for (bp in breakpoints where ((c.has(props,bp.key)) ^ { false })) validate_column(column_values(props[bp.key]))^];
     c.node('col',props,child,[*column_fields,*[for (bp in breakpoints) bp.key]])^
 }
 fn percent(value) => string(value * 100.0 / 24) ++ "%"
-fn column_property(field, value) => if (field == "flex") flex_value(value) else if (field == "order") string(value)
+fn column_property(field, value) any^ => if (field == "flex") flex_value(value) else if (field == "order") string(value)
     else if ((field == "push" or field == "pull") and value == 0) "auto" else percent(value)
 fn column_variables(prefix, values) => join([for (field,value in values)
     "--dtna-col-" ++ prefix ++ "-" ++ string(field) ++ ":" ++ column_property(string(field),value) ++ ";" ++
@@ -55,13 +55,13 @@ fn column_variables(prefix, values) => join([for (field,value in values)
 fn column(node) {
     let base = {span:c.option(c.props(node),"span",24),offset:c.option(c.props(node),"offset",0),order:c.option(c.props(node),"order",0),
         push:c.option(c.props(node),"push",0),pull:c.option(c.props(node),"pull",0)}
-    let sizes = [for (bp in breakpoints where c.has(c.props(node),bp.key)) {key:bp.key,values:column_values(c.props(node)[bp.key])}];
+    let sizes = [for (bp in breakpoints where ((c.has(c.props(node),bp.key)) ^ { false })) {key:bp.key,values:column_values(c.props(node)[bp.key])}];
     <div *:c.styled(node,join([for (size in sizes) join([for (field,value in size.values) "dtna-col-" ++ size.key ++ "-" ++ string(field)]," ")]," ")),
         style:c.style_with(c.props(node),column_variables("base",base) ++ join([for (size in sizes) column_variables(size.key,size.values)],"") ++
             // the reference's base flex is inline and therefore takes precedence over responsive flex classes.
             (if (c.has(c.props(node),"flex")) "flex:" ++ flex_value(c.props(node).flex) ++ ";" else "")), *c.contents(node)>
 }
-fn gap_variables(axis, value) => if (value is map) join([for (key,gap in value)
+fn gap_variables(axis, value) any^ => if (value is map) join([for (key,gap in value)
     "--dtna-row-" ++ string(key) ++ "-" ++ axis ++ ":" ++ c.length(gap) ++ ";"],"")
     else "--dtna-row-base-" ++ axis ++ ":" ++ c.length(value) ++ ";"
 fn gap_classes(axis, value) => if (value is map) [for (key,gap in value) "dtna-row-" ++ string(key) ++ "-" ++ axis] else []
@@ -108,7 +108,7 @@ pub fn compact(kind, props, child) element^ {
     if (not c.enum_valid(props.direction,["horizontal","vertical"])^) raise c.fail(kind,"invalid direction")
     else c.node(kind,props,child,["direction","block","size","disabled"])^
 }
-fn spacing_style(props) {
+fn spacing_style(props) any^ {
     let gap = props.gap
     let gap_css = if (gap == null) "var(--dtna-spacing)" else if (gap is array) c.length(gap[1]) ++ " " ++ c.length(gap[0]) else c.length(gap);
     "display:flex;flex-direction:" ++ (if (c.text(props.direction) == "vertical") "column" else "row") ++ ";gap:" ++ gap_css ++
@@ -117,7 +117,7 @@ fn spacing_style(props) {
         (if (c.has(props,"flex")) "flex:" ++ flex_value(props.flex) ++ ";" else "")
 }
 fn space(node) {
-    let children = [for (child in content(node) where child != null) child];
+    let children = [for (child in ((content(node)) ^ { [] }) where child != null) child];
     <div *:c.styled(node),style:c.style_with(c.props(node),spacing_style(c.props(node))),
         *[for (index,child in children) (
             if (index > 0 and c.props(node).separator != null) <span class:"dtna-space-separator",["aria-hidden"]:"true",c.render(c.props(node).separator)> else null,
@@ -137,7 +137,7 @@ fn divider_view(node) {
         role:"separator",["aria-orientation"]:c.text(c.option(c.props(node),"direction","horizontal")),
         *[if (labelled) (<span class:"dtna-divider-line">,<span class:"dtna-divider-label",*c.contents(node)>,<span class:"dtna-divider-line">) else null]>
 }
-view dtna_layout_parts: <dtna.row> | <dtna.col> | <dtna.space> | <dtna.flex> | <dtna.space_compact> | <dtna.button_group> | <dtna.divider> {
+view dtna_layout_parts: <dtna.row> | <dtna.col> | <dtna.space> | <dtna.flex> | <dtna.space_compact> | <dtna.button_group> | <dtna.divider> () any^ {
     if (c.kind(~) == 'row') row_view(~)
     else if (c.kind(~) == 'col') column(~)
     else if (c.kind(~) == 'space') space(~)

@@ -21,26 +21,26 @@ pub fn merge(parent, own) => if (own == false) false else if (own == null) if (p
 fn policy(options, phase) => if (options == false or options == null or options[phase] == false) null
     else if (options[phase] == true) {type: if (phase == "update") "morph" else "fade", duration: 300}
     else options[phase]
-fn evaluate(value, row, index, group, values) {
+fn evaluate(value, row, index, group, values) any^ {
     if (value is fn) value(row, index, group)
     else if (value.expr != null) expr.evaluate(expr.compile(value.expr, parameter.expression_values(values)), row)
     else value
 }
-fn curve(raw, t) {
+fn curve(raw, t) any^ {
     let name = if (raw == null) 'linear' else if (raw is string) symbol(replace(raw, "_", "-")) else raw;
     let result = if (raw is fn) raw(t) else if (easing.valid(name)) easing.sample(name, t) else error("chart: unknown animation easing");
     if (result is error) result else if (not util.finite_number(result) or result < 0 or result > 1)
         error("chart: easing must return finite progress in [0,1]") else if (t == 0 or t == 1) t else result
 }
 fn group_value(row, grouping) => [for (field in grouping.by) row[field]]
-fn groups(data, grouping) {
+fn groups(data, grouping) any^ {
     let values = util.unique_vals(data |> group_value(~, grouping));
     if (grouping.order == "ascending" or grouping.order == "descending")
         sort(values, if (grouping.order == "descending") 'desc' else 'asc')
-    else if (grouping.order is array) [*grouping.order, for (value in values where not contains(grouping.order, value)) value]
+    else if (grouping.order is array) [*grouping.order, for (value in values where ((not contains(grouping.order, value)) ^ { false })) value]
     else values
 }
-fn timing(ctx, row, index, group, options, phase) {
+fn timing(ctx, row, index, group, options, phase) any^ {
     let config = policy(options, phase);
     let delay_channel = ctx.encoding[phase ++ "_delay"];
     let duration_channel = ctx.encoding[phase ++ "_duration"];
@@ -58,7 +58,7 @@ fn timing(ctx, row, index, group, options, phase) {
     else {type: kind, delay: delay, duration: duration, easing: config.easing, fallback: config.fallback,
         boundary: if (config.boundary != null) config.boundary else 0.5}
 }
-fn descriptor(ctx, row, options, phase) {
+fn descriptor(ctx, row, options, phase) any^ {
     let grouping = options.group;
     let group = group_value(row, grouping);
     let ordered = groups(ctx.data, grouping);
@@ -66,8 +66,8 @@ fn descriptor(ctx, row, options, phase) {
     let index = index_of(ctx.data, row);
     let own = timing(ctx, row, index, group, options, phase);
     let stagger = if (grouping.stagger != null) grouping.stagger else 0.0;
-    let lengths = if (grouping.mode == "sequence") [for (value in slice(ordered, 0, rank))
-        max([0.0, for (i, datum in ctx.data where group_value(datum, grouping) == value,
+    let lengths = if (grouping.mode == "sequence") [for (value in ((slice(ordered, 0, rank)) ^ { [] }))
+        max([0.0, for (i, datum in ctx.data where ((group_value(datum, grouping) == value) ^ { false }),
             let settings = timing(ctx, datum, i, value, options, phase)) settings.delay + settings.duration])] else [];
     let offset = sum(lengths) + (if (rank != null) rank else 0) * stagger;
     let progress = if (own.duration == 0) (if (ctx._time < own.delay + offset) 0.0 else 1.0)
@@ -79,7 +79,7 @@ fn descriptor(ctx, row, options, phase) {
     else if (eased is error) eased
     else {*:own, easing: if (own.easing is fn) "custom" else own.easing, delay: own.delay + offset, progress: eased}
 }
-pub fn attributes(ctx, row, mark_options = {}) {
+pub fn attributes(ctx, row, mark_options = {}) any^ {
     let options = merge(ctx._animate, mark_options.animate);
     if (options == null) {} else if (options == false) {'data-chart-animation': "{\"disabled\":true}"} else {
         let descriptors = [for (phase in phases) descriptor(ctx, row, options, phase)];
@@ -90,7 +90,7 @@ pub fn attributes(ctx, row, mark_options = {}) {
     }
 }
 
-pub fn validate(spec) {
+pub fn validate(spec) any^ {
     let options = spec.animate;
     let keys = if (spec.encoding.key!=null) [for (row in spec.data) parse.channel_value(spec.encoding.key,row)] else null;
     let ctx = {data: spec.data, encoding: spec.encoding, _animate: options, _parameter_values: spec._parameter_values};
@@ -103,18 +103,18 @@ pub fn validate(spec) {
             error("chart: animation groups require ordered field names"),
         if (keys!=null and any([for (key in keys) not (key is string or key is symbol or util.finite_number(key))])) error("chart: animated keys must be strings, symbols or finite numbers"),
         if (keys != null and len(util.unique_vals(keys)) != len(keys)) error("chart: animated keys must be unique within a mark"),
-        for (phase in phases,let settings=policy(options,phase) where settings!=null)
+        for (phase in phases,let settings=policy(options,phase) where ((settings!=null) ^ { false }))
             if (not (settings is map)) error("chart: transition options must be a map") else
             if (len(spec.data)==0 and not (settings.delay is fn or settings.delay.expr!=null or settings.duration is fn or settings.duration.expr!=null))
                 timing(ctx,{},0,[],options,phase),
         for (row in spec.data) attributes(ctx, row)])
 }
 
-fn metadata(node) => if (node["data-chart-animation"] == null) null else parse(node["data-chart-animation"], 'json') ^ {~}
+fn metadata(node) any^ => if (node["data-chart-animation"] == null) null else parse(node["data-chart-animation"], 'json') ^ {~}
 // retired geometry keeps correspondence without regaining a picking key.
 fn retained_key(node) => if (node["data-chart-key"]!=null) node["data-chart-key"] else node["data-chart-retained-key"]
 // guide roles keep titles separate from ticks when domain or tick counts change.
-fn identity(node, index, parent) => if (node is element and retained_key(node) != null)
+fn identity(node, index, parent) any^ => if (node is element and retained_key(node) != null)
     "key:" ++ node["data-chart-view"] ++ ":" ++ string(node["data-chart-part"]) ++ ":" ++ retained_key(node)
     else if (node is element and node["data-chart-row"] != null) "row:" ++ node["data-chart-row"]
     else if (node is element and node.id != null) "id:" ++ node.id
@@ -126,26 +126,26 @@ fn keyed(parent) {
     // entering containers have no source parent or source children.
     let children = if (parent is element) content(parent) else [];
     [for (i, child in children) {node: child, id: identity(child, i, parent),
-        role: len([for (j, earlier in children where j < i and identity(earlier, j, parent) == identity(child, i, parent)) true])}]
+        role: len([for (j, earlier in children where ((j < i and identity(earlier, j, parent) == identity(child, i, parent)) ^ { false })) true])}]
 }
-fn decorative(node) => if (not (node is element)) node else svg.rebuild(name(node),
-    {*:map([for (key, value in map(node) where not starts_with(string(key), "data-chart-") and not contains(["tabindex","data-focus-key"],string(key)))
+fn decorative(node) any^ => if (not (node is element)) node else svg.rebuild(name(node),
+    {*:map([for (key, value in map(node) where ((not starts_with(string(key), "data-chart-") and not contains(["tabindex","data-focus-key"],string(key))) ^ { false }))
         for (part in [string(key), value]) part]), 'pointer-events': "none"}, content(node) |> decorative(~))
 fn faded(node, opacity, exit = false) => if (node == null) null else <g opacity: opacity,
-    *:map([for (key,value in map(node) where contains(["data-chart-view","data-chart-part","data-chart-animation"],string(key))) (key,value)]),
+    *:map([for (key,value in map(node) where ((contains(["data-chart-view","data-chart-part","data-chart-animation"],string(key))) ^ { false })) (key,value)]),
     *:(if (exit) {'pointer-events': "none",inert:"",'data-chart-retained-key':retained_key(node)}
         else {'data-chart-key':retained_key(node)}),
     if (exit) decorative(node) else node>
 fn crossfade(a, b, t) => <g class: "chart-crossfade", faded(a, 1.0 - t, true); faded(b, t)>
-fn points(node) => if (contains(['path','rect','line','circle','ellipse'],name(node))) picking.outlines(node) else null
+fn points(node) any^ => if (contains(['path','rect','line','circle','ellipse'],name(node))) picking.outlines(node) else null
 fn resample(polyline, count) {
-    let clean=[for (i,p in polyline.points where (i==0 or p!=polyline.points[i-1]) and
-        not (polyline.closed and i==len(polyline.points)-1 and p==polyline.points[0])) p];
+    let clean=[for (i,p in polyline.points where (((i==0 or p!=polyline.points[i-1]) and
+        not (polyline.closed and i==len(polyline.points)-1 and p==polyline.points[0])) ^ { false })) p];
     let vertices = if (polyline.closed) [*clean, clean[0]] else clean;
-    let lengths = [for (i in 0 to (len(vertices)-2)) math.sqrt(sum([for (axis in [0,1]) (vertices[i+1][axis]-vertices[i][axis])**2]))];
+    let lengths = [for (i in ((0 to (len(vertices)-2)) ^ { [] })) math.sqrt(sum([for (axis in [0,1]) (vertices[i+1][axis]-vertices[i][axis])**2]))];
     let total = sum(lengths);
     [for (i in 0 to (count-1), let distance=total*float(i)/float(if (polyline.closed) count else max(1,count-1)),
-        let candidates=[for (j, length in lengths where sum(slice(lengths,0,j+1))>=distance) j],
+        let candidates=[for (j, length in lengths where ((sum(slice(lengths,0,j+1))>=distance) ^ { false })) j],
         let segment=if (len(candidates)>0) candidates[0] else max(0,len(lengths)-1),
         let t=if (lengths[segment]>0) (distance-sum(slice(lengths,0,segment)))/lengths[segment] else 0.0)
         if (len(vertices)<=1) vertices[0] else geometry.interpolate(vertices[segment],vertices[segment+1],t)]
@@ -158,8 +158,8 @@ fn align(source,target,closed) {
 }
 fn nesting(lines) => [for (i,line in lines) for (j,other in lines where i!=j and line.closed and other.closed)
     geometry.contains_point(other.points,line.points[0])]
-fn vertex_count(line) => len(line.points)-(if (line.closed and line.points[0]==line.points[len(line.points)-1]) 1 else 0)
-pub fn morph(a, b, t, fallback = "crossfade") {
+fn vertex_count(line) any^ => len(line.points)-(if (line.closed and line.points[0]==line.points[len(line.points)-1]) 1 else 0)
+pub fn morph(a, b, t, fallback = "crossfade") any^ {
     let source=points(a); let target=points(b);
     let failure=util.first_error([source,target]);
     let compatible=source!=null and target!=null and len(source)==len(target) and all([for (i, line in source)
@@ -177,24 +177,24 @@ pub fn morph(a, b, t, fallback = "crossfade") {
         if (crossing) if (fallback=="error") error("chart: morph would intersect itself") else null else paths.path(lines)
     }
 }
-fn color(a,b,t) {
+fn color(a,b,t) any^ {
     // none, missing attributes and paint servers are valid paints, but cannot interpolate as RGBA.
     let ac=color_parser.try_parse(a); let bc=color_parser.try_parse(b);
     if (ac==null or bc==null) null else colors.css(colors.sample(ac,bc,t))
 }
-fn resources(node) => if (not (node is element)) [] else [
+fn resources(node) any^ => if (not (node is element)) [] else [
     if (contains(['linearGradient','radialGradient','pattern','clipPath'],name(node))) node,
-    for (child in content(node)) for (resource in resources(child)) resource] |: ~!=null
-fn resource(items,reference) => if (not (reference is string) or not starts_with(reference,"url(#")) null else
+    for (child in ((content(node)) ^ { [] })) for (resource in ((resources(child)) ^ { [] })) resource] |: ~!=null
+fn resource(items,reference) any^ => if (not (reference is string) or not starts_with(reference,"url(#")) null else
     (items |: ~.id==slice(reference,5,len(reference)-1))[0]
-fn compatible_paint(a,b) => a!=null and b!=null and name(a)==name(b) and
+fn compatible_paint(a,b) any^ => a!=null and b!=null and name(a)==name(b) and
     (name(a)=='linearGradient' or name(a)=='radialGradient') and len(content(a))==len(content(b)) and
-    a.gradientUnits==b.gradientUnits and a.spreadMethod==b.spreadMethod and all([for (i,stop in content(b))
+    a.gradientUnits==b.gradientUnits and a.spreadMethod==b.spreadMethod and all([for (i,stop in ((content(b)) ^ { [] }))
         content(a)[i]["stop-color"]==stop["stop-color"] or color(content(a)[i]["stop-color"],stop["stop-color"],0.5)!=null])
-fn references(node) => if (not (node is element)) [] else [for (value in [node.fill,node.stroke] where value is string and starts_with(value,"url(#")) value,
-    for (child in content(node)) for (value in references(child)) value]
-fn paint_id(a,b,t) => "chart-transition-"++a.id++"-to-"++b.id++"-at-"++util.fmt_num(t)
-fn paint_between(a,b,t,config) {
+fn references(node) any^ => if (not (node is element)) [] else [for (value in [node.fill,node.stroke] where ((value is string and starts_with(value,"url(#")) ^ { false })) value,
+    for (child in ((content(node)) ^ { [] })) for (value in ((references(child)) ^ { [] })) value]
+fn paint_id(a,b,t) any^ => "chart-transition-"++a.id++"-to-"++b.id++"-at-"++util.fmt_num(t)
+fn paint_between(a,b,t,config) any^ {
     let aa=resource(config.source_resources,a); let bb=resource(config.target_resources,b);
     if (compatible_paint(aa,bb)) "url(#"++paint_id(aa,bb,t)++")" else color(a,b,t)
 }
@@ -204,7 +204,7 @@ fn attributes_between(a,b,t,boundary,config={}) => map([for (key,value in map(b)
         else if (contains(["fill","stroke","stop-color"],string(key)) and previous!=value) paint_between(previous,value,t,config)
         else if (previous==value or starts_with(string(key),"data-chart-")) value
         else if (t<boundary and previous!=null) previous else value]) part])
-fn transition(node, config, phase, t) {
+fn transition(node, config, phase, t) any^ {
     let progress=if (phase=="exit") 1.0-t else t;
     let opacity=if (node.opacity!=null) node.opacity else 1.0;
     let image=if (phase=="exit") decorative(node) else node;
@@ -215,9 +215,9 @@ fn transition(node, config, phase, t) {
         svg.rebuild('path',{*:map(image),pathLength:1.0,'stroke-dasharray':"1",'stroke-dashoffset':1.0-progress},content(image))
     else faded(node,progress,phase=="exit")
 }
-pub fn progress(config, elapsed) => if (config.progress!=null) config.progress else
+pub fn progress(config, elapsed) any^ => if (config.progress!=null) config.progress else
     curve(config.easing,if (config.duration==0) (if (elapsed<config.delay) 0.0 else 1.0) else util.clamp_val((elapsed-config.delay)/config.duration,0.0,1.0))
-fn group_identity(node) => if (node["data-chart-group-key"]==null) null else
+fn group_identity(node) any^ => if (node["data-chart-group-key"]==null) null else
     format([node["data-chart-view"],node["data-chart-part"],node["data-chart-group-key"]],{type:"json",compact:true})
 fn children_between(a,b,elapsed,default_config,overall) {
     let aa=keyed(a); let bb=keyed(b);
@@ -229,7 +229,7 @@ fn children_between(a,b,elapsed,default_config,overall) {
         let ambiguous=len(matches)==0 and len(groups)>1 and len(targets)>1,
         let source=if (len(matches)>0) matches[0].node else if (len(groups)==1) groups[0].node
             else if (len(groups)>1 and len(targets)==1) <g for (group in groups) group.node> else null
-        where not ambiguous or entry==targets[0])
+        where ((not ambiguous or entry==targets[0]) ^ { false }))
         if (ambiguous) if (default_config.fallback=="error") error("chart: ambiguous many-to-many correspondence") else
             crossfade(<g for (group in groups) group.node>,<g for (target in targets) target.node>,overall)
         else sample_node(source,entry.node,elapsed,child_config,overall),
@@ -237,11 +237,11 @@ fn children_between(a,b,elapsed,default_config,overall) {
         let group=group_identity(entry.node),
         let sources=aa |: group_identity(~.node)==group,
         let targets=bb |: group_identity(~.node)==group
-        where not any([for (target in bb) target.id==entry.id and target.role==entry.role]) and
-            not (group!=null and len(targets)>0))
+        where ((not any([for (target in bb) target.id==entry.id and target.role==entry.role]) and
+            not (group!=null and len(targets)>0)) ^ { false }))
         for (exiting in [sample_node(entry.node,null,elapsed,child_config,overall)] where exiting!=null) exiting]
 }
-fn sample_node(a,b,elapsed,default_config,overall) {
+fn sample_node(a,b,elapsed,default_config,overall) any^ {
     let phase=if (a==null) "enter" else if (b==null) "exit" else "update";
     let own=metadata(if (b!=null) b else a)[phase];
     let config=if (own!=null) own else default_config;
@@ -254,7 +254,7 @@ fn sample_node(a,b,elapsed,default_config,overall) {
     else if (t is error) t
     // A retained frame may contain fade wrappers; recurse only after time advances.
     else if (a!=null and b!=null and retained_key(a)!=null and t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
-        *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
+        *:map([for (key,value in map(b) where ((starts_with(string(key),"data-chart-") or string(key)=="data-focus-key") ^ { false }))
             for (part in [string(key),value]) part])},content(a)) else a
     else if (container and (a==null or a is element and name(a)==name(b))) (
         let attrs=if (a==null) map(b) else attributes_between(a,b,t,0.5,default_config),
@@ -265,7 +265,7 @@ fn sample_node(a,b,elapsed,default_config,overall) {
     else if (a==null) if (own==null) b else if (t>=1) b else transition(b,config,phase,t)
     else if (b==null) if (own==null or t>=1) null else if (t<=0 and a.inert=="") a else transition(a,config,phase,t)
     else if (t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
-        *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
+        *:map([for (key,value in map(b) where ((starts_with(string(key),"data-chart-") or string(key)=="data-focus-key") ^ { false }))
             for (part in [string(key),value]) part])},content(a)) else a else if (t>=1) b
     else if (not (a is element and b is element)) if (a==b or t>=0.5) b else a
     else if (not tick_label and (config.type=="fade" or name(a)=='text' and content(a)!=content(b))) crossfade(a,b,t)
@@ -275,9 +275,9 @@ fn sample_node(a,b,elapsed,default_config,overall) {
         let path=if (config.type=="morph" and geometric and (name(a)=='path' or name(a)!=name(b))) morph(a,b,t,config.fallback) else null;
         let attrs=attributes_between(a,b,t,boundary,default_config);
         let paints=[for (key in ["fill","stroke"],let aa=resource(default_config.source_resources,a[key]),
-            let bb=resource(default_config.target_resources,b[key]) where a[key]!=b[key] and compatible_paint(aa,bb))
+            let bb=resource(default_config.target_resources,b[key]) where ((a[key]!=b[key] and compatible_paint(aa,bb)) ^ { false }))
             svg.rebuild(name(bb),{*:attributes_between(aa,bb,t,0.5),id:paint_id(aa,bb,t)},
-                [for (i,stop in content(bb)) <stop *:attributes_between(content(aa)[i],stop,t,0.5)>])];
+                [for (i,stop in ((content(bb)) ^ { [] })) <stop *:attributes_between(content(aa)[i],stop,t,0.5)>])];
         let incompatible_paint=any([for (key in ["fill","stroke","stop-color"] where b[key]!=null and a[key]!=null and a[key]!=b[key]) attrs[key]==null]);
         // tick strings switch atomically; overlaying old/new digits makes guides unreadable.
         let children=if (tick_label) (if (t<boundary) content(a) else content(b)) else children_between(a,b,elapsed,default_config,overall);
@@ -291,7 +291,7 @@ fn sample_node(a,b,elapsed,default_config,overall) {
         }
     }
 }
-pub fn sample(previous, target, elapsed, options = {}) {
+pub fn sample(previous, target, elapsed, options = {}) any^ {
     let duration=if (options.duration!=null) options.duration else 300.0;
     let old_resources=resources(previous);let new_resources=resources(target);
     let config={type:"morph",duration:duration,delay:0.0,easing:options.easing,fallback:options.fallback,timeline:options.timeline,
@@ -306,7 +306,7 @@ pub fn sample(previous, target, elapsed, options = {}) {
     }
 }
 
-fn refine_states(node) {
+fn refine_states(node) any^ {
     if (not (node is element)) node else {
         let children=content(node) |> refine_states(~);
         let failure=util.first_error(children);
@@ -317,7 +317,7 @@ fn refine_states(node) {
 }
 pub fn duration(image) => if (not (image is element)) 0.0 else max([0.0,
     for (phase in phases,let config=metadata(image)[phase] where config!=null) config.delay+config.duration,
-    for (child in content(image)) duration(child)])
+    for (child in ((content(image)) ^ { [] })) duration(child)])
 pub fn geometry_signature(image) => if (not (image is element)) image else [name(image),
-    map([for (key,value in map(image) where contains(["x","y","x1","x2","y1","y2","cx","cy","r","rx","ry","width","height","d","points","transform","viewBox","font-size","text-anchor"],string(key)))
+    map([for (key,value in map(image) where ((contains(["x","y","x1","x2","y1","y2","cx","cy","r","rx","ry","width","height","d","points","transform","viewBox","font-size","text-anchor"],string(key))) ^ { false }))
         for (part in [string(key),value]) part]),content(image) |> geometry_signature(~)]

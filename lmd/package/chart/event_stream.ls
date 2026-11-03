@@ -22,7 +22,7 @@ fn split_parts(text, separator = ",") {
     [for (i, begin in [0, for (cut in cuts) cut + 1]) trim(slice(text, begin, ends[i]))]
 }
 
-pub fn lifecycle(stream) {
+pub fn lifecycle(stream) any^ {
     if (stream is array) {
         let lifecycles=[for (part in stream) lifecycle(part)];
         let failure=util.first_error(lifecycles);
@@ -40,7 +40,7 @@ pub fn lifecycle(stream) {
     } else {start: if (stream != null) stream else "pointerdown", end: "pointerup", move: "pointermove"}
 }
 
-fn atom(text) {
+fn atom(text) any^ {
     let raw = trim(text);
     let consume = ends_with(raw, "!");
     let source = if (consume) slice(raw, 0, len(raw) - 1) else raw;
@@ -54,7 +54,7 @@ fn atom(text) {
     else {type: origin[len(origin) - 1], filter: filter, consume: consume}
 }
 
-pub fn validate(stream, bindings = null) {
+pub fn validate(stream, bindings = null) any^ {
     if (stream == null or stream == false or stream == true) null
     else if (stream is array) util.first_error([for (part in stream) validate(part, bindings)])
     else if (stream is string and starts_with(trim(stream), "[") or stream.between != null) {
@@ -69,7 +69,7 @@ pub fn validate(stream, bindings = null) {
         else if (parsed.source != null and not contains(["view", "window"], parsed.source))
             error("chart: event source must be view or window")
         else if (parsed.throttle != null or parsed.debounce != null) error("chart: timed event streams are not supported")
-        else util.first_error([for (filter in (if (parsed.filter is array) parsed.filter else [parsed.filter]) where filter != null)
+        else util.first_error([for (filter in (((if (parsed.filter is array) parsed.filter else [parsed.filter])) ^ { [] }) where filter != null)
             expr.compile(filter, {*:parse.attributes(bindings), event: {}})])
     }
 }
@@ -78,14 +78,14 @@ fn event_kind(expected, actual) => expected == actual or
     (expected == "pointerover" and actual == "mouseover") or (expected == "pointerout" and actual == "mouseout") or
     (expected == "pointerenter" and actual == "mouseenter") or (expected == "pointerleave" and actual == "mouseleave")
 
-pub fn matches(stream, event, bindings = null) {
+pub fn matches(stream, event, bindings = null) any^ {
     if (stream == false or stream == null) false
     else if (stream is array) any([for (part in stream) matches(part, event, bindings)])
     else if (stream is string and len(split_parts(stream)) > 1) any([for (part in split_parts(stream)) matches(part, event, bindings)])
     else {
         let parsed = if (stream is string) atom(stream) else stream;
         event_kind(parsed.type, event.type) and
-            all([for (filter in (if (parsed.filter is array) parsed.filter else [parsed.filter]) where filter != null)
+            all([for (filter in (((if (parsed.filter is array) parsed.filter else [parsed.filter])) ^ { [] }) where filter != null)
                 expr.test(expr.compile(filter, {*:parse.attributes(bindings), event: event}), event.row)])
     }
 }

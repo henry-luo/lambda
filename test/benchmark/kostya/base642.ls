@@ -12,7 +12,7 @@ let TABLE: string[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
              "0","1","2","3","4","5","6","7","8","9","+","/"]
 
 // Encode using integer array of byte values
-fn b64_encode(bytes: int[], num_bytes: int) string {
+fn b64_encode(bytes: int[], num_bytes: int) string^ {
     var result: string = ""
     var i: int = 0
     while (i + 2 < num_bytes) {
@@ -56,14 +56,14 @@ pn main() {
     // Create input: 10000 bytes all = 97 ('a')
     let num_bytes: int = 10000
     // This buffer crosses b64_encode's checked int[] parameter boundary.
-    var bytes: int[] = fill(num_bytes, 97)
+    var bytes: int[] = fill(num_bytes, 97)^
 
     var encoded: string = ""
     var decoded_len: int = 0
 
     var iter: int = 0
     while (iter < 100) {
-        encoded = b64_encode(bytes, num_bytes)
+        encoded = b64_encode(bytes, num_bytes)^
         decoded_len = b64_decode_len(encoded)
         iter = iter + 1
     }

@@ -12,7 +12,7 @@ import vtt: lambda.archive.vtt
 let SITE = "test/lambda/archive/site/"
 
 // the reassembled file's bytes are the parts' bytes, in order
-pn same_as(path, parts) bool {
+pn same_as(path, parts) bool^ {
     var want = null
     for (p in parts) {
         let b = input(SITE ++ p, 'binary')^
@@ -41,7 +41,7 @@ pn main() {
     if (exists(root)) io.delete(root)^
     let site = "file://" ++ sys.proc.self.cwd# ++ "/" ++ SITE
     let lib = archive.library(root, {config: {defaults: {per_host_delay_ms: 0}}})^
-    let dir_of = (s) => root ++ "/snapshots/" ++ s.id
+    let dir_of = (s) any^ => root ++ "/snapshots/" ++ s.id
     let c = start(collect)
     let stream = archive.add(lib, site ++ "stream.html", {kind: "video", progress: pn (m) => { send(c, m)^ }})^
     send(c, {type: 'stop', reply: self()})^
@@ -69,8 +69,8 @@ pn main() {
 
     let results = [
      // the parsers on their own (fn): variant ranking under the cap, implied byte-range offsets
-     [for (v in hls.ranked(hls.variants(input(SITE ++ "hls/fmp4/master.m3u8", 'text')^, site), 1080)) v.height] == [1080, 720, 360] and
-        [for (s in hls.media(input(SITE ++ "hls/range/index.m3u8", 'text')^, site).segments) s.range.start] == [120, 420, 770],
+     [for (v in hls.ranked(hls.variants(input(SITE ++ "hls/fmp4/master.m3u8", 'text')^, site), 1080)^) v.height] == [1080, 720, 360] and
+        [for (s in hls.media(input(SITE ++ "hls/range/index.m3u8", 'text')^, site)^.segments) s.range.start] == [120, 420, 770],
      vtt.transcript(input(SITE ++ "media/clip.en.vtt", 'text')^) ==
         "The tide comes in over the old pier.\nGulls circle the lamp house.\nBy noon the harbour is quiet again.",
      // fMP4 at 1080p: the init map then four segments, its English subtitles, the poster

@@ -25,7 +25,7 @@ pub fn original_bytes(session) binary^ {
     if (session.doc != session.original) raise error("image.original_bytes: document changed")
     else {
         let sources = if (img.assets(session.original) == null) [] else
-            [for (asset in content(img.assets(session.original)) where asset.id == "source") asset]
+            [for (asset in ((content(img.assets(session.original))) ^ { [] }) where asset.id == "source") asset]
         if (len(sources) != 1 or not (sources[0].data is binary))
             raise error("image.original_bytes: captured source is unavailable")
         else sources[0].data

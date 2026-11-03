@@ -2,8 +2,8 @@ import chart: lambda.chart.chart
 import hierarchy: lambda.chart.hierarchy
 import util: lambda.chart.util
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn classes(node, label) => elements(node) |: ~.class == label
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn classes(node, label) any^ => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
 let data = [{id: "root", value: 999}, {id: "A", parent: "root", value: 3}, {id: "B", parent: "root", value: 1}];
 let flat = slice(data, 1, 3) |> {*:~, parent: null};

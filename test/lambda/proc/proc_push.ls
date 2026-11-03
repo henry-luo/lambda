@@ -5,24 +5,24 @@
 // Grow an empty array and read back
 pn t_grow() {
     var v = []
-    for i in 0 to 9 { push(v, i * i) }
+    for i in 0 to 9 { push(v, i * i)^ }
     print("grow: len=" ++ (len(v)) ++ " v0=" ++ (int(v[0])) ++ " v9=" ++ (int(v[9])) ++ "\n")
 }
 
 // push maps/objects, read fields back
 pn t_maps() {
     var w = []
-    push(w, {name: "a", val: 10})
-    push(w, {name: "b", val: 20})
-    push(w, {name: "c", val: 30})
+    push(w, {name: "a", val: 10})^
+    push(w, {name: "b", val: 20})^
+    push(w, {name: "c", val: 30})^
     print("maps: len=" ++ (len(w)) ++ " w1.name=" ++ (w[1]).name ++ " w2.val=" ++ (int((w[2]).val)) ++ "\n")
 }
 
 // push an array value — appended as a single element (no flattening)
 pn t_nested() {
     var z = []
-    push(z, [1, 2, 3])
-    push(z, [4, 5])
+    push(z, [1, 2, 3])^
+    push(z, [4, 5])^
     print("nested: len=" ++ (len(z)) ++ " z0.len=" ++ (len(z[0])) ++ " z1.len=" ++ (len(z[1])) ++ "\n")
 }
 
@@ -41,16 +41,16 @@ pn t_field() {
 // many appends (stress the doubling growth)
 pn t_stress() {
     var v = []
-    for i in 0 to 999 { push(v, i) }
+    for i in 0 to 999 { push(v, i)^ }
     var sum = 0
     for i in 0 to 999 { sum = sum + int(v[i]) }
     print("stress: len=" ++ (len(v)) ++ " sum=" ++ (sum) ++ "\n")
 }
 
 pn main() {
-    t_grow()
-    t_maps()
-    t_nested()
+    t_grow()^
+    t_maps()^
+    t_nested()^
     t_field()
     t_stress()
 }

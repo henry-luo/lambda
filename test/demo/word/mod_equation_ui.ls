@@ -15,7 +15,7 @@ fn structure_icon(s) {
         <rect x:"2",y:"3",width:"36",height:"31",rx:"5",fill:p.wash>
         <text x:"20",y:"25",'text-anchor':"middle",'font-family':"Georgia, serif",'font-size':if (len(s.glyph)>2) 20 else 27,fill:p.ink,s.glyph>>
 }
-fn thumbnail(source) {
+fn thumbnail(source) any^ {
     let p = equation.render({*:equation.defaults,source:source,size:20}) ^ {null};
     if (p==null) null else <img src:objects.source(p.element)^,alt:source>
 }

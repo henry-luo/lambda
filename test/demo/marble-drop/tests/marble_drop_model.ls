@@ -1,10 +1,10 @@
 import game: ~~.mod_model
 import sound: ~~.mod_sound
 
-fn advance(st, count = 100) => reduce([st,*[for (i in 1 to count) i]],(s,unused)=>game.tick(s))
-fn send(st, inlet, color) => advance(game.drop(st,inlet,color))
-fn run_plan(st, plan) => reduce([st,*plan],(s,m)=>send(s,m.funnel,m.color))
-fn before_arrival(st, node, budget = 200) {
+fn advance(st, count = 100) => reduce([st,*[for (i in 1 to count) i]],(s,unused)any^ =>game.tick(s))
+fn send(st, inlet, color) any^ => advance(game.drop(st,inlet,color))
+fn run_plan(st, plan) => reduce([st,*plan],(s,m)any^ =>send(s,m.funnel,m.color))
+fn before_arrival(st, node, budget = 200) any^ {
     let next = game.tick(st)
     if (budget == 0 or (st.active.to == node and
         (next.active == null or next.active.from != st.active.from))) st
@@ -71,7 +71,7 @@ let solutions = [for (i in 0 to len(game.LEVELS)-1) {
     let plan = game.solve(start)
     let done = run_plan(start,plan)
     {puzzle:i+1, solved:done.mode == "won", par:done.moves == game.level(start).par,
-        clean:done.losses == 0, stock:all([for (v in done.stock) v >= 0]), medal:done.medals[i] == 3}
+        clean:done.losses == 0, stock:all([for (v in ((done.stock) ^ { [] })) v >= 0]), medal:done.medals[i] == 3}
 }]
 solutions
 {

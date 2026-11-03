@@ -70,7 +70,7 @@ The CLI entry decides which path runs. `lambda script.ls` runs the script as a f
 
 ## 2. The procedural / IO builtins (`lambda-proc.cpp`)
 
-`lambda-proc.cpp` is the home of the `pn_*` builtins — the procedures a script reaches through `print`, `output`, `fetch`, `cmd`, the `io.*` module, and `clock`. They are registered as `SYSPROC_*` / side-effect rows in `sys_func_defs[]` (`sys_func_registry.c`), most flagged `can_raise` and returning a `RetItem` so an IO failure propagates as an error through the `T^E` return machinery ([LR_10 — Error Handling]). Under **D5.4.1–D5.4.4**, effectful paths read the active owner’s `Runtime::dry_run` through `lambda_dry_run_enabled()`; when set, each IO procedure returns a fabricated result (`dry_run_fabricated_output`/`_fetch`/`_cmd`, `:36`–`:52`) instead of touching the filesystem or network, so fuzz/test runs still exercise the result-processing code paths without side effects.
+`lambda-proc.cpp` is the home of the `pn_*` builtins — the procedures a script reaches through `print`, `output`, `fetch`, `cmd`, the `io.*` module, and `clock`. They are registered as `SYSPROC_*` / side-effect rows in `sys_func_defs[]` (`sys_func_registry.c`), most flagged `can_raise` and returning a `RetItem` so an IO failure propagates as an error through the `T^` return machinery ([LR_10 — Error Handling]). Under **D5.4.1–D5.4.4**, effectful paths read the active owner’s `Runtime::dry_run` through `lambda_dry_run_enabled()`; when set, each IO procedure returns a fabricated result (`dry_run_fabricated_output`/`_fetch`/`_cmd`, `:36`–`:52`) instead of touching the filesystem or network, so fuzz/test runs still exercise the result-processing code paths without side effects.
 
 - **`pn_print`** (`:56`) — the procedural `print()`: stringifies the Item via `fn_string` and writes it to stdout. It is the one sanctioned `printf` in the runtime (annotated `PRINTF_OK`, `:61`), an explicit exception to the project's `log_*`-only rule, because `print` *is* the user-facing output channel. Returns `ItemNull`.
 - **`pn_emit`** — dispatches a custom event through the lower-owned
@@ -115,7 +115,7 @@ position (S7.6.1v9, S7.6.7v5). `is_statement` retains the procedure fault
 regime independently of result production. `validate_handler_await_node`
 still rejects a potentially suspending operand without that procedure
 classification. M1 qualification is recorded in
-[the error-handling plan](../../../vibe/impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
+[the error-handling plan](<../../../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>).
 
 `concurrency_js.cpp` is the JS membrane. A `pn` that `wait`s on a JavaScript Promise registers two reactions and parks through `lambda_task_suspend` (`lambda_wait_js_promise`). The reaction resumes it with the fulfilment, or with the rejection converted to a Lambda error. A Lambda handle can be observed as a Promise through `toPromise`, and module namespaces wrap every exported `pn` as a Promise-returning JavaScript function that starts it as a fresh task. Both sides share the same scheduler and libuv loop; no exception representation crosses the boundary.
 

@@ -1,13 +1,13 @@
 import model: lambda.graph.model
 import schema: lambda.graph.schema
 
-fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+fn children(value, wanted) any^ => [
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
-fn property_lists(value) => [
-  for (group in children(value, "properties")) [
-    for (entry in model.element_children(group))
+fn property_lists(value) any^ => [
+  for (group in ((children(value, "properties")) ^ { [] })) [
+    for (entry in ((model.element_children(group)) ^ { [] }))
       [entry.name, entry.value, entry["value-source-kind"],
         entry["source-start"] < entry["source-end"]]
   ]
@@ -27,17 +27,17 @@ let id_nodes = children(ids, "node")
   header: [graph.id, graph.directed, graph.strict, graph["ir-stage"],
     graph["source-kind"]],
   order: [for (child in direct) model.tag(child)],
-  defaults: [for (value in children(graph, "dot-attr-statement"))
+  defaults: [for (value in ((children(graph, "dot-attr-statement")) ^ { [] }))
     [value["target-kind"], property_lists(value)]],
-  nodes: [for (value in children(graph, "node"))
+  nodes: [for (value in ((children(graph, "node")) ^ { [] }))
     [value.id, value["source-kind"], value.port, value.compass, property_lists(value)]],
   edge: {
     id: edge.id,
-    endpoints: [for (value in children(edge, "dot-endpoint"))
+    endpoints: [for (value in ((children(edge, "dot-endpoint")) ^ { [] }))
       [value.kind, value.id, value.port, value.compass, value.operator]],
     properties: property_lists(edge)
   },
-  assignment: [for (value in children(graph, "dot-assignment"))
+  assignment: [for (value in ((children(graph, "dot-assignment")) ^ { [] }))
     [value.name, value.value]],
   schema_codes: [for (value in schema.validate(graph)) value.code],
   recovery_codes: [for (value in model.diagnostics(recovered)) value.code],

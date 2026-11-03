@@ -1,8 +1,8 @@
 import s: lambda.scene3d
 import o: lambda.scene3d.outdoor
-fn stage(children) element => s.scene([s.camera(),*children])
+fn stage(children) element^ => s.scene([s.camera(),*children])
 fn bad(children) bool => (s.validate(stage(children)) ^ {false}) == false
-fn export_error(material) => format(stage([s.mesh(s.box(),material)]),'gltf') ^ {^.message}
+fn export_error(material) any^ => format(stage([s.mesh(s.box(),material)]),'gltf') ^ {^.message}
 let leaf=o.foliage({id:"leaf",'wind-strength':0.2})
 let water=o.water(0.4,{id:"water"});
 [

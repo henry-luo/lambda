@@ -7,14 +7,14 @@ import presets: ~~.mod_shape_presets
 
 pub let styles = presets.styles
 pub let colors = presets.colors
-pub fn describe(n) {
+pub fn describe(n) any^ {
     let p = shapes.settings(n)
     if (p!=null) {kind:"shape",values:p} else {
         let a = art.settings(n)
         if (a==null) null else {kind:"wordart",values:a}
     }
 }
-pub fn draft_values(editor,draft) => if (draft.revision==editor.model_revision and draft.path==image.selected(editor).path)
+pub fn draft_values(editor,draft) any^ => if (draft.revision==editor.model_revision and draft.path==image.selected(editor).path)
     draft.values or {} else {}
 pub fn transaction(editor,params) map^ {
     let selected = image.selected(editor)
@@ -23,7 +23,7 @@ pub fn transaction(editor,params) map^ {
     let values = if (params.preset!=null and preset!=null) {*:preset.values,dash:"solid",effect:"none",fill_style:"solid",opacity:100} else params.values
     if (item==null) raise error("Word: select a shape or Word Art first")
     else if (params.preset!=null and (preset==null or item.kind!="shape")) raise error("Word: choose a supported shape style")
-    else if (not (values is map) or any([for (key,value in values) not contains([for (k,v in item.values) string(k)],string(key))]))
+    else if (not (values is map) or any([for (key,value in values) not contains([for (k,v in ((item.values) ^ { [] })) string(k)],string(key))]))
         raise error("Word: choose a supported formatting property")
     else {
         let p = {*:item.values,*:values}

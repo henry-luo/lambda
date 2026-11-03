@@ -5,26 +5,26 @@
 pn g(x: int[]) { len(x) }
 pn main() {
   var a = [1, 2, 3]
-  push(a, 4)
+  push(a, 4)^
   var b = [1, 2, 3]
-  push(b, "s")
+  push(b, "s")^
   var c = [1, 2, 3]
-  push(c, 1.5)
+  push(c, 1.5)^
   var d = [1, 2]
-  push(d, (7, 8))
+  push(d, (7, 8))^
   var e = [1, 2]
-  push(e, ())
+  push(e, ())^
   var f = [1.5, 2.5]
-  push(f, 3.5)
+  push(f, 3.5)^
   var h = [true, false]
-  push(h, true)
+  push(h, true)^
   var u = [1, 2, 3]
   g(u)
-  push(u, "s")
+  push(u, "s")^
   var a0 = [1, 2, 3]
   let snap = a0
-  push(a0, 9)
+  push(a0, 9)^
   var big = [for (i in 1 to 20) i]
-  push(big, 21)
+  push(big, 21)^
   print([a, b, c, d, e, f, h, u, a0, snap, len(big), big[20]])
 }

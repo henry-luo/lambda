@@ -5,13 +5,13 @@ pn compare_neighbors(values: float[], index: int) {
     print([left != right, left == right]); print("\n")
 }
 
-pn positive(values: float[], index: int) bool {
+pn positive(values: float[], index: int) bool^ {
     var value: float = values[index]
     return value > 0.0
 }
 
-pn classify(values: float[], index: int) int {
-    if (positive(values, index)) { return 1 }
+pn classify(values: float[], index: int) int^ {
+    if (positive(values, index)^) { return 1 }
     return 0
 }
 

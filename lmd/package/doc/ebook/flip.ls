@@ -12,11 +12,11 @@ import dom
 
 fn sub(a,b) => {x:a.x-b.x,y:a.y-b.y}
 fn dot(a,b) => a.x*b.x + a.y*b.y
-fn side(p,line) => dot(sub(p,line.m),line.n)
+fn side(p,line) any^ => dot(sub(p,line.m),line.n)
 fn rect(x0,x1,h) => [{x:x0,y:0.0},{x:x1,y:0.0},{x:x1,y:h},{x:x0,y:h}]
 
 // The part of a convex polygon where side(p) <= 0 (Sutherland–Hodgman, one edge).
-fn edge(a,b,line) => (let fa = side(a,line), let fb = side(b,line),
+fn edge(a,b,line) any^ => (let fa = side(a,line), let fb = side(b,line),
     (if (fa <= 0) [a] else []) ++ (if ((fa <= 0) != (fb <= 0)) (let t = fa/(fa-fb), [{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t}]) else []))
 fn cut(poly,line) => (let k = len(poly),
     [for (kept in [for (i in 0 to k-1) edge(poly[i],poly[(i+1)%k],line)], q in kept) q])
@@ -31,7 +31,7 @@ fn reflect(line) => (let n = line.n, let k = 2.0*dot(line.m,n),
 let strip_half = 2000.0
 fn strip(m,n) => {a:n.x,b:n.y,c:-n.y,d:n.x,e:m.x+n.y*strip_half,f:m.y-n.x*strip_half}
 
-fn num(x) => string(round(x*100.0)/100.0)
+fn num(x) any^ => string(round(x*100.0)/100.0)
 fn css_matrix(m) => "matrix(" ++ join([for (k in ["a","b","c","d","e","f"]) num(m[k])],",") ++ ")"
 fn css_polygon(poly) => if (len(poly) < 3) "polygon(0px 0px,0px 0px,0px 0px)"
     else "polygon(" ++ join([for (p in poly) num(p.x) ++ "px " ++ num(p.y) ++ "px"],",") ++ ")"
@@ -98,10 +98,10 @@ pn style(node,css) { if (node != null) dom.set_attribute(node,"style",css) }
 pub pn paint(host,f,way,p) {
     let s = mirrored(mirror(f,way),fold(f,p))
     let width = "width:" ++ num(s.shade) ++ "px;"
-    style(dom.query_selector(host,".ebook-turn-page"),"clip-path:" ++ css_polygon(s.leaf))
-    style(dom.query_selector(host,".ebook-turn-back"),"transform:" ++ css_matrix(s.back) ++ ";clip-path:" ++ css_polygon(s.back_clip))
-    style(dom.query_selector(host,".ebook-turn-back .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.back_shade))
-    style(dom.query_selector(host,".ebook-flip-cast"),"clip-path:" ++ css_polygon(s.cast) ++ ";opacity:" ++ num(s.strength))
+    style(dom.query_selector(host,".ebook-turn-page"),"clip-path:" ++ css_polygon(s.leaf))^
+    style(dom.query_selector(host,".ebook-turn-back"),"transform:" ++ css_matrix(s.back) ++ ";clip-path:" ++ css_polygon(s.back_clip))^
+    style(dom.query_selector(host,".ebook-turn-back .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.back_shade))^
+    style(dom.query_selector(host,".ebook-flip-cast"),"clip-path:" ++ css_polygon(s.cast) ++ ";opacity:" ++ num(s.strength))^
     style(dom.query_selector(host,".ebook-flip-cast .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.cast_shade))
 }
 

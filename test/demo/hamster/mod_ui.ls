@@ -54,19 +54,19 @@ fn item_icon(kind,color) => <svg viewBox:"0 0 64 48",'aria-hidden':"true",
 pub fn item_palette() => [for (entry in items.catalog)
     <button id:"item-" ++ entry.kind,type:"button",class:"module-card",'data-item':entry.kind,'aria-pressed':"false",title:entry.note,
         (item_icon(entry.kind,entry.color));<span entry.title><small entry.tag>>]
-pub fn furnishings(st) => (let room = cage.lookup(st.modules,st.selected),let contents = items.contents(room),
+pub fn furnishings(st) any^ => (let room = cage.lookup(st.modules,st.selected),let contents = items.contents(room),
     if (len(contents) == 0) [<p class:"hint","No furnishings here. Choose one from the Furnishings tab, then click this room.">]
     else [for (kind in contents) <div class:"furnishing-row",<span items.entry(kind).title>;
         (button("remove-item-" ++ kind,"Remove",{'data-remove-item':kind,'aria-label':"Remove " ++ lower(items.entry(kind).title)}))>])
 pub fn cell_id(x,z) => "cell-" ++ string(x+2) ++ "-" ++ string(z+2)
-pub fn grid(st) => [for (z in -2 to 2) for (x in -2 to 2,let m = cage.at(st.modules,x,z,st.level))
+pub fn grid(st) any^ => [for (z in -2 to 2) for (x in -2 to 2,let m = cage.at(st.modules,x,z,st.level))
     <button id:cell_id(x,z),type:"button",class:if (m == null) "grid-cell empty" else "grid-cell filled",
         'data-x':string(x),'data-z':string(z),'data-module':if (m == null) "" else m.id,
         'aria-label':if (m == null) "Build at " ++ string(x) ++ ", " ++ string(z) else cage.entry(m.kind).title ++ " at " ++ string(x) ++ ", " ++ string(z),
         'aria-pressed':string(m != null and m.id == st.selected),
         style:if (m == null) "" else "background:" ++ cage.entry(m.kind).color,
         if (m == null) <span "+"> else <span class:"cell-kind",upper(slice(m.kind,0,3))>;
-        if (m != null) for (side in 0 to 3 where cage.open_side(st.modules,m,side)) <i class:"port port-" ++ string(side)>>]
+        if (m != null) for (side in 0 to 3 where ((cage.open_side(st.modules,m,side)) ^ { false })) <i class:"port port-" ++ string(side)>>]
 pub fn residents(st) => [for (h in st.pets)
     <button id:"choose-" ++ h.id,type:"button",class:"resident",'data-pet':h.id,'aria-pressed':string(st.pet_selected == h.id),
         <span class:"portrait",portrait(h.coat)>

@@ -24,9 +24,9 @@ let tex = "\\documentclass{article}\n\\usepackage{pgfplots}\n" ++
     "\\begin{document}\n" ++ plot_source ++ "\n\\end{document}"
 let doc = parse(tex, {type: "latex"})^
 let documents = [for (child in doc
-    where child is element and string(name(child)) == "document") child]
+    where ((child is element and string(name(child)) == "document") ^ { false })) child]
 let islands = [for (child in documents[0]
-    where child is element and string(name(child)) == "tikzpicture") child]
+    where ((child is element and string(name(child)) == "tikzpicture") ^ { false })) child]
 let island = islands[0]
 let latex_html = latex.render_to_html(doc, null)
 let roundtrip = format(doc, 'latex');

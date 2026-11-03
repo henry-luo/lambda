@@ -1,0 +1,1 @@
+3d-raytrace: PASS (pixels=7200)

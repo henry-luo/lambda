@@ -16,7 +16,7 @@ pn concat_typed_array() {
     print(len(again)); print(" ")
     print(again[4].v); print(" ")
     print(incompatible[2]); print("\n")
-    var changed: SnapshotChild[] = extended
+    var changed: SnapshotChild[] = extended^
     changed[0].v = 9
     print(base[0].v); print(" ")
     print(extended[0].v); print(" ")
@@ -26,7 +26,7 @@ pn concat_typed_array() {
 pn consume_open_array() {
     var changes: array = []
     changes = changes ++ [{v: 1}]
-    let before: array = changes
+    let before: array = changes^
     changes = changes ++ [{v: 2}]
     let first = changes[0].v
     changes = changes ++ changes
@@ -61,4 +61,4 @@ pn consume_open_array() {
     print(saved_record.child.v); print("\n")
 }
 
-pn main() { consume_open_array(); concat_typed_array() }
+pn main() { consume_open_array()^; concat_typed_array() }

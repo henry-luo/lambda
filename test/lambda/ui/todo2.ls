@@ -136,7 +136,7 @@ on cut(evt) {
 }
 on blur(evt) {
   if (editing) {
-    if (edit_text != "" and (edit_text != ~.text or edit_notes != ~.notes)) {
+    if ((edit_text != "" and (edit_text != ~.text or edit_notes != ~.notes))^) {
       emit("update_item", {id: ~.id, text: edit_text, notes: edit_notes})
     }
     editing = false
@@ -201,7 +201,7 @@ on keydown(evt) {
       }
     }
     if (evt.key == "Enter") {
-      if (new_text != "") {
+      if ((new_text != "")^) {
         let max_id = if (len(~.items) == 0) 0 else max([for (i in ~.items) i.id])
         let next_id = max_id + 1
         let new_item = {id: next_id, text: new_text, done: false, notes: ""}
@@ -272,7 +272,7 @@ on click(evt) {
 edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", drag_item: null, drag_source: "" {
   // The error-handler migration must preserve a successful directory listing.
   let dir_listing = input(data_dir) ^ { [] }
-  let json_files = [for (f in dir_listing where ends_with(f.name, ".json")) f]
+  let json_files = [for (f in dir_listing where ((ends_with(f.name, ".json")) ^ { false })) f]
   let file_names = [for (f in json_files) replace(f.name, ".json", "")]
 
   // auto-select first file if none active
@@ -664,7 +664,7 @@ on keydown(evt) {
       }
     }
     if (evt.key == "Enter") {
-      if (new_file_name != "") {
+      if ((new_file_name != "")^) {
         let path = data_dir ++ new_file_name ++ ".json"
         let empty_data = {name: new_file_name, lists: [{name: "Tasks", items: []}]}
         output(empty_data, path, 'json') ^ { null }

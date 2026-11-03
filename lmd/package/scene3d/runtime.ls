@@ -31,15 +31,15 @@ pub pn audio_render_close(node, request) { return radiant.scene3d(node, {operati
 
 // D7.5.4/S12.1.1v3: completed PCM streams through ordinary procedural IO authority.
 pub pn audio_render_file(node, request, target) {
- let job=audio_render_snapshot(node,request)
+ let job=audio_render_snapshot(node,request)^
  if (job.state!="complete") { raise error("audio render: file output requires a completed job") }
- let header=audio_render_read(node,{session:request.session,job:request.job,format:"wav_header"})
+ let header=audio_render_read(node,{session:request.session,job:request.job,format:"wav_header"})^
  output(header.data,target)^
  var offset=0
- let frames=int(job.frames)
+ let frames=int(job.frames)^
  while (offset<frames) {
   let count=min(4096,frames-offset)
-  let chunk=audio_render_read(node,{session:request.session,job:request.job,offset:offset,frames:count})
+  let chunk=audio_render_read(node,{session:request.session,job:request.job,offset:offset,frames:count})^
   output(chunk.data,target,{mode:"append"})^
   offset=offset+count
  }

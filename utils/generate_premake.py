@@ -797,7 +797,7 @@ class PremakeGenerator:
             '            for _, option in ipairs(cfg.linkoptions) do',
             '                -- "=" separates --dynamic-list=<file> from its operand',
             '                for token in option:gmatch("[^%s,=]+") do',
-            '                    if (token:find("%.a$") or token:find("%.sym$")) and',
+            '                    if (token:find("%.a$") or token:find("%.sym$") or token:find("%.plist$")) and',
             '                            not token:find("^%-") and',
             '                            not table.contains(archives, token) then',
             '                        table.insert(archives, token)',
@@ -4070,6 +4070,12 @@ class PremakeGenerator:
             platforms_config = self.config.get('platforms', {})
             macos_config = platforms_config.get('macos', {})
             linker_flags = macos_config.get('linker_flags', [])
+            # an embedded host purpose string is required before macOS can request microphone consent.
+            info_plist = macos_config.get('info_plist')
+            if info_plist:
+                relative = os.path.relpath(info_plist, self._premake_location())
+                option = '-Wl,-sectcreate,__TEXT,__info_plist,' + relative
+                self.premake_content.append('    linkoptions { ' + json.dumps(option) + ' }')
             if linker_flags:
                 self.premake_content.append('    linkoptions {')
                 for flag in linker_flags:

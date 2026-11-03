@@ -31,7 +31,7 @@ fn stack(id, items, shown: any) element => <span class: "stack", id: id,
 // odometer digits: each cell stacks 0-9 and a blank and shows one by opacity, so numbers never relayout
 fn digit(id) element => <span class: "digit", for (k in 0 to 10)
     <span id: id ++ "-" ++ string(k), class: "glyph", style: if (k == 10) "opacity:1" else "opacity:0", if (k < 10) string(k) else " ">>
-fn odometer(id, pattern) element => <span class: "odometer", for (i, ch in split(pattern, "")) if (ch == "#") digit(id ++ "-" ++ string(i)) else <span ch>>
+fn odometer(id, pattern) element => <span class: "odometer", for (i, ch in ((split(pattern, "")) ^ { [] })) if (ch == "#") digit(id ++ "-" ++ string(i)) else <span ch>>
 
 fn callout(k) element => <div id: "callout-" ++ k.id, class: "callout",
     <div id: "callout-line-" ++ k.id, class: "callout-line">
@@ -140,7 +140,7 @@ fn operation(seq) element => <section class: "panel operation", 'aria-label': "G
                     <span id: "phase-" ++ name ++ "-" ++ string(i), class: "stack-item", style: "opacity:0", ph.caption>>>
                 <span class: "finish", per_sequence("finish", seq, (q) => q.finish)>>
             slider("scrub", "Sequence position");
-            <div class: "clock", "00:"; odometer("clock-now", "##"); " / 00:0"; per_sequence("total", seq, (q) => string(int(q.duration)))>>
+            <div class: "clock", "00:"; odometer("clock-now", "##"); " / 00:0"; per_sequence("total", seq, (q) any^ => string(int(q.duration)))>>
         <div class: "speed", <div class: "timeline-labels", <span "SPEED">>
             <div class: "speed-row", slider("speed", "Playback speed"); <span class: "speed-value", odometer("speed-value", "#.##"); "×">>>>>
 

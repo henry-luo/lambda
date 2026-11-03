@@ -247,3 +247,8 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
     if (following_context) *following_context = after_length != 0;
     return true;
 }
+
+bool layout_text_source_word_start(const unsigned char* text, size_t byte_offset) {
+    // source slices can start inside a word; UTF-8 continuation bytes cannot be CSS whitespace.
+    return byte_offset == 0 || is_space(text[byte_offset - 1]);
+}

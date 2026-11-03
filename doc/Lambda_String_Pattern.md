@@ -114,7 +114,7 @@ alternatives. `\("a" 'b')` and `\("a" | 'b')` are compile errors. A mixed-domain
 union is written between whole islands: `\("\d"+) | \('\d'+)`.
 
 The island's only binary operator is `|`. Intersect or exclude whole patterns
-with the type operators (S10.1.1v3):
+with the type operators (S10.1.1v5):
 
 ```lambda
 type AlphaWord = \("\a"+) & \("\w"+)

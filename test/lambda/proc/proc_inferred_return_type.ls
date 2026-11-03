@@ -1,5 +1,6 @@
 pn next_seed(var seed: int[]) {
-    var value: int = seed[0]
+    let initial: int = seed[0]
+    var value: int = initial^
     value = value * 1309 + 13849
     value = int(value % 65536)
     seed[0] = value

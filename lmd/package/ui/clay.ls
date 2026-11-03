@@ -11,7 +11,7 @@ import presentation: .clay.presentation
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
 pub fn component_names() array => [*catalog.kinds(),"config-provider"]
-pub fn icon_names() array => base.icon_names()
+pub fn icon_names() array^ => base.icon_names()
 pub fn palette(seed) array^ => base.palette(seed)^
 pub fn render(root) any^ => shared.render(root,"clay",["page",*component_names()])^
 pub fn page(root, options = {}) element^ {
@@ -20,7 +20,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"clay",variables,styles.css,"dtna-root clay-root")
 }
-view clay_page: <clay.page> { page(content(~),c.props(~))^ }
+view clay_page: <clay.page> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => catalog.descriptor('button',props,child)^
 pub fn button_group(props = {}, child = null) element^ => catalog.descriptor('button-group',props,child)^

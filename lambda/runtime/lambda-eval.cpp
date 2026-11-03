@@ -506,6 +506,44 @@ String *fn_strcat_many(int64_t owned, int64_t count, ...) {
     return string_buffer_join<0>(parts, (int)count, owned != 0);
 }
 
+String *fn_strcat_values(int64_t owned, int64_t count, ...) {
+    if (count < 2 || count > LAMBDA_STRING_CONCAT_MAX_PARTS) return &STR_ERROR;
+    Item incoming[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    bool converts = false;
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i++) {
+        incoming[i].item = va_arg(args, uint64_t);
+        TypeId type = get_type_id(incoming[i]);
+        converts |= type != LMD_TYPE_STRING && type != LMD_TYPE_INT;
+    }
+    va_end(args);
+    // finite integer rendering cannot collect. The join roots its sources if
+    // it allocates; only generic conversions need an additional construction frame.
+    RootSpan roots(converts ? (size_t)count : 0);
+    if (converts && !roots.valid()) return &STR_ERROR;
+    Item* values = converts ? roots.items() : incoming;
+    if (converts) memcpy(values, incoming, (size_t)count * sizeof(Item));
+    struct IntegerText { alignas(String) char bytes[sizeof(String) + PRINT_INT_VALUE_CHARS_CAP]; };
+    IntegerText text[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    String* parts[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    for (int i = 0; i < count; i++) {
+        TypeId type = get_type_id(values[i]);
+        if (type == LMD_TYPE_STRING) { parts[i] = values[i].get_safe_string(); continue; }
+        if (type == LMD_TYPE_INT) {
+            String* part = (String*)text[i].bytes;
+            part->len = (uint32_t)print_int_value_chars(part->chars, lambda_int_item_value(values[i]));
+            part->flags = 0; part->is_ascii = 1;
+            if (part->len) { parts[i] = part; continue; }
+        }
+        // formatting uses the canonical spelling (S4.1.2); original and converted
+        // heap strings stay precisely rooted across later conversions and the join.
+        parts[i] = fn_string(values[i]);
+        values[i].item = s2it(parts[i]);
+    }
+    return string_buffer_join<0>(parts, (int)count, owned != 0);
+}
+
 String *fn_string_freeze(String *str) {
     if (str && str->is_buffer) {
         // The MIR owner is about to publish this value through an ordinary
@@ -2468,7 +2506,7 @@ static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
-static Type* runtime_boundary_unwrap_type(Type* type) {
+static Type* runtime_boundary_unwrap_type(Type* type, Type** env = NULL) {
     while (type && type->type_id == LMD_TYPE_TYPE &&
             !type_is_global_meta_type(type) && type->kind == TYPE_KIND_SIMPLE) {
         // Global meta-types have only the compact prefix; no TypeType payload
@@ -2480,17 +2518,18 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_CONSTRAINED) {
         Type* base = ((TypeConstrained*)type)->base;
-        if (base) return runtime_boundary_unwrap_type(base);
+        if (base) return runtime_boundary_unwrap_type(base, env);
     }
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_BINDER) {
         Type* bound = ((TypeBinder*)type)->bound;
-        if (bound) return runtime_boundary_unwrap_type(bound);
+        if (bound) return runtime_boundary_unwrap_type(bound, env);
     }
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_BOUND_REF) {
-        Type* bound = ((TypeBoundRef*)type)->bound;
-        if (bound) return runtime_boundary_unwrap_type(bound);
+        TypeBoundRef* ref = (TypeBoundRef*)type;
+        Type* bound = env && env[ref->slot] ? env[ref->slot] : ref->bound;
+        if (bound) return runtime_boundary_unwrap_type(bound, env);
     }
     return type;
 }
@@ -2764,7 +2803,7 @@ Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
     return lambda_type_error_with_validation(actual, expected, boundary, NULL);
 }
 
-static Type* binder_narrowest_type(Item value) {
+Type* lambda_binder_value_type(Item value) {
     Type scratch = {};
     Type* narrowest = item_static_type_for_is(value, &scratch);
     if (!narrowest) return &TYPE_ANY;
@@ -2809,7 +2848,7 @@ static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
     if (!binder || !converted || !runtime_type_admit_value_env(value,
             binder->bound, env, converted)) return false;
     if (!env) return true;
-    Type* narrowest = binder_narrowest_type(*converted);
+    Type* narrowest = lambda_binder_value_type(*converted);
     Type* prior = env[binder->slot];
     // NULL is the per-invocation unbound marker. A reference resolves to its
     // declared bound until the first binder site writes the concrete type,
@@ -2845,11 +2884,10 @@ Item lambda_report_boundary_failure(Item failure, const char* binding,
 
 Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary) {
-    // Error-transparent contracts (`any`, `error`, or an explicit union) keep
-    // an incoming error value.  Plain T short-circuits it unchanged so callers
-    // retain the original diagnostic instead of receiving a misleading second
-    // type mismatch.
-    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    // Plain T preserves a prior diagnostic. Error-admitting contracts still
+    // check their alternatives under normal admission (S7.4.2v3/S11.4.6v3).
+    if (get_type_id(value) == LMD_TYPE_ERROR &&
+            lambda_boundary_preserves_error(expected)) return value;
 
     Item converted = ItemError;
     if (runtime_type_admit_value_env(value, expected, env, &converted)) {
@@ -2859,7 +2897,7 @@ Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
     // Shape/union/occurrence matching is delegated to the validator. Reuse its
     // first concrete failure here so a rejected dynamic binding identifies the
     // offending member/index instead of merely saying "got map".
-    Type* contract = runtime_boundary_unwrap_type(expected);
+    Type* contract = runtime_boundary_unwrap_type(expected, env);
     ValidationResult* validation = NULL;
     if (contract && ((contract->type_id == LMD_TYPE_TYPE &&
             (contract->kind == TYPE_KIND_BINARY || contract->kind == TYPE_KIND_UNARY)) ||
@@ -2867,7 +2905,7 @@ Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
             contract->type_id == LMD_TYPE_ELEMENT)) {
         (void)runtime_validate_value_against_type(value, contract, &validation);
     }
-    return lambda_type_error_lazy(value, expected, boundary, validation);
+    return lambda_type_error_lazy(value, contract, boundary, validation);
 }
 
 Item lambda_type_check(Item value, Type* expected, const char* boundary) {
@@ -3595,7 +3633,10 @@ static Bool virtual_map_eq(Item a_item, Item b_item, int depth, EqualityContext*
             (const void*)(uintptr_t)b_item.item)) return BOOL_FALSE;
     // Handle equality is capability identity; two empty handle carriers must
     // never collapse to structural VMap equality.
-    if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) return BOOL_FALSE;
+    if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) {
+        // S13.1.3v2: the same capability remains equal across mailbox/map copies.
+        return a_item.item == b_item.item ? BOOL_TRUE : BOOL_FALSE;
+    }
     int64_t count_a = a_root.get().vmap->vtable->count(a_root.get().vmap->data);
     int64_t count_b = native_b ? ((TypeMap*)b_root.get().map->type)->length
         : b_root.get().vmap->vtable->count(b_root.get().vmap->data);
@@ -7228,11 +7269,12 @@ static Item fn_index_select(Item source, Item index_array) {
 
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
-    // Quick null/error guard: indexing null returns null to propagate
-    // null safely through algorithms. Operations like null[field]
-    // should not crash or return a wrong result.
+    // computed error metadata uses the same member path as dot access; other
+    // keys preserve the failure (S7.4.4, S8.2.1v4, S7.9.3).
     TypeId item_type = get_type_id(item);
-    if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_ERROR) {
+    if (item_type == LMD_TYPE_ERROR) return fn_member(item, index_item);
+    if (item_is_error(index_item)) return index_item;
+    if (item_type == LMD_TYPE_NULL) {
         return ItemNull;
     }
     if (item_type == LMD_TYPE_VMAP) {
@@ -15316,6 +15358,16 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         *converted = value;
         return true;
     }
+    if (lambda_type_is_union(expected) && cow_profile_enabled())
+        g_cow_profile.union_admit_calls++;
+    if (get_type_id(value) != LMD_TYPE_ERROR && lambda_type_accepts_error(expected)) {
+        // S11.4.6v4: membership in T | E cannot bypass T's conversion/reification.
+        Type* normal = lambda_type_normal_admission_contract(
+            context ? context->pool : NULL, expected);
+        if (!normal) return false;
+        if (normal != expected)
+            return runtime_type_admit_value_env(value, normal, env, converted);
+    }
     bool binder_dependent = runtime_contract_uses_binder(expected);
     TypeId value_type = get_type_id(value);
     if (!binder_dependent && (value_type == LMD_TYPE_MAP ||
@@ -15336,9 +15388,6 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         *converted = value;
         return true;
     }
-    if (lambda_type_is_union(expected) && cow_profile_enabled())
-        g_cow_profile.union_admit_calls++;
-
     if (!binder_dependent && get_type_id(value) == LMD_TYPE_MAP && value.map &&
             lambda_type_is_union(expected)) {
         TypeMap* candidate = (TypeMap*)value.map->type;

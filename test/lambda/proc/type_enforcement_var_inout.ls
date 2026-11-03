@@ -8,6 +8,6 @@ pn birthday(var person: Person) {
 
 pn main() {
     var person: Person = {name: "Ana", age: 30}
-    birthday(person)
+    birthday(person)^
     print(person.age ++ "\n")
 }

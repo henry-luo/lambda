@@ -1,11 +1,12 @@
 // D3.3.4/S7.1.3v2: a shrinking two-index loop shares its entry extent proof.
-pn reverse_span(var values: int[], lower: int, upper: int) int[] {
+pn reverse_span(var values: int[], lower: int, upper: int) int[]^ {
     var lo: int = lower
     var hi: int = upper
-    // S7.7.2: an invalid read must end this function, not just one iteration.
+    // S7.6.3v3: explicit propagation completes this function on an invalid read.
     var saved: int = 0
     while (lo < hi) {
-        saved = values[lo]
+        let _admitted_saved_8: int = values[lo]
+        saved = _admitted_saved_8^
         values[lo] = values[hi]
         values[hi] = saved
         lo = lo + 1
@@ -14,13 +15,14 @@ pn reverse_span(var values: int[], lower: int, upper: int) int[] {
     return values
 }
 
-pn reverse_growing(var values: int[], lower: int, upper: int) int[] {
+pn reverse_growing(var values: int[], lower: int, upper: int) int[]^ {
     var lo: int = lower
     var hi: int = upper
     var saved: int = 0
     while (lo < hi) {
-        push(values, 9)
-        saved = values[lo]
+        push(values, 9)^
+        let _admitted_saved_23: int = values[lo]
+        saved = _admitted_saved_23^
         values[lo] = values[hi]
         values[hi] = saved
         lo = lo + 1

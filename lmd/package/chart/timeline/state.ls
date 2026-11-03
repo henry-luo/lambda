@@ -27,14 +27,14 @@ fn visible_neighbor(spec, current, visible) {
 }
 
 // A nested collapse returns focus to the first header that remains exposed.
-fn visible_group_header(spec, id, visible) {
+fn visible_group_header(spec, id, visible) any^ {
     if (id==null or contains(visible,id)) id else {
         let group=(spec.groups |: ~.id==id)[0];
         visible_group_header(spec,group.parent,visible)
     }
 }
 
-pub fn initial_state(spec) {
+pub fn initial_state(spec) any^ {
     let normalized=schema.validate(spec);
     if (normalized is error) normalized else initial(normalized)
 }
@@ -56,7 +56,7 @@ pub fn initial(spec) {
 }
 pub fn reconcile(spec, current) {
     let source=if (current==null) initial(spec) else current;
-    let controlled=map([for (field in fields where c.has(spec.value,field)) (field,spec.value[field])]);
+    let controlled=map([for (field in fields where ((c.has(spec.value,field)) ^ { false })) (field,spec.value[field])]);
     let merged={*:source,*:controlled};
     let indexed=spec._timeline!=null and spec.events==spec._timeline.index.events;
     let ids=if (indexed) [] else spec.events |> ~.id;
@@ -66,9 +66,9 @@ pub fn reconcile(spec, current) {
     {*:merged,active_id:active,revision:spec.source.revision,
         draft:if (source.revision!=spec.source.revision) null else merged.draft,
         edit_gesture:if (source.revision!=spec.source.revision) null else merged.edit_gesture,
-        selected_ids:[for (id in c.items(merged.selected_ids) where if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) id],
-        expanded_events:[for (id in c.items(merged.expanded_events) where if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) id],
-        collapsed_groups:[for (id in c.items(merged.collapsed_groups) where if (indexed) index.group(spec._timeline.index,id)!=null else contains(groups,id)) id]}
+        selected_ids:[for (id in ((c.items(merged.selected_ids)) ^ { [] }) where ((if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) ^ { false })) id],
+        expanded_events:[for (id in ((c.items(merged.expanded_events)) ^ { [] }) where ((if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) ^ { false })) id],
+        collapsed_groups:[for (id in ((c.items(merged.collapsed_groups)) ^ { [] }) where ((if (indexed) index.group(spec._timeline.index,id)!=null else contains(groups,id)) ^ { false })) id]}
 }
 
 fn notification(spec, action, field, old, value, revision) => {
@@ -86,7 +86,7 @@ fn change(current, field, value, spec, action, context) {
         notifications:if (current[field]!=value) [notice] else []}
 }
 pub fn result(current) => {state:current,requests:[],notifications:[]}
-fn playback_change(current, action, spec, context) {
+fn playback_change(current, action, spec, context) any^ {
     let sampled=story.command(current,action,context.now,spec);
     if (sampled is error) sampled else {
         let activated=change({*:current,playback:sampled.state.playback,story_frame:sampled.state.story_frame,
@@ -94,9 +94,9 @@ fn playback_change(current, action, spec, context) {
         {*:activated,notifications:[*sampled.notifications,*activated.notifications]}
     }
 }
-fn toggle(values, value) => if (contains(values,value)) values |: ~!=value else [*values,value]
+fn toggle(values, value) any^ => if (contains(values,value)) values |: ~!=value else [*values,value]
 
-fn activate(current, id, spec, action, context) {
+fn activate(current, id, spec, action, context) any^ {
     let changed_active=change(current,"active_id",id,spec,action,context);
     let aligned=if (changed_active.state.active_id==id and current.active_id!=id) story.align(changed_active.state,id,context.now,spec) else changed_active.state;
     let aligned_state={*:changed_active.state,
@@ -119,7 +119,7 @@ fn activate(current, id, spec, action, context) {
     }
 }
 
-fn visibility_change(current, field, value, spec, action, context) {
+fn visibility_change(current, field, value, spec, action, context) any^ {
     let changed=change(current,field,value,spec,action,context);
     let shown=story.items(spec,changed.state) |> ~.id;
     let hidden=current.active_id!=null and not contains(shown,current.active_id);
@@ -141,7 +141,7 @@ fn visibility_change(current, field, value, spec, action, context) {
         requests:[*changed.requests,*activated.requests],notifications:[*changed.notifications,*activated.notifications]}
 }
 
-fn gesture_change(current, action, spec, context) {
+fn gesture_change(current, action, spec, context) any^ {
     let plan=if (context.layout!=null) context.layout else layout.normalized(spec,context.viewport,current);
     let reduced=if (plan is error) plan else gesture.update(current,action,plan,spec);
     if (reduced is error) reduced else {
@@ -151,7 +151,7 @@ fn gesture_change(current, action, spec, context) {
     }
 }
 
-fn navigate(current, action, spec, context) {
+fn navigate(current, action, spec, context) any^ {
     let shown=layout.visible(spec,current);
     let ids=if (contains(["next_match","previous_match"],action.type)) shown.matches else story.items(spec,current) |> ~.id;
     let at=index_of(ids,current.active_id);
@@ -160,7 +160,7 @@ fn navigate(current, action, spec, context) {
         else if (at==null) 0 else min(len(ids)-1,at+1);
     activate(current,ids[index],spec,action,context)
 }
-fn select(current, action, spec, context) {
+fn select(current, action, spec, context) any^ {
     let options=spec.interaction;
     let anchor=c.option(action,"anchor_id",if (current.selection_anchor!=null) current.selection_anchor else current.active_id);
     let ordered=layout.visible(spec,current).events;
@@ -187,7 +187,7 @@ fn bounds(spec) {
     let max=if (w.max!=null) dates.normalize(w.max,spec.scale) else null;
     {min:min.value,max:max.value,min_span:w.min_span,max_span:w.max_span}
 }
-fn set_window(current, action, spec, context) {
+fn set_window(current, action, spec, context) any^ {
     let visible=current.window;
     let span=visible.to-visible.from;
     let target=if (action.type=="fit") {
@@ -212,7 +212,7 @@ fn set_window(current, action, spec, context) {
 
 
 // Source replacement and resource arrival use the same activation/selection policy.
-fn replace_source(current, action, context) {
+fn replace_source(current, action, context) any^ {
     let previous=if (context.normalized_spec!=null) context.normalized_spec else resource.normalize(context.spec,current);
     let stale=action.expected_revision!=null and action.expected_revision!=previous.source.revision;
     let spec=if (stale) previous else if (context.replacement_spec!=null) context.replacement_spec else resource.normalize(action.spec,current);
@@ -242,7 +242,7 @@ fn replace_source(current, action, context) {
         if (retired is error) retired else {
             let ready=retired.state;
             let notices=[for (field in ["active_id","selected_ids","window"] where old[field]!=ready[field] and
-                not any([for (notice in activated.notifications) notice.detail.field==field]))
+                not any([for (notice in ((activated.notifications) ^ { [] })) notice.detail.field==field]))
                     notification(spec,action,field,old[field],ready[field],spec.source.revision)];
             {state:ready,source:action.spec,normalized_spec:spec,requests:[*activated.requests,*retired.requests],
                 notifications:[*activated.notifications,*notices,*retired.notifications,
@@ -253,7 +253,7 @@ fn replace_source(current, action, context) {
     }
 }
 
-pub fn update(current, action, context) {
+pub fn update(current, action, context) any^ {
     let spec=if (context.normalized_spec!=null) context.normalized_spec else resource.normalize(context.spec,current);
     let reduced=if (spec is error) spec else reduce(current,action,{*:context,normalized_spec:spec});
     let authored=if (context.source_spec!=null) context.source_spec else if (context.spec!=null) context.spec else schema.source_record(spec);
@@ -276,7 +276,7 @@ pub fn update(current, action, context) {
     }
 }
 
-fn reduce(current, action, context) {
+fn reduce(current, action, context) any^ {
     let spec=if (context.normalized_spec!=null) context.normalized_spec else schema.validate(context.spec);
     let st=if (spec is error) spec else reconcile(spec,if (current==null) initial(spec) else current);
     let kind=c.text(action.type);

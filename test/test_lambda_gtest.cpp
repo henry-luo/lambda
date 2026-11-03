@@ -58,6 +58,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/note/tests",
     "test/demo/readability/tests",
     "test/demo/archive/tests",
+    "test/demo/chat/tests",
     "test/demo/mail/tests",
     "test/demo/greetings/tests",
     "test/demo/dreamhome/tests",
@@ -774,10 +775,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // D3.4.3v5 / D3.4.4v4: maps grow through the runtime tree from symbol
     // keys and from external parents (literal, parsed, contract, nominal,
     // retyped, element types); the parsed copy also pins LR12-39
-    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt",
-     "AST_NODE_INDEX_ASSIGN_STAM"},
-    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt",
-     "AST_NODE_INDEX_ASSIGN_STAM"},
+    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt"},
+    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt"},
     // a type definition read in a function, and a call returning a type value,
     // give that type; the JIT gave a `pub type` a module slot and unboxed a
     // type-valued call as the value its type names (`0` for `int`)
@@ -971,6 +970,21 @@ TEST(LambdaTierParityTests, ForStatementLoopHandoffResumesWalk) {
         SCOPED_TRACE(threshold);
         test_lambda_script_against_file("test/lambda/proc/for_loop_handoff.ls",
             "test/lambda/proc/for_loop_handoff.txt", true, "auto");
+    }
+}
+
+// D8.1.1v18/S7.6.3v3: a module callee uses boxed dispatch in a satellite.
+TEST(LambdaTierParityTests, PropagatedLoopCallsKeepBoxedResults) {
+    static const char* const thresholds[] = {"1", "5"};
+    ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
+    ScopedTestEnv functions("LAMBDA_FUNC_JIT_THRESHOLD", "1000000");
+    ScopedTestEnv collect("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    for (const char* threshold : thresholds) {
+        ScopedTestEnv loops("LAMBDA_LOOP_JIT_THRESHOLD", threshold);
+        SCOPED_TRACE(threshold);
+        test_lambda_script_against_file("test/lambda/proc/admission_loop_call_outcomes.ls",
+            "test/lambda/proc/admission_loop_call_outcomes.txt", true, "auto");
     }
 }
 
@@ -1307,8 +1321,12 @@ void test_lambda_proc_script_expects_error(const char* script_path) {
         << "Runtime aborted on: " << script_path;
 }
 
-TEST(LambdaNegativeTests, test_typed_array_coercion_error) {
-    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/typed_array_coercion_error.ls");
+TEST(LambdaAdmissionTests, DeferredArrayRejectionContinues) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        test_lambda_script_against_file("test/lambda/proc/deferred_array_rejection.ls",
+            "test/lambda/proc/deferred_array_rejection.txt", true, tier);
+    }
 }
 
 TEST(LambdaNegativeTests, test_type_enforcement_typed_map_write) {
@@ -1351,8 +1369,12 @@ TEST(LambdaNegativeTests, nullable_map_rejects_non_lane_value) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_map_reject_wrong_type.ls");
 }
 
-TEST(LambdaNegativeTests, nullable_index_read_rejects_plain_int) {
-    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_index_read_reject_plain_int.ls");
+TEST(LambdaAdmissionTests, DeferredAbsentReadRejectionContinues) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        test_lambda_script_against_file("test/lambda/proc/deferred_absent_rejection.ls",
+            "test/lambda/proc/deferred_absent_rejection.txt", true, tier);
+    }
 }
 
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_map) {

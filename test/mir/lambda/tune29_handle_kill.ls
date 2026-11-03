@@ -35,7 +35,7 @@ pn root_escapes(var g: Grid) Row {
 
 // killed: the root is handed to a writer while the copy is alive
 pn bump(var g: Grid) any { g.row.n = g.row.n + 100 }
-pn root_to_var(var g: Grid) int {
+pn root_to_var(var g: Grid) int^ {
     var r = g.row
     bump(g)
     r.n = r.n + 1

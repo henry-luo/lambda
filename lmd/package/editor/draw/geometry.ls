@@ -47,8 +47,8 @@ pub fn v2_dot(a, b) => a.x * b.x + a.y * b.y
 
 pub fn hypot(dx, dy) => math.sqrt(dx * dx + dy * dy)
 
-pub fn v2_len(a) => hypot(a.x, a.y)
-pub fn v2_dist(a, b) => hypot(a.x - b.x, a.y - b.y)
+pub fn v2_len(a) any^ => hypot(a.x, a.y)
+pub fn v2_dist(a, b) any^ => hypot(a.x - b.x, a.y - b.y)
 
 // ---------------------------------------------------------------------------
 // Rect predicates  (geom.ts)
@@ -111,21 +111,21 @@ pub fn point_to_segment_dist_sq(p, a, b) {
 
 pub fn point_to_segment_dist(p, a, b) => math.sqrt(point_to_segment_dist_sq(p, a, b))
 
-fn near_polyline_at(p, poly, tol_sq, i, n) {
+fn near_polyline_at(p, poly, tol_sq, i, n) any^ {
   if (i + 1 >= n) { false }
   else if (point_to_segment_dist_sq(p, poly[i], poly[i + 1]) <= tol_sq) { true }
   else { near_polyline_at(p, poly, tol_sq, i + 1, n) }
 }
 
 // True iff p is within `tolerance` of the polyline.
-pub fn point_near_polyline(p, poly, tolerance) =>
+pub fn point_near_polyline(p, poly, tolerance) any^ =>
   near_polyline_at(p, poly, tolerance * tolerance, 0, len(poly))
 
 // ---------------------------------------------------------------------------
 // Polygon (closed): even-odd point-in-polygon  (geom.ts)
 // ---------------------------------------------------------------------------
 
-fn pip_at(poly, p, i, j, n, inside) {
+fn pip_at(poly, p, i, j, n, inside) any^ {
   if (i >= n) { inside }
   else {
     let a = poly[i]
@@ -139,7 +139,7 @@ fn pip_at(poly, p, i, j, n, inside) {
   }
 }
 
-pub fn point_in_polygon(p, poly) =>
+pub fn point_in_polygon(p, poly) any^ =>
   if (len(poly) < 3) { false } else { pip_at(poly, p, 0, len(poly) - 1, len(poly), false) }
 
 // ---------------------------------------------------------------------------
@@ -162,12 +162,12 @@ pub fn point_in_ellipse(p, bbox) {
 // SVG path d-string from polyline  (geom.ts)
 // ---------------------------------------------------------------------------
 
-fn pld_at(points, i, n, acc) {
+fn pld_at(points, i, n, acc) any^ {
   if (i >= n) { acc }
   else { pld_at(points, i + 1, n, acc ++ " L " ++ (points[i].x) ++ " " ++ (points[i].y)) }
 }
 
-pub fn polyline_to_svg_d(points) {
+pub fn polyline_to_svg_d(points) any^ {
   if (len(points) == 0) { "" }
   else {
     let head = points[0]
@@ -182,28 +182,28 @@ pub fn polyline_to_svg_d(points) {
 fn is_number(v) => type(v) == int or type(v) == float
 
 // Shape kind symbol ('rect | 'ellipse | ...), or null for non-shape nodes.
-pub fn get_shape_kind(shape) {
+pub fn get_shape_kind(shape) any^ {
   if (not is_node(shape) or shape.tag != 'shape') { null }
   else { attrs_get(shape.attrs, 'kind') }
 }
 
-pub fn get_shape_attr_number(shape, name, def) {
+pub fn get_shape_attr_number(shape, name, def) any^ {
   let v = attrs_get(shape.attrs, name)
   if (is_number(v)) { v } else { def }
 }
 
-pub fn get_shape_attr_string(shape, name, def) {
+pub fn get_shape_attr_string(shape, name, def) any^ {
   let v = attrs_get(shape.attrs, name)
   if (type(v) == string) { v } else { def }
 }
 
-pub fn get_shape_id(shape) {
+pub fn get_shape_id(shape) any^ {
   let v = attrs_get(shape.attrs, 'id')
   if (type(v) == string and len(v) > 0) { v } else { null }
 }
 
 // Axis-aligned bounding box of a shape (rotation NOT applied).
-pub fn get_shape_bbox(shape) {
+pub fn get_shape_bbox(shape) any^ {
   let kind = get_shape_kind(shape)
   let tag = if (is_node(shape)) { shape.tag } else { null }
   if (kind == null and tag != 'text-frame' and tag != 'image') { null }
@@ -217,7 +217,7 @@ pub fn get_shape_bbox(shape) {
 }
 
 // Parse polyline "x1,y1 x2,y2 ..." into [Vec2].
-fn parse_points_at(parts, i, n, acc) {
+fn parse_points_at(parts, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let pair = split(trim(parts[i]), ",")
@@ -230,7 +230,7 @@ fn parse_points_at(parts, i, n, acc) {
   }
 }
 
-pub fn parse_points(s) {
+pub fn parse_points(s) any^ {
   let t = trim(s)
   if (len(t) == 0) { [] }
   else {
@@ -253,7 +253,7 @@ fn is_drawing_object(n) =>
                   n.tag == 'connector' or n.tag == 'text-frame')
 
 // Depth-first search for a drawing-object by id. Returns {path, shape} or null.
-fn find_in_children(content, target, path, i, n) {
+fn find_in_children(content, target, path, i, n) any^ {
   if (i >= n) { null }
   else {
     let c = content[i]
@@ -262,7 +262,7 @@ fn find_in_children(content, target, path, i, n) {
   }
 }
 
-fn find_shape_node(n, target, path) {
+fn find_shape_node(n, target, path) any^ {
   if (not is_node(n)) { null }
   else if (is_drawing_object(n) and get_shape_attr_string(n, 'id', "") == target) {
     {path: path, shape: n}
@@ -270,7 +270,7 @@ fn find_shape_node(n, target, path) {
   else { find_in_children(n.content, target, path, 0, len(n.content)) }
 }
 
-pub fn find_shape_by_id(doc, id) => find_shape_node(doc, id, [])
+pub fn find_shape_by_id(doc, id) any^ => find_shape_node(doc, id, [])
 
 // ===========================================================================
 // Geometric hit-test  (hit-test.ts)
@@ -278,14 +278,14 @@ pub fn find_shape_by_id(doc, id) => find_shape_node(doc, id, [])
 
 pub let HIT_TOLERANCE = 4.0   // px
 
-fn segment_hit_at(points, pp, i, n) {
+fn segment_hit_at(points, pp, i, n) any^ {
   if (i + 1 >= n) { false }
   else if (point_to_segment_dist(pp, points[i], points[i + 1]) <= HIT_TOLERANCE) { true }
   else { segment_hit_at(points, pp, i + 1, n) }
 }
 
 // Hit-test a single shape against a point in drawing-local coords.
-pub fn hit_test_shape(shape, p) {
+pub fn hit_test_shape(shape, p) any^ {
   let kind = get_shape_kind(shape)
   let bbox = get_shape_bbox(shape)
   if (kind == null or bbox == null) { false }
@@ -314,7 +314,7 @@ pub fn hit_test_shape(shape, p) {
 fn empty_hit() => {kind: 'empty', path: [], shape_id: null}
 
 // Reverse-z walk over a container's children; first hit wins (topmost).
-fn hit_container_at(content, base_path, p, i) {
+fn hit_container_at(content, base_path, p, i) any^ {
   if (i < 0) { null }
   else {
     let c = content[i]
@@ -340,7 +340,7 @@ fn hit_container_at(content, base_path, p, i) {
 }
 
 // Iterate layers from last (top of z-stack) to first.
-fn hit_layers_at(drawing, p, li) {
+fn hit_layers_at(drawing, p, li) any^ {
   if (li < 0) { empty_hit() }
   else {
     let layer = drawing.content[li]
@@ -355,5 +355,5 @@ fn hit_layers_at(drawing, p, li) {
 
 // Hit-test a drawing tree against a point. Returns
 //   {kind: 'shape'|'empty', path: SourcePath (relative to drawing), shape_id}
-pub fn hit_test_drawing(drawing, p) =>
+pub fn hit_test_drawing(drawing, p) any^ =>
   hit_layers_at(drawing, p, len(drawing.content) - 1)

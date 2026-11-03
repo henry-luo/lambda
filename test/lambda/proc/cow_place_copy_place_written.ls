@@ -51,15 +51,15 @@ pn write_after_last_use(var r: N) {
 
 pn main() {
     var a: N = {kid: {n: 3}}
-    direct_write(a)
+    direct_write(a)^
     var b: N = {kid: {n: 3}}
-    var_pass(b)
+    var_pass(b)^
     var c: N = {kid: {n: 3}}
-    rmw_alias(c) print(c.kid.n)
+    rmw_alias(c)^ print(c.kid.n)
     var d: N = {kid: {n: 3}}
-    nested_if(d, true)
+    nested_if(d, true)^
     var e: N = {kid: {n: 3}}
-    in_loop(e)
+    in_loop(e)^
     var u = {kid: {n: 3}}
     let old_u = u.kid
     u.kid.n = 7
@@ -68,7 +68,8 @@ pn main() {
     var old_w = w.kid
     w.kid.n = 7
     print(old_w.n)
-    var t: T = {nodes: [{v: 1}, {v: 2}]}
+    let _admitted_t_71: T = {nodes: [{v: 1}, {v: 2}]}
+    var t: T = _admitted_t_71^
     print(get_v(t, 0))
     t.nodes[0].v = 9
     print(get_v(t, 0))

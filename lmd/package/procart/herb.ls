@@ -24,21 +24,21 @@ pub fn normalize(raw={}) map^ {
     let colors=[for (value in [p.leaf,p.stem,p.petal,p.center]) color.parse(value)^];
     p
 }
-fn petal() element {
+fn petal() element^ {
     let b=primitive.blade();
     s.geometry(b.positions,{id:"herb-petal",normals:b.normals,uvs:b.uvs,indices:b.indices})
 }
-fn pad() element {
+fn pad() element^ {
     let segments=36
     let points=[[0.0,0.0,0.0],*[for (i in 0 to segments,let a=0.18+(2.0*math.pi-0.36)*float(i)/segments) [cos(a),0.025,sin(a)]]];
     s.geometry([for (p in points) *p],{id:"herb-pad",normals:[for (p in points) *[0.0,1.0,0.0]],
         uvs:[for (p in points) *[0.5+0.5*p[0],0.5+0.5*p[2]]],indices:[for (i in 1 to segments) *[0,i+1,i]]})
 }
 pub fn resources() array => [s.sphere(8,12,{id:"herb-round"}),petal(),pad()]
-fn piece(shape,position,scale,color,role,rotation=[0.0,0.0,0.0]) map =>
+fn piece(shape,position,scale,color,role,rotation=[0.0,0.0,0.0]) map^ =>
     {shape:shape,geometry:shape,matrix:t.matrix(position,rotation,scale)^,color:color,role:role}
-fn oval(position,radii,color,role,rotation=[0.0,0.0,0.0]) map => piece("herb-round",position,radii*2.0,color,role,rotation)
-fn translated(part,parent) map => {*:part,matrix:t.multiply(parent,part.matrix)^}
+fn oval(position,radii,color,role,rotation=[0.0,0.0,0.0]) map^ => piece("herb-round",position,radii*2.0,color,role,rotation)
+fn translated(part,parent) map^ => {*:part,matrix:t.multiply(parent,part.matrix)^}
 
 pub fn generate(k:u64,parameters={},environment=null,frame=c.identity(),pose={}) map^ {
     let p=normalize(parameters)^,e=if (environment == null) env.sample()^ else environment

@@ -6,7 +6,7 @@ pub fn atom_type_index(atom_type) => index_of(
     ["mord", "mop", "mbin", "mrel", "mopen", "mclose", "mpunct", "minner"], atom_type) or 0
 
 // Return fractions of the current math quad (18mu), not the text font's em.
-pub fn get_spacing(left_type, right_type, style) {
+pub fn get_spacing(left_type, right_type, style) any^ {
     let index = atom_type_index(left_type) * 8 + atom_type_index(right_type)
     let code = slice(table, index, index + 1);
     if (code == "2") 3.0 / 18.0

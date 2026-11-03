@@ -10,7 +10,7 @@ import group: .mod_group_data
 
 fn measure(n,key,fallback) => (float(attrs_get(n.attrs,key)) ^ { fallback }) or fallback
 pub fn rotation(n) => measure(n,'data-word-rotation',0)
-pub fn settings(n,fallback={width:0,height:0}) {
+pub fn settings(n,fallback={width:0,height:0}) any^ {
     let entry = graphics.descriptor(n)
     let stored = if (entry!=null) entry.settings(n) else {
         width:measure(n,'width',fallback.width),height:measure(n,'height',fallback.height),rotation:rotation(n)}
@@ -45,11 +45,12 @@ pub fn parameters(n,p) {
     let stored = if (entry!=null) entry.settings(n) else original
     {*:stored,width:p.width,height:p.height,rotation:p.rotation,*:if (original.kind=="wordart") {size:size} else {}}
 }
-pub fn preview_source(n,p) string | null {
+fn render_preview_source(n,p) string?^ {
     let value = parameters(n,p)
     let entry = graphics.descriptor(n);
-    if (entry.graphic==null) null else objects.source(entry.graphic(value)^)^ { null }
+    if (entry.graphic==null) null else objects.source(entry.graphic(value))
 }
+pub fn preview_source(n,p) string? => render_preview_source(n,p) ^ { null }
 pub fn transaction(editor,p) map^ {
     let selected = image.selected(editor)
     if (selected==null or (p.path!=null and p.path!=selected.path) or settings(selected.node)==null)

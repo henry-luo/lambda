@@ -1,24 +1,24 @@
 // Bounded siunitx number and SI-unit formatter; no TeX macro execution.
 import util: ~~.util
 
-fn raw_arg(el, index) {
+fn raw_arg(el, index) any^ {
     let raw = util.raw_argument(el, "required", index)
     if (raw != null) raw else util.text_of_child(el, index)
 }
 
-fn group_integer(digits) {
+fn group_integer(digits) any^ {
     if (len(digits) <= 3) digits
     else group_integer(slice(digits, 0, len(digits) - 3)) ++ "\u202F" ++
         slice(digits, len(digits) - 3, len(digits))
 }
 
-fn digits_only(s, i) {
+fn digits_only(s, i) any^ {
     if (i >= len(s)) true
     else if (index_of("0123456789", slice(s, i, i + 1)) == null) false
     else digits_only(s, i + 1)
 }
 
-fn format_decimal(source) {
+fn format_decimal(source) any^ {
     let signed = starts_with(source, "-") or starts_with(source, "+")
     let sign = if (signed) slice(source, 0, 1) else ""
     let rest = if (signed) slice(source, 1, len(source)) else source
@@ -38,7 +38,7 @@ fn superscript_digit(ch) {
     if (i == null) null else raised[i]
 }
 
-fn superscript(source, i, result) {
+fn superscript(source, i, result) any^ {
     if (i >= len(source)) result
     else {
         let raised = superscript_digit(slice(source, i, i + 1))
@@ -46,7 +46,7 @@ fn superscript(source, i, result) {
     }
 }
 
-fn format_uncertainty(source) {
+fn format_uncertainty(source) any^ {
     let mark = index_of(source, "(")
     if (mark == null) format_decimal(source)
     else if (not ends_with(source, ")")) null
@@ -58,7 +58,7 @@ fn format_uncertainty(source) {
     }
 }
 
-pub fn format_number(source) {
+pub fn format_number(source) any^ {
     let value = trim(source)
     let lower_e = index_of(value, "e")
     let upper_e = index_of(value, "E")
@@ -87,12 +87,12 @@ let UNITS = [
     ["\\centi", "c"], ["\\milli", "m"], ["\\micro", "µ"]
 ]
 
-fn replace_units(source, i) {
+fn replace_units(source, i) any^ {
     if (i >= len(UNITS)) source
     else replace_units(replace(source, UNITS[i][0], UNITS[i][1]), i + 1)
 }
 
-fn unit_text(source) {
+fn unit_text(source) any^ {
     let result = replace_units(source, 0)
     if (index_of(result, "\\") != null) null else result
 }
@@ -115,7 +115,7 @@ pub fn dcolumn_descriptor(input, output, places, offset) {
 }
 
 // an output separator as text: \cdot is a centered dot, braces and $ are dropped
-fn separator_text(raw) {
+fn separator_text(raw) any^ {
     if (raw == "\\cdot" or raw == "\\cdotp") "·"
     else replace(replace(replace(raw, "{", ""), "}", ""), "$", "")
 }
@@ -128,10 +128,10 @@ fn separated_parts(text, separator) {
           point: true, suffix: ""}
 }
 
-fn cell_parts(text, desc) =>
+fn cell_parts(text, desc) any^ =>
     if (desc.separator != null) separated_parts(text, desc.separator) else numeric_parts(text)
 
-fn numeric_parts(source) {
+fn numeric_parts(source) any^ {
     let text = trim(source)
     let formatted = format_number(text)
     let exponent_at = index_of(text, "e")
@@ -150,7 +150,7 @@ fn numeric_parts(source) {
     }
 }
 
-fn table_cells(node, i, column, current, acc) {
+fn table_cells(node, i, column, current, acc) any^ {
     if (i >= len(node)) acc ++ [{column: column, text: trim(current)}]
     else {
         let child = node[i]
@@ -169,7 +169,7 @@ fn table_cells(node, i, column, current, acc) {
     }
 }
 
-fn table_format(raw) {
+fn table_format(raw) any^ {
     if (raw == null) {whole: 0, fraction: 0}
     else {
         let parts = split(trim(raw), ".")
@@ -185,7 +185,7 @@ fn measured_profile(desc, cells, column) {
     let keys = [for (key, value at opts where string(key) != "table-format") string(key)]
     let requested = if (desc.places != null) desc.places else table_format(opts["table-format"])
     let shapes = [for (cell in cells
-        where cell.column == column and cell.text != "" and cell_parts(cell.text, desc) != null)
+        where ((cell.column == column and cell.text != "" and cell_parts(cell.text, desc) != null) ^ { false }))
         cell_parts(cell.text, desc)]
     let whole = max([0] ++ [for (shape in shapes) len(shape.whole)])
     let fraction = max([0] ++ [for (shape in shapes) len(shape.fraction)])
@@ -204,7 +204,7 @@ pub fn measure_columns(content, columns) {
 }
 
 // a decimal-grid cell; `style` carries the column's rules and colors
-pub fn render_table_cell(cell, profile, style = null) {
+pub fn render_table_cell(cell, profile, style = null) any^ {
     let text = util.text_of(cell)
     let parts = cell_parts(text, profile)
     if (not (profile.error is null)) <td util.unsupported_element("siunitx", profile.error, profile.offset)>
@@ -225,12 +225,12 @@ pub fn render_table_cell(cell, profile, style = null) {
     }
 }
 
-fn unsupported(message, el) {
+fn unsupported(message, el) any^ {
     let offset = if (el is element) el.source_offset else null
     util.unsupported_element("siunitx", message, offset)
 }
 
-pub fn render(el) {
+pub fn render(el) any^ {
     let command = string(name(el))
     if (command == "num") {
         let formatted = format_number(raw_arg(el, 0))

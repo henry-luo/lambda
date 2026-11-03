@@ -101,12 +101,12 @@ view <superlambda_game> state game: world.new_game(), music: MUSIC {
     <section class:"stage", 'aria-label':"Scrolling platform game: Meadow Circuit",
       <img class:"scenery", src:"assets/scenery.svg", alt:"">
       <div class:"world", 'aria-hidden':"true",
-        for (s in world.TERRAIN where in_camera(s, camera)) sprite(s, camera, s.kind);
-        for (b in world.BLOCKS where in_camera(b, camera))
+        for (s in world.TERRAIN where ((in_camera(s, camera)) ^ { false })) sprite(s, camera, s.kind);
+        for (b in world.BLOCKS where ((in_camera(b, camera)) ^ { false }))
           sprite(b, camera, if (contains(game.used, b.id)) "used" else b.kind);
-        for (c in world.COINS where in_camera(c, camera) and not contains(game.collected, c.id))
+        for (c in world.COINS where ((in_camera(c, camera) and not contains(game.collected, c.id)) ^ { false }))
           sprite(c, camera, "coin");
-        for (e in game.enemies where e.alive and in_camera(e, camera)) sprite(e, camera, e.kind);
+        for (e in game.enemies where ((e.alive and in_camera(e, camera)) ^ { false })) sprite(e, camera, e.kind);
         <div class:("checkpoint " ++ (if (game.checkpoint) "activated" else "")),
           style:position(world.CHECKPOINT_X - camera, 300, 44, 100),
           <div class:"flag-pole"> <div class:"checkpoint-flag", "λ">
@@ -174,7 +174,7 @@ view <superlambda_game> state game: world.new_game(), music: MUSIC {
 }
 on press(evt) {
   let command = event_command(evt)
-  if (game.autoplay and contains(["left", "right", "jump", "run"], command)) {
+  if ((game.autoplay and contains(["left", "right", "jump", "run"], command))^) {
     game = {*:world.release_controls(game), autoplay: false}
   }
   if (command == "music") { music = {*:music, on: not music.on} }
@@ -188,20 +188,20 @@ on releasecontrols(evt) {
 }
 on click(evt) {
   let command = event_command(evt)
-  if (contains(["pause", "restart", "auto"], command)) { game = world.action(game, command) }
+  if (contains(["pause", "restart", "auto"], command)^) { game = world.action(game, command) }
   if (command == "music") { music = {*:music, on: not music.on} }
   if (contains(["pause", "restart", "auto", "music"], command)) { music = follow_music(music_owner(evt), music, game) }
 }
 on mousedown(evt) {
   let command = event_command(evt)
   if (contains(["left", "right", "jump", "run"], command)) {
-    if (game.autoplay) { game = {*:world.release_controls(game), autoplay: false} }
+    if ((game.autoplay)^) { game = {*:world.release_controls(game), autoplay: false} }
     game = {*:world.set_control(game, command, true), pointer: true}
     return 'prevent-default'
   }
 }
 on frame(evt) {
-  if (game.mode == "playing") {
+  if ((game.mode == "playing")^) {
     game = world.tick(if (game.autoplay) world.auto_controls(game) else game)
   }
   // a finish or game over stops the music; while playing, this also loops it.

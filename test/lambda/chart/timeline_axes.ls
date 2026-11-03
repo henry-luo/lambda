@@ -10,7 +10,7 @@ let plan=timeline.layout(spec,{width:800,height:400})
 let image=timeline.render_svg(spec,{width:800,height:400})
 let plot=(content(image) |: ~.class=="lambda-timeline-plot")[0]
 let numeric={id:"collisions",view:"axis",width:180,height:300,scales:[{kind:"numeric",unit:"year"}],window:{from:0,to:100},
-    axes:[{tick_count:15,formatter:(stamp,ctx)=>"Very long date " ++ string(stamp.value),collision:"omit"}],events:[]}
+    axes:[{tick_count:15,formatter:(stamp,ctx)any^ =>"Very long date " ++ string(stamp.value),collision:"omit"}],events:[]}
 let crowded=timeline.layout(numeric,{width:180,height:300})
 let free=timeline.layout({*:numeric,axes:[{*:numeric.axes[0],collision:"none"}]},{width:180,height:300})
 let sunday=calendar.ticks(dates.normalize("2024-01-01").value,dates.normalize("2024-01-15").value,{interval:"week",week_start:0},0);

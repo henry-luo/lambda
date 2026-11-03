@@ -23,16 +23,16 @@ let exaggeration = 1.6
 
 // ---------------------------------------------------------------- loaded asset ids
 
-fn walk(n) array => [n, *[for (c in content(n) where c is element and name(c) != 'geometry') *walk(c)]]
+fn walk(n) array => [n, *[for (c in ((content(n)) ^ { [] }) where ((c is element and name(c) != 'geometry') ^ { false })) *walk(c)]]
 let loaded = walk(city)
 // the generator names glTF nodes and materials; the loader prefixes their ids.
-fn asset_id(tag, label) => [for (n in loaded where name(n) == tag and n.name == label) n.id][0]
+fn asset_id(tag, label) => [for (n in loaded where ((name(n) == tag and n.name == label) ^ { false })) n.id][0]
 let band_count = len(story.zones) * story.bands_per_zone
 
 // ---------------------------------------------------------------- colours
 
-fn hexdigit(ch) => [for (i in 0 to 15 where slice("0123456789abcdef", i, i + 1) == ch) i][0]
-fn channel(hex, i) => (hexdigit(slice(hex, 1 + i * 2, 2 + i * 2)) * 16 + hexdigit(slice(hex, 2 + i * 2, 3 + i * 2))) / 255.0
+fn hexdigit(ch) => [for (i in 0 to 15 where ((slice("0123456789abcdef", i, i + 1) == ch) ^ { false })) i][0]
+fn channel(hex, i) any^ => (hexdigit(slice(hex, 1 + i * 2, 2 + i * 2)) * 16 + hexdigit(slice(hex, 2 + i * 2, 3 + i * 2))) / 255.0
 // static colours are sRGB text; colour tracks carry linear components.
 fn linear(v) => if (v <= 0.04045) v / 12.92 else ((v + 0.055) / 1.055) ** 2.4
 fn rgb(hex) array => [for (i in 0 to 2) linear(channel(hex, i))]
@@ -70,9 +70,9 @@ fn role_keys(colour, extra) array =>
           let start = if (i == 0) 0.0 else cut.t + fade,
           let finish = if (i == len(cuts) - 1) duration else cuts[i + 1].t)
         *[[start, c], *extra(cut.look, start, finish), [finish, c]]]
-fn colour_track(target, keys) element =>
+fn colour_track(target, keys) element^ =>
     s.track(target ++ ".color", [for (k in keys) k[0]], [for (k in keys) *rgb(k[1])], 'color')
-fn palette_track(target, role) element => colour_track(target, role_keys((name) => looks[name][role], no_extra))
+fn palette_track(target, role) element^ => colour_track(target, role_keys((name) => looks[name][role], no_extra))
 
 // ---------------------------------------------------------------- procedural geometry
 
@@ -82,7 +82,7 @@ fn quads(n, closed) array =>
 fn up(n) array => [for (i in 1 to n) *[0.0, 1.0, 0.0]]
 
 // a flat strip between two outlines sampled at the same angles.
-fn band_fill(inner, outer, y) element =>
+fn band_fill(inner, outer, y) element^ =>
     s.geometry([for (i in 0 to (len(inner) - 1)) *[inner[i][0], y, inner[i][1], outer[i][0], y, outer[i][1]]],
         {normals: up(len(inner) * 2), indices: quads(len(inner), true)})
 // each vertex shifts along its averaged tangent's normal, so off-centre outlines keep an even width.
@@ -90,49 +90,49 @@ fn offsets(points, width) array =>
     [for (i in 0 to (len(points) - 1), let n = len(points), let a = points[(i + n - 1) % n], let b = points[(i + 1) % n],
           let tx = b[0] - a[0], let tz = b[1] - a[1], let l = sqrt(tx * tx + tz * tz) + 0.000001, let p = points[i])
         [[p[0] - tz / l * width / 2.0, p[1] + tx / l * width / 2.0], [p[0] + tz / l * width / 2.0, p[1] - tx / l * width / 2.0]]]
-fn ribbon(points, width, y) element {
+fn ribbon(points, width, y) element^ {
     let edges = offsets(points, width)
     s.geometry([for (q in edges) *[q[0][0], y, q[0][1], q[1][0], y, q[1][1]]],
         {normals: up(len(edges) * 2), indices: quads(len(edges), true)})
 }
-fn wall(points, height) element =>
+fn wall(points, height) element^ =>
     s.geometry([for (p in points) *[p[0], 0.0, p[1], p[0], height, p[1]]],
         {normals: [for (p in points, let r = sqrt(p[0] ** 2 + p[1] ** 2) + 0.000001) *[p[0] / r, 0.0, p[1] / r, p[0] / r, 0.0, p[1] / r]],
          indices: quads(len(points), true)})
 // a wall is a vertical strip plus a flat cap, so it still reads when seen edge-on from above.
-fn flat_colour(colour) element => s.material('basic', {color: colour, side: 'double'})
+fn flat_colour(colour) element^ => s.material('basic', {color: colour, side: 'double'})
 fn rampart(points, height, colour) array =>
     [s.mesh(wall(points, height), flat_colour(colour)), s.mesh(ribbon(points, 0.05, height), flat_colour(colour))]
 fn lerp_outline(a, b, u) array => [for (i in 0 to (len(a) - 1)) [a[i][0] + (b[i][0] - a[i][0]) * u, a[i][1] + (b[i][1] - a[i][1]) * u]]
 
 let samples = len(lines.core)
-let centre = [for (i in 1 to samples) [0.0, 0.0]]
-let edge = [for (j in 0 to (samples - 1), let a = 2.0 * pi * j / samples)
+let centre = [for (i in ((1 to samples) ^ { [] })) [0.0, 0.0]]
+let edge = [for (j in ((0 to (samples - 1)) ^ { [] }), let a = 2.0 * pi * j / samples)
     [half / max(abs(cos(a)), abs(sin(a))) * cos(a), half / max(abs(cos(a)), abs(sin(a))) * sin(a)]]
 let zone_lines = [centre, lines.core, lines.ring1, lines.ring2, lines.ring3, edge]
 
 fn polar(r, a) array => [r * cos(a), r * sin(a)]
-fn strip(left, right) element =>
+fn strip(left, right) element^ =>
     s.geometry([for (i in 0 to (len(left) - 1)) *[left[i][0], 0.0, left[i][1], right[i][0], 0.0, right[i][1]]],
         {normals: up(len(left) * 2), indices: quads(len(left), false)})
-fn annulus(r0, r1, segments) element =>
+fn annulus(r0, r1, segments) element^ =>
     strip([for (i in 0 to segments) polar(r0, 2.0 * pi * i / segments)], [for (i in 0 to segments) polar(r1, 2.0 * pi * i / segments)])
 
 // the Sun Bird gold foil: a rim, a hollow sun with twelve swirling rays and four birds.
-fn ray(i) element {
+fn ray(i) element^ {
     let steps = 8
     strip([for (t in 0 to steps, let u = t / steps) polar(0.25 + 0.38 * u, pi * i / 6.0 + 0.8 * u + 0.13 * (1.0 - u))],
           [for (t in 0 to steps, let u = t / steps) polar(0.25 + 0.38 * u, pi * i / 6.0 + 0.8 * u - 0.13 * (1.0 - u))])
 }
 // a bird's body thickens mid-way and narrows to a neck; the head swells again near the front.
 fn bird_width(u) => 0.065 * (sin(pi * u) ** 0.6) + (if (u > 0.82) 0.03 * sin(pi * (u - 0.82) / 0.18) else 0.0)
-fn bird(i) element {
+fn bird(i) element^ {
     let steps = 16
     strip([for (t in 0 to steps, let u = t / steps) polar(0.78 - bird_width(u), pi * i / 2.0 + 1.25 * u)],
           [for (t in 0 to steps, let u = t / steps) polar(0.78 + bird_width(u), pi * i / 2.0 + 1.25 * u)])
 }
-fn gold() element => s.material('basic', {color: "#f6c453", side: 'double'})
-fn glow(colour, opacity) element => s.material('basic', {color: colour, opacity: opacity, transparent: true, side: 'double'})
+fn gold() element^ => s.material('basic', {color: "#f6c453", side: 'double'})
+fn glow(colour, opacity) element^ => s.material('basic', {color: colour, opacity: opacity, transparent: true, side: 'double'})
 
 // ---------------------------------------------------------------- camera
 
@@ -178,13 +178,13 @@ let camera_tracks = [
 // ---------------------------------------------------------------- growth and highlights
 
 let flat = 0.001
-fn scale_track(id, keys) element => s.track(id ++ ".scale", [for (k in keys) k[0]], [for (k in keys) *[1.0, k[1], 1.0]], 'vector')
-fn uniform_track(id, keys) element => s.track(id ++ ".scale", [for (k in keys) k[0]], [for (k in keys) *[k[1], k[1], k[1]]], 'vector')
-fn visible_track(id, on, off) element =>
+fn scale_track(id, keys) element^ => s.track(id ++ ".scale", [for (k in keys) k[0]], [for (k in keys) *[1.0, k[1], 1.0]], 'vector')
+fn uniform_track(id, keys) element^ => s.track(id ++ ".scale", [for (k in keys) k[0]], [for (k in keys) *[k[1], k[1], k[1]]], 'vector')
+fn visible_track(id, on, off) element^ =>
     s.track(id ++ ".visible", [0.0, on, off], [false, true, false], 'bool')
 
 // buildings sink for Jinsha, return for today, then regrow band by band, centre first.
-let band_tracks = [for (k in 0 to (band_count - 1)) scale_track(asset_id('group', "band-" ++ string(k)), [
+let band_tracks = [for (k in ((0 to (band_count - 1)) ^ { [] })) scale_track(asset_id('group', "band-" ++ string(k)), [
     [0.0, 1.0], [15.5 + k * 0.05, 1.0], [17.5 + k * 0.05, flat], [28.0 + k * 0.35, flat], [29.2 + k * 0.35, 1.0],
     [103.0 + k * 0.04, 1.0], [104.5 + k * 0.04, flat], [107.0 + k * 1.0, flat], [108.2 + k * 1.0, 1.0], [duration, 1.0]])]
 
@@ -209,7 +209,7 @@ let water_tracks = [for (k in 0 to (story.flow_buckets - 1))
     colour_track(asset_id('material', "water-" ++ string(k)), role_keys((name) => looks[name].water, pulse(k)))]
 let zone_ids = [for (z in story.zones) asset_id('material', "building-" ++ z)]
 let material_tracks = [
-    *[for (i in 0 to (len(story.zones) - 1)) palette_track(zone_ids[i], story.zones[i])],
+    *[for (i in ((0 to (len(story.zones) - 1)) ^ { [] })) palette_track(zone_ids[i], story.zones[i])],
     *[for (z in story.zones) colour_track("wash-" ++ z,
         role_keys((name) => if (name == "rings") washes[z] else looks[name].slab, no_extra))],
     *water_tracks, palette_track(asset_id('material', "road"), "road"),
@@ -274,7 +274,7 @@ let scene = s.scene([
 
 // ---------------------------------------------------------------- captions
 
-fn thousands(n) string {
+fn thousands(n) string^ {
     let text = string(n)
     let k = len(text)
     if (k <= 3) text else thousands(int(n / 1000)) ++ "," ++ slice(text, k - 3, k)
@@ -433,7 +433,7 @@ pn start_narration(owner, clock0) {
             if (line != null) { lines = lines ++ [line] }
         }
     }
-    dom.set_attribute(owner, "data-state", if (len(lines) > 0) "on" else "error")
+    dom.set_attribute(owner, "data-state", if ((len(lines) > 0)^) "on" else "error")
     dom.set_text_content(owner, if (len(lines) > 0) "旁白 · 关 · Narration off" else "旁白 · 无声 · No voice")
     return lines
 }
@@ -467,13 +467,13 @@ on render(evt) {
 on click(evt) {
     let narrate = dom.closest(evt.target, "#narrate")
     if (narrate != null) {
-        if (len(playback.lines) > 0) {
-            stop_narration(narrate, playback.lines)
+        if ((len(playback.lines) > 0)^) {
+            stop_narration(narrate, playback.lines)^
             playback = {*:playback, lines: []}
             return 'handled'
         }
         let playing = if (playback.token == null) null else dom.midi_info(narrate, playback.token)
-        if (playing == null or playing.state != "playing") {
+        if ((playing == null or playing.state != "playing")^) {
             dom.set_attribute(narrate, "data-state", "error")
             dom.set_text_content(narrate, "旁白 · 先开声音 · Sound first")
             return 'handled'
@@ -484,14 +484,14 @@ on click(evt) {
     let owner = dom.closest(evt.target, "#sound")
     if (owner == null) { return 'pass' }
     // the film restarts or goes quiet, so narration cued to the old start stops too.
-    if (len(playback.lines) > 0) {
-        stop_narration(dom.query_selector(dom.closest(owner, ".audio"), "#narrate"), playback.lines)
+    if ((len(playback.lines) > 0)^) {
+        stop_narration(dom.query_selector(dom.closest(owner, ".audio"), "#narrate"), playback.lines)^
     }
     let info = if (playback.token == null) null else dom.midi_info(owner, playback.token)
-    if (playback.token != null) dom.audio_close(owner, playback.token)
+    if ((playback.token != null)^) dom.audio_close(owner, playback.token)^
     playback = {*:playback, token: null, lines: []}
     // a click while the score plays mutes it; any other click restarts the film with sound.
-    if (info != null and info.state == "playing") {
+    if ((info != null and info.state == "playing")^) {
         dom.set_attribute(owner, "data-state", "off")
         dom.set_text_content(owner, "♪ 声音 · Sound")
         return 'handled'

@@ -2,7 +2,7 @@ import stack: lambda.chart.stack
 
 fn close(a, b) => abs(a - b) < 0.0000001
 fn sample(rows, group, x) => (rows |: ~.g == group and ~.x == x)[0]
-fn stack_rows(rows, order = null) => stack.apply_stack(rows, "v", "g", "x", "wiggle", order)
+fn stack_rows(rows, order = null) any^ => stack.apply_stack(rows, "v", "g", "x", "wiggle", order)
 let data = [{x: 0, g: "A", v: 1}, {x: 1, g: "A", v: 2}, {x: 2, g: "A", v: 1},
     {x: 0, g: "B", v: 3}, {x: 1, g: "B", v: 1}, {x: 2, g: "B", v: 4}]
 let stream = stack_rows(data, ["A", "B"])

@@ -1,0 +1,1315 @@
+{
+  "schema": 2,
+  "date": "2026-11-02T10:33:26.782407+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "911a0b1ed871a0aa85b5c2d1b371a20e24a840ea",
+  "working_tree": "M doc/Lambda_Formal_Design.md\n M doc/Lambda_Formal_Index.md\n M doc/Lambda_Formal_Semantics.md\n M lambda/lambda.h\n M lambda/runtime/lambda-vector.cpp\n M lambda/runtime/mir_bitwise.hpp\n M lambda/runtime/mvp/mvp_internal.hpp\n M lambda/runtime/mvp/mvp_mir.cpp\n M lambda/runtime/mvp/mvp_plan.cpp\n M lambda/runtime/sys_func_registry.c\n M test/benchmark/lambda_mir_mvp.py\n M test/benchmark/test_lambda_mir_mvp.py\n M test/lambda/mvp/mir_mvp_constructor_boundary.ls\n M test/lambda/mvp/mir_mvp_constructor_boundary.txt\n M test/lambda/mvp/mir_mvp_iterations.ls\n M test/lambda/mvp/mir_mvp_iterations.txt\n M test/lambda/mvp/mir_mvp_recursive_arrays.ls\n M test/lambda/mvp/mir_mvp_recursive_arrays.txt\n M test/lambda/mvp/mir_mvp_shift.ls\n M test/lambda/mvp/mir_mvp_shift.txt\n M vibe/Lambda_Design_Procedural.md\n M vibe/Lambda_Design_Runtime_COW.md\n M vibe/Lambda_Design_Runtime_Globals.md\n M vibe/Lambda_Design_Syntax.md\n M vibe/Lambda_Design_Type_Enforcement.md\n M vibe/Lambda_Design_Type_Error_Handling.md\n M vibe/impl/Lambda_Impl_MIR_MVP.md\n M vibe/impl/Lambda_Impl_Type_Error_Handling.md\n?? test/benchmark/lambda_mvp/tune28_constant_fill_2026-11-02.json\n?? test/benchmark/lambda_mvp/tune28_native_fill_2026-11-02.json\n?? test/lambda/mvp/mir_mvp_flags.ls\n?? test/lambda/mvp/mir_mvp_flags.txt\n?? vibe/impl/Lambda_Impl_Function_Local_State.md",
+  "release_confirmed": true,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "93d660b7bc2e899469980d481146d4db3a1e02e4b492577f1815188fef126a41",
+      "file_count": 27,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "76506330f6df5bf11a931728677c929f2912c56dd9feb2ec5147f58cfacdcd9c"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "4a9a95569706fa04d37d859f261477b867584fbd327ad9fb6bebf18f56c84492"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "218cdc7f41e0c4fb1c9703113a17bbfe2e1dc2200148b33fc7ded0b599c48a15"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "036af99656c02420989b6a5594c39f8f91474db49aef37287a63fd8502e64f92"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "d2ba0a8b24e6c08a2093d46dad1feb3998ca46b05c8db0e85cb19237ad8fef79"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "96ecd0f4e976e4791f75ea3c46a27ca778e3eee0add6c7674174a56202e7de3c"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "064e5288023c7c67342b7b52e07012f7d9796f84576cde06d240e631127462f6"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "a16949aa22455e6707c53b32d860ac27104fe7d193c0f549dad68ed7d519b477"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "8f2d1b8fbf9d5956b815fc2c4f91a3cfba55ffa5a10c81120c1505483c847f2e"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "736845465e3777c2beabc7b838eef72d33a6ab233cb8de20ca76eca87ea38164"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "697dfd1be58df4d62e981886e8f57804abf54894cac9587809086b570149765c"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "8c0b446ee760d728957791833773097216b6af7c5288f2ffba3c9750e6cde815"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "2415769e567d8b179786ffd000b170f8a3b0f46e8cac0c19629c29187b3eb382"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "9f557cdb298cd8818ec5f60e204bd4a2cf3e757f85d6fb6e47e31d30b76a071f"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "8cbcbd1409bee3d96806ed64b933388e213e781efe9f4d383834190b8c34cb9f"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "3505e8ab0489e126a7b8786793f8daa607ca9253c73ea1fa7183833751967148"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "1dc5603f0d43aaae21cbc58dfd9a303ff824df3616cead27e30f3fa63458f6c5"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "206c87213a62a9c34cf671c1b69d38d6cfbe23d32381c48d9379a3f0643c117d"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "0bddfa937a8e9b19b2f3134a314619b1ab857513f1eaa0a8b714867bd0e6bdc7"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "b8c24d088e6cb0c75b5ff5c125a719465e896f97ce762767196c41798ac63cc3"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "21516f75ab65ea88a12a8cda123a5efbcc48de42f4b9c9f74d184a3edf40577f"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "f1490837a786018134965b9b9b5c91c0005be54b70db0da908856aca6ea91c56"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/final-constant-release.exe",
+      "sha256": "6a1d5dd787c5da62a8c86af5aa2805b6e372373f6d690862f077540e8b35fb2c"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/final-constant-release.exe",
+      "sha256": "6a1d5dd787c5da62a8c86af5aa2805b6e372373f6d690862f077540e8b35fb2c"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "bfa99529aa3474e4ad89f2f8b4e635397c74b78e44910b6c8ee88574ace4b118"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/start-release.exe",
+      "sha256": "be462999194811d7538b0ba07c50f50c9a258c9da61e3a36f8ce3d3b632a8d17"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "2499093d45e8e53e31704de91a05580760581b14660cabf24031f0e6dc49c81d",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "50de29fc5dda6f869af737b79e4efc2383e90a4819b61b6a6eb6b467b4cf5059"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "reference_helpers": {
+    "sha256": "5d5c5db1b048956a93b7e0981cfd001d9c0fd2b9dc27124e3cb78fc61bba0ec9",
+    "file_count": 1,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_lcg.h",
+        "sha256": "7b28fdea98296e466bc3f44a3d2e102b31009a8a6e96a473bdbe9592b2871f31"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "ece8ab0609afe489cd56a302c20bfdeeddf458a84a65c37486f3f3571c6b8d21",
+    "file_count": 4,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "e3464cbacf79ba4cb159c2a359d1db3a324fbeebb2bc358bad8f601fcfefee05"
+      },
+      {
+        "path": "test/benchmark/run_c2mir_benchmarks.py",
+        "sha256": "fb28fa56d48e8dc1ae1cf10102c2d5c076c922425946130817d5507a3e4fe029"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "matched per-row execution boundaries; compilation excluded; see each row for timed output",
+  "runs": 100,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "5579b9a75f242ecb308bc6dbaabd4b41290a780c30fcc8dc803d5872a4c2a4d3",
+      "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded",
+      "c_sha256": "86b95b6620a28345342a0064b5253c8e42587dcacd15bd19578f8fa44eeca8d9",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/final-constant-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/final-constant-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune28f/start-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.021,
+          0.011,
+          0.022,
+          0.011,
+          0.023,
+          0.029,
+          0.011,
+          0.021,
+          0.023,
+          0.022,
+          0.021,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.025,
+          0.01,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.011,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.022,
+          0.011,
+          0.022,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.011,
+          0.057,
+          0.011,
+          0.032,
+          0.021,
+          0.011,
+          0.011,
+          0.022,
+          0.01,
+          0.011,
+          0.011,
+          0.021,
+          0.011,
+          0.011,
+          0.022,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.022,
+          0.022,
+          0.022,
+          0.011,
+          0.022,
+          0.011,
+          0.025,
+          0.026,
+          0.022,
+          0.033,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.021,
+          0.035,
+          0.011,
+          0.03,
+          0.021,
+          0.01,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.011,
+          0.022,
+          0.022,
+          0.021,
+          0.022,
+          0.022,
+          0.022,
+          0.028,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.011,
+          0.022,
+          0.022,
+          0.011,
+          0.011
+        ],
+        "production": [
+          1022.5,
+          873.183,
+          948.034,
+          1088.72,
+          1067.53,
+          860.882,
+          945.32,
+          841.731,
+          1041.84,
+          881.399,
+          996.251,
+          1068.36,
+          1034.19,
+          1042.56,
+          1444.65,
+          1370.51,
+          1383.14,
+          954.151,
+          1039.92,
+          958.766,
+          1013.82,
+          987.728,
+          989.738,
+          945.358,
+          977.234,
+          1024.9,
+          986.514,
+          978.358,
+          944.611,
+          909.819,
+          996.551,
+          1136.66,
+          1003.2,
+          1930.34,
+          1513.32,
+          1603.1,
+          1324.13,
+          992.866,
+          996.802,
+          1044.5,
+          950.072,
+          1031.05,
+          958.425,
+          878.047,
+          997.26,
+          1210.56,
+          1141.53,
+          870.904,
+          1047.09,
+          1076.86,
+          999.595,
+          992.419,
+          1020.79,
+          1050.56,
+          1035.69,
+          1007.8,
+          978.773,
+          1290.6,
+          1175.03,
+          1006.83,
+          915.722,
+          968.041,
+          903.292,
+          871.224,
+          911.229,
+          1029.2,
+          1012.43,
+          1040.17,
+          914.541,
+          1018.17,
+          1093.5,
+          949.306,
+          1025.61,
+          977.188,
+          946.316,
+          990.042,
+          1023.04,
+          1030.5,
+          975.859,
+          1030.63,
+          901.005,
+          1012.2,
+          930.253,
+          1045.82,
+          1025.91,
+          1057.25,
+          936.895,
+          986.616,
+          965.183,
+          922.872,
+          939.017,
+          1012.88,
+          1028.01,
+          956.038,
+          1048.32,
+          1032.49,
+          959.542,
+          1015.4,
+          991.254,
+          890.29
+        ],
+        "c2mir": [
+          1217.020996,
+          1015.453857,
+          954.676025,
+          892.331055,
+          998.960205,
+          990.25,
+          914.268066,
+          986.789795,
+          970.211914,
+          958.851074,
+          933.958984,
+          977.957031,
+          878.738037,
+          955.455078,
+          1408.209961,
+          1277.419189,
+          1402.552979,
+          1041.926025,
+          971.045166,
+          997.75,
+          888.148926,
+          908.489014,
+          973.193848,
+          919.820068,
+          931.445068,
+          868.581055,
+          921.720947,
+          980.75,
+          940.50415,
+          944.102051,
+          1485.167969,
+          1119.417969,
+          1421.289062,
+          1409.807129,
+          1489.40918,
+          1042.246826,
+          1051.794922,
+          1032.432861,
+          934.328125,
+          901.5979,
+          998.618896,
+          1013.77002,
+          955.989014,
+          1005.528076,
+          1023.322998,
+          922.926025,
+          970.678955,
+          911.165039,
+          916.436035,
+          928.583984,
+          942.788086,
+          890.537109,
+          887.799072,
+          966.733887,
+          885.415039,
+          919.493896,
+          994.666992,
+          953.87793,
+          885.052979,
+          965.680176,
+          928.052979,
+          953.465088,
+          902.232178,
+          969.123047,
+          965.873047,
+          841.344971,
+          968.807861,
+          890.906982,
+          938.307129,
+          928.248047,
+          961.059814,
+          935.388184,
+          928.178955,
+          952.364014,
+          926.64502,
+          889.602051,
+          967.766846,
+          891.155029,
+          925.116943,
+          1021.84082,
+          940.968994,
+          867.237061,
+          943.869141,
+          941.447998,
+          985.894043,
+          861.321045,
+          940.370117,
+          1016.442139,
+          944.594971,
+          946.453125,
+          982.231934,
+          1003.705078,
+          909.932129,
+          950.385986,
+          879.355957,
+          983.11084,
+          898.506104,
+          976.549072,
+          843.572021,
+          947.805908
+        ],
+        "previous_mvp": [
+          0.01,
+          0.015,
+          0.011,
+          0.021,
+          0.011,
+          0.011,
+          0.022,
+          0.011,
+          0.022,
+          0.011,
+          0.023,
+          0.011,
+          0.011,
+          0.038,
+          0.011,
+          0.01,
+          0.011,
+          0.021,
+          0.011,
+          0.029,
+          0.011,
+          0.011,
+          0.01,
+          0.011,
+          0.021,
+          0.022,
+          0.022,
+          0.021,
+          0.011,
+          0.011,
+          0.01,
+          0.01,
+          0.011,
+          0.011,
+          0.021,
+          0.022,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.015,
+          0.022,
+          0.034,
+          0.011,
+          0.011,
+          0.011,
+          0.03,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.042,
+          0.011,
+          0.011,
+          0.011,
+          0.022,
+          0.025,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.022,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.011,
+          0.011,
+          0.011,
+          0.021,
+          0.021,
+          0.011,
+          0.022,
+          0.011,
+          0.027,
+          0.01,
+          0.011,
+          0.023,
+          0.011,
+          0.011,
+          0.021,
+          0.011,
+          0.011,
+          0.021,
+          0.033,
+          0.011,
+          0.027,
+          0.021,
+          0.022,
+          0.021,
+          0.021,
+          0.022,
+          0.011,
+          0.011,
+          0.011
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.011,
+        "production": 1001.3975,
+        "c2mir": 951.375,
+        "previous_mvp": 0.011
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ]
+      ],
+      "mvp_over_c2mir": 1.1562212587045066e-05,
+      "mvp_over_production": 1.0984648953088058e-05,
+      "timer_resolution_limited": {
+        "mvp": false,
+        "production": false,
+        "c2mir": false,
+        "previous_mvp": false
+      },
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 2.1057698092774202e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.0775967632911764e-05,
+          "two_sided_upper_bound": 2.107902526572119e-05
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 2.2050392172839912e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.1388660273900364e-05,
+          "two_sided_upper_bound": 2.218810361051954e-05
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.9090909090909094,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.0,
+          "two_sided_upper_bound": 1.9090909090909094
+        }
+      },
+      "derived_workload": {
+        "count": 10000,
+        "lambda_sha256": "f504ae568e039038de1b8f6652c72fff465c18e23f00a5446a940102593934d6",
+        "c_sha256": "a89c77a0f9de7568750ada47d673d06c3acf9a766f31c50eafa9710143053049",
+        "lambda_source": "// R7RS Benchmark: sumfp (Typed version)\n// Sum of floats from 0.0 to 100000.0, repeated 1 time\n// Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)\n\npn run(n: float) float {\n    var s: float = 0.0\n    while (n >= 0.0) {\n        s = s + n\n        n = n - 1.0\n    }\n    return s\n}\n\npn benchmark() float {\n    var result = run(100000.0)\n    return result\n}\n\npn main() {\n    let t0 = clock()\n    var total: float = 0.0\n    var i: int = 0\n    while (i < 10000) { total = total + benchmark(); i = i + 1 }\n    let elapsed = (clock() - t0) * 1000.0\n    if (abs(total - 5000050000.0 * 10000.0) < 1.0) { print(\"sumfp: PASS\\n\") }\n    else { print(\"sumfp: FAIL\\n\") }\n    print(\"__TIMING__:\" ++ elapsed ++ \"\\n\")\n}\n",
+        "c_source": "/* Native C2MIR port of r7rs/sumfp2.ls. */\nextern int printf(const char *, ...);\n#include \"/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_kernel_timer.h\"\n\nstatic double run_sumfp(double n) {\n    double sum = 0.0;\n    while (n >= 0.0) {\n        sum += n;\n        n -= 1.0;\n    }\n    return sum;\n}\n\nint main(void) {\n    BENCH_KERNEL_BEGIN();\n    double total = 0.0;\n    long i;\n    for (i = 0; i < 10000; i++) total += run_sumfp(100000.0);\n    BENCH_KERNEL_END();\n    double diff = total - 5000050000.0 * 10000.0;\n    if (diff < 0.0) diff = -diff;\n    printf(diff < 1.0 ? \"sumfp: PASS\\n\" : \"sumfp: FAIL\\n\");\n    BENCH_KERNEL_REPORT();\n    return diff >= 1.0;\n}\n",
+        "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded"
+      },
+      "mvp_over_previous": 1.0,
+      "performance_gates": {
+        "faster_than_full_mir": true,
+        "within_10_percent_of_c2mir": true
+      }
+    }
+  ],
+  "geomean_mvp_over_production": 1.0984648953088053e-05,
+  "geomean_mvp_over_c2mir": 1.1562212587045073e-05,
+  "geomean_mvp_over_previous_mvp": 1.0,
+  "qualification": "all subset; coverage and per-row performance qualification are separate; matched workload boundaries, paired bootstrap per row"
+}

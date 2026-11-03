@@ -19,7 +19,7 @@ pub fn assemble(model,options) map^ {
         let notes = [for (node in model.nodes where node.tag == "footnote") node]
         let note_numbers = if (options.output == "single" or not options.parameters["chunk-renumber-footnotes"])
             model.notes else c.dictionary([for (i,node in notes) {key:node.key,
-                value:len([for (prior in take(notes,i) where plan.owners[prior.key] == plan.owners[node.key]) prior])+1}])
+                value:len([for (prior in ((take(notes,i)) ^ { [] }) where plan.owners[prior.key] == plan.owners[node.key]) prior])+1}])
         let rendered = [for (i,page in plan.pages) render.page({*:model,page_root:page.node,notes:note_numbers},options,
             page.path,plan.owners,captured,plan.roots,chunks.navigation(plan,i))^]
         let pages = [for (i,page in plan.pages) {path:page.path,document:document(page.node,rendered[i],options)}]

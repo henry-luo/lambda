@@ -16,7 +16,7 @@ fn run(src) {
 }
 
 fn has(text, part) => index_of(text, part) != null
-fn count(text, part) => len(split(text, part)) - 1
+fn count(text, part) any^ => len(split(text, part)) - 1
 
 // ---- the column preamble: vertical rules and \newcolumntype ----
 let ruled = run(doc("\\usepackage{array}\\newcolumntype{Y}{>{\\bfseries}r}\\newcolumntype{P}[1]{p{#1}}",

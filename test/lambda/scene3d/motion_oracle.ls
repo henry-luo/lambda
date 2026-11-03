@@ -21,12 +21,12 @@ let cases = [["jump.fbx", "jump"], ["jump-ascii.fbx", "jump"], ["jump-7500.fbx",
     ["cube-pets/animal-cat.fbx", "walk"], ["cube-pets/animal-cat.fbx", "dance"],
     ["robot/Robot.fbx", null], ["robot/Robot.fbx", "RobotArmature|Robot_Dance"], ["robot/Robot.fbx", "RobotArmature|Robot_Wave"]]
 // FBXLoader keys every curve linearly, so files whose clips need cubic keys are compared with ufbx only
-fn curved(cs) => cs[0] == "rig.fbx" or starts_with(cs[0], "cube-pets")
+fn curved(cs) any^ => cs[0] == "rig.fbx" or starts_with(cs[0], "cube-pets")
 let loaded = map([for (f in unique([for (cs in cases) cs[0]])) (f, motion.load(dir ++ f)^)]);
-[for (cs in cases) [o.id_of(cs), o.agrees([for (s, p in oracle.ufbx[o.id_of(cs)].nodes) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, false)])]];
+[for (cs in cases) [o.id_of(cs), o.agrees([for (s, p in ((oracle.ufbx[o.id_of(cs)].nodes) ^ { [] })) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, false)])]];
 
 "3 and with FBXLoader where it evaluates the same curves";
-[for (cs in cases where not curved(cs)) [o.id_of(cs), o.agrees([for (s, p in oracle.three.fbx[o.id_of(cs)]) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, true)])]];
+[for (cs in cases where ((not curved(cs)) ^ { false })) [o.id_of(cs), o.agrees([for (s, p in ((oracle.three.fbx[o.id_of(cs)]) ^ { [] })) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, true)])]];
 // FBXLoader keys every curve linearly and re-slerps Euler turns: it ignores
 // constant and cubic keys, which ufbx and the converter honour
 fn mid(cs) => if (cs[1] == "sway") "0.7" else "0.5";
@@ -34,15 +34,15 @@ fn mid(cs) => if (cs[1] == "sway") "0.7" else "0.5";
     [o.id_of(cs), o.joint_drift(loaded[cs[0]], cs[1], float(mid(cs)), oracle.three.fbx[o.id_of(cs)][mid(cs)], true) > 0.001]];
 
 "4 skinned vertices agree with ufbx and FBXLoader";
-[for (cs in cases where motion.body_of(loaded[cs[0]]) != null and not starts_with(cs[0], "cube-pets"))
-    [o.id_of(cs), [for (s, w in oracle.ufbx[o.id_of(cs)].skin) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
-[for (cs in cases where not curved(cs) and oracle.three.skinned[o.id_of(cs)] != null)
-    [o.id_of(cs), [for (s, w in oracle.three.skinned[o.id_of(cs)]) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
+[for (cs in cases where ((motion.body_of(loaded[cs[0]]) != null and not starts_with(cs[0], "cube-pets")) ^ { false }))
+    [o.id_of(cs), [for (s, w in ((oracle.ufbx[o.id_of(cs)].skin) ^ { [] })) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
+[for (cs in cases where ((not curved(cs) and oracle.three.skinned[o.id_of(cs)] != null) ^ { false }))
+    [o.id_of(cs), [for (s, w in ((oracle.three.skinned[o.id_of(cs)]) ^ { [] })) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
 
 "5 a rigid prop rides its joint as ufbx places it";
 let rig = loaded["rig.fbx"]
-let prop = [for (m in content(motion.body_of(rig)) where name(m) == 'mesh' and m.name == "Prop") content(m)[0]][0]
-fn prop_drift(clip_name, seconds, want) {
+let prop = [for (m in ((content(motion.body_of(rig))) ^ { [] }) where ((name(m) == 'mesh' and m.name == "Prop") ^ { false })) content(m)[0]][0]
+fn prop_drift(clip_name, seconds, want) any^ {
     let world = o.world_at(rig, clip_name, seconds)
     let js = motion.joints(rig);
     max([for (v in 0 to 3) (let p = [prop.positions[3 * v], prop.positions[3 * v + 1], prop.positions[3 * v + 2]],
@@ -60,5 +60,5 @@ let bent = <character source: 'fbx', units: 'm', *[motion.skeleton_of(apose), mo
 o.agrees([for (s, p in oracle.three.retarget["apose#jump"]) o.joint_drift(bent, "jump", float(s), p, true)]);
 
 "7 Kenney's Cube Pets: a rigid rig with weighted tangents, each part placed as ufbx places it";
-[for (cs in cases where starts_with(cs[0], "cube-pets"))
-    [o.id_of(cs), o.agrees([for (s, w in oracle.ufbx[o.id_of(cs)].static) o.rigid_drift(loaded[cs[0]], cs[1], float(s), w, 3)])]]
+[for (cs in cases where ((starts_with(cs[0], "cube-pets")) ^ { false }))
+    [o.id_of(cs), o.agrees([for (s, w in ((oracle.ufbx[o.id_of(cs)].static) ^ { [] })) o.rigid_drift(loaded[cs[0]], cs[1], float(s), w, 3)])]]

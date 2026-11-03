@@ -17,22 +17,22 @@ fn rule(value, scale) {
     if (failure is error) failure else {from:from,to:to,repeat:repeat,compression:compression}
 }
 
-pub fn validate(scale) {
+pub fn validate(scale) any^ {
     let values=scale.hidden_intervals;
     if (values!=null and not (values is array)) c.fail("scale.hidden_intervals","expected an array of interval records")
-    else util.first_error([for (value in c.items(values)) rule(value,scale)])
+    else util.first_error([for (value in ((c.items(values)) ^ { [] })) rule(value,scale)])
 }
 
-fn cycle(value, anchor, unit) {
+fn cycle(value, anchor, unit) any^ {
     if (unit=="year") value.year-anchor.year
     else if (unit=="month") (value.year-anchor.year)*12+value.month-anchor.month
     else dates.floor_div(dates.days(value.year,value.month,value.day)-dates.days(anchor.year,anchor.month,anchor.day),if (unit=="week") 7 else 1)
 }
-fn occurrences(item, scale, domain, limit) {
+fn occurrences(item, scale, domain, limit) any^ {
     let from=if (item.repeat!=null) cycle(dates.from_coordinate(domain.from,scale),item.to,item.repeat)-1 else 0;
     let to=if (item.repeat!=null) cycle(dates.from_coordinate(domain.to,scale),item.from,item.repeat)+1 else 0;
     if (to-from+1>limit) c.fail("scale.hidden_intervals","recurrence exceeds interval_limit; narrow the visible window or increase the explicit limit")
-    else [for (index in from to to,
+    else [for (index in ((from to to) ^ { [] }),
         let start=if (item.repeat==null) item.from else dates.shift_calendar(item.from,item.repeat,index,scale),
         let end=if (item.repeat==null) item.to else dates.shift_calendar(item.to,item.repeat,index,scale))
         if (start is error) start else if (end is error) end else if (end.value>domain.from and start.value<domain.to)
@@ -51,8 +51,8 @@ fn segments(boundaries, spans, index = 0, offset = 0m) {
     }
 }
 
-pub fn configure(scale, domain) {
-    let parsed=[for (value in c.items(scale.hidden_intervals)) rule(value,scale)];
+pub fn configure(scale, domain) any^ {
+    let parsed=[for (value in ((c.items(scale.hidden_intervals)) ^ { [] })) rule(value,scale)];
     let limit=c.option(scale,"interval_limit",10000);
     let spans=[for (item in parsed) if (item is error) item else occurrences(item,scale,domain,limit)];
     let failure=util.first_error([*parsed,*spans]);
@@ -75,7 +75,7 @@ pub fn project(plan, value) {
 pub fn fraction(plan, value) => project(plan,value).fraction
 
 // at a collapsed seam the caller chooses the previous end or the next start.
-pub fn invert(plan, fraction, bias = "forward") {
+pub fn invert(plan, fraction, bias = "forward") any^ {
     let distance=decimal(fraction)*plan.size;
     let candidates=plan.segments |: ~.compression>0 and distance>=~.offset and distance<=~.offset+~.width;
     let segment=if (len(candidates)>0) candidates[if (bias=="backward") 0 else len(candidates)-1]

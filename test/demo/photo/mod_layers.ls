@@ -20,7 +20,7 @@ pub let limits = {x:[0.0,1.0],y:[0.0,1.0],width:[0.02,1.0],height:[0.02,1.0],
 pub fn object_tool(tool) => contains(["text","shapes","stickers"],tool)
 pub fn color_valid(color: string) => len(color) == 7 and starts_with(color,"#") and
     all([for (i in 1 to 6) contains("0123456789abcdefABCDEF",slice(color,i,i+1)) or false])
-pub fn valid(layer) => layer is map and layer.id is int and layer.id > 0 and
+pub fn valid(layer) any^ => layer is map and layer.id is int and layer.id > 0 and
     contains(["text",*[for (entry in shapes) entry.id],*[for (entry in stickers) entry.id]],layer.kind) and
     all([for (key,bounds in limits) layer[key] is number and layer[key] >= bounds[0] and layer[key] <= bounds[1]]) and
     layer.color is string and color_valid(layer.color) and layer.text is string and len(layer.text) <= 160 and
@@ -36,7 +36,7 @@ pub fn create(recipe,kind,text="Your story",aspect=1.5) {
 }
 pub fn update(recipe,id,patch) => {*:recipe,layers:[for (layer in recipe.layers)
     if (layer.id == id) {*:layer,*:patch} else layer]}
-pub fn change(recipe,id,key,requested) {
+pub fn change(recipe,id,key,requested) any^ {
     let layer = selected(recipe,id)
     let numeric = if (contains(limits,key)) float(requested) ^ { null } else null
     let changed = if (contains(limits,key) and numeric is number) geometry.clamp(numeric,limits[key][0],limits[key][1])
@@ -56,7 +56,7 @@ pub fn reorder(recipe,id,direction) {
             if (i == next) recipe.layers[index] else if (i == index) recipe.layers[next] else layer]}
     )
 }
-pub fn duplicate(recipe,id) {
+pub fn duplicate(recipe,id) any^ {
     let layer = selected(recipe,id);
     if (layer == null or len(recipe.layers) >= 24) recipe else {*:recipe,layers:[*recipe.layers,
         {*:layer,id:max([for (item in recipe.layers) item.id])+1,x:min(0.95,layer.x+0.03),y:min(0.95,layer.y+0.03)}]}

@@ -18,12 +18,12 @@ pn main() {
 
     let pushed_g = []
     var pushed_h = pushed_g
-    push(pushed_h, 2)
+    push(pushed_h, 2)^
     print((len(pushed_g)) ++ " " ++ (len(pushed_h)) ++ "\n")
 
     let spliced_g = [{value: 1}, {value: 2}]
     var spliced_h = spliced_g
-    splice(spliced_h, 0, 1)
+    splice(spliced_h, 0, 1)^
     print((len(spliced_g)) ++ " " ++ (len(spliced_h)) ++ "\n")
 
     let g = [[1, 2], [3, 4]]

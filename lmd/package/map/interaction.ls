@@ -1,7 +1,7 @@
 import camera: .camera
 import numbers: lambda.chart.numbers
 
-pub fn update(spec, event) {
+pub fn update(spec, event) any^ {
     let c = camera.camera(spec);
     let kind = string(event.type);
     if (c is error) c

@@ -260,7 +260,7 @@ pub fn set_dash(st, arr, phase) { _set_dash(st, arr, phase) }
 // Path construction operators
 // ============================================================
 
-fn _op_m(st, ops) {
+fn _op_m(st, ops) any^ {
     if (len(ops) >= 2) {
         let x = util.num(ops[0])
         let y = util.num(ops[1])
@@ -270,7 +270,7 @@ fn _op_m(st, ops) {
     else { st }
 }
 
-fn _op_l(st, ops) {
+fn _op_l(st, ops) any^ {
     if (len(ops) >= 2) {
         let x = util.num(ops[0])
         let y = util.num(ops[1])
@@ -280,7 +280,7 @@ fn _op_l(st, ops) {
     else { st }
 }
 
-fn _op_c(st, ops) {
+fn _op_c(st, ops) any^ {
     if (len(ops) >= 6) {
         let x1 = util.num(ops[0]); let y1 = util.num(ops[1])
         let x2 = util.num(ops[2]); let y2 = util.num(ops[3])
@@ -295,7 +295,7 @@ fn _op_c(st, ops) {
 }
 
 // v: first control point = current point; produces a C with cur,cur,x2,y2,x3,y3
-fn _op_v(st, ops) {
+fn _op_v(st, ops) any^ {
     if (len(ops) >= 4) {
         let x2 = util.num(ops[0]); let y2 = util.num(ops[1])
         let x3 = util.num(ops[2]); let y3 = util.num(ops[3])
@@ -309,7 +309,7 @@ fn _op_v(st, ops) {
 }
 
 // y: second control point = endpoint; C with x1,y1,x3,y3,x3,y3
-fn _op_y(st, ops) {
+fn _op_y(st, ops) any^ {
     if (len(ops) >= 4) {
         let x1 = util.num(ops[0]); let y1 = util.num(ops[1])
         let x3 = util.num(ops[2]); let y3 = util.num(ops[3])
@@ -323,7 +323,7 @@ fn _op_y(st, ops) {
 }
 
 // re x y w h: append a closed rectangle subpath.
-fn _op_re(st, ops) {
+fn _op_re(st, ops) any^ {
     if (len(ops) >= 4) {
         let x = util.num(ops[0])
         let y = util.num(ops[1])
@@ -340,7 +340,7 @@ fn _op_re(st, ops) {
     else { st }
 }
 
-fn _op_h(st) {
+fn _op_h(st) any^ {
     let segs = st.segments ++ [{ cmd: "Z" }]
     _set(st, segs, st.start_x, st.start_y, st.start_x, st.start_y)
 }
@@ -349,7 +349,7 @@ fn _op_h(st) {
 // d-string serialization
 // ============================================================
 
-fn _seg_str(s) {
+fn _seg_str(s) any^ {
     if (s.cmd == "M") {
         "M " ++ util.fmt_num(s.x) ++ " " ++ util.fmt_num(s.y)
     }
@@ -373,13 +373,13 @@ fn _segments_to_d(segments) {
 // Public: render the *current* path's segments as an SVG `d` string.
 // Used by interp.ls to capture the clipping path on W / W* before the
 // next painting operator clears the segments.
-pub fn current_path_d(st) {
+pub fn current_path_d(st) any^ {
     if (st == null or len(st.segments) == 0) { "" }
     else { _segments_to_d(st.segments) }
 }
 
 // Public: true when the current state has any path segments queued.
-pub fn has_segments(st) {
+pub fn has_segments(st) any^ {
     (st != null) and (len(st.segments) > 0)
 }
 
@@ -401,7 +401,7 @@ pub fn clear_current_path(st) map | error {
     _set(st, [], st.current_x, st.current_y, st.start_x, st.start_y)
 }
 
-fn _close_last(st) {
+fn _close_last(st) any^ {
     let segs = st.segments ++ [{ cmd: "Z" }]
     _set(st, segs, st.start_x, st.start_y, st.start_x, st.start_y)
 }
@@ -430,7 +430,7 @@ fn _line_join_name(n) {
 }
 
 // shared paint primitive; callers own PDF/PostScript path and graphics-state semantics.
-pub fn paint(st, fill, stroke, fill_rule) {
+pub fn paint(st, fill, stroke, fill_rule) any^ {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)
@@ -547,21 +547,21 @@ pub fn paint(st, fill, stroke, fill_rule) {
 }
 
 // S: stroke (no close)
-fn _op_S(st)  { paint(st, "none", st.stroke_color, "nonzero") }
+fn _op_S(st)  any^ { paint(st, "none", st.stroke_color, "nonzero") }
 // s: close + stroke
-fn _op_s(st)  { paint(_close_last(st), "none", st.stroke_color, "nonzero") }
+fn _op_s(st)  any^ { paint(_close_last(st), "none", st.stroke_color, "nonzero") }
 // f / F: fill nonzero
-fn _op_f(st)  { paint(st, st.fill_color, "none", "nonzero") }
+fn _op_f(st)  any^ { paint(st, st.fill_color, "none", "nonzero") }
 // f*: fill evenodd
-fn _op_fstar(st) { paint(st, st.fill_color, "none", "evenodd") }
+fn _op_fstar(st) any^ { paint(st, st.fill_color, "none", "evenodd") }
 // B: fill nonzero + stroke
-fn _op_B(st)  { paint(st, st.fill_color, st.stroke_color, "nonzero") }
+fn _op_B(st)  any^ { paint(st, st.fill_color, st.stroke_color, "nonzero") }
 // B*: fill evenodd + stroke
-fn _op_Bstar(st) { paint(st, st.fill_color, st.stroke_color, "evenodd") }
+fn _op_Bstar(st) any^ { paint(st, st.fill_color, st.stroke_color, "evenodd") }
 // b: close + fill nonzero + stroke
-fn _op_b(st)  { paint(_close_last(st), st.fill_color, st.stroke_color, "nonzero") }
+fn _op_b(st)  any^ { paint(_close_last(st), st.fill_color, st.stroke_color, "nonzero") }
 // b*: close + fill evenodd + stroke
-fn _op_bstar(st) { paint(_close_last(st), st.fill_color, st.stroke_color, "evenodd") }
+fn _op_bstar(st) any^ { paint(_close_last(st), st.fill_color, st.stroke_color, "evenodd") }
 // n: end path with no paint, just clear
 fn _op_n(st)  { { state: _clear(st), emit: [] } }
 
@@ -569,24 +569,24 @@ fn _op_n(st)  { { state: _clear(st), emit: [] } }
 // Line-state operators
 // ============================================================
 
-fn _op_w(st, ops) {
+fn _op_w(st, ops) any^ {
     if (len(ops) >= 1) { _set_line_width(st, util.num(ops[0])) } else { st }
 }
 
-fn _op_J(st, ops) {
+fn _op_J(st, ops) any^ {
     if (len(ops) >= 1) { _set_line_cap(st, util.int_or(ops[0], 0)) } else { st }
 }
 
-fn _op_j(st, ops) {
+fn _op_j(st, ops) any^ {
     if (len(ops) >= 1) { _set_line_join(st, util.int_or(ops[0], 0)) } else { st }
 }
 
-fn _op_M(st, ops) {
+fn _op_M(st, ops) any^ {
     if (len(ops) >= 1) { _set_miter(st, util.num(ops[0])) } else { st }
 }
 
 // d [ array ] phase
-fn _op_d(st, ops) {
+fn _op_d(st, ops) any^ {
     if (len(ops) >= 2 and ops[0] is map and ops[0].kind == "array") {
         let raw = ops[0].value
         let nums = [for (n in raw) util.num(n)]
@@ -604,7 +604,7 @@ fn _op_d(st, ops) {
 // (possibly empty) singleton; unknown ops are returned as a no-op so
 // the interp.ls catch-all keeps working.
 
-pub fn apply_op(st, opr, ops) {
+pub fn apply_op(st, opr, ops) any^ {
     if (opr == "m") { { state: _op_m(st, ops),  emit: [] } }
     else if (opr == "l") { { state: _op_l(st, ops),  emit: [] } }
     else if (opr == "c") { { state: _op_c(st, ops),  emit: [] } }

@@ -3,7 +3,7 @@ import util: ~~.util
 import color: ~~.elements.color
 import boxes: ~~.elements.boxes
 
-pub fn options(node) => util.parse_kv_options(node.options_raw)
+pub fn options(node) any^ => util.parse_kv_options(node.options_raw)
 
 pub fn issues(node) {
     let selected = options(node);
@@ -13,7 +13,7 @@ pub fn issues(node) {
             "Unsupported tcolorbox option " ++ string(key), node.source_offset)]
 }
 
-pub fn render(node, custom_colors, children) {
+pub fn render(node, custom_colors, children) any^ {
     let selected = options(node)
     let invalid = issues(node)
     let background = if (selected.colback == null) "white"

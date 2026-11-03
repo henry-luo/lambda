@@ -34,19 +34,19 @@ pub fn ui_style(ui, path = "ui") string^ {
     else if (not (ui is map)) raise c.fail(path, "expected map")
     else {
         let checked_attrs = c.attributes(ui, ui_tokens, path)^
-        let invalid = [for (key, value in ui where value != null and (not (value is string) or len(value) == 0 or
-            contains(value, ";") or contains(value, "{") or contains(value, "}"))) string(key)];
+        let invalid = [for (key, value in ui where ((value != null and (not (value is string) or len(value) == 0 or
+            contains(value, ";") or contains(value, "{") or contains(value, "}"))) ^ { false })) string(key)];
         if (len(invalid) > 0) raise c.fail(path, invalid[0] ++ " must be a nonempty CSS value without ; { or }")
         else join([for (key, value in ui where value != null) "--slide-ui-" ++ replace(string(key), "_", "-") ++ ":" ++ value ++ ";"], "")
     }
 }
 
-pub fn background(scene) => c.value(scene.source.background, scene.palette.background)
+pub fn background(scene) any^ => c.value(scene.source.background, scene.palette.background)
 
 // layouts supply bounds only; explicitly authored coordinates always win.
 fn box(x, y, width, height) => {x: x, y: y, width: width, height: height}
 
-pub fn bounds(layout, role, width, height, index) {
+pub fn bounds(layout, role, width, height, index) any^ {
     let margin = width * 0.0625
     let top = height * 0.0833333333
     let inner = width - margin * 2.0

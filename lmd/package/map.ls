@@ -13,24 +13,24 @@ pub fn geomap(children, options = {}) => <geomap *:options, *children>
 pub fn source(id, data) => <source id:id,type:"geojson",data:data>
 pub fn layer(id, kind, source = null, paint = {}, layout = {}) =>
     <layer id:id,type:kind,source:source,paint:paint,layout:layout>
-pub fn normalize(model) => models.normalize(model)
-pub fn validate(model) => (let result = normalize(model), if (result is error) result else true)
-pub fn from_style(style, options = {}) => styles.from_style(style,options)
-pub fn project(camera, position) => cameras.project(camera,position)
-pub fn unproject(camera, point) => cameras.unproject(camera,point)
-pub fn fit_bounds(camera, bounds, padding = 0.0) => cameras.fit_bounds(camera,bounds,padding)
-pub fn update(camera, event) => interactions.update(camera,event)
-pub fn query_source(model, source_id) => queries.query_source(model,source_id)
-pub fn query_rendered(model, point, options = {}) => queries.query_rendered(model,point,options)
-pub fn plan(model, viewport = null) => frames.plan(model,viewport)
-pub fn render_frame(frame) => frames.render_frame(frame)
-pub fn snapshot(node) { frames.snapshot(node) }
-pub fn query_displayed(node, point_or_box, options = {}) { frames.query_displayed(node,point_or_box,options) }
-pub fn to_svg(model, viewport = null) => exports.to_svg(model,viewport)
+pub fn normalize(model) any^ => models.normalize(model)
+pub fn validate(model) any^ => (let result = normalize(model), if (result is error) result else true)
+pub fn from_style(style, options = {}) any^ => styles.from_style(style,options)
+pub fn project(camera, position) any^ => cameras.project(camera,position)
+pub fn unproject(camera, point) any^ => cameras.unproject(camera,point)
+pub fn fit_bounds(camera, bounds, padding = 0.0) any^ => cameras.fit_bounds(camera,bounds,padding)
+pub fn update(camera, event) any^ => interactions.update(camera,event)
+pub fn query_source(model, source_id) any^ => queries.query_source(model,source_id)
+pub fn query_rendered(model, point, options = {}) any^ => queries.query_rendered(model,point,options)
+pub fn plan(model, viewport = null) any^ => frames.plan(model,viewport)
+pub fn render_frame(frame) any^ => frames.render_frame(frame)
+pub fn snapshot(node) any^ { frames.snapshot(node) }
+pub fn query_displayed(node, point_or_box, options = {}) any^ { frames.query_displayed(node,point_or_box,options) }
+pub fn to_svg(model, viewport = null) any^ => exports.to_svg(model,viewport)
 
 pub fn model(spec, options = {}) => <geomap_view spec:spec, options:options>
 pub fn interactive(spec, options = {}) => apply(model(spec,options))
-view <geomap_view> state map_state: null {
+view <geomap_view> () any^ state map_state: null {
     let checked = normalize(~.spec);
     let image=if (checked is error) checked else <geomap
         *:map([for (k,v in checked where k is string or k is symbol) (string(k),v)]),
@@ -47,7 +47,7 @@ view <geomap_view> state map_state: null {
 }
 on pointerdown(evt) {
     map_state = events.dispatch(~.spec,map_state,evt,~.options)
-    if (map_state.drag != null) { return 'prevent-default' }
+    if ((map_state.drag != null)^) { return 'prevent-default' }
     'pass'
 }
 on pointermove(evt) { map_state = events.dispatch(~.spec,map_state,evt,~.options) }
@@ -63,14 +63,14 @@ on lostpointercapture(evt) { map_state = events.dispatch(~.spec,map_state,evt,~.
 on wheel(evt) {
     let before = map_state;
     map_state = events.dispatch(~.spec,map_state,evt,~.options)
-    if (map_state != before) { return 'prevent-default' }
+    if ((map_state != before)^) { return 'prevent-default' }
     'pass'
 }
 on keydown(evt) {
-    if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","+","=","-","Home","Escape"],evt.key)) {
+    if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","+","=","-","Home","Escape"],evt.key)^) {
         let before = map_state;
         map_state = events.dispatch(~.spec,map_state,evt,~.options)
-        if (map_state != before) { return 'prevent-default' }
+        if ((map_state != before)^) { return 'prevent-default' }
     }
     'pass'
 }

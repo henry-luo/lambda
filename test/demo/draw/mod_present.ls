@@ -22,8 +22,8 @@ pub pn apply_camera(owner,st) {
     let surface = dom.bounding_box(dom.get_element_by_id(owner,"canvas-space"));
     // geometry reads expose the last committed layout; scroll only after the new surface is laid out.
     dom.set_scroll_state(dom.get_element_by_id(owner,"stage"),
-        model.clamp(model.width*st.zoom/2-st.pan.x,0,max(surface.width-stage.width,0)),
-        model.clamp(model.height*st.zoom/2-st.pan.y,0,max(surface.height-stage.height,0)))
+        model.clamp(model.width*st.zoom/2-st.pan.x,0,max(surface.width-stage.width,0))^,
+        model.clamp(model.height*st.zoom/2-st.pan.y,0,max(surface.height-stage.height,0))^)
     sync_menu(owner,st)
     return if (st.drag.page == null) st else {*:st,drag:{*:st.drag,
         page:dom.bounding_box(dom.get_element_by_id(owner,"paper")),scroll:dom.scroll_state(dom.get_element_by_id(owner,"stage"))}}
@@ -34,7 +34,7 @@ pn control_value(owner,key,requested) {
         if (dom.get_attribute(control,"value") != string(requested)) {
             dom.set_attribute(control,"value",string(requested))
             dom.set_inner_html(dom.get_element_by_id(owner,key ++ "-preview"),format(
-                paint.arrow_preview(requested,if (key == "start-arrow") "start" else "end","preview-" ++ key),'xml'))
+                paint.arrow_preview(requested,if (key == "start-arrow") "start" else "end","preview-" ++ key),'xml')^)
         }
         let label = dom.get_attribute(control,"data-label") ++ ": " ++ string(requested)
         dom.set_attribute(control,"aria-label",label)
@@ -51,9 +51,9 @@ pn control_value(owner,key,requested) {
 // HTML formatting produces a document wrapper; select children require bare option fragments.
 fn option_markup(value,label) string | error => format(<option value:value,label>,'xml')
 pn object_options(owner,st) {
-    let options = option_markup("","Free endpoint") ++ join([for (node in model.objects(st.doc) where node.tag == 'shape')
+    let options = option_markup("","Free endpoint") ++ join([for (node in ((model.objects(st.doc)) ^ { [] }) where node.tag == 'shape')
         option_markup(model.id(node),model.id(node) ++ " · " ++ model.attr(node,"label"))],"")
-    let all_options = option_markup("","Select an object…") ++ join([for (node in model.objects(st.doc))
+    let all_options = option_markup("","Select an object…") ++ join([for (node in ((model.objects(st.doc)) ^ { [] }))
         option_markup(model.id(node),(if (node.tag == 'connector') "↗ " else "□ ") ++ model.id(node) ++ " · " ++ model.attr(node,"label"))],"");
     for (target in ["object-list","prop-from-shape","prop-to-shape"]) {
         let control = dom.get_element_by_id(owner,target)
@@ -63,24 +63,24 @@ pn object_options(owner,st) {
             dom.set_attribute(control,"data-options",markup)
         }
     }
-    let positions = [for (i,node in model.objects(st.doc) where model.id(node) == st.selected) i+1]
+    let positions = [for (i,node in ((model.objects(st.doc)) ^ { [] }) where ((model.id(node) == st.selected) ^ { false })) i+1]
     dom.set_selected_index(dom.get_element_by_id(owner,"object-list"),if (len(positions)>0) positions[0] else 0)
 }
 pub pn sync_connector(owner,st) {
     let node = model.lookup(st.doc,st.selected).shape
     let ids = model.selected_ids(st)
-    if (node.tag != 'connector') { return st }
+    if ((node.tag != 'connector')^) { return st }
     if (dom.get_element_by_id(owner,"edge-" ++ st.selected) == null and st.drag.mode == "connect") {
         // install a draft once; later moves reuse the same local edge update as endpoint edits.
         dom.set_inner_html(dom.get_element_by_id(owner,"connector-draft"),format(<g
-            <defs (paint.marker(node,"start"));(paint.marker(node,"end"))>
-            ; (drawing_scene.edge_view(st.doc,node,ids))>,'xml'))
+            <defs (paint.marker(node,"start")^);(paint.marker(node,"end"))>
+            ; (drawing_scene.edge_view(st.doc,node,ids))>,'xml')^)
     }
     // keep static shapes, definitions, grid and inspector nodes out of the pointer hot path.
     dom.set_inner_html(dom.get_element_by_id(owner,"edge-" ++ st.selected),
-        drawing_scene.inner_xml(drawing_scene.edge_view(st.doc,node,ids)))
+        drawing_scene.inner_xml(drawing_scene.edge_view(st.doc,node,ids))^)
     dom.set_inner_html(dom.get_element_by_id(owner,"selection-overlay"),
-        drawing_scene.inner_xml(drawing_scene.selection_view(st.doc,ids,st.zoom)))
+        drawing_scene.inner_xml(drawing_scene.selection_view(st.doc,ids,st.zoom))^)
     for (key in ["from-shape","to-shape","from-port","to-port"]) control_value(owner,key,model.attr(node,key))
     dom.set_attribute(owner,"data-hover",st.hover)
     dom.set_attribute(owner,"data-selected",st.selected)
@@ -99,22 +99,22 @@ pub pn sync_menu(owner,st) {
         let root = dom.bounding_box(owner)
         let x = model.clamp(paper.x+center.x*st.zoom-52,stage.x+6,stage.x+stage.width-110)
         let y = model.clamp(paper.y+center.y*st.zoom-50,stage.y+6,stage.y+stage.height-40);
-        dom.style_set_property(menu,"left",string(x-root.x) ++ "px")
-        dom.style_set_property(menu,"top",string(y-root.y) ++ "px")
+        dom.style_set_property(menu,"left",string(x-root.x)^ ++ "px")
+        dom.style_set_property(menu,"top",string(y-root.y)^ ++ "px")
         for (key in ["start-arrow","end-arrow"]) {
             let trigger = dom.get_element_by_id(owner,"connector-" ++ key)
             let value = model.attr(chosen,key);
-            if (dom.get_attribute(trigger,"value") != value) {
+            if ((dom.get_attribute(trigger,"value") != value)^) {
                 dom.set_attribute(trigger,"value",value)
-                dom.set_inner_html(trigger,format(paint.arrow_preview(value,if (key == "start-arrow") "start" else "end","floating-" ++ key),'xml'))
+                dom.set_inner_html(trigger,format(paint.arrow_preview(value,if (key == "start-arrow") "start" else "end","floating-" ++ key),'xml')^)
             }
-            dom.set_attribute(trigger,"title",(if (key == "start-arrow") "Start arrowhead: " else "End arrowhead: ") ++ value)
+            dom.set_attribute(trigger,"title",(if (key == "start-arrow") "Start arrowhead: " else "End arrowhead: ") ++ value)^
             dom.set_attribute(trigger,"aria-expanded",string(st.arrow_menu == key))
         }
         let kind = string(model.attr(chosen,"routing"))
         let route = dom.get_element_by_id(owner,"connector-routing");
-        dom.set_attribute(route,"title","Route: " ++ kind ++ ". Click to cycle orthogonal, straight, curved.")
-        dom.set_attribute(route,"aria-label","Route: " ++ kind ++ ". Change connector routing")
+        dom.set_attribute(route,"title","Route: " ++ kind ++ ". Click to cycle orthogonal, straight, curved.")^
+        dom.set_attribute(route,"aria-label","Route: " ++ kind ++ ". Change connector routing")^
         dom.set_attribute(route,"data-routing",kind)
         dom.set_attribute(dom.query_selector(route,"path"),"d",if (kind == "straight") "M 4 16 L 20 8"
             else if (kind == "curved") "M 4 18 V 12 Q 4 6 10 6 H 20" else "M 4 18 V 6 H 20")
@@ -125,10 +125,10 @@ pub pn sync(owner,st) {
     let paper = dom.get_element_by_id(owner,"paper")
     let primary = model.lookup(st.doc,st.selected).shape
     let ids = model.selected_ids(st)
-    let selected_shapes = [for (node in model.objects(st.doc) where node.tag == 'shape' and contains(ids,model.id(node))) node]
+    let selected_shapes = [for (node in ((model.objects(st.doc)) ^ { [] }) where ((node.tag == 'shape' and contains(ids,model.id(node))) ^ { false })) node]
     let chosen = if (len(ids)>1 and len(selected_shapes)>0) selected_shapes[last] else primary
     let shape_selected = chosen.tag == 'shape'
-    let shape_count = len([for (node in model.objects(st.doc) where node.tag == 'shape') node]);
+    let shape_count = len([for (node in ((model.objects(st.doc)) ^ { [] }) where node.tag == 'shape') node]);
     let page_width = model.width*st.zoom
     let page_height = model.height*st.zoom
     let surface = dom.get_element_by_id(owner,"canvas-space");
@@ -138,9 +138,9 @@ pub pn sync(owner,st) {
     for (key,value in {width:page_width,height:page_height,left:stage.width/2,top:stage.height/2})
         dom.style_set_property(paper,string(key),string(value) ++ "px")
     dom.style_set_property(dom.get_element_by_id(owner,"stage"),"cursor",if (st.tool == "pan") "grab"
-        else if (contains(["connect","marquee"],st.tool) or contains(model.kinds,st.tool)) "crosshair" else "default")
+        else if ((contains(["connect","marquee"],st.tool) or contains(model.kinds,st.tool))^) "crosshair" else "default")
     dom.set_inner_html(paper,format(scene.svg(st.doc,st.selected,if (st.hover != "") st.hover else st.source,st.grid,false,ids,st.zoom,
-        if (st.drag.mode == "marquee") geom.rect_from_points(st.drag.start,st.drag.current) else null),'xml'))
+        if (st.drag.mode == "marquee") geom.rect_from_points(st.drag.start,st.drag.current) else null),'xml')^)
     for (target,shown in {properties:chosen != null,'empty-selection':chosen == null,
         'group-properties':len(ids)>1,'shape-properties':len(selected_shapes)>0,'edge-properties':chosen.tag == 'connector' and len(ids)==1,'file-dialog':st.dialog != ""})
         dom.style_set_property(dom.get_element_by_id(owner,string(target)),"display",if (shown) "block" else "none")
@@ -171,7 +171,7 @@ pub pn sync(owner,st) {
     for (target,pressed in {'tool-select':st.tool=="select",'tool-marquee':st.tool=="marquee",'tool-connect':st.tool=="connect",'tool-pan':st.tool=="pan",grid:st.grid})
         dom.set_attribute(dom.get_element_by_id(owner,string(target)),"aria-pressed",string(pressed))
     for (kind in model.kinds) dom.set_attribute(dom.get_element_by_id(owner,"add-" ++ kind),"aria-pressed",string(st.tool == kind))
-    sync_menu(owner,st)
+    sync_menu(owner,st)^
     for (key in ["start-arrow","end-arrow"]) {
         let opened = st.arrow_menu == key and chosen.tag == 'connector' and len(ids)==1
         let trigger = dom.get_element_by_id(owner,"prop-" ++ key)
@@ -181,15 +181,15 @@ pub pn sync(owner,st) {
         let root = dom.bounding_box(owner)
         let menu_height = len(model.arrows)*34+10
         let above = root.y+root.height-b.y-b.height < menu_height+4
-        dom.set_attribute(trigger,"aria-expanded",string(opened))
+        dom.set_attribute(trigger,"aria-expanded",string(opened)^)
         dom.style_set_property(menu,"display",if (opened) "block" else "none")
-        dom.style_set_property(menu,"left",string(b.x-root.x) ++ "px")
-        dom.style_set_property(menu,"top",string(if (above) max(4,b.y-root.y-menu_height-3) else b.y-root.y+b.height+3) ++ "px")
+        dom.style_set_property(menu,"left",string(b.x-root.x)^ ++ "px")
+        dom.style_set_property(menu,"top",string(if (above) max(4,b.y-root.y-menu_height-3) else b.y-root.y+b.height+3)^ ++ "px")
         dom.style_set_property(menu,"width",string(max(74,b.width)) ++ "px")
     }
     object_options(owner,st)
-    if (chosen != null) {
-        for (key in model.editable_keys(chosen) where key != st.editing.key) control_value(owner,key,model.attr(chosen,key))
+    if ((chosen != null)^) {
+        for (key in ((model.editable_keys(chosen)) ^ { [] }) where key != st.editing.key) control_value(owner,key,model.attr(chosen,key))
         for (key in ["label","variant","x","y","width","height"]) {
             let control = dom.get_element_by_id(owner,"prop-" ++ key)
             if (len(ids)>1) dom.set_attribute(control,"disabled","")

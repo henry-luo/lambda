@@ -29,7 +29,7 @@ fn log_message(index) {
     if (index % 11 == 0) { "retry-scheduled" } else { "request-complete" }
 }
 
-fn make_log_line(index) {
+fn make_log_line(index) any^ {
     let hour = pad2(index % 24)
     let minute = pad2(index % 60)
     let second = pad2((index * 7) % 60)
@@ -69,7 +69,7 @@ pn build_logs() {
     var lines = []
     var index = 0
     while (index < log_count) {
-        lines.push(make_log_line(index))
+        lines.push(make_log_line(index))^
         index = index + 1
     }
     lines
@@ -78,11 +78,11 @@ pn build_logs() {
 pn set_field(var record, key, value) {
     if (key == "level") { record.level = value }
     else if (key == "service") { record.service = value }
-    else if (key == "status") { record.status = int(value) }
-    else if (key == "latency") { record.latency = int(value) }
+    else if (key == "status") { record.status = int(value)^ }
+    else if (key == "latency") { record.latency = int(value)^ }
     else if (key == "region") { record.region = value }
     else if (key == "route") { record.route = value }
-    else if (key == "bytes") { record.bytes = int(value) }
+    else if (key == "bytes") { record.bytes = int(value)^ }
     else if (key == "message") { record.message = value }
 }
 
@@ -93,17 +93,17 @@ pn parse_log_line(line) {
         region: "", route: "", bytes: 0, message: ""
     }
     var field_start = 1
-    if (index_of(fields[1], "=") == null) {
+    if ((index_of(fields[1], "=") == null)^) {
         record.level = fields[1]
         record.service = fields[2]
         field_start = 3
     }
     var index = field_start
-    while (index < len(fields)) {
+    while ((index < len(fields))^) {
         let token = fields[index]
         let separator = index_of(token, "=")
-        if (separator != null) {
-            set_field(record, slice(token, 0, separator), slice(token, separator + 1, len(token)))
+        if ((separator != null)^) {
+            set_field(record, slice(token, 0, separator), slice(token, separator + 1, len(token)))^
         }
         index = index + 1
     }
@@ -125,13 +125,13 @@ pn process_logs(lines) {
     var rejected = 0
     for index of lines {
         let record = parse_log_line(lines[index])
-        if (record.status >= 500 or record.level == "ERROR") {
+        if ((record.status >= 500 or record.level == "ERROR")^) {
             rejected = rejected + 1
         } else {
-            if (record.service == "api") { add_to_group(groups.api, record) }
-            else if (record.service == "worker") { add_to_group(groups.worker, record) }
-            else if (record.service == "db") { add_to_group(groups.db, record) }
-            else { add_to_group(groups.cache, record) }
+            if ((record.service == "api")^) { add_to_group(groups.api, record)^ }
+            else if ((record.service == "worker")^) { add_to_group(groups.worker, record)^ }
+            else if ((record.service == "db")^) { add_to_group(groups.db, record)^ }
+            else { add_to_group(groups.cache, record)^ }
             accepted = accepted + 1
         }
     }
@@ -149,7 +149,7 @@ pn main() {
             result.groups.api.totalLatency + result.groups.worker.totalBytes + pass) % modulus
         pass = pass + 1
     }
-    if (checksum == 292634526) {
+    if ((checksum == 292634526)^) {
         print("log_pipeline: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("log_pipeline: FAIL checksum=" ++ string(checksum) ++ "\n")

@@ -1,24 +1,24 @@
-pn last_code(text: string, begin: int, stop: int) int {
+pn last_code(text: string, begin: int, stop: int) int^ {
     var code: int = 0
     var index: int = begin
     while (index < stop) {
-        code = ord(text[index])
+        code = ord(text[index])^
         index = index + 1
     }
     code
 }
 
-pn has_missing(text: string, begin: int, stop: int) bool {
+pn has_missing(text: string, begin: int, stop: int) bool^ {
     var missing: bool = false
     var index: int = begin
     while (index < stop) {
-        missing = missing or (ord(text[index]) == null)
+        missing = (missing or (ord(text[index]) == null))^
         index = index + 1
     }
     missing
 }
 
-pn fold_digits(text: string) int {
+pn fold_digits(text: string) int^ {
     var value: int = 0
     var index: int = 0
     let stop: int = len(text)

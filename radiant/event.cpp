@@ -5724,8 +5724,12 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
 
 static bool dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
                                          View* focused) {
-    const char* clip = clipboard_get_text();
-    if (!clip || !*clip) return false;
+    const char* source = clipboard_get_text();
+    if (!source || !*source) return false;
+    // paste listeners can refresh/replace the clipboard store; own the bytes
+    // across their dispatch before the default insertion uses them.
+    char* clip = mem_strdup(source, MEM_CAT_LAYOUT);
+    if (!clip) return false;
 
     evcon->paste_text = clip;
     dispatch_lambda_handler(evcon, focused, "paste");
@@ -5738,6 +5742,7 @@ static bool dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
                                      clip, (uint32_t)strlen(clip));
         }
     }
+    mem_free(clip);
     evcon->need_repaint = true;
     return true;
 }
@@ -13516,8 +13521,16 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     int current_offset = rect->start_index;
     // CSS Ruby ranges retain alignment padding at the first/last boundary.
     if (rect->ruby_alignment_advance > 0.0f) {
-        if (byte_offset <= rect->start_index) return rect->x;
-        if (byte_offset >= rect->start_index + rect->length) return rect->x + rect->width;
+        int first, length;
+        // suppressed separator bytes share the visible end's allocated column edge.
+        text_rect_painted_source_range(rect, &first, &length);
+        // soft wraps keep separators in exports, but consumed bytes cannot take Ruby's end padding.
+        if (rect->collapsed_space_advance != 0.0f) {
+            int consumed = text_rect_trailing_collapsible_bytes(text, rect);
+            length = max(0, length - max(0, consumed - rect->trailing_whitespace_bytes));
+        }
+        if (byte_offset <= first) return rect->x;
+        if (byte_offset >= first + length) return rect->x + rect->width;
     }
     float x = rect->x + rect->ruby_alignment_offset;
     bool has_space = false;

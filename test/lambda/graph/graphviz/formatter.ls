@@ -2,11 +2,11 @@ import model: lambda.graph.model
 import normalize: lambda.graph.normalize
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn property_pairs(value) => [
-  for (group in children(value, "properties"), property in children(group, "property"))
+  for (group in children(value, "properties"), property in ((children(group, "property")) ^ { [] }))
     [property.name, property.value]
 ]
 

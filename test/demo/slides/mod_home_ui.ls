@@ -5,17 +5,17 @@ import text_format: ~~.mod_text_format
 import presets: ~~.mod_shape_presets
 import font_picker: ~~.word.mod_font_picker
 
-fn tool(id,label,graphic,cls="",action=null) => ribbon.tool(id,label,graphic,cls,action)
-fn menu(id,label,graphic,cls="") => ribbon.menu(id,label,graphic,cls,id in ["font-color","text-highlight","shape-fill","shape-outline"])
-fn row(children) => ribbon.row(children)
+fn tool(id,label,graphic,cls="",action=null) any^ => ribbon.tool(id,label,graphic,cls,action)
+fn menu(id,label,graphic,cls="") any^ => ribbon.menu(id,label,graphic,cls,id in ["font-color","text-highlight","shape-fill","shape-outline"])
+fn row(children) any^ => ribbon.row(children)
 fn stack(children) => ribbon.stack(children)
-fn selector(id,label,items,property) {
+fn selector(id,label,items,property) any^ {
     let control = <select id:id,class:"home-select",title:label,'aria-label':label,'data-property':"home-" ++ property,
         for (item in items) <option value:item.value,item.label>>;
     if (property=="font-family") font_picker.field(control,id,"Arial, sans-serif",true) else control
 }
 pub fn tree(fonts=[]) => <div class:"home-ribbon editor-ribbon",
-    ribbon.group("Undo",ribbon.history_tools((action,label,graphic)=>tool("home-" ++ action,label,graphic,"icon-only",action)));
+    ribbon.group("Undo",ribbon.history_tools((action,label,graphic)any^ =>tool("home-" ++ action,label,graphic,"icon-only",action)));
     ribbon.group("Clipboard",[row([
         <div class:"paste-tool",tool("paste","Paste","paste","home-large");menu("paste-options","Paste options","down","icon-only")>,
         stack([tool("cut","Cut","cut"),tool("copy","Copy","copy"),tool("format-painter","Format Painter","format_painter")])])]);
@@ -46,7 +46,7 @@ pub fn tree(fonts=[]) => <div class:"home-ribbon editor-ribbon",
         menu("arrange","Arrange","object_position","home-large"),menu("quick-styles","Quick Styles","format_shape","home-large"),
         stack([menu("shape-fill","Shape Fill","shape_fill"),menu("shape-outline","Shape Outline","shape_outline")])])])
 >
-fn item(action,label,graphic=null,disabled=false,prefix="") => ribbon.item(action,label,graphic,disabled,prefix)
+fn item(action,label,graphic=null,disabled=false,prefix="") any^ => ribbon.item(action,label,graphic,disabled,prefix)
 fn slide_items(disabled=false,prefix="") => [item("duplicate-slide","Duplicate Slide","copy",false,prefix),item("delete-slide","Delete Slide","trash",disabled,prefix)]
 pub fn slide_context(st) {
     let prefix = "slide-context-"
@@ -62,7 +62,7 @@ fn swatch(color) => <span class:"home-swatch",style:"background:" ++ color ++ ";
 fn colors(prefix,choices,none_label="Automatic") => [item(prefix ++ ":none",none_label),
     <div class:"home-color-grid",for (color in choices) <button type:"button",role:"menuitem",title:color.label,'aria-label':color.label,
         'data-action':prefix ++ ":" ++ color.value,swatch(color.value)>>]
-pub fn menu_tree(key) {
+pub fn menu_tree(key) any^ {
     if (key == "paste-options") [item("paste","Keep Source Formatting","paste"),item("paste-text","Keep Text Only","text_box")]
     else if (key == "slide-actions") slide_items()
     else if (key == "home-layout") [for (layout in ["blank","title","title-body","two-column","three-column","section","quote","image-left","image-right"])

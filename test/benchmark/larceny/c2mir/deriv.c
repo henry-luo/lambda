@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/deriv.ls. */
 /* Symbolic differentiation of 3*x^3 + 2*x^2 + x + 5, repeated 5000 times.
  * Expression nodes are a tagged struct (0=const, 1=var, 2=add, 3=mul),
@@ -79,11 +80,14 @@ static int benchmark(void) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int result = benchmark();
+    BENCH_KERNEL_END();
     if (result == 45) {
         printf("deriv: PASS\n");
     } else {
         printf("deriv: FAIL result=%d\n", result);
     }
+    BENCH_KERNEL_REPORT();
     return result != 45;
 }

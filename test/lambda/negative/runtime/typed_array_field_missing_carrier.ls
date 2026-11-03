@@ -7,6 +7,5 @@ type Graph = {nodes: Node[]}
 pn main() {
     var g: Graph = {nodes: [{id: 0, edges: [1]}]}
     var cs: int[] = g.nodes[3].edges
-    print("bound: ")
-    print(cs)
+    cs
 }

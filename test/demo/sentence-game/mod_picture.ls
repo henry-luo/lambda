@@ -58,22 +58,22 @@ pub let pictures = [
 pub fn picture(id) => named(pictures,id)
 pub fn card_count(scene) => sum([for (part in model.parts) len(scene.decks[part.id])])
 pub fn new_game(seed=42) => {*:model.new_game(seed),phase:"picture",scene:"",notice:"",unlimited:true}
-fn choose_picture(st,id) => if (st.phase != "picture" or picture(id) == null) st
+fn choose_picture(st,id) any^ => if (st.phase != "picture" or picture(id) == null) st
     else model.choose_pattern({*:new_game(st.seed),book:st.book,scene:id,decks:picture(id).decks,phase:"pattern"},"triple")
-fn save_description(st) {
+fn save_description(st) any^ {
     let saved = model.save_sentence(st)
     if (saved == st) st
     // saving clears the sentence while keeping every card available again.
     else model.clear_choices({*:saved,clauses:[],link:"",previous:null,notice:"Added to your book! Use these cards again to describe something else."})
 }
-pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
+pub fn action(st,command,value="") any^ => if (command == "reset") new_game(st.seed)
     else if (command == "picture") choose_picture(st,value)
     else if (command == "pictures") {*:st,phase:"picture"}
     else if (command == "recipe" and st.phase == "build" and model.pattern(value) != null) model.choose_pattern(model.show_patterns(st),value)
     else if (command == "primary") save_description(st)
     else if (command == "clear-description" and st.phase == "build") model.clear_choices({*:st,clauses:[],link:"",previous:null,notice:""})
     else if (st.phase == "build") model.action({*:st,notice:""},command,value) else st
-pub fn shortcut(st,key) {
+pub fn shortcut(st,key) any^ {
     let changed = if (st.phase == "build") model.shortcut(st,key) else st
     if (changed == st) st else {*:changed,notice:""}
 }

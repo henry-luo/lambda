@@ -7,36 +7,36 @@ let CHRSZ = 8
 let MASK32 = 0xFFFFFFFF
 
 // Safe 32-bit addition
-fn safe_add(x: int, y: int) {
+fn safe_add(x: int, y: int) any^ {
     var ux: u32 = x
     var uy: u32 = y
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-fn bit_rol(num: int, cnt: int) {
+fn bit_rol(num: int, cnt: int) any^ {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // MD5 helper functions
-fn md5_cmn(q: int, a: int, b: int, x: int, s: int, t: int) {
+fn md5_cmn(q: int, a: int, b: int, x: int, s: int, t: int) any^ {
     return safe_add(bit_rol(safe_add(safe_add(a, q), safe_add(x, t)), s), b)
 }
 
-fn md5_ff(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_ff(a: int, b: int, c: int, d: int, x: int, s: int, t: int) any^ {
     return md5_cmn(bor(band(b, c), band(band(bnot(b), MASK32), d)), a, b, x, s, t)
 }
 
-fn md5_gg(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_gg(a: int, b: int, c: int, d: int, x: int, s: int, t: int) any^ {
     return md5_cmn(bor(band(b, d), band(c, band(bnot(d), MASK32))), a, b, x, s, t)
 }
 
-fn md5_hh(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_hh(a: int, b: int, c: int, d: int, x: int, s: int, t: int) any^ {
     return md5_cmn(bxor(bxor(b, c), d), a, b, x, s, t)
 }
 
-fn md5_ii(a: int, b: int, c: int, d: int, x: int, s: int, t: int) {
+fn md5_ii(a: int, b: int, c: int, d: int, x: int, s: int, t: int) any^ {
     return md5_cmn(bxor(c, bor(b, band(bnot(d), MASK32))), a, b, x, s, t)
 }
 
@@ -59,7 +59,7 @@ pn str2binl(str) {
 }
 
 // Convert little-endian words to hex string
-fn binl2hex(binarray) {
+fn binl2hex(binarray) any^ {
     let hex_tab = "0123456789abcdef"
     var result = ""
     var i: int = 0
@@ -75,7 +75,7 @@ fn binl2hex(binarray) {
 }
 
 // Core MD5 computation
-fn core_md5(x_in, input_len: int) {
+fn core_md5(x_in, input_len: int) any^ {
     // Copy and pad
     var x_len = len(x_in)
     // Compute total needed: padding index + 14 + 1
@@ -110,78 +110,78 @@ fn core_md5(x_in, input_len: int) {
         var oldd = d
 
         // Use unsigned 32-bit constants (negatives converted from JS)
-        a = md5_ff(a, b, c, d, x[i+ 0], 7 , 0xD76AA478)
-        d = md5_ff(d, a, b, c, x[i+ 1], 12, 0xE8C7B756)
-        c = md5_ff(c, d, a, b, x[i+ 2], 17, 0x242070DB)
-        b = md5_ff(b, c, d, a, x[i+ 3], 22, 0xC1BDCEEE)
-        a = md5_ff(a, b, c, d, x[i+ 4], 7 , 0xF57C0FAF)
-        d = md5_ff(d, a, b, c, x[i+ 5], 12, 0x4787C62A)
-        c = md5_ff(c, d, a, b, x[i+ 6], 17, 0xA8304613)
-        b = md5_ff(b, c, d, a, x[i+ 7], 22, 0xFD469501)
-        a = md5_ff(a, b, c, d, x[i+ 8], 7 , 0x698098D8)
-        d = md5_ff(d, a, b, c, x[i+ 9], 12, 0x8B44F7AF)
-        c = md5_ff(c, d, a, b, x[i+10], 17, 0xFFFF5BB1)
-        b = md5_ff(b, c, d, a, x[i+11], 22, 0x895CD7BE)
-        a = md5_ff(a, b, c, d, x[i+12], 7 , 0x6B901122)
-        d = md5_ff(d, a, b, c, x[i+13], 12, 0xFD987193)
-        c = md5_ff(c, d, a, b, x[i+14], 17, 0xA679438E)
-        b = md5_ff(b, c, d, a, x[i+15], 22, 0x49B40821)
+        a = md5_ff(a, b, c, d, x[i+ 0], 7 , 0xD76AA478)^
+        d = md5_ff(d, a, b, c, x[i+ 1], 12, 0xE8C7B756)^
+        c = md5_ff(c, d, a, b, x[i+ 2], 17, 0x242070DB)^
+        b = md5_ff(b, c, d, a, x[i+ 3], 22, 0xC1BDCEEE)^
+        a = md5_ff(a, b, c, d, x[i+ 4], 7 , 0xF57C0FAF)^
+        d = md5_ff(d, a, b, c, x[i+ 5], 12, 0x4787C62A)^
+        c = md5_ff(c, d, a, b, x[i+ 6], 17, 0xA8304613)^
+        b = md5_ff(b, c, d, a, x[i+ 7], 22, 0xFD469501)^
+        a = md5_ff(a, b, c, d, x[i+ 8], 7 , 0x698098D8)^
+        d = md5_ff(d, a, b, c, x[i+ 9], 12, 0x8B44F7AF)^
+        c = md5_ff(c, d, a, b, x[i+10], 17, 0xFFFF5BB1)^
+        b = md5_ff(b, c, d, a, x[i+11], 22, 0x895CD7BE)^
+        a = md5_ff(a, b, c, d, x[i+12], 7 , 0x6B901122)^
+        d = md5_ff(d, a, b, c, x[i+13], 12, 0xFD987193)^
+        c = md5_ff(c, d, a, b, x[i+14], 17, 0xA679438E)^
+        b = md5_ff(b, c, d, a, x[i+15], 22, 0x49B40821)^
 
-        a = md5_gg(a, b, c, d, x[i+ 1], 5 , 0xF61E2562)
-        d = md5_gg(d, a, b, c, x[i+ 6], 9 , 0xC040B340)
-        c = md5_gg(c, d, a, b, x[i+11], 14, 0x265E5A51)
-        b = md5_gg(b, c, d, a, x[i+ 0], 20, 0xE9B6C7AA)
-        a = md5_gg(a, b, c, d, x[i+ 5], 5 , 0xD62F105D)
-        d = md5_gg(d, a, b, c, x[i+10], 9 , 0x02441453)
-        c = md5_gg(c, d, a, b, x[i+15], 14, 0xD8A1E681)
-        b = md5_gg(b, c, d, a, x[i+ 4], 20, 0xE7D3FBC8)
-        a = md5_gg(a, b, c, d, x[i+ 9], 5 , 0x21E1CDE6)
-        d = md5_gg(d, a, b, c, x[i+14], 9 , 0xC33707D6)
-        c = md5_gg(c, d, a, b, x[i+ 3], 14, 0xF4D50D87)
-        b = md5_gg(b, c, d, a, x[i+ 8], 20, 0x455A14ED)
-        a = md5_gg(a, b, c, d, x[i+13], 5 , 0xA9E3E905)
-        d = md5_gg(d, a, b, c, x[i+ 2], 9 , 0xFCEFA3F8)
-        c = md5_gg(c, d, a, b, x[i+ 7], 14, 0x676F02D9)
-        b = md5_gg(b, c, d, a, x[i+12], 20, 0x8D2A4C8A)
+        a = md5_gg(a, b, c, d, x[i+ 1], 5 , 0xF61E2562)^
+        d = md5_gg(d, a, b, c, x[i+ 6], 9 , 0xC040B340)^
+        c = md5_gg(c, d, a, b, x[i+11], 14, 0x265E5A51)^
+        b = md5_gg(b, c, d, a, x[i+ 0], 20, 0xE9B6C7AA)^
+        a = md5_gg(a, b, c, d, x[i+ 5], 5 , 0xD62F105D)^
+        d = md5_gg(d, a, b, c, x[i+10], 9 , 0x02441453)^
+        c = md5_gg(c, d, a, b, x[i+15], 14, 0xD8A1E681)^
+        b = md5_gg(b, c, d, a, x[i+ 4], 20, 0xE7D3FBC8)^
+        a = md5_gg(a, b, c, d, x[i+ 9], 5 , 0x21E1CDE6)^
+        d = md5_gg(d, a, b, c, x[i+14], 9 , 0xC33707D6)^
+        c = md5_gg(c, d, a, b, x[i+ 3], 14, 0xF4D50D87)^
+        b = md5_gg(b, c, d, a, x[i+ 8], 20, 0x455A14ED)^
+        a = md5_gg(a, b, c, d, x[i+13], 5 , 0xA9E3E905)^
+        d = md5_gg(d, a, b, c, x[i+ 2], 9 , 0xFCEFA3F8)^
+        c = md5_gg(c, d, a, b, x[i+ 7], 14, 0x676F02D9)^
+        b = md5_gg(b, c, d, a, x[i+12], 20, 0x8D2A4C8A)^
 
-        a = md5_hh(a, b, c, d, x[i+ 5], 4 , 0xFFFA3942)
-        d = md5_hh(d, a, b, c, x[i+ 8], 11, 0x8771F681)
-        c = md5_hh(c, d, a, b, x[i+11], 16, 0x6D9D6122)
-        b = md5_hh(b, c, d, a, x[i+14], 23, 0xFDE5380C)
-        a = md5_hh(a, b, c, d, x[i+ 1], 4 , 0xA4BEEA44)
-        d = md5_hh(d, a, b, c, x[i+ 4], 11, 0x4BDECFA9)
-        c = md5_hh(c, d, a, b, x[i+ 7], 16, 0xF6BB4B60)
-        b = md5_hh(b, c, d, a, x[i+10], 23, 0xBEBFBC70)
-        a = md5_hh(a, b, c, d, x[i+13], 4 , 0x289B7EC6)
-        d = md5_hh(d, a, b, c, x[i+ 0], 11, 0xEAA127FA)
-        c = md5_hh(c, d, a, b, x[i+ 3], 16, 0xD4EF3085)
-        b = md5_hh(b, c, d, a, x[i+ 6], 23, 0x04881D05)
-        a = md5_hh(a, b, c, d, x[i+ 9], 4 , 0xD9D4D039)
-        d = md5_hh(d, a, b, c, x[i+12], 11, 0xE6DB99E5)
-        c = md5_hh(c, d, a, b, x[i+15], 16, 0x1FA27CF8)
-        b = md5_hh(b, c, d, a, x[i+ 2], 23, 0xC4AC5665)
+        a = md5_hh(a, b, c, d, x[i+ 5], 4 , 0xFFFA3942)^
+        d = md5_hh(d, a, b, c, x[i+ 8], 11, 0x8771F681)^
+        c = md5_hh(c, d, a, b, x[i+11], 16, 0x6D9D6122)^
+        b = md5_hh(b, c, d, a, x[i+14], 23, 0xFDE5380C)^
+        a = md5_hh(a, b, c, d, x[i+ 1], 4 , 0xA4BEEA44)^
+        d = md5_hh(d, a, b, c, x[i+ 4], 11, 0x4BDECFA9)^
+        c = md5_hh(c, d, a, b, x[i+ 7], 16, 0xF6BB4B60)^
+        b = md5_hh(b, c, d, a, x[i+10], 23, 0xBEBFBC70)^
+        a = md5_hh(a, b, c, d, x[i+13], 4 , 0x289B7EC6)^
+        d = md5_hh(d, a, b, c, x[i+ 0], 11, 0xEAA127FA)^
+        c = md5_hh(c, d, a, b, x[i+ 3], 16, 0xD4EF3085)^
+        b = md5_hh(b, c, d, a, x[i+ 6], 23, 0x04881D05)^
+        a = md5_hh(a, b, c, d, x[i+ 9], 4 , 0xD9D4D039)^
+        d = md5_hh(d, a, b, c, x[i+12], 11, 0xE6DB99E5)^
+        c = md5_hh(c, d, a, b, x[i+15], 16, 0x1FA27CF8)^
+        b = md5_hh(b, c, d, a, x[i+ 2], 23, 0xC4AC5665)^
 
-        a = md5_ii(a, b, c, d, x[i+ 0], 6 , 0xF4292244)
-        d = md5_ii(d, a, b, c, x[i+ 7], 10, 0x432AFF97)
-        c = md5_ii(c, d, a, b, x[i+14], 15, 0xAB9423A7)
-        b = md5_ii(b, c, d, a, x[i+ 5], 21, 0xFC93A039)
-        a = md5_ii(a, b, c, d, x[i+12], 6 , 0x655B59C3)
-        d = md5_ii(d, a, b, c, x[i+ 3], 10, 0x8F0CCC92)
-        c = md5_ii(c, d, a, b, x[i+10], 15, 0xFFEFF47D)
-        b = md5_ii(b, c, d, a, x[i+ 1], 21, 0x85845DD1)
-        a = md5_ii(a, b, c, d, x[i+ 8], 6 , 0x6FA87E4F)
-        d = md5_ii(d, a, b, c, x[i+15], 10, 0xFE2CE6E0)
-        c = md5_ii(c, d, a, b, x[i+ 6], 15, 0xA3014314)
-        b = md5_ii(b, c, d, a, x[i+13], 21, 0x4E0811A1)
-        a = md5_ii(a, b, c, d, x[i+ 4], 6 , 0xF7537E82)
-        d = md5_ii(d, a, b, c, x[i+11], 10, 0xBD3AF235)
-        c = md5_ii(c, d, a, b, x[i+ 2], 15, 0x2AD7D2BB)
-        b = md5_ii(b, c, d, a, x[i+ 9], 21, 0xEB86D391)
+        a = md5_ii(a, b, c, d, x[i+ 0], 6 , 0xF4292244)^
+        d = md5_ii(d, a, b, c, x[i+ 7], 10, 0x432AFF97)^
+        c = md5_ii(c, d, a, b, x[i+14], 15, 0xAB9423A7)^
+        b = md5_ii(b, c, d, a, x[i+ 5], 21, 0xFC93A039)^
+        a = md5_ii(a, b, c, d, x[i+12], 6 , 0x655B59C3)^
+        d = md5_ii(d, a, b, c, x[i+ 3], 10, 0x8F0CCC92)^
+        c = md5_ii(c, d, a, b, x[i+10], 15, 0xFFEFF47D)^
+        b = md5_ii(b, c, d, a, x[i+ 1], 21, 0x85845DD1)^
+        a = md5_ii(a, b, c, d, x[i+ 8], 6 , 0x6FA87E4F)^
+        d = md5_ii(d, a, b, c, x[i+15], 10, 0xFE2CE6E0)^
+        c = md5_ii(c, d, a, b, x[i+ 6], 15, 0xA3014314)^
+        b = md5_ii(b, c, d, a, x[i+13], 21, 0x4E0811A1)^
+        a = md5_ii(a, b, c, d, x[i+ 4], 6 , 0xF7537E82)^
+        d = md5_ii(d, a, b, c, x[i+11], 10, 0xBD3AF235)^
+        c = md5_ii(c, d, a, b, x[i+ 2], 15, 0x2AD7D2BB)^
+        b = md5_ii(b, c, d, a, x[i+ 9], 21, 0xEB86D391)^
 
-        a = safe_add(a, olda)
-        b = safe_add(b, oldb)
-        c = safe_add(c, oldc)
-        d = safe_add(d, oldd)
+        a = safe_add(a, olda)^
+        b = safe_add(b, oldb)^
+        c = safe_add(c, oldc)^
+        d = safe_add(d, oldd)^
 
         i = i + 16
     }
@@ -206,7 +206,7 @@ pn run() {
 
     var md5_output = hex_md5(plain_text)
     var expected = "a831e91e0f70eddcb70dc61c6f82f6cd"
-    if (md5_output != expected) {
+    if ((md5_output != expected)^) {
         print("crypto-md5: FAIL got=" ++ md5_output ++ " expected=" ++ expected ++ "\n")
         return false
     }
@@ -219,7 +219,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 22) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

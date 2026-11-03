@@ -8,7 +8,7 @@ pn read_count(world: World, key: int) any {
 }
 
 pn main() {
-    var world: World = {datas: fill(3, null)}
+    var world: World = {datas: fill(3, null)^}
     let idle: IdleData = {control: 1, icount: 7}
     world.datas[0] = idle
     world.datas[1] = {icount: 17}

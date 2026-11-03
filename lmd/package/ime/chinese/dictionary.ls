@@ -18,7 +18,7 @@ pub pn save_edits(edits,path,engine) any^ {
     return output(validate(edits,engine)^,path,{format:"json",atomic:true})^
 }
 
-pub fn reading(text) string => join([for (part in split(replace(lower(trim(text)),"'"," ")," ") where part != "") part],"'")
+pub fn reading(text) string^ => join([for (part in ((split(replace(lower(trim(text)),"'"," ")," ")) ^ { [] }) where part != "") part],"'")
 
 pub fn validate(value,engine) map^ {
     let header = c.require(value is map and value.format == "lambda.ime.chinese.edits" and
@@ -33,7 +33,7 @@ pub fn validate(value,engine) map^ {
 
 pub fn change(edits,engine,word,text,present) map^ {
     let key = reading(text)
-    let entries = [*[for (entry in edits.entries where not (entry[0] == trim(word) and entry[1] == key)) entry],
+    let entries = [*[for (entry in edits.entries where ((not (entry[0] == trim(word) and entry[1] == key)) ^ { false })) entry],
         [normalize(trim(word),"nfc"),key,present]];
     validate({*:edits,entries:entries},engine)^
 }
@@ -82,7 +82,7 @@ fn word_lines(table,word) array^ {
     if (len(table.offsets) == 0) [] else {
         // native UTF-8 decoding and line tests avoid decoding every posting during a word search.
         let rows = split(parse(table.bytes,"text")^,"\n");
-        [for (i,row in rows where contains(row,word)) i]
+        [for (i,row in rows where ((contains(row,word)) ^ { false })) i]
     }
 }
 

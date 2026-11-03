@@ -223,8 +223,11 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     RdtLogicalPoint applied = layout_relative_position_offset_in_flow(block);
     block->x += applied.x;
     block->y += applied.y;
-    if (block->view_type == RDT_VIEW_INLINE && (applied.x != 0 || applied.y != 0)) {
+    if (block->position) {
+        block->position->inline_relative_x = applied.x;
         block->position->inline_relative_y = applied.y;
+    }
+    if (block->view_type == RDT_VIEW_INLINE && (applied.x != 0 || applied.y != 0)) {
         layout_shift_inline_descendants(
             lam::view_require_element(block), applied.x, applied.y);
     }

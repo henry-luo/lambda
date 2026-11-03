@@ -1,6 +1,6 @@
 import conformance: lambda.graph.conformance
 
-fn scene_case(test_case) => string(test_case.policy) == "scene-semantic"
+fn scene_case(test_case) any^ => string(test_case.policy) == "scene-semantic"
 
 fn run_case(test_case) {
   let source_path = "test/lambda/graph/mermaid/" ++ string(test_case.source);
@@ -17,7 +17,7 @@ fn run_case(test_case) {
 }
 
 let cases = [for (test_case in conformance.manifest_cases(
-  "test/lambda/graph/mermaid/manifest.mark") where scene_case(test_case)) test_case]
+  "test/lambda/graph/mermaid/manifest.mark") where ((scene_case(test_case)) ^ { false })) test_case]
 let results = [for (test_case in cases) run_case(test_case)]
 
 {

@@ -15,7 +15,7 @@ fn screen(c, dx, dy) {
     [c.width / 2.0 + world * (math.cos(angle) * dx + math.sin(angle) * dy),
      c.height / 2.0 + world * (-math.sin(angle) * dx + math.cos(angle) * dy)]
 }
-pub fn camera(spec) {
+pub fn camera(spec) any^ {
     let center = value(spec.center, [0.0,0.0]);
     let zoom = value(spec.zoom, 0.0), bearing = value(spec.bearing, 0.0);
     let width = value(spec.width, 300.0), height = value(spec.height, 150.0);
@@ -27,7 +27,7 @@ pub fn camera(spec) {
     else {center: [wrap(center[0]),max([-max_latitude,min([max_latitude,center[1]])])],
         zoom: zoom, bearing: wrap(bearing), pitch: 0.0, width: width, height: height}
 }
-pub fn project(spec, position) {
+pub fn project(spec, position) any^ {
     let c = camera(spec);
     if (c is error) c else if (not projection.valid_position(position)) error("map: invalid position")
     else {
@@ -52,7 +52,7 @@ fn sequence(c, points, start, end, previous) {
     }
 }
 pub fn project_sequence(c, points, anchor = 0.0) => sequence(c,points,0,len(points),anchor).points
-pub fn unproject(spec, point) {
+pub fn unproject(spec, point) any^ {
     let c = camera(spec);
     if (c is error) c else if (not (point is array) or len(point) != 2 or not all(point |> numbers.finite_number(~)))
         error("map: invalid viewport point")
@@ -63,12 +63,12 @@ pub fn unproject(spec, point) {
          latitude(mercator_y(c.center[1]) + math.sin(angle) * dx + math.cos(angle) * dy)]
     }
 }
-pub fn pan(spec, dx, dy) {
+pub fn pan(spec, dx, dy) any^ {
     let c = camera(spec);
     if (c is error) c else if (not numbers.finite_number(dx) or not numbers.finite_number(dy)) error("map: invalid pan delta")
     else camera({*:c,center:unproject(c,[c.width/2.0-dx,c.height/2.0-dy])})
 }
-pub fn zoom_at(spec, zoom, point = null) {
+pub fn zoom_at(spec, zoom, point = null) any^ {
     let c = camera(spec);
     let anchor = if (point == null) [c.width/2.0,c.height/2.0] else point;
     let location = if (c is error) c else unproject(c,anchor);
@@ -79,7 +79,7 @@ pub fn zoom_at(spec, zoom, point = null) {
         pan(next,anchor[0]-projected[0],anchor[1]-projected[1])
     }
 }
-pub fn fit_bounds(spec, bounds, padding = 0.0) {
+pub fn fit_bounds(spec, bounds, padding = 0.0) any^ {
     let c = camera(spec);
     if (c is error) c else if (not (bounds is array) or len(bounds) != 4 or
         not all(bounds |> numbers.finite_number(~)) or abs(bounds[0]) > 180 or abs(bounds[2]) > 180 or

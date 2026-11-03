@@ -1,13 +1,13 @@
 // S9.1.2–S9.1.3: recursive readers may borrow; retained or mutated values remain snapshots.
-pn sum_tail(a: int[], n: int) int {
+pn sum_tail(a: int[], n: int) int^ {
     if (n == 0) { return 0 }
     return a[n - 1] + sum_tail(a, n - 1)
 }
-pn even_read(a: int[], n: int) int {
+pn even_read(a: int[], n: int) int^ {
     if (n == 0) { return a[0] }
     return odd_read(a, n - 1)
 }
-pn odd_read(a: int[], n: int) int {
+pn odd_read(a: int[], n: int) int^ {
     if (n == 0) { return a[1] }
     return even_read(a, n - 1)
 }
@@ -15,12 +15,12 @@ pn retain(a: int[], n: int) int[] {
     if (n == 0) { return a }
     return retain(a, n - 1)
 }
-pn plain_write(a: int[], n: int) int {
+pn plain_write(a: int[], n: int) int^ {
     a[0] = a[0] + 1
     if (n == 0) { return a[0] }
     return plain_write(a, n - 1)
 }
-pn observe_and_change(a: int[], var b: int[]) int {
+pn observe_and_change(a: int[], var b: int[]) int^ {
     var before: int = a[0]
     b[0] = b[0] + 10
     return a[0] * 10 + before
@@ -47,19 +47,29 @@ pn near_limit(n: int) int {
     if (n == 9007199254740991) { return n }
     return near_limit(n + 1)
 }
-pn search(a: int[], n: int) int {
+pn search(a: int[], n: int) int^ {
     if (n < 0) { return -1 }
     var current: int = a[n]
-    if (current == 5) { return n }
+    current^
+    if ((current == 5)^) { return n }
     return search(a, n - 1)
 }
 pn touch(var a: int[], value: int) any { a[0] = value }
-pn count_up(var a: int[], n: int) int {
-    touch(a, n)
+pn count_up(var a: int[], n: int) int^ {
+    touch(a, n)^
     if (n == 4) { return a[0] }
     return count_up(a, n + 1)
 }
+pn collecting_tail(a: int[], n: int, sum: int) int^ {
+    if (n == 0) { return sum }
+    let garbage = fill(32, n)
+    let part: int = a[0]
+    return collecting_tail(a, n - 1, sum + part)
+}
 pn main() {
+    print(collecting_tail([3], 1000, 0)); print("\n")
+    print(collecting_tail([], 1, 0)); print("\n")
+
     var a: int[] = [2, 3, 5]
     print(sum_tail(a, 3)); print("\n")
     print(even_read(a, 3)); print("\n")
@@ -85,8 +95,8 @@ pn main() {
     var searched: int[] = [5, 2, 3, 4]
     print(search(searched, 3)); print("\n")
     if (true) {
-        let missing: int = search(searched, 8)
-        print("UNEXPECTED SEARCH\n")
+        let missing = search(searched, 8)
+        if (not (missing is error)) { print("UNEXPECTED SEARCH\n") }
     }
     print("after search\n")
     var counter: int[] = [9]
@@ -96,8 +106,8 @@ pn main() {
     print(old[0]); print("\n")
     if (true) {
         var short: int[] = []
-        let failed: int = count_up(short, 0)
-        print("UNEXPECTED SHORT\n")
+        let failed = count_up(short, 0)
+        if (not (failed is error)) { print("UNEXPECTED SHORT\n") }
     }
     print("after short\n")
 }

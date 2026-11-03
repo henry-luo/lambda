@@ -14,7 +14,7 @@ pub fn capitalize(s) {
 }
 
 // convert a reference like "#/components/schemas/Pet" to just "Pet"
-pub fn ref_to_name(ref_str) {
+pub fn ref_to_name(ref_str) any^ {
     let parts = split(ref_str, "/");
     parts[len(parts) - 1]
 }
@@ -30,7 +30,7 @@ pub fn get_or(m, key, fallback) {
 }
 
 // check if a value is in an array
-pub fn list_contains(arr, val) {
+pub fn list_contains(arr, val) any^ {
     if (arr == null) false
     else any(arr |> ~ == val)
 }

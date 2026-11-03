@@ -3,7 +3,7 @@
 // an ordinary start in the same procedure keeps its scoped join.
 pn child() { 7 }
 pn main() {
-    let owned: any | error = start(child, [], {owner: 'document'})
+    let owned: any^ = start(child, [], {owner: 'document'})
     let scoped = start(child, [])
     let value = wait(scoped)^;
     [owned is error, owned.code, owned.message, value]

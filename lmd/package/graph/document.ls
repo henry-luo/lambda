@@ -6,7 +6,7 @@ import structurizr: .structurizr.structurizr
 fn option(options, key, fallback = null) =>
   if (options != null and options[key] != null) options[key] else fallback
 
-pub fn to_html(source, options) {
+pub fn to_html(source, options) any^ {
   if (source.flavor == "structurizr") {
     let workspace = structurizr.normalize(source)
     structurizr.to_html(workspace, option(options, "view_key"), options)
@@ -16,7 +16,7 @@ pub fn to_html(source, options) {
 }
 
 // Markdown fences and standalone Mermaid previews share the native graph pipeline.
-pub fn from_mermaid(source, options = null) {
+pub fn from_mermaid(source, options = null) any^ {
   let graph = parse(source, {type:"graph", flavor:"mermaid"})^
   to_html(graph, options)
 }

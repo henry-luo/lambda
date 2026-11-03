@@ -2,19 +2,19 @@ import chart: lambda.chart.chart
 import text: lambda.chart.text
 import collision: lambda.chart.collision
 
-fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
-fn guides(image) => (elements(image) |: ~.class == "coordinate-guides")[0]
+fn elements(node) any^ => if (node is element) [node, for (child in ((content(node)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn guides(image) any^ => (elements(image) |: ~.class == "coordinate-guides")[0]
 fn separated(image) {
     let boxes = text.svg_bounds(guides(image));
     not any([for (i, box in boxes) for (j, other in boxes where j > i) collision.overlaps(box, other, 1.99)])
 }
 fn tick_text(image, key) {
     let axis = (elements(image) |: ~.class == "axis " ++ key ++ "-axis")[0];
-    [for (tick in content(axis) where tick.class == "tick")
-        for (label in elements(tick) where name(label) == 'text') join(content(label), "")]
+    [for (tick in ((content(axis)) ^ { [] }) where tick.class == "tick")
+        for (label in ((elements(tick)) ^ { [] }) where ((name(label) == 'text') ^ { false })) join(content(label), "")]
 }
-fn screen_ticks(image, size = 5.0) {
-    let lines = [for (tick in elements(image) where tick.class == "tick") for (line in content(tick) where name(line) == 'line') line];
+fn screen_ticks(image, size = 5.0) any^ {
+    let lines = [for (tick in ((elements(image)) ^ { [] }) where tick.class == "tick") for (line in ((content(tick)) ^ { [] }) where ((name(line) == 'line') ^ { false })) line];
     len(lines) > 0 and all(lines |> abs(math.sqrt((~.x2 - ~.x1) ** 2 + (~.y2 - ~.y1) ** 2) - size) < 0.001)
 }
 
@@ -41,16 +41,16 @@ let checks = {
     progression_endpoints: "1" in tick_text(image, "x") and "5" in tick_text(image, "x"),
     track_endpoints: "2" in tick_text(image, "y") and "6" in tick_text(image, "y"),
     pixel_tick_size: screen_ticks(image),
-    grid_below_labels: max([for (i, node in content(guides(image)) where node.class == "coordinate-grid") i]) <
-        min([for (i, node in content(guides(image)) where node.class == "coordinate-axis") i]),
-    background_halo: all([for (node in elements(guides(image)) where name(node) == 'text')
+    grid_below_labels: max([for (i, node in ((content(guides(image))) ^ { [] }) where node.class == "coordinate-grid") i]) <
+        min([for (i, node in ((content(guides(image))) ^ { [] }) where node.class == "coordinate-axis") i]),
+    background_halo: all([for (node in ((elements(guides(image))) ^ { [] }) where ((name(node) == 'text') ^ { false }))
         node.stroke == "white" and node["paint-order"] == "stroke fill"]) and
-        all([for (node in elements(guides(dark)) where name(node) == 'text') node.stroke == "#333"]) and separated(dark),
+        all([for (node in ((elements(guides(dark))) ^ { [] }) where ((name(node) == 'text') ^ { false })) node.stroke == "#333"]) and separated(dark),
     transformed_guides_clear: all(variants |> separated(~) and screen_ticks(~)),
     large_formatted_labels_clear: separated(large),
     custom_tick_geometry: screen_ticks(custom, 9.0) and separated(custom) and
         tick_text(custom, "x") == ["1", "3", "5"] and tick_text(custom, "y") == ["2", "6"] and
-        not any([for (node in elements(custom) where node.class == "coordinate-axis")
+        not any([for (node in ((elements(custom)) ^ { [] }) where node.class == "coordinate-axis")
             any(elements(node) |> name(~) == 'path')]),
     viewport_fit: all(text.svg_bounds(image) |> ~.left >= 19.7 and ~.right <= 280.3 and ~.top >= 19.7 and ~.bottom <= 250.3),
     hidden_guides: len(tick_text(hidden, "x")) == 0 and

@@ -28,8 +28,9 @@ fn create_node(key: float, value: Payload) SplayNode {
 // u32 arithmetic intentionally wraps like the original 32-bit PRNG.
 // The PRNG and tree are explicit inout values; ordinary parameters are
 // snapshots under COW and would lose the state update that makes keys unique.
-pn next_random(var st: RngState) float {
-    var s: u32 = st.seed
+pn next_random(var st: RngState) float^ {
+    let _admitted_s_32: u32 = st.seed
+    var s: u32 = _admitted_s_32^
     s = s * 1103515245u32 + 12345u32
     st.seed = int(s)
     return float(s) / 4294967296.0
@@ -171,7 +172,7 @@ pn splay_insert(var tree: SplayTree, key: float, value: Payload) int {
     return 0
 }
 
-pn splay_remove(var tree: SplayTree, key: float) SplayNode? {
+pn splay_remove(var tree: SplayTree, key: float) SplayNode?^ {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -183,8 +184,10 @@ pn splay_remove(var tree: SplayTree, key: float) SplayNode? {
     if (removed.left == null) {
         tree.root = removed.right
     } else {
-        var left_tree: SplayNode? = removed.left
-        var right_tree: SplayNode? = removed.right
+        let _admitted_left_tree_186: SplayNode? = removed.left
+        var left_tree: SplayNode? = _admitted_left_tree_186^
+        let _admitted_right_tree_187: SplayNode? = removed.right
+        var right_tree: SplayNode? = _admitted_right_tree_187^
         left_tree = splay_node(left_tree, key)
         left_tree.right = right_tree
         tree.root = left_tree
@@ -203,16 +206,17 @@ pn splay_find(var tree: SplayTree, key: float) SplayNode? {
     return null
 }
 
-fn splay_find_max(node: SplayNode) SplayNode {
+fn splay_find_max(node: SplayNode) SplayNode^ {
     var work_node: SplayNode = node
 
     while (work_node.right != null) {
-        work_node = work_node.right
+        let checked_right: SplayNode = work_node.right
+        work_node = checked_right^
     }
     return work_node
 }
 
-pn splay_find_greatest_less_than(var tree: SplayTree, key: float) SplayNode? {
+pn splay_find_greatest_less_than(var tree: SplayTree, key: float) SplayNode?^ {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -257,9 +261,9 @@ fn generate_payload(depth: int, tag: float) Payload {
     return branch
 }
 
-pn insert_new_node(var tree: SplayTree, var rng: RngState) float {
+pn insert_new_node(var tree: SplayTree, var rng: RngState) float^ {
     var key = next_random(rng)
-    while (splay_find(tree, key) != null) {
+    while ((splay_find(tree, key) != null)^) {
         key = next_random(rng)
     }
     var payload = generate_payload(5, key)
@@ -267,14 +271,14 @@ pn insert_new_node(var tree: SplayTree, var rng: RngState) float {
     return key
 }
 
-pn run_splay() int {
+pn run_splay() int^ {
     var tree = splay_tree_new()
     var rng = {seed: 49734321}
 
     // Setup: insert TREE_SIZE nodes
     var i: int = 0
     while (i < TREE_SIZE) {
-        insert_new_node(tree, rng)
+        insert_new_node(tree, rng)^
         i = i + 1
     }
 
@@ -285,10 +289,10 @@ pn run_splay() int {
         while (j < TREE_MODIFICATIONS) {
             var key = insert_new_node(tree, rng)
             var greatest = splay_find_greatest_less_than(tree, key)
-            if (greatest == null) {
-                splay_remove(tree, key)
+            if ((greatest == null)^) {
+                splay_remove(tree, key)^
             } else {
-                splay_remove(tree, greatest.key)
+                splay_remove(tree, greatest.key)^
             }
             j = j + 1
         }
@@ -304,7 +308,7 @@ pn main() {
     var __t0 = clock()
     let count = run_splay()
     var __t1 = clock()
-    if (count == TREE_SIZE) {
+    if ((count == TREE_SIZE)^) {
         print("splay: PASS (nodes=" ++ count ++ ")\n")
     } else {
         print("splay: FAIL (nodes=" ++ count ++ ", expected " ++ TREE_SIZE ++ ")\n")

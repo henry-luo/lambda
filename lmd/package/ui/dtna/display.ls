@@ -62,7 +62,7 @@ pub fn description_item(props, child) map^ {
 fn description_span(value) => "span " ++ string(value)
 fn columns(value) => "repeat(" ++ string(value) ++ ",minmax(0,1fr))"
 // clamp overflowing cells and fill the final cell of each row, including responsive rows.
-fn description_spans(items, count, key, used = 0) {
+fn description_spans(items, count, key, used = 0) any^ {
     if (len(items) == 0) [] else (
         let requested = responsive.at(c.option(items[0],"span",1),key,1),
         let remaining = count - used,
@@ -87,7 +87,7 @@ fn descriptions_view(node) {
                 <dt style:item.label_style,*[c.render(item.label),if (p.colon != false and c.text(p.layout) != "vertical") ":" else null]>
                 <dd style:item.content_style,c.render(item.children)>>)]>]>
 }
-view dtna_display: <dtna.badge> | <dtna.badge_ribbon> | <dtna.descriptions> {
+view dtna_display: <dtna.badge> | <dtna.badge_ribbon> | <dtna.descriptions> () any^ {
     if (c.kind(~) == 'badge') badge_view(~)
     else if (c.kind(~) == 'descriptions') descriptions_view(~)
     else <div *:c.styled(~,"dtna-ribbon-" ++ c.text(c.option(c.props(~),"placement","end"))),

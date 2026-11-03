@@ -3,7 +3,7 @@ import util: .util
 
 pub fn text(value, fallback = "") => if (value is string) value else fallback
 pub fn is_tag(value, kind) => value is element and string(name(value)) == kind
-pub fn item(value, depth, element_fn, symbol_fn) {
+pub fn item(value, depth, element_fn, symbol_fn) any^ {
     if (depth > 50) "..."
     else if (value is element) element_fn(value, depth)
     else if (value is array) join([for (child in value) item(child, depth+1, element_fn, symbol_fn)], " ")

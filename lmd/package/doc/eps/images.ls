@@ -24,9 +24,9 @@ pub pn start_image(var m, op) int^ {
     let bytes = int(ceil(float(width * bits * components / planes) / 8.0)) * height
     let bounded = obj.require(m, bytes * planes <= m.limits.max_decoded_bytes, "limitcheck: image bytes")^
     let id = len(m.images)
-    push(m.images, {sources: slice(args, 4), data: [for (i in 1 to planes) []], counts: fill(planes, 0),
+    push(m.images, {sources: slice(args, 4), data: [for (i in ((1 to planes) ^ { [] })) []], counts: fill(planes, 0),
         bytes: bytes, width: width, height: height, bits: bits, components: components,
-        matrix: transform, clips: m.graphics.clips})
+        matrix: transform, clips: m.graphics.clips})^
     push(m.exec, {kind: "image", id: id, plane: 0, awaiting: false, base: len(m.stack)})
     return 0
 }
@@ -55,15 +55,15 @@ pub pn resume(var m, frame) int^ {
             bits: m.images[id].bits, components: m.images[id].components}, m.limits)
         let valid = obj.require(m, uri is string, "ioerror: image encoding")^
         push(m.draws, {node: <image href: uri, x: "0", y: "0", width: string(m.images[id].width), height: string(m.images[id].height), preserveAspectRatio: "none">,
-            matrix: m.images[id].matrix, clips: m.images[id].clips})
+            matrix: m.images[id].matrix, clips: m.images[id].clips})^
         m.images[id] = null
         return 0
     }
-    let plane = [for (i in 0 to (len(counts) - 1) where counts[i] == least) i][0]
+    let plane = [for (i in ((0 to (len(counts) - 1)) ^ { [] }) where counts[i] == least) i][0]
     let source = m.images[id].sources[plane]
     let entry = obj.entry(m, source)^
     if (entry.kind == "array" and source.executable) {
-        push(m.exec, {*: frame, plane: plane, awaiting: true})
+        push(m.exec, {*: frame, plane: plane, awaiting: true})^
         let scheduled = obj.schedule(m, source)^
         return 0
     }

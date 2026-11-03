@@ -2,7 +2,7 @@
 
 import graph_style: lambda.graph.style
 
-fn opacity_declaration(value) {
+fn opacity_declaration(value) any^ {
   let numeric = graph_style.unsigned_number_text(value, false);
   if (numeric == null or float(numeric) > 100.0) { "" }
   else { "opacity:" ++ string(float(numeric) / 100.0) }
@@ -42,7 +42,7 @@ pub fn route(value) {
   else { null }
 }
 
-pub fn declaration(target, property) {
+pub fn declaration(target, property) any^ {
   let name = lower(string(property.name));
   let value = string(property.value);
   let color = graph_style.safe_color(value);
@@ -65,7 +65,7 @@ pub fn declaration(target, property) {
   else ""
 }
 
-pub fn supported(target, property) => declaration(target, property) != "" or
+pub fn supported(target, property) any^ => declaration(target, property) != "" or
   (target == "node" and lower(string(property.name)) == "shape" and
     shape(property.value) != null) or
   (target == "edge" and lower(string(property.name)) == "routing" and

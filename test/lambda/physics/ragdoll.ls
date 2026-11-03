@@ -1,6 +1,6 @@
 import physics: lambda.physics
 
-fn stage(controls) => <scene3d id:"world", *[
+fn stage(controls) any^ => <scene3d id:"world", *[
     *controls,
     <skeleton id:"rig",
         physics.bind_bone(<bone id:"base">,"base-body")^

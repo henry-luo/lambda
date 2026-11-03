@@ -6,7 +6,7 @@ import viewer: ~~.procart.mod_scene_view
 import garden: .mod_outdoors
 let SOURCE=input(url_resolve(resources.entry_uri()^,"../procart/meadow.mark"),'mark')^
 let MODEL=meadow.generate(SOURCE)^
-view <outdoor_study> state mist:true,wind:true,motion:false,cascades:3,lens:garden.home() {
+view <outdoor_study> () any^ state mist:true,wind:true,motion:false,cascades:3,lens:garden.home() {
  <body <main <header <div <a href:"index.html","Scene3D /"> <p "OUTDOOR RENDERING STUDY"> <h1 "Light through the garden.">
    <p "Native height fog, leaf backlighting, instanced grass wind, cascaded sun shadows and refractive pond water.">>;
    <nav <button id:"mist",'aria-pressed':string(mist),if (mist) "Clear the mist" else "Bring the mist">;
@@ -19,7 +19,7 @@ view <outdoor_study> state mist:true,wind:true,motion:false,cascades:3,lens:gard
 }
 on click(evt) {
  let id=dom.get_attribute(evt.target,"id")
- if (not contains(["mist","wind","motion","cascades"],id)) {return 'pass'}
+ if ((not contains(["mist","wind","motion","cascades"],id))^) {return 'pass'}
  lens=viewer.snapshot(evt.target,"meadow-camera",garden.home())^
  if (id=="mist") {mist=not mist}
  else if (id=="wind") {wind=not wind}

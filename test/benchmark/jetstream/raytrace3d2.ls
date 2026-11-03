@@ -45,8 +45,8 @@ fn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-fn vec_normalise(v: float[]) float[] {
-    var l: float = vec_length(v)
+fn vec_normalise(v: float[]) float[]^ {
+    var l: float = vec_length(v)^
     return [v[0] / l, v[1] / l, v[2] / l]
 }
 
@@ -98,7 +98,7 @@ pn invert_matrix(m: float[]) float[] {
 }
 
 // Triangle: stored as a map with precomputed intersection data
-fn create_triangle(p1: float[], p2: float[], p3: float[]) Triangle {
+fn create_triangle(p1: float[], p2: float[], p3: float[]) Triangle^ {
     var edge1 = vec_sub(p3, p1)
     var edge2 = vec_sub(p2, p1)
     var normal = vec_cross(edge1, edge2)
@@ -164,7 +164,7 @@ fn triangle_intersect(tri: Triangle, orig: float[], dir: float[], near: float, f
 }
 
 // Scene: list of triangles, lights, ambient, background
-fn create_scene(triangles: Triangle[]) Scene {
+fn create_scene(triangles: Triangle[]) Scene^ {
     var sc: Scene = {triangles: triangles, lights: [],
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}
@@ -180,7 +180,7 @@ pn scene_add_light(scene: Scene, pos: float[], colour: float[]) any {
     scene.n_lights = idx + 1
 }
 
-pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far: float, depth: int) float[] {
+pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far: float, depth: int) float[]^ {
     if (depth > 3) {
         return scene.background
     }
@@ -191,8 +191,8 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
         // An invalid intersection cannot be a hit; keep the soft error channel explicit.
         var d_result = triangle_intersect(tri, origin, dir, near, far)
         var d: float = match d_result { case error: -1.0 case float: d_result }
-        if (d > 0.0) {
-            far = d
+        if ((d > 0.0)^) {
+            far = d^
             closest = tri
         }
         i = i + 1
@@ -202,7 +202,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
     }
     var normal = closest.normal
     var hit = vec_add(origin, vec_scale(dir, far))
-    if (vec_dot(dir, normal) > 0.0) {
+    if ((vec_dot(dir, normal) > 0.0)^) {
         normal = [0.0 - normal[0], 0.0 - normal[1], 0.0 - normal[2]]
     }
     var colour = closest.material
@@ -223,7 +223,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
             var tri = (scene.triangles)[bi]
             var sd_result = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
             var sd: float = match sd_result { case error: -1.0 case float: sd_result }
-            if (sd > 0.0) {
+            if ((sd > 0.0)^) {
                 blocked = true
                 bi = scene.n_triangles  // break
             }
@@ -232,7 +232,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
         if (blocked == false) {
             var nl_result = vec_dot(normal, to_light)
             var nl: float = match nl_result { case error: 0.0 case float: nl_result }
-            if (nl > 0.0) {
+            if ((nl > 0.0)^) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }
         }
@@ -243,7 +243,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
 }
 
 // Camera
-pn create_camera(origin: float[], lookat: float[], up: float[]) Camera {
+pn create_camera(origin: float[], lookat: float[], up: float[]) Camera^ {
     var zaxis = vec_normalise(vec_sub(lookat, origin))
     var xaxis = vec_normalise(vec_cross(up, zaxis))
     var neg_z = [0.0 - zaxis[0], 0.0 - zaxis[1], 0.0 - zaxis[2]]
@@ -296,7 +296,7 @@ pn render_scene(camera: Camera, scene: Scene, size: int) int {
     return pixel_count
 }
 
-pn raytrace_scene() int {
+pn raytrace_scene() int^ {
     // Build scene: a cube (12 triangles) + floor (2 triangles)
     var tfl = vec3(-10.0, 10.0, -10.0)
     var tfr = vec3(10.0, 10.0, -10.0)
@@ -332,8 +332,8 @@ pn raytrace_scene() int {
     var all_tris = triangles ++ [floor1, floor2]
 
     var scene = create_scene(all_tris)
-    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])
-    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])
+    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])^
+    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])^
     scene_add_light(scene, vec3(23.0, 20.0, 17.0), [0.7, 0.7, 0.7])
     scene.ambient = [0.1, 0.1, 0.1]
 
@@ -354,7 +354,7 @@ pn main() {
     }
     var __t1 = clock()
     // 30x30 = 900 pixels per iteration, 8 iterations = 7200
-    if (total_pixels == 7200) {
+    if ((total_pixels == 7200)^) {
         print("3d-raytrace: PASS (pixels=" ++ total_pixels ++ ")\n")
     } else {
         print("3d-raytrace: DONE (pixels=" ++ total_pixels ++ ")\n")

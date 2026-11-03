@@ -5,9 +5,9 @@ fn dynamic(value) any { value }
 pn main() {
     var source = {value: 7, ready: true, ratio: 1.5}
     var target: Row = source
-    target.value = dynamic(null)
-    target.ready = dynamic(null)
-    target.ratio = dynamic(null)
+    target.value = dynamic(null)^
+    target.ready = dynamic(null)^
+    target.ratio = dynamic(null)^
     var initially_null: Row = {value: null, ready: null, ratio: null}
     initially_null.value = 8
     initially_null.ready = true

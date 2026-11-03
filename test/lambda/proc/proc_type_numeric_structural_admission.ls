@@ -6,20 +6,24 @@ type Child = {score: int}
 type Person = {age: int, child: Child, scores: int[], choice: int | string}
 
 pn reject_fractional_nested_write(var person: Person) Person^ {
-    person.child.score = dynamic(3.5)
+    person.child.score = dynamic(3.5)^
     return person
 }
 
 pn main() {
     var source = {age: 3.0, child: {score: 4.0}, scores: [5.0, 6.0], choice: 7.0, note: "open"}
-    let person: Person = dynamic(source)
-    let typed_scores: int[] = dynamic([7.0, 8.0])
+    let _admitted_person_15: Person = dynamic(source)
+    let person: Person = _admitted_person_15^
+    let _admitted_typed_scores_16: int[] = dynamic([7.0, 8.0])
+    let typed_scores: int[] = _admitted_typed_scores_16^
 
-    var updated: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
+    let _admitted_updated_18: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
+    var updated: Person = _admitted_updated_18^
     let snapshot = updated
-    updated.child.score = dynamic(9.0)
+    updated.child.score = dynamic(9.0)^
 
-    var rejected: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
+    let _admitted_rejected_22: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
+    var rejected: Person = _admitted_rejected_22^
     let rejected_snapshot = rejected
     var write_error = null
     reject_fractional_nested_write(rejected) ^ { write_error = ^ }

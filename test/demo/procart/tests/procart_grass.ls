@@ -13,7 +13,7 @@ let mesh = G.geometry();
  all([for (b in blades) b.position[1] == 0.0 and min(b.scale) > 0.0 and
      sqrt(b.position[0]**2+b.position[2]**2) <= p.radius+0.045 and contains(p.colors,b.color)]),
  len(mesh.positions) == 30,len(mesh.indices) == 24,
- all([for (i in 0 to (len(mesh.normals) div 3-1),let n = slice(mesh.normals,i*3,i*3+3))
+ all([for (i in ((0 to (len(mesh.normals) div 3-1)) ^ { [] }),let n = slice(mesh.normals,i*3,i*3+3))
      abs(camera.dot(n,n)-1.0) < 1e-9]),
  (G.generate(rng.key(17),{*:p,blades:0}) ^ { null }) == null,
  (G.generate(rng.key(17),{*:p,bend:0.0}) ^ { null }) == null]

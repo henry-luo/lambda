@@ -3,7 +3,7 @@ import .generate_well_known_names_core
 
 pn main() {
     var stale = 0
-    for (entry in generated_outputs()) {
+    for (entry in generated_outputs()^) {
         if (not exists(entry.path)) {
             print("stale generated file: " ++ entry.path ++ "\n")
             stale = stale + 1

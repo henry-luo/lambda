@@ -1,51 +1,51 @@
 // S7.7.2-S7.7.4/D3.3.3v3: exact arms preserve all dynamic boundary failures.
 fn dynamic(value) any => value
-pn integers(count, value) int[] {
+pn integers(count, value) int[]^ {
     var values: int[] = fill(count, value)
     return values
 }
-pn floating(count, value) float[] {
+pn floating(count, value) float[]^ {
     var values: float[] = fill(count, value)
     return values
 }
-pn booleans(count, value) bool[] {
+pn booleans(count, value) bool[]^ {
     var values: bool[] = fill(count, value)
     return values
 }
 type One = 1
-pn ones(value) One[] {
+pn ones(value) One[]^ {
     var values: One[] = fill(2, value)
     return values
 }
-pn counted(count) int[2] {
-    var values: int[2] = fill(count, 3)
+pn counted(count) int[2]^ {
+    var values: int[2] = fill(count, 3)^
     return values
 }
 // S11.4.6: declaration boundaries enforce constrained bases only.
 type Positive = int that ~ > 0
 type Negative = int that ~ < 0
 type NonEmpty = int[] that len(~) > 0
-pn positives(value) Positive[] {
+pn positives(value) Positive[]^ {
     var values: Positive[] = fill(2, value)
     return values
 }
 pn negatives(values) Negative[] { return values }
-pn nonempty(count) NonEmpty { return fill(count, 1) }
-pn positive_store(value) Positive[] {
-    var values: Positive[] = fill(2, 1)
+pn nonempty(count) NonEmpty^ { return fill(count, 1) }
+pn positive_store(value) Positive[]^ {
+    var values: Positive[] = fill(2, 1)^
     values[0] = value
     return values
 }
-pn invalid_scalar() int {
+pn invalid_scalar() int^ {
     var value: int = dynamic("wrong")
     return value
 }
-pn missing_local(values: int[]) int {
+pn missing_local(values: int[]) int^ {
     var value: int = values[10]
     print("rejected declaration continued")
     return value
 }
-pn missing_assignment(values: int[]) int {
+pn missing_assignment(values: int[]) int^ {
     var value: int = 1
     value = values[10]
     print("rejected assignment continued")
@@ -79,7 +79,7 @@ pn main() {
     var values: int[] = [1, 2, 3]
     let snapshot = values
     values[0] = 9
-    values[1] = dynamic(8.0)
+    values[1] = dynamic(8.0)^
     values[2] = (4, 5)
     print([values, snapshot]) print("\n")
     let first = node(2, "first", null)

@@ -47,13 +47,13 @@ pn read_only(p: P) int {
 pn main() {
     // typed map field through a plain pn parameter
     var a: P = {cur: "~", n: 0}
-    set_typed_field(a)
+    set_typed_field(a)^
     print(a.cur) print(" ") print(a.n)
     print("\n")
 
     // typed array element through a plain pn parameter
     var b: Box = {xs: [1, 2, 3]}
-    set_typed_elem(b)
+    set_typed_elem(b)^
     print(b.xs[0]) print(" ") print(b.xs[1])
     print("\n")
 
@@ -65,7 +65,7 @@ pn main() {
 
     // explicit `var` parameter: the documented sharing construct
     var d: P = {cur: "~", n: 0}
-    set_var_field(d)
+    set_var_field(d)^
     print(d.cur)
     print("\n")
 
@@ -76,9 +76,9 @@ pn main() {
 
     // repeated calls accumulate on the same caller value
     var f: P = {cur: "~", n: 0}
-    set_typed_field(f)
-    f.n = f.n + 1
-    set_typed_field(f)
+    set_typed_field(f)^
+    f.n = (f.n + 1)^
+    set_typed_field(f)^
     print(f.cur) print(" ") print(f.n)
     print("\n")
 }

@@ -40,18 +40,18 @@ fn archive_input_format(extension) => if (extension == "7z") '7z'
   else if (extension == "rar") 'rar'
   else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
   else 'zip'
-fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
-fn directory_entries(source) {
+fn entry_is_container(entry) any^ => entry.is_dir == true or (archive_extension(entry.extension) or false)
+fn directory_entries(source) any^ {
   let loaded = if (type(source) == element) {
     if (source.is_dir or source.entry_path == "") source else input(source, archive_input_format(lower(source.extension)))^
   } else { input(source)^ }
   let entries = if (type(loaded) == array) loaded else content(loaded)^;
   // The directory reader sorts names; keep that order within each group.
-  [for (entry in entries where entry_is_container(entry)) entry] ++
-    [for (entry in entries where not entry_is_container(entry)) entry]
+  [for (entry in entries where ((entry_is_container(entry)) ^ { false })) entry] ++
+    [for (entry in entries where ((not entry_is_container(entry)) ^ { false })) entry]
 }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
-fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") path
+fn absolute_file_path(path) any^ => if (starts_with(path, "/") or path[1] == ":") path
   else sys.proc.self.cwd# ++ "/" ++ path
 
 // Keep the root list identity stable so document selection does not recreate
@@ -59,7 +59,7 @@ fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") pat
 let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT) ^ { [] }
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
-fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
+fn tree_hit_class(path) any^ => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // An empty-space hit targets the row; absent event classes recover to false (S7.6).
 fn event_hits_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or
@@ -95,7 +95,7 @@ fn bounded_text_offset(value, offset) {
   else { offset }
 }
 
-fn text_before_input(value, evt) {
+fn text_before_input(value, evt) any^ {
   let selection_start = evt["selection_start"]
   let caret_pos = evt["caret_pos"]
   // Optional event offsets can be undefined; only integers are valid slice indices.
@@ -104,13 +104,13 @@ fn text_before_input(value, evt) {
   else { len(value) }
 }
 
-fn text_after_input(value, evt) {
+fn text_after_input(value, evt) any^ {
   let selection_end = evt["selection_end"]
   if (type(selection_end) == int) { bounded_text_offset(value, selection_end) }
   else { text_before_input(value, evt) }
 }
 
-fn erase_backwards(value, evt) {
+fn erase_backwards(value, evt) any^ {
   let start = text_before_input(value, evt)
   let end = text_after_input(value, evt)
   if (start != end) { slice(value, 0, start) ++ slice(value, end, len(value)) }
@@ -118,7 +118,7 @@ fn erase_backwards(value, evt) {
   else { value }
 }
 
-fn erase_forwards(value, evt) {
+fn erase_forwards(value, evt) any^ {
   let start = text_before_input(value, evt)
   let end = text_after_input(value, evt)
   if (start != end) { slice(value, 0, start) ++ slice(value, end, len(value)) }
@@ -126,7 +126,7 @@ fn erase_forwards(value, evt) {
   else { value }
 }
 
-fn entry_is_visible(entry, parent_path) {
+fn entry_is_visible(entry, parent_path) any^ {
   // archive members retain dotfiles and build-like names as part of the package.
   if (type(entry) == element) { true }
   else {
@@ -144,14 +144,14 @@ fn entry_is_visible(entry, parent_path) {
   }
 }
 
-fn entry_matches_filter(entry, parent_path, filter_text) {
+fn entry_matches_filter(entry, parent_path, filter_text) any^ {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
   entry_is_visible(entry, parent_path) and
     (entry_is_container(entry) or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
 }
 
-fn document_format(extension) {
+fn document_format(extension) any^ {
   let ext = lower(extension)
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
@@ -188,7 +188,7 @@ fn graph_flavor(extension) {
   else { null }
 }
 
-fn property_format(extension) {
+fn property_format(extension) any^ {
   let ext = lower(extension)
   if (ext == "json") { "json" }
   else if (ext == "xml") { "xml" }
@@ -208,8 +208,8 @@ fn property_format(extension) {
 fn properties_group(children, own) =>
   {props: children, has_own: len(own) > 0, own: (if (len(own) > 0) own[0].value else null)}
 fn properties_node(name, members, depth) {
-  let own = [for (entry in members where len(entry.path) == depth + 1) entry]
-  let deeper = [for (entry in members where len(entry.path) > depth + 1) entry]
+  let own = [for (entry in members where ((len(entry.path) == depth + 1) ^ { false })) entry]
+  let deeper = [for (entry in members where ((len(entry.path) > depth + 1) ^ { false })) entry]
   if (len(deeper) == 0) { {name:name, value:own[0].value} }
   else { {name:name, value:properties_group(properties_nodes(deeper, depth + 1), own)} }
 }
@@ -218,7 +218,7 @@ fn properties_nodes(entries, depth) {
   [for (name in names)
     properties_node(name, [for (entry in entries where entry.path[depth] == name) entry], depth)]
 }
-fn properties_tree(flat) {
+fn properties_tree(flat) any^ {
   if (type(flat) != map) { flat }
   else {
     let entries = [for (key, value in flat) {path:split(string(key), "."), value:value}]
@@ -226,7 +226,7 @@ fn properties_tree(flat) {
   }
 }
 
-fn is_renderable_document(extension) =>
+fn is_renderable_document(extension) any^ =>
   document_format(extension) != null or is_latex_document(extension) or
     is_pdf_document(extension) or is_office_document(extension) or is_epub_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
@@ -252,7 +252,7 @@ let SETI_WORD = chr(0xE0A3)
 let SETI_XML = chr(0xE0A5)
 let SETI_YAML = chr(0xE0A7)
 
-fn file_icon(extension) {
+fn file_icon(extension) any^ {
   let ext = if (extension == null) "" else lower(extension)
   // seti glyphs identify parsed formats; source-only files retain the plain-text icon.
   if (ext == "ls") { "λ" }
@@ -293,7 +293,7 @@ fn file_icon_color(icon) {
   else "#519aba"
 }
 
-fn selected_source(file) {
+fn selected_source(file) any^ {
   if (file == null) { "" }
   else {
     let source = file["source"]
@@ -303,7 +303,7 @@ fn selected_source(file) {
   }
 }
 
-fn selected_image_source(file) {
+fn selected_image_source(file) any^ {
   if (type(file["source"]) != element) { absolute_file_path(file["file_path"]) }
   else {
     let extension = lower(file["extension"])
@@ -332,19 +332,19 @@ fn xml_has_stylesheet(parsed) {
   if (parsed == null) { false }
   else {
     // The parser preserves the stylesheet processing instruction as a document child.
-    any([for (child in content(parsed) where type(child) == element and
-      string(name(child)) == "?xml-stylesheet" and len(content(child)) > 0)
+    any([for (child in ((content(parsed)) ^ { [] }) where ((type(child) == element and
+      string(name(child)) == "?xml-stylesheet" and len(content(child)) > 0) ^ { false }))
       contains(content(child)[0], "href=")])
   }
 }
 
-fn xml_is_docbook(parsed) {
+fn xml_is_docbook(parsed) any^ {
   let root = xml.root(parsed);
   if (not (root is element)) false else
     xml.expanded(name(root),xml.bindings(root)).uri == "http://docbook.org/ns/docbook"
 }
 
-fn selected_preview(file) {
+fn selected_preview(file) any^ {
   if (file == null) { null }
   else {
     let selected_path = file["source"]
@@ -392,7 +392,7 @@ fn property_children(value, format) {
     let attrs = [for (key, child at map(value)) {name:"@" ++ string(key), value:child}]
     let attr_rows = [for (index, attr in attrs)
       {name:attr.name, value:attr.value, segment:"a" ++ string(index)}]
-    let child_rows = [for (index, child in content(value))
+    let child_rows = [for (index, child in ((content(value)) ^ { [] }))
       {name:(if (type(child) == element) string(name(child)) else "#text"),
        value:child, segment:"c" ++ string(index)}]
     attr_rows ++ child_rows
@@ -419,17 +419,17 @@ fn property_children(value, format) {
   } else { [] }
 }
 
-fn property_is_container(value) =>
+fn property_is_container(value) any^ =>
   type(value) == map or type(value) == array or
     (type(value) == element and
-      (len(map(value)) > 0 or any([for (child in content(value)) type(child) == element])))
+      (len(map(value)) > 0 or any([for (child in ((content(value)) ^ { [] })) type(child) == element])))
 fn property_roots(parsed, format) {
   if (format == "xml") {
     // The XML reader wraps the document and its processing instructions in <document>.
-    [for (index, child in content(parsed)
-      where type(child) == element and
+    [for (index, child in ((content(parsed)) ^ { [] })
+      where ((type(child) == element and
         not starts_with(string(name(child)), "?") and
-        not starts_with(string(name(child)), "!"))
+        not starts_with(string(name(child)), "!")) ^ { false }))
       {name:string(name(child)), value:child, segment:string(index)}]
   }
   else if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
@@ -437,7 +437,7 @@ fn property_roots(parsed, format) {
     [{name:"VCARD", value:parsed, segment:"card"}]
   } else { property_children(parsed, format) }
 }
-fn property_initial_open_paths(parsed, format) {
+fn property_initial_open_paths(parsed, format) any^ {
   if (not property_is_container(parsed)) { [] }
   else {
     let roots = property_roots(parsed, format)
@@ -448,10 +448,10 @@ fn property_initial_open_paths(parsed, format) {
 let PROPERTY_PAGE_SIZE = 60
 fn property_visible_count(path, more_paths) =>
   PROPERTY_PAGE_SIZE * (1 + len([for (more_path in more_paths where more_path == path) more_path]))
-fn property_hit_class(path) =>
+fn property_hit_class(path) any^ =>
   "property-hit-" ++ replace(replace(replace(path, "/", "_"), ".", "_"), " ", "_")
 
-fn property_matches(value, name, filter_text, format) {
+fn property_matches(value, name, filter_text, format) any^ {
   if (filter_text == "" or contains(lower(name), filter_text)) { true }
   else if (property_is_container(value)) {
     any([for (child in property_children(value, format))
@@ -465,7 +465,7 @@ fn property_value_text(value) {
   else { string(value) }
 }
 
-fn property_summary(value, format) {
+fn property_summary(value, format) any^ {
   if (format == "xml" and type(value) == element) {
     let children = content(value)
     let attrs = len(map(value))
@@ -539,7 +539,7 @@ fn csv_resized_widths(widths, gesture, x) {
 
 view any { ~ }
 
-fn rendered_children(item) => [for (child in content(item)) apply(child)]
+fn rendered_children(item) => [for (child in ((content(item)) ^ { [] })) apply(child)]
 
 view <doc> { <div class:"document-body", *[rendered_children(~)]> }
 // HTML previews expose document content while keeping imported page chrome and
@@ -658,9 +658,9 @@ on click(evt) {
   if (contains(evt.target_class, "csv-more")) { emit("csv_more_rows", null) }
 }
 on mousedown(evt) {
-  if (evt.button != 0 or not contains(evt.target_class, "csv-resize")) { return }
+  if ((evt.button != 0 or not contains(evt.target_class, "csv-resize"))^) { return }
   let column_id = dom.get_attribute(evt.target, "data-csv-column")
-  let indices = [for (index, column in csv_columns(~.rows) where string(index) == column_id) index]
+  let indices = [for (index, column in csv_columns(~.rows)^ where (string(index) == column_id)^) index]
   if (len(indices) == 0) { return }
   let index = indices[0]
   emit("csv_resize_start", {index:index, x:evt.x, width:csv_width(~.widths, index)})
@@ -681,8 +681,8 @@ view <property_node> {
     (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
      else { not path_is_open(~.closed_paths, ~.path) })
   let matching_children = if (is_open) {
-    [for (child in property_children(~.value, ~.format)
-      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
+    [for (child in ((property_children(~.value, ~.format)) ^ { [] })
+      where ((property_matches(child.value, child.name, ~.filter_text, ~.format)) ^ { false })) child]
   } else { [] }
   // Bound mounted rows; broad filters can match thousands of keys at once.
   let visible_children = take(matching_children, property_visible_count(~.path, ~.more_paths))
@@ -752,7 +752,7 @@ view <property_inspector> {
     } else {
       let roots = property_roots(parsed, format)
       let matches = [for (child in roots
-        where property_matches(child.value, child.name, query, format)) child]
+        where ((property_matches(child.value, child.name, query, format)) ^ { false })) child]
       let visible_roots = take(matches, property_visible_count("", ~.more_paths))
       if (len(matches) == 0) {
         <p class:"property-message", "No matching properties">
@@ -779,7 +779,7 @@ on click(evt) {
 
 fn eml_html_root(body) {
   // HTML5 returns #document; enter at html so the editor's element views run.
-  let roots = [for (child in content(body) where type(child) == element and name(child) == 'html') child]
+  let roots = [for (child in ((content(body)) ^ { [] }) where ((type(child) == element and name(child) == 'html') ^ { false })) child]
   if (len(roots) > 0) roots[0] else body
 }
 
@@ -838,7 +838,7 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
   let matching_children = if (~.is_dir and is_open) {
     let current_children = if (children == null) { directory_entries(~.source) ^ { [] } } else { children };
     if (type(current_children) != array) [] else
-      [for (child in current_children where entry_matches_filter(child, entry_path, ~.filter_text)) child]
+      [for (child in current_children where ((entry_matches_filter(child, entry_path, ~.filter_text)) ^ { false })) child]
   } else { [] };
 
   <div class:"tree-entry", 'data-tree-path':entry_path,
@@ -886,7 +886,7 @@ on click(evt) {
     if (not is_open and children == null) { children = directory_entries(~.source) ^ { ^.message } }
     is_open = not is_open
   } else if (not ~.is_dir) {
-    if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
+    if ((~.selected_path != entry_path)^) { reset_document_scroll(evt.target)^ }
     emit("file_select", {file_path:entry_path, source:~.source, name:~.name, extension:~.extension,
       target:evt.target,
       text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
@@ -896,7 +896,7 @@ on click(evt) {
 // Pane-local controls are state on a pane model the app rebuilds only for a
 // new file or a CSV change, so a property toggle, tab switch or property
 // filter edit re-renders this pane alone instead of the whole project tree.
-view <document_pane> state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
+view <document_pane> () any^ state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
   if (~.file == null) {
     <main class:"document-panel"
     , <div id:"empty-preview", class:"empty-preview"
@@ -1025,7 +1025,7 @@ on keydown(evt) {
       else if (evt.key == "Delete") { erase_forwards(property_filter, evt) }
       else if (evt.key == "Escape") { "" }
       else { null }
-    if (next == null) { return }
+    if ((next == null)^) { return }
     property_filter = next
     property_closed_paths = []
     property_more_paths = []
@@ -1053,7 +1053,7 @@ on property_more(path) {
 // --------------------------------------------------------------------------
 
 edit <project_tree> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
-  let matching_root_entries = [for (entry in ~.entries where entry_matches_filter(entry, ~.root_path, filter_text)) entry];
+  let matching_root_entries = [for (entry in ~.entries where ((entry_matches_filter(entry, ~.root_path, filter_text)) ^ { false })) entry];
 
   <aside class:"file-panel"
     , <div class:"file-panel-header"
@@ -1125,7 +1125,7 @@ on keydown(evt) {
       else if (evt.key == "Delete") { erase_forwards(filter_text, evt) }
       else if (evt.key == "Escape") { "" }
       else { null }
-    if (next == null) { return }
+    if ((next == null)^) { return }
     if (root_open) { open_paths = visible_open_paths(evt.target) }
     filter_text = next
     // The model owns this edit; a second native edit would desynchronize it.
@@ -1159,7 +1159,7 @@ on document_select(entry) {
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
   // Procedure handlers assign the captured publication in their success arm.
   var publication = null
-  if (is_epub_document(entry["extension"])) {
+  if (is_epub_document(entry["extension"])^) {
     { let __error_outcome_1 = selected_epub(entry) ^ { ^ }; if (__error_outcome_1 is error) {
       publication = {error:__error_outcome_1.message}
     } else match __error_outcome_1 { case any {
@@ -1179,7 +1179,7 @@ on document_select(entry) {
     selected_office(entry) ^ { {error:^.message} } else null
   let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
-  let widths = [for (column in csv_columns(table)) CSV_DEFAULT_WIDTH]
+  let widths = [for (column in csv_columns(table)^) CSV_DEFAULT_WIDTH]
   selected_file = file
   property_data = properties
   initial_open_paths = open_paths
@@ -1437,7 +1437,7 @@ fn viewer_document(tree_model) {
 pub pn open_browser(source, options) {
   // capture once; member nodes retain this snapshot throughout the UI session (S12.4.1v2).
   let entries = directory_entries(source)^
-  let segments = [for (part in split(replace(source, "\\", "/"), "/") where part != "") part]
+  let segments = [for (part in split(replace(source, "\\", "/"), "/")^ where part != "") part]
   let root_name = if (len(segments) == 0) source else segments[len(segments) - 1];
   viewer_document(<project_tree root_path:source, root_name:root_name, entries:entries>)
 }

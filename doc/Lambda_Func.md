@@ -91,8 +91,9 @@ inside a procedure: bind a procedure's result before using it in an element
 (**S12.1.1v3**).
 
 Function colour and failure are separate: `fn ... T^` is a pure function with
-an error channel, while a `pn` can have effects without declaring one
-(**S7.4.2**, **S12.1.1v3**).
+an ordinary error outcome, while a `pn` can have effects with a clean return
+contract. `T^` and `T | error` have identical admission and acknowledgement
+rules (**S7.4.2v3**, **S12.1.1v3**).
 
 ---
 

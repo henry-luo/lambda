@@ -9,7 +9,7 @@ pub fn root(node, evt, family = "dtna") {
     // native dispatch position scopes delegation even when nested roots omit HTML ids.
     if (found != null and found == owner) found else null
 }
-pub fn target(node, evt, selector, family = "dtna") {
+pub fn target(node, evt, selector, family = "dtna") any^ {
     let found = dom.closest(evt.target, selector)
     let owner = root(node, evt, family);
     if (found != null and owner != null and

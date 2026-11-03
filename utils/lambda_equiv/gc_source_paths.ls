@@ -7,10 +7,10 @@ fn gc_source(name: string) bool =>
     ends_with(name, ".hh") or ends_with(name, ".hpp")
 
 pn gc_collect_source(path, roots, skipped, var targets) {
-    if (not path.is_file or not gc_source(path.name) or has_link_ancestor(path)) { return }
+    if ((not path.is_file or not gc_source(path.name) or has_link_ancestor(path))^) { return }
     let label = relative_path(path)
     let parts = split(label, "/")
-    if (not contains(roots, parts[0])) { return }
+    if ((not contains(roots, parts[0]))^) { return }
     for (part in parts) { if (contains(skipped, part)) { return } }
     targets = targets ++ [path]
 }

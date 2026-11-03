@@ -13,8 +13,8 @@ pn mul4(m1: float[], m2: float[], m: float[]) float {
     return m[0] + m[15]
 }
 pn main() {
-    var a: float[] = fill(16, 1.0)
-    var b: float[] = fill(16, 2.0)
-    var c: float[] = fill(16, 0.0)
+    var a: float[] = fill(16, 1.0)^
+    var b: float[] = fill(16, 2.0)^
+    var c: float[] = fill(16, 0.0)^
     print(mul4(a, b, c), "\n")
 }

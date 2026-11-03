@@ -563,7 +563,7 @@ pn job(n) { sleep(n)^; return n }
 pn main() {
     let h = start(worker)        // start a child
     send(h, "job")^              // bounded FIFO mailbox
-    print(wait(h)^)              // wait for the T^E result
+    print(wait(h)^)              // wait for the T^ result
 
     let j = start(job, [5], {mode: 'task'})  
     let k = start(job, [1])
@@ -700,13 +700,13 @@ Creating Errors:
 | `error("load failed", inner_err)` | With an inner error |
 | `error({code: 304, message: "div by zero"})` | Structured payload |
 
-Error Return Types (`T^E`):
+Error Return Types (`T^`):
 
 | Form | Meaning |
 |---|---|
 | `fn parse(s: string) int^ {...}` | int or any error |
-| `fn divide(a, b) int ^ DivErr {...}` | specific error |
-| `fn load(p) Config ^ ParseErr\|IOErr {...}` | multi errors |
+| `fn divide(a, b) int \| DivErr {...}` | specific error |
+| `fn load(p) Config \| ParseErr\|IOErr {...}` | multi errors |
 
 **`raise` error , or propagate error with `^`**
 ```lambda
@@ -719,7 +719,7 @@ fn compute(x: int) int^ {
 fun()^               // propagate error, discard value
 ```
 
-**`e ^ { }` — handle the error here (`~` is the error):**
+**`e ^ { }` — handle the error here (`^` is the error):**
 ```lambda
 pn main() {              
   let result = divide(10, x) ^ {

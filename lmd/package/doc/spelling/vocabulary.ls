@@ -1,7 +1,7 @@
 // positional vocabulary POC; IO is procedural (S12.1.1v3), data uses source-package paths (D7.2.4v3).
 import search: lambda.io.search
 
-fn valid_row(row, key) => row is array and len(row) >= 2 and len(row) <= 4 and
+fn valid_row(row, key) any^ => row is array and len(row) >= 2 and len(row) <= 4 and
     row[0] is string and normalize(row[0],"nfc") == key and
     row[1] in ["ordinary","exact"] and
     (len(row) < 3 or row[2] == null or (row[2] is int and row[2] >= 0)) and

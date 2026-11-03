@@ -10,7 +10,7 @@ fn make_list(length) {
     return e
 }
 
-fn list_length(node) {
+fn list_length(node) any^ {
     if (node == null) {
         return 0
     }
@@ -31,7 +31,7 @@ fn is_shorter_than(x, y) {
     return 0
 }
 
-fn tail(x, y, z) {
+fn tail(x, y, z) any^ {
     if (is_shorter_than(y, x) == 1) {
         return tail(
             tail(x.next, y, z),
@@ -42,7 +42,7 @@ fn tail(x, y, z) {
     return z
 }
 
-fn benchmark() {
+fn benchmark() any^ {
     let result = tail(
         make_list(15),
         make_list(10),
@@ -55,7 +55,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 10) {
+    if ((result == 10)^) {
         print("List: PASS\n")
     } else {
         print("List: FAIL result=")

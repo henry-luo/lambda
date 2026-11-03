@@ -8,7 +8,7 @@ let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
-fn format9(x) {
+fn format9(x) any^ {
     var work_x = x
 
     var neg = ""
@@ -21,14 +21,14 @@ fn format9(x) {
     var scaled = frac * 1000000000.0 + 0.5
     var fl = floor(scaled)
     var frac_int = int(fl)
-    if (frac_int >= 1000000000) {
+    if ((frac_int >= 1000000000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
     var frac_str = string(frac_int)
     var pad = 9 - len(frac_str)
     var prefix = ""
-    while (pad > 0) {
+    while ((pad > 0)^) {
         prefix = prefix ++ "0"
         pad = pad - 1
     }

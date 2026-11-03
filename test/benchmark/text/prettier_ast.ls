@@ -21,7 +21,7 @@ fn group_doc(contents, break_threshold = large_length) =>
 fn if_break_doc(broken, flat = text_doc("")) =>
     {kind: "if-break", broken: broken, flat: flat}
 
-fn join_docs_at(separator, parts, index, count, acc) {
+fn join_docs_at(separator, parts, index, count, acc) any^ {
     if (index >= count) concat_docs(acc)
     else {
         let next = if (index == 0) acc ++ [parts[index]]
@@ -30,14 +30,14 @@ fn join_docs_at(separator, parts, index, count, acc) {
     }
 }
 
-fn join_docs(separator, parts) => join_docs_at(separator, parts, 0, len(parts), [])
+fn join_docs(separator, parts) any^ => join_docs_at(separator, parts, 0, len(parts), [])
 
-fn flat_length_at(doc, index, count, acc) {
+fn flat_length_at(doc, index, count, acc) any^ {
     if (index >= count) acc
     else flat_length_at(doc, index + 1, count, acc + flat_length(doc.parts[index]))
 }
 
-fn flat_length(doc) {
+fn flat_length(doc) any^ {
     if (doc.kind == "text") len(doc.value)
     else if (doc.kind == "concat") flat_length_at(doc, 0, len(doc.parts), 0)
     else if (doc.kind == "indent") flat_length(doc.contents)
@@ -48,7 +48,7 @@ fn flat_length(doc) {
     else large_length
 }
 
-fn fits(doc, remaining) => flat_length(doc) <= remaining
+fn fits(doc, remaining) any^ => flat_length(doc) <= remaining
 
 fn indent_string(level) {
     if (level <= 0) ""
@@ -57,7 +57,7 @@ fn indent_string(level) {
 
 fn render_result(value, column) => {value: value, column: column}
 
-fn render_parts_at(parts, index, count, ctx, mode, acc) {
+fn render_parts_at(parts, index, count, ctx, mode, acc) any^ {
     if (index >= count) render_result(acc, ctx.column)
     else {
         let rendered = render_doc(parts[index], ctx, mode)
@@ -67,7 +67,7 @@ fn render_parts_at(parts, index, count, ctx, mode, acc) {
     }
 }
 
-fn render_doc(doc, ctx, mode) {
+fn render_doc(doc, ctx, mode) any^ {
     if (doc.kind == "text") {
         render_result(doc.value, ctx.column + len(doc.value))
     } else if (doc.kind == "concat") {
@@ -97,9 +97,9 @@ fn render_doc(doc, ctx, mode) {
     }
 }
 
-fn render_doc_root(doc) => render_doc(doc, {column: 0, indent: 0}, "break").value
+fn render_doc_root(doc) any^ => render_doc(doc, {column: 0, indent: 0}, "break").value
 
-fn json_quote(value) {
+fn json_quote(value) any^ {
     let escaped_backslash = replace(value, "\\", "\\\\")
     let escaped_quote = replace(escaped_backslash, "\"", "\\\"")
     let escaped_newline = replace(escaped_quote, "\n", "\\n")
@@ -108,7 +108,7 @@ fn json_quote(value) {
     "\"" ++ escaped_tab ++ "\""
 }
 
-fn literal_doc(node) {
+fn literal_doc(node) any^ {
     if (node.type == "StringLiteral") text_doc(json_quote(node.value))
     else if (node.type == "NumericLiteral") text_doc(node.value)
     else if (node.type == "BooleanLiteral") text_doc(if (node.value) "true" else "false")
@@ -116,23 +116,23 @@ fn literal_doc(node) {
     else text_doc("/" ++ node.pattern ++ "/" ++ node.flags)
 }
 
-fn print_nodes_at(nodes, index, count, acc) {
+fn print_nodes_at(nodes, index, count, acc) any^ {
     if (index >= count) acc
     else {
         print_nodes_at(nodes, index + 1, count, acc ++ [print_node(nodes[index])])
     }
 }
 
-fn print_nodes(nodes) => print_nodes_at(nodes, 0, len(nodes), [])
+fn print_nodes(nodes) any^ => print_nodes_at(nodes, 0, len(nodes), [])
 
-fn print_statements_at(nodes, index, count, acc) {
+fn print_statements_at(nodes, index, count, acc) any^ {
     if (index >= count) acc
     else print_statements_at(nodes, index + 1, count, acc ++ [print_statement(nodes[index])])
 }
 
-fn print_statements(nodes) => print_statements_at(nodes, 0, len(nodes), [])
+fn print_statements(nodes) any^ => print_statements_at(nodes, 0, len(nodes), [])
 
-fn node_key(node) {
+fn node_key(node) any^ {
     if (node.computed) concat_docs([text_doc("["), print_node(node.key), text_doc("]")])
     else print_node(node.key)
 }
@@ -206,7 +206,7 @@ fn variable_doc(node, terminator) {
     if (terminator) concat_docs([declaration, text_doc(";")]) else declaration
 }
 
-fn print_property(node) {
+fn print_property(node) any^ {
     if (node.type == "SpreadElement") concat_docs([text_doc("..."), print_node(node.argument)])
     else {
         let key = node_key(node)
@@ -228,14 +228,14 @@ fn expression_precedence(node) {
     } else 20
 }
 
-fn print_expression(node, parent_precedence = 0) {
+fn print_expression(node, parent_precedence = 0) any^ {
     let doc = print_node(node)
     if (expression_precedence(node) < parent_precedence)
         concat_docs([text_doc("("), doc, text_doc(")")])
     else doc
 }
 
-fn flatten_additive(node, acc) {
+fn flatten_additive(node, acc) any^ {
     if (node.type == "BinaryExpression" and node.operator == "+")
         flatten_additive(node.left, acc) ++ [node.right]
     else acc ++ [node]
@@ -255,7 +255,7 @@ fn additive_chain_doc(node) {
     ]), 60)
 }
 
-fn print_node(node) {
+fn print_node(node) any^ {
     if (node == null) text_doc("")
     else if (node.type == "Identifier") text_doc(node.name)
     else if (node.type == "ThisExpression") text_doc("this")
@@ -321,7 +321,7 @@ fn print_node(node) {
     else print_statement(node)
 }
 
-fn print_statement(node) {
+fn print_statement(node) any^ {
     if (node.type == "VariableDeclaration") variable_doc(node, true)
     else if (node.type == "ReturnStatement") concat_docs([text_doc("return"), if (node.argument == null) text_doc("") else concat_docs([text_doc(" "), print_node(node.argument)]), text_doc(";")])
     else if (node.type == "ExpressionStatement") concat_docs([print_node(node.expression), text_doc(";")])
@@ -368,7 +368,7 @@ pn main() {
         checksum = (checksum * 31 + ord(formatted[index])) % 1000000007
     }
     print(formatted)
-    if (checksum == 56483873) {
+    if ((checksum == 56483873)^) {
         print("prettier_ast: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("prettier_ast: FAIL checksum=" ++ string(checksum) ++ "\n")

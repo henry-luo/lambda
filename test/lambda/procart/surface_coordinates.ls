@@ -31,7 +31,7 @@ let atlas=<procart version:2,seed:42,<resources <pattern id:"mineral",generator:
  <sphere id:"one",segments:4,rings:2,surface:{pattern:"mineral",mapping:"object",resolution:16}>;
  <sphere id:"two",segments:4,rings:2,position:[2,0,0],scale:2,surface:{pattern:"mineral",mapping:"object",resolution:16}>>
 let rock=scene.expand(atlas)^
-let geometry=[for (g in rock.resources where name(g)=='geometry' and g.id==rock.parts[0].geometry) g][0];
+let geometry=[for (g in rock.resources where ((name(g)=='geometry' and g.id==rock.parts[0].geometry) ^ { false })) g][0];
 [rock.stats.surface_textures==1,rock.parts[0].geometry==rock.parts[1].geometry,
  len(geometry.positions)==16*9,len(geometry.uvs)==16*6,
  native.validate(scene.to_scene3d(rock))^,rock==scene.expand(parse(format(atlas,'mark')^,'mark')^)^,
@@ -44,7 +44,7 @@ let pattern=<pattern id:"oracle",generator:"noise",version:1,parameters:{frequen
 let triangle=<geometry id:"tri",type:"buffer",positions:[0,0,0,1,0,0,0,1,0],uvs:[0,0,1,0,0,1]>
 let doc=<procart version:2,seed:42,<resources pattern;triangle>;<mesh geometry:"tri",surface:{pattern:"oracle",mapping:"object",resolution:8}>>
 let oracle=scene.expand(doc)^
-let tex=[for (r in oracle.resources where name(r)=='texture') r][0]
+let tex=[for (r in oracle.resources where ((name(r)=='texture') ^ { false })) r][0]
 let raster=image.decode(media.data_uri_bytes(tex.src)^)^,red=image.channel(image.composition(raster)[0][0],"r")^
 let p=surface.prepare(pattern,42)^
 let mapped=scene.expand(<procart version:2,seed:42,<resources pattern;triangle>;
@@ -52,4 +52,4 @@ let mapped=scene.expand(<procart version:2,seed:42,<resources pattern;triangle>;
 [red[6][1]==int(round(surface.sample(p,[0,0,0])[0]*255)),
  red[6][6]==int(round(surface.sample(p,[1,0,0])[0]*255)),
  red[1][1]==int(round(surface.sample(p,[0,1,0])[0]*255)),
- [for (g in mapped.resources where name(g)=='geometry' and g.id==mapped.parts[0].geometry) g.uvs][0]==[0.25,0.1,0.75,0.1,0.25,0.35]]
+ [for (g in mapped.resources where ((name(g)=='geometry' and g.id==mapped.parts[0].geometry) ^ { false })) g.uvs][0]==[0.25,0.1,0.75,0.1,0.25,0.35]]

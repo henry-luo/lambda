@@ -10,10 +10,10 @@ let svg = "http://www.w3.org/2000/svg"
 let math = "http://www.w3.org/1998/Math/MathML"
 fn lower_attrs(book,node,owner,path,chain) map^ {
     let ordinary = map([for (key,value in node.attrs,let pieces = split(string(key),"#"),let local = pieces[len(pieces)-1],
-        let ns = join(take(pieces,len(pieces)-1),"#") where (ns == "" or ns == xml.XML) and
+        let ns = join(take(pieces,len(pieces)-1),"#") where (((ns == "" or ns == xml.XML) and
             not starts_with(lower(local),"on") and not starts_with(local,"__lambda_") and not (lower(local) in
                 ["src","href","srcset","style","action","formaction","poster","background","data","http-equiv","content"])
-            and not starts_with(local,"data-ebook-")) (local,value)])
+            and not starts_with(local,"data-ebook-")) ^ { false })) (local,value)])
     let style = if (c.attr(node,"style") == null) {text:null,diagnostics:[]}
         else res.css(book,c.attr(node,"style"),owner,chain,svg_resource)^
     let src = c.attr(node,"src")
@@ -33,7 +33,7 @@ fn lower_attrs(book,node,owner,path,chain) map^ {
 }
 // A highlighted source string renders its ranges as <mark> runs; ranges are
 // sorted, disjoint and relative to the string.
-fn marked(text,ranges,at = 0) => if (len(ranges) == 0) res.escape(slice(text,at,len(text))) else (
+fn marked(text,ranges,at = 0) any^ => if (len(ranges) == 0) res.escape(slice(text,at,len(text))) else (
     let r = ranges[0],
     res.escape(slice(text,at,r.from)) ++ "<mark class=\"ebook-highlight\" data-ebook-highlight=\"" ++ res.escape(r.id) ++
         "\" data-ebook-color=\"" ++ res.escape(r.color) ++ "\">" ++ res.escape(slice(text,r.from,r.to)) ++ "</mark>" ++
@@ -76,33 +76,33 @@ fn svg_resource(book,path,chain) map^ => lower_node(book,c.tree(epub.source_text
 // Reader covers use the same resource rewriting and SVG sanitization as chapters.
 pub fn resource(book,path) map^ => res.asset(book,"",uri.url(path),svg_resource)^
 // node is the owning element's path; key is the string's own lowering path
-fn text_nodes(node,path = "n") => if (not (node is map) or node.tag in blocked or node.tag in ["head","style"]) []
-    else [for (i,child in node.children,segment in (if (child is string and child != "")
-        [{node:path,key:path ++ "-" ++ string(i),text:child}] else if (child is map) text_nodes(child,path ++ "-" ++ string(i)) else [])) segment]
+fn text_nodes(node,path = "n") any^ => if (not (node is map) or node.tag in blocked or node.tag in ["head","style"]) []
+    else [for (i,child in node.children,segment in (((if (child is string and child != "")
+        [{node:path,key:path ++ "-" ++ string(i),text:child}] else if (child is map) text_nodes(child,path ++ "-" ++ string(i)) else [])) ^ { [] })) segment]
 // A highlight is kept only while its stored text still matches this chapter.
-fn kept_highlights(highlights,occurrence,text) => [for (h in highlights where h is map and
+fn kept_highlights(highlights,occurrence,text) any^ => [for (h in highlights where ((h is map and
     h.spine_occurrence == occurrence and h.start is int and h.end is int and h.start >= 0 and
-    h.start < h.end and h.end <= len(text) and slice(text,h.start,h.end) == h.text) h]
-fn segment_marks(source_map,highlights) => map([for (s in source_map,let end = s.offset+len(s.text),
-    let ranges = [for (h in highlights where h.start < end and h.end > s.offset)
+    h.start < h.end and h.end <= len(text) and slice(text,h.start,h.end) == h.text) ^ { false })) h]
+fn segment_marks(source_map,highlights) any^ => map([for (s in source_map,let end = s.offset+len(s.text),
+    let ranges = [for (h in highlights where ((h.start < end and h.end > s.offset) ^ { false }))
         {from:max(h.start,s.offset)-s.offset,to:min(h.end,end)-s.offset,id:h.id,color:h.color}] where len(ranges) > 0)
     (s.key,sort(ranges,(r) => r.from))])
 fn dimension(value) => float(if (value is string and ends_with(value,"px")) slice(value,0,len(value)-2) else value) ^ { null }
-fn viewport(root) {
+fn viewport(root) any^ {
     if (root.uri == svg) {
         let box = split(trim(c.value(c.attr(root,"viewBox"),""))," ");
         {width:c.value(dimension(c.attr(root,"width")),if (len(box) == 4) dimension(box[2]) else null),
             height:c.value(dimension(c.attr(root,"height")),if (len(box) == 4) dimension(box[3]) else null)}
     } else {
-        let node = c.first([for (node in c.descendants(root,"meta") where c.attr(node,"name") == "viewport") node])
-        let fields = map([for (field in split(c.value(c.attr(node,"content"),""),","),
-            let pair = split(field,"=") where len(pair) == 2) (trim(pair[0]),trim(pair[1]))]);
+        let node = c.first([for (node in c.descendants(root,"meta") where ((c.attr(node,"name") == "viewport") ^ { false })) node])
+        let fields = map([for (field in ((split(c.value(c.attr(node,"content"),""),",")) ^ { [] }),
+            let pair = split(field,"=") where ((len(pair) == 2) ^ { false })) (trim(pair[0]),trim(pair[1]))]);
         {width:dimension(fields.width),height:dimension(fields.height)}
     }
 }
 pub fn load(book,target,highlights = []) map^ {
     let entry = if (target is int) book.reading_order[target] else c.first([for (entry in book.reading_order
-        where (if (target is map) target.href else split(target,"#")[0]) in [entry.href,entry.source_href]) entry])
+        where (((if (target is map) target.href else split(target,"#")[0]) in [entry.href,entry.source_href]) ^ { false })) entry])
     let valid = if (entry == null) raise c.fail("invalid-location","Chapter is not in the reading order") else true
     let source = epub.source_text(book,entry.href)^
     let root = if (entry.media_type == "image/svg+xml") c.tree(source,entry.href)^

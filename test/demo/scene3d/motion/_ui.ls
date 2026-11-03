@@ -26,5 +26,5 @@ pub fn states(choices, rest) => [for (c in choices)
 
 // the template's [state, cue] after a click on `id`: a choice's button switches to it,
 // and the requested one's button cues it again
-pub fn pick(id, choice, cue) => if (id == null or not starts_with(id, "play-")) [choice, cue]
+pub fn pick(id, choice, cue) any^ => if (id == null or not starts_with(id, "play-")) [choice, cue]
     else (let next = symbol(slice(id, 5, len(id))), if (next == choice) [choice, cue + 1] else [next, cue])

@@ -18,7 +18,7 @@ import series: .series
 import card: .card
 import index: .index
 
-pub fn plain(value) => c.plain(value)
+pub fn plain(value) any^ => c.plain(value)
 
 pub fn extent(spec) {
     if (spec._timeline!=null and spec.events==spec._timeline.index.events) spec._timeline.domain else {
@@ -28,11 +28,11 @@ pub fn extent(spec) {
     else {from:min(points),to:if (min(points)==max(points)) max(points)+(if (spec.scale.kind=="calendar") 86400000 else 1) else max(points)}
     }
 }
-fn date_option(value, scale) {
+fn date_option(value, scale) any^ {
     let parsed=if (value!=null) dates.normalize(value,scale) else null;
     if (parsed is error) parsed else parsed.value
 }
-pub fn window(spec, snapshot = null) {
+pub fn window(spec, snapshot = null) any^ {
     let domain=extent(spec);
     let requested=spec.window;
     let from=if (snapshot.window.from != null) snapshot.window.from else if (requested.from!=null) date_option(requested.from,spec.scale) else domain.from;
@@ -47,7 +47,7 @@ pub fn window(spec, snapshot = null) {
     if (failure is error) failure else constrain({from:from,to:to},
         {min:minimum,max:maximum,min_span:requested.min_span,max_span:requested.max_span})
 }
-pub fn constrain(value, bounds) {
+pub fn constrain(value, bounds) any^ {
     let requested=value.to-value.from;
     let smallest=if (bounds.min_span!=null) bounds.min_span else requested;
     let desired=max(requested,smallest);
@@ -59,7 +59,7 @@ pub fn constrain(value, bounds) {
     if (not c.positive(span)) c.fail("window", "constraints leave no visible interval") else {from:from,to:dates.offset(from,span)}
 }
 
-fn ancestors_visible(group, groups, collapsed, seen = []) {
+fn ancestors_visible(group, groups, collapsed, seen = []) any^ {
     if (group.visible == false) false else if (group.parent==null) true
     else if (contains(collapsed,group.parent)) false
     else {
@@ -75,7 +75,7 @@ pub fn visible(spec, snapshot = null) {
     let cached=spec._timeline;
     if (cached!=null and spec.events==cached.index.events and visibility_key(spec,snapshot)==cached.key) cached.visible else {
     let collapsed=c.option(c.attrs(snapshot),"collapsed_groups",[for (group in spec.groups where group.collapsed==true) group.id]);
-    let groups=[for (group in spec.groups where ancestors_visible(group,spec.groups,collapsed)) group];
+    let groups=[for (group in spec.groups where ((ancestors_visible(group,spec.groups,collapsed)) ^ { false })) group];
     let group_index=sort(groups,{by:(group)=>group.id});
     let filters=search.filters(spec,snapshot);
     let query=c.text(c.option(c.attrs(snapshot),"query",c.option(spec.search,"query","")));
@@ -86,7 +86,7 @@ pub fn visible(spec, snapshot = null) {
         let accepted=search.accepts(item,filters),
         let eligible=item.visible!=false and in_group and accepted,
         let matched=if (eligible) search.matches(item,query,spec.search,{chart_id:spec.id,locale:spec.locale}) else false
-        where eligible and (matched is error or c.text(spec.search.mode)!="filter" or matched))
+        where ((eligible and (matched is error or c.text(spec.search.mode)!="filter" or matched)) ^ { false }))
         if (matched is error) matched else {*:item,matched:matched}];
     let failure=util.first_error([filters,*matches]);
     if (failure is error) failure else {events:matches,groups:groups,matches:[for (item in matches where item.matched) item.id],query:query}
@@ -100,7 +100,7 @@ fn box_at(point, width, height) => {left:point[0]-width/2.0,right:point[0]+width
 fn fit_box(bounds, plot) map | error => collision.translate(bounds,
     max(plot.x-bounds.left,min(0,plot.x+plot.width-bounds.right)),
     max(plot.y-bounds.top,min(0,plot.y+plot.height-bounds.bottom)))
-fn clear_box(box, obstacles, direction, gap, depth = 0) {
+fn clear_box(box, obstacles, direction, gap, depth = 0) any^ {
     let overlaps=obstacles |: collision.overlaps(box,~,gap);
     if (len(overlaps)==0) box else if (depth>len(obstacles)) c.fail("layout","collision placement did not converge")
     else {
@@ -108,7 +108,7 @@ fn clear_box(box, obstacles, direction, gap, depth = 0) {
         clear_box(collision.translate(box,direction[0]*shift,direction[1]*shift),obstacles,direction,gap,depth+1)
     }
 }
-fn stack(items, gap, index = 0, placed = []) {
+fn stack(items, gap, index = 0, placed = []) any^ {
     if (index>=len(items)) placed else {
         let item=items[index];
         let box=if (item.stack==false) item.bounds else clear_box(item.bounds,(placed |: ~.lane==item.lane) |> ~.bounds,item.normal,gap);
@@ -117,7 +117,7 @@ fn stack(items, gap, index = 0, placed = []) {
     }
 }
 
-pub fn dimensions(spec, viewport = null) {
+pub fn dimensions(spec, viewport = null) any^ {
     let vp=sizing.viewport(viewport);
     let requested={width:if (spec.width is number) spec.width else c.option(c.attrs(vp),"width",800),
         height:if (spec.height is number) spec.height else c.option(c.attrs(vp),"height",max(400,len(spec.events)*80))};
@@ -125,7 +125,7 @@ pub fn dimensions(spec, viewport = null) {
         (key,max(c.option(spec,"min_" ++ key,0),min(requested[key],c.option(spec,"max_" ++ key,requested[key]))))])
 }
 
-pub fn normalized(spec, viewport, snapshot = null, resources = {}) {
+pub fn normalized(spec, viewport, snapshot = null, resources = {}) any^ {
     let vp=dimensions(spec,viewport);
     let width=vp.width;
     let height=vp.height;
@@ -156,22 +156,22 @@ pub fn normalized(spec, viewport, snapshot = null, resources = {}) {
             let projected=coordinate.project(path,fraction,offset),
             let target=coordinate.project(path,if (spec.spacing=="sequence") fraction else time_map.fraction(temporal,end),offset),
             let sign=if (item.placement=="start" or item.placement=="auto" and index%2==0) -1.0 else 1.0,
-            let normal=[for (component in projected.normal) component*sign])
+            let normal=[for (component in ((projected.normal) ^ { [] })) component*sign])
             {id:item.id,event:item,layout_index:index,point:projected.point,end:target.point,fraction:fraction,normal:normal,tangent:projected.tangent,
                 angle:projected.angle,lane:lane.index,offset:offset,stack:lane.stack,hidden:spec.spacing=="time" and mapped.hidden}];
         let clustered=cluster.layout(geometry,path,{*:spec.cluster,locale:spec.locale,messages:spec.messages},snapshot);
-        let labels=[for (item in clustered.events) plain(item.event.title)];
+        let labels=[for (item in ((clustered.events) ^ { [] })) plain(item.event.title)];
         let metrics=text.measure(labels,font);
-        let widths=[for (position,item in clustered.events) max(c.option(spec.cards,"min_width",1),
+        let widths=[for (position,item in ((clustered.events) ^ { [] })) max(c.option(spec.cards,"min_width",1),
             min(c.option(spec.cards,"max_width",max(1,box.width)),c.option(spec.cards,"width",max(100,min(240,metrics[position].width+32)))))];
         let card_metrics=if (metrics is error) metrics else card.measure(clustered.events |> ~.event,spec,widths,vp,snapshot);
-        let measured=[for (position,item in clustered.events,
+        let measured=[for (position,item in ((clustered.events) ^ { [] }),
             let size=card_metrics[position],
             let center=[item.point[0]+item.normal[0]*(size.width/2.0+24),item.point[1]+item.normal[1]*(size.height/2.0+24)],
             let bounds=if (resources.metrics[item.id]!=null) resources.metrics[item.id] else fit_box(box_at(center,size.width,size.height),box))
             {*:item,bounds:bounds,card:[(bounds.left+bounds.right)/2.0,(bounds.top+bounds.bottom)/2.0],metric:metrics[position]}];
         let stacked=if (metrics is error) metrics else if (card_metrics is error) card_metrics else if (spec.cards.stack==false) measured else stack(sort(measured,
-            {by:(item)=>c.option(item.event,"priority",0),dir:"desc"}),spec.gap);
+            {by:(item)any^ =>c.option(item.event,"priority",0),dir:"desc"}),spec.gap);
         let placed=if (stacked is error) stacked else sort(stacked,{by:(item)=>item.layout_index});
         let base={spec:spec,width:width,height:height,box:box,path:path,time_map:temporal,window:domain,domain:extent(spec),
             events:placed,visible_events:candidates,total_events:len(spec.events),offscreen_count:len(shown.events)-len(candidates),
@@ -185,12 +185,12 @@ pub fn normalized(spec, viewport, snapshot = null, resources = {}) {
         else {*:base,series:overlays,value_axes:value_axes}
     }
 }
-pub fn layout(spec, viewport, snapshot = null, resources = {}) {
+pub fn layout(spec, viewport, snapshot = null, resources = {}) any^ {
     let validated=schema.validate(spec);
     if (validated is error) validated else normalized(validated,viewport,snapshot,resources)
 }
 
-pub fn pick(plan, point, radius = 12) {
+pub fn pick(plan, point, radius = 12) any^ {
     let hits=[for (item in plan.events,
         let inside=point[0]>=item.bounds.left and point[0]<=item.bounds.right and point[1]>=item.bounds.top and point[1]<=item.bounds.bottom,
         let distance=math.sqrt((item.point[0]-point[0])**2+(item.point[1]-point[1])**2)

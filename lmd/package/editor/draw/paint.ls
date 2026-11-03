@@ -16,7 +16,7 @@ pub fn pattern(node,prefix="") => <pattern id:prefix ++ "fill-" ++ model.id(node
     <rect width:8,height:8,fill:model.attr(node,"fill")>
     ; (if (model.attr(node,"pattern") == "dots") <circle cx:2,cy:2,r:1,fill:model.attr(node,"pattern-color")>
         else <path d:pattern_paths[model.attr(node,"pattern")],fill:"none",stroke:model.attr(node,"pattern-color"),'stroke-width':0.8>)>
-pub fn graphic(node,prefix="") {
+pub fn graphic(node,prefix="") any^ {
     let style = {*:stroke(node),fill:if (model.attr(node,"pattern") == "solid") model.attr(node,"fill") else "url(#" ++ prefix ++ "fill-" ++ model.id(node) ++ ")"};
     shapes.graphic(model.attr(node,"variant"),model.box(node),style,model.attr(node,"descriptor"))
 }
@@ -30,7 +30,7 @@ fn arrow_marker(kind,target) {
         else <path d:paths[kind],fill:if (kind == "open" or kind == "bar") "none" else "context-stroke",
             stroke:"context-stroke",'stroke-width':1.4,'stroke-linecap':"round",'stroke-linejoin':"round">)>
 }
-pub fn marker(node,side,prefix="") => arrow_marker(model.attr(node,side ++ "-arrow"),prefix ++ "arrow-" ++ side ++ "-" ++ model.id(node))
+pub fn marker(node,side,prefix="") any^ => arrow_marker(model.attr(node,side ++ "-arrow"),prefix ++ "arrow-" ++ side ++ "-" ++ model.id(node))
 pub fn arrow_preview(kind,side,target) => <svg class:"arrow-preview",width:58,height:22,viewBox:"0 0 64 24",'aria-hidden':"true",
     <defs (arrow_marker(kind,target))>
     <path d:"M 10 12 H 54",fill:"none",stroke:"currentColor",'stroke-width':1.6,

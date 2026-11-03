@@ -25,7 +25,7 @@ pn replace_place(var b: Box, i: int, j: int) int {
 }
 
 // growth of the container
-pn grow_prefix(var b: Box, i: int) int {
+pn grow_prefix(var b: Box, i: int) int^ {
     var before = b.cells[i].k
     push(b.cells, {k: 9, n: 0})
     b.cells[i].k = before + 1
@@ -33,9 +33,9 @@ pn grow_prefix(var b: Box, i: int) int {
 }
 
 // the root rebound
-pn rebind_root(var b: Box, i: int) int {
+pn rebind_root(var b: Box, i: int) int^ {
     var before = b.cells[i].k
-    b = fresh()
+    b = fresh()^
     return before * 100 + b.cells[i].k
 }
 
@@ -55,10 +55,10 @@ pn peek(b: Box, i: int) int {
 }
 
 // the root handed to a plain callee, then written through the place
-pn root_to_plain(var b: Box, i: int) int {
+pn root_to_plain(var b: Box, i: int) int^ {
     var before = b.cells[i].k
     var seen = peek(b, i)
-    b.cells[i].k = before + seen
+    b.cells[i].k = (before + seen)^
     return b.cells[i].k
 }
 
@@ -87,8 +87,8 @@ pn copy_then_write(var b: Box, i: int) int {
 }
 
 // a local root shared before the bind: the writing bind un-shares it
-pn shared_root(i: int) int {
-    var b: Box = fresh()
+pn shared_root(i: int) int^ {
+    var b: Box = fresh()^
     var saved = b
     var before = b.cells[i].k
     b.cells[i].k = before + 7
@@ -97,8 +97,8 @@ pn shared_root(i: int) int {
 }
 
 // the element shared (it sits in a second container) before the bind
-pn shared_leaf(i: int) int {
-    var b: Box = fresh()
+pn shared_leaf(i: int) int^ {
+    var b: Box = fresh()^
     var other: Cell?[] = [b.cells[i]]
     var before = b.cells[i].k
     b.cells[i].k = before + 30
@@ -106,11 +106,11 @@ pn shared_leaf(i: int) int {
 }
 
 // a local root (not a parameter), shared through a plain call
-pn local_root(i: int) int {
-    var b: Box = fresh()
+pn local_root(i: int) int^ {
+    var b: Box = fresh()^
     var seen = peek(b, i)
     var before = b.cells[i].k
-    b.cells[i].k = before + seen + 100
+    b.cells[i].k = (before + seen + 100)^
     return b.cells[i].k
 }
 
@@ -156,36 +156,36 @@ pn absent(var b: Box, i: int) any {
 }
 
 pn main() {
-    var b = fresh()
+    var b = fresh()^
     print("alias=" ++ string(alias_write(b, 0, 0)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("replace=" ++ string(replace_place(b, 1, 1)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("grow=" ++ string(grow_prefix(b, 0)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("rebind=" ++ string(rebind_root(b, 1)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("root_var=" ++ string(root_to_var(b, 0)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("root_plain=" ++ string(root_to_plain(b, 1)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("key=" ++ string(key_moves(b)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("sibling=" ++ string(sibling_write(b, 0)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("copy=" ++ string(copy_then_write(b, 1)) ++ "\n")
     print("shared=" ++ string(shared_root(0)) ++ "\n")
     print("shared_leaf=" ++ string(shared_leaf(1)) ++ "\n")
     print("local=" ++ string(local_root(1)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("loop_kept=" ++ string(loop_kept(b, 1)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("loop_killed=" ++ string(loop_killed(b, 0)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("arms_t=" ++ string(arms(b, 0, true)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("arms_f=" ++ string(arms(b, 0, false)) ++ "\n")
-    b = fresh()
+    b = fresh()^
     print("absent=" ++ string(absent(b, 2)) ++ "," ++ string(absent(b, 9)) ++ "\n")
     print("caller=" ++ string(b.cells[0].k) ++ "," ++ string(b.cells[1].k) ++ "\n")
 }

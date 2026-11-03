@@ -26,15 +26,15 @@ pn main() {
     // 8b: pn method mutating int field
     var cnt = <Counter val: 10>
     print('=8b='); print("\n")
-    cnt.add(5)
+    cnt.add(5)^
     print(cnt.val); print("\n")
 
     // 8c: multiple pn calls in sequence
     var ac = <Accum total: 0>
     print('=8c='); print("\n")
-    ac.add(10)
-    ac.add(20)
-    ac.add(30)
+    ac.add(10)^
+    ac.add(20)^
+    ac.add(30)^
     print(ac.total); print("\n")
 
     // ============================================================
@@ -44,17 +44,17 @@ pn main() {
     // 10a: int mutation and subsequent read
     var wallet = <Wallet balance: 100>
     print('=10a='); print("\n")
-    wallet.deposit(50)
-    wallet.withdraw(30)
+    wallet.deposit(50)^
+    wallet.withdraw(30)^
     print(wallet.balance); print("\n")
 
     // 10b: bool toggle mutation
     var t = <Toggle on: false>
     print('=10b='); print("\n")
     print(t.on); print("\n")
-    t.flip()
+    t.flip()^
     print(t.on); print("\n")
-    t.flip()
+    t.flip()^
     print(t.on); print("\n")
 
 }

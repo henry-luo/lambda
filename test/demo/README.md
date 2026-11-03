@@ -13,6 +13,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `sentence-game` | `sentence-game/sentence-game.ls` | [Build Sentence](sentence-game/README.md) |
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
+| `midtown` | `midtown/midtown.ls` | [Midtown](midtown/README.md) |
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
 | `photos` | `photos/photos.ls` | [Layered Photos editor](photos/README.md) |
 | `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
@@ -31,6 +32,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
+| `chat` | `chat/chat.ls` | [Chat](chat/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
 | `music` | `music/music.ls` | [Music](music/README.md) |
 | `soundflow` | `soundflow/soundflow.ls` | [Soundflow](soundflow/README.md) |
@@ -67,6 +69,11 @@ The [physics experiments](scene3d/physics/README.md) include four interactive na
 Scene3D experiments: a domino cascade, compound bodies in zero gravity, a
 marble sorter and a bounce comparison with trajectory charts. Open `./lambda.exe demo scene3d` and choose any of the four experiment tiles directly. The same index
 also contains CellScope, Ringworld, Crystal garden, Observatory, and Shared Animation.
+
+[Midtown](midtown/README.md) is an open-city driving sandbox on native Scene3D:
+thirty-six procedural blocks with lane-keeping traffic, signals, pedestrians, stunt ramps,
+physics props and courier runs, in day, dusk and night looks. Open it with
+`./lambda.exe demo midtown`.
 
 [The Rings of a City](cityscape/README.md) rebuilds Chengdu inside the Third Ring
 Road from OpenStreetMap, then plays its history from 1250 BC to 2022 as one

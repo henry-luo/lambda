@@ -70,11 +70,11 @@ fn options(opts) map^ {
             raise error("wordcloud: max_steps must be a positive int")
         else if (not (rotations is array) or len(rotations) == 0)
             raise error("wordcloud: rotations must be a nonempty array")
-        else if (len([for (r in rotations where not valid_rotation(r)) r]) > 0)
+        else if (len([for (r in rotations where ((not valid_rotation(r)) ^ { false })) r]) > 0)
             raise error("wordcloud: rotations must be finite and from -180 to 180")
         else if (not (palette is array) or len(palette) == 0)
             raise error("wordcloud: colors must be a nonempty array")
-        else if (len([for (c in palette where not (c is string) or len(c) == 0) c]) > 0)
+        else if (len([for (c in palette where ((not (c is string) or len(c) == 0) ^ { false })) c]) > 0)
             raise error("wordcloud: colors must contain nonempty strings")
         else if (not contains(["rectangle", "ellipse", "circle", "diamond"], shape))
             raise error("wordcloud: invalid shape")
@@ -176,7 +176,7 @@ fn projection_radius(word, nx, ny, padding) =>
 fn separated(a, b, dx, dy, nx, ny, padding) =>
     abs(dx * nx + dy * ny) >= projection_radius(a, nx, ny, padding) + projection_radius(b, nx, ny, padding)
 
-fn collides(word, x, y, placed, index, padding) {
+fn collides(word, x, y, placed, index, padding) any^ {
     if (index >= len(placed)) false
     else {
         let other = placed[index];
@@ -194,7 +194,7 @@ fn collides(word, x, y, placed, index, padding) {
     }
 }
 
-fn corners_fit(word, x, y, opts, index) {
+fn corners_fit(word, x, y, opts, index) any^ {
     if (index >= len(word._corners)) true
     else {
         let corner = word._corners[index];
@@ -205,14 +205,14 @@ fn corners_fit(word, x, y, opts, index) {
     }
 }
 
-fn fits(word, x, y, opts) =>
+fn fits(word, x, y, opts) any^ =>
     x - word.width / 2.0 >= opts.margin and x + word.width / 2.0 <= opts.width - opts.margin and
     y - word.height / 2.0 >= opts.margin and y + word.height / 2.0 <= opts.height - opts.margin and
     (opts.shape == "rectangle" or corners_fit(word, x, y, opts, 0))
 
 fn next_seed(seed) => (seed * 48271) % 2147483647
 
-fn phase(seed, index) {
+fn phase(seed, index) any^ {
     // The 31-bit recurrence is local to this call; zero preserves the original path.
     if (seed == 0) 0.0
     else util.TAU * float(next_seed(next_seed((seed + index) % 2147483646 + 1))) / 2147483647.0
@@ -236,7 +236,7 @@ fn spiral_point(index, opts) {
     }
 }
 
-fn seek(word, placed, opts, index) {
+fn seek(word, placed, opts, index) any^ {
     if (index >= opts.max_steps) null
     else {
         let point = spiral_point(index, opts);
@@ -250,7 +250,7 @@ fn seek(word, placed, opts, index) {
     }
 }
 
-fn place(words, opts, index, placed, unplaced) {
+fn place(words, opts, index, placed, unplaced) any^ {
     if (index >= len(words)) {words: placed, unplaced: unplaced}
     else {
         let start = phase(opts.seed, index);

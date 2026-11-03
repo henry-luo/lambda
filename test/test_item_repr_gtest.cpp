@@ -783,6 +783,55 @@ TEST_F(RuntimeShapeTransition, ArrayNumExactStoresKeepEveryCompactLaneIsolated) 
     }
 }
 
+TEST_F(RuntimeShapeTransition, SmallNumericPayloadSurvivesCollectionAndGrowth) {
+    const ArrayNumElemType lanes[] = {
+        ELEM_INT, ELEM_FLOAT64, ELEM_INT8, ELEM_INT16, ELEM_INT32,
+        ELEM_INT64, ELEM_UINT8, ELEM_UINT16, ELEM_UINT32, ELEM_UINT64,
+        ELEM_FLOAT16, ELEM_FLOAT32, ELEM_BOOL, ELEM_UINT8_CLAMPED,
+    };
+    for (ArrayNumElemType lane : lanes) {
+        RootFrame roots(1);
+        Rooted<ArrayNum*> owner(roots, array_num_new(lane, 3));
+        ASSERT_NE(owner.get(), nullptr);
+        ASSERT_NE(owner.get()->data, nullptr);
+        EXPECT_FALSE(gc_data_zone_owns(eval.heap->gc->data_zone, owner.get()->data));
+        for (int i = 0; i < 3; i++)
+            ASSERT_TRUE(array_num_store_admitted(owner.get(), i,
+                array_num_exact_store_test_value(lane, 11 + i)));
+        heap_gc_collect();
+        for (int i = 0; i < 3; i++)
+            EXPECT_EQ(fn_eq(array_num_read_item(owner.get(), i),
+                array_num_exact_store_test_value(lane, 11 + i)), BOOL_TRUE);
+        // growth detaches the payload from its nonmoving owner, then collection
+        // must preserve its copied contents through the ordinary data-zone path.
+        ASSERT_EQ(array_num_reserve_capacity(owner.get(), 1024), owner.get());
+        EXPECT_TRUE(gc_data_zone_owns(eval.heap->gc->data_zone, owner.get()->data));
+        heap_gc_collect();
+        for (int i = 0; i < 3; i++)
+            EXPECT_EQ(fn_eq(array_num_read_item(owner.get(), i),
+                array_num_exact_store_test_value(lane, 11 + i)), BOOL_TRUE);
+    }
+}
+
+TEST_F(RuntimeShapeTransition, SmallNumericPayloadKeepsSnapshotsAndViewsAlive) {
+    RootFrame roots(3);
+    Rooted<Item> source(roots, Item{.array_num = array_int_new(8)});
+    ASSERT_EQ(get_type_id(source.get()), LMD_TYPE_ARRAY_NUM);
+    for (int i = 0; i < 8; i++) array_int_set(source.get().array_num, i, i + 10);
+    Rooted<Item> view(roots, fn_subview(source.get(), {.item = i2it(1)}, {.item = i2it(4)}));
+    ASSERT_EQ(get_type_id(view.get()), LMD_TYPE_ARRAY_NUM);
+    ASSERT_TRUE(view.get().array_num->is_view);
+    Rooted<Item> replacement(roots, array_num_set_cow_idx(cow_mark_shared(source.get()), 1,
+        {.item = i2it(99)}));
+    ASSERT_EQ(get_type_id(replacement.get()), LMD_TYPE_ARRAY_NUM);
+    EXPECT_NE(source.get().array_num, replacement.get().array_num);
+    source.set(ItemNull);
+    // the view is the only precise edge retaining its small original owner.
+    heap_gc_collect();
+    EXPECT_EQ(lambda_int_item_value(array_num_read_item(view.get().array_num, 0)), 11);
+    EXPECT_EQ(lambda_int_item_value(array_num_read_item(replacement.get().array_num, 1)), 99);
+}
+
 TEST_F(RuntimeShapeTransition, LabelStackAllocationFailureReturnsError) {
     int64_t shape[2] = {1, 1};
     ArrayNum* mask = array_num_new_ndim(ELEM_INT, 1, 2, shape);

@@ -59,23 +59,23 @@ pn hashmap_put(var hm, key: int, value: int) {
     while (idx != EMPTY) {
         if (hm.keys[idx] == key) {
             var old = hm.values[idx]
-            int_slot_set(hm.values, idx, value)
+            int_slot_set(hm.values, idx, value)^
             return old
         }
         idx = hm.nexts[idx]
     }
     // Insert new entry
     var slot = hm.size
-    int_slot_set(hm.keys, slot, key)
-    int_slot_set(hm.values, slot, value)
-    int_slot_set(hm.hashes, slot, hash)
-    int_slot_set(hm.nexts, slot, hm.heads[bucket])
+    int_slot_set(hm.keys, slot, key)^
+    int_slot_set(hm.values, slot, value)^
+    int_slot_set(hm.hashes, slot, hash)^
+    int_slot_set(hm.nexts, slot, hm.heads[bucket])^
     int_slot_set(hm.heads, bucket, slot)
     hm.size = hm.size + 1
 
     // Rehash if needed
     if (hm.size > hm.threshold) {
-        hashmap_rehash(hm)
+        hashmap_rehash(hm)^
     }
     return EMPTY
 }
@@ -87,20 +87,20 @@ pn hashmap_rehash(var hm) {
     // Reset nexts
     var i: int = 0
     while (i < hm.size) {
-        int_slot_set(hm.nexts, i, EMPTY)
+        int_slot_set(hm.nexts, i, EMPTY)^
         i = i + 1
     }
     // Reinsert all entries
     i = 0
     while (i < hm.size) {
         var bucket = hm.hashes[i] % new_cap
-        int_slot_set(hm.nexts, i, new_heads[bucket])
+        int_slot_set(hm.nexts, i, new_heads[bucket])^
         new_heads[bucket] = i
         i = i + 1
     }
     hm.cap = new_cap
     hm.heads = new_heads
-    hm.threshold = int(floor(float(new_cap) * LOAD_FACTOR))
+    hm.threshold = int(floor(float(new_cap) * LOAD_FACTOR))^
     // Grow arrays if needed
     if (hm.size + new_cap > len(hm.keys)) {
         var new_keys = fill(new_cap * 2, EMPTY)
@@ -143,15 +143,15 @@ pn run() {
     let COUNT = 90000
     var hm = hashmap_new(COUNT * 2)
     // Pre-allocate arrays large enough
-    hm.keys = fill(COUNT + 100, EMPTY)
-    hm.values = fill(COUNT + 100, 0)
-    hm.hashes = fill(COUNT + 100, 0)
-    hm.nexts = fill(COUNT + 100, EMPTY)
+    hm.keys = fill(COUNT + 100, EMPTY)^
+    hm.values = fill(COUNT + 100, 0)^
+    hm.hashes = fill(COUNT + 100, 0)^
+    hm.nexts = fill(COUNT + 100, EMPTY)^
 
     // Insert COUNT entries
     var i: int = 0
     while (i < COUNT) {
-        hashmap_put(hm, i, 42)
+        hashmap_put(hm, i, 42)^
         i = i + 1
     }
 
@@ -183,15 +183,15 @@ pn run() {
     var expected_key_sum = (COUNT * (COUNT - 1)) / 2
     var expected_value_sum = 42 * COUNT
 
-    if (result != expected_result) {
+    if ((result != expected_result)^) {
         print("hash-map: FAIL result=" ++ result ++ " expected=" ++ expected_result ++ "\n")
         return false
     }
-    if (key_sum != expected_key_sum) {
+    if ((key_sum != expected_key_sum)^) {
         print("hash-map: FAIL keySum=" ++ key_sum ++ " expected=" ++ expected_key_sum ++ "\n")
         return false
     }
-    if (value_sum != expected_value_sum) {
+    if ((value_sum != expected_value_sum)^) {
         print("hash-map: FAIL valueSum=" ++ value_sum ++ " expected=" ++ expected_value_sum ++ "\n")
         return false
     }

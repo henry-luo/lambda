@@ -1,8 +1,8 @@
 import chart: lambda.chart.chart
 import mesh: lambda.chart.mesh
 import contour: lambda.chart.mesh_contour
-fn elements(node) => if (node is element) [node,for (child in content(node)) for (v in elements(child)) v] else []
-fn paths(node,label) => elements(node) |: ~.class==label
+fn elements(node) any^ => if (node is element) [node,for (child in ((content(node)) ^ { [] })) for (v in ((elements(child)) ^ { [] })) v] else []
+fn paths(node,label) any^ => elements(node) |: ~.class==label
 let data={kind:"grid",x:[0,1,2],y:[0,1],vertex_fields:{value:[[0,1,2],[0,1,2]]}};
 let spec={width:320,height:220,data:data,encoding:{color:{field:"value",dtype:"quantitative"}}};
 let prepared=mesh.prepare(data);

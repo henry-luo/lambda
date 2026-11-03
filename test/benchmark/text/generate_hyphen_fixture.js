@@ -161,7 +161,7 @@ const lambda = [
   "    root: int, exception_words: string[]",
   "}",
   "",
-  "pub pn load_hyphen_tables() HyphenTables {",
+  "pub pn load_hyphen_tables() HyphenTables^ {",
   '    return input("test/benchmark/text/hyphen_tables.json", {type: "json"})^',
   "}",
   "",

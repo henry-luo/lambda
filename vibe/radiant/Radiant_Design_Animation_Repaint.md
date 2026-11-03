@@ -292,7 +292,9 @@ at 1× and approaches it at 2×. To be confirmed by measurement (§6).
 
 These remain deferred until A and B are measured:
 - a compositor thread;
-- GPU compositing of layers;
+- GPU compositing of layers; native graphics viewports first, designed as
+  C1–C7 in [Radiant_Design_GPU_Compositor.md](Radiant_Design_GPU_Compositor.md),
+  with rulings Q7–Q13 accepted by the user on 2026-11-02;
 - `will-change` layer promotion beyond Q2;
 - tiled replay with glyphs (RAD_12 §9.5).
 
@@ -391,7 +393,9 @@ done. Stage B is held until A is reviewed. Nothing is committed.
   else uploads everything.
   - `UiContext::present_partial`/`present_rect` accumulate across renders
     between presents.
-  - The cached video blit resets them to a full upload.
+  - The cached video blit resets them to a full upload. (2026-11-02: it now adds
+    its placements instead, and dirty-region frames upload their union too;
+    [GPU compositor](Radiant_Design_GPU_Compositor.md) step 1.)
 - **Switches.**
   - `RADIANT_PRESENTATION_DAMAGE=off` disables the path.
   - `RADIANT_SELECTIVE_SIM=1` lets headless replays repaint selectively; they

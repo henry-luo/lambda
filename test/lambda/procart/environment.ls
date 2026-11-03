@@ -62,7 +62,7 @@ let roundtrip=parse(format(source,'mark')^,'mark')^
 fn reject_document(doc) bool => (A.normalize(doc,H.registry()) ^ { null })==null;
 [S.validate(rendered)^,model.environment.config.time==8.0,
  A.expand(roundtrip,H.registry())^==model,
- len([for (n in content(content(rendered)[5]) where name(n)=='animation-clip') n])==1,
+ len([for (n in ((content(content(rendered)[5])) ^ { [] }) where ((name(n)=='animation-clip') ^ { false })) n])==1,
  reject_document(<procart version:2,seed:1,<resources>;<environment>;<environment>;<box>>),
  reject_document(<procart version:2,seed:1,<resources>;<group <environment>>>),
  (H.normalize({species:"unknown"}) ^ { null })==null]

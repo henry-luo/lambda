@@ -25,11 +25,11 @@ pub fn new_game(stage = 0, medals = []) {
 pub fn indexed(node) => node.kind == "switch" or node.kind == "rotor"
 pub fn selective(node) => node.kind == "magnet" or node.kind == "filter"
 pub fn catching(node) => node.kind == "gate" or node.kind == "counter"
-fn advance_device(machine,bits,index) {
+fn advance_device(machine,bits,index) any^ {
     let next = bits[index]+1
     replace_at(bits,index,if (next >= len(machine.nodes[index].exits)) 0 else next)
 }
-pub fn outlet(machine,bits,index,color) {
+pub fn outlet(machine,bits,index,color) any^ {
     let node = machine.nodes[index]
     if (indexed(node)) bits[index]
     else if (selective(node)) (if (color == node.match) 0 else 1)
@@ -45,12 +45,12 @@ pub fn visit(machine, bits, index, color = -1) {
     {bits:updated, next:if (node.kind == "bin" or closed) -1
         else node.exits[outlet(machine,bits,index,color)], caught:closed, node:index}
 }
-fn trace(machine, bits, index, remaining, color) {
+fn trace(machine, bits, index, remaining, color) any^ {
     let step = visit(machine,bits,index,color)
     if (step.next == -1 or remaining == 0) step
     else trace(machine,step.bits,step.next,remaining-1,color)
 }
-pub fn preview(game, funnel, color = null) => trace(level(game),game.bits,level(game).funnels[funnel],
+pub fn preview(game, funnel, color = null) any^ => trace(level(game),game.bits,level(game).funnels[funnel],
     len(level(game).nodes),if (color == null) game.selected else color)
 
 fn finish(game, result, color) {
@@ -77,7 +77,7 @@ fn finish(game, result, color) {
 }
 fn snapshot(game) => {bits:game.bits, filled:game.filled, stock:game.stock, selected:game.selected,
     funnel:game.funnel, moves:game.moves, losses:game.losses, mode:game.mode, message:game.message, medals:game.medals}
-pub fn drop(game, funnel, color) {
+pub fn drop(game, funnel, color) any^ {
     if (game.mode != "playing" or game.paused or game.active != null or
         funnel < 0 or funnel >= len(level(game).funnels) or color < 0 or color > 7 or game.stock[color] <= 0) game
     else {
@@ -95,7 +95,7 @@ fn trial(game, funnel, color, result) => finish({*:game, moves:game.moves+1,
     stock:replace_at(game.stock,color,game.stock[color]-1)},result,color)
 fn state_key(game) => {bits:game.bits, filled:game.filled}
 fn candidates(game) {
-    let moves = [for (f in 0 to len(level(game).funnels)-1, color in 0 to 7 where game.stock[color] > 0) {
+    let moves = [for (f in ((0 to len(level(game).funnels)-1) ^ { [] }), color in 0 to 7 where game.stock[color] > 0) {
         let result = preview(game,f,color)
         let node = level(game).nodes[result.node]
         let wanted = not result.caught and node.kind == "bin" and game.filled[result.node] < node.need and
@@ -105,7 +105,7 @@ fn candidates(game) {
     }];
     [for (move in moves where move.legal) move]
 }
-fn search(game, seen, depth) {
+fn search(game, seen, depth) any^ {
     if (game.mode == "won") []
     else if (depth == 0) null
     else {
@@ -115,7 +115,7 @@ fn search(game, seen, depth) {
         choose_plan(game,ordered,seen,depth,0)
     }
 }
-fn choose_plan(game, moves, seen, depth, index) {
+fn choose_plan(game, moves, seen, depth, index) any^ {
     if (index >= len(moves)) null
     else {
         let move = moves[index]
@@ -127,13 +127,13 @@ fn choose_plan(game, moves, seen, depth, index) {
         else choose_plan(game,moves,seen,depth,index+1)
     }
 }
-pub fn solve(game) => search(game,[state_key(game)],sum(game.stock))
+pub fn solve(game) any^ => search(game,[state_key(game)],sum(game.stock))
 pub fn hint_text(game, plan) => if (plan == null or len(plan) == 0)
     "No solution with this tray. Undo a drop or restart the machine."
     else "Try " ++ lower(COLORS[plan[0].color]) ++ " in inlet " ++
         level(game).nodes[level(game).funnels[plan[0].funnel]].label ++ "."
 
-pub fn tick(game) {
+pub fn tick(game) any^ {
     if (game.paused or game.mode != "playing") game
     else if (game.active == null) {
         if (not game.autoplay or len(game.plan) == 0) game
@@ -152,7 +152,7 @@ pub fn tick(game) {
         }
     }
 }
-pub fn action(game, command, value = 0) {
+pub fn action(game, command, value = 0) any^ {
     if (command == "restart") new_game(game.stage,game.medals)
     else if (command == "level") new_game(value,game.medals)
     else if (command == "next" and game.mode == "won") new_game((game.stage+1)%len(LEVELS),game.medals)
@@ -180,6 +180,6 @@ pub fn action(game, command, value = 0) {
     else game
 }
 
-pub fn point(a,b,t) => motion.point(a,b,t)
-pub fn rail(a,b) => motion.rail(a,b)
-pub fn ball_position(game) => motion.position(game.active.motion,game.active.tick*STEP_MS)
+pub fn point(a,b,t) any^ => motion.point(a,b,t)
+pub fn rail(a,b) any^ => motion.rail(a,b)
+pub fn ball_position(game) any^ => motion.position(game.active.motion,game.active.tick*STEP_MS)

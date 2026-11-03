@@ -39,7 +39,7 @@ pn main() {
 
     // arithmetic round-trips through the slot: read, compute, store back
     var m: Measures = {q: 1.5, label: "measures"}
-    m.q = m.q + 1.0
-    multi.n = multi.n + 1n
+    m.q = (m.q + 1.0)^
+    multi.n = (multi.n + 1n)^
     print(type(m.q) ++ " " ++ m.q ++ " | " ++ type(multi.n) ++ " " ++ multi.n ++ "\n")
 }

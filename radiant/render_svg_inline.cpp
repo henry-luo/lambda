@@ -8512,8 +8512,6 @@ static bool svg_layer_paint_equal(const SvgInitialPaint* a, const SvgInitialPain
 // Rasterise the SVG at the layer origin into a straight-alpha surface. Every
 // vector-only layers share a premultiplied-alpha contract. Mixed CPU/effect
 // recordings keep black/white reconstruction until their alpha writers are qualified.
-static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
-                                    uint32_t* out, size_t count);
 static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
                                   float viewport_width, float viewport_height, float scale,
                                   const SvgInitialPaint* paint, ImageSurface* surface, ImageSurface* image,
@@ -8633,32 +8631,10 @@ bool render_layer_rasterize(DisplayList* recording, ScratchArena* scratch_arena,
             rdt_vector_destroy(&vec);
         }
     }
-    if (ok && !transparent) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
-        (uint32_t*)surface->pixels, count);
+    if (ok && !transparent) render_pixel_resolve_matte(over_black.get(), over_white.get(),
+        (uint32_t*)surface->pixels, count, false);
     surface->alpha_mode = transparent ? IMAGE_ALPHA_PREMULTIPLIED : IMAGE_ALPHA_STRAIGHT;
     return ok;
-}
-
-// straight RGBA from the black and white passes: coverage is what the white
-// backdrop lost, colour is the black pass scaled back up by that coverage
-static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
-                                    uint32_t* out, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        const uint8_t* b = (const uint8_t*)&over_black[i];
-        const uint8_t* w = (const uint8_t*)&over_white[i];
-        uint32_t lost = (uint32_t)(w[0] - b[0]) + (uint32_t)(w[1] - b[1]) + (uint32_t)(w[2] - b[2]);
-        uint32_t alpha = 255u - (lost + 1u) / 3u;
-        uint8_t* o = (uint8_t*)&out[i];
-        if (alpha == 0) {
-            out[i] = 0;
-            continue;
-        }
-        for (int c = 0; c < 3; c++) {
-            uint32_t value = ((uint32_t)b[c] * 255u + alpha / 2u) / alpha;
-            o[c] = (uint8_t)(value > 255u ? 255u : value);
-        }
-        o[3] = (uint8_t)alpha;
-    }
 }
 
 static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* registry,

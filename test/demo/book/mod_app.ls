@@ -10,7 +10,7 @@ pn close_book(lib, st, persist) map {
     return {*: st, open: null, saved: null, places: lb.refresh(st.places, e, persist)}
 }
 
-view <books_app> state st: {section: "home", query: "", sort: "recent", open: null, saved: null,
+view <books_app> () any^ state st: {section: "home", query: "", sort: "recent", open: null, saved: null,
         places: {}, opened: [], ready: false} {
     ui.page(~.library, st)
 }
@@ -54,11 +54,11 @@ on input(evt) {
 }
 on keydown(evt) {
     let typing = dom.closest(evt.target, "input,textarea,select,[contenteditable]") != null
-    if (st.open != null and evt.key == "Escape" and not typing) {
+    if ((st.open != null and evt.key == "Escape" and not typing)^) {
         st = close_book(~.library, st, ~.persist)
         return 'prevent-default'
     }
-    if (st.open == null and (evt.metaKey or evt.ctrlKey) and lower(string(evt.key)) == "f") {
+    if ((st.open == null and (evt.metaKey or evt.ctrlKey) and lower(string(evt.key)) == "f")^) {
         dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target), "search"), false)
         return 'prevent-default'
     }
@@ -66,7 +66,7 @@ on keydown(evt) {
 }
 
 // base is the demo folder; persist: false neither reads nor saves reading state
-pub fn document(base, persist) => (let css = input(url_resolve(base, "book.css"), 'text')^,
+pub fn document(base, persist) any^ => (let css = input(url_resolve(base, "book.css"), 'text')^,
     <html lang:"en",
         <head <meta charset:"UTF-8"><title "Books — Lambda"><style (reader.stylesheet ++ css)>>
         apply(<books_app library:lb.load_all(base), persist:persist>)>)

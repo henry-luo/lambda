@@ -28,12 +28,12 @@ pn run(root,args,options,codes = [0]) map^ {
         let drivers = exec_git(root,["config","--null","--name-only","--get-regexp",
             "^filter\\..*\\.(clean|smudge|process|required)$"],options,[0,1])^
         let keys = lambda.sys.parse(if (drivers.stdout == null) "" else drivers.stdout,g.path_list)^
-        overrides = [for (node in content(keys)) for (part in ["-c",c.text(node.value)^ ++
+        overrides = [for (node in ((content(keys)) ^ { [] })) for (part in ["-c",c.text(node.value)^ ++
             (if (ends_with(c.text(node.value)^,".required")) "=false" else "=")]) part]
     }
     return exec_git(root,[*overrides,*args],options,codes)^
 }
-fn output_line(bytes) => if (len(bytes) > 0 and bytes[len(bytes) - 1] == 10) take(bytes,len(bytes) - 1) else bytes
+fn output_line(bytes) any^ => if (len(bytes) > 0 and bytes[len(bytes) - 1] == 10) take(bytes,len(bytes) - 1) else bytes
 pn resolve(root,revision,options,optional = false) {
     let checked = c.require(revision is string and revision != "","revision must be a nonempty string")^
     let result = run(root,["rev-parse","--verify","--end-of-options",revision ++ "^{tree}"],options,
@@ -67,7 +67,7 @@ fn raw_entry(source,node) map^ {
 }
 pub fn parse_manifest(source) array^ {
     let tree = lambda.sys.parse(if (source == null) "" else binary(source),g.raw,{spans:true})^;
-    [for (node in content(tree)) raw_entry(binary(source),node)^]
+    [for (node in ((content(tree)) ^ { [] })) raw_entry(binary(source),node)^]
 }
 fn untracked_entry(node) map^ {
     let path = binary(node.value)
@@ -103,7 +103,7 @@ pub pn compare(repo,comparison = "unstaged",options = null) map^ {
     if (mode == "unstaged" or mode == "working") {
         let result = run(repo.root,["ls-files","--others","--exclude-standard","-z"],checked)^
         let tree = lambda.sys.parse(if (result.stdout == null) "" else result.stdout,g.path_list)^
-        others = [for (node in content(tree)) untracked_entry(node)^]
+        others = [for (node in ((content(tree)) ^ { [] })) untracked_entry(node)^]
     }
     let files = [for (i,change in [*distinct,*others]) {*:change,id:i}];
     return {kind:"diff-manifest",repo:repo,mode:mode,before:before,after:after,arguments:arguments,files:files}

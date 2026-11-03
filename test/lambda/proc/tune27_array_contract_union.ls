@@ -7,10 +7,10 @@ fn tune27_leaf(k: string) Tune27Doc => {kind: k}
 
 fn tune27_group(parts: Tune27Doc[]) Tune27Doc => {kind: "group", parts: parts}
 
-fn tune27_size(doc: Tune27Doc) int =>
+fn tune27_size(doc: Tune27Doc) int^ =>
     if (doc.kind == "group") tune27_size_all(doc.parts, 0, 1) else 1
 
-fn tune27_size_all(parts: Tune27Doc[], index: int, acc: int) int =>
+fn tune27_size_all(parts: Tune27Doc[], index: int, acc: int) int^ =>
     if (index >= len(parts)) acc
     else tune27_size_all(parts, index + 1, acc + tune27_size(parts[index]))
 

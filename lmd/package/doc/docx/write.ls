@@ -16,7 +16,7 @@ fn options(value) map^ {
     let valid_page = if (opts.page!=null and not (opts.page is map)) raise errors.fail("invalid-options","page must be a map")
     let names = ["title","creator","subject","description","unsupported","base","styles","page"]
     let page = {*:{width:793.7007874,height:1122.519685,top:96.0,right:96.0,bottom:96.0,left:96.0},*:opts.page or {}}
-    let invalid = [for (key,item in opts where not (string(key) in names)) string(key)];
+    let invalid = [for (key,item in opts where ((not (string(key) in names)) ^ { false })) string(key)];
     if (not (opts is map) or len(invalid)>0) raise errors.fail("invalid-options","Invalid DOCX export options")
     else if (not ((opts.unsupported or "warn") in ["warn","error"])) raise errors.fail("invalid-options","unsupported must be warn or error")
     else if (not (opts.styles==null or opts.styles is map) or any([for (key,v in opts.styles) not (v is string)]))
@@ -30,20 +30,20 @@ fn options(value) map^ {
         raise errors.fail("invalid-options","Page dimensions must leave a positive writing area")
     else {*:opts,unsupported:opts.unsupported or "warn",styles:opts.styles or {},page:page}
 }
-fn valid_xml(value) => all([for (ch in split(value,""),let n=ord(ch))
+fn valid_xml(value) any^ => all([for (ch in ((split(value,"")) ^ { [] }),let n=ord(ch))
     n in [9,10,13] or (n>=32 and n<=1114111 and not (n>=55296 and n<=57343) and n!=65534 and n!=65535)])
-fn list_records(nodes) => [for (i,entry in [for (n in nodes where c.tag(n.node) in ["ul","ol"]) n]) {
+fn list_records(nodes) => [for (i,entry in [for (n in nodes where ((c.tag(n.node) in ["ul","ol"]) ^ { false })) n]) {
     let raw = style.css_get(entry.node.style,"list-style-type") or entry.node.type
     let format = if (c.tag(entry.node)=="ul") "bullet" else list_formats[raw] or "decimal"
     let start = int(entry.node.start or 1) ^ { 1 }
-    let level = len([for (parent in nodes where c.tag(parent.node) in ["ul","ol"] and len(parent.path)<len(entry.path) and
-        take(entry.path,len(parent.path))==parent.path) parent]);
+    let level = len([for (parent in nodes where ((c.tag(parent.node) in ["ul","ol"] and len(parent.path)<len(entry.path) and
+        take(entry.path,len(parent.path))==parent.path) ^ { false })) parent]);
     {id:i+1,path:c.path_key(entry.path),format:format,start:start,level:min(8,level),bullet:if (raw=="square") "▪" else if (raw=="circle") "○" else "•",
         diagnostics:if (level>8 or (raw!=null and list_formats[raw]==null and not (raw in ["disc","circle","square"])))
             [c.issue("numbering","List format or depth was approximated with the supported Word numbering profile")] else []}
 }]
 fn bookmark(ctx,id) => [for (entry in ctx.bookmarks where entry.source==id) entry][0]
-fn boundaries(node,ctx,ending=false) {
+fn boundaries(node,ctx,ending=false) any^ {
     let entry = bookmark(ctx,node.id);
     if (entry==null) [] else if (ending) [<'w:bookmarkEnd' 'w:id':entry.id>]
     else [<'w:bookmarkStart' 'w:id':entry.id,'w:name':entry.name>]
@@ -53,12 +53,12 @@ fn text_runs(value,props) {
     let lines = split(if (props.preserve==true) text else replace(text,"\n"," "),"\n");
     [for (i,line in lines) *[
         if (i>0) <'w:r' style.run(props); <'w:br'>>,
-        *[for (j,part in split(line,"\t")) *[
+        *[for (j,part in ((split(line,"\t")) ^ { [] })) *[
             if (j>0) <'w:r' style.run(props); <'w:tab'>>,
             if (part!="") <'w:r' style.run(props); <'w:t' 'xml:space':"preserve",part>>]]]]
 }
-fn inlines(nodes,path,ctx) => c.merge([for (i,n in nodes) inline_node(n,[*path,i],ctx)])
-fn inline_node(n,path,ctx) {
+fn inlines(nodes,path,ctx) any^ => c.merge([for (i,n in nodes) inline_node(n,[*path,i],ctx)])
+fn inline_node(n,path,ctx) any^ {
     if (n is string or n is symbol) c.result(text_runs(string(n),ctx.props))
     else if (not (n is element)) c.result([],[c.issue("value","Non-text inline value was omitted")])
     else {
@@ -89,7 +89,7 @@ fn inline_node(n,path,ctx) {
         c.result([*boundaries(n,ctx),*content.nodes,*boundaries(n,ctx,true)],content.diagnostics ++ style.diagnostics(n,defaults ++ ";" ++ (n.style or "")))
     }
 }
-fn paragraph(n,path,ctx,children=null) {
+fn paragraph(n,path,ctx,children=null) any^ {
     let defaults = (ctx.options.styles[c.tag(n)] or "") ++ ";" ++
         (if (ctx.cell==true) ctx.options.styles["td " ++ c.tag(n)] or "" else "")
     let props = style.inherit(n,ctx.props,defaults)
@@ -100,10 +100,10 @@ fn paragraph(n,path,ctx,children=null) {
         if (style.css_get(css,"page-break-after")=="always" or style.css_get(css,"break-after")=="page") <'w:r' <'w:br' 'w:type':"page">> >],
         inline.diagnostics ++ style.diagnostics(n,css))
 }
-fn write_list(n,path,ctx) {
+fn write_list(n,path,ctx) any^ {
     let record = [for (entry in ctx.lists where entry.path==c.path_key(path)) entry][0]
     let props = style.inherit(n,ctx.props,ctx.options.styles[c.tag(n)] or "");
-    c.merge([for (i,item in c.kids(n) where c.tag(item)=="li") {
+    c.merge([for (i,item in ((c.kids(n)) ^ { [] }) where ((c.tag(item)=="li") ^ { false })) {
         let nesting = record.level+min(8-record.level,max(0,int(item.indent or 0) ^ { 0 }))
         let body = blocks(c.kids(item),[*path,i],{*:ctx,props:style.inherit(item,props),numbering:{id:record.id,level:nesting}});
         c.result(if (len(body.nodes)>0 and string(name(body.nodes[0]))=="w:p") body.nodes else
@@ -111,7 +111,7 @@ fn write_list(n,path,ctx) {
             body.diagnostics ++ (if (item.value==null) [] else [c.issue("numbering","Per-item list value resets are outside the export profile")]))
     }])
 }
-fn block(n,path,ctx) {
+fn block(n,path,ctx) any^ {
     let tag = c.tag(n)
     let defaults = if (tag=="body") "" else ctx.options.styles[tag] or ""
     let props = style.inherit(n,ctx.props,defaults);
@@ -130,10 +130,10 @@ pub fn blocks(nodes,path,ctx,index=0,out=[],diagnostics=[]) map^ {
         let n = nodes[index]
         let tag = c.tag(n)
         let is_block = tag in blocks_tags
-        let next_block = [for (j in range(index+1,len(nodes),1) where c.tag(nodes[j]) in blocks_tags) j][0]
+        let next_block = [for (j in range(index+1,len(nodes),1) where ((c.tag(nodes[j]) in blocks_tags) ^ { false })) j][0]
         let end = if (is_block) index+1 else next_block or len(nodes)
         let converted = if (is_block) block(n,[*path,index],ctx)^
-            else if (all([for (value in slice(nodes,index,end)) value is string and trim(value)==""])) c.result()
+            else if (all([for (value in ((slice(nodes,index,end)) ^ { [] })) value is string and trim(value)==""])) c.result()
             else paragraph(<p>,path,ctx,c.merge([for (j in range(index,end,1)) inline_node(nodes[j],[*path,j],ctx)]));
         blocks(nodes,path,{*:ctx,numbering:if (len(converted.nodes)>0) null else ctx.numbering},end,
             [*out,*converted.nodes],[*diagnostics,*converted.diagnostics])^
@@ -170,14 +170,14 @@ pub fn export_document(value,requested=null) map^ {
     let source = if (value is string) parse(value,'html')^ else value
     let original = if (source is element) c.walk(source)^ else []
     let root = c.root(source)^
-    let title = opts.title or [for (entry in original where c.tag(entry.node)=="title") c.text(entry.node)][0] or "Untitled document"
+    let title = opts.title or [for (entry in original where ((c.tag(entry.node)=="title") ^ { false })) c.text(entry.node)][0] or "Untitled document"
     let nodes = c.walk(root)^
-    let strings = [for (entry in nodes) if (entry.node is string) entry.node else *[for (key,v in c.attrs(entry.node) where v is string) v]]
+    let strings = [for (entry in nodes) if (entry.node is string) entry.node else *[for (key,v in ((c.attrs(entry.node)) ^ { [] }) where v is string) v]]
     let checked_xml = if (not all([for (v in [*strings,*[for (key,v in opts.styles) v],title,opts.creator or "",opts.subject or "",opts.description or ""]) valid_xml(v)]))
         raise errors.fail("invalid-source","Document contains characters forbidden by XML 1.0")
     let images = pictures.records(nodes,opts)
-    let links = [for (i,href in unique([for (entry in nodes where c.tag(entry.node)=="a" and
-        not starts_with(entry.node.href or "","#") and errors.safe_link(entry.node.href)) entry.node.href])) {href:href,id:"rIdLink" ++ string(i+1)}]
+    let links = [for (i,href in unique([for (entry in nodes where ((c.tag(entry.node)=="a" and
+        not starts_with(entry.node.href or "","#") and errors.safe_link(entry.node.href)) ^ { false })) entry.node.href])) {href:href,id:"rIdLink" ++ string(i+1)}]
     let bookmarks = [for (i,id in unique([for (entry in nodes where entry.node.id is string and entry.node.id!="") entry.node.id]))
         {source:id,id:i+1,name:"_lambdaBookmark" ++ string(i+1)}]
     let lists = list_records(nodes)
@@ -202,7 +202,7 @@ pub fn export_document(value,requested=null) map^ {
         <Default Extension:"rels",ContentType:"application/vnd.openxmlformats-package.relationships+xml">;
         <Default Extension:"xml",ContentType:"application/xml">;
         *[for (extension in unique([for (image in images where image.bytes!=null) split(image.filename,".")[last]]),
-            let image=[for (image in images where ends_with(image.filename or "","." ++ extension)) image][0]) <Default Extension:extension,ContentType:image.mime>];
+            let image=[for (image in images where ((ends_with(image.filename or "","." ++ extension)) ^ { false })) image][0]) <Default Extension:extension,ContentType:image.mime>];
         *[for (part in [{name:"document",kind:"document.main"},{name:"styles",kind:"styles"},{name:"numbering",kind:"numbering"}])
             <Override PartName:"/word/" ++ part.name ++ ".xml",ContentType:"application/vnd.openxmlformats-officedocument.wordprocessingml." ++ part.kind ++ "+xml">];
         <Override PartName:"/docProps/core.xml",ContentType:"application/vnd.openxmlformats-package.core-properties+xml">>

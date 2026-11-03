@@ -3,7 +3,7 @@ import c: .common
 import t: .time
 
 // 34-digit decimal keys distinguish every bounded rational without float rounding.
-pub fn ordered(items) => sort(items,(e)=>decimal(e.at.num)/decimal(e.at.den))
+pub fn ordered(items) any^ => sort(items,(e)any^ =>decimal(e.at.num)/decimal(e.at.den))
 pub fn message(at, status, a, b = 0) => {at:at,status:status,a:a,b:b}
 pub fn tempo(at, microseconds) => {at:at,microseconds:microseconds}
 fn sounding_step(st,e) map^ {
@@ -23,8 +23,8 @@ pub fn check_notes(events) bool^ {
     let closed=c.require(all([for (key,onset in valid) onset==null]),"unterminated MIDI note")^;
     true
 }
-pub fn seconds(tempos, at) {
-    let index=max([for (i,x in tempos where t.compare(x.at,at)<=0) i])
+pub fn seconds(tempos, at) any^ {
+    let index=max([for (i,x in tempos where ((t.compare(x.at,at)<=0) ^ { false })) i])
     let segment=tempos[index];
     segment.seconds+t.value(t.sub(at,segment.at)^)*segment.microseconds/1000000.0
 }

@@ -5,7 +5,7 @@ import s: lambda.scene3d
 import color: lambda.color
 
 pub fn from_document(doc) map?^ {
-    let ponds=[for (n in content(doc) where n is element and name(n)=='pond') n]
+    let ponds=[for (n in ((content(doc)) ^ { [] }) where ((n is element and name(n)=='pond') ^ { false })) n]
     let count=c.require(len(ponds)<=1,"meadow supports one pond")^;
     if (len(ponds)==0) null else {
         let relief=c.require(doc.relief>0.0,"pond needs positive terrain relief")^
@@ -21,7 +21,7 @@ pub fn from_document(doc) map?^ {
     }
 }
 fn shore(angle) float => 1.0+0.07*sin(3.0*angle)+0.04*cos(5.0*angle)
-pub fn distance(p,x,z) float {
+pub fn distance(p,x,z) float^ {
     let a=(x-p.position[0])/(p.size[0]/2.0),b=(z-p.position[1])/(p.size[1]/2.0);
     sqrt(a*a+b*b)/shore(math.atan2(b,a))
 }

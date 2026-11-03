@@ -5,3 +5,4 @@ xx:xxx
 xyxyxy
 [xx]
 stopped
+nested stopped

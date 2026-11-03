@@ -1503,16 +1503,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         // CW34: a borrowed handle was already decided by cow_bind_rmw_handle
         cow_mark_shared(bound);
     }
-    if (item_is_error(bound) && named->declared_type &&
-            !lambda_type_accepts_error(named->declared_type)) {
-        // A failed deferred boundary must not publish ItemError into the slot:
-        // MIR returns before the store, so continuing would expose a binding
-        // that cannot exist and would run statements past the declaring block.
-        // An error the initializer carries as its value skips the same way
-        // (S7.7.2): `let n: int = len(mode)` had bound it (LR12-25).
-        interp_skip_binding(f, named->entry, bound, (AstNode*)named, 0);
-        return false;
-    }
+    // S7.7.2v2: retain the outcome in the binding, including a shared capture home.
     return interp_initialize_binding(f, named->entry, bound);
 }
 
@@ -1854,7 +1845,7 @@ static Item interp_read_store_owner(InterpFrame* f, NameEntry* root,
 
 // LR12-10: remember that this activation shared one of its `var` parameters
 static void interp_note_var_param_marked(InterpFrame* f, AstNode* source) {
-    AstNode* node = ast_unwrap_primary(source);
+    AstNode* node = ast_cow_value_source(source);
     if (!f || !node || node->node_type != AST_NODE_IDENT) return;
     NameEntry* entry = ((AstIdentNode*)node)->entry;
     if (!entry || !entry->is_var_param || !entry->storage_assigned ||
@@ -2323,7 +2314,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
 
     if (!injected && source_argc == 1 && callee &&
             callee->node_type == AST_NODE_TYPE) {
-        Type* target_type = ((AstNode*)node)->type;
+        Type* target_type = ast_called_type_target(callee);
         if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
                 target_type->type_id == LMD_TYPE_UINT64)) {
             Item source = eval_expr(f, node->argument);
@@ -4824,7 +4815,7 @@ static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
 static Item interp_snapshot_binding_alias(InterpFrame* f, AstNode* expr,
         NameEntry* alias, Type* declared, Item value) {
     if (alias && alias->cow_borrow_lowered) return value;
-    AstNode* source = ast_unwrap_primary(expr);
+    AstNode* source = ast_cow_value_source(expr);
     if (!source) return value;
     bool captures = ast_expr_insertion_needs_capture(source);
     if (source->node_type == AST_NODE_IDENT) {
@@ -6404,18 +6395,6 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             log_error("interp: assignment target has no binding");
             return ItemError;
         }
-        if (fresh_rhs_error && target->declared_type &&
-                !lambda_type_accepts_error(target->declared_type)) {
-            // A checked binding rejects a fresh RHS error before publishing it,
-            // but an untyped binding must retain that ItemError so a later
-            // error-excluding `var` call short-circuits before COW mutation.
-            // The rejected error leaves the function as it does through MIR's
-            // emit_return_if_item_error edge: the binding keeps its old value
-            // and a loop accumulator dies with the batch (S7.7.4, S7.7.5).
-            // Returning it only as this statement's value let a loop carry on
-            // silently with the stale binding (S11.4.1v3: never silence).
-            return interp_skip_binding(f, target, value, node, 1);
-        }
         value = interp_snapshot_binding_alias(f, assign->value, target,
             target->declared_type, value);
         // S7.7.4: the runtime report names the binding, in MIR's spelling
@@ -6427,12 +6406,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (!assign->interp_boundary_proven)
             value = interp_coerce_declared_binding(f, value, target->declared_type,
                 &boundary, target->interp_boundary);
-        if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
-                !lambda_type_accepts_error(target->declared_type)) {
-            // A fresh checked-assignment failure returns before publishing the
-            // rejected value, matching MIR's emit_return_if_item_error edge.
-            return interp_skip_binding(f, target, value, node, 1);
-        }
+        // S7.7.4v2: publish the new outcome even when validation failed.
         interp_write_binding(f, target, value);
         AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
         // A direct assignment body is the function result in MIR. Other
@@ -7233,21 +7207,17 @@ typedef struct InterpBorrowedCall {
 class InterpBorrowedScratch {
 public:
     Item* values;
-    TypeId* scalar_types;
     uint64_t* scalar_payloads;
 
     explicit InterpBorrowedScratch(bool needed)
-            : values(NULL), scalar_types(NULL), scalar_payloads(NULL) {
+            : values(NULL), scalar_payloads(NULL) {
         if (!needed) return;
-        // one block for all three arrays: a `var` call paid three
-        // allocations per activation (8-byte arrays first keep alignment)
+        // one block holds each Item and its activation-independent scalar home.
         size_t words = LAMBDA_MAX_FUNCTION_ARGS * (sizeof(Item) + sizeof(uint64_t));
-        uint8_t* block = (uint8_t*)mem_calloc(1,
-            words + LAMBDA_MAX_FUNCTION_ARGS * sizeof(TypeId), MEM_CAT_EVAL);
+        uint8_t* block = (uint8_t*)mem_calloc(1, words, MEM_CAT_EVAL);
         if (!block) return;
         values = (Item*)(void*)block;
         scalar_payloads = (uint64_t*)(void*)(block + LAMBDA_MAX_FUNCTION_ARGS * sizeof(Item));
-        scalar_types = (TypeId*)(void*)(block + words);
     }
 
     ~InterpBorrowedScratch() {
@@ -7255,7 +7225,7 @@ public:
     }
 
     bool valid(bool needed) const {
-        return !needed || (values && scalar_types && scalar_payloads);
+        return !needed || (values && scalar_payloads);
     }
 
     InterpBorrowedScratch(const InterpBorrowedScratch&) = delete;
@@ -7315,7 +7285,6 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
 
     st->depth--;
     Item result = ItemNull;
-    TypeId escaped_scalar_type = LMD_TYPE_NULL;
     uint64_t escaped_scalar_payload = 0;
     InterpBorrowedScratch borrowed_scratch(borrowed != NULL);
     if (!borrowed_scratch.valid(borrowed != NULL)) {
@@ -7508,7 +7477,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             result = interp_signal_payload(frame);
         }
         if (signature && signature->has_explicit_return_contract &&
-                signature->return_contract && !item_is_error(result)) {
+                signature->return_contract) {
             // The MIR return firewall checks a dynamic body at every declared
             // return site. T0 must perform the same check before the callee
             // frame closes, otherwise `fn f() int { any_value() }` leaks its
@@ -7526,41 +7495,16 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             for (int index = 0; index < (int)params; index++) {
                 if (!borrowed->entries[index] && !borrowed->homes[index]) continue;
                 Item value = (Item){.item = frame->slots[index]};
-                TypeId type = get_type_id(value);
-                borrowed_scratch.scalar_types[index] = type;
-                if (type == LMD_TYPE_INT64) {
-                    borrowed_scratch.scalar_payloads[index] = (uint64_t)value.get_int64();
-                    borrowed_scratch.values[index] = ItemNull;
-                } else if (type == LMD_TYPE_UINT64) {
-                    borrowed_scratch.scalar_payloads[index] = value.get_uint64();
-                    borrowed_scratch.values[index] = ItemNull;
-                } else {
-                    borrowed_scratch.values[index] = scalar_storage_read(value, false);
-                }
+                borrowed_scratch.values[index] = lambda_item_adopt_scalar_home(value,
+                    &borrowed_scratch.scalar_payloads[index]);
             }
         }
-        // A u64/i64 Item points into the callee's number extent. Capturing
-        // its payload before that extent closes, then boxing after the guard,
-        // preserves both lifetime and its observable numeric type; the generic
-        // scalar reader intentionally narrows small u64 values for property
-        // reads, which is wrong at a function return boundary.
-        escaped_scalar_type = get_type_id(result);
-        if (escaped_scalar_type == LMD_TYPE_INT64) {
-            escaped_scalar_payload = (uint64_t)result.get_int64();
-            result = ItemNull;
-        } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
-            escaped_scalar_payload = result.get_uint64();
-            result = ItemNull;
-        } else {
-            escaped_scalar_type = LMD_TYPE_NULL;
-            result = scalar_storage_read(result, false);
-        }
+        // D5.1.3/D5.2.3: copying into the dying extent leaves tiny floats
+        // dangling. Capture every scalar payload before the frame closes,
+        // then re-home it in the caller using the shared ownership helpers.
+        result = lambda_item_adopt_scalar_home(result, &escaped_scalar_payload);
     }
-    if (escaped_scalar_type == LMD_TYPE_INT64) {
-        result = box_int64_value((int64_t)escaped_scalar_payload);
-    } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
-        result = box_uint64_value(escaped_scalar_payload);
-    }
+    result = scalar_storage_read(result, false);
     if (borrowed) {
         for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
             NameEntry* entry = borrowed->entries[index];
@@ -7569,11 +7513,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // a transported home (satellite caller) has no caller frame; the
             // legacy entry channel needs one
             if (!home && !borrowed->caller) continue;
-            Item value = borrowed_scratch.scalar_types[index] == LMD_TYPE_INT64
-                ? box_int64_value((int64_t)borrowed_scratch.scalar_payloads[index])
-                : borrowed_scratch.scalar_types[index] == LMD_TYPE_UINT64
-                    ? box_uint64_value(borrowed_scratch.scalar_payloads[index])
-                    : borrowed_scratch.values[index];
+            Item value = scalar_storage_read(borrowed_scratch.values[index], false);
             // The callee frame owns its param slot, but a `var` argument is
             // the caller's mutable root. Publish after the callee extent
             // closes so a wide scalar cannot retain a dead number-stack home.
@@ -8862,6 +8802,20 @@ static Item interp_eval_view_activation(Context* host, Script* module,
         }
     }
     if (setup_ok) result.set(eval_expr(frame, body));
+    // state setup can explicitly return too; its outcome crosses the same
+    // view boundary before the activation completes (S12.1.3v2/S7.6.3v3).
+    if ((setup_ok || frame->signal == EvalSignal::RETURNED) && !handler && view->signature) {
+        if (frame->signal == EvalSignal::RETURNED) {
+            result.set(interp_signal_payload(frame));
+            frame->signal = EvalSignal::NORMAL;
+        }
+        if (!interp_frame_pending(frame)) {
+            static const LambdaBoundary return_label = {"view return", NULL, NULL, NULL, 0};
+            result.set(interp_coerce_declared_binding(frame, result.get(),
+                view->signature->return_contract, &return_label,
+                activation_plan->return_boundary));
+        }
+    }
     if (setup_ok && !interp_frame_pending(frame) && handler && view->is_edit) {
         edit_commit(NULL);
     }

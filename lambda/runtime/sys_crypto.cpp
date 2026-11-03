@@ -7,6 +7,7 @@
 // unguessable (a PKCE verifier or an OAuth state may rest on it).
 
 #include "io_file_search.hpp"
+#include "sys_crypto.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uuid.h"
 #include "../../lib/digest.h"
@@ -89,6 +90,11 @@ extern "C" Item fn_hash(Item value, Item algorithm) {
     }
     Binary* result = heap_binary_from_bytes((const char*)digest, (int64_t)mbedtls_md_get_size(info));
     return result ? (Item){.item = x2it(result)} : ItemError;
+}
+
+// use the shared entropy provider so restricted builds fail closed too
+bool crypto_random(unsigned char* out, size_t n) {
+    return crypto_random_bytes(out, n);
 }
 
 // uuid(): a random (version 4) UUID; a procedure, since each call differs

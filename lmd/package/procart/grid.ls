@@ -37,7 +37,7 @@ fn parse_rule(rule) array^ {
     let parts = if (rule is string) split(rule, "/") else [];
     if (len(parts) != 2 or not starts_with(parts[0], "B") or not starts_with(parts[1], "S"))
         raise error("procart.grid: a rule is written \"B<digits>/S<digits>\", such as \"B3/S23\"")
-    else [for (p in parts) [for (i in 1 to (len(p) - 1)) int(slice(p, i, i + 1))]]
+    else [for (p in parts) [for (i in ((1 to (len(p) - 1)) ^ { [] })) int(slice(p, i, i + 1))]]
 }
 
 fn live_around(flat, c: int, w: int, h: int, edge: int) int {
@@ -58,7 +58,7 @@ pub fn evolve(tiles, options = {}) array^ {
     let h = len(tiles)
     let w = if (h == 0) 0 else len(tiles[0]);
     if (not (steps is int) or steps < 0 or steps > 1000) raise error("procart.grid.evolve: steps must be an int in 0..1000")
-    else rows(reduce([cells_of(tiles), *[for (i in 1 to steps) i]], (flat, i) => generation(flat, rule, w, h, edge)), w, h)
+    else rows(reduce([cells_of(tiles), *[for (i in 1 to steps) i]], (flat, i) any^ => generation(flat, rule, w, h, edge)), w, h)
 }
 
 // a cave: random fill, then the smoothing rule (Lambda_Pkg_Proc_Art.md §5).
@@ -66,11 +66,11 @@ pub fn automaton(k: u64, options) array^ => evolve(random_fill(k, options)^, opt
 
 // --- regions: min-caller propagation with pointer jumping, O(log diameter) rounds in practice ---
 fn label_round(lab, passable, w: int, h: int) array {
-    let lowest = [for (c, l in lab) if (l < 0) -1 else min([l, *[for (n in around(c, w, h) where passable[n]) lab[n]]])];
+    let lowest = [for (c, l in lab) if (l < 0) -1 else min([l, *[for (n in ((around(c, w, h)) ^ { [] }) where passable[n]) lab[n]]])];
     [for (l in lowest) if (l < 0) -1 else lowest[l]]
 }
 
-fn settle(lab, passable, w: int, h: int) array => (let next = label_round(lab, passable, w, h), if (next == lab) lab else settle(next, passable, w, h))
+fn settle(lab, passable, w: int, h: int) array^ => (let next = label_round(lab, passable, w, h), if (next == lab) lab else settle(next, passable, w, h))
 
 // labels[y][x] is the region id of a floor cell (numbered in row-major order of first appearance), -1 elsewhere.
 pub fn regions(tiles, floor_tile = 0) map {
@@ -85,7 +85,7 @@ pub fn regions(tiles, floor_tile = 0) map {
 }
 
 // the largest region (the first of equal ones) stays floor; every other floor cell becomes wall.
-pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array {
+pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array^ {
     let r = regions(tiles, floor_tile);
     if (len(r.sizes) == 0) tiles
     else (let biggest = [for (i, s in r.sizes where s == max(r.sizes)) i][0],
@@ -94,10 +94,10 @@ pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array {
 
 // --- distance maps: breadth-first layers over floor cells ---
 fn layer(dist, passable, w: int, h: int, d: int) array =>
-    [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in around(c, w, h)) dist[n] == d])) d + 1 else -1]
+    [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in ((around(c, w, h)) ^ { [] })) dist[n] == d])) d + 1 else -1]
 
 // steps from the nearest source [x, y] through 4-connected floor; -1 for walls and unreachable cells.
-pub fn distances(tiles, sources, floor_tile = 0) array {
+pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let h = len(tiles)
     let w = if (h == 0) 0 else len(tiles[0])
     let passable = [for (v in cells_of(tiles)) v == floor_tile]
@@ -132,7 +132,7 @@ pub fn walk(k: u64, options) array^ {
         let visits = [for (i in 0 to n) [(fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1, i]]
         let first = sort([for (v in visits group by v[0] as cell into g) [min(g |> ~[1]), cell]], (e) => e)
         let target = int(ceil(density * float(iw * ih)))
-        let carved = map([for (j, e in first where j < target) for (x in [string(e[1]), true]) x]);
+        let carved = map([for (j, e in first where ((j < target) ^ { false })) for (x in [string(e[1]), true]) x]);
         rows([for (c in 0 to (d[0] * d[1] - 1)) if (carved[string(c)] == true) 0 else 1], d[0], d[1])
     }
 }
@@ -154,7 +154,7 @@ fn divide(r, k: u64, depth: int, min_size: int) {
     }
 }
 
-fn leaves(node) array => if (len(node.children) == 0) [node.rect] else [for (c in node.children) for (r in leaves(c)) r]
+fn leaves(node) array^ => if (len(node.children) == 0) [node.rect] else [for (c in node.children) for (r in ((leaves(c)) ^ { [] })) r]
 
 fn bsp_tree(k: u64, options, caller) map^ {
     let d = dims(options, caller)^
@@ -180,7 +180,7 @@ fn room_in(leaf, k: u64, margin: int) array {
 fn centre(room) array => [room[0] + room[2] div 2, room[1] + room[3] div 2]
 
 // the rooms of a subtree in leaf order, and the corridors joining its halves.
-fn furnish(node, k: u64, margin: int) map {
+fn furnish(node, k: u64, margin: int) map^ {
     if (len(node.children) == 0) {rooms: [room_in(node.rect, k, margin)], corridors: []}
     else {
         let a = furnish(node.children[0], rng.at(k, 0), margin)
@@ -205,8 +205,8 @@ pub fn dungeon(k: u64, options) map^ {
     let h = tree.rect[3];
     {rooms: built.rooms, corridors: built.corridors,
      tiles: [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1))
-        if (any([for (r in built.rooms) x >= r[0] and x < r[0] + r[2] and y >= r[1] and y < r[1] + r[3]]) or
-            any([for (c in built.corridors) on_segment(x, y, c[0], c[1]) or on_segment(x, y, c[1], c[2])])) 0 else 1]]}
+        if (any([for (r in ((((((built.rooms) ^ { [] })))))) x >= r[0] and x < r[0] + r[2] and y >= r[1] and y < r[1] + r[3]]) or
+            any([for (c in ((((((built.corridors) ^ { [] })))))) on_segment(x, y, c[0], c[1]) or on_segment(x, y, c[1], c[2])])) 0 else 1]]}
 }
 
 // --- mazes: spanning trees over a width x height cell grid ---
@@ -220,8 +220,8 @@ fn backtracker(k: u64, w: int, h: int) array {
     let n = w * h
     let root = rng.below(rng.derive(k, "root"), n)
     let first = [for (c in 0 to (n - 1)) if (c == root) -1 else -2]
-    let walked = reduce([[first, root, false], *[for (i in 1 to 2 * n) i]], (st, i: int) => if (st[2]) st
-        else (let parent = st[0], let cur = st[1], let passable = [for (m in around(cur, w, h) where parent[m] == -2) m],
+    let walked = reduce([[first, root, false], *[for (i in 1 to 2 * n) i]], (st, i: int) any^ => if (st[2]) st
+        else (let parent = st[0], let cur = st[1], let passable = [for (m in ((around(cur, w, h)) ^ { [] }) where parent[m] == -2) m],
             if (len(passable) > 0) (let next = passable[rng.below(rng.at(k, i), len(passable))], [set_at(parent, next, cur), next, false])
             else if (cur == root) [parent, cur, true] else [parent, parent[cur], false]));
     [for (c, p in walked[0] where p >= 0) [p, c]]
@@ -244,11 +244,11 @@ fn prim(k: u64, w: int, h: int) array {
     let root = rng.below(rng.derive(k, "root"), n)
     let seeds = around(root, w, h)
     let first = [[for (c in 0 to (n - 1)) if (c == root) 2 else if (c in seeds) 1 else 0], seeds, []]
-    let done = reduce([first, *[for (i in 1 to (n - 1)) i]], (st, i: int) => if (len(st[1]) == 0) st
+    let done = reduce([first, *[for (i in 1 to (n - 1)) i]], (st, i: int) any^ => if (len(st[1]) == 0) st
         else (let status = st[0], let f = st[1][rng.below(rng.at(k, i), len(st[1]))],
-            let inside = [for (m in around(f, w, h) where status[m] == 2) m],
+            let inside = [for (m in ((around(f, w, h)) ^ { [] }) where status[m] == 2) m],
             let joined = inside[rng.below(rng.at(rng.at(k, i), 1), len(inside))],
-            let added = [for (m in around(f, w, h) where status[m] == 0) m],
+            let added = [for (m in ((around(f, w, h)) ^ { [] }) where status[m] == 0) m],
             [[for (c, s in status) if (c == f) 2 else if (c in added) 1 else s],
              [*[for (m in st[1] where m != f) m], *added], [*st[2], [joined, f]]]));
     done[2]
@@ -264,7 +264,7 @@ fn walk_from(k: u64, w: int, h: int, s: int, length: int) array {
 }
 
 // walk in doubling chunks until the tree is hit; returns the positions up to the hit.
-fn walk_to_tree(k: u64, w: int, h: int, tree, s: int, chunk: int, from) array {
+fn walk_to_tree(k: u64, w: int, h: int, tree, s: int, chunk: int, from) array^ {
     let path = walk_from(rng.at(k, chunk), w, h, s, chunk)
     let hits = [for (i, c in path where tree[c]) i];
     if (len(hits) > 0) [*from, *slice(path, 0, hits[0] + 1)]
@@ -289,7 +289,7 @@ fn wilson(k: u64, w: int, h: int) array {
         else (let path = erase_loops(walk_to_tree(rng.at(k, i), w, h, st[0], passable[0], 16, [])),
             let on_path = map([for (c in path) for (x in [string(c), true]) x]),
             [[for (c, t in st[0]) t or on_path[string(c)] == true],
-             [*st[1], *[for (j in 1 to (len(path) - 1)) [path[j - 1], path[j]]]]])));
+             [*st[1], *[for (j in ((1 to (len(path) - 1)) ^ { [] })) [path[j - 1], path[j]]]]])));
     done[1]
 }
 

@@ -1,0 +1,64 @@
+"city"
+{
+  blocks: 36,
+  buildings: 113,
+  lamps: 288,
+  trees: 172,
+  signals: 160,
+  parked: 102,
+  props: 59,
+  obstacles: 857,
+  tallest: 111.85,
+  styles: [18, 20, 30, 45],
+  ground: [0, 0.15, 1],
+  places: ["Downtown", "Stunt Lot", "Harbour Promenade", "4th Avenue", "4th Ave & Union St"],
+  near: [4, 3]
+}
+"vehicle"
+{
+  launch: [29.6, 3, "3"],
+  braked: [4.98, 24.76],
+  turn: [0.54, 21.9],
+  crash: [0, true, true],
+  jump: [2.32, true, true]
+}
+"traffic"
+{
+  cars: 16,
+  overlaps: 0,
+  off_road: 0,
+  trips: true,
+  lights: ["green", "amber", "red", "red", "green"],
+  nearest: [3, 2, 1, 19, -3, -100]
+}
+"pedestrians"
+{
+  crowd: 24,
+  hop: 3.16,
+  back: 0,
+  on_sidewalks: 24
+}
+"courier"
+{
+  pickup: ["pickup", true],
+  carrying: ["deliver", true],
+  paid: ["pickup", true, 1, 1],
+  late: ["idle", true, 0],
+  stops: 140
+}
+"camera"
+{
+  identity: [0, 0, 0, 1],
+  turned: [0, -0.71, 0, 0.71],
+  behind: true,
+  modes: ["far", "hood", "top", "chase"]
+}
+"scene"
+{
+  valid: true,
+  bodies: 108,
+  clips: ["signals", "crane", "harbour-ripples", "beacons"],
+  commands: 48,
+  looks: [23, 23, 23],
+  next_look: ["dusk", "night", "day"]
+}

@@ -23,7 +23,7 @@ fn mark_options(value) {
         *:(if (kind=="step") {interpolate:"step"} else {})}
 }
 
-fn clock(value, row, fallback, scale) => dates.normalize(parse.channel_value(parse.channel_definition(value,row),row,fallback),scale)
+fn clock(value, row, fallback, scale) any^ => dates.normalize(parse.channel_value(parse.channel_definition(value,row),row,fallback),scale)
 
 pub fn prepare(spec, plan, item, index = 0) {
     let raw=if (item.data is array) item.data else c.items(item.data.values);
@@ -40,9 +40,9 @@ pub fn prepare(spec, plan, item, index = 0) {
     let prepared=renderer.prepare_mark_data({data:records,encoding:enc,mark:options});
     let named=(spec.scales |: ~.id==c.text(item.value_scale))[0];
     let measure_options=if (named!=null) {*:named,type:named.kind} else c.attrs(encoding.y.scale);
-    let values=[for (row in prepared.data) for (channel in [encoding.y,encoding.y2] where channel!=null)
+    let values=[for (row in ((prepared.data) ^ { [] })) for (channel in [encoding.y,encoding.y2] where channel!=null)
         parse.channel_value(parse.channel_definition(channel,row),row)];
-    let bounds=if (prepared.stack_mode!=null) [for (row in prepared.data) for (value in [row._y0,row._y1]) value] else values;
+    let bounds=if (prepared.stack_mode!=null) [for (row in ((prepared.data) ^ { [] })) for (value in [row._y0,row._y1]) value] else values;
     let mapping=scales.configured_scale(bounds,plan.height,0.0,"linear",measure_options,contains(["bar","area"],options.kind));
     let skin=theme.tokens(spec);
     let styling=cfg.resolve_theme({font:skin.font_family,background:skin.background,*:c.attrs(item.config)});
@@ -52,7 +52,7 @@ pub fn prepare(spec, plan, item, index = 0) {
         _behaviors:[],_parameters:[],_parameter_values:{},_view_path:"timeline-series-" ++ string(index)};
     let breadth=c.option(spec.coordinate,"lane_width",min(plan.box.width,plan.box.height)*0.65);
     let projection=spatial.configure({type:"custom",precision:plan.path.precision,
-        project:(point)=>coordinate.project(plan.path,point[0],(point[1]-0.5)*breadth).point,
+        project:(point)any^ =>coordinate.project(plan.path,point[0],(point[1]-0.5)*breadth).point,
         invert:(point)=>(let hit=coordinate.invert(plan.path,point),let base=coordinate.project(plan.path,hit.fraction),
             [hit.fraction,0.5+((point[0]-base.point[0])*base.normal[0]+(point[1]-base.point[1])*base.normal[1])/breadth])},plan.width,plan.height);
     let legends=if (item.legend==false) [] else legend.plans(enc,context,styling);
@@ -70,7 +70,7 @@ pub fn prepare_all(spec, plan) {
     let failure=util.first_error(prepared);
     if (failure is error) failure else {
         let shared=[for (mapping in spec.scales where mapping.id!=spec.time_scale,
-            let values=[for (model in prepared where c.text(model.spec.value_scale)==mapping.id) for (value in model.values) value])
+            let values=[for (model in prepared where ((c.text(model.spec.value_scale)==mapping.id) ^ { false })) for (value in model.values) value])
             if (mapping.domain!=null or len(values)==0) mapping else {*:mapping,domain:[min(values),max(values)]}];
         let combined={*:spec,scales:[spec.scale,*shared]};
         let models=[for (index,model in prepared) if (model.spec.value_scale==null) model else prepare(combined,plan,model.spec,index)];
@@ -82,7 +82,7 @@ pub fn prepare_all(spec, plan) {
 pub fn axes(spec, models, plan) {
     let images=[for (guide in spec.axes,
         let model=(models |: c.text(~.spec.value_scale)==c.text(guide.scale))[0]
-        where guide.scale!=null and c.text(guide.scale)!=spec.time_scale and guide.position!="none" and model!=null)
+        where ((guide.scale!=null and c.text(guide.scale)!=spec.time_scale and guide.position!="none" and model!=null) ^ { false }))
         for (side in (if (guide.position=="both") ["left","right"] else [if (guide.position=="start") "left" else "right"]),
             let prepared=axis.prepare(model.mapping,{*:c.attrs(guide),orient:side},guide.title),
             let image=axis.y_axis(model.mapping,plan.width,plan.height,prepared,guide.title))
@@ -92,7 +92,7 @@ pub fn axes(spec, models, plan) {
     if (failure is error) failure else images
 }
 
-pub fn render(model) {
+pub fn render(model) any^ {
     let image=renderer.render(model.mark.kind,model.data,model.context,{*:model.mark,clip:false});
     let projected=if (image is error) image else spatial.warp(image,model.projection);
     let clipped=if (projected is error) projected else spatial.clip(projected,model.projection,"timeline-series-" ++ util.binding_key([model.id]));

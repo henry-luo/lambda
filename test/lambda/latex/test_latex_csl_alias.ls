@@ -6,12 +6,12 @@ import util: lambda.doc.latex.util
 let path = "test/lambda/latex/fixtures/citeproc/document.tex"
 let source = input(path, "text")^
 
-fn render(declaration, options = null) =>
+fn render(declaration, options = null) any^ =>
     latex.render_result(latex.parse_source(
         replace(source, "\\usepackage{biblatex}", declaration), path), options)
 
 // the visible text of the first parenthetical citation sentence
-fn first_citation(result) {
+fn first_citation(result) any^ {
     let text = util.text_of(result.body)
     let at = index_of(text, "Parenthetical")
     if (at == null) null else trim(slice(text, at, index_of(text, "Textual")))

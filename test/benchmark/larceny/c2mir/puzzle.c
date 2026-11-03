@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/puzzle.ls. */
 extern int printf(const char *, ...);
 
@@ -18,10 +19,13 @@ static int solve(int row, int columns[10], int diagonals_forward[20], int diagon
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int columns[10] = {0};
     int diagonals_forward[20] = {0};
     int diagonals_back[20] = {0};
     int result = solve(0, columns, diagonals_forward, diagonals_back);
+    BENCH_KERNEL_END();
     printf(result == 724 ? "puzzle: PASS\n" : "puzzle: FAIL result=%d\n", result);
+    BENCH_KERNEL_REPORT();
     return result != 724;
 }

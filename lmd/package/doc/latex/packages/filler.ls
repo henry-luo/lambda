@@ -15,18 +15,18 @@ let DEFAULT_COUNT = {lipsum: 7, 'lipsum*': 7, blindtext: 1, Blindtext: 5}
 pub let COMMANDS = {lipsum: ["lipsum", "lipsum*"], blindtext: ["blindtext", "Blindtext"]}
 
 // the paragraph numbers of \lipsum[a-b] or [n]; the default range otherwise
-fn numbers(command, option) {
+fn numbers(command, option) any^ {
     let parts = if (option == null) [] else split(trim(option), "-")
     let first = if (len(parts) > 0) (int(trim(parts[0])) ^ { null }) else null
     let final = if (len(parts) > 1) (int(trim(parts[1])) ^ { null }) else first
     if (first == null or final == null or final < first) [for (i in 1 to DEFAULT_COUNT[command]) i]
-    else [for (i in first to final) i]
+    else [for (i in ((first to final) ^ { [] })) i]
 }
 
 // the filler paragraphs a command prints; lipsum's starred form runs them together
 pub fn render(el) {
     let command = string(name(el))
-    let texts = [for (i in numbers(command, util.optional_raw(el))) PARAGRAPHS[(i - 1) % len(PARAGRAPHS)]]
+    let texts = [for (i in ((numbers(command, util.optional_raw(el))) ^ { [] })) PARAGRAPHS[(i - 1) % len(PARAGRAPHS)]]
     if (command == "lipsum*") <span class: "latex-filler", util.str_join(texts, " ")>
     else <div class: "latex-filler", for (text in texts) <p text>>
 }

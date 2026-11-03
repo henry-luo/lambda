@@ -87,18 +87,18 @@ fn with_mark_at(marks, name, value, i, n, found, acc) {
 pub fn with_mark(marks, name, value) => with_mark_at(marks, name, value, 0, len(marks), false, [])
 
 // order-independent set equality over {name, value} entries
-fn marks_subset_at(a, b, i, n) {
+fn marks_subset_at(a, b, i, n) any^ {
   if (i >= n) { true }
   else if (mark_value(b, a[i].name) == a[i].value) { marks_subset_at(a, b, i + 1, n) }
   else { false }
 }
-pub fn marks_equal(a, b) => len(a) == len(b) and marks_subset_at(a, b, 0, len(a))
+pub fn marks_equal(a, b) any^ => len(a) == len(b) and marks_subset_at(a, b, 0, len(a))
 
 // ---------------------------------------------------------------------------
 // step_apply
 // ---------------------------------------------------------------------------
 
-fn apply_replace_text(step, doc) {
+fn apply_replace_text(step, doc) any^ {
   let leaf = node_at(doc, step.path)
   let pre  = slice(leaf.text, 0, step.from)
   let post = slice(leaf.text, step.to, len(leaf.text))
@@ -107,23 +107,23 @@ fn apply_replace_text(step, doc) {
   replace_node_at(doc, step.path, new_leaf)
 }
 
-fn apply_replace(step, doc) =>
+fn apply_replace(step, doc) any^ =>
   splice_children_at(doc, step.parent, step.from, step.to - step.from, step.slice)
 
-fn apply_replace_around(step, doc) {
+fn apply_replace_around(step, doc) any^ {
   let parent = node_at(doc, step.parent)
   let gap = list_take(list_drop(parent.content, step.gap_from), step.gap_to - step.gap_from)
   let slice2 = list_splice(step.slice, step.insert, 0, gap)
   splice_children_at(doc, step.parent, step.from, step.to - step.from, slice2)
 }
 
-fn apply_add_mark(step, doc) {
+fn apply_add_mark(step, doc) any^ {
   let leaf = node_at(doc, step.path)
   let new_leaf = {kind: 'text', text: leaf.text, marks: with_mark(leaf.marks, step.name, step.value)}
   replace_node_at(doc, step.path, new_leaf)
 }
 
-fn apply_remove_mark(step, doc) {
+fn apply_remove_mark(step, doc) any^ {
   let leaf = node_at(doc, step.path)
   let new_leaf = {kind: 'text', text: leaf.text, marks: without_mark(leaf.marks, step.name)}
   replace_node_at(doc, step.path, new_leaf)
@@ -151,20 +151,20 @@ fn find_attr_at(attrs, name, i, n) {
 }
 pub fn attrs_get(attrs, name) => find_attr_at(attrs, name, 0, len(attrs))
 
-fn apply_set_attr(step, doc) {
+fn apply_set_attr(step, doc) any^ {
   let n = node_at(doc, step.path)
   let new_attrs = attrs_set(n.attrs, step.name, step.value)
   let new_node = {kind: n.kind, tag: n.tag, attrs: new_attrs, content: n.content}
   replace_node_at(doc, step.path, new_node)
 }
 
-fn apply_set_node_type(step, doc) {
+fn apply_set_node_type(step, doc) any^ {
   let n = node_at(doc, step.path)
   let new_node = {kind: n.kind, tag: step.tag, attrs: n.attrs, content: n.content}
   replace_node_at(doc, step.path, new_node)
 }
 
-pub fn step_apply(step, doc) {
+pub fn step_apply(step, doc) any^ {
   if (step.kind == 'replace_text')      { apply_replace_text(step, doc) }
   else if (step.kind == 'replace')      { apply_replace(step, doc) }
   else if (step.kind == 'replace_around'){ apply_replace_around(step, doc) }
@@ -180,38 +180,38 @@ pub fn step_apply(step, doc) {
 // `step` was applied.
 // ---------------------------------------------------------------------------
 
-fn invert_replace_text(step, doc_before) {
+fn invert_replace_text(step, doc_before) any^ {
   let leaf = node_at(doc_before, step.path)
   let old_text = slice(leaf.text, step.from, step.to)
   let new_to = step.from + len(step.text)
   step_replace_text(step.path, step.from, new_to, old_text)
 }
 
-fn invert_replace(step, doc_before) {
+fn invert_replace(step, doc_before) any^ {
   let parent = node_at(doc_before, step.parent)
   let old_slice = list_take(list_drop(parent.content, step.from), step.to - step.from)
   let new_to = step.from + len(step.slice)
   step_replace(step.parent, step.from, new_to, old_slice)
 }
 
-fn invert_replace_around(step, doc_before) {
+fn invert_replace_around(step, doc_before) any^ {
   let parent = node_at(doc_before, step.parent)
   let old_slice = list_take(list_drop(parent.content, step.from), step.to - step.from)
   let new_to = step.from + len(step.slice) + (step.gap_to - step.gap_from)
   step_replace(step.parent, step.from, new_to, old_slice)
 }
 
-fn invert_set_attr(step, doc_before) {
+fn invert_set_attr(step, doc_before) any^ {
   let n = node_at(doc_before, step.path)
   step_set_attr(step.path, step.name, attrs_get(n.attrs, step.name))
 }
 
-fn invert_set_node_type(step, doc_before) {
+fn invert_set_node_type(step, doc_before) any^ {
   let n = node_at(doc_before, step.path)
   step_set_node_type(step.path, n.tag)
 }
 
-pub fn step_invert(step, doc_before) {
+pub fn step_invert(step, doc_before) any^ {
   if (step.kind == 'replace_text')      { invert_replace_text(step, doc_before) }
   else if (step.kind == 'replace')      { invert_replace(step, doc_before) }
   else if (step.kind == 'replace_around'){ invert_replace_around(step, doc_before) }
@@ -232,7 +232,7 @@ pub fn step_invert(step, doc_before) {
 // the boundary are pushed forward (post-bias, like ProseMirror's default).
 // ---------------------------------------------------------------------------
 
-fn map_replace_text_bias(step, p, bias) {
+fn map_replace_text_bias(step, p, bias) any^ {
   if (not path_equal(p.path, step.path)) { p }
   else if (p.offset < step.from) { p }
   else if (p.offset > step.to) {
@@ -242,15 +242,15 @@ fn map_replace_text_bias(step, p, bias) {
   }
 }
 
-fn map_replace_text(step, p) => map_replace_text_bias(step, p, 1)
+fn map_replace_text(step, p) any^ => map_replace_text_bias(step, p, 1)
 
 // True iff p sits strictly inside the parent affected by `step` (one level deep).
-fn under_replace_parent(p, step) {
+fn under_replace_parent(p, step) any^ {
   if (len(p.path) <= len(step.parent)) { false }
   else { path_is_prefix(step.parent, p.path) }
 }
 
-fn map_replace_bias(step, p, bias) {
+fn map_replace_bias(step, p, bias) any^ {
   let pp = step.parent
   let depth = len(pp)
   let same_parent_pos = (len(p.path) == depth and path_equal(p.path, pp))
@@ -280,11 +280,11 @@ fn map_replace_bias(step, p, bias) {
   }
 }
 
-fn map_replace(step, p) => map_replace_bias(step, p, 1)
+fn map_replace(step, p) any^ => map_replace_bias(step, p, 1)
 
-fn replace_around_new_size(step) => len(step.slice) + (step.gap_to - step.gap_from)
+fn replace_around_new_size(step) any^ => len(step.slice) + (step.gap_to - step.gap_from)
 
-fn map_replace_around_bias(step, p, bias) {
+fn map_replace_around_bias(step, p, bias) any^ {
   let pp = step.parent
   let depth = len(pp)
   let same_parent_pos = (len(p.path) == depth and path_equal(p.path, pp))
@@ -318,16 +318,16 @@ fn map_replace_around_bias(step, p, bias) {
   }
 }
 
-fn map_replace_around(step, p) => map_replace_around_bias(step, p, 1)
+fn map_replace_around(step, p) any^ => map_replace_around_bias(step, p, 1)
 
-pub fn step_map_bias(step, p, bias) {
+pub fn step_map_bias(step, p, bias) any^ {
   if (step.kind == 'replace_text') { map_replace_text_bias(step, p, bias) }
   else if (step.kind == 'replace') { map_replace_bias(step, p, bias) }
   else if (step.kind == 'replace_around') { map_replace_around_bias(step, p, bias) }
   else { p }
 }
 
-pub fn step_map(step, p) {
+pub fn step_map(step, p) any^ {
   step_map_bias(step, p, 1)
 }
 

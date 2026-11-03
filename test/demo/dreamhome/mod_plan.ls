@@ -9,13 +9,13 @@ import A: ~~.greetings.mod_art
 pub let ACCENT = "#2f7de1"
 let WALL_INK = "#3b4048"
 let PAPER = "#f7f6f2"
-fn n(x) => A.n(x)
-fn pt(x, y) => n(x) ++ "," ++ n(y)
+fn n(x) any^ => A.n(x)
+fn pt(x, y) any^ => n(x) ++ "," ++ n(y)
 fn pts(ps) => join([for (p in ps) pt(p[0], p[1])], " ")
-fn place(x, y, rot) => "translate(" ++ n(x) ++ " " ++ n(y) ++ ") rotate(" ++ n(rot) ++ ")"
+fn place(x, y, rot) any^ => "translate(" ++ n(x) ++ " " ++ n(y) ++ ") rotate(" ++ n(rot) ++ ")"
 
 // a role colour of a part, for its 3D material and its plan symbol alike
-pub fn paint(c, color) => if (c == "main") color else if (c == "tint") A.tint(color, .32) else if (c == "shade") A.shade(color, .22) else c
+pub fn paint(c, color) any^ => if (c == "main") color else if (c == "tint") A.tint(color, .32) else if (c == "shade") A.shade(color, .22) else c
 
 // the plan window: a centre and pixels per centimetre, seen through a pane
 pub fn frame(v, pw, ph) => {x0: v.cx - pw / 2.0 / v.zoom, y0: v.cy - ph / 2.0 / v.zoom, w: pw / v.zoom, h: ph / v.zoom}
@@ -27,15 +27,15 @@ pub fn wall_quad(w, s0, s1, thick) => (let u = M.wall_dir(w), let nx = 0.0 - u.y
 
 // ---- grid ------------------------------------------------------------------------
 
-fn grid(f, z) {
+fn grid(f, z) any^ {
     let step = if (z * 50.0 >= 14.0) 50.0 else 100.0
     let gx = floor(f.x0 / step) * step
     let gy = floor(f.y0 / step) * step
     let major = (v) => abs(v / 100.0 - round(v / 100.0)) < .01;
     <g class:"grid", 'pointer-events':"none",
-        for (i in 0 to int(f.w / step) + 1, let x = gx + i * step)
+        for (i in ((0 to int(f.w / step) + 1) ^ { [] }), let x = gx + i * step)
             <line x1:n(x), y1:n(f.y0), x2:n(x), y2:n(f.y0 + f.h), stroke:if (major(x)) "#dcd9d0" else "#e9e6df", 'stroke-width':n(1.0 / z)>
-        for (i in 0 to int(f.h / step) + 1, let y = gy + i * step)
+        for (i in ((0 to int(f.h / step) + 1) ^ { [] }), let y = gy + i * step)
             <line x1:n(f.x0), y1:n(y), x2:n(f.x0 + f.w), y2:n(y), stroke:if (major(y)) "#dcd9d0" else "#e9e6df", 'stroke-width':n(1.0 / z)>>
 }
 
@@ -76,7 +76,7 @@ fn leaf(x0, w, t, side, hinge, ink, z) => (let hx = x0 + (if (hinge > 0) 0.0 els
     [<line x1:n(hx), y1:n(y0), x2:n(hx), y2:n(y1), stroke:ink, 'stroke-width':n(2.0 / z)>,
      <path d:"M" ++ pt(hx, y1) ++ " A" ++ n(w) ++ " " ++ n(w) ++ " 0 0 " ++ (if (side * hinge > 0) "0 " else "1 ") ++ pt(ex, y0),
         fill:"none", stroke:ink, 'stroke-width':n(1.0 / z), 'stroke-dasharray':n(4.0 / z) ++ " " ++ n(3.0 / z)>])
-fn opening_shape(it, sel, z) {
+fn opening_shape(it, sel, z) any^ {
     let kind = C.item_of(it.key).opening
     let ink = if (sel == it.id) ACCENT else "#4b5563"
     let w = it.w
@@ -86,7 +86,7 @@ fn opening_shape(it, sel, z) {
     <g class:"opening", 'data-id':it.id, transform:place(it.x, it.y, it.rot),
         <rect x:n(0.0 - w / 2.0), y:n(0.0 - t / 2.0), width:n(w), height:n(t), fill:if (kind == "window" or kind == "slider") "#e4f1f7" else PAPER,
             stroke:ink, 'stroke-width':n(1.0 / z)>;
-        if (kind == "door") for (e in leaf(0.0 - w / 2.0, w, t, side, hinge, ink, z)) e
+        if (kind == "door") for (e in ((leaf(0.0 - w / 2.0, w, t, side, hinge, ink, z)) ^ { [] })) e
         else if (kind == "double") for (e in [*leaf(0.0 - w / 2.0, w / 2.0, t, side, 1.0, ink, z), *leaf(0.0, w / 2.0, t, side, -1.0, ink, z)]) e
         else if (kind == "slider") for (k in [-1.0, 1.0])
             <rect x:n(if (k < 0) 0.0 - w / 2.0 else -2.0), y:n(k * t / 6.0 - t / 8.0), width:n(w / 2.0 + 2.0), height:n(t / 4.0), fill:"#cfe7f2", stroke:ink, 'stroke-width':n(1.0 / z)>

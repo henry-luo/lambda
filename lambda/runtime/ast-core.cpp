@@ -1,5 +1,6 @@
 #include "ast-core.hpp"
 #include "ast.hpp"
+#include "transpiler.hpp"
 #include "type_contract.hpp"
 #include "../lambda-data.hpp"
 
@@ -50,7 +51,44 @@ extern "C" bool ast_type_is_array_contract(Type* type) {
     return lambda_array_contract_info(type, &info);
 }
 
+// D4.4.4v4: an outcome/occurrence wrapper can retain a mutable member.
+// Unresolved binders stay conservative; scalar-only unions need no mark.
+static bool ast_type_may_be_container_inner(Type* type, int depth) {
+    if (!type || depth > 32) return true;
+    type = unwrap_simple_type_type(type);
+    if (!type) return true;
+    if (ast_type_needs_mutable_clone(type->type_id)) return true;
+    if (type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type)) return false;
+    if (lambda_type_is_union(type)) {
+        TypeBinary* choice = (TypeBinary*)type;
+        return ast_type_may_be_container_inner(choice->left, depth + 1) ||
+            ast_type_may_be_container_inner(choice->right, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_CONSTRAINED) {
+        return ast_type_may_be_container_inner(((TypeConstrained*)type)->base, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* occurrence = (TypeUnary*)type;
+        return occurrence->op != OPERATOR_OPTIONAL ||
+            ast_type_may_be_container_inner(occurrence->operand, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        return ast_type_may_be_container_inner(parameter->contract_type
+            ? parameter->contract_type : parameter->full_type, depth + 1);
+    }
+    return type->kind == TYPE_KIND_BINDER || type->kind == TYPE_KIND_BOUND_REF ||
+        type->kind == TYPE_KIND_BINARY;
+}
+
+extern "C" bool ast_type_may_be_container(Type* type) {
+    return ast_type_may_be_container_inner(type, 0);
+}
+
 static bool ast_nonnull_array_type(Type* type) {
+    // S9.1.2: a join's error outcome is immutable; its array success still
+    // owns a fresh root and must retain snapshot capture on later aliases.
+    type = lambda_type_remove_error(NULL, type);
     return type && !lambda_type_accepts_null(type) &&
         ast_type_is_array_contract(type);
 }
@@ -1621,6 +1659,20 @@ extern "C" bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first
         if (parent >= index->count || (index->nodes[parent] != declared && index->nodes[parent] != plan->last)) return false;
     }
     return true;
+}
+
+extern "C" TypeString* ast_string_literal_type(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_PRIMARY ||
+            ((AstPrimaryNode*)node)->expr || !node->type ||
+            !node->type->is_literal || node->type->type_id != LMD_TYPE_STRING) {
+        return NULL;
+    }
+    TypeString* literal = (TypeString*)node->type;
+    return literal->string ? literal : NULL;
 }
 
 // bounded source-order leaves; preserves the original AST for fallback replay.

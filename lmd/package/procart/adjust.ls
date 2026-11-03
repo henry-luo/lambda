@@ -22,14 +22,14 @@ pub fn color_op(n) map^ {
 }
 pub fn identity() map => {matrix:c.identity(),colors:[]}
 pub fn compose(st,n) map^ => {matrix:t.multiply(st.matrix,matrix(n)^)^,colors:[*st.colors,color_op(n)^]}
-fn color_step(rgba,op) array {
+fn color_step(rgba,op) array^ {
     let base = if (op.base != null) [*slice(op.base,0,3),rgba[3]*op.base[3]] else rgba
     let hsv = colors.hsv(base);
     colors.rgb(hsv.h+op.hue,min(1.0,hsv.s*op.saturation),min(1.0,hsv.v*op.brightness),base[3]*op.opacity)
 }
 pub fn paint(ops,intrinsic="#ffffff") map^ {
     let base = colors.parse(intrinsic,"intrinsic color")^
-    let rgba = reduce([base,*ops],(current,op) => color_step(current,op));
+    let rgba = reduce([base,*ops],(current,op) any^ => color_step(current,op));
     {color:colors.hex(rgba),opacity:rgba[3]}
 }
 pub fn frame_size(matrix) float => sqrt(sum([for (i in [0,1,2,4,5,6,8,9,10]) matrix[i]*matrix[i]]))

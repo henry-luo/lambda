@@ -10,7 +10,7 @@ pn capture(path,repo,comparison,preferred,generation,options) map^ {
     let selected = if (len(matches) > 0) matches[0] else if (len(manifest.files) > 0) 0 else null
     var document = null
     var message = ""
-    if (selected != null) {
+    if ((selected != null)^) {
         { let __error_outcome_1 = git.load_file(opened,manifest,selected,options) ^ { ^ }; if (__error_outcome_1 is error) { message = __error_outcome_1.message } else match __error_outcome_1 { case any { document = ~ } } }
     }
     return {kind:"capture",generation:generation,repo:opened,manifest:manifest,selected:selected,document:document,message:message}
