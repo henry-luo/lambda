@@ -41,7 +41,8 @@ struct DocumentAudio : DomDocumentResourceData {
     double last_tick_ms;          // offline output: frame clock at the previous tick
     double pending_frames;        // offline output: fractional frames not yet rendered
     AudioOwnerHook owners[8];      // the existing per-document Scene3D viewport bound
-    DocumentAudio() : slots(MEM_CAT_RENDER, 0), activated(false), submix(0), last_tick_ms(-1), pending_frames(0), owners{} {}
+    struct { uint64_t id; size_t bytes; } storage[AUDIO_DECODED_SLOTS];
+    DocumentAudio() : slots(MEM_CAT_RENDER, 0), activated(false), submix(0), last_tick_ms(-1), pending_frames(0), owners{}, storage{} {}
 };
 
 static void audio_slot_close(AudioSlot* slot) {
@@ -112,6 +113,7 @@ struct AudioDocumentUsage { size_t count, bytes; };
 static bool document_audio_usage(DocumentAudio* audio, AudioDocumentUsage* usage) {
     AudioMixAccess access(audio->submix); if (!access.valid) return false;
     *usage = {};
+    for (const auto& storage : audio->storage) if (storage.id) { usage->count++; usage->bytes += storage.bytes; }
     for (const AudioSlot& slot : audio->slots) if (slot.audio) {
         auto storage = rdt_audio_storage(slot.audio);
         bool shared = false;
@@ -124,6 +126,20 @@ static bool document_audio_usage(DocumentAudio* audio, AudioDocumentUsage* usage
         usage->bytes += bytes; usage->count++;
     }
     return true;
+}
+uint64_t radiant_audio_storage_acquire(DomDocument* doc, size_t bytes) {
+    auto* audio = document_audio(doc, true); AudioDocumentUsage usage;
+    if (!audio || !bytes || !document_audio_usage(audio, &usage) || usage.count >= AUDIO_DECODED_SLOTS ||
+        bytes > AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes) return 0;
+    for (auto& storage : audio->storage) if (!storage.id) {
+        uint64_t id = audio_bus_identity(); if (!id) return 0;
+        storage = {id, bytes}; return id;
+    }
+    return 0;
+}
+void radiant_audio_storage_release(DomDocument* doc, uint64_t id) {
+    auto* audio = document_audio(doc);
+    if (audio && id) for (auto& storage : audio->storage) if (storage.id == id) { storage = {}; break; }
 }
 uint64_t radiant_audio_open(DomDocument* doc, const void* bytes, size_t length) {
     if (!doc || !bytes || !length) return 0;
@@ -341,6 +357,9 @@ uint64_t radiant_audio_source_start(DomDocument* doc, uint64_t asset, uint64_t r
     if (started) destination->route = route;
     return started ? reuse : 0;
 }
+bool radiant_audio_graph_input_audible(AudioSubmixId submix, AudioGraphId graph, AudioRouteId route, bool active, double gain) {
+    return active && gain > 0 && audio_submix_graph_has_route(submix, graph, route);
+}
 bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
     if (radiant_document_may_start_audio(doc)) return true;
     auto* audio = document_audio(doc); if (!audio) return true;
@@ -350,13 +369,14 @@ bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
     for (const auto& slot : audio->slots) if (audio_submix_graph_has_route(audio->submix, graph, slot.route)) {
         if (slot.midi) {
             auto info = midi_player_info(slot.midi);
-            if (info.state == MIDI_PLAYING && info.volume > 0) return false;
+            if (radiant_audio_graph_input_audible(audio->submix, graph, slot.route, info.state == MIDI_PLAYING, info.volume)) return false;
         } else if (slot.audio) {
             RdtAudioInfo info = {};
-            if (radiant_audio_info(doc, slot.token, &info) && (info.state == RDT_AUDIO_PLAYING || info.armed) && info.gain > 0) return false;
+            if (radiant_audio_info(doc, slot.token, &info) && radiant_audio_graph_input_audible(audio->submix, graph, slot.route,
+                info.state == RDT_AUDIO_PLAYING || info.armed, info.gain)) return false;
         }
     }
-    return !radiant_speech_graph_audible(doc, graph);
+    return !radiant_speech_graph_audible(doc, graph) && !radiant_media_graph_audible(doc, graph);
 }
 bool radiant_audio_graph_commit(DomDocument* doc, AudioGraphId graph, AudioGraph* prepared,
     const AudioPlayerRoute* routes, unsigned count, const char** error) {
@@ -541,6 +561,7 @@ bool radiant_audio_tick(DomDocument* doc, double now_ms) {
     for (unsigned i = 0; i < 8; i++) {
         auto hook = audio->owners[i]; if (hook.poll) hook.poll(hook.owner, now_ms);
     }
+    radiant_media_audio_tick(doc);
     for (AudioSlot& slot : audio->slots) audio_slot_poll(&slot);
     // offline output: the sub-mix follows this document's frame clock while it has voices.
     double delta_ms = audio->last_tick_ms < 0 ? 0 : now_ms - audio->last_tick_ms;

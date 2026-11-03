@@ -876,7 +876,8 @@ static Item audio_provider_operate(Scene3dAudio* state, uint64_t session, const 
         const char* name;
         bool (*route)(DomDocument*, uint64_t, AudioRouteId, AudioRouteId, const char**);
         bool (*read)(DomDocument*, uint64_t, AudioProviderInfo*);
-    } providers[] = {{"midi", radiant_midi_route, radiant_midi_routing}, {"speech", radiant_speech_route, radiant_speech_routing}};
+    } providers[] = {{"midi", radiant_midi_route, radiant_midi_routing}, {"speech", radiant_speech_route, radiant_speech_routing},
+        {"video", radiant_media_route, radiant_media_routing}};
     const char* name = scene3d_command_name(fields.get("provider")); const Provider* provider = nullptr;
     for (const auto& entry : providers) if (name && !strcmp(name, entry.name)) provider = &entry;
     uint64_t token;

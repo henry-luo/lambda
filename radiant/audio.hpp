@@ -26,12 +26,17 @@ uint64_t radiant_audio_source_start(DomDocument* document, uint64_t asset, uint6
 struct AudioPlayerRoute { uint64_t token; AudioRouteId route; };
 // staged graph and live/paused source routes publish together; failed admission keeps ownership with the caller.
 bool radiant_audio_graph_may_edit(DomDocument* document, AudioGraphId graph);
+// dry providers still express audible intent when a muted bus has no DSP history (D7.5.4).
+bool radiant_audio_graph_input_audible(AudioSubmixId submix, AudioGraphId graph, AudioRouteId route, bool active, double gain);
 bool radiant_audio_graph_commit(DomDocument* document, AudioGraphId graph, AudioGraph* prepared,
     const AudioPlayerRoute* routes, unsigned count, const char** error = nullptr);
 bool radiant_audio_parameters(DomDocument* document, uint64_t token, const RdtAudioParameters* parameters, float gain = -1);
 bool radiant_audio_info(DomDocument* document, uint64_t token, RdtAudioInfo* info);
 // copied native accounting includes each immutable PCM owner once across all players.
 bool radiant_audio_usage(DomDocument* document, size_t* players, size_t* bytes);
+// native streaming providers share the document's PCM/player budget; reservation IDs never alias.
+uint64_t radiant_audio_storage_acquire(DomDocument* document, size_t bytes);
+void radiant_audio_storage_release(DomDocument* document, uint64_t reservation);
 // native main-thread sampling only; these hooks never run on the audio callback.
 typedef void (*AudioOwnerPoll)(void* owner, double now_ms);
 bool radiant_audio_bind_owner(DomDocument* document, void* owner, AudioOwnerPoll poll);
@@ -53,6 +58,9 @@ struct AudioProviderInfo {
 };
 bool radiant_midi_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error);
 bool radiant_midi_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info);
+bool radiant_media_route(DomDocument* document, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error);
+bool radiant_media_routing(DomDocument* document, uint64_t token, AudioProviderInfo* info);
+bool radiant_media_graph_audible(DomDocument* document, AudioGraphId graph);
 void radiant_audio_prune(DomDocument* document);
 void radiant_audio_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root);
 // the document's sub-mix on the window bus, created on first use (§3.2).

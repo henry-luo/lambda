@@ -1,7 +1,7 @@
 // rdt_video_avf.mm — macOS AVFoundation backend for RdtVideo
 //
 // AVFoundation manages decode + playback scheduling on internal dispatch queues.
-// We poll for new video frames from the render thread and let AVPlayer handle audio.
+// The shared document bus consumes bounded PCM; video frames follow its consumed sample time.
 
 #ifdef __APPLE__
 
@@ -12,6 +12,9 @@
 #import <objc/runtime.h>
 
 #include "rdt_video.h"
+#include "audio_bus.hpp"
+#include "audio_stream.hpp"
+#include "audio.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/ownership.hpp"
@@ -114,6 +117,18 @@ extern "C" const char* rdt_video_can_play_type(const char* mime_type, size_t len
 // ---------------------------------------------------------------------------
 
 struct RdtVideo {
+    RdtVideoAudioBinding          audio_binding;
+    AudioStream*                 pcm;
+    AudioVoiceId                 audio_voice;
+    AudioRouteId                 audio_route;
+    AudioRouteRef                audio_routing;
+    AudioVoiceLoss               audio_loss;
+    AVAssetReader*               audio_reader;
+    AVAssetReaderTrackOutput*    audio_output;
+    CMSampleBufferRef            audio_packet;
+    unsigned                     packet_begin, packet_offset, packet_frames;
+    uint64_t                     packet_frame, loop_base, media_frames;
+    bool                         audio_eof, audio_reserved, play_requested;
     // AVFoundation objects
     AVAsset*                     asset;
     AVPlayer*                    player;
@@ -140,6 +155,7 @@ struct RdtVideo {
     atomic_int                   state;
     atomic_int                   current_time_ms;    // milliseconds, for lock-free read
     double                       duration;
+    double                       requested_time;
     int                          intrinsic_width;
     int                          intrinsic_height;
     bool                         has_audio_track;
@@ -155,6 +171,143 @@ struct RdtVideo {
     // Periodic time observer token
     id                           time_observer;
 };
+
+static void set_state(RdtVideo* video, RdtVideoState state);
+static void video_pcm_reader_close(RdtVideo* video) {
+    if (video->audio_packet) CFRelease(video->audio_packet);
+    video->audio_packet = nullptr;
+    [video->audio_reader cancelReading]; [video->audio_reader release]; [video->audio_output release];
+    video->audio_reader = nil; video->audio_output = nil;
+}
+static void video_pcm_close(RdtVideo* video) {
+    audio_voice_remove(video->audio_voice); video->audio_voice = 0;
+    video_pcm_reader_close(video); audio_stream_destroy(video->pcm); video->pcm = nullptr;
+    if (video->audio_reserved && video->audio_binding.release) video->audio_binding.release(video->audio_binding.owner);
+    video->audio_reserved = false;
+}
+static bool video_pcm_error(RdtVideo* video, const char* reason) {
+    audio_voice_remove(video->audio_voice); video->audio_voice = 0;
+    audio_stream_fail(video->pcm); log_error("video_pcm: %s", reason);
+    set_state(video, RDT_VIDEO_STATE_ERROR); return false;
+}
+static bool video_pcm_reader_open(RdtVideo* video, uint64_t frame) {
+    video_pcm_reader_close(video); video->audio_eof = false;
+    NSArray* tracks = [video->asset tracksWithMediaType:AVMediaTypeAudio];
+    if (!tracks.count) return video_pcm_error(video, "audio track is unavailable");
+    NSError* error = nil;
+    video->audio_reader = [[AVAssetReader alloc] initWithAsset:video->asset error:&error];
+    NSDictionary* settings = @{AVFormatIDKey:@(kAudioFormatLinearPCM), AVSampleRateKey:@(AUDIO_BUS_RATE),
+        AVNumberOfChannelsKey:@2, AVLinearPCMBitDepthKey:@32, AVLinearPCMIsFloatKey:@YES,
+        AVLinearPCMIsBigEndianKey:@NO, AVLinearPCMIsNonInterleaved:@NO};
+    video->audio_output = [[AVAssetReaderTrackOutput alloc] initWithTrack:tracks[0] outputSettings:settings];
+    if (!video->audio_reader || ![video->audio_reader canAddOutput:video->audio_output])
+        return video_pcm_error(video, "audio decoder admission failed");
+    [video->audio_reader addOutput:video->audio_output];
+    video->audio_reader.timeRange = CMTimeRangeMake(CMTimeMake((int64_t)frame, AUDIO_BUS_RATE), kCMTimePositiveInfinity);
+    if (![video->audio_reader startReading]) return video_pcm_error(video, "audio decoder could not start");
+    return true;
+}
+static bool video_pcm_seek(RdtVideo* video, uint64_t frame) {
+    audio_voice_remove(video->audio_voice); video->audio_voice = 0;
+    audio_stream_reset(video->pcm, frame); video->loop_base = 0;
+    return video_pcm_reader_open(video, frame);
+}
+static bool video_pcm_prepare(RdtVideo* video) {
+    if (video->pcm) return true;
+    if (!video->audio_binding.submix || !isfinite(video->duration) || video->duration <= 0 || video->duration > 86400)
+        return video_pcm_error(video, "missing document submix or unsupported finite media duration");
+    if (video->audio_binding.reserve) {
+        if (!video->audio_binding.reserve(video->audio_binding.owner, audio_stream_storage_bytes()))
+            return video_pcm_error(video, "document PCM quota exceeded");
+        video->audio_reserved = true;
+    }
+    video->pcm = audio_stream_create();
+    if (!video->pcm) { video_pcm_close(video); return video_pcm_error(video, "PCM allocation failed"); }
+    video->media_frames = (uint64_t)ceil(video->duration * AUDIO_BUS_RATE);
+    audio_stream_gain(video->pcm, video->muted ? 0 : video->volume);
+    // the initial seek belongs to the PCM clock; a silent AVPlayer cannot transfer that cursor.
+    double start = video->requested_time < video->duration ? video->requested_time : video->duration;
+    return video_pcm_seek(video, (uint64_t)llround(start * AUDIO_BUS_RATE));
+}
+static bool video_pcm_fill(RdtVideo* video) {
+    if (!video->pcm) return true;
+    // decoding is control-thread work; the output callback reads only the bounded PCM ring.
+    for (unsigned work = 0; work < 64; work++) {
+        auto info = audio_stream_snapshot(video->pcm);
+        if (info.state == AUDIO_STREAM_ERROR) return video_pcm_error(video, "stream PCM validation failed");
+        if (info.finished || info.queued == info.capacity) return true;
+        if (video->audio_packet) {
+            unsigned count = video->packet_frames - video->packet_offset;
+            if (count > 4096) count = 4096;
+            float samples[4096 * 2];
+            CMBlockBufferRef data = CMSampleBufferGetDataBuffer(video->audio_packet);
+            if (!data || CMBlockBufferCopyDataBytes(data, (size_t)video->packet_offset * 8, (size_t)count * 8, samples) != noErr)
+                return video_pcm_error(video, "invalid decoded PCM buffer");
+            unsigned consumed = audio_stream_write(video->pcm, video->packet_frame + video->packet_offset - video->packet_begin, samples, count);
+            video->packet_offset += consumed;
+            if (video->packet_offset == video->packet_frames) { CFRelease(video->audio_packet); video->audio_packet = nullptr; }
+            if (!consumed) return true;
+            continue;
+        }
+        if (video->audio_eof) {
+            uint64_t end = video->loop_base + video->media_frames;
+            audio_stream_write(video->pcm, end, nullptr, 0);
+            if (audio_stream_snapshot(video->pcm).written != end) return true;
+            if (!video->loop) { audio_stream_finish(video->pcm); return true; }
+            if (end > INT64_MAX - video->media_frames) return video_pcm_error(video, "loop sample clock exhausted");
+            video->loop_base = end;
+            if (!video_pcm_reader_open(video, 0)) return false;
+            continue;
+        }
+        video->audio_packet = [video->audio_output copyNextSampleBuffer];
+        if (!video->audio_packet) {
+            if (video->audio_reader.status != AVAssetReaderStatusCompleted) return video_pcm_error(video, "audio decoder failed before EOF");
+            video->audio_eof = true; continue;
+        }
+        CMItemCount frames = CMSampleBufferGetNumSamples(video->audio_packet);
+        CMTime pts = CMSampleBufferGetPresentationTimeStamp(video->audio_packet);
+        if (!CMTIME_IS_NUMERIC(pts) || frames <= 0 || frames > AUDIO_STREAM_PACKET)
+            return video_pcm_error(video, "decoded PCM packet exceeds the admitted profile");
+        int64_t first = CMTimeConvertScale(pts, AUDIO_BUS_RATE, kCMTimeRoundingMethod_RoundHalfAwayFromZero).value;
+        if (first <= -frames || first >= (int64_t)video->media_frames) {
+            CFRelease(video->audio_packet); video->audio_packet = nullptr; continue;
+        }
+        unsigned begin = first < 0 ? (unsigned)-first : 0;
+        uint64_t start = first < 0 ? 0 : (uint64_t)first;
+        uint64_t count = (uint64_t)frames - begin;
+        if (count > video->media_frames - start) count = video->media_frames - start;
+        video->packet_frame = video->loop_base + start;
+        video->packet_begin = video->packet_offset = begin; video->packet_frames = begin + (unsigned)count;
+    }
+    return true;
+}
+static void video_notify_time(RdtVideo* video, double seconds) {
+    int current_ms = (int)(seconds * 1000); // INT_CAST_OK: bounded native media timestamp in milliseconds.
+    atomic_store(&video->current_time_ms, current_ms);
+    int previous = atomic_load(&video->last_notified_frame_ms);
+    if (current_ms >= 0 && (previous < 0 || current_ms < previous || current_ms - previous >= 33)) {
+        atomic_store(&video->last_notified_frame_ms, current_ms); atomic_store(&video->has_new_frame, true);
+        if (video->callbacks.on_frame_ready) video->callbacks.on_frame_ready(video, video->userdata);
+    }
+}
+static void video_pcm_poll(RdtVideo* video) {
+    if (atomic_load(&video->state) == RDT_VIDEO_STATE_ERROR) return;
+    // retained routes fence pending and paused transports as well as active callback readers.
+    if (video->audio_routing && !audio_submix_route_ref_valid(video->audio_binding.submix, video->audio_routing)) {
+        video->audio_loss = AUDIO_VOICE_ROUTE_LOST; video_pcm_error(video, "shared audio route was lost"); return;
+    }
+    if (!video->pcm) return;
+    if (video->audio_voice && audio_voice_loss(video->audio_voice) != AUDIO_VOICE_OK) {
+        video->audio_loss = audio_voice_loss(video->audio_voice);
+        video_pcm_error(video, "shared audio output was lost"); return;
+    }
+    if (!video_pcm_fill(video)) return;
+    video_notify_time(video, rdt_video_get_current_time(video));
+    if (audio_stream_snapshot(video->pcm).state == AUDIO_STREAM_ENDED) {
+        audio_voice_remove(video->audio_voice); video->audio_voice = 0; video->play_requested = false;
+        if (atomic_load(&video->state) != RDT_VIDEO_STATE_ENDED) set_state(video, RDT_VIDEO_STATE_ENDED);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,6 +381,7 @@ static void populate_metadata(RdtVideo* v, AVPlayerItem* item, bool emit_callbac
             set_state(v, RDT_VIDEO_STATE_ERROR);
         }
     } else if ([keyPath isEqualToString:@"timeControlStatus"]) {
+        if (v->has_audio_track) return;
         AVPlayer* player = (AVPlayer*)object;
         if (player.timeControlStatus == AVPlayerTimeControlStatusPlaying) {
             set_state(v, RDT_VIDEO_STATE_PLAYING);
@@ -251,6 +405,7 @@ static RdtVideoObserver* get_or_create_observer(RdtVideo* v) {
         obs = [[RdtVideoObserver alloc] init];
         obs.video = v;
         objc_setAssociatedObject(v->player, &kObserverKey, obs, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [obs release];
     }
     return obs;
 }
@@ -272,19 +427,39 @@ RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
     return v;
 }
 
+bool rdt_video_bind_audio(RdtVideo* video, const RdtVideoAudioBinding* binding) {
+    if (!video || (binding && video->player_item)) return false;
+    if (binding) {
+        bool callbacks = binding->reserve || binding->release || binding->retire;
+        if ((callbacks && (!binding->reserve || !binding->release || !binding->retire)) || !audio_submix_lock(binding->submix)) return false;
+        audio_submix_unlock(binding->submix);
+    }
+    // retire callbacks while their native owner is still valid, including early source rejection.
+    if (video->audio_binding.submix) rdt_video_pause(video);
+    video_pcm_close(video);
+    audio_submix_release_route(video->audio_binding.submix, video->audio_routing);
+    video->audio_route = video->audio_routing = 0; video->audio_loss = AUDIO_VOICE_OK;
+    if (video->audio_binding.retire) video->audio_binding.retire(video->audio_binding.owner);
+    video->audio_binding = binding ? *binding : RdtVideoAudioBinding{};
+    if (!binding) { video->callbacks = {}; video->userdata = nullptr; }
+    return true;
+}
+
 void rdt_video_destroy(RdtVideo* video) {
     if (!video) return;
+    rdt_video_bind_audio(video, nullptr);
 
     // remove observers
     if (video->player) {
         RdtVideoObserver* obs = get_or_create_observer(video);
+        // queued platform blocks retain the observer, whose owner pointer retires before native storage.
+        obs.video = nullptr;
         if (video->observing_time_control) {
             [video->player removeObserver:obs forKeyPath:@"timeControlStatus"];
             video->observing_time_control = false;
         }
         if (video->time_observer) {
             [video->player removeTimeObserver:video->time_observer];
-            video->time_observer = nil;
         }
     }
     if (video->player_item && video->observing_status) {
@@ -294,7 +469,6 @@ void rdt_video_destroy(RdtVideo* video) {
     }
     if (video->end_observer) {
         [[NSNotificationCenter defaultCenter] removeObserver:video->end_observer];
-        video->end_observer = nil;
     }
 
     // stop playback
@@ -353,7 +527,8 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
         }
         video->player_item = [[AVPlayerItem alloc] initWithAsset:video->asset];
         video->player = [[AVPlayer alloc] initWithPlayerItem:video->player_item];
-        video->player.volume = video->muted ? 0.0f : video->volume;
+        // all audible PCM belongs to the shared bus; AVPlayer remains a silent metadata/video owner.
+        video->player.volume = 0.0f;
 
         // Local media exposes track dimensions before playback becomes ready;
         // publish them now so the first layout can use the intrinsic ratio.
@@ -377,23 +552,14 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
         // periodic media-time observer. It only wakes Radiant when AVFoundation
         // reports a fresh pixel buffer, so low-FPS and paused videos do not
         // force display-rate redraws.
-        __block RdtVideo* weakVideo = video;
+        RdtVideoObserver* frameObserver = obs;
         // NOTE: No ARC — retain the returned observer token
         video->time_observer = [[video->player addPeriodicTimeObserverForInterval:CMTimeMake(1, 60)
                                                                           queue:dispatch_get_main_queue()
                                                                      usingBlock:^(CMTime time) {
-            if (weakVideo) {
-                double t = CMTimeGetSeconds(time);
-                int current_ms = (int)(t * 1000.0);
-                atomic_store(&weakVideo->current_time_ms, current_ms);
-                int last_ms = atomic_load(&weakVideo->last_notified_frame_ms);
-                if (current_ms >= 0 && (last_ms < 0 || current_ms - last_ms >= 33)) {
-                    atomic_store(&weakVideo->last_notified_frame_ms, current_ms);
-                    atomic_store(&weakVideo->has_new_frame, true);
-                    if (weakVideo->callbacks.on_frame_ready) {
-                        weakVideo->callbacks.on_frame_ready(weakVideo, weakVideo->userdata);
-                    }
-                }
+            RdtVideo* weakVideo = frameObserver.video;
+            if (weakVideo && !weakVideo->has_audio_track) {
+                video_notify_time(weakVideo, CMTimeGetSeconds(time));
             }
         }] retain];
 
@@ -405,7 +571,8 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
                         queue:[NSOperationQueue mainQueue]
                    usingBlock:^(NSNotification* note) {
             (void)note;
-            if (weakVideo) {
+            RdtVideo* weakVideo = frameObserver.video;
+            if (weakVideo && !weakVideo->has_audio_track) {
                 if (weakVideo->loop) {
                     [weakVideo->player seekToTime:kCMTimeZero];
                     [weakVideo->player play];
@@ -426,40 +593,64 @@ void rdt_video_set_layout_rect(RdtVideo* video, int width, int height) {
 }
 
 void rdt_video_play(RdtVideo* video) {
-    if (!video || !video->player) return;
-    [video->player play];
+    if (!video || !video->player || atomic_load(&video->state) == RDT_VIDEO_STATE_ERROR) return;
+    video->play_requested = true;
+    if (atomic_load(&video->state) == RDT_VIDEO_STATE_LOADING) return;
+    if (!video->has_audio_track) { [video->player play]; return; }
+    video_pcm_poll(video);
+    if (atomic_load(&video->state) == RDT_VIDEO_STATE_ERROR) return;
+    video->play_requested = true;
+    if (!video_pcm_prepare(video)) return;
+    if (audio_stream_snapshot(video->pcm).state == AUDIO_STREAM_ENDED && !video_pcm_seek(video, 0)) return;
+    if (!video_pcm_fill(video) || !audio_stream_play(video->pcm)) return;
+    if (!video->audio_voice) video->audio_voice = audio_voice_add(video->audio_binding.submix, audio_stream_mix, video->pcm, nullptr, video->audio_route);
+    if (!video->audio_voice) { video_pcm_error(video, "shared voice admission failed"); return; }
+    set_state(video, RDT_VIDEO_STATE_PLAYING);
 }
 
 void rdt_video_pause(RdtVideo* video) {
     if (!video || !video->player) return;
-    [video->player pause];
+    video->play_requested = false;
+    if (!video->pcm) {
+        [video->player pause];
+        if (video->has_audio_track && atomic_load(&video->state) == RDT_VIDEO_STATE_PLAYING) set_state(video, RDT_VIDEO_STATE_PAUSED);
+        return;
+    }
+    audio_voice_remove(video->audio_voice); video->audio_voice = 0; audio_stream_pause(video->pcm);
+    if (atomic_load(&video->state) == RDT_VIDEO_STATE_PLAYING) set_state(video, RDT_VIDEO_STATE_PAUSED);
 }
 
 void rdt_video_seek(RdtVideo* video, double seconds) {
-    if (!video || !video->player) return;
-    CMTime target = CMTimeMakeWithSeconds(seconds, NSEC_PER_SEC);
-    [video->player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+    if (!video || !video->player || !isfinite(seconds) || seconds < 0) return;
+    video->requested_time = seconds;
+    if (!video->pcm) {
+        if (!video->has_audio_track)
+            [video->player seekToTime:CMTimeMakeWithSeconds(seconds, NSEC_PER_SEC) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+        return;
+    }
+    bool playing = atomic_load(&video->state) == RDT_VIDEO_STATE_PLAYING;
+    if (seconds > video->duration) seconds = video->duration;
+    if (!video_pcm_seek(video, (uint64_t)llround(seconds * AUDIO_BUS_RATE))) return;
+    atomic_store(&video->last_generated_frame_ms, -1);
+    if (playing) rdt_video_play(video);
+    if (video->callbacks.on_frame_ready) video->callbacks.on_frame_ready(video, video->userdata);
 }
 
 void rdt_video_set_loop(RdtVideo* video, bool loop) {
-    if (!video) return;
-    video->loop = loop;
+    if (!video || video->loop == loop) return;
+    double position = rdt_video_get_current_time(video); video->loop = loop;
+    // discard queued next-loop samples when loop policy changes, preserving the selected media time.
+    if (video->pcm) rdt_video_seek(video, position);
 }
 
 void rdt_video_set_volume(RdtVideo* video, float volume) {
-    if (!video) return;
-    video->volume = volume;
-    if (video->player && !video->muted) {
-        video->player.volume = volume;
-    }
+    if (!video || !isfinite(volume) || volume < 0 || volume > 1) return;
+    video->volume = volume; if (video->pcm) audio_stream_gain(video->pcm, video->muted ? 0 : volume);
 }
 
 void rdt_video_set_muted(RdtVideo* video, bool muted) {
     if (!video) return;
-    video->muted = muted;
-    if (video->player) {
-        video->player.volume = muted ? 0.0f : video->volume;
-    }
+    video->muted = muted; if (video->pcm) audio_stream_gain(video->pcm, muted ? 0 : video->volume);
 }
 
 float rdt_video_get_volume(RdtVideo* video) {
@@ -485,8 +676,12 @@ RdtVideoState rdt_video_get_state(RdtVideo* video) {
         }
     }
 
+    if (cur == RDT_VIDEO_STATE_READY && video->play_requested) { rdt_video_play(video); cur = (RdtVideoState)atomic_load(&video->state); }
+    video_pcm_poll(video); cur = (RdtVideoState)atomic_load(&video->state);
+    if (video->pcm || cur == RDT_VIDEO_STATE_ERROR) return cur;
+
     // also poll timeControlStatus for playing/paused transitions
-    if (video->player && (cur == RDT_VIDEO_STATE_READY || cur == RDT_VIDEO_STATE_PLAYING || cur == RDT_VIDEO_STATE_PAUSED)) {
+    if (!video->has_audio_track && video->player && (cur == RDT_VIDEO_STATE_READY || cur == RDT_VIDEO_STATE_PLAYING || cur == RDT_VIDEO_STATE_PAUSED)) {
         if (video->player.timeControlStatus == AVPlayerTimeControlStatusPlaying) {
             if (cur != RDT_VIDEO_STATE_PLAYING) {
                 set_state(video, RDT_VIDEO_STATE_PLAYING);
@@ -503,16 +698,46 @@ RdtVideoState rdt_video_get_state(RdtVideo* video) {
     return cur;
 }
 
+bool rdt_video_audio_routing(RdtVideo* video, AudioProviderInfo* info) {
+    if (!video || !info || !video->audio_binding.submix || !video->has_audio_track) return false;
+    auto state = rdt_video_get_state(video);
+    *info = {video->audio_route, video->audio_loss, rdt_video_state_name(state), rdt_video_get_current_time(video),
+        video->muted ? 0 : video->volume,
+        !video->audio_route || audio_submix_route_valid(video->audio_binding.submix, video->audio_route)};
+    return true;
+}
+
+bool rdt_video_audio_route(RdtVideo* video, uint64_t expected, uint64_t route, const char** error) {
+    const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    auto fail = [&](const char* message) { *error = message; return false; };
+    AudioProviderInfo info;
+    if (!rdt_video_audio_routing(video, &info) || info.route != expected) return fail("video route: missing provider or stale expected route");
+    if (route && atomic_load(&video->state) == RDT_VIDEO_STATE_ERROR) return fail("video route: failed source must be reloaded");
+    if (route == video->audio_route && !video->audio_routing) return true;
+    if (!audio_submix_bind_route(video->audio_binding.submix, &video->audio_routing, video->audio_voice, route))
+        return fail("video route: stale/foreign route or reference quota exceeded");
+    video->audio_route = route; return true;
+}
+
 bool rdt_video_events_pending(RdtVideo* video) {
     if (!video || !video->player) return false;
     // Virtual assertion retries must allow native playback to reach its completion event too.
     RdtVideoState state = rdt_video_get_state(video);
+    if (video->pcm) return state == RDT_VIDEO_STATE_PLAYING && !audio_bus_offline();
     return state == RDT_VIDEO_STATE_LOADING || state == RDT_VIDEO_STATE_PLAYING ||
         video->player.timeControlStatus == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate;
 }
 
 double rdt_video_get_current_time(RdtVideo* video) {
     if (!video) return 0.0;
+    if (video->pcm) {
+        uint64_t frame = audio_stream_snapshot(video->pcm).frame;
+        if (video->loop && video->media_frames) frame %= video->media_frames;
+        if (frame > video->media_frames) frame = video->media_frames;
+        return frame / (double)AUDIO_BUS_RATE;
+    }
+    if (video->has_audio_track) return video->duration > 0 && video->requested_time > video->duration ?
+        video->duration : video->requested_time;
     if (video->player_item) {
         CMTime current = [video->player_item currentTime];
         if (CMTIME_IS_VALID(current) && !CMTIME_IS_INDEFINITE(current)) {
@@ -551,7 +776,7 @@ int rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame) {
     @autoreleasepool {
         if (!video->image_generator) return -1;
 
-        CMTime current = [video->player_item currentTime];
+        CMTime current = CMTimeMakeWithSeconds(rdt_video_get_current_time(video), AUDIO_BUS_RATE);
         int current_ms = (int)(CMTimeGetSeconds(current) * 1000.0);
         if (current_ms == atomic_load(&video->last_generated_frame_ms) &&
             video->frame_buffer && video->frame_width > 0 && video->frame_height > 0) {

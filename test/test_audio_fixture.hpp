@@ -1,12 +1,31 @@
 #pragma once
 #include "../radiant/audio.hpp"
 #include "../radiant/speech.hpp"
+#include "../radiant/rdt_video.h"
 #include "../lib/file.h"
 #include "../lib/mem.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <uv.h>
+
+static inline bool audio_fixture_video_wait(RdtVideo* video, RdtVideoState target, unsigned timeout_ms) {
+    uint64_t start = uv_hrtime();
+    do {
+        rdt_video_pump_events();
+        if (rdt_video_get_state(video) == target) return true;
+        uv_sleep(10);
+    } while ((uv_hrtime() - start) / 1000000 < timeout_ms);
+    return rdt_video_get_state(video) == target;
+}
+
+static inline bool audio_fixture_graph_publish(AudioSubmixId submix, AudioGraphId graph, const AudioGraphConfig& config) {
+    AudioGraph* prepared = nullptr; const char* error = nullptr;
+    if (!audio_submix_graph_prepare(submix, graph, config, &prepared, &error)) return false;
+    if (audio_submix_graph_commit(submix, graph, prepared, nullptr, 0)) return true;
+    audio_graph_destroy(prepared); return false;
+}
 
 static inline void audio_fixture_le(unsigned char* out, uint32_t value, unsigned bytes) {
     for (unsigned i = 0; i < bytes; i++) out[i] = (unsigned char)(value >> (i * 8));

@@ -4046,6 +4046,10 @@
               "gtest_main"
             ],
             "macos": {
+              "additional_sources": [
+                "test/test_window_fullscreen_gtest.cpp",
+                "radiant/rdt_video_avf.mm"
+              ],
               "libraries": [
                 "CoreFoundation",
                 "Security",
@@ -4311,6 +4315,12 @@
             "additional_sources": [
               "radiant/rdt_video_stub.cpp"
             ],
+            "additional_files": [
+              "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
+              "radiant/audio_reverb.cpp",
+              "radiant/audio_stream.cpp"
+            ],
             "macos": {
               "additional_sources": [
                 "radiant/rdt_video_avf.mm"
@@ -4319,6 +4329,7 @@
                 "CoreFoundation",
                 "Security",
                 "AVFoundation",
+                "AudioToolbox",
                 "CoreMedia",
                 "CoreVideo",
                 "Cocoa"
@@ -4356,6 +4367,7 @@
               "radiant/audio_bus.cpp",
               "radiant/audio_graph.cpp",
               "radiant/audio_cues.cpp",
+              "radiant/audio_stream.cpp",
               "radiant/audio_reverb.cpp"
             ],
             "macos": {"libraries": ["AudioToolbox"]},

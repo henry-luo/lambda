@@ -1,0 +1,17 @@
+{
+  "name": "Hidden video maintains the shared sample clock across large offline frame advances",
+  "html": "test/ui/audio_video_shared.html",
+  "viewport": {"width": 200, "height": 160},
+  "env": [{"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "script", "js": "movie.style.display='none';movie.setAttribute('loop','');startVideo()"},
+    {"type": "assert_script", "assert_interval": 1, "js": "videoPlaying&&!movie.paused"},
+    {"type": "advance_time", "ms": 30000, "steps": 30},
+    {"type": "script", "js": "readVideoClock()"},
+    {"type": "assert_script", "assert_interval": 1, "js": "!clockBusy&&clockSample!==null"},
+    {"type": "assert_script", "js": "clockSample.clock>=30&&((clockSample.clock%movie.duration-clockSample.before+movie.duration)%movie.duration)<=((clockSample.after-clockSample.before+movie.duration)%movie.duration)+1/48000"},
+    {"type": "script", "js": "movie.pause()"}
+  ]
+}

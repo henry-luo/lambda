@@ -25,6 +25,18 @@ extern "C" {
 #endif
 
 typedef struct RdtVideo RdtVideo;
+struct AudioProviderInfo;
+
+// native host ownership only; callbacks run on the control thread, never the output callback.
+typedef struct {
+    uint64_t submix;
+    void* owner;
+    bool (*reserve)(void* owner, size_t bytes);
+    void (*release)(void* owner);
+    void (*retire)(void* owner);
+} RdtVideoAudioBinding;
+// bind before selecting a source; null detaches and retires the previous owner.
+bool rdt_video_bind_audio(RdtVideo* video, const RdtVideoAudioBinding* binding);
 
 // Service one nonblocking native event turn on the host thread.
 void rdt_video_pump_events(void);
@@ -39,6 +51,14 @@ typedef enum {
     RDT_VIDEO_STATE_ENDED,
     RDT_VIDEO_STATE_ERROR,
 } RdtVideoState;
+
+static inline const char* rdt_video_state_name(RdtVideoState state) {
+    static const char* names[] = {"idle", "loading", "ready", "playing", "paused", "ended", "error"};
+    return state >= RDT_VIDEO_STATE_IDLE && state <= RDT_VIDEO_STATE_ERROR ? names[state] : "error";
+}
+
+bool rdt_video_audio_route(RdtVideo* video, uint64_t expected, uint64_t route, const char** error);
+bool rdt_video_audio_routing(RdtVideo* video, struct AudioProviderInfo* info);
 
 typedef struct {
     uint8_t*    pixels;     // RGBA 32bpp, caller-owned buffer
@@ -95,7 +115,7 @@ void            rdt_video_set_volume(RdtVideo* video, float volume);  // 0.0–1
 void            rdt_video_set_muted(RdtVideo* video, bool muted);
 
 // ---------------------------------------------------------------------------
-// Query — all thread-safe, lock-free reads
+// Query — control-thread reads may prepare bounded decoder output; the audio callback never calls them.
 // ---------------------------------------------------------------------------
 
 RdtVideoState   rdt_video_get_state(RdtVideo* video);

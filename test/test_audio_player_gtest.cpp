@@ -2,11 +2,137 @@
 #include "../radiant/rdt_audio.h"
 #include "../radiant/audio_bus.hpp"
 #include "../radiant/audio_cues.hpp"
+#include "../radiant/audio_stream.hpp"
 #include "../lib/str.h"
 #include "../lib/mem.h"
 #include "../lib/file.h"
 #include "test_audio_fixture.hpp"
 #include <math.h>
+#include <pthread.h>
+#include <sched.h>
+#include "../lib/time_util.h"
+
+class NativeAudioStream : public ::testing::Test {
+protected:
+    AudioStream* stream = nullptr;
+    void SetUp() override { stream = audio_stream_create(8); ASSERT_NE(stream, nullptr); }
+    void TearDown() override { audio_stream_destroy(stream); }
+};
+TEST_F(NativeAudioStream, TimestampGapsAndOverlapsPreserveExactStereoPcm) {
+    const float first[] = {.1f,-.1f,.2f,-.2f,.3f,-.3f,.4f,-.4f};
+    const float next[] = {.5f,-.5f,.6f,-.6f,.7f,-.7f,.8f,-.8f};
+    ASSERT_EQ(audio_stream_write(stream, 2, first, 4), 4u);
+    ASSERT_EQ(audio_stream_write(stream, 4, next, 4), 4u);
+    audio_stream_finish(stream); ASSERT_TRUE(audio_stream_play(stream));
+    float output[20]; for (auto& value : output) value = .125f;
+    audio_stream_mix(stream, output, 10, 123);
+    const float expected[] = {0,0,.1f,.2f,.3f,.4f,.7f,.8f,0,0};
+    for (unsigned i = 0; i < 10; i++) {
+        EXPECT_FLOAT_EQ(output[i * 2], .125f + expected[i]);
+        EXPECT_FLOAT_EQ(output[i * 2 + 1], .125f - expected[i]);
+    }
+    auto info = audio_stream_snapshot(stream); EXPECT_EQ(info.frame, 8u);
+    EXPECT_EQ(info.state, AUDIO_STREAM_ENDED); EXPECT_EQ(info.underrun_frames, 0u);
+}
+TEST_F(NativeAudioStream, PartialWritesAndPhysicalWrapRetainSourceOrder) {
+    audio_stream_destroy(stream); stream = audio_stream_create(4); ASSERT_NE(stream, nullptr);
+    float samples[16]; for (unsigned i = 0; i < 8; i++) samples[i * 2] = samples[i * 2 + 1] = (float)i / 10;
+    ASSERT_EQ(audio_stream_write(stream, 0, samples, 8), 4u); ASSERT_TRUE(audio_stream_play(stream));
+    float output[8] = {}; audio_stream_mix(stream, output, 3, 0);
+    for (unsigned i = 0; i < 6; i++) EXPECT_FLOAT_EQ(output[i], samples[i]);
+    ASSERT_EQ(audio_stream_write(stream, 4, samples + 8, 4), 3u);
+    memset(output, 0, sizeof(output)); audio_stream_mix(stream, output, 4, 3);
+    for (unsigned i = 0; i < 8; i++) EXPECT_FLOAT_EQ(output[i], samples[6 + i]);
+    ASSERT_EQ(audio_stream_write(stream, 7, samples + 14, 1), 1u); audio_stream_finish(stream);
+    memset(output, 0, sizeof(output)); audio_stream_mix(stream, output, 4, 7);
+    EXPECT_FLOAT_EQ(output[0], .7f); EXPECT_FLOAT_EQ(output[1], .7f);
+    for (unsigned i = 2; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    EXPECT_EQ(audio_stream_snapshot(stream).frame, 8u);
+}
+TEST_F(NativeAudioStream, StarvationHoldsMediaTimeUntilTheProducerPublishesMore) {
+    ASSERT_TRUE(audio_stream_play(stream)); float output[14] = {};
+    audio_stream_mix(stream, output, 7, 999); auto before = audio_stream_snapshot(stream);
+    EXPECT_EQ(before.frame, 0u); EXPECT_EQ(before.underrun_frames, 7u);
+    const float input[] = {.25f,.5f,.75f,1}; ASSERT_EQ(audio_stream_write(stream, 0, input, 2), 2u);
+    audio_stream_mix(stream, output, 5, 1006); auto after = audio_stream_snapshot(stream);
+    EXPECT_EQ(after.frame, 2u); EXPECT_EQ(after.underrun_frames, 10u);
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], input[i]);
+    for (unsigned i = 4; i < 14; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    audio_stream_finish(stream); audio_stream_mix(stream, output, 1, 1011);
+    EXPECT_EQ(audio_stream_snapshot(stream).state, AUDIO_STREAM_ENDED);
+}
+TEST_F(NativeAudioStream, PauseGainAndSeekResetPreserveWideSampleCounters) {
+    const float samples[] = {.5f,.25f,.5f,.25f,.5f,.25f,.5f,.25f};
+    ASSERT_EQ(audio_stream_write(stream, 0, samples, 4), 4u); ASSERT_TRUE(audio_stream_gain(stream, .25f));
+    ASSERT_TRUE(audio_stream_play(stream)); float output[4] = {}; audio_stream_mix(stream, output, 1, 0);
+    EXPECT_FLOAT_EQ(output[0], .125f); EXPECT_FLOAT_EQ(output[1], .0625f);
+    audio_stream_pause(stream); memset(output, 0, sizeof(output)); audio_stream_mix(stream, output, 2, 1);
+    EXPECT_EQ(audio_stream_snapshot(stream).frame, 1u); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    EXPECT_FALSE(audio_stream_gain(stream, NAN)); EXPECT_FALSE(audio_stream_gain(stream, 2));
+    ASSERT_TRUE(audio_stream_gain(stream, 0)); ASSERT_TRUE(audio_stream_play(stream)); audio_stream_mix(stream, output, 1, 1);
+    EXPECT_EQ(audio_stream_snapshot(stream).frame, 2u); EXPECT_FLOAT_EQ(output[0], 0);
+    uint64_t wide = (UINT64_C(1) << 53) + 17; audio_stream_reset(stream, wide);
+    EXPECT_EQ(audio_stream_snapshot(stream).queued, 0u); ASSERT_EQ(audio_stream_write(stream, wide, samples, 2), 2u);
+    audio_stream_finish(stream); ASSERT_TRUE(audio_stream_play(stream)); audio_stream_mix(stream, output, 2, 2);
+    EXPECT_EQ(audio_stream_snapshot(stream).frame, wide + 2); EXPECT_FALSE(audio_stream_play(stream));
+}
+TEST_F(NativeAudioStream, MalformedPacketsNeverPublishAPrefixOrWrapTheirTimestamp) {
+    const float valid[] = {.5f,.5f}; ASSERT_EQ(audio_stream_write(stream, 0, valid, 1), 1u);
+    const float invalid[] = {.1f,.1f,NAN,.2f}; EXPECT_EQ(audio_stream_write(stream, 1, invalid, 2), 0u);
+    auto info = audio_stream_snapshot(stream); EXPECT_EQ(info.queued, 1u); EXPECT_EQ(info.written, 1u);
+    EXPECT_EQ(info.state, AUDIO_STREAM_ERROR); EXPECT_FALSE(audio_stream_play(stream));
+    audio_stream_reset(stream, UINT64_MAX - 1); EXPECT_EQ(audio_stream_write(stream, UINT64_MAX - 1, nullptr, 2), 0u);
+    EXPECT_EQ(audio_stream_snapshot(stream).state, AUDIO_STREAM_ERROR);
+    audio_stream_reset(stream, 0); EXPECT_EQ(audio_stream_write(stream, 0, nullptr, AUDIO_STREAM_PACKET + 1), 0u);
+    EXPECT_EQ(audio_stream_snapshot(stream).queued, 0u);
+    EXPECT_EQ(audio_stream_create(0), nullptr); EXPECT_EQ(audio_stream_create(AUDIO_STREAM_CAPACITY + 1), nullptr);
+}
+TEST_F(NativeAudioStream, SharedBusRendersTheStreamAndRetiresItsReaderBeforeRelease) {
+    bool previous = audio_bus_offline(); audio_bus_set_offline(true);
+    auto mix = audio_submix_create(); ASSERT_NE(mix, 0u);
+    const float input[] = {.25f,-.25f,.5f,-.5f}; EXPECT_EQ(audio_stream_write(stream, 0, input, 2), 2u);
+    audio_stream_finish(stream); EXPECT_TRUE(audio_stream_play(stream));
+    auto voice = audio_voice_add(mix, audio_stream_mix, stream, nullptr); EXPECT_NE(voice, 0u);
+    float output[8]; audio_bus_mix(output, 4);
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], input[i]);
+    for (unsigned i = 4; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    audio_voice_remove(voice); audio_stream_destroy(stream); stream = nullptr;
+    audio_bus_mix(output, 4); for (float v : output) EXPECT_FLOAT_EQ(v, 0);
+    audio_submix_destroy(mix); audio_bus_set_offline(previous);
+}
+
+struct StreamProducerControl { AudioStream* stream; int stopped; };
+static void* stream_test_producer(void* argument) {
+    auto* control = (StreamProducerControl*)argument;
+    unsigned next = 0; float samples[37 * 2];
+    while (next < 24000 && !__atomic_load_n(&control->stopped, __ATOMIC_ACQUIRE)) {
+        unsigned count = 24000 - next < 37 ? 24000 - next : 37;
+        for (unsigned i = 0; i < count; i++) {
+            samples[i * 2] = (float)((next + i) % 1000) / 1000;
+            samples[i * 2 + 1] = -samples[i * 2];
+        }
+        unsigned written = audio_stream_write(control->stream, next, samples, count);
+        next += written; if (!written) sched_yield();
+    }
+    audio_stream_finish(control->stream); return nullptr;
+}
+TEST_F(NativeAudioStream, ConcurrentProducerAndConsumerKeepSampleOrderAcrossRingWraps) {
+    ASSERT_TRUE(audio_stream_play(stream)); StreamProducerControl control{stream, 0}; pthread_t producer;
+    ASSERT_EQ(pthread_create(&producer, nullptr, stream_test_producer, &control), 0);
+    uint64_t start = time_now_ns(), cursor = 0;
+    while (cursor < 24000 && time_now_ns() - start < UINT64_C(10000000000)) {
+        float samples[17 * 2] = {}; audio_stream_mix(stream, samples, 17, cursor);
+        uint64_t after = audio_stream_snapshot(stream).frame, count = after - cursor;
+        for (unsigned i = 0; i < 17; i++) {
+            float expected = i < count ? (float)((cursor + i) % 1000) / 1000 : 0;
+            EXPECT_FLOAT_EQ(samples[i * 2], expected); EXPECT_FLOAT_EQ(samples[i * 2 + 1], -expected);
+        }
+        cursor = after; if (!count) sched_yield();
+    }
+    __atomic_store_n(&control.stopped, 1, __ATOMIC_RELEASE); EXPECT_EQ(pthread_join(producer, nullptr), 0);
+    EXPECT_EQ(cursor, 24000u); float samples[2] = {}; audio_stream_mix(stream, samples, 1, cursor);
+    EXPECT_EQ(audio_stream_snapshot(stream).state, AUDIO_STREAM_ENDED);
+}
 
 class DecodedAudioPlayer : public ::testing::Test {
 protected:
@@ -274,10 +400,7 @@ protected:
         auto& value = config.buses[config.count++]; value = audio_graph_bus_default(id); value.smoothing = 0; return value;
     }
     bool publish() {
-        AudioGraph* prepared = nullptr; const char* error = nullptr;
-        if (!audio_submix_graph_prepare(submix, graph, config, &prepared, &error)) return false;
-        if (audio_submix_graph_commit(submix, graph, prepared, nullptr, 0)) return true;
-        audio_graph_destroy(prepared); return false;
+        return audio_fixture_graph_publish(submix, graph, config);
     }
     void voice(unsigned index, const char* bus_name = "master") {
         ASSERT_LT(index, 8u); auto route = bus_name ? audio_submix_graph_route(submix, graph, nullptr, bus_name) : 0;

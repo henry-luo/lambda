@@ -18983,6 +18983,29 @@ TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 16.0 / AUDIO_BUS_RATE);
 }
 
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareDecodedPcmBytesAndRejectStaleRelease) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    size_t players = 0, bytes = 0; size_t limit = 512u * 1024u * 1024u;
+    EXPECT_EQ(radiant_audio_storage_acquire(document, 0), 0u);
+    EXPECT_EQ(radiant_audio_storage_acquire(document, limit + 1), 0u);
+    auto all = radiant_audio_storage_acquire(document, limit); ASSERT_NE(all, 0u);
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, limit);
+    radiant_audio_storage_release(document, all); auto next = radiant_audio_storage_acquire(document, 1);
+    ASSERT_NE(next, 0u); EXPECT_NE(next, all); radiant_audio_storage_release(document, all);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, 1u);
+    EXPECT_NE(open_clip(), 0u); radiant_audio_storage_release(document, next);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_GT(bytes, 1u);
+}
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareTheDocumentReaderCapacity) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr); uint64_t reservations[128];
+    for (auto& id : reservations) { id = radiant_audio_storage_acquire(document, 1); ASSERT_NE(id, 0u); }
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    radiant_audio_storage_release(document, reservations[0]); EXPECT_NE(open_clip(), 0u);
+    for (auto id : reservations) radiant_audio_storage_release(document, id);
+    size_t players = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u);
+}
+
 TEST_F(RadiantDecodedAudio, PauseResumeEndAndCloseRetireTheirBusVoices) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
     uint64_t token = open_clip(); ASSERT_NE(token, 0u);
@@ -19012,6 +19035,7 @@ TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmiss
     radiant_audio_tick(document, start + 20); EXPECT_STREQ(radiant_audio_state(document, token), "ended");
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
 }
+
 
 TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
@@ -19057,6 +19081,80 @@ TEST_F(RadiantDecodedAudio, NetworkStartsRetainActivationAndMutedPlaybackRules) 
     radiant_audio_note_activation(document); ASSERT_TRUE(radiant_audio_play(document, token, 1));
     EXPECT_FALSE(radiant_audio_play(document, token, NAN)); EXPECT_STREQ(radiant_audio_state(document, token), "playing");
     ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64)); EXPECT_FLOAT_EQ(output[0], 0.5f);
+}
+
+TEST_F(RadiantDecodedAudio, MediaGainChangesCannotBypassNetworkActivation) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    Url* local = document->url.get(); Url* network = url_parse("https://example.test/video");
+    ASSERT_NE(network, nullptr); document->url = lam::own(network);
+    MediaViewState media = {}; media.play_requested = true; media.volume = 1; media.muted = true;
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false));
+    EXPECT_TRUE(media.muted); EXPECT_EQ(media.play_error, 1);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, 0, false));
+    EXPECT_FALSE(media.muted); EXPECT_FLOAT_EQ(media.volume, 0);
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false)); EXPECT_FLOAT_EQ(media.volume, 0);
+    media.play_requested = false; EXPECT_TRUE(radiant_media_set_gain(document, &media, 1, false));
+    media.play_requested = true; radiant_audio_note_activation(document);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, .5f, false)); EXPECT_EQ(media.play_error, 0);
+    document->url = lam::own(local); url_destroy(network);
+}
+
+TEST_F(RadiantDecodedAudio, MediaStatusPollingPreservesARefusedStartDiagnostic) {
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_status_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr);
+    media->play_error = 1;
+    for (unsigned poll = 0; poll < 3; poll++) {
+        EXPECT_EQ(radiant_media_prepare(movie), media); EXPECT_EQ(media->play_error, 1);
+        EXPECT_FALSE(media->muted); EXPECT_FLOAT_EQ(media->volume, 1);
+    }
+}
+
+TEST_F(RadiantDecodedAudio, DryVideoInputsFenceBusEditsWhenHostAutoplayIsWithdrawn) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_graph_gate_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    auto mix = radiant_document_submix(document); auto graph = audio_submix_graph_open(mix); ASSERT_NE(graph, 0u);
+    AudioGraphConfig config = {}; config.count = 2;
+    config.buses[0] = audio_graph_bus_default("master"); config.buses[1] = audio_graph_bus_default("providers");
+    config.buses[1].mute = true;
+    ASSERT_TRUE(audio_fixture_graph_publish(mix, graph, config));
+    auto route = audio_submix_graph_route(mix, graph, nullptr, "providers"); ASSERT_NE(route, 0u);
+    const char* error = nullptr; ASSERT_TRUE(radiant_media_route(document, media->audio_token, 0, route, &error));
+    struct NetworkUrl {
+        DomDocument* doc; Url* local; Url* network;
+        ~NetworkUrl() { radiant_audio_grant_activation(false); doc->url = lam::own(local); url_destroy(network); }
+    } url{document, document->url.get(), url_parse("https://example.test/video")};
+    ASSERT_NE(url.network, nullptr); document->url = lam::own(url.network);
+    radiant_audio_grant_activation(true); media->play_requested = true; rdt_video_play(media->player);
+    ASSERT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_PLAYING);
+    float output[64 * 2]; ASSERT_TRUE(audio_submix_render(mix, output, 64));
+    AudioGraphSnapshot snapshot; ASSERT_TRUE(audio_submix_graph_snapshot(mix, graph, &snapshot));
+    ASSERT_FALSE(snapshot.active); for (float value : output) EXPECT_FLOAT_EQ(value, 0);
+    radiant_audio_grant_activation(false); EXPECT_FALSE(radiant_document_may_start_audio(document));
+    EXPECT_FALSE(radiant_audio_graph_may_edit(document, graph));
+    config.buses[1].mute = false; AudioGraph* prepared = nullptr;
+    ASSERT_TRUE(audio_submix_graph_prepare(mix, graph, config, &prepared, &error));
+    bool committed = radiant_audio_graph_commit(document, graph, prepared, nullptr, 0, &error);
+    if (!committed) audio_graph_destroy(prepared);
+    EXPECT_FALSE(committed);
+    EXPECT_FALSE(radiant_media_route(document, media->audio_token, route, 0, &error));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 0, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    rdt_video_pause(media->player); media->play_requested = false;
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 1, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    radiant_audio_note_activation(document); media->play_requested = true; rdt_video_play(media->player);
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
 }
 
 TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers) {

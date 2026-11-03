@@ -964,8 +964,11 @@ Explicit offline PCM/WAV jobs are implemented and qualified in the bounded nativ
 Existing MIDI/speech providers now expose copied named-route controls, retained
 route references and explicit loss behavior through the shared submix. See the
 [provider contract](../../doc/Lambda_Packages.md#native-scene3d-midi-and-speech-routes).
-Provider export and ratified capture remain pending, as does shared-provider
-integration of existing video-track audio. See the
+Existing macOS video-track audio now decodes bounded stereo PCM into the same
+document submix and uses consumed samples for A/V time. Copied document-owned
+video tickets now join named routes through the same provider table, including
+the graph-edit activation guard; see the [qualified video-route component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-named-video-routes--qualified-2026-11-03).
+Provider export and ratified capture remain pending. See the
 [decoded-audio contract](../../doc/Lambda_Packages.md#shared-decoded-audio-foundation)
 and [qualified component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-shared-audio-playback-foundation--2026-11-03)
 (**D4.5.2 / D7.5.3v2 / D7.5.4**).
@@ -1021,8 +1024,8 @@ activation under **D7.5.4**, and stream completed output through existing
 procedural IO (**S12.1.1v3 / D7.5.3v2**). Referenced authored audio controls are
 copied without publishing live gain/routing changes. The [render-job contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
 records static-pose scope, virtual scaling, native limits and cancellation/
-teardown behavior (**D4.5.2 / D5.3.3**). Provider export/shared video integration,
-ratified capture and combined scene-motion/release qualification remain open.
+teardown behavior (**D4.5.2 / D5.3.3**). Provider export, ratified capture and
+combined scene-motion/release qualification remain open.
 
 ### 9.3 Microphone input
 

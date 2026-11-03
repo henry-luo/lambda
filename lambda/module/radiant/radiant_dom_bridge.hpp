@@ -15,6 +15,7 @@ struct DomDocument;
 struct StrBuf;
 
 Context* radiant_dom_resource_owner(DomDocument* document);
+int radiant_dom_url_attribute_get(Item receiver, Item* out, const char* attribute);
 
 // Native provider signatures share the runtime-owned schema (D7.1.3, D7.5.3).
 #define RADIANT_CANVAS_FONT_TEXT_MAX DOM_CANVAS_FONT_TEXT_MAX

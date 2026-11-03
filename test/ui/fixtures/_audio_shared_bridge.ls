@@ -11,6 +11,12 @@ pub pn request(owner, operation, token, value) map {
 }
 
 pub pn provider_request(owner, operation, token, value) {
+    if (operation == "video_open") { return dom.media_info(owner).audio_token }
+    if (operation == "video_read") { return dom.media_info(owner) }
+    if (operation == "video_command") {
+        if (dom.media_info(owner).audio_token != token) { return false }
+        return dom.media_command(owner,value,null)
+    }
     if (operation == "midi_open") {
         let font=input("lmd/package/music/soundfonts/TimGM6mb.sf2",'binary')^
         return dom.midi_open(owner,{seconds:0.5,events:[{seconds:0,status:144,a:60,b:100},{seconds:0.25,status:128,a:60,b:0}]},font)

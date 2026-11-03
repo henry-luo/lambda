@@ -511,8 +511,8 @@ bool radiant_speech_routing(DomDocument* doc, uint64_t token, AudioProviderInfo*
 }
 bool radiant_speech_graph_audible(DomDocument* doc, uint64_t graph) {
     auto* speech = document_speech(doc);
-    if (speech) for (auto* u : speech->queue) if (u->state < SPEECH_ENDED && u->state != SPEECH_PAUSED &&
-        !u->paused_request && u->options.volume > 0 && audio_submix_graph_has_route(u->submix, graph, u->route)) return true;
+    if (speech) for (auto* u : speech->queue) if (radiant_audio_graph_input_audible(u->submix, graph, u->route,
+        u->state < SPEECH_ENDED && u->state != SPEECH_PAUSED && !u->paused_request, u->options.volume)) return true;
     return false;
 }
 

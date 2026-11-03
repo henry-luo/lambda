@@ -2550,7 +2550,6 @@ RADIANT_C_API Item fn_radiant_media_info(Item node) {
     MediaViewState* media = radiant_media_prepare(elem);
     if (!media) return ItemNull;
     rdt_video_pump_events();
-    static const char* states[] = {"idle", "loading", "ready", "playing", "paused", "ended", "error"};
     RdtVideo* player = media->player;
     RdtVideoState state = player ? rdt_video_get_state(player) :
         media->source_pending ? RDT_VIDEO_STATE_LOADING : RDT_VIDEO_STATE_IDLE;
@@ -2562,7 +2561,8 @@ RADIANT_C_API Item fn_radiant_media_info(Item node) {
     if (state == RDT_VIDEO_STATE_ERROR) media->play_error = 2;
     RootFrame roots(1);
     Rooted<Item> result(roots, radiant_obj_new());
-    radiant_rooted_obj_set(result, "state", radiant_string_item(states[state]));
+    radiant_rooted_obj_set(result, "state", radiant_string_item(rdt_video_state_name(state)));
+    radiant_rooted_obj_set(result, "audio_token", player && rdt_video_has_audio(player) ? box_uint64_value(media->audio_token) : ItemNull);
     radiant_rooted_obj_set(result, "generation", radiant_int_item((int64_t)media->source_generation));
     radiant_rooted_obj_set(result, "play_error", radiant_int_item(media->play_error));
     radiant_rooted_obj_set(result, "paused", radiant_bool_item(!media->play_requested));
@@ -2624,12 +2624,10 @@ RADIANT_C_API Item fn_radiant_media_command(Item node, Item command, Item value)
         media->seek_time = number;
         if (player) rdt_video_seek(player, number);
     } else if (strcmp(action, "volume") == 0 && numeric && isfinite(number) && number >= 0 && number <= 1) {
-        media->volume = (float)number;
-        if (player) rdt_video_set_volume(player, media->volume);
+        if (!radiant_media_set_gain(elem->doc, media, (float)number, media->muted)) return radiant_bool_item(false);
     } else if (strcmp(action, "muted") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
-        media->muted = value.item == ITEM_TRUE;
+        if (!radiant_media_set_gain(elem->doc, media, media->volume, value.item == ITEM_TRUE)) return radiant_bool_item(false);
         media->muted_override = true;
-        if (player) rdt_video_set_muted(player, media->muted);
     } else if (strcmp(action, "loop") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
         if (player) rdt_video_set_loop(player, value.item == ITEM_TRUE);
     } else return radiant_bool_item(false);
@@ -5528,6 +5526,15 @@ static void* radiant_host_web_animation_create(DomElement* element, void* keyfra
         (const TimingFunction*)timing, pool);
 }
 
+static bool radiant_host_element_client_frame(DomNode* node, RdtMatrix* matrix, float* x, float* y) {
+    // snapshot the projected frame and its CSS-plane origin together at the engine owner (D7.1.3).
+    if (!node || !matrix || !view_get_client_matrix(node, matrix)) return false;
+    auto origin = view_geometry_block_viewport_origin(node);
+    if (x) *x = origin.x;
+    if (y) *y = origin.y;
+    return true;
+}
+
 static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_request_frame,
     fn_radiant_cancel_frame,
@@ -5587,7 +5594,11 @@ static const DomHostEngineOps radiant_host_operations = {
     dom_range_adopt_subtree,
     dom_range_refresh_lifecycle_pins,
     dom_selection_collapse,
-    dom_text_split_at
+    dom_text_split_at,
+    radiant_host_element_client_frame,
+    dom_boundary_from_source_pos,
+    editing_geometry_text_control_for_each_selection_rect,
+    radiant_dom_url_attribute_get
 };
 
 static const DomCollectionHostTypes radiant_collection_types = {
