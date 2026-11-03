@@ -910,13 +910,16 @@ static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool conten
 
 template <typename Contribute>
 static void ruby_position_annotation_levels(ViewSpan* ruby, LayoutRubySegment* segment,
-        Rect base_bounds, bool after_line, Contribute contribute) {
+        Rect base_bounds, int line_number, bool after_line, Contribute contribute) {
     float before_edge = base_bounds.y, after_edge = base_bounds.y + base_bounds.height;
     bool over_at_end = layout_line_over_is_block_end(layout_nearest_block_ancestor(ruby));
     bool previous_under = true;
+    ViewBlock* flow = layout_nearest_block_ancestor(ruby);
+    // the completed source line, not an annotation IFC's temporary line, owns first-line inheritance.
+    DomElement* first_line_origin = line_number == 0 && flow ? flow->as_element() : nullptr;
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
         CssEnum position = css_prop_compute_cascaded_keyword(level->element ? level->element : ruby,
-            CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE);
+            CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE, first_line_origin, PSEUDO_ELEMENT_FIRST_LINE);
         bool under = position == CSS_VALUE_UNDER || (position == CSS_VALUE_ALTERNATE && !previous_under);
         // CSS Writing Modes §6.3: semantic line-over can be the source block-end side.
         bool block_after = under != over_at_end;
@@ -1018,7 +1021,7 @@ static void ruby_place_annotation_levels(LayoutContext* context, ViewSpan* ruby,
         if (is_under) under = max(under, distance);
         else over = max(over, distance);
     };
-    ruby_position_annotation_levels(ruby, segment, base, false, contribute);
+    ruby_position_annotation_levels(ruby, segment, base, context->block.line_number, false, contribute);
     if (visible) ruby_contribute_line_metrics(context, base_line, &segment->base,
         baseline, line_height, base, over, under);
 }
@@ -1241,7 +1244,7 @@ static void ruby_align_annotation_model(ViewSpan* ruby, LayoutRubyModel* model,
         Rect base = ruby_level_bounds(&segment->base);
         if (base.height <= 0.0f) base = empty_base;
         auto no_contribution = [](LayoutRubyLevel*, Rect, bool) {};
-        ruby_position_annotation_levels(ruby, segment, base, true, no_contribution);
+        ruby_position_annotation_levels(ruby, segment, base, line_number, true, no_contribution);
     }
 }
 
@@ -1449,7 +1452,8 @@ static void ruby_flow_unbroken_segments(LayoutContext* context, ViewSpan* ruby,
         // block Ruby is outside the ordinary inline ancestor callback chain.
         for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
             Rect base = ruby_level_bounds(&segment->base);
-            ruby_position_annotation_levels(ruby, segment, base, true, [](LayoutRubyLevel*, Rect, bool) {});
+            ruby_position_annotation_levels(ruby, segment, base, segment->line_number, true,
+                [](LayoutRubyLevel*, Rect, bool) {});
         }
     }
 }

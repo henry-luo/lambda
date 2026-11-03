@@ -336,10 +336,19 @@ static DomElement* cssom_inheritance_parent(DomElement* element) {
     return element->doc && element == element->doc->root ? nullptr : dom_parent_element(element);
 }
 
-static DomElement* cssom_inherited_source(DomElement* element, int* pseudo_type) {
+struct CssomInheritanceProjection {
+    DomElement* origin;
+    int pseudo_type;
+};
+
+static DomElement* cssom_inherited_source(DomElement* element, int* pseudo_type,
+        const CssomInheritanceProjection* inheritance = nullptr) {
     // a generated pseudo inherits from its originating element before walking further ancestors.
     if (*pseudo_type != 0) { *pseudo_type = 0; return element; }
-    return cssom_inheritance_parent(element);
+    DomElement* parent = cssom_inheritance_parent(element);
+    // a selected fragment inherits through its originating pseudo before the normal block.
+    if (inheritance && parent == inheritance->origin) *pseudo_type = inheritance->pseudo_type;
+    return parent;
 }
 
 static ArrayList* cssom_collect_style_ancestors(DomElement* element) {
@@ -548,8 +557,11 @@ static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
 static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, StringBuf* out,
                                      Pool* scratch, bool preserve_color_model,
-                                     const CssomValueTarget* native_value) {
+                                     const CssomValueTarget* native_value,
+                                     const CssomInheritanceProjection* inheritance) {
     if (!element) return false;
+    if (inheritance && element == inheritance->origin && pseudo_type == 0)
+        pseudo_type = inheritance->pseudo_type;
     DomElement* receiver = element;
     int receiver_pseudo = pseudo_type;
     bool ruby_bidi = false;
@@ -618,10 +630,9 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             : component_shorthand ? declaration->property_code : id;
         value = css_project_shorthand_longhand(scratch, value, projection, id);
         if (cssom_value_inherits(value, id)) {
-            DomElement* parent = cssom_inherited_source(element, &pseudo_type);
+            DomElement* parent = cssom_inherited_source(element, &pseudo_type, inheritance);
             if (parent) {
                 element = parent;
-                pseudo_type = 0;
                 continue;
             }
             value = nullptr;
@@ -691,10 +702,12 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
 
 static bool consume_cascaded_value(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out,
-                                 bool preserve_color_model, const CssomValueTarget* native_value) {
+                                 bool preserve_color_model, const CssomValueTarget* native_value,
+                                 const CssomInheritanceProjection* inheritance = nullptr) {
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    bool result = consume_inherited_decl(element, id, pseudo_type, out, scratch, preserve_color_model, native_value);
+    bool result = consume_inherited_decl(element, id, pseudo_type, out, scratch,
+        preserve_color_model, native_value, inheritance);
     pool_destroy(scratch);
     return result;
 }
@@ -712,10 +725,17 @@ static bool cssom_consume_keyword(DomElement*, const CssValue* value, int, void*
 
 CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
         CssEnum fallback) {
+    return css_prop_compute_cascaded_keyword(element, id, fallback, nullptr, 0);
+}
+
+CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
+        CssEnum fallback, DomElement* inherited_pseudo_origin, int inherited_pseudo_type) {
     CssEnum result = fallback;
     CssomValueTarget target = {cssom_consume_keyword, &result};
     // native enum consumers share CSSOM's inheritance, resets and substitution.
-    return consume_cascaded_value(element, id, 0, nullptr, false, &target) ? result : fallback;
+    CssomInheritanceProjection projection = {inherited_pseudo_origin, inherited_pseudo_type};
+    return consume_cascaded_value(element, id, 0, nullptr, false, &target,
+        inherited_pseudo_origin && inherited_pseudo_type ? &projection : nullptr) ? result : fallback;
 }
 
 struct CssomTextCombine { CssEnum mode; float digits; };

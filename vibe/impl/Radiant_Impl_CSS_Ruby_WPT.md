@@ -18,6 +18,8 @@ envelopes are qualified. Inline margin contributions and source border-box
 publication are also qualified. The objective is not complete.
 Semantic line-over/under mapping and internal block-start padding are qualified
 for ordinary Ruby across horizontal and both vertical writing modes.
+First-line position inheritance is qualified for selected horizontal source
+fragments, including retained line membership changes.
 
 ## Objective and contracts
 
@@ -2640,3 +2642,77 @@ coupling it to a dummy first-line font override or patching only final geometry.
 The existing font resolver correctly declines rules with no font properties.
 Evidence and bounded acceptance cases:
 `temp/ruby-m29/{first-line-comparison.json,next-milestone.json}`.
+
+## M30: first-line Ruby position follows the selected source fragment
+
+P1, completed with the boundary-check limit below. Imported
+`pseudo-first-line` ignores the applicable first-line `ruby-position`. An
+explicit-font probe isolates two incorrect reading/text Y coordinates while
+color-only, local Ruby override, constant-under and later-line controls agree
+geometrically. The strict regression also demonstrates an incorrect tight-line
+advance before the repair. Evidence: `temp/ruby-m29/first-line-comparison.json`
+and `temp/ruby-m30/focused-before.log`.
+
+[CSS Pseudo §2.1.2–2.1.3](https://drafts.csswg.org/css-pseudo-4/#first-line-styling)
+applies `ruby-position` to first-line fragments through inherited style. The
+shared native keyword consumer now accepts an optional originating pseudo in
+its inheritance path. Local declarations resolve first; an inheriting child
+then visits the originating pseudo before the normal block. The existing
+substitution, validation, CSS-wide defaulting and initial-value consumer remain
+shared. The existing three-argument API remains intact, and ordinary CSSOM
+ancestry is unchanged. No dummy font is allocated to activate a non-font rule.
+
+Ruby initial placement, metric contribution and after-line alignment pass the
+explicit selected source line number. Existing segment membership and completed
+line callbacks already retain that fact, including source-text fragments; no
+new persistent style cache or source mutation is needed. The pseudo origin is
+borrowed only for the synchronous read (**D4.5.1v4 / D4.1.4v5**), and the shared
+API stays within the CSS/layout module (**D7.3.3–D7.3.4**).
+
+Two regressions cover inherited position, color-only/local/ancestor overrides,
+inherit/initial/unset/invalid substitution, normal under with first-line over,
+soft/forced breaks, tight-line padding/advance, and live width/custom-property
+changes. A single Ruby source also spans one, two or three selected lines;
+only its first fragment inherits the pseudo. Source identities and reading
+character geometry survive edits, and normal computed keyword reads stay
+ordinary. All **150 focused neighbors** pass. Evidence:
+`temp/ruby-m30/{focused-fragments.log,neighbors-final.log}`.
+
+Five browser states agree on all **3,000 element/whole-source bounding coordinates**,
+with 0px maximum delta. Native JSON exports separate text fragments, so the
+local analysis helper groups them by their original source offsets and compares
+source unions. A separate full fragment audit retains **3,072 checks**, including
+six last-fragment width differences: native pairs two reading words with the
+first two base words, while Chromium pairs one reading word with them and two
+with the last base word. [CSS Ruby §3.4.2](https://drafts.csswg.org/css-ruby-1/#break-within)
+permits different matching break opportunities. Those differences remain in
+the artifact; no engine, upstream reference or raw comparator change forces
+a particular UA partition. Evidence: `temp/ruby-m30/{browser-union-comparison-final.json,
+browser-comparison-final.json,fragment-choice-audit.json}`.
+
+The raw suite reaches **60/212 full matches**, gaining `pseudo-first-line`,
+with no lost match or changed partial score. Dimension lint and the 421-name
+inventory check pass; only source/test reference columns change. Strict boundary
+DSOs link; the checker rejects the same six recorded imports as M29, with no
+added import or allowlist change.
+Evidence: `temp/ruby-m30/{wpt-final.log,delta-final.json,lint-final.log,
+inventory-check.log,boundary-comparison.json,source-inputs.json}`.
+
+The required Radiant aggregate passes: **9,093 passed, 305 partial, 2 skipped,
+0 failed / 9,400 checks**, including **497 native text-query**, **504 paged-media**
+and **752 UI automation** checks. Layout retains 4,973 full / 301 partial
+matches. All six frozen inputs and the qualified CLI hash remain unchanged
+after the gate. Evidence: `temp/ruby-m30/{radiant.log,qualification-result.json}`.
+
+The goal remains active with 152 raw mismatches. Next is containing-block float
+exclusion during Ruby column completion. A reduced source probe places the
+same base at x22 for ordinary inline, unannotated Ruby and a disabled reading;
+a visible reading moves it back to x8 across a 14px float margin box. LLDB
+confirms that column alignment translates an already-flowed local x14 to the
+obsolete x0 cursor. CSS Ruby §2.1.1 retains containing-block float ownership.
+Chromium instead computes nested Ruby floats to `none` in the causal controls,
+so that browser behavior cannot justify suppressing native floats. Trace the
+source-origin/column-completion protocol, keeping ordinary and disabled-reading
+controls and retained edits. Evidence and bounded acceptance cases:
+`temp/ruby-m30/next-milestone.json` and
+`temp/ruby-m31/{float-cause-coordinates.json,float-cause-debugger.log,float-browser.json}`.

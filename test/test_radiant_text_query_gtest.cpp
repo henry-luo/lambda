@@ -15123,6 +15123,122 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyFirstLinePositionChangesAcrossOneFragmentedSource) {
+    ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    DomElement* row = dom_find_element_by_id(document->root, "fragmented");
+    DomElement* ruby = dom_find_element_by_id(document->root, "fragmented-ruby");
+    DomElement* reading = dom_find_element_by_id(document->root, "fragmented-reading");
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(reading, nullptr);
+    DomText* base = first_text_leaf(ruby), *annotation = first_text_leaf(reading);
+    ASSERT_NE(base, nullptr); ASSERT_NE(annotation, nullptr);
+    DomNode* base_parent = base->parent, *reading_parent = annotation->parent;
+    const unsigned char* base_data = base->text_data(), *reading_data = annotation->text_data();
+    const struct { const char* width; unsigned line[3]; } widths[] = {
+        {"140px", {0, 0, 1}}, {"80px", {0, 1, 2}}, {"400px", {0, 0, 0}}, {"140px", {0, 0, 1}}};
+    for (bool under : {true, false, true}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(row, "--first-side", under ? "under" : "over"));
+        for (const auto& state : widths) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", state.width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_EQ(first_text_leaf(ruby), base); EXPECT_EQ(first_text_leaf(reading), annotation);
+            EXPECT_EQ(base->parent.get(), base_parent); EXPECT_EQ(annotation->parent.get(), reading_parent);
+            EXPECT_EQ(base->text_data(), base_data); EXPECT_EQ(annotation->text_data(), reading_data);
+            DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+            Rect first = {}; ASSERT_TRUE(character_rect(range, base, 0, &first));
+            for (unsigned word = 0; word < 3; word++) {
+                Rect source = {}, parallel = {};
+                ASSERT_TRUE(character_rect(range, base, word * 4, &source));
+                ASSERT_TRUE(character_rect(range, annotation, word * 7, &parallel));
+                EXPECT_FLOAT_EQ(source.y, first.y + (float)state.line[word] * 40.0f);
+                EXPECT_FLOAT_EQ(parallel.y, source.y + (under && state.line[word] == 0 ? 20.0f : -10.0f));
+                EXPECT_FLOAT_EQ(source.height, 20.0f); EXPECT_FLOAT_EQ(parallel.height, 10.0f);
+            }
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(ruby, CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE),
+                CSS_VALUE_ALTERNATE);
+            dom_range_release(range);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyFirstLinePositionFollowsSelectedLineInheritanceAndMetrics) {
+    ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool projected; bool authored_under; bool normal_under; bool soft; bool tight;
+        CssEnum normal_keyword = CSS_VALUE_ALTERNATE;
+        DomText* base[2]; DomText* reading[2]; DomNode* parent[2]; const unsigned char* data[2];
+    } cases[] = {{"under", true, true}, {"color"}, {"local", false, false, false, false, false, CSS_VALUE_OVER},
+        {"inherit", true, true}, {"initial"},
+        {"unset", true, true}, {"invalid", true, true}, {"normal-under", true, false, true},
+        {"constant", false, false, true}, {"ancestor", false, false, false, false, false, CSS_VALUE_OVER},
+        {"soft", true, true, false, true},
+        {"tight", true, true, false, false, true}};
+    auto part = [&](const Case& entry, size_t second, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s-%s", entry.id, second ? "-second" : "", suffix); return find(id);
+    };
+    for (Case& entry : cases) for (size_t line = 0; line < 2; line++) {
+        entry.base[line] = first_text_leaf(part(entry, line, "ruby"));
+        entry.reading[line] = first_text_leaf(part(entry, line, "reading"));
+        ASSERT_NE(entry.base[line], nullptr); ASSERT_NE(entry.reading[line], nullptr);
+        entry.parent[line] = entry.reading[line]->parent; entry.data[line] = entry.reading[line]->text_data();
+    }
+    enum class Width { Authored, Wide, Narrow };
+    enum class Rule { Authored, Over, Under };
+    auto check = [&](Width width, Rule rule) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-first-line-position"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            for (size_t second = 0; second < 2; second++) {
+                ASSERT_NE(entry.base[second]->rect, nullptr);
+                int line = entry.base[second]->rect->line_number;
+                int expected_line = width == Width::Narrow ? (second ? entry.soft ? 2 : 3 : 1)
+                    : second && !(entry.soft && width == Width::Wide) ? 1 : 0;
+                EXPECT_EQ(line, expected_line);
+                bool under = entry.normal_under;
+                if (entry.projected && line == 0)
+                    under = rule == Rule::Authored ? entry.authored_under : rule == Rule::Under;
+                DomElement* ruby = part(entry, second, "ruby"), *reading = part(entry, second, "reading");
+                EXPECT_EQ(css_prop_compute_cascaded_keyword(ruby, CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE),
+                    entry.normal_under ? CSS_VALUE_UNDER : entry.normal_keyword);
+                Rect base = {}, annotation = {};
+                view_get_visual_bounds(ruby, &base.x, &base.y, &base.width, &base.height);
+                view_get_visual_bounds(reading, &annotation.x, &annotation.y, &annotation.width, &annotation.height);
+                EXPECT_FLOAT_EQ(base.width, 80.0f); EXPECT_FLOAT_EQ(base.height, 20.0f);
+                EXPECT_FLOAT_EQ(annotation.x, base.x); EXPECT_FLOAT_EQ(annotation.width, 80.0f);
+                EXPECT_FLOAT_EQ(annotation.height, 10.0f);
+                float y = under ? base.y + base.height : base.y - annotation.height;
+                EXPECT_FLOAT_EQ(annotation.y, y);
+                EXPECT_EQ(first_text_leaf(reading), entry.reading[second]);
+                EXPECT_EQ(entry.reading[second]->parent.get(), entry.parent[second]);
+                EXPECT_EQ(entry.reading[second]->text_data(), entry.data[second]);
+                for (unsigned character = 0; character < 8; character++)
+                    expect_character_rect(range, entry.reading[second], character,
+                        {base.x + (float)character * 10.0f, y, 10.0f, 10.0f});
+            }
+            if (entry.tight && width != Width::Narrow) {
+                bool first_under = rule == Rule::Authored ? entry.authored_under : rule == Rule::Under;
+                // padding hosts first-line over-leading; an under reading must reserve its own advance.
+                EXPECT_FLOAT_EQ(find(entry.id)->height, first_under ? 80.0f : 70.0f);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(Width::Authored, Rule::Authored); }
+    for (Width width : {Width::Wide, Width::Narrow, Width::Authored}) {
+        for (const Case& entry : cases)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "width",
+                width == Width::Wide ? "400px" : width == Width::Narrow ? "130px" : "300px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(width, Rule::Authored);
+    }
+    for (Rule rule : {Rule::Over, Rule::Under}) {
+        for (const Case& entry : cases)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "--first-side", rule == Rule::Over ? "over" : "under"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(Width::Authored, rule);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyLineSidesFollowLineOverWithoutReversingBlockProgression) {
     ASSERT_NE(load("test/html/layout_ruby_line_sides.html"), nullptr);
     process_document_font_faces(&ui, document);

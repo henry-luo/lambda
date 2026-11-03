@@ -107,6 +107,9 @@ String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
 CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
     CssEnum fallback);
+// selected fragments may inherit through an originating pseudo without changing ordinary CSSOM ancestry.
+CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
+    CssEnum fallback, DomElement* inherited_pseudo_origin, int inherited_pseudo_type);
 CssEnum css_prop_compute_cascaded_text_combine(DomElement* element, float* digit_limit);
 uint8_t css_prop_compute_cascaded_containment(DomElement* element);
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
