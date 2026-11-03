@@ -2764,7 +2764,7 @@ Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
     return lambda_type_error_with_validation(actual, expected, boundary, NULL);
 }
 
-static Type* binder_narrowest_type(Item value) {
+Type* lambda_binder_value_type(Item value) {
     Type scratch = {};
     Type* narrowest = item_static_type_for_is(value, &scratch);
     if (!narrowest) return &TYPE_ANY;
@@ -2809,7 +2809,7 @@ static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
     if (!binder || !converted || !runtime_type_admit_value_env(value,
             binder->bound, env, converted)) return false;
     if (!env) return true;
-    Type* narrowest = binder_narrowest_type(*converted);
+    Type* narrowest = lambda_binder_value_type(*converted);
     Type* prior = env[binder->slot];
     // NULL is the per-invocation unbound marker. A reference resolves to its
     // declared bound until the first binder site writes the concrete type,

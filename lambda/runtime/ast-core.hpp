@@ -1402,15 +1402,13 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
 
     AstNode* root_expr = ast_cow_value_source(expr);
     if (!root_expr) return target_tid == LMD_TYPE_ANY;
+    // S7.7.4v2/S9.1.2: a fallible object constructor still owns its successful
+    // container. Use the shared producer classification for boxed outcomes too.
+    if (ast_expr_produces_owned_container(root_expr)) return true;
     switch (root_expr->node_type) {
-    case AST_NODE_ARRAY:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT:
-    case AST_NODE_LIST:
     case AST_NODE_IDENT:
     case AST_NODE_INDEX_EXPR:
     case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_CALL_EXPR:
     case AST_NODE_IF_EXPR:
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_FOR_EXPR:
@@ -1418,8 +1416,7 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_PIPE:
         return true;
     case AST_NODE_BINARY:
-        return ast_join_produces_fresh_array(root_expr) ||
-            ((AstBinaryNode*)root_expr)->op == OPERATOR_OR ||
+        return ((AstBinaryNode*)root_expr)->op == OPERATOR_OR ||
             ((AstBinaryNode*)root_expr)->op == OPERATOR_AND ||
             ((AstBinaryNode*)root_expr)->op == OPERATOR_THAT;
     default:

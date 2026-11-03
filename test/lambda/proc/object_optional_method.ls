@@ -4,6 +4,11 @@ type R {
     fn read() => [name, value, tail]
     pn set(flag: bool, v: int?) { if (flag) { value = v } }
 }
+type Counter {
+    value: int,
+    fn read() => value
+    pn step() { value = value + 1 }
+}
 pn main() {
     var r = <R name: "r">
     r.read()^
@@ -14,4 +19,8 @@ pn main() {
     print(['value' at r, len(r), r.value, 'value' at before, len(before)]); print("\n")
     r.set(true, 7)^
     print(r.read()); print("\n")
+    var counter = <Counter value: 1>
+    let saved = counter
+    counter.step()^
+    print([saved.value, counter.value]); print("\n")
 }

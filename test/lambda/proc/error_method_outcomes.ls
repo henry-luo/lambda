@@ -34,11 +34,12 @@ pn main() {
     let bad_field = bad_holder.lower()
     var mutable_bad = custom_outcome(true)
     var mutable_good = custom_outcome(false)
+    let bad_snapshot = mutable_bad
     let refused = mutable_bad.visit()
     let visited = mutable_good.visit();
     [safe_enum("LEFT", ["left", "right"]), safe_enum("invalid", ["left"]),
      good, failed is error, failed.message, chained, failed_chain.message,
      method, bad_method is error, bad_method.message,
      field, bad_field is error, bad_field.message,
-     refused is error, refused.message, visited]
+     refused is error, refused.message, visited, bad_snapshot is error]
 }

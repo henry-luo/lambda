@@ -1070,7 +1070,7 @@ S7.6.3v3/S7.7.2v2 counted fill qualification keeps producer propagation before
 destination validation: `let a: int[2] = fill(n, 1)^` retains a length mismatch
 at `a` and continues, while an invalid fill count propagates. Uncounted numeric
 literal fill success has a static membership proof; runtime storage admission
-is still required. The focused tier/GC matrix passes 232/232.
+is still required. The focused tier/GC matrix passes 256/256.
 S7.6.3v3/D2.4.1 dynamic dispatch preserves its boxed outcome until propagation
 checks it, including when a loop continuation calls an existing module
 definition. The deterministic handoff regression checks both normal values
@@ -1087,6 +1087,20 @@ revalidation. Boxed tails enter that gate as Items, avoiding a second boxing.
 S7.6.3v3 boolean system-call producers also publish whether they boxed their
 outcome before `^`; the normal bool type does not describe that earlier
 physical representation. These fixes retain the pending union-policy question.
+S11.4.8v2/S4.2.2/D8.3.1v2 exact raw scalar value-binder keys use the same semantic type as
+runtime binding, rather than retaining a singleton literal. Selection follows
+parameter admission: conversion-dependent static inference retains an
+approximation, and scalar raw entries require full membership and the admitted
+kind before bypassing the checked entry. S7.7.3/S9.1.2 method preparation also
+keeps an incoming error as the call's outcome when its receiver has a snapshot.
+S7.7.4v2/S9.1.2 boxed constructor outcomes also retain successful container ownership and
+snapshots across procedure-method writes. D8.3.3 forward calls whose native
+plan is not established use the stable public Item entry; a later native
+specialization cannot reinterpret tagged arguments. The full LaTeX corpus
+now matches its JIT golden after this boundary repair. A complete interpreter
+sweep still reports legacy and vendor divergences and has not published new
+manifests; detailed comparisons and qualification limits are in the
+[implementation record](impl/Lambda_Impl_Type_Error_Handling.md).
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

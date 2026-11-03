@@ -3468,7 +3468,7 @@ static TypeBinder* static_contract_binder_site(Type* type, int depth = 0) {
     return NULL;
 }
 
-static Type* static_contract_resolve_binder(Type* type, Type** env, int depth = 0) {
+Type* lambda_ast_resolve_binder_contract(Type* type, Type** env, int depth) {
     if (!type || depth > 64 || type->type_id != LMD_TYPE_TYPE) return type;
     if (type->kind == TYPE_KIND_BINDER) return ((TypeBinder*)type)->bound;
     if (type->kind == TYPE_KIND_BOUND_REF) {
@@ -3478,13 +3478,33 @@ static Type* static_contract_resolve_binder(Type* type, Type** env, int depth = 
     return type;
 }
 
-static Type* static_binder_argument_type(AstNode* argument, TypeBinder* binder) {
+static Type* static_binder_argument_type(AstNode* argument, TypeBinder* binder,
+        bool* exact) {
+    *exact = true;
     if (!argument || !argument->type || !binder) return NULL;
+    Type* candidate = boundary_unwrap_type(argument->type);
     if (binder->bound == &TYPE_TYPE) {
-        if (!ast_is_explicit_type_value(argument)) return NULL;
-        return boundary_unwrap_type(argument->type);
+        return ast_is_explicit_type_value(argument) ? candidate : NULL;
     }
-    return boundary_unwrap_type(argument->type);
+    // S11.4.8v2/S4.2.2: a value binder selects a type, not a scalar singleton.
+    Item literal;
+    if (lambda_literal_contract_value(candidate, &literal))
+        candidate = lambda_binder_value_type(literal);
+    else if (candidate && candidate->is_literal &&
+            is_native_param_type_id(candidate->type_id))
+        candidate = type_info[candidate->type_id].type;
+    LaneStorageDesc admitted = {};
+    if (candidate && (candidate->type_id == LMD_TYPE_ANY ||
+            (is_native_param_type_id(candidate->type_id) &&
+             lambda_type_lane_storage_desc(binder->bound, &admitted) &&
+             admitted.base_contract &&
+             admitted.base_contract->type_id != candidate->type_id))) {
+        // Admission can change the kind before selection. Keep its bound as
+        // the caller's approximation, never an exact raw-specialization key.
+        *exact = false;
+        return binder->bound;
+    }
+    return candidate;
 }
 
 static Type* static_binder_join(Type* left, Type* right) {
@@ -3504,12 +3524,13 @@ static Type* static_binder_join(Type* left, Type* right) {
 }
 
 static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
-        AstNode* argument) {
+        AstNode* argument, bool require_exact = false) {
     if (!env || !written || !binder || binder->slot >= LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
     }
-    Type* candidate = static_binder_argument_type(argument, binder);
-    if (!candidate) return false;
+    bool exact = false;
+    Type* candidate = static_binder_argument_type(argument, binder, &exact);
+    if (!candidate || (require_exact && !exact)) return false;
     if (!written[binder->slot]) {
         env[binder->slot] = candidate;
         written[binder->slot] = true;
@@ -3537,7 +3558,7 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         TypeBinder* binder = param->binder ? param->binder :
             static_contract_binder_site(parameter_boundary_type(param));
         if (!binder) continue;
-        if (!static_bind_argument(env_out, written, binder, argument)) return false;
+        if (!static_bind_argument(env_out, written, binder, argument, true)) return false;
     }
     for (uint16_t i = 0; i < func_type->binder_count; i++) {
         if (!written[i] || !env_out[i]) return false;
@@ -3818,7 +3839,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             }
         }
         Type* full_type = parameter_boundary_type(expected_param);
-        full_type = static_contract_resolve_binder(full_type, binder_env);
+        full_type = lambda_ast_resolve_binder_contract(full_type, binder_env);
         if (binder_site) full_type = binder_site->bound;
         if (parameter_short_circuits_argument_error(tp, expected_param, arg)) {
             parameter_short_circuits_error = true;
@@ -3850,7 +3871,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     }
     if (func_type->binder_count) {
         Type* result_contract = function_success_result_type(func_type);
-        Type* resolved_result = static_contract_resolve_binder(result_contract,
+        Type* resolved_result = lambda_ast_resolve_binder_contract(result_contract,
             binder_env);
         if (resolved_result && resolved_result != result_contract) {
             call->type = func_type->can_raise && func_type->error_type

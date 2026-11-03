@@ -683,6 +683,14 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)stmt;
             AstNode* callee_node = ast_unwrap_primary(call->function);
+            if (call->is_proc_method && callee_node &&
+                    callee_node->node_type == AST_NODE_MEMBER_EXPR) {
+                // S9.1.2: the implicit receiver is a mutable argument too.
+                // Ignoring it lets an alias borrow survive a method write.
+                AstIdentNode* receiver = ast_compound_root_ident(
+                    ((AstFieldNode*)callee_node)->object);
+                if (receiver && receiver->entry == root) return true;
+            }
             AstFuncNode* callee = NULL;
             if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* fn_ident = (AstIdentNode*)callee_node;

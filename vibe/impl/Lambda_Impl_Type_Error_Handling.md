@@ -1592,3 +1592,133 @@ completion sources; MIR's retained-local scans already distinguish them.
 An optimization needs a concrete producer/consumer witness and must preserve
 parameter/store containment and explicit propagation. This is an investigation
 entry point, not a claim that it explains all four remaining budget failures.
+
+
+### Completed interpreter sweep and forward-boundary repairs (2026-11-03)
+
+The complete `interp-sweep --jobs 3` examined **1,437** scripts: **1,416**
+matched, **9** were excluded and **12** mismatched, with no timeouts. Its
+failure prevented manifest publication; all three interpreter manifests remain
+unchanged. Each mismatch was replayed with the original source/compiler in its
+own checkout (S1.6). Eight already diverged there: six chart error-control
+fixtures, `type_param_error_short_circuit`, and `proc/mir_mvp_roots`. Four were
+new relative to that original pair: value-binder return admission, optional
+object snapshots, the full LaTeX corpus, and the separately isolated vendor MIR
+loop optimizer defect. The vendor remains unchanged pending explicit approval.
+Evidence: `m3-return-outcomes-final-interp-sweep.log`, `temp/sweep_full.tsv`,
+and `m4-sweep-mismatch-review.{json,log}`.
+
+Three Lambda-side root causes are repaired:
+
+- **S11.4.8v2/S4.2.2/D8.3.1v2:** static scalar value-binder selection uses
+  the runtime binder's semantic type normalization. A concrete float literal
+  had bound `N` to singleton `1.5`, so the newly enforced return boundary
+  rejected `increment(1.5) => 2.5`. The shared AST collector already reaches
+  embedded binder sites; normalizing there feeds both caller-visible result
+  types and MIR keys. Runtime and compiler reuse the promoted
+  `lambda_binder_value_type` helper. Explicit type binders retain Type identity,
+  and existing container-key planning is retained. A conversion-dependent
+  selection uses its bound as a conservative static approximation and cannot
+  establish an exact raw key. Scalar raw arguments additionally require full
+  value-set inclusion and an already-matching admission kind. The existing
+  binder-contract resolver is shared by AST validation and MIR planning.
+- **S7.7.4v2/S9.1.2:** a fallible object constructor still owns its successful
+  container after its result becomes an Item. Boxed outcomes now reuse the
+  shared fresh-container classification, including object literals and `new`.
+  The mutation walk also recognizes a procedure method's implicit receiver,
+  so a read-only alias optimization cannot span a method write. The optional
+  presence snapshot and a simple counter snapshot agree on both tiers.
+- **D2.4.1/D8.3.3:** a forward raw target without a native plan can gain native
+  parameters when its body is lowered. Such calls now use its stable boxed
+  public entry; already lowered bodies and proven native plans retain their
+  direct routes. The LaTeX macro scanner had received an Item-tagged length in
+  a later native integer parameter and recursed until E308. A macro with a
+  parameter count and no body reproduces this in isolation. The new paired
+  fixture covers that scanner boundary alongside an ordinary successful macro.
+
+The expanded matrix passes **256/256** executions across interpreter, JIT,
+AUTO, immediate promotion, and forced/poison GC. All 14 macros in the reduced
+Vietnamese document agree across interpreter/JIT with and without forced GC.
+The complete **31-document LaTeX corpus** now matches its golden under JIT
+(exit 0), using a frozen final executable. This fixes all three newly found
+Lambda-side divergences; it is not a claim that the complete sweep or its
+manifests are green. Evidence: `m4-forward-entry-focused.log`,
+`m4-macro-vietnamese-forward-entry.json`, and `m4-latex-forward-entry.json`.
+Final rebuilt native/aggregate qualification for this checkpoint remains
+pending below; no safety assertion, emission budget or interpreter manifest
+was relaxed.
+
+The first rebuilt aggregate for these repairs completed **6,441/6,450**:
+MIR GC **351/351**, error diagnostics **321/321**, MIR emission **278/280**,
+and runtime fixtures **2,002/2,004**. It exposed an overbroad binder-key
+normalization in the initial repair: the caller-attribution profile lost its
+two distinct array-shape raw variants. Normalization through the complete
+binder table is now limited to scalar selections, retaining the original
+container-key planning and exact profile assertions. That profile check
+passes after the correction. Final aggregate qualification must use the
+corrected source, not count the first aggregate as a passing checkpoint.
+Evidence: `m4-forward-entry-final-lambda.log` and
+`m4-scalar-binder-native-profile.log`.
+
+A separate matrix-binder type-identity probe also found a **pre-existing**
+S11.4.8v2 discrepancy: T0 and an intentionally boxed JIT entry select the
+admitted matrix contract, while an exact raw entry can report broad `array`.
+Both the current and original compiler/source reproduce it. It remains
+recorded as binder-planning debt; this scalar fix does not claim complete
+container-binder equivalence. The exploratory probe was not added as a new
+passing regression fixture. Evidence: `_binder-array-identity-probe.ls` and
+its replay under `base-proof-audit/temp/error-handling/`.
+
+
+A further S7.7.3/S9.1.2 boundary probe retains a snapshot of an error-valued
+mutable method receiver, then binds the outcome of its procedure method call.
+T0 continues with that error at the receiving binding; JIT returned it from the
+enclosing procedure while preparing the shared COW receiver. Method preparation
+now bypasses an incoming error, leaving ordinary member/call dispatch to produce
+the call's outcome. Successful receivers still detach before the bound method
+closure captures them. `error_method_outcomes` retains and inspects the snapshot
+after the refused call. Container-store containment is unchanged (S7.7.6v2).
+The scalar-only binder correction passes the previously failed
+caller-attribution profile check with its exact raw-variant assertions
+unchanged. The additional method-outcome change requires a fresh focused run
+and rebuilt qualification below.
+
+
+With the original container-key behavior retained and the method-receiver
+preparation corrected, the final focused matrix again passes **256/256**.
+The independent error-receiver snapshot probe now returns
+`[true, true, true]` on both tiers instead of an unhandled JIT error.
+Evidence: `m4-method-snapshot-focused.log` and
+`_error-method-snapshot-probe.ls`. Final native runners are rebuilding from
+this same source before aggregate qualification.
+
+
+S11.4.8v2 also requires selecting **after parameter admission**. A final
+numeric probe found `float as F` receiving integer `1` selected `int` under JIT,
+while T0 correctly selected `float`; `int as I` receiving `1.0` had the inverse
+mismatch. Static inference now keeps a conversion-dependent bound as an
+approximation, withholds exact raw-key evidence, and leaves admission to the
+checked entry. The raw-key planner resolves ordinary/dependent scalar formals
+against the invocation's type selections, requires value-set inclusion, and
+rejects a kind-changing argument. This covers explicit type arguments as well
+as value binders; it does not change the pending error-union conversion policy.
+The expanded binder fixture checks both conversions, matching-kind calls,
+explicit `identity(float, 1)` / `identity(int, 1.0)`, and repeated binder sites
+sharing their required common bound. The independent numeric probe now matches
+on both tiers. Fresh focused/native/aggregate qualification is required for
+this final binder-inference refinement.
+
+
+The final binder-inference source passes the expanded **256/256** focused
+matrix. Rebuilt aggregate qualification completes **6,442/6,450**, with the
+same eight outstanding checks: the two union-policy-dependent emission cases,
+four size ratchets, the vendor-loop parity case, and the pre-existing
+`proc/mir_mvp_roots` AUTO/T0 mismatch. Native optimization is **55/55**, MIR GC
+**351/351**, and error diagnostics **321/321**. Input baselines pass
+**2,112/2,112**, map **20/20**, and the selected native view/Scene3d checks
+**11/11**. No assertion, size budget, or timeout was relaxed. Evidence:
+`m4-admitted-binder-final-focused.log`, `m4-admitted-final-lambda.log`, its
+per-suite directory, `m4-admitted-final-input.log`, and
+`m4-admitted-final-{map,native-view-gui}.json`. A new full interpreter sweep
+is running against this exact implementation; tier qualification and manifest
+publication remain pending its completion.

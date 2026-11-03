@@ -1311,6 +1311,14 @@ static bool mir_raw_variant_type_uses_lane(Type* type) {
 static Type* mir_raw_variant_runtime_type(Type* type) {
     type = type_field_unwrap_simple_decl(type);
     if (!type) return NULL;
+    // S4.2.2/D8.3.1v2: exact raw entries bind float, not the singleton 1.5.
+    // Reuse the runtime binder's canonicalization before checking returns.
+    Item literal;
+    if (lambda_literal_contract_value(type, &literal))
+        return lambda_binder_value_type(literal);
+    // shared scalar literal markers carry a kind but no literal payload.
+    if (type->is_literal && is_native_param_type_id(type->type_id))
+        return type_info[type->type_id].type;
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         TypeUnary* occurrence = (TypeUnary*)type;
         if (occurrence->op == OPERATOR_ARRAY) return (Type*)&TYPE_ARRAY;
@@ -33731,9 +33739,18 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             ? (AstFieldNode*)unwrapped : NULL;
         MirVarEntry* receiver = member ? mir_direct_root_binding(mt, member->object) : NULL;
         if (receiver && receiver->cow_marked) {
+            // S7.7.3: an incoming error remains this call's outcome. COW
+            // preparation must not return it from the enclosing function.
+            MIR_label_t prepared = new_label(mt);
+            MIR_reg_t owner = emit_box(mt, receiver->reg, receiver->type_id);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                MIR_new_label_op(mt->ctx, prepared),
+                MIR_new_reg_op(mt->ctx, emit_item_tag(mt, owner)),
+                MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
             // The bound closure captures self by value, so replacement must be
             // installed before fn_member creates the mutating method closure.
             mir_prepare_cow_root(mt, receiver);
+            emit_label(mt, prepared);
         }
     }
 
@@ -35557,9 +35574,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 omitted_default |= !resolved_args[default_index] && contract && contract->default_value &&
                     mir_default_needs_activation(fn_def, contract->default_value);
             }
-            // scope-dependent defaults need the callee's earlier parameters and captures;
-            // closed expressions keep the existing native call lane.
-            if ((omitted_default && !routed_to_boxed_entry) ||
+            // D8.3.3: a forward body without a native plan can specialize later.
+            // Its public Item entry stays stable; assuming a boxed raw ABI here
+            // passed tagged loop limits to the eventual native integer formal.
+            // Scope-dependent defaults also need the callee's activation.
+            if ((!call_nfi && fn_def && local_func &&
+                     local_func->item_type == MIR_forward_item) ||
+                    (omitted_default && !routed_to_boxed_entry) ||
                     (borrowed_var_call && fn_def && !native_call &&
                      !mir_boxed_body_arguments_proven(mt, fn_def, resolved_args)) ||
                     (native_call && call_nfi->record_result &&
@@ -48273,6 +48294,18 @@ static bool mir_callsite_exact_raw_key(AstCallNode* call, AstFuncNode* callee,
         }
         Type* actual = mir_raw_variant_runtime_type(argument->type);
         if (!mir_raw_variant_type_uses_lane(actual)) return false;
+        if (is_native_param_type_id(actual->type_id)) {
+            Type* target = lambda_ast_resolve_binder_contract(
+                parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                key->binder_types);
+            TypeId admitted = LMD_TYPE_ANY;
+            // D8.3.3/S11.4.8v2: a kind guard proves neither a refinement nor
+            // a numeric conversion. Those edges must admit through `_b`.
+            if (!target || lambda_type_contract_has_binder(target, true) ||
+                    !lambda_type_contract_is_subtype(actual, target) ||
+                    (mir_contract_native_scalar_type(target, &admitted) &&
+                     admitted != actual->type_id)) return false;
+        }
         key->param_types[index] = actual;
         has_raw_lane = true;
     }
