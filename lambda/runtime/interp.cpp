@@ -7134,21 +7134,17 @@ typedef struct InterpBorrowedCall {
 class InterpBorrowedScratch {
 public:
     Item* values;
-    TypeId* scalar_types;
     uint64_t* scalar_payloads;
 
     explicit InterpBorrowedScratch(bool needed)
-            : values(NULL), scalar_types(NULL), scalar_payloads(NULL) {
+            : values(NULL), scalar_payloads(NULL) {
         if (!needed) return;
-        // one block for all three arrays: a `var` call paid three
-        // allocations per activation (8-byte arrays first keep alignment)
+        // one block holds each Item and its activation-independent scalar home.
         size_t words = LAMBDA_MAX_FUNCTION_ARGS * (sizeof(Item) + sizeof(uint64_t));
-        uint8_t* block = (uint8_t*)mem_calloc(1,
-            words + LAMBDA_MAX_FUNCTION_ARGS * sizeof(TypeId), MEM_CAT_EVAL);
+        uint8_t* block = (uint8_t*)mem_calloc(1, words, MEM_CAT_EVAL);
         if (!block) return;
         values = (Item*)(void*)block;
         scalar_payloads = (uint64_t*)(void*)(block + LAMBDA_MAX_FUNCTION_ARGS * sizeof(Item));
-        scalar_types = (TypeId*)(void*)(block + words);
     }
 
     ~InterpBorrowedScratch() {
@@ -7156,7 +7152,7 @@ public:
     }
 
     bool valid(bool needed) const {
-        return !needed || (values && scalar_types && scalar_payloads);
+        return !needed || (values && scalar_payloads);
     }
 
     InterpBorrowedScratch(const InterpBorrowedScratch&) = delete;
@@ -7216,7 +7212,6 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
 
     st->depth--;
     Item result = ItemNull;
-    TypeId escaped_scalar_type = LMD_TYPE_NULL;
     uint64_t escaped_scalar_payload = 0;
     InterpBorrowedScratch borrowed_scratch(borrowed != NULL);
     if (!borrowed_scratch.valid(borrowed != NULL)) {
@@ -7427,41 +7422,16 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             for (int index = 0; index < (int)params; index++) {
                 if (!borrowed->entries[index] && !borrowed->homes[index]) continue;
                 Item value = (Item){.item = frame->slots[index]};
-                TypeId type = get_type_id(value);
-                borrowed_scratch.scalar_types[index] = type;
-                if (type == LMD_TYPE_INT64) {
-                    borrowed_scratch.scalar_payloads[index] = (uint64_t)value.get_int64();
-                    borrowed_scratch.values[index] = ItemNull;
-                } else if (type == LMD_TYPE_UINT64) {
-                    borrowed_scratch.scalar_payloads[index] = value.get_uint64();
-                    borrowed_scratch.values[index] = ItemNull;
-                } else {
-                    borrowed_scratch.values[index] = scalar_storage_read(value, false);
-                }
+                borrowed_scratch.values[index] = lambda_item_adopt_scalar_home(value,
+                    &borrowed_scratch.scalar_payloads[index]);
             }
         }
-        // A u64/i64 Item points into the callee's number extent. Capturing
-        // its payload before that extent closes, then boxing after the guard,
-        // preserves both lifetime and its observable numeric type; the generic
-        // scalar reader intentionally narrows small u64 values for property
-        // reads, which is wrong at a function return boundary.
-        escaped_scalar_type = get_type_id(result);
-        if (escaped_scalar_type == LMD_TYPE_INT64) {
-            escaped_scalar_payload = (uint64_t)result.get_int64();
-            result = ItemNull;
-        } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
-            escaped_scalar_payload = result.get_uint64();
-            result = ItemNull;
-        } else {
-            escaped_scalar_type = LMD_TYPE_NULL;
-            result = scalar_storage_read(result, false);
-        }
+        // D5.1.3/D5.2.3: copying into the dying extent leaves tiny floats
+        // dangling. Capture every scalar payload before the frame closes,
+        // then re-home it in the caller using the shared ownership helpers.
+        result = lambda_item_adopt_scalar_home(result, &escaped_scalar_payload);
     }
-    if (escaped_scalar_type == LMD_TYPE_INT64) {
-        result = box_int64_value((int64_t)escaped_scalar_payload);
-    } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
-        result = box_uint64_value(escaped_scalar_payload);
-    }
+    result = scalar_storage_read(result, false);
     if (borrowed) {
         for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
             NameEntry* entry = borrowed->entries[index];
@@ -7470,11 +7440,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // a transported home (satellite caller) has no caller frame; the
             // legacy entry channel needs one
             if (!home && !borrowed->caller) continue;
-            Item value = borrowed_scratch.scalar_types[index] == LMD_TYPE_INT64
-                ? box_int64_value((int64_t)borrowed_scratch.scalar_payloads[index])
-                : borrowed_scratch.scalar_types[index] == LMD_TYPE_UINT64
-                    ? box_uint64_value(borrowed_scratch.scalar_payloads[index])
-                    : borrowed_scratch.values[index];
+            Item value = scalar_storage_read(borrowed_scratch.values[index], false);
             // The callee frame owns its param slot, but a `var` argument is
             // the caller's mutable root. Publish after the callee extent
             // closes so a wide scalar cannot retain a dead number-stack home.

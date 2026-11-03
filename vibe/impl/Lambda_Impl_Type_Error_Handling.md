@@ -1720,5 +1720,54 @@ four size ratchets, the vendor-loop parity case, and the pre-existing
 `m4-admitted-binder-final-focused.log`, `m4-admitted-final-lambda.log`, its
 per-suite directory, `m4-admitted-final-input.log`, and
 `m4-admitted-final-{map,native-view-gui}.json`. A new full interpreter sweep
-is running against this exact implementation; tier qualification and manifest
-publication remain pending its completion.
+completed against this exact implementation: **1,438** scripts, **1,421**
+matches, **8** exclusions, **9** mismatches and no timeouts. The previous new
+binder/object/LaTeX divergences are resolved. Seven remaining mismatches are
+the earlier tail-call/chart cases; the other two are the T0 scalar snapshot
+and independently isolated vendor loop defect. Manifest publication remains
+blocked by the sweep failure. Evidence: `m4-admitted-final-interp-sweep.log`
+and its frozen `m4-admitted-final-sweep.tsv`.
+
+### Tail-call rejection and scalar escape ownership (2026-11-03)
+
+**S7.7.3/D8.2.6:** a tail-call rewrite exits only on its successful backedge.
+Its rejected-argument join still produces the call's error outcome. MIR kept
+`block_returned` set after opening that join, so enclosing branches discarded
+the retained error and returned `null`. The shared admission-guard completion
+now restores value-producing flow. A successful record tail rewrite also
+records that it forwards its destination, avoiding unused fallback field-copy
+code after the rejection check. The first rebuilt MIR gate exposed that missing
+destination fact; its existing exact concatenation assertion remains unchanged.
+`error_tail_call_outcomes` covers returned/raised errors, expression/procedure
+tails, direct/boxed calls, and normal recursion.
+
+**D5.1.3/D5.2.3:** T0 re-homed a tiny float into the callee's number extent
+immediately before destroying that extent. A subsequent call reused the home
+and changed an earlier snapshot. Return and borrowed-argument publication now
+capture payloads through `lambda_item_adopt_scalar_home` before frame teardown,
+then call `scalar_storage_read` in the caller's extent. This reuses the complete
+scalar ownership protocol and removes the duplicated integer-only switches.
+`error_scalar_escape_outcomes` checks deferred validation errors replacing a
+tiny-float binding, saved normal/error outcomes, borrowed publication, and small
+and full-width signed/unsigned type identity.
+
+The expanded focused matrix passes **272/272** executions; all **68**
+interpreter runs report zero fallback. Replaying the nine completed-sweep
+mismatches now resolves **eight**; only `tune27_loop_accumulator` still diverges
+through the already isolated vendor MIR optimizer defect. No vendor code was
+changed. Evidence: `m5-tail-scalar-focused.log`, `m5-focused-current.json`,
+`m5-sweep-mismatch-review.{json,log}`. Final qualification must include the
+record-destination refinement and is recorded below.
+
+The final record-destination source again passes **272/272** focused runs and
+the unchanged renderer emission assertion. Rebuilt aggregate qualification
+completes **6,445/6,452**, with runtime fixtures **2,005/2,006**, MIR GC
+**351/351**, diagnostics **321/321**, native optimization **55/55**, and MIR
+emission **278/280**. The first aggregate had **6,444/6,452**, including the
+additional renderer emission failure repaired by the destination fact. The
+remaining seven checks are the four size ratchets, the two union-policy-dependent
+emission cases, and vendor-loop parity. No assertion, budget or timeout was
+relaxed. Evidence: `m5-destination-{focused.log,renderer.json}` and
+`m5-destination-final-lambda.log` with its per-suite results directory. A complete
+sweep has not yet been rerun after these fixes; the nine-case differential is
+not manifest qualification. All three interpreter manifests remain unchanged.

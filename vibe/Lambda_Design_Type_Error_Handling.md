@@ -1101,6 +1101,12 @@ now matches its JIT golden after this boundary repair. A complete interpreter
 sweep still reports legacy and vendor divergences and has not published new
 manifests; detailed comparisons and qualification limits are in the
 [implementation record](impl/Lambda_Impl_Type_Error_Handling.md).
+S7.7.3/D8.2.6 tail-call rejection retains its ordinary error outcome even when
+the successful path becomes a backedge. D5.1.3/D5.2.3 interpreter publication
+also captures wide scalar payloads before frame teardown, preserving snapshots
+when a later outcome replaces the variable. Qualification and the remaining
+vendor divergence are tracked in the
+[tail-call and ownership record](impl/Lambda_Impl_Type_Error_Handling.md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03).
 
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available

@@ -26546,6 +26546,9 @@ static MirValue mir_finish_admission_guard(MirTranspiler* mt,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
         emit_label(mt, guard->error);
         emit_label(mt, done);
+        // S7.7.3/D8.2.6: a TCO backedge exits only its successful arm.
+        // The rejected-argument join still produces this call's error value.
+        mt->block_returned = false;
         value = mir_value_from_reg(mt, node, guard->result,
             VALUE_REP_ITEM, &TYPE_ANY, LMD_TYPE_ANY);
     }
@@ -35386,6 +35389,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                     MIR_new_label_op(mt->ctx, mt->tco_label)));
                 mt->block_returned = true;
+                if (tail_info && tail_info->record_result &&
+                        mt->record_call_target == call_node) {
+                    // D8.2.6: success forwards the record destination; the
+                    // rejection-only continuation must not unpack a record.
+                    mt->record_call_output->filled = true;
+                }
 
                 // Return a type-shaped dummy register. The jump makes this value
                 // unreachable, but enclosing expressions still use its MIR type.
