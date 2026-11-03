@@ -2,6 +2,7 @@
 #include "audio_bus.hpp"
 #include "speech.hpp"
 #include "audio_cue_owner.hpp"
+#include "audio_capture.hpp"
 #include "document_clock.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/mem.h"
@@ -41,7 +42,8 @@ struct DocumentAudio : DomDocumentResourceData {
     double last_tick_ms;          // offline output: frame clock at the previous tick
     double pending_frames;        // offline output: fractional frames not yet rendered
     AudioOwnerHook owners[8];      // the existing per-document Scene3D viewport bound
-    DocumentAudio() : slots(MEM_CAT_RENDER, 0), activated(false), submix(0), last_tick_ms(-1), pending_frames(0), owners{} {}
+    struct { uint64_t id; size_t bytes; } storage[AUDIO_DECODED_SLOTS];
+    DocumentAudio() : slots(MEM_CAT_RENDER, 0), activated(false), submix(0), last_tick_ms(-1), pending_frames(0), owners{}, storage{} {}
 };
 
 static void audio_slot_close(AudioSlot* slot) {
@@ -81,6 +83,7 @@ static AudioSlot* document_audio_slot(DomDocument* doc, uint64_t token) {
     if (audio) for (AudioSlot& slot : audio->slots) if (slot.token == token) return &slot;
     return nullptr;
 }
+bool radiant_audio_prepare_document(DomDocument* doc) { return document_audio(doc, true) != nullptr; }
 bool radiant_audio_bind_owner(DomDocument* doc, void* owner, AudioOwnerPoll poll) {
     auto* audio = document_audio(doc, true);
     if (!audio || !owner || !poll) return false;
@@ -112,6 +115,7 @@ struct AudioDocumentUsage { size_t count, bytes; };
 static bool document_audio_usage(DocumentAudio* audio, AudioDocumentUsage* usage) {
     AudioMixAccess access(audio->submix); if (!access.valid) return false;
     *usage = {};
+    for (const auto& storage : audio->storage) if (storage.id) { usage->count++; usage->bytes += storage.bytes; }
     for (const AudioSlot& slot : audio->slots) if (slot.audio) {
         auto storage = rdt_audio_storage(slot.audio);
         bool shared = false;
@@ -125,12 +129,64 @@ static bool document_audio_usage(DocumentAudio* audio, AudioDocumentUsage* usage
     }
     return true;
 }
+uint64_t radiant_audio_storage_acquire(DomDocument* doc, size_t bytes) {
+    auto* audio = document_audio(doc, true); AudioDocumentUsage usage;
+    if (!audio || !bytes || !document_audio_usage(audio, &usage) || usage.count >= AUDIO_DECODED_SLOTS ||
+        bytes > AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes) return 0;
+    for (auto& storage : audio->storage) if (!storage.id) {
+        uint64_t id = audio_bus_identity(); if (!id) return 0;
+        storage = {id, bytes}; return id;
+    }
+    return 0;
+}
+void radiant_audio_storage_release(DomDocument* doc, uint64_t id) {
+    auto* audio = document_audio(doc);
+    if (audio && id) for (auto& storage : audio->storage) if (storage.id == id) { storage = {}; break; }
+}
 uint64_t radiant_audio_open(DomDocument* doc, const void* bytes, size_t length) {
     if (!doc || !bytes || !length) return 0;
     DocumentAudio* audio = document_audio(doc, true); AudioDocumentUsage usage;
     if (!audio || !document_audio_usage(audio, &usage) || usage.count == AUDIO_DECODED_SLOTS) return 0;
     RdtAudio* player = rdt_audio_open_bytes_limit(bytes, length, AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes);
     return player ? audio_slot_add(audio, {0, player, nullptr, {}}) : 0;
+}
+size_t radiant_audio_available_pcm(DomDocument* doc) {
+    auto* audio = document_audio(doc, true); AudioDocumentUsage usage;
+    return audio && document_audio_usage(audio, &usage) && usage.count < AUDIO_DECODED_SLOTS ? AUDIO_DOCUMENT_PCM_LIMIT - usage.bytes : 0;
+}
+uint64_t radiant_audio_adopt(DomDocument* doc, RdtAudio* player) {
+    if (!player) return 0;
+    auto* audio = document_audio(doc, true);
+    if (!audio || rdt_audio_storage_bytes(player) > radiant_audio_available_pcm(doc)) { rdt_audio_destroy(player); return 0; }
+    return audio_slot_add(audio, {0, player, nullptr, {}});
+}
+const AudioProviderOps* radiant_audio_provider(const char* name) {
+    static const AudioProviderOps providers[] = {
+        {"midi", radiant_midi_route, radiant_midi_routing, radiant_midi_snapshot},
+        {"speech", radiant_speech_route, radiant_speech_routing, radiant_speech_snapshot},
+        {"video", radiant_media_route, radiant_media_routing, radiant_media_snapshot},
+        {"capture", radiant_capture_route, radiant_capture_routing, nullptr}};
+    for (const auto& provider : providers) if (name && !strcmp(name, provider.name)) return &provider;
+    return nullptr;
+}
+uint64_t radiant_audio_provider_snapshot(DomDocument* doc, const AudioProviderOps* provider,
+    uint64_t token, double position, uint32_t frames, const char** error) {
+    const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
+    if (provider && !provider->snapshot) { *error = "audio render: live provider has no prepared snapshot"; return 0; }
+    AudioProviderInfo info; size_t bytes = rdt_audio_pcm_storage_bytes(frames);
+    if (!provider || !token || !isfinite(position) || position < 0 || !bytes || !provider->read(doc, token, &info)) {
+        *error = "audio render: missing provider or invalid position/interval"; return 0;
+    }
+    if (info.loss != AUDIO_VOICE_OK || !strcmp(info.state, "idle") || !strcmp(info.state, "loading") ||
+        !strcmp(info.state, "rendering") || !strcmp(info.state, "cancelled") || !strcmp(info.state, "error")) {
+        *error = "audio render: provider is not prepared or has failed"; return 0;
+    }
+    if (bytes > radiant_audio_available_pcm(doc)) { *error = "audio render: provider snapshot exceeds document PCM/reader quota"; return 0; }
+    auto* copy = provider->snapshot(doc, token, position, frames);
+    if (!copy) { *error = "audio render: provider position or native snapshot preparation failed"; return 0; }
+    auto id = radiant_audio_adopt(doc, copy);
+    if (!id) *error = "audio render: provider snapshot ownership admission failed";
+    return id;
 }
 
 // D7.5.4: judged by the document's own URL, so a network iframe in a local
@@ -341,6 +397,9 @@ uint64_t radiant_audio_source_start(DomDocument* doc, uint64_t asset, uint64_t r
     if (started) destination->route = route;
     return started ? reuse : 0;
 }
+bool radiant_audio_graph_input_audible(AudioSubmixId submix, AudioGraphId graph, AudioRouteId route, bool active, double gain) {
+    return active && gain > 0 && audio_submix_graph_has_route(submix, graph, route);
+}
 bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
     if (radiant_document_may_start_audio(doc)) return true;
     auto* audio = document_audio(doc); if (!audio) return true;
@@ -350,13 +409,15 @@ bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
     for (const auto& slot : audio->slots) if (audio_submix_graph_has_route(audio->submix, graph, slot.route)) {
         if (slot.midi) {
             auto info = midi_player_info(slot.midi);
-            if (info.state == MIDI_PLAYING && info.volume > 0) return false;
+            if (radiant_audio_graph_input_audible(audio->submix, graph, slot.route, info.state == MIDI_PLAYING, info.volume)) return false;
         } else if (slot.audio) {
             RdtAudioInfo info = {};
-            if (radiant_audio_info(doc, slot.token, &info) && (info.state == RDT_AUDIO_PLAYING || info.armed) && info.gain > 0) return false;
+            if (radiant_audio_info(doc, slot.token, &info) && radiant_audio_graph_input_audible(audio->submix, graph, slot.route,
+                info.state == RDT_AUDIO_PLAYING || info.armed, info.gain)) return false;
         }
     }
-    return !radiant_speech_graph_audible(doc, graph);
+    return !radiant_speech_graph_audible(doc, graph) && !radiant_media_graph_audible(doc, graph) &&
+        !radiant_capture_graph_audible(doc, graph);
 }
 bool radiant_audio_graph_commit(DomDocument* doc, AudioGraphId graph, AudioGraph* prepared,
     const AudioPlayerRoute* routes, unsigned count, const char** error) {
@@ -495,6 +556,25 @@ bool radiant_midi_info(DomDocument* doc, uint64_t token, MidiSnapshot* snapshot)
     snapshot->reverb = slot->reverb;
     return true;
 }
+RdtAudio* radiant_midi_snapshot(DomDocument* doc, uint64_t token, double position, uint32_t frames) {
+    auto* slot = document_audio_slot(doc, token);
+    if (!slot || !slot->midi || !rdt_audio_pcm_storage_bytes(frames)) return nullptr;
+    struct PreparedMidi { MidiPlayer* player = nullptr; ~PreparedMidi() { midi_player_close(player); } } copy;
+    {
+        AudioMixAccess access(slot->submix); if (!access.valid) return nullptr;
+        copy.player = midi_player_clone(slot->midi, 0);
+    }
+    if (!copy.player || !midi_player_command(copy.player, "seek", position)) return nullptr;
+    auto info = midi_player_info(copy.player);
+    if (position < info.duration && !midi_player_command(copy.player, "play", 0)) return nullptr;
+    auto* samples = rdt_audio_pcm_alloc(frames); if (!samples) return nullptr;
+    // fixed preparation partitions make job stepping independent of synth control-block boundaries.
+    for (uint32_t done = 0; done < frames;) {
+        uint32_t count = frames - done < 4096 ? frames - done : 4096;
+        midi_player_render(copy.player, samples + done * 2, count); done += count;
+    }
+    return rdt_audio_adopt_pcm(samples, frames);
+}
 bool radiant_midi_route(DomDocument* doc, uint64_t token, AudioRouteId expected, AudioRouteId route, const char** error) {
     const char* ignored = nullptr; if (!error) error = &ignored; *error = nullptr;
     auto fail = [&](const char* message) { *error = message; return false; };
@@ -535,17 +615,19 @@ uint64_t radiant_audio_frame(DomDocument* doc) {
 
 bool radiant_audio_tick(DomDocument* doc, double now_ms) {
     audio_bus_poll();
+    bool capture_pending = radiant_capture_tick(doc);
     DocumentAudio* audio = document_audio(doc);
     if (!audio) return false;
     // a hook may retire its scene and clear its slot while main-thread sampling runs.
     for (unsigned i = 0; i < 8; i++) {
         auto hook = audio->owners[i]; if (hook.poll) hook.poll(hook.owner, now_ms);
     }
+    radiant_media_audio_tick(doc);
     for (AudioSlot& slot : audio->slots) audio_slot_poll(&slot);
     // offline output: the sub-mix follows this document's frame clock while it has voices.
     double delta_ms = audio->last_tick_ms < 0 ? 0 : now_ms - audio->last_tick_ms;
     audio->last_tick_ms = now_ms;
-    if (!audio_bus_offline() || !audio_submix_has_work(audio->submix)) { audio->pending_frames = 0; return false; }
+    if (!audio_bus_offline() || !audio_submix_has_work(audio->submix)) { audio->pending_frames = 0; return capture_pending; }
     // a resumed background document starts a new interval, not a catch-up burst.
     if (delta_ms < 0 || delta_ms > 1000) delta_ms = 0;
     audio->pending_frames += delta_ms * AUDIO_BUS_RATE / 1000.0;
@@ -559,7 +641,7 @@ bool radiant_audio_frames_pending(DomDocument* doc) {
     // device output still needs main-owner polling to retire ended readers and completed tails.
     DocumentAudio* audio = document_audio(doc);
     if (audio) for (AudioSlot& slot : audio->slots) audio_slot_poll(&slot);
-    return audio && audio_submix_has_work(audio->submix);
+    return radiant_capture_pending(doc) || (audio && audio_submix_has_work(audio->submix));
 }
 
 void radiant_audio_prune(DomDocument* doc) {

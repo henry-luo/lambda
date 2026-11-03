@@ -11,13 +11,20 @@ struct AudioRenderSource {
     float gain;
     char bus[128];
 };
+struct AudioRenderProvider {
+    const AudioProviderOps* provider;
+    uint64_t token;
+    double position;
+    char bus[128];
+};
 struct AudioRenderPlan {
     uint64_t frames;
     double scene_time, time_scale;
     AudioGraphConfig graph;
-    unsigned source_count, event_count;
+    unsigned source_count, event_count, provider_count;
     AudioRenderSource sources[AUDIO_CUE_TRACKS];
     AudioCueCommand events[AUDIO_CUE_CAPACITY];
+    AudioRenderProvider providers[AUDIO_CUE_TRACKS];
 };
 struct AudioRenderSnapshot {
     uint64_t id, frames, rendered;

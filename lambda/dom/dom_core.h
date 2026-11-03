@@ -299,6 +299,7 @@ Item dom_engine_option_count(Item a);
 Item dom_engine_capture_pointer(Item a);
 Item dom_engine_set_canvas_pixels(Item canvas, Item pixels);
 Item dom_engine_audio_open(Item a, Item b);
+Item dom_engine_audio_capture(Item a, Item b);
 Item dom_engine_audio_play(Item a, Item b, Item c);
 Item dom_engine_midi_open(Item a, Item b, Item c);
 Item dom_engine_midi_command(Item a, Item b, Item c, Item d);

@@ -2538,12 +2538,13 @@ static void set_event_dispatch_position(void* key, bool key_is_dom, Item event,
 
 static void fire_listeners(void* key, const char* type, Item event, int phase,
                            bool key_is_dom, int reported_phase = 0) {
-    RootFrame roots(5);
+    RootFrame roots(6);
     Rooted<Item> event_root(roots, event);
     Rooted<Item> callback_root(roots, ItemNull);
     Rooted<Item> this_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
     Rooted<Item> err_root(roots, ItemNull);
+    Rooted<Item> signal_root(roots, ItemNull);
     NodeListeners* nl = find_listeners(key);
     if (!nl || nl->count == 0) return;
 
@@ -2568,9 +2569,6 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // non-capture; AT_TARGET fires both.
         if (phase == 1 && !el->capture) continue;
         if (phase == 3 && el->capture) continue;
-        // signal — if its AbortSignal aborted, treat as removed
-        Item listener_signal = event_listener_root_item(el->signal_root);
-        if (signal_is_aborted(listener_signal)) { tombstone_listener(el); continue; }
         snap[snap_count++] = el->order;
     }
 
@@ -2580,15 +2578,24 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         EventListener* live = nl_find_snapshot_listener(live_nl, snap[i]);
         // re-check tombstone in case a prior listener removed this one
         if (!live) continue;
-        Item live_signal = event_listener_root_item(live->signal_root);
-        if (signal_is_aborted(live_signal)) { tombstone_listener(live); continue; }
+        signal_root.set(event_listener_root_item(live->signal_root));
+        bool aborted = signal_is_aborted(signal_root.get());
+        // signal getters can mutate registration too; no listener-array pointer crosses script.
+        live = nl_find_snapshot_listener(find_listeners(key), snap[i]);
+        if (!live) continue;
+        if (aborted) { tombstone_listener(live); continue; }
+
+        bool is_idl_handler = live->is_idl_handler;
+        bool passive = live->passive;
 
         // Resolve callback — function or {handleEvent}. `wrap_path_key` can
         // allocate a DOM wrapper, so root the stored listener before it can
         // compact and invalidate a local callback Item.
         callback_root.set(event_listener_root_item(live->callback_root));
+        // remove once entries before handleEvent lookup can reenter or grow the listener array.
+        if (live->once) tombstone_listener(live);
         this_root.set(wrap_path_key(key, key_is_dom));
-        if (!live->is_idl_handler && !dom_realm_is_callable(callback_root.get())) {
+        if (!is_idl_handler && !dom_realm_is_callable(callback_root.get())) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
             Item he = dom_realm_get_name(callback_root.get(), "handleEvent");
             if (!dom_realm_is_callable(he)) continue;
@@ -2600,11 +2607,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // Set passive flag on the event so preventDefault no-ops within this
         // listener (per HTML spec, passive listeners cannot cancel).
         bool was_passive = event_flag_get(event_root.get(), "__in_passive");
-        event_set_bool(event_root.get(), "__in_passive", live->passive);
-
-        // Mark for once-removal BEFORE invocation so that recursion / re-add
-        // sees the slot as removed.
-        if (live->once) tombstone_listener(live);
+        event_set_bool(event_root.get(), "__in_passive", passive);
 
         // call the callback with event as argument; isolate exceptions per spec
         Item args[1] = { event_root.get() };
@@ -2614,10 +2617,10 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
             args, 1, result_root.home()));
         if (item_is_error(result_root.get())) {
             err_root.set(js_error_lane_payload(result_root.get()));
-            log_event_exception_detail(live->is_idl_handler
+            log_event_exception_detail(is_idl_handler
                 ? "event handler" : "event listener", type, err_root.get());
             report_exception_to_window_onerror(err_root.get(), type);
-        } else if (live->is_idl_handler &&
+        } else if (is_idl_handler &&
                    get_type_id(result_root.get()) == LMD_TYPE_BOOL &&
                    !it2b(result_root.get())) {
             dom_event_host_prevent_default(event_root.get());

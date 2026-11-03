@@ -533,6 +533,41 @@ static bool host_test_svg_dispatch(bool present) {
         isnan(dom_engine_svg_animation_simple_duration(nullptr));
 }
 
+static bool host_test_client_frame(DomNode* node, RdtMatrix* matrix, float* x, float* y) {
+    if (node != (DomNode*)&host_test_node || !matrix || !x || !y) return false;
+    matrix->e13 = 12.5f; matrix->e23 = -3.25f; *x = 4.5f; *y = 6.75f; return true;
+}
+static bool host_test_source_boundary(DomNode* root, const SourcePosC* position, DomBoundary* boundary) {
+    return root == (DomNode*)&host_test_node && position == (SourcePosC*)&host_test_document &&
+        boundary == (DomBoundary*)&host_svg_source;
+}
+static bool host_test_selection_rects(UiContext* ui, DomElement* element, uint32_t start, uint32_t end,
+        void (*callback)(float, float, float, float, void*), void* owner) {
+    if (ui != (UiContext*)&host_test_document || element != host_svg_element() || start != 3 || end != 7 || !callback) return false;
+    callback(1.25f, -2.5f, 3.75f, 4.5f, owner); return true;
+}
+static int host_test_url_attribute(Item receiver, Item* out, const char* attribute) {
+    if (receiver.item != 31415 || !out || !attribute || strcmp(attribute, "src")) return 0;
+    out->item = 90210; return 1;
+}
+static void host_test_selection_rect(float x, float y, float width, float height, void* owner) {
+    if (x == 1.25f && y == -2.5f && width == 3.75f && height == 4.5f) (*(unsigned*)owner)++;
+}
+static bool host_test_borrowed_queries(bool present) {
+    RdtMatrix matrix = {}; float x = 0, y = 0; unsigned rectangles = 0; Item value = ItemNull;
+    if (dom_engine_element_client_frame((DomNode*)&host_test_node, &matrix, &x, &y) != present ||
+        matrix.e13 != (present ? 12.5f : 0) || matrix.e23 != (present ? -3.25f : 0) ||
+        x != (present ? 4.5f : 0) || y != (present ? 6.75f : 0)) return false;
+    if (dom_engine_source_boundary((DomNode*)&host_test_node, (SourcePosC*)&host_test_document,
+            (DomBoundary*)&host_svg_source) != present ||
+        dom_engine_source_boundary(nullptr, (SourcePosC*)&host_test_document, (DomBoundary*)&host_svg_source)) return false;
+    if (dom_engine_text_control_selection_rects((UiContext*)&host_test_document, host_svg_element(), 3, 7,
+            host_test_selection_rect, &rectangles) != present || rectangles != (present ? 1u : 0u)) return false;
+    return dom_engine_url_attribute_get((Item){.item = 31415}, &value, "src") == (present ? 1 : 0) &&
+        value.item == (present ? 90210 : ItemNull.item) &&
+        !dom_engine_url_attribute_get((Item){.item = 31415}, &value, "missing");
+}
+
 static const DomHostEngineOps host_test_operations = {
     host_test_operation<1, Item, Item>, host_test_operation<2, Item, Item>,
     host_test_operation<3, Item>, host_test_operation<4, Item, Item, Item>,
@@ -556,10 +591,12 @@ static const DomHostEngineOps host_test_operations = {
     host_test_svg_style_parent, host_test_svg_property, host_test_svg_append_shape,
     host_test_svg_text_path, host_test_svg_clip_contains,
     host_test_web_animation_create, host_test_range_adopt, host_test_range_pins,
-    host_test_selection_collapse, host_test_text_split
+    host_test_selection_collapse, host_test_text_split,
+    host_test_client_frame, host_test_source_boundary, host_test_selection_rects, host_test_url_attribute
 };
 
 static bool host_test_dispatch(bool present) {
+    if (!host_test_borrowed_queries(present)) return false;
     if (!host_test_svg_dispatch(present)) return false;
     if (!host_test_svg_source_scope(present)) return false;
     if (!host_test_geometry_dispatch(present)) return false;

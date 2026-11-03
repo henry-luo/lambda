@@ -1,0 +1,143 @@
+{
+  "name": "HTML video audio shares the document sample clock through pause, seek, muted playback and removal",
+  "html": "test/ui/audio_video_shared.html",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "env": [
+    {
+      "key": "LAMBDA_AUDIO_OUTPUT",
+      "value": "offline"
+    }
+  ],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "movie.readyState>=2&&movie.duration>0&&movie.videoWidth>0&&movie.paused"
+    },
+    {
+      "type": "script",
+      "js": "startVideo()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "videoPlaying&&!movie.paused"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "script",
+      "js": "readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy&&clockSample!==null"
+    },
+    {
+      "type": "assert_script",
+      "js": "clockSample.clock>0&&clockSample.before<=clockSample.clock&&clockSample.clock<=clockSample.after"
+    },
+    {
+      "type": "script",
+      "js": "movie.pause();globalThis.heldTime=movie.currentTime;readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy&&movie.paused"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.heldClock=clockSample.clock"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "script",
+      "js": "readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy&&clockSample.clock===heldClock&&movie.currentTime===heldTime"
+    },
+    {
+      "type": "script",
+      "js": "movie.currentTime=.5"
+    },
+    {
+      "type": "assert_script",
+      "js": "movie.paused&&movie.currentTime===.5"
+    },
+    {
+      "type": "script",
+      "js": "movie.muted=true;startVideo()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "videoPlaying&&!movie.paused"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "script",
+      "js": "readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy&&movie.currentTime>.5&&clockSample.clock>heldClock"
+    },
+    {
+      "type": "script",
+      "js": "movie.remove()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 20,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.removedClock=clockSample.clock"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "script",
+      "js": "readVideoClock()"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "!clockBusy&&clockSample.clock===removedClock"
+    }
+  ]
+}
