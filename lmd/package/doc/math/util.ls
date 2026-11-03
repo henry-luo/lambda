@@ -1,7 +1,7 @@
 // math/util.ls — Numeric and string helpers for the math package
 
 // Command identity is shared by TeX layout, symbol lookup and MathML conversion.
-pub fn command_name(raw) {
+pub fn command_name(raw) any^ {
     let text=string(raw or "");
     if (len(text)>1 and slice(text,0,1)=="\\") slice(text,1,len(text)) else text
 }
@@ -18,12 +18,12 @@ pub fn fmt_num(x, decimals) {
 
 // format a number as em units: "0.5em".
 // Keep five decimal places for SVG dimensions and baseline offsets.
-pub fn fmt_em(x) {
+pub fn fmt_em(x) any^ {
     if (abs(x) >= 100000.0) fmt_large_em(x)
     else fmt_num(x, 5) ++ "em"
 }
 
-fn fmt_large_em(x) {
+fn fmt_large_em(x) any^ {
     let scaled = int(round(x * 10.0))
     let s = string(abs(scaled))
     let body = if (len(s) <= 1) "0." ++ s
@@ -53,14 +53,14 @@ pub fn str_repeat(s, n) {
 }
 
 // join an array of strings with a separator
-pub fn str_join(arr, sep) {
+pub fn str_join(arr, sep) any^ {
     if (len(arr) == 0) ""
     else if (len(arr) == 1) string(arr[0])
     else (arr[0]) ++ sep ++ str_join(slice(arr, 1, len(arr)), sep)
 }
 
 // check if string starts with a prefix
-pub fn starts_with(s, prefix) {
+pub fn starts_with(s, prefix) any^ {
     if (len(prefix) > len(s)) false
     else slice(s, 0, len(prefix)) == prefix
 }
@@ -76,22 +76,22 @@ pub fn attr_or(el, key, default_val) {
 }
 
 // get text content of a leaf element
-pub fn text_of(el, include_values = false) {
+pub fn text_of(el, include_values = false) any^ {
     if (el is string or el is symbol) string(el)
     // Parsed operators store their token in value; dimension signs are not child text.
     else if (include_values and el is element and el.value != null) string(el.value)
-    else if (el is element or el is array) children_text(el,(child) => text_of(child,include_values))
+    else if (el is element or el is array) children_text(el,(child) any^ => text_of(child,include_values))
     else if (el == null) ""
     else string(el)
 }
 
 // extract child text without interpreting attribute-count slots as glyphs.
-pub fn children_text(node, text_fn) {
+pub fn children_text(node, text_fn) any^ {
     let items = content_items(node)
     join_content_text(items, text_fn, 0, "")
 }
 
-fn join_content_text(items, text_fn, i, acc) {
+fn join_content_text(items, text_fn, i, acc) any^ {
     if (i >= len(items)) acc
     else join_content_text(items, text_fn, i + 1, acc ++ text_fn(items[i]))
 }
@@ -103,7 +103,7 @@ pub fn content_items(node) {
 }
 
 // Shared syntax parsing; callers resolve ex/absolute lengths in their font context.
-pub fn dimension_from_string(raw) {
+pub fn dimension_from_string(raw) any^ {
     let start = find_number_start(raw, 0)
     if (start >= len(raw)) {
         {value: 0.0, sign: 1.0, unit: "em"}
@@ -119,19 +119,19 @@ pub fn dimension_from_string(raw) {
     }
 }
 
-fn find_number_start(s, i) {
+fn find_number_start(s, i) any^ {
     if (i >= len(s)) i
     else if (is_number_start_char(slice(s, i, i + 1))) i
     else find_number_start(s, i + 1)
 }
 
-fn find_number_end(s, i) {
+fn find_number_end(s, i) any^ {
     if (i >= len(s)) i
     else if (is_number_char(slice(s, i, i + 1))) find_number_end(s, i + 1)
     else i
 }
 
-fn find_unit_end(s, i) {
+fn find_unit_end(s, i) any^ {
     if (i >= len(s)) i
     else if (is_unit_char(slice(s, i, i + 1))) find_unit_end(s, i + 1)
     else i
@@ -161,10 +161,10 @@ fn is_unit_char(ch) {
 
 
 // Preserve explicit row/cell token boundaries during matrix layout.
-pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
+pub fn parse_rows(body, i, n, rows, current_row, current_cell) any^ {
     if (i >= n) {
         // a final row terminator does not introduce another empty matrix row.
-        let rules = [for (item in current_cell where item is element and name(item) == 'array_rule') item];
+        let rules = [for (item in current_cell where ((item is element and name(item) == 'array_rule') ^ { false })) item];
         if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == len(rules))
             [*slice(rows,0,len(rows) - 1), {*:rows[len(rows) - 1], trailing_rules:rules}]
         else rows ++ [make_row(current_row ++ [make_cell(current_cell)])]

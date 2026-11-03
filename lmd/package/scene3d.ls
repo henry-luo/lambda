@@ -60,14 +60,14 @@ fn drawable(kind, geometry, material, options) element {
     else if (kind == 'line') <line *: attrs, *children>
     else <'line-segments' *: attrs, *children>
 }
-pub fn mesh(geometry, material, options = {}) element => drawable('mesh', geometry, material, options)
-pub fn points(geometry, material, options = {}) element => drawable('points', geometry, material, options)
-pub fn sprite(material, options = {}) element => drawable('sprite', geometry([0.0, 0.0, 0.0]), material, options)
-pub fn line(geometry, material, options = {}) element => drawable('line', geometry, material, options)
-pub fn line_segments(geometry, material, options = {}) element => drawable('line-segments', geometry, material, options)
+pub fn mesh(geometry, material, options = {}) element^ => drawable('mesh', geometry, material, options)
+pub fn points(geometry, material, options = {}) element^ => drawable('points', geometry, material, options)
+pub fn sprite(material, options = {}) element^ => drawable('sprite', geometry([0.0, 0.0, 0.0]), material, options)
+pub fn line(geometry, material, options = {}) element^ => drawable('line', geometry, material, options)
+pub fn line_segments(geometry, material, options = {}) element^ => drawable('line-segments', geometry, material, options)
 pub fn resources(children) element => <resources *children>
-pub fn clip(label, tracks, options = {}) element => clips.clip(label, tracks, options)
-pub fn track(path, times, values, kind = 'number', options = {}) element => clips.track(path, times, values, kind, options)
+pub fn clip(label, tracks, options = {}) element^ => clips.clip(label, tracks, options)
+pub fn track(path, times, values, kind = 'number', options = {}) element^ => clips.track(path, times, values, kind, options)
 pub fn load(source, options = {}) element^ => assets.load(source, options)^
 pub fn normalize(scene) element^ => model.normalize(scene)^
 pub fn validate(scene) bool^ { let checked = model.normalize(scene)^; true }

@@ -1,7 +1,7 @@
 // D2.6.5v3: a positional runtime structure stores a list value as ONE item
 // (the verbatim append); only sequence building splices a list (S2.5.1v2).
 fn args_of(...) => varg()
-fn count_args(...) => len(varg())
+fn count_args(...) any^ => len(varg())
 
 // a rest list keeps a list argument whole (LR09-9)
 args_of(for (x in [1, 2]) x);

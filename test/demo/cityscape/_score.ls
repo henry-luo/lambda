@@ -35,10 +35,10 @@ fn hit(t, key, vel) array => note(t, 1.5, DRUMS, key, vel)
 // a fixed per-note wobble in -3..3: shaping never sounds machine-flat, yet every
 // rendering is identical.
 fn wobble(i) => (i * 7919 + 13) % 7 - 3
-fn level7(v) => max(1, min(127, int(round(v))))
+fn level7(v) any^ => max(1, min(127, int(round(v))))
 // a phrase rises toward its middle and relaxes at its close; notes on the beat lean in.
 fn arch(i, n) => math.sin(math.pi * (i + 0.5) / n)
-fn shaped(vel, i, n, beat) =>
+fn shaped(vel, i, n, beat) any^ =>
     level7(vel - 8 + 14 * arch(i, n) + (if (beat == floor(beat)) 4 else 0) + wobble(i))
 
 // channels whose held chords breathe; their CC11 comes only from the expression lane.
@@ -54,7 +54,7 @@ let STAGGER = 0.012
 fn chord(t, dur, ch, keys, vel) array {
     let sorted = sort(keys);
     let top = len(sorted) - 1;
-    [*[for (i in 0 to top) *note(t + i * STAGGER, dur - i * STAGGER, ch, sorted[i],
+    [*[for (i in ((0 to top) ^ { [] })) *note(t + i * STAGGER, dur - i * STAGGER, ch, sorted[i],
         level7(vel + (if (i == top) 6 else if (i == 0) 0 else -4) + wobble(i) / 2))],
      *(if (dur >= 1.5 and contains(SWELLING, ch)) [swell(t, dur, ch)] else [])]
 }
@@ -70,7 +70,7 @@ fn roll(t, ch, keys, gap, dur, vel) array =>
 
 // degree i of D major pentatonic counted from D4 (MIDI 62); negative degrees go down.
 let steps = [0, 2, 4, 7, 9]
-pub fn penta(i) int {
+pub fn penta(i) int^ {
     let octave = int(floor(i / 5.0));
     62 + 12 * octave + steps[i - octave * 5]
 }
@@ -90,7 +90,7 @@ fn pedal(ch, changes, release) array =>
 
 // a swelling channel's expression at time t: its latest fade (holding the final
 // value, 100 before the first), times the breath of the latest held chord at t.
-fn level(fades, t) {
+fn level(fades, t) any^ {
     let past = [for (f in fades where f.t0 <= t) f];
     let f = if (len(past) == 0) null else past[len(past) - 1];
     if (f == null) 100.0 else if (t >= f.t1) float(f.v1) else f.v0 + (f.v1 - f.v0) * (t - f.t0) / (f.t1 - f.t0)
@@ -253,7 +253,7 @@ let ending = [*hit(143.5, CHINA, 68), ramp(146.0, 149.9, PAD, 110, 20),
     *[for (s in setup) cc(149.98, s.ch, 123, 0)]]
 
 let init = [*[for (s in setup) program(0.0, s.ch, s.program)], *[for (s in setup) cc(0.0, s.ch, 7, s.volume)],
-    *[for (s in setup) cc(0.0, s.ch, 10, s.pan)], *[for (s in setup where not contains(SWELLING, s.ch)) cc(0.0, s.ch, 11, 100)]]
+    *[for (s in setup) cc(0.0, s.ch, 10, s.pan)], *[for (s in setup where ((not contains(SWELLING, s.ch)) ^ { false })) cc(0.0, s.ch, 11, 100)]]
 
 // chapter cues, for documentation and checks: film seconds → what the music does.
 pub let cues = [{t: 0.0, cue: "title"}, {t: 7.5, cue: "flyover"}, {t: 16.0, cue: "jinsha"}, {t: 28.0, cue: "today"},

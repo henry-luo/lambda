@@ -26,7 +26,7 @@ fn graphic(node, value, options) {
     let contents = if (node.crop == null) value else <span class:"docx-image-crop",style:node.crop.box,value>;
     if (placement == null) contents else <span class:"docx-anchor",style:(placement.box ++ layer_style),contents>
 }
-fn reference_label(node, options) => "[" ++ string(c.first([for (note in options.annotations
+fn reference_label(node, options) any^ => "[" ++ string(c.first([for (note in options.annotations
     where note.key == node.key) note.number])) ++ "]"
 fn inline_node(node, options) any^ {
     if (node.kind == "text") {
@@ -199,7 +199,7 @@ fn plain_text(blocks, options) => join([for (node in blocks)
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
 pub fn render(model, options) map^ {
-    let layers = [for (node in c.model_nodes(model.blocks ++ model.annotations)
+    let layers = [for (node in ((c.model_nodes(model.blocks ++ model.annotations)) ^ { [] })
         where node.placement.absolute == true) node.placement]
     let opts = {*:options,annotations:model.annotations,layers:layers}
     let blocks = render_blocks(model.blocks,0,{},opts)^

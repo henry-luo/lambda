@@ -9,14 +9,14 @@ fn leaf_fan(position,angle,length,width,count,color,shape="petal") array =>
     [for (i in 0 to (count-1),let a = angle+float(i)*2.0*math.pi/float(count))
         solid.oval(position,[length,length,width],color,"leaf",[0.0,-a,0.18],shape)]
 
-fn pond_leaves(recipe,spread) array => [for (i in 0 to 1,let a = float(i)*2.5+0.3,
+fn pond_leaves(recipe,spread) array^ => [for (i in 0 to 1,let a = float(i)*2.5+0.3,
     let p = [spread*cos(a),0.16+float(i)*0.1,spread*sin(a)],let size = if (i == 0) 0.8 else 0.62,
     let parent = transforms.matrix(p,[0.0,-a,0.0],[size,size,size])^)
     *[solid.placed(solid.oval([0.0,0.0,0.0],[1.0,1.0,1.0],recipe.leaf,"leaf",[0.0,0.0,0.0],"pad"),parent),
       *[for (vein in 0 to 15,let t = float(vein)/15.0)
           solid.placed(solid.stem(bloom.point(0.08,t,"pad"),bloom.point(0.95,t,"pad"),0.006,"#a8bc70","leaf"),parent)]]]
 
-fn foliage(recipe,height,spread) array => if (recipe.foliage == "pad") pond_leaves(recipe,spread)
+fn foliage(recipe,height,spread) array^ => if (recipe.foliage == "pad") pond_leaves(recipe,spread)
     else [for (i in 0 to 3,let a = float(i)*2.4,let y = height*(0.18+float(i)*0.13),
         let p = [0.32*cos(a),y,0.32*sin(a)])
         *[solid.stem([0.0,y-0.08,0.0],p,0.012,recipe.stem,"leaf"),
@@ -25,7 +25,7 @@ fn foliage(recipe,height,spread) array => if (recipe.foliage == "pad") pond_leav
               if (recipe.foliage == "palm") 7 else 1,recipe.leaf)]]
 
 // petal rings share one construction; recipes set shape, packing, color and opening.
-fn rings(k,recipe,order,angle) array {
+fn rings(k,recipe,order,angle) array^ {
     let layers = max(2,recipe.layers+order-3)
     let form = bloom.profile(rng.derive(k,"head"),recipe.petals)
     let parent = transforms.matrix([0.0,recipe.height,0.0],
@@ -36,7 +36,7 @@ fn rings(k,recipe,order,angle) array {
         let length = recipe.length*(1.0-0.55*t),
         let tilt = recipe.tilt+0.7*t+(float(angle)-25.0)*0.01,
         let color = recipe.colors[min(len(recipe.colors)-1,int(t*float(len(recipe.colors))))])
-        for (i,p in ring.petals,let a = p.angle+float(layer)*0.35,
+        for (i,p in ((ring.petals) ^ { [] }),let a = p.angle+float(layer)*0.35,
             let shade = if (recipe.highlight != null and rng.chance(rng.at(rng.at(k,layer),i),0.24)) recipe.highlight else color,
             let radius = 0.11*(1.0-t),let petal = solid.oval([radius*cos(a),float(layer)*0.07,radius*sin(a)],
                 [length*p.length,length*p.length,recipe.width*(1.0-0.35*t)*p.width],shade,"flower",
@@ -64,7 +64,7 @@ pub fn layered(k,recipe,order,angle) map {
      solids:[stalk,*leaves,*petals,center,*stamens(rng.derive(k,"stamens"),recipe,order)]}
 }
 
-fn pea_blossom(position,rotation,size,shade) array {
+fn pea_blossom(position,rotation,size,shade) array^ {
     let parent = transforms.matrix(position,rotation,[size,size,size])^
     let parts = [solid.oval([0.0,0.01,-0.09],[0.16,0.075,0.19],shade,"flower"),
         *[for (side in [-1.0,1.0]) solid.oval([side*0.085,0.025,0.065],[0.1,0.07,0.14],"#f5d5df","flower",[0.0,0.0,side*0.35])],

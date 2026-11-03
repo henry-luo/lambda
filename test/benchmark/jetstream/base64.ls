@@ -124,14 +124,14 @@ pn run() {
     var i: int = 0
     while (i < n) {
         // Park-Miller PRNG
-        var hi: int = seed / 127773
+        var hi: int = (seed / 127773)^
         var lo = seed % 127773
         seed = 16807 * lo - 2836 * hi
-        if (seed <= 0) {
+        if ((seed <= 0)^) {
             seed = seed + 2147483647
         }
         var r: int = seed % 26
-        bytes[i] = r + 97
+        bytes[i] = (r + 97)^
         i = i + 1
     }
 
@@ -148,7 +148,7 @@ pn run() {
             print("base64: FAIL - length mismatch: expected " ++ n ++ " got " ++ dec_len ++ "\n")
             return false
         }
-        if (bytes_equal(bytes, dec_bytes, n) == false) {
+        if ((bytes_equal(bytes, dec_bytes, n) == false)^) {
             print("base64: FAIL - decode mismatch at size " ++ n ++ "\n")
             return false
         }
@@ -174,7 +174,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 8) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

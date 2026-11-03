@@ -36,13 +36,13 @@ pub fn normalize(data, options = {}) {
 }
 
 // Longest-path ranking rejects cycles after exactly |V| relaxation passes.
-fn rank_pass(graph, ranks, remaining) {
+fn rank_pass(graph, ranks, remaining) any^ {
     let next = [for (i, rank in ranks) max([rank, for (link in graph.links where link.target == i) ranks[link.source] + 1])];
     if (next == ranks) ranks else if (remaining <= 0) error("chart: Sankey stage ordering must be acyclic")
     else rank_pass(graph, next, remaining - 1)
 }
 
-fn sankey(graph, width, height, options) {
+fn sankey(graph, width, height, options) any^ {
     let ranks = rank_pass(graph, [for (node in graph.nodes) 0], len(graph.nodes));
     let node_width = if (options.node_width != null) options.node_width else 12.0;
     let gap = if (options.node_padding != null) options.node_padding else 10.0;
@@ -126,7 +126,7 @@ fn force(graph, width, height, options) {
     }
 }
 
-fn chord(graph, width, height, options) {
+fn chord(graph, width, height, options) any^ {
     let gap = if (options.pad_angle != null) options.pad_angle else 0.03;
     let weights = [for (node in graph.nodes) sum([for (link in graph.links
         where link.source == node.index or link.target == node.index) link.value *
@@ -150,7 +150,7 @@ fn chord(graph, width, height, options) {
     }
 }
 
-pub fn layout(data, width, height, options = {}) {
+pub fn layout(data, width, height, options = {}) any^ {
     let graph = normalize(data, options);
     if (graph is error) graph
     else if (not util.finite_number(width) or not util.finite_number(height) or width <= 0 or height <= 0)
@@ -161,7 +161,7 @@ pub fn layout(data, width, height, options = {}) {
     else force(graph, width, height, options)
 }
 
-fn ribbon(link) {
+fn ribbon(link) any^ {
     let mid = (link.x1 + link.x2) / 2.0;
     svg.M(link.x1, link.y1) ++ " " ++ svg.C(mid, link.y1, mid, link.y2, link.x2, link.y2) ++ " " ++
         svg.L(link.x2, link.y2 + link.width) ++ " " ++ svg.C(mid, link.y2 + link.width,
@@ -169,7 +169,7 @@ fn ribbon(link) {
 }
 
 fn radial(radius, angle) => [radius * math.cos(angle - util.PI / 2.0), radius * math.sin(angle - util.PI / 2.0)]
-fn chord_ribbon(link, radius) {
+fn chord_ribbon(link, radius) any^ {
     let a0 = radial(radius, link.a0); let a1 = radial(radius, link.a1);
     let b0 = radial(radius, link.b0); let b1 = radial(radius, link.b1);
     svg.M(a0[0], a0[1]) ++ " " ++ svg.A(radius, radius, 0, if (link.a1 - link.a0 > util.PI) 1 else 0, 1, a1[0], a1[1]) ++
@@ -178,7 +178,7 @@ fn chord_ribbon(link, radius) {
         " Q 0 0 " ++ util.fmt_num(a0[0]) ++ " " ++ util.fmt_num(a0[1]) ++ " Z"
 }
 
-pub fn render(data, ctx, options) {
+pub fn render(data, ctx, options) any^ {
     let graph = layout(data, ctx.plot_w, ctx.plot_h, options);
     let nc = mark.part_context(ctx, options, "node", graph.nodes |> ~.row);
     let lc = mark.part_context(ctx, options, "link", graph.links |> ~.row);
@@ -188,7 +188,7 @@ pub fn render(data, ctx, options) {
     let invalid=util.first_error([graph,mark.part_error([nc,lc,label_ctx])]);
     if (invalid is error) invalid else svg.group_class("marks " ++ options.kind, [
         <g class: "links", transform: if (options.kind == "chord") svg.translate(ctx.plot_w / 2.0, ctx.plot_h / 2.0) else null,
-            for (edge in graph.links where mark.part_selected(lc,edge.row),
+            for (edge in ((graph.links) ^ { [] }) where ((mark.part_selected(lc,edge.row)) ^ { false }),
                 let a = graph.nodes[edge.source], let b = graph.nodes[edge.target],
                 let linear = options.kind == "force_graph",
                 let appearance = mark.style(lc, edge.row, lo,
@@ -196,7 +196,7 @@ pub fn render(data, ctx, options) {
                 <path class: "graph-link", 'data-source': string(a.id), 'data-target': string(b.id),
                     d: if (options.kind == "sankey") ribbon(edge) else if (options.kind == "chord") chord_ribbon(edge, radius)
                         else svg.line_path([[a.x, a.y], [b.x, b.y]]), *:appearance, mark.tooltip(lc, edge.row)>>,
-        for (i, node in graph.nodes,
+        for (i, node in ((graph.nodes) ^ { [] }),
             let appearance = mark.style(nc, node.row, no, {fill: color.category10[i % 10], stroke: "white", 'stroke-width': 1, opacity: 1.0}))
             <g class: "graph-node", 'data-node': string(node.id),
                 if (options.kind == "sankey" and mark.part_selected(nc,node.row)) <rect x: node.x, y: node.y, width: node.width, height: node.height, *:appearance, mark.tooltip(nc, node.row)>

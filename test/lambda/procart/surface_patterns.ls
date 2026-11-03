@@ -14,13 +14,13 @@ let prepared=surface.prepare(pattern,42)^;
 fn document(nodes,settings={}) element => <procart version:2,seed:42,settings:settings,<resources pattern>;*nodes>
 let source=document([<group surface:{pattern:"grain",resolution:8},<box id:"one">;<box id:"two",color:"#889966">>,<box id:"plain">])
 let model=scene.expand(source)^
-let textures=[for (r in model.resources where name(r)=='texture') r]
+let textures=[for (r in model.resources where ((name(r)=='texture') ^ { false })) r]
 let raster=image.decode(media.data_uri_bytes(textures[0].src)^)^;
 [model.stats.surface_textures==1,model.stats.surface_pixels==64,len(textures)==1,model.parts[0].surface==model.parts[1].surface,
  model.parts[2].surface==null,native.validate(scene.to_scene3d(model))^,
  scene.expand(parse(format(source,'mark')^,'mark')^)^==model,
  len(unique(flatten(image.channel(image.composition(raster)[0][0],"r")^)))>1,
- all([for (m in scene.meshes(model) where content(m)[0].texture != null) content(m)[0].type=='standard'])];
+ all([for (m in scene.meshes(model) where ((content(m)[0].texture != null) ^ { false })) content(m)[0].type=='standard'])];
 let override=document([<group surface:{pattern:"grain",resolution:8},
  <box id:"clear",surface:null>;<box id:"role",surfaces:{box:null}>;<box id:"kept">>])
 let overridden=scene.expand(override)^;

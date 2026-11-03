@@ -11,7 +11,7 @@ import boxes: ~~.elements.boxes
 pub let FRAMED = ["framed", "oframed", "shaded", "shaded*", "snugshade", "snugshade*", "leftbar"]
 
 // the frame's CSS, or null when a shaded form finds no shadecolor
-pub fn framed_css(tag, custom_colors) {
+pub fn framed_css(tag, custom_colors) any^ {
     let shade = color.resolve_color("shadecolor", custom_colors)
     if (tag == "leftbar") boxes.frame_css({width: "3pt", sides: ["left"], padding: "0 0 0 10pt"})
     else if (starts_with(tag, "shaded") or false) (if (shade == null) null
@@ -32,17 +32,17 @@ let SIDES = [{key: "topline", side: "top"}, {key: "rightline", side: "right"},
 // keys outside the bounded profile
 pub fn unknown_keys(keys) => [for (key, value at keys where not (contains(MDFRAMED_KEYS, string(key)) or false)) string(key)]
 
-fn dimension(value, fallback) => if (value == null) fallback else (util.css_dimension(string(value)) or fallback)
+fn dimension(value, fallback) any^ => if (value == null) fallback else (util.css_dimension(string(value)) or fallback)
 fn off(value) => value != null and (value == "false" or value == false)
 
 // {css, title} of an mdframed block, or null when a color does not resolve.
 // mdframed's defaults: a .4pt black line on every side, a white background, 10pt
 // inner side margins and .4\baselineskip (4.8pt) above and below.
-pub fn mdframed_frame(keys, custom_colors) {
+pub fn mdframed_frame(keys, custom_colors) any^ {
     let line = color.resolve_color(string(keys.linecolor or "black"), custom_colors)
     let background = color.resolve_color(string(keys.backgroundcolor or "white"), custom_colors)
     let hidden = keys.hidealllines != null and not off(keys.hidealllines)
-    let sides = if (hidden) [] else [for (entry in SIDES where not off(keys[entry.key])) entry.side]
+    let sides = if (hidden) [] else [for (entry in SIDES where ((not off(keys[entry.key])) ^ { false })) entry.side]
     let margin = if (keys.innermargin == null) null else dimension(keys.innermargin, null)
     let top = dimension(keys.innertopmargin, margin or "4.8pt")
     let bottom = dimension(keys.innerbottommargin, margin or "4.8pt")

@@ -4,15 +4,15 @@ import model: lambda.graph.model
 import graph_style: lambda.graph.style
 
 fn sanitized_children(value) =>
-  [for (item in content(value), child in sanitize_value(item)) child]
+  [for (item in ((content(value)) ^ { [] }), child in ((sanitize_value(item)) ^ { [] })) child]
 
-fn safe_enum(value, allowed) {
+fn safe_enum(value, allowed) any^ {
   // this module also exports lower(), so method syntax must select string.lower().
   let text = string(if (value != null) value else "").lower();
   if (contains(allowed, text)) text else null
 }
 
-fn safe_span(value) {
+fn safe_span(value) any^ {
   let text = graph_style.unsigned_number_text(value, false);
   let span = if (text != null and not contains(text, ".")) int(text) else null;
   if (span != null and span > 0 and span <= 1000) span else null
@@ -71,7 +71,7 @@ fn sanitized_element(value, value_tag) {
     else { sanitized_children(value) }
 }
 
-fn sanitize_value(value) {
+fn sanitize_value(value) any^ {
   if (value is string) { [value] }
   else if (value is element) {
     let value_tag = model.tag(value);
@@ -81,7 +81,7 @@ fn sanitize_value(value) {
   else { [] }
 }
 
-fn parsed_label(source, label_format) {
+fn parsed_label(source, label_format) any^ {
   if (label_format == "markdown") {
     parse(source, "markdown") ^ { null }
   }
@@ -89,7 +89,7 @@ fn parsed_label(source, label_format) {
   else { null }
 }
 
-pub fn lower(source, label_format = "text") {
+pub fn lower(source, label_format = "text") any^ {
   let text = string(source);
   if (label_format == "markdown" or label_format == "html") {
     let parsed = parsed_label(text, label_format);
@@ -102,7 +102,7 @@ pub fn lower(source, label_format = "text") {
 
 pub fn is_rich(label_format) => label_format == "markdown" or label_format == "html"
 
-fn port_names_at(stack, result) {
+fn port_names_at(stack, result) any^ {
   if (len(stack) == 0) result
   else {
     let value = stack[len(stack) - 1];
@@ -116,4 +116,4 @@ fn port_names_at(stack, result) {
   }
 }
 
-pub fn port_names(values) => port_names_at(values, [])
+pub fn port_names(values) any^ => port_names_at(values, [])

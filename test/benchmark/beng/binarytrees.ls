@@ -11,7 +11,7 @@ fn make_tree(depth) {
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-fn check(node) {
+fn check(node) any^ {
     if (node.left == null) {
         return 1
     }

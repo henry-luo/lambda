@@ -11,8 +11,8 @@ let compiled = motion.scene(motion.attach(hero, {jump: jump})^, {id: "kenney", a
 
 fn fields(n) map => map([for (k, x in n where k is string or k is symbol) (string(k), x)])
 // the pack's FBX names no texture; its skins are separate images
-fn dressed(group, image) element => <group *: fields(group), *[for (x in content(group))
-    if (name(x) == 'resources') <resources *: fields(x), *[*[for (m in content(x))
+fn dressed(group, image) element^ => <group *: fields(group), *[for (x in content(group)^)
+    if (name(x) == 'resources') <resources *: fields(x), *[*[for (m in content(x)^)
         if (name(m) == 'material') <material *: {*: fields(m), color: "#ffffff", texture: "kenney-skin"}> else m],
         <texture id: "kenney-skin", src: image>]>
     else x]>;

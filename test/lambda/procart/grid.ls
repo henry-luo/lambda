@@ -43,7 +43,7 @@ let dg = grid.dungeon(rng.key(8), {width: 70, height: 40})^;
  all([for (r in dg.rooms) r[0] >= 1 and r[1] >= 1 and r[0] + r[2] <= 69 and r[1] + r[3] <= 39])];
 
 "7 mazes are spanning trees";
-fn maze_check(m) {
+fn maze_check(m) any^ {
     let edges = grid.maze_edges(rng.key(9), {width: 13, height: 9, method: m})^
     let tiles = grid.maze(rng.key(9), {width: 13, height: 9, method: m})^
     let dist = grid.distances(tiles, [[1, 1]]);
@@ -57,7 +57,7 @@ grid.maze(k, {width: 3, height: 2, method: 'kruskal'})^;
 [grid.maze(k, {width: 200, height: 200}) ^ { "size" }, grid.maze(k, {width: 3, height: 2, method: 'x'}) ^ { "method" }];
 
 "8 Wilson draws uniformly from the 15 spanning trees of a 3 x 2 grid";
-let trees = [for (i in 0 to 2999) join([for (e in sort(grid.maze_edges(rng.at(rng.key(10), i), {width: 3, height: 2, method: 'wilson'})^ |>
-    (if (~[0] < ~[1]) ~ else [~[1], ~[0]]), (e) => e)) string(e[0]) ++ "-" ++ string(e[1])], " ")]
+let trees = [for (i in 0 to 2999) join([for (e in ((sort(grid.maze_edges(rng.at(rng.key(10), i), {width: 3, height: 2, method: 'wilson'})^ |>
+    (if (~[0] < ~[1]) ~ else [~[1], ~[0]]), (e) => e)) ^ { [] })) string(e[0]) ++ "-" ++ string(e[1])], " ")]
 let counts = [for (t in trees group by t as tree into g) len(g)];
 [len(counts), sum([for (c in counts) (float(c) - 200.0) * (float(c) - 200.0) / 200.0]) < 36.1]

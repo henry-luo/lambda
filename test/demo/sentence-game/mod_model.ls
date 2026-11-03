@@ -178,26 +178,26 @@ fn display_cards(cards,id,kind) {
     // only a separate object slot turns a complete predicate into its verb.
     if (kind == "predicate" and has_object(id)) [for (card in cards) {*:card,text:card.verb}] else cards
 }
-pub fn catalog(id,kind) => display_cards(catalogs[kind] or [],id,kind)
-pub fn deck(st,kind) => display_cards((if (st.decks == null) catalogs else st.decks)[kind] or [],st.pattern,kind)
-pub fn card(st,kind) => lookup(deck(st,kind),st[kind])
-pub fn ranked(cards,seed) => [for (entry in sort(
-    [for (i,card in cards) {card:card,rank:math.random(seed+i)[0]}],(entry)=>entry.rank)) entry.card]
-pub fn scrambled(cards,seed) {
+pub fn catalog(id,kind) any^ => display_cards(catalogs[kind] or [],id,kind)
+pub fn deck(st,kind) any^ => display_cards((if (st.decks == null) catalogs else st.decks)[kind] or [],st.pattern,kind)
+pub fn card(st,kind) any^ => lookup(deck(st,kind),st[kind])
+pub fn ranked(cards,seed) any^ => [for (entry in ((sort(
+    [for (i,card in cards) {card:card,rank:math.random(seed+i)[0]}],(entry)=>entry.rank)) ^ { [] })) entry.card]
+pub fn scrambled(cards,seed) any^ {
     let shuffled = ranked(cards,seed)
     // keep a scramble visibly different even when the random draw keeps its order.
     if (len(cards) > 1 and all([for (i,card in shuffled) card.id == cards[i].id]))
         [*slice(shuffled,1),shuffled[0]] else shuffled
 }
-fn scramble(st) {
+fn scramble(st) any^ {
     // qualify IDs because an action and its object can share the same card ID.
     let cards = if (st.mixed_cards != null) st.mixed_cards else
-        [for (kind in kinds(st.pattern),card in st.hands[kind]) {id:kind ++ ":" ++ card.id,kind:kind,card:card}]
+        [for (kind in ((kinds(st.pattern)) ^ { [] }),card in st.hands[kind]) {id:kind ++ ":" ++ card.id,kind:kind,card:card}]
     {*:st,mixed_cards:scrambled(cards,st.seed),seed:st.seed+len(cards)}
 }
-fn offer(cards,required) => if (contains([for (card in cards) card.id],required.id)) cards
+fn offer(cards,required) any^ => if (contains([for (card in cards) card.id],required.id)) cards
     else [cards[0],required,cards[1]]
-fn deal(st) {
+fn deal(st) any^ {
     let hand_subjects = if (st.decks != null) deck(st,"subject") else slice(ranked(subjects,st.seed),0,3)
     let verbs = deck(st,"predicate")
     let natural = [for (card in verbs where card.match == hand_subjects[0].id) card][0]
@@ -219,41 +219,41 @@ pub fn new_game(seed=42,round_id=1) => {*:empty_choices,round:round_id,seed:seed
     mixed_cards:null,phase:"pattern",clauses:[],link:"",previous:null,visits:{}}
 pub fn jump_round(st,target) => progress.jump(st,target,rounds,round_fields,new_game,"saved")
 pub fn round_saved(st,id) => progress.finished(st,id)
-pub fn choose_pattern(st,id) => if (st.phase != "pattern" or pattern(id) == null) st
+pub fn choose_pattern(st,id) any^ => if (st.phase != "pattern" or pattern(id) == null) st
     // reopening the same recipe preserves the draft and its hand.
     else if (st.pattern == id and st.hands != null) {*:st,phase:"build"}
     else deal({*:st,pattern:id})
 pub fn show_patterns(st) => if (st.phase == "build") {*:st,phase:"pattern"} else st
-pub fn choose(st,kind,id) {
+pub fn choose(st,kind,id) any^ {
     if (st.phase != "build" or not contains(kinds(st.pattern),kind) or lookup(st.hands[kind],id) == null) st else {*:st,[kind]:id}
 }
 pub fn current_clause(st) => reduce([{pattern:st.pattern,link:st.link,decks:st.decks},*part_ids],(clause,kind)=>{*:clause,[kind]:st[kind]})
 pub fn all_clauses(st) => [*st.clauses,current_clause(st)]
-pub fn complete(st) => pattern(st.pattern) != null and all([for (kind in kinds(st.pattern)) card(st,kind) != null])
-pub fn part_text(clause,kind) {
+pub fn complete(st) any^ => pattern(st.pattern) != null and all([for (kind in ((kinds(st.pattern)) ^ { [] })) card(st,kind) != null])
+pub fn part_text(clause,kind) any^ {
     let selected = card(clause,kind)
     if (selected == null) "" else if (kind == "subject" and clause.link != "" and selected.proper != true) lower(selected.text) else selected.text
 }
 pub fn separator(id) => if (id == "") "" else lookup(connectors,id).separator
-pub fn clause_text(clause) => join([for (kind in kinds(clause.pattern)) part_text(clause,kind)]," ")
-pub fn sentence(st) => if (not complete(st)) "" else join([for (clause in all_clauses(st)) separator(clause.link) ++ clause_text(clause)],"") ++ "."
-pub fn repeated(st) => sentence(st) != "" and contains([for (entry in st.book) entry.text],sentence(st))
-pub fn ready(st) => st.phase == "build" and complete(st) and not repeated(st)
-fn familiar(clause) => card(clause,"predicate").match == clause.subject and
+pub fn clause_text(clause) any^ => join([for (kind in ((kinds(clause.pattern)) ^ { [] })) part_text(clause,kind)]," ")
+pub fn sentence(st) any^ => if (not complete(st)) "" else join([for (clause in all_clauses(st)) separator(clause.link) ++ clause_text(clause)],"") ++ "."
+pub fn repeated(st) any^ => sentence(st) != "" and contains([for (entry in st.book) entry.text],sentence(st))
+pub fn ready(st) any^ => st.phase == "build" and complete(st) and not repeated(st)
+fn familiar(clause) any^ => card(clause,"predicate").match == clause.subject and
     (not has_object(clause.pattern) or card(clause,"predicate").object == clause.object)
-pub fn save_sentence(st) {
+pub fn save_sentence(st) any^ {
     if (not ready(st)) st else {
         let clauses = all_clauses(st)
         let entry = {text:sentence(st),art:card(clauses[0],"subject").art,clauses:clauses,natural:all([for (clause in clauses) familiar(clause)])}
         {*:st,phase:"saved",previous:null,book:if (st.unlimited == true) [*st.book,entry] else progress.record(st,entry)}
     }
 }
-pub fn extend(st,connector) => if (st.phase != "build" or not complete(st) or lookup(connectors,connector) == null) st
+pub fn extend(st,connector) any^ => if (st.phase != "build" or not complete(st) or lookup(connectors,connector) == null) st
     // the immutable pre-join snapshot restores both the choices and their hand.
     else deal({*:st,clauses:[*st.clauses,current_clause(st)],link:connector,previous:st})
-pub fn next(st) => if (st.phase != "saved") st else if (len(st.book) == rounds) {*:st,phase:"done"}
+pub fn next(st) any^ => if (st.phase != "saved") st else if (len(st.book) == rounds) {*:st,phase:"done"}
     else jump_round(st,progress.pending(st,rounds))
-pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
+pub fn action(st,command,value="") any^ => if (command == "reset") new_game(st.seed)
     else if (command == "primary") (if (st.phase == "saved") next(st) else save_sentence(st))
     else if (command == "pattern") choose_pattern(st,value)
     else if (command == "patterns") show_patterns(st)
@@ -266,15 +266,15 @@ pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
     else if (command == "undo-join") (if (st.phase == "build" and st.previous != null)
         {*:st.previous,book:st.book,visits:st.visits,seed:max(st.seed,st.previous.seed)} else st)
     else choose(st,command,value)
-pub fn shortcut(st,key) {
-    let options = [for (kind in kinds(st.pattern),i,value in part(kind).keys where value == key) {kind:kind,id:st.hands[kind][i].id}]
+pub fn shortcut(st,key) any^ {
+    let options = [for (kind in ((kinds(st.pattern)) ^ { [] }),i,value in ((part(kind).keys) ^ { [] }) where value == key) {kind:kind,id:st.hands[kind][i].id}]
     let index = bank_index(key)
     let mixed = if (st.mixed_cards != null and index != null) st.mixed_cards[index] else null
     if (st.mixed_cards != null) (if (mixed == null) st else choose(st,mixed.kind,mixed.card.id))
     else if (len(options) == 0) st else choose(st,options[0].kind,options[0].id)
 }
-pub fn saved_entry(st) => progress.entry(st,st.round)
-pub fn feedback(st) => if (st.phase == "saved")
+pub fn saved_entry(st) any^ => progress.entry(st,st.round)
+pub fn feedback(st) any^ => if (st.phase == "saved")
     (if (len(saved_entry(st).clauses) > 1) "A bigger story! Your conjunctions connect complete clauses."
         else if (saved_entry(st).natural) "A lovely match! Who and what fit together."
         else "A fun mix! Your subject and predicate make a sentence.")

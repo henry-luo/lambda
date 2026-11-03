@@ -18,8 +18,8 @@ let models = {
 pub fn model(id) => models[id]
 pub fn needs_load(viewport,id) => models[id] != null and
     dom.get_attribute(dom.query_selector(viewport,"#imported-specimen"),"data-model") != id
-pub fn nodes(tree) => [tree,*[for (child in content(tree)) *nodes(child)]]
-pub fn source(base,id) => if (models[id].local == true) url_resolve(base,models[id].file)
+pub fn nodes(tree) any^ => [tree,*[for (child in ((content(tree)) ^ { [] })) *nodes(child)]]
+pub fn source(base,id) any^ => if (models[id].local == true) url_resolve(base,models[id].file)
     else if (models[id].url != null) models[id].url else REMOTE ++ "models/" ++ models[id].file
 pub fn thumbnail(id) => if (id == "whiteBlood") REMOTE ++ "cell-renders-transparent/white-blood.png"
     else "assets/" ++ id ++ ".png"
@@ -33,19 +33,19 @@ pub fn load(base,id) element^ {
 pub pn ensure(viewport,base,id) {
     let slot = dom.query_selector(viewport,"#imported-specimen")
     let asset = models[id]
-    dom.set_attribute(slot,"visible",string(asset != null))
+    dom.set_attribute(slot,"visible",string(asset != null)^)
     if (asset == null) { return "" }
     if (dom.get_attribute(slot,"data-model") == id) {
         return dom.get_attribute(slot,"data-error")
     }
     // Only the selected imported model occupies this viewport; camera changes retain its buffers.
-    scene_dom.clear(slot)
+    scene_dom.clear(slot)^
     dom.set_attribute(slot,"data-model",id)
     var loaded = null
     var problem = ""
     { let __error_outcome_1 = load(base,id) ^ { ^ }; if (__error_outcome_1 is error) { problem = "Could not load " ++ data.cell(id).name ++ ". " ++ __error_outcome_1.message } else match __error_outcome_1 { case any { loaded = ~ } } }
     if (loaded != null) {
-        scene_dom.mount(slot,loaded,if (id == "whiteBlood") 1024 else 2048)
+        scene_dom.mount(slot,loaded,if (id == "whiteBlood") 1024 else 2048)^
     }
     dom.set_attribute(slot,"data-error",problem)
     dom.set_attribute(viewport,"data-model-source",source(base,id))

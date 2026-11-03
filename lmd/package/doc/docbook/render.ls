@@ -21,9 +21,9 @@ let labels = {chapter:"Chapter",appendix:"Appendix",section:"Section",figure:"Fi
     important:"Important",warning:"Warning",caution:"Caution",danger:"Danger"}
 let admonitions = {note:"ⓘ",tip:"☞",important:"☝",caution:"⚠",warning:"🛑",danger:"⚡"}
 
-fn label_parts(value) => [for (i,part in split(value,"."),piece in
+fn label_parts(value) any^ => [for (i,part in ((split(value,".")) ^ { [] }),piece in
     (if (i == 0) [part] else [<span class:"sep",".">,part])) piece]
-fn numbered(node,context) => c.get(context.model.formal_numbers,node.key,node.number)
+fn numbered(node,context) any^ => c.get(context.model.formal_numbers,node.key,node.number)
 fn titlepage_div(children) element^ => h.make("header",{},[h.make("div",{class:"title"},children)^])^
 fn numbered_title(node,context,toc = false) array^ {
     let title_nodes = nodes(c.title(node),{*:context,preserve_text:true})^
@@ -41,7 +41,7 @@ fn header(node,context) any^ {
             nodes(subtitle.children,{*:context,preserve_text:true})^)^]);
     if (len(headings) == 0) null else <header *headings>
 }
-fn structural_children(node) => [for (child in c.children(node) where c.is_structure(child)) child]
+fn structural_children(node) => [for (child in c.children(node) where ((c.is_structure(child)) ^ { false })) child]
 fn toc_items(node,context) array^ => [for (child in structural_children(node),
     let nested = if (len(structural_children(child)) == 0) [] else [<ul class:"toc",*toc_items(child,context)^>])
     h.make("li",{},[<a href:href(child,context),*numbered_title(child,context,true)^>,*nested])^]
@@ -50,14 +50,14 @@ fn formal_lists(node,context) array^ {
         {tag:"table",plural:"tables",token:"ListofTables"},{tag:"example",plural:"examples",token:"ListofExamples"},
         {tag:"equation",plural:"equations",token:"ListofEquations"},{tag:"procedure",plural:"procedures",token:"ListofProcedures"}];
     if (not (node.tag in ["book","set"])) [] else [for (family in families,
-        let entries = [for (entry in c.nodes(node) where entry.tag == family.tag and len(c.title(entry)) > 0) entry]
+        let entries = [for (entry in ((c.nodes(node)) ^ { [] }) where ((entry.tag == family.tag and len(c.title(entry)) > 0) ^ { false })) entry]
         where len(entries) > 0 and context.options.parameters["lists-of-" ++ family.plural])
         h.make("div",{class:"list-of-" ++ family.plural ++ " lot"},[
             <div class:"title",gentext.token(family.token)>,
             <ul class:"toc",*[for (entry in entries) <li <a href:href(entry,context),*numbered_title(entry,context,true)^>>]>])^]
 }
 fn toc(node,context) any^ {
-    let entries = [for (child in c.nodes(node) where child.key != node.key and c.is_structure(child)) child]
+    let entries = [for (child in ((c.nodes(node)) ^ { [] }) where ((child.key != node.key and c.is_structure(child)) ^ { false })) child]
     let enabled = context.options.parameters["auto-toc"] and
         (node.tag in divisions or (node.tag == "article" and node.parent == null))
     let lists = formal_lists(node,context)^;
@@ -77,7 +77,7 @@ fn structure(node,context) element^ {
     let classes = [node.tag,if (division) "division" else if (node.tag in components) "component" else null]
     let tag = if (division or (node.tag in components and node.parent == null)) "article" else "section"
     let body = [for (child in node.children where not (child is map and child.tag in ["info","title","subtitle"])) child]
-    let first_section = c.first([for (i,child in body where child is map and c.is_section(child)) i])
+    let first_section = c.first([for (i,child in body where ((child is map and c.is_section(child)) ^ { false })) i])
     let prefix = if (first_section == null or division or c.is_section(node)) [] else nodes(take(body,first_section),context)^
     let contents = if (first_section == null or division or c.is_section(node)) nodes(body,context)^
         else [if (len(prefix) == 0) null else <div class:"db-bfs",*prefix>,*nodes(drop(body,first_section),context)^];
@@ -89,7 +89,7 @@ fn structure(node,context) element^ {
 
 fn inline_node(node,context) element^ {
     let spec = c.get(inlines.TEMPLATES,node.tag,{tag:"span",classed:true,class_attr:false})
-    let tag = if (node.tag == "emphasis") (if (any([for (role in c.words(c.attr(node,"role")))
+    let tag = if (node.tag == "emphasis") (if (any([for (role in ((c.words(c.attr(node,"role"))) ^ { [] }))
         role in ["bold","strong"]])) "strong" else "em")
         else if (context.in_verbatim == true and spec.verbatim_tag != null) spec.verbatim_tag else spec.tag
     let classes = [*if (node.tag == "emphasis" or not spec.classed) [] else [node.tag],
@@ -147,7 +147,7 @@ fn block(node,context) any^ {
         preserve_text:node.tag in ["para","simpara","term","bridgehead","attribution"]})^)^
 }
 
-fn trim_lines(lines,leading,trailing) {
+fn trim_lines(lines,leading,trailing) any^ {
     if (leading and len(lines) > 0 and trim(lines[0]) == "") trim_lines(drop(lines,1),leading,trailing)
     else if (trailing and len(lines) > 0 and trim(lines[len(lines)-1]) == "") trim_lines(take(lines,len(lines)-1),leading,trailing)
     else lines
@@ -193,7 +193,7 @@ fn table(node,context) element^ {
     let classes = [node.tag,if (node.tag == "table") "formalobject" else "informalobject"]
     let attrs = h.attributes(node,classes,true)
     let contents = if (len(groups) > 0) [for (group in groups) tables.cals(group,context,nodes)^]
-        else [<table *:map([for (key,value in attrs where string(key) != "id") (key,value)]),
+        else [<table *:map([for (key,value in attrs where ((string(key) != "id") ^ { false })) (key,value)]),
             *nodes([for (child in node.children where not (child is map and child.tag in ["info","title"])) child],context)^>]
     h.make("div",attrs,[formal_header(node,context)^,*contents])^
 }
@@ -234,8 +234,8 @@ fn note_body(node,context) element^ {
         <div class:"footnote-number",reference>,<div class:"footnote-body",*nodes(node.children,context)^>])^
 }
 fn media_object(node,context) element^ {
-    let image = c.first([for (entry in c.nodes(node) where entry.tag == "imagedata") entry])
-    let alternate = c.first([for (entry in c.nodes(node) where entry.tag in ["alt","textobject"]) entry])
+    let image = c.first([for (entry in ((c.nodes(node)) ^ { [] }) where entry.tag == "imagedata") entry])
+    let alternate = c.first([for (entry in ((c.nodes(node)) ^ { [] }) where entry.tag in ["alt","textobject"]) entry])
     let uri = if (image == null) null else c.resolve_uri(image.base_uri,c.attr(image,"fileref"))
     let asset = context.media.by_uri[uri]
     let media_nodes = if (asset.resource.bytes == null) [c.text(alternate)] else
@@ -277,7 +277,7 @@ fn one(value,context) any^ {
         let handler = context.options.customization[value.tag]
         let inherited = {*:context,preserve_text:context.preserve_text == true or value.space == "preserve"};
         if (handler == null) default_node(value,inherited)^
-        else handler(value,inherited,(node,ctx)=> default_node(node,ctx)^)^
+        else handler(value,inherited,(node,ctx)any^ => default_node(node,ctx)^)^
     }
 }
 pub fn nodes(values,context) array^ => [for (value in values,let rendered = one(value,context)^ where rendered != null) rendered]
@@ -313,6 +313,6 @@ pub fn page(model,options,page_path,owners,media = null,chunks = {},nav = null) 
     let body_nodes = [<nav class:"top",navigation(context,"top")^>,<main *main_nodes>,<nav class:"bottom",navigation(context,"bottom")^>]
     let page_root = c.get(model,"page_root",model.root)
     let page_body = <body class:if (page_root.key == model.root.key) "home" else contents[0].class,*body_nodes>;
-    {body:page_body,toc:[for (node in model.nodes where c.is_structure(node) and node.key != model.root.key)
+    {body:page_body,toc:[for (node in model.nodes where ((c.is_structure(node) and node.key != model.root.key) ^ { false }))
         {title:c.normalized(c.title(node)),number:node.number,href:href(node,context)}]}
 }

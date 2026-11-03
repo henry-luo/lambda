@@ -6,7 +6,7 @@ import utf16: lambda.io.utf16
 // Modified base64 of RFC 3501 §5.1.3 uses "," where base64 uses "/".
 fn sextets(chunk) {
     let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
-    [for (ch in split(chunk, "")) index_of(alphabet, ch)]
+    [for (ch in ((split(chunk, "")) ^ { [] })) index_of(alphabet, ch)]
 }
 
 // The bytes a run of sextets carries: byte i spans bits 8i..8i+7 of the
@@ -23,7 +23,7 @@ fn sextet_bytes(values) {
 }
 
 // A mailbox name as the server spells it (modified UTF-7) to text.
-pub fn mailbox_name(path) {
+pub fn mailbox_name(path) any^ {
     if (not contains(path, "&")) path
     else {
         let pieces = split(path, "&");
@@ -73,13 +73,13 @@ pub fn is_list(tokens) => len(tokens) >= 4 and tokens[0] == 'LIST'
 
 // The argument of an OK response code such as [UIDVALIDITY 3857529045].
 fn code_value(responses, code_name) {
-    let found = [for (r in responses where len(r) == 3 and r[0] == 'OK' and r[1] is array and
-                     len(r[1]) > 1 and string(r[1][0]) == code_name) r[1][1]];
+    let found = [for (r in responses where ((len(r) == 3 and r[0] == 'OK' and r[1] is array and
+                     len(r[1]) > 1 and string(r[1][0]) == code_name) ^ { false })) r[1][1]];
     if (len(found) == 0) null else found[len(found) - 1]
 }
 
 fn counted(responses, word) {
-    let found = [for (r in responses where len(r) == 2 and r[1] is symbol and string(r[1]) == word) r[0]];
+    let found = [for (r in responses where ((len(r) == 2 and r[1] is symbol and string(r[1]) == word) ^ { false })) r[0]];
     if (len(found) == 0) null else found[len(found) - 1]
 }
 
@@ -100,14 +100,14 @@ fn item(pairs, key) {
 }
 
 fn item_prefixed(pairs, prefix) {
-    let found = [for (p in pairs where slice(p.key, 0, len(prefix)) == prefix) p.value];
+    let found = [for (p in pairs where ((slice(p.key, 0, len(prefix)) == prefix) ^ { false })) p.value];
     if (len(found) == 0) null else found[0]
 }
 
 // One `* n FETCH (...)` response as a map of its data items.
 pub fn fetch_items(tokens) {
     let data = tokens[2]
-    let pairs = [for (i in range(0, len(data) - 1, 2)) {key: lower(string(data[i])), value: data[i + 1]}]
+    let pairs = [for (i in ((range(0, len(data) - 1, 2)) ^ { [] })) {key: lower(string(data[i])), value: data[i + 1]}]
     let modseq = item(pairs, "modseq");
     {seq: tokens[0],
      uid: item(pairs, "uid"),
@@ -123,11 +123,11 @@ pub fn fetch_items(tokens) {
 }
 
 // UIDs as an IMAP sequence set: [1, 2, 3, 7] is "1:3,7".
-pub fn uid_set(uids) {
+pub fn uid_set(uids) any^ {
     let sorted = sort(unique(uids));
     if (len(sorted) == 0) ""
     else join([for (i, uid in sorted where i == 0 or sorted[i - 1] != uid - 1) {
-        let runs = [for (j in range(i, len(sorted), 1) where sorted[j] - uid == j - i) sorted[j]]
+        let runs = [for (j in ((range(i, len(sorted), 1)) ^ { [] }) where sorted[j] - uid == j - i) sorted[j]]
         let end_uid = runs[len(runs) - 1];
         if (end_uid == uid) string(uid) else string(uid) ++ ":" ++ string(end_uid)
     }], ",")

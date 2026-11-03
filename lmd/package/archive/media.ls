@@ -21,16 +21,16 @@ let HLS_TYPES = ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audi
 let PLAYABLE = ["video/mp4", "video/quicktime", "audio/mp4", "audio/mpeg", "audio/aac"]
 let MB = 1024 * 1024
 
-fn ext_of_url(url) => (let u = planning.parse(url), if (u == null) null else planning.extension(u.path))
-pub fn is_hls(url, declared) => (declared != null and page.media_type(declared) in HLS_TYPES) or ext_of_url(url) == "m3u8"
+fn ext_of_url(url) any^ => (let u = planning.parse(url), if (u == null) null else planning.extension(u.path))
+pub fn is_hls(url, declared) any^ => (declared != null and page.media_type(declared) in HLS_TYPES) or ext_of_url(url) == "m3u8"
 // "video", "audio" or null: by the declared type, then the extension
-pub fn media_of(url, declared) {
+pub fn media_of(url, declared) any^ {
     let t = page.media_type(declared)
     let ext = ext_of_url(url);
     if (t != null and starts_with(t, "video/")) "video" else if (t != null and starts_with(t, "audio/")) "audio"
     else if (ext in platforms.VIDEO_EXT) "video" else if (ext in platforms.AUDIO_EXT) "audio" else null
 }
-fn words(s) => [for (w in split(lower(s or ""), \("\s"+)) where w != "") w]
+fn words(s) => [for (w in ((split(lower(s or ""), \("\s"+))) ^ { [] }) where w != "") w]
 fn text_or_null(v) => if (v is string and trim(v) != "") trim(v) else null
 
 // ---- discovery (fn) ----
@@ -38,21 +38,21 @@ fn text_or_null(v) => if (v is string and trim(v) != "") trim(v) else null
 fn metas(html) => [for (m in n.find_all(html, ["meta"]))
     {key: lower(n.attr(m, "property") or n.attr(m, "name") or n.attr(m, "itemprop") or ""), value: n.attr(m, "content")}]
 fn meta_of(ms, keys) {
-    let hits = [for (k in keys) for (m in ms where m.key == k and text_or_null(m.value) != null) trim(m.value)];
+    let hits = [for (k in keys) for (m in ms where ((m.key == k and text_or_null(m.value) != null) ^ { false })) trim(m.value)];
     if (len(hits) == 0) null else hits[0]
 }
-fn ld_flat(v) => if (v is array) [for (x in v) for (y in ld_flat(x)) y]
+fn ld_flat(v) any^ => if (v is array) [for (x in v) for (y in ((ld_flat(x)) ^ { [] })) y]
     else if (v is map) [v, *(if (v.'@graph' != null) ld_flat(v.'@graph') else [])] else []
 fn ld_types(o) => (let t = o.'@type', if (t is array) [for (x in t) string(x)] else if (t == null) [] else [string(t)])
 // the JSON-LD blocks of the parsed document, whose JSON the HTML reader has
 // already parsed (Readability's node records keep only a script's text)
-fn ld_blocks(el) => if (not (el is element)) []
+fn ld_blocks(el) any^ => if (not (el is element)) []
     else if (string(name(el)) == "script" and lower(string(el.'type' or "")) == "application/ld+json")
         [for (c in el where c is map or c is array) c]
-    else [for (c in el) for (b in ld_blocks(c)) b]
+    else [for (c in el) for (b in ((ld_blocks(c)) ^ { [] })) b]
 // the document's JSON-LD VideoObject and AudioObject records
-pub fn ld_media(root) => [for (b in ld_blocks(root)) for (o in ld_flat(b)
-    where any([for (t in ld_types(o)) t in ["VideoObject", "AudioObject"]])) o]
+pub fn ld_media(root) => [for (b in ((ld_blocks(root)) ^ { [] })) for (o in ((ld_flat(b)) ^ { [] })
+    where any([for (t in ((ld_types(o)) ^ { [] })) t in ["VideoObject", "AudioObject"]])) o]
 
 // one reference: a stream is video unless it says audio; a file is media by its
 // type or extension, or, for a <video>/<audio> element's own src, by the element
@@ -61,7 +61,7 @@ fn candidate(url, declared, base, from, hint, owner) => (let abs = rewrite.resol
      media: if (stream) (if (hint == "audio") "audio" else "video") else (media_of(abs, declared) or owner)})
 fn element_candidates(e, base) => [
     *(if (n.attr(e, "src") == null) [] else [candidate(n.attr(e, "src"), null, base, e.tag, e.tag, e.tag)]),
-    *[for (k in e.kids where n.is_el(k) and k.tag == "source" and n.attr(k, "src") != null)
+    *[for (k in e.kids where ((n.is_el(k) and k.tag == "source" and n.attr(k, "src") != null) ^ { false }))
         candidate(n.attr(k, "src"), n.attr(k, "type"), base, e.tag, e.tag, e.tag)]]
 let OG = [["og:video:secure_url", "og:video:type", "video"], ["og:video:url", "og:video:type", "video"],
     ["og:video", "og:video:type", "video"], ["og:audio:secure_url", "og:audio:type", "audio"],
@@ -69,14 +69,14 @@ let OG = [["og:video:secure_url", "og:video:type", "video"], ["og:video:url", "o
 
 fn first_of(xs) => if (len(xs) == 0) null else xs[0]
 fn unique_urls(cs) => [for (i, c in cs where not any([for (j, d in cs where j < i) d.url == c.url])) c]
-fn usable(c) => not starts_with(c.url, "blob:") and not starts_with(c.url, "data:") and (c.stream or c.media != null)
+fn usable(c) any^ => not starts_with(c.url, "blob:") and not starts_with(c.url, "data:") and (c.stream or c.media != null)
 
 // every media reference of the page, in the order of preference (AR4v2), each once
 pub fn references(html, base, ld) {
     let ms = metas(html)
-    let own = [for (e in n.find_all(html, ["video", "audio"])) for (c in element_candidates(e, base)) c]
+    let own = [for (e in n.find_all(html, ["video", "audio"])) for (c in ((element_candidates(e, base)) ^ { [] })) c]
     let og = [for (row in OG, let v = meta_of(ms, [row[0]]) where v != null) candidate(v, meta_of(ms, [row[1]]), base, "og", row[2], null)]
-    let enclosures = [for (l in n.find_all(html, ["link"]) where "enclosure" in words(n.attr(l, "rel")) and n.attr(l, "href") != null)
+    let enclosures = [for (l in n.find_all(html, ["link"]) where (("enclosure" in words(n.attr(l, "rel")) and n.attr(l, "href") != null) ^ { false }))
         candidate(n.attr(l, "href"), n.attr(l, "type"), base, "enclosure", null, null)]
     let lds = [for (o in ld) for (u in [o.contentUrl, o.embedUrl] where u is string)
         candidate(u, o.encodingFormat, base, "json-ld", if ("AudioObject" in ld_types(o)) "audio" else "video", null)];
@@ -84,20 +84,20 @@ pub fn references(html, base, ld) {
 }
 // the downloadable ones: a stream or a file with a media type or extension, those the system plays first
 pub fn candidates(html, base, ld) {
-    let ok = [for (c in references(html, base, ld) where usable(c)) c];
+    let ok = [for (c in references(html, base, ld) where ((usable(c)) ^ { false })) c];
     [*[for (c in ok where c.stream or c.type in PLAYABLE) c], *[for (c in ok where not (c.stream or c.type in PLAYABLE)) c]]
 }
 
 // the <track> subtitles and captions
 pub fn tracks(html, base) => [for (e in n.find_all(html, ["track"])
-    where lower(n.attr(e, "kind") or "subtitles") in ["subtitles", "captions"] and n.attr(e, "src") != null)
+    where ((lower(n.attr(e, "kind") or "subtitles") in ["subtitles", "captions"] and n.attr(e, "src") != null) ^ { false }))
     {url: rewrite.resolve(base, n.attr(e, "src")), lang: lower(n.attr(e, "srclang") or "und"), label: n.attr(e, "label")}]
 
 // the record's fields from the page: title, description, author, date, site, poster
 pub fn describe(html, base, ld) {
     let ms = metas(html)
     let o = first_of(ld) or {}
-    let posters = [for (e in n.find_all(html, ["video"]) where n.attr(e, "poster") != null) n.attr(e, "poster")]
+    let posters = [for (e in n.find_all(html, ["video"]) where ((n.attr(e, "poster") != null) ^ { false })) n.attr(e, "poster")]
     let poster = first_of([for (v in [first_of(posters), meta_of(ms, ["og:image", "twitter:image"]), text_or_null(o.thumbnailUrl)]
         where v != null) v]);
     {title: meta_of(ms, ["og:title", "twitter:title"]) or text_or_null(o.name) or page.title_of(html),
@@ -142,7 +142,7 @@ pn fetch_part(url, span, settings, max_bytes, retries) map^ {
         }
         attempt = attempt + 1
     }
-    outcome
+    outcome or^ { error("archive: segment fetch ended without an outcome") }
 }
 
 // Appends a media playlist's segments to `dest`, a few fetched at a time and
@@ -160,12 +160,12 @@ pn append_segments(m, dest, settings, cfg, notify, tag) map^ {
     var bytes = 0
     var failure = null
     var pos = 0
-    while (pos < len(segs) and failure == null) {
+    while ((pos < len(segs) and failure == null)^) {
         let batch = take(drop(segs, pos), per_batch)
         let handles = [for (s in batch) start(fetch_part, [s.uri, s.range, settings, max_part, retries])]
         let results = [for (h in handles) wait(h)^]
         for (i, s in batch) {
-            if (failure == null and s.map != null and s.map != written_map) {
+            if ((failure == null and s.map != null and s.map != written_map)^) {
                 let init = fetch_part(s.map.uri, s.map.range, settings, max_part, retries)^
                 if (init.ok) {
                     output(init.body, dest, {mode: 'append'})^
@@ -187,7 +187,7 @@ pn append_segments(m, dest, settings, cfg, notify, tag) map^ {
                 }
             }
         }
-        say(notify, {type: "progress", tag: tag, stage: "media", received: done, total: len(segs), bytes: bytes, rate: null})
+        say(notify, {type: "progress", tag: tag, stage: "media", received: done, total: len(segs), bytes: bytes, rate: null})^
         pos = pos + per_batch
     }
     {ok: failure == null, message: failure, segments: done, bytes: bytes}
@@ -198,7 +198,7 @@ pn append_segments(m, dest, settings, cfg, notify, tag) map^ {
 // fMP4 alongside fMP4 video (two files); otherwise the next variant (AR4v2).
 pn choose(master, url, settings, cfg) map^ {
     let rs = hls.renditions(master, url)
-    for (v in hls.ranked(hls.variants(master, url), cfg.max_height)) {
+    for (v in ((hls.ranked(hls.variants(master, url), cfg.max_height)) ^ { [] })) {
         let pl = text_at(v.uri, settings)^
         if (pl.ok) {
             let video = hls.media(pl.text, pl.url)
@@ -219,9 +219,9 @@ pn choose(master, url, settings, cfg) map^ {
 
 // the subtitle tracks wanted by media.subtitles, written beside the medium
 pn subtitles(slug, refs, renditions, staging, settings, cfg) array^ {
-    let from_streams = [for (r in renditions where r.type == "SUBTITLES" and r.uri != null and lang_wanted(r.language or "und", cfg.subtitles))
+    let from_streams = [for (r in renditions where ((r.type == "SUBTITLES" and r.uri != null and lang_wanted(r.language or "und", cfg.subtitles)) ^ { false }))
         {url: r.uri, lang: lower(r.language), label: r.name, playlist: true}]
-    let from_tracks = [for (t in refs where lang_wanted(t.lang, cfg.subtitles)) {*: t, playlist: false}]
+    let from_tracks = [for (t in refs where ((lang_wanted(t.lang, cfg.subtitles)) ^ { false })) {*: t, playlist: false}]
     var out = []
     var langs = []
     for (t in [*from_tracks, *from_streams]) {
@@ -229,7 +229,7 @@ pn subtitles(slug, refs, renditions, staging, settings, cfg) array^ {
             // a subtitle rendition is a playlist of WebVTT segments, joined under one header
             let body = if (not t.playlist) text_at(t.url, settings)^
                 else (let pl = text_at(t.url, settings)^, if (not pl.ok) pl
-                    else (let parts = [for (s in hls.media(pl.text, pl.url).segments) text_at(s.uri, settings)^],
+                    else (let parts = [for (s in ((hls.media(pl.text, pl.url).segments) ^ { [] })) text_at(s.uri, settings)^],
                         if (not all([for (x in parts) x.ok])) {ok: false, message: "subtitle segment failed"}
                         else {ok: true, text: join([for (i, x in parts) if (i == 0) x.text
                             else replace(x.text, \("WEBVTT" (!"\n")* "\n"), "")], "\n")}))
@@ -270,7 +270,7 @@ pn take_stream(url, playlist, slug, kind, staging, settings, cfg, notify, tag) m
     if (pick.video.encrypted or (pick.audio != null and pick.audio.encrypted)) {
         return {ok: false, message: "encrypted stream (AES-128): needs AR-E9", renditions: pick.renditions}
     }
-    if (len(pick.video.segments) == 0) { return {ok: false, message: "empty playlist", renditions: pick.renditions} }
+    if ((len(pick.video.segments) == 0)^) { return {ok: false, message: "empty playlist", renditions: pick.renditions} }
     let ext = if (pick.video.container == "fmp4") (if (kind == "audio") "m4a" else "mp4") else pick.video.container
     let split = pick.audio != null
     let video_path = "media/" ++ slug ++ (if (split) ".video." else ".") ++ ext
@@ -285,7 +285,7 @@ pn take_stream(url, playlist, slug, kind, staging, settings, cfg, notify, tag) m
         file_of(audio_path, "audio", "fmp4", got_audio.bytes, pick.audio_rendition.uri, stream_info(pick.audio_rendition.uri, null, pick.audio))]}
 }
 
-fn base_name(url) => (let u = planning.parse(url), let segs = if (u == null) [url] else split(u.path, "/"),
+fn base_name(url) any^ => (let u = planning.parse(url), let segs = if (u == null) [url] else split(u.path, "/"),
     let tail = segs[len(segs) - 1], let dot = last_index_of(tail, "."), if (dot == null or dot == 0) tail else slice(tail, 0, dot))
 
 // Acquires the medium behind the job's first fetch `r` (written to `fetched`):
@@ -298,12 +298,12 @@ pub pn acquire(p, staging, settings, notify, r, fetched) map^ {
     let ct = r.headers.'content-type'
     io.mkdir(staging ++ "/media")^
     // a direct stream or file: the first fetch is the medium, or its playlist
-    if (is_hls(r.url, ct) or media_of(r.url, ct) != null) {
+    if ((is_hls(r.url, ct) or media_of(r.url, ct) != null)^) {
         let kind = if (p.kind in ["video", "audio"]) p.kind else (media_of(r.url, ct) or "video")
         let title = base_name(r.url)
         let slug = store.slug(title)
         let meta = {title: title, description: null, author: null, site: null, published: null, poster: null}
-        if (is_hls(r.url, ct)) {
+        if (is_hls(r.url, ct)^) {
             let got = take_stream(r.url, input(fetched, 'text')^, slug, kind, staging, settings, cfg, notify, p.tag)^
             if (not got.ok) raise error("archive: " ++ got.message ++ " (" ++ r.url ++ ")")
             let subs = subtitles(slug, [], got.renditions, staging, settings, cfg)^
@@ -325,8 +325,8 @@ pub pn acquire(p, staging, settings, notify, r, fetched) map^ {
     let refs = references(html, base, ld)
     let found = candidates(html, base, ld)
     let about = describe(html, base, ld)
-    let not_taken = [for (c in refs where not usable(c)) {url: c.url, reason: "not a media file or stream (" ++ c.from ++ ")"}]
-    if (len(found) == 0) { return {fallback: true, source: source, remote: not_taken, reason: "no downloadable media"} }
+    let not_taken = [for (c in refs where ((not usable(c)) ^ { false })) {url: c.url, reason: "not a media file or stream (" ++ c.from ++ ")"}]
+    if ((len(found) == 0)^) { return {fallback: true, source: source, remote: not_taken, reason: "no downloadable media"} }
     let best = found[0]
     let kind = if (p.kind in ["video", "audio"]) p.kind else best.media
     let slug = store.slug(about.title or base_name(best.url))
@@ -351,7 +351,7 @@ pub pn acquire(p, staging, settings, notify, r, fetched) map^ {
         else if (not got.response.ok) { trouble = "HTTP " ++ string(got.response.status) ++ " for " ++ best.url }
         else { files = [file_of(path, kind, ext, got.response.bytes, got.response.url, null)] }
     }
-    if (trouble != null) {
+    if ((trouble != null)^) {
         return {fallback: true, source: source, remote: [{url: best.url, reason: trouble}, *not_taken], reason: trouble}
     }
     let subs = subtitles(slug, tracks(html, base), renditions, staging, settings, cfg)^

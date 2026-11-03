@@ -7,9 +7,9 @@ fn field(p, from, to) => int(slice(p.taken, from, to)) ^ { 0 }
 fn year_of(p) => field(p, 0, 4)
 fn month_of(p) => max(1, field(p, 5, 7))
 fn day_of(p) => field(p, 8, 10)
-pub fn month_label(p) => MONTHS[month_of(p) - 1] ++ " " ++ slice(p.taken, 0, 4)
-pub fn date_label(p) => string(day_of(p)) ++ " " ++ month_label(p)
-pub fn time_label(p) => slice(p.taken, 11, 16)
+pub fn month_label(p) any^ => MONTHS[month_of(p) - 1] ++ " " ++ slice(p.taken, 0, 4)
+pub fn date_label(p) any^ => string(day_of(p)) ++ " " ++ month_label(p)
+pub fn time_label(p) any^ => slice(p.taken, 11, 16)
 
 fn album_title(albums, key) => [for (a in albums where a.key == key) a.title][0] or key
 
@@ -43,21 +43,21 @@ pub fn build(manifest, present, base) map^ {
 
 pub fn photo(lib, id) => lib.photos[id - 1]
 
-pub fn tokens(query) => [for (t in split(lower(trim(query or "")), " ") where t != "") t]
+pub fn tokens(query) any^ => [for (t in ((split(lower(trim(query or "")), " ")) ^ { [] }) where t != "") t]
 
 pub fn matches(p, words) => all([for (w in words) contains(p.text, w)])
 
 // mode: "library" | "album" | "favorites" | "places"; a non-empty query searches the whole library
-pub fn scope(lib, mode, album, favorites, query) {
+pub fn scope(lib, mode, album, favorites, query) any^ {
     let words = tokens(query);
-    if (len(words) > 0) [for (id in lib.order where matches(photo(lib, id), words)) id]
-    else if (mode == "album") [for (id in lib.order where photo(lib, id).album == album) id]
-    else if (mode == "favorites") [for (id in lib.order where contains(favorites, id)) id]
-    else if (mode == "places") [for (id in lib.order where photo(lib, id).gps != null) id]
+    if (len(words) > 0) [for (id in lib.order where ((matches(photo(lib, id), words)) ^ { false })) id]
+    else if (mode == "album") [for (id in lib.order where ((photo(lib, id).album == album) ^ { false })) id]
+    else if (mode == "favorites") [for (id in lib.order where ((contains(favorites, id)) ^ { false })) id]
+    else if (mode == "places") [for (id in lib.order where ((photo(lib, id).gps != null) ^ { false })) id]
     else lib.order
 }
 
-pub fn scope_title(lib, mode, album, query) {
+pub fn scope_title(lib, mode, album, query) any^ {
     let words = tokens(query);
     if (len(words) > 0) "Search: “" ++ trim(query) ++ "”"
     else if (mode == "album") [for (a in lib.albums where a.key == album) a.title][0] or "Album"
@@ -66,8 +66,8 @@ pub fn scope_title(lib, mode, album, query) {
 
 // month sections only when months hold enough photos to fill rows; sparse scopes group by year
 pub let DENSE_MONTH = 8
-pub fn by_year(lib, ids) {
-    let months = len([for (i, id in ids where i == 0 or slice(photo(lib, ids[i - 1]).taken, 0, 7) != slice(photo(lib, id).taken, 0, 7)) id]);
+pub fn by_year(lib, ids) any^ {
+    let months = len([for (i, id in ids where ((i == 0 or slice(photo(lib, ids[i - 1]).taken, 0, 7) != slice(photo(lib, id).taken, 0, 7)) ^ { false })) id]);
     months == 0 or len(ids) / months < DENSE_MONTH
 }
 
@@ -78,7 +78,7 @@ pub fn items(lib, ids, by_year) => [for (id in ids) (
         label:if (by_year) slice(p.taken, 0, 4) else month_label(p)})]
 
 // "45.98° N, 7.76° E", or "" without coordinates
-pub fn location_label(p) => if (p.gps == null) "" else
+pub fn location_label(p) any^ => if (p.gps == null) "" else
     string(abs(p.gps.lat)) ++ "° " ++ (if (p.gps.lat >= 0) "N" else "S") ++ ", " ++
     string(abs(p.gps.lon)) ++ "° " ++ (if (p.gps.lon >= 0) "E" else "W")
 
@@ -94,7 +94,7 @@ pub fn camera_label(p) {
         lens:c.lens or "", exposure:join(parts, " · ")}
 }
 
-pub fn status(lib, ids, selected) {
+pub fn status(lib, ids, selected) any^ {
     let total = len(ids);
     string(total) ++ (if (total == 1) " photo" else " photos") ++
         (if (len(selected) > 0) " · " ++ string(len(selected)) ++ " selected" else "")
@@ -102,7 +102,7 @@ pub fn status(lib, ids, selected) {
 
 // file-name stem for a title: its lower-case letter and digit runs joined by "-", at most 48 characters
 type SlugWord = \(("a" to "z" | "0" to "9")+)
-pub fn slug(title, fallback) {
+pub fn slug(title, fallback) any^ {
     let stem = slice(join([for (m in find(lower(title or ""), SlugWord)) m.value], "-"), 0, 48);
     if (stem == "") fallback else stem
 }

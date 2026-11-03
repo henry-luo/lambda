@@ -20,7 +20,7 @@ pub fn parse(snapshot,options = null) map^ {
 }
 pub pn read(path,options = null) map^ {
     let opts = checked(options)^
-    if (not (path is string) or path == "" or contains(path,"://"))
+    if ((not (path is string) or path == "" or contains(path,"://"))^)
         raise c.fail("invalid-source","A local ebook filename is required")
     let snapshot = input(path,"binary")^;
     return parse(snapshot,opts)^

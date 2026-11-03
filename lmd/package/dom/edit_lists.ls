@@ -9,7 +9,7 @@ fn tag_of(node) {
     else lower(dom.node_name(node))
 }
 
-fn item_ancestor(host, node) {
+fn item_ancestor(host, node) any^ {
     if (node == null or dom.same_node(host, node)) null
     else if (tag_of(node) == "li") node
     else item_ancestor(host, dom.parent_node(node))
@@ -20,7 +20,7 @@ pn abort(host, token) {
     false
 }
 
-fn list_parent(block) {
+fn list_parent(block) any^ {
     let item = if (tag_of(block) == "li") block
                else if (block == null) null else dom.parent_node(block);
     let list_node = if (item == null) null else dom.parent_node(item);
@@ -28,13 +28,13 @@ fn list_parent(block) {
         (tag_of(list_node) == "ul" or tag_of(list_node) == "ol")) list_node else null
 }
 
-fn list_item(block) {
+fn list_item(block) any^ {
     let item = if (tag_of(block) == "li") block
                else if (block == null) null else dom.parent_node(block);
     if (tag_of(item) == "li") item else null
 }
 
-fn list_for_item(item) {
+fn list_for_item(item) any^ {
     let list_node = if (item == null) null else dom.parent_node(item);
     if (tag_of(list_node) == "ul" or tag_of(list_node) == "ol") list_node
     else null

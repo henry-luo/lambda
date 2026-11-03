@@ -23,7 +23,7 @@ import lambda.editor.draw.geometry
 //   args = {drawing_path, layer_index (default 0), shape}
 // ---------------------------------------------------------------------------
 
-pub fn cmd_insert_shape(st, args) {
+pub fn cmd_insert_shape(st, args) any^ {
   let drawing = node_at(st.doc, args.drawing_path)
   if (drawing == null or not is_node(drawing) or drawing.tag != 'drawing') { null }
   else {
@@ -47,7 +47,7 @@ pub fn cmd_insert_shape(st, args) {
 //   args = {shape_paths, dx, dy}
 // ---------------------------------------------------------------------------
 
-fn move_one(tx, p, dx, dy) {
+fn move_one(tx, p, dx, dy) any^ {
   let n = node_at(tx.doc_after, p)
   if (n == null or not is_node(n)) { tx }
   else {
@@ -63,12 +63,12 @@ fn move_one(tx, p, dx, dy) {
   }
 }
 
-fn move_at(tx, paths, dx, dy, i, n) {
+fn move_at(tx, paths, dx, dy, i, n) any^ {
   if (i >= n) { tx }
   else { move_at(move_one(tx, paths[i], dx, dy), paths, dx, dy, i + 1, n) }
 }
 
-pub fn cmd_move_shapes(st, args) {
+pub fn cmd_move_shapes(st, args) any^ {
   if (len(args.shape_paths) == 0) { null }
   else if (args.dx == 0.0 and args.dy == 0.0) { null }
   else {
@@ -83,7 +83,7 @@ pub fn cmd_move_shapes(st, args) {
 //   args = {shape_path, x?, y?, width?, height?}   (absent fields are skipped)
 // ---------------------------------------------------------------------------
 
-fn resize_step(tx, p, name, val) {
+fn resize_step(tx, p, name, val) any^ {
   if (val == null) { tx }
   else {
     let n = node_at(tx.doc_after, p)
@@ -92,7 +92,7 @@ fn resize_step(tx, p, name, val) {
   }
 }
 
-pub fn cmd_resize_shape(st, args) {
+pub fn cmd_resize_shape(st, args) any^ {
   let n = node_at(st.doc, args.shape_path)
   if (n == null or not is_node(n)) { null }
   else {
@@ -109,14 +109,14 @@ pub fn cmd_resize_shape(st, args) {
 // cmd_rotate_shape / cmd_set_shape_attr
 // ---------------------------------------------------------------------------
 
-pub fn cmd_rotate_shape(st, shape_path, angle_deg) {
+pub fn cmd_rotate_shape(st, shape_path, angle_deg) any^ {
   let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else if (get_shape_attr_number(n, 'rotate', 0.0) == angle_deg) { null }
   else { tx_step(tx_begin(st.doc, st.selection), step_set_attr(shape_path, 'rotate', angle_deg)) }
 }
 
-pub fn cmd_set_shape_attr(st, shape_path, name, value) {
+pub fn cmd_set_shape_attr(st, shape_path, name, value) any^ {
   let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else { tx_step(tx_begin(st.doc, st.selection), step_set_attr(shape_path, name, value)) }
@@ -128,31 +128,31 @@ pub fn cmd_set_shape_attr(st, shape_path, name, value) {
 // indices of earlier ones.
 // ---------------------------------------------------------------------------
 
-fn path_seen(acc, p, i, n) {
+fn path_seen(acc, p, i, n) any^ {
   if (i >= n) { false }
   else if (path_equal(acc[i], p)) { true }
   else { path_seen(acc, p, i + 1, n) }
 }
 
-fn unique_paths_at(ps, i, n, acc) {
+fn unique_paths_at(ps, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (path_seen(acc, ps[i], 0, len(acc))) { unique_paths_at(ps, i + 1, n, acc) }
   else { unique_paths_at(ps, i + 1, n, [*acc, ps[i]]) }
 }
 
 // insertion sort, descending document order (path_compare(b, a) ascending => desc)
-fn insert_desc(sorted, p, i, n, acc) {
+fn insert_desc(sorted, p, i, n, acc) any^ {
   if (i >= n) { [*acc, p] }
   else if (path_compare(p, sorted[i]) > 0) { list_concat([*acc, p], list_drop(sorted, i)) }
   else { insert_desc(sorted, p, i + 1, n, [*acc, sorted[i]]) }
 }
 
-fn sort_desc_at(ps, i, n, acc) {
+fn sort_desc_at(ps, i, n, acc) any^ {
   if (i >= n) { acc }
   else { sort_desc_at(ps, i + 1, n, insert_desc(acc, ps[i], 0, len(acc), [])) }
 }
 
-fn delete_at(tx, paths, i, n) {
+fn delete_at(tx, paths, i, n) any^ {
   if (i >= n) { tx }
   else {
     let p = paths[i]
@@ -167,7 +167,7 @@ fn delete_at(tx, paths, i, n) {
   }
 }
 
-pub fn cmd_delete_shapes(st, shape_paths) {
+pub fn cmd_delete_shapes(st, shape_paths) any^ {
   if (len(shape_paths) == 0) { null }
   else {
     let uniq = unique_paths_at(shape_paths, 0, len(shape_paths), [])
@@ -181,7 +181,7 @@ pub fn cmd_delete_shapes(st, shape_paths) {
 // cmd_bring_to_front / cmd_send_to_back — reorder z within the parent
 // ---------------------------------------------------------------------------
 
-pub fn cmd_bring_to_front(st, shape_path) {
+pub fn cmd_bring_to_front(st, shape_path) any^ {
   let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else {
@@ -201,7 +201,7 @@ pub fn cmd_bring_to_front(st, shape_path) {
   }
 }
 
-pub fn cmd_send_to_back(st, shape_path) {
+pub fn cmd_send_to_back(st, shape_path) any^ {
   let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else {
@@ -268,7 +268,7 @@ pub fn make_line_shape(id, geom, style) =>
 fn opt_attr(acc, name, val) => if (val == null) { acc } else { [*acc, {name: name, value: val}] }
 
 // args = {from_shape?, to_shape?, from_x?, from_y?, to_x?, to_y?, routing?}
-pub fn make_connector(id, args) {
+pub fn make_connector(id, args) any^ {
   let base = [{name: 'id', value: id}, {name: 'routing', value: def(args.routing, 'orthogonal')}]
   let a1 = opt_attr(base, 'from-shape', args.from_shape)
   let a2 = opt_attr(a1, 'to-shape', args.to_shape)

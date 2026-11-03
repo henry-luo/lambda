@@ -3,7 +3,7 @@ fn make_tree(depth: int) {
     if (depth == 0) { return {left: null, right: null} }
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
-fn count_nodes(node) {
+fn count_nodes(node) int^ {
     if (node.left == null) { return 1 }
     return 1 + count_nodes(node.left) + count_nodes(node.right)
 }

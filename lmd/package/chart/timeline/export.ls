@@ -16,15 +16,15 @@ import svg_ns: 'http://www.w3.org/2000/svg'
 
 let default_fields=["id","display_date","at","from","to","title","subtitle","content","group","subgroup","tags","metadata"]
 
-fn options_for(spec, options) => if (not (options is map)) c.fail("export.options","expected an options map") else schema.config({*:spec.export,*:options},"export")
-fn normalize(raw, options, current) {
+fn options_for(spec, options) any^ => if (not (options is map)) c.fail("export.options","expected an options map") else schema.config({*:spec.export,*:options},"export")
+fn normalize(raw, options, current) any^ {
     let authored=schema.authored(raw);
     let source=c.attrs(current);
     let declared=if (authored.export.snapshot is map) authored.export.snapshot else {};
     let supplied=if (options.snapshot is map) options.snapshot else {};
     if (authored is error) authored else resource.normalize(raw,{*:source,*:declared,*:supplied})
 }
-fn rich(value, policy) {
+fn rich(value, policy) any^ {
     if (value is element or value is fn or value is pn) {
         if (policy=="text" and not (value is fn or value is pn)) c.plain(value)
         else if (policy=="omit") null else c.fail("export.content","rich content requires an explicit text or omit policy")
@@ -38,7 +38,7 @@ fn rich(value, policy) {
         if (failure is error) failure else values
     } else value
 }
-pub fn snapshot(spec, options = {}, current = null) {
+pub fn snapshot(spec, options = {}, current = null) any^ {
     let supplied=if (options.snapshot is map) {*:c.attrs(current),*:options.snapshot} else current;
     let base=reducer.reconcile(spec,{*:reducer.initial(spec),*:c.attrs(supplied)});
     let frozen=if (options.time_ms!=null) story.sample(story.plan(spec,base),options.time_ms) else {};
@@ -47,7 +47,7 @@ pub fn snapshot(spec, options = {}, current = null) {
         sample_time_ms:options.time_ms,expanded_events:expanded,
         window:if (options.scope=="full") layout.extent(spec) else base.window}
 }
-fn rows_in(spec, options, current) {
+fn rows_in(spec, options, current) any^ {
     let scope=c.text(c.option(options,"scope","full"));
     if (scope=="full") spec.events
     else if (scope=="selected") spec.events |: contains(current.selected_ids,~.id)
@@ -55,7 +55,7 @@ fn rows_in(spec, options, current) {
     else if (scope=="window") layout.visible(spec,current).events |: layout.in_window(~,current.window)
     else c.fail("export.scope","expected full, current, window, or selected")
 }
-fn source_event(item, policy) => rich({*:schema.event_record(item),display_date:item.display_date},policy)
+fn source_event(item, policy) any^ => rich({*:schema.event_record(item),display_date:item.display_date},policy)
 
 pub fn dataset(raw, options = {}, current = null) {
     let spec=normalize(raw,options,current);
@@ -71,9 +71,9 @@ pub fn dataset(raw, options = {}, current = null) {
         snapshot:{window:frozen.window,active_id:frozen.active_id,selected_ids:frozen.selected_ids,
             expanded_events:frozen.expanded_events,locale:spec.locale,timezone:spec.scale.timezone,revision:frozen.revision,
             time_ms:c.option(opts,"time_ms",frozen.playback.elapsed),
-            resources:[for (key,entry in c.attrs(frozen.resources)) {id:string(key),revision:entry.revision,status:entry.status,url:entry.descriptor.url}]}}
+            resources:[for (key,entry in ((c.attrs(frozen.resources)) ^ { [] })) {id:string(key),revision:entry.revision,status:entry.status,url:entry.descriptor.url}]}}
 }
-fn columns(spec, options) {
+fn columns(spec, options) any^ {
     let fields=c.option(options,"fields",default_fields);
     let values=if (fields is array) [for (field in fields) if (field is string or field is symbol)
         {field:c.text(field),heading:c.text(c.option(c.attrs(options.headings),c.text(field),c.message(spec,"export_" ++ c.text(field),c.text(field))))}
@@ -82,18 +82,18 @@ fn columns(spec, options) {
     if (failure is error) failure else if (len(util.unique_vals(values |> ~.heading))!=len(values))
         c.fail("export.headings","duplicate headings") else values
 }
-fn table_value(item, field, options) {
+fn table_value(item, field, options) any^ {
     let value=chart_parse.channel_value({field:field},item);
     if (contains(["at","from","to"],field) and value!=null and options.date_formatter is fn)
         options.date_formatter(value,{event:item,field:field})
     else if (value is map or value is array) format(value,'json') else value
 }
-pub fn data(raw, kind = "json", options = {}, current = null) {
+pub fn data(raw, kind = "json", options = {}, current = null) any^ {
     let spec=normalize(raw,options,current);
     let opts=options_for(spec,options);
     let payload=dataset(raw,opts,current);
     let cols=columns(spec,opts);
-    let rows=if (payload is error or cols is error) [] else [for (item in payload.events,
+    let rows=if (payload is error or cols is error) [] else [for (item in ((payload.events) ^ { [] }),
         let row=map([for (column in cols) (column.field,table_value(item,column.field,opts))]),
         let failure=util.first_error([for (key,value in row) value])) if (failure is error) failure else row];
     let failure=util.first_error([spec,opts,payload,cols,*rows]);
@@ -115,7 +115,7 @@ fn static_source(spec, options, frozen) {
     if (failure is error) failure else {*:spec,events:events,intro:intro,
         cluster:if (options.scope=="full" and options.clusters!=true) {*:spec.cluster,enabled:false} else spec.cluster}
 }
-pub fn document(raw, kind = "html", viewport = null, options = {}, current = null) {
+pub fn document(raw, kind = "html", viewport = null, options = {}, current = null) any^ {
     let spec=normalize(raw,options,current);
     let opts=options_for(spec,options);
     let frozen=if (spec is error) spec else if (opts is error) opts else snapshot(spec,opts,current);

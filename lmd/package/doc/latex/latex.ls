@@ -56,19 +56,19 @@ pub fn parse_file(file_path) {
 }
 
 // parse and render a LaTeX file to HTML string
-pub fn render_file_to_html(file_path) {
+pub fn render_file_to_html(file_path) any^ {
     let ast = parse_file(file_path)
     render_to_html(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string to HTML string
-pub fn render_string_to_html(latex_source) {
+pub fn render_string_to_html(latex_source) any^ {
     let ast = parse_source(latex_source, null)
     render_to_html(ast, null)
 }
 
 // render a LaTeX AST to HTML string
-pub fn render_to_html(ast, options) {
+pub fn render_to_html(ast, options) any^ {
     let elements = render(ast, options)
     html_ser.to_html(elements)
 }
@@ -168,8 +168,8 @@ pub fn render_result(ast, options) {
     }
     // an aliased style is supported through CSL, so its unsupported-style report is dropped
     let package_issues = if (style_alias == null) loaded.diagnostics
-        else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
-            issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
+        else [for (issue in loaded.diagnostics where ((not (issue.code == "unsupported-bib-style" and
+            issue.item == style_alias.biblatex_style)) ^ { false })) issue] ++ style_alias.diagnostics
     let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
         registry.font_issues(loaded.packages) ++
@@ -217,7 +217,7 @@ pub fn render_result(ast, options) {
          bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
 }
 
-fn document_language(options, packages, polyglossia) {
+fn document_language(options, packages, polyglossia) any^ {
     if (options != null and options.language != null) options.language
     else if (polyglossia != null) polyglossia.default
     else if (registry.active(packages, "vietnam")) "vietnamese"
@@ -230,7 +230,7 @@ fn engine_diagnostics(ast) {
     [for (issue in issues) util.diagnostic(issue.code, "tex", issue.file, issue.message, issue.offset)]
 }
 
-fn resource_base(options) {
+fn resource_base(options) any^ {
     if (options == null) null
     else if (options.base_uri != null) options.base_uri
     else if (options.source_path != null) paths.dirname(options.source_path)
@@ -239,19 +239,19 @@ fn resource_base(options) {
 
 fn output_diagnostics(node) {
     if (node is array or node is list)
-        [for (child in node, issue in output_diagnostics(child)) issue]
+        [for (child in node, issue in ((output_diagnostics(child)) ^ { [] })) issue]
     else if (node == null or not (node is element)) []
     else {
         let message = node["data-latex-error"]
         let own = if (message != null)
             [util.diagnostic("unsupported-output", node["data-latex-package"], null,
               message, node["data-latex-offset"])] else []
-        own ++ [for (child in node, issue in output_diagnostics(child)) issue]
+        own ++ [for (child in node, issue in ((output_diagnostics(child)) ^ { [] })) issue]
     }
 }
 
 // fontspec's features for the sans and mono families, on the elements set in them
-fn family_features(info) {
+fn family_features(info) any^ {
     let sans = dispatcher.role_features(info, "sans")
     let mono = dispatcher.role_features(info, "mono");
     (if (sans == "") "" else ".latex-document .latex-sf,.latex-document .latex-sffamily{" ++ sans ++ "}\n") ++
@@ -259,7 +259,7 @@ fn family_features(info) {
         ".latex-document .latex-ttfamily,.latex-document .latex-listing pre{" ++ mono ++ "}\n")
 }
 
-fn package_stylesheet(info) {
+fn package_stylesheet(info) any^ {
     family_features(info) ++ profiles.stylesheet(registry.class_family(info.docclass)) ++
     (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
@@ -278,14 +278,14 @@ fn package_stylesheet(info) {
 }
 
 // The parser preserves both braced and control-sequence forms of \setlength.
-fn declared_length(node, key) {
+fn declared_length(node, key) any^ {
     if (not (node is element)) null
     else if (string(name(node)) == "setlength" and node.length_name == key)
         util.css_dimension(node.length_value)
     else declared_length_child(node, key, 0)
 }
 
-fn declared_length_child(node, key, index) {
+fn declared_length_child(node, key, index) any^ {
     if (index >= len(node)) null
     else {
         let value = declared_length(node[index], key)
@@ -293,7 +293,7 @@ fn declared_length_child(node, key, index) {
     }
 }
 
-fn cellspace_stylesheet(ast, packages) {
+fn cellspace_stylesheet(ast, packages) any^ {
     if (not registry.active(packages, "cellspace")) ""
     else {
         let top = declared_length(ast, "cellspacetoplimit")
@@ -306,7 +306,7 @@ fn cellspace_stylesheet(ast, packages) {
 }
 
 // Native document-loader entry point keeps standalone output as the view default.
-pub fn render_document(ast, options) {
+pub fn render_document(ast, options) any^ {
     let effective = if (options == null) {standalone: true}
         else if (options.standalone == null) {*:options, standalone: true}
         else options
@@ -335,7 +335,7 @@ pub fn render_default(ast) {
 }
 
 // parse and render a LaTeX file
-pub fn render_file(file_path) {
+pub fn render_file(file_path) any^ {
     let ast = parse_file(file_path)
     render(ast, {base_uri: paths.dirname(file_path)})
 }
@@ -350,13 +350,13 @@ pub fn render_string(latex_source) {
 // Post-processing — append footnotes
 // ============================================================
 
-fn postprocess(html, info) {
+fn postprocess(html, info) any^ {
     let fn_section = render_footnotes_section(info)
     if (fn_section != null) wrap_with_footnotes(html, fn_section) else html
 }
 
 // the first \boldmath or \mathversion{bold}
-fn bold_math_request(ast) {
+fn bold_math_request(ast) any^ {
     let boldmath = util.find_descendant(ast, "boldmath")
     let version = util.find_descendant(ast, "mathversion")
     if (boldmath != null) boldmath
@@ -371,7 +371,7 @@ fn wrap_with_footnotes(body, footnotes_el) {
     >
 }
 
-fn render_footnotes_section(info) {
+fn render_footnotes_section(info) any^ {
     let footnotes = info.footnotes
     let options = registry.options_for(info.packages, "footmisc")
     // symbol marks replace the list's own numbers

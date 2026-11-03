@@ -2,14 +2,14 @@
 // the colour palette. Art is drawn in its own box in one ink, its tints and
 // a few fixed accents, so recolouring a piece keeps it readable.
 
-pub fn n(x) => string(round(x * 10) / 10)
+pub fn n(x) any^ => string(round(x * 10) / 10)
 
 // ---- colour arithmetic on #rrggbb --------------------------------------
 
 let HEX = "0123456789abcdef"
-fn digit(c, i) => index_of(HEX, lower(slice(c, i, i + 1)))
+fn digit(c, i) any^ => index_of(HEX, lower(slice(c, i, i + 1)))
 fn rgb(c) => [digit(c, 1) * 16 + digit(c, 2), digit(c, 3) * 16 + digit(c, 4), digit(c, 5) * 16 + digit(c, 6)]
-fn hex2(v) => (let k = int(max(0, min(255, round(v)))), let q = int(floor(k / 16)),
+fn hex2(v) any^ => (let k = int(max(0, min(255, round(v)))), let q = int(floor(k / 16)),
     slice(HEX, q, q + 1) ++ slice(HEX, k % 16, k % 16 + 1))
 pub fn mix(c, d, t) => (let a = rgb(c), let b = rgb(d), "#" ++ join([for (i in 0 to 2) hex2(a[i] + (b[i] - a[i]) * t)], ""))
 pub fn tint(c, t) => mix(c, "#ffffff", t)
@@ -27,7 +27,7 @@ let PI = 3.141592653589793
 let HEART = "M50 88 C20 66 6 48 6 30 C6 16 17 6 30 6 C39 6 46 11 50 18 C54 11 61 6 70 6 C83 6 94 16 94 30 C94 48 80 66 50 88 Z"
 let SPARK = "M50 0 C54 36 64 46 100 50 C64 54 54 64 50 100 C46 64 36 54 0 50 C36 46 46 36 50 0 Z"
 
-fn at(x, y, s) => "translate(" ++ n(x) ++ " " ++ n(y) ++ ") scale(" ++ n(s) ++ ")"
+fn at(x, y, s) any^ => "translate(" ++ n(x) ++ " " ++ n(y) ++ ") scale(" ++ n(s) ++ ")"
 pub fn star_points(cx, cy, outer, inner, k) => join([for (i in 0 to 2 * k - 1)
     (let r = if (i % 2 == 0) outer else inner, let a = PI * i / k - PI / 2,
      n(cx + r * math.cos(a)) ++ "," ++ n(cy + r * math.sin(a)))], " ")
@@ -300,7 +300,7 @@ fn border_marks(key, c, w, h) => if (key == "line") [inset(18, w, h, c, {'stroke
     else if (key == "frame") [inset(0, w, h, c, {'stroke-width':40}), inset(30, w, h, c, {'stroke-width':1.5})]
     else if (key == "corners") [corner(18, 18, 1, 1, c), corner(w - 18, 18, -1, 1, c), corner(18, h - 18, 1, -1, c), corner(w - 18, h - 18, -1, -1, c)]
     else []
-pub fn border_layer(key, color, w, h) => (let marks = border_marks(key, color, w, h),
+pub fn border_layer(key, color, w, h) any^ => (let marks = border_marks(key, color, w, h),
     if (len(marks) == 0) null else <svg class:"page-layer", viewBox:"0 0 " ++ string(w) ++ " " ++ string(h), width:"100%", height:"100%",
         preserveAspectRatio:"none", 'aria-hidden':"true", for (m in marks) m>)
 

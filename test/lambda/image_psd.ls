@@ -25,7 +25,7 @@ let second = img.decode(img.encode(decoded, {format: 'psd'})^)^
 ; img.decode(b'\x3842505300020000000000000004000000010000000100080003') ^ { true }
 
 let no_preview = img.decode(slice(bytes, 0, len(bytes) - 10))^
-; [len([for (child in content(no_preview) where name(child) == 'preview') child]),
+; [len([for (child in ((content(no_preview)) ^ { [] }) where ((name(child) == 'preview') ^ { false })) child]),
    img.render_frame(no_preview)^ == b]
 let empty = <image width: 1, height: 1, <stack <layer kind: 'empty', name: "Blank">>>
 let empty_copy = img.decode(img.encode(empty, {format: 'psd'})^)^

@@ -15,11 +15,11 @@ pn publish(owner,previous,next) {
     let jobs = present.pending(owner,next)
     let updated = {*:next,token:token,last_ms:if (next.rotating) next.last_ms else null,
         load_token:if (len(jobs) > 0) dom.request_frame(owner,"cell_prepare") else 0}
-    present.sync(owner,updated)
+    present.sync(owner,updated)^
     present.loading(owner,if (len(jobs) > 0) jobs[0].cell else null)
     return updated
 }
-fn command(st,action) =>
+fn command(st,action) any^ =>
     if (action == "compare") {*:st,compare:not st.compare}
     else if (action == "rotate") {*:st,rotating:not st.rotating,last_ms:null}
     else if (action == "favorite") model.favorite(st)
@@ -36,16 +36,16 @@ on cell_activate(evt) {
 // frame requests created in a callback wait for the next frame (D7.5.3).
 // paint the loading card before the synchronous HTTP/decode/mount work.
 on cell_prepare(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.load_token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.load_token)^) { return 'pass' }
     session = {*:session,load_token:dom.request_frame(evt.target,"cell_load")}
     return 'handled'
 }
 on cell_load(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.load_token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.load_token)^) { return 'pass' }
     let jobs = present.pending(evt.target,session)
     // resolve assets from this document after navigation, rather than the process entry argv.
-    if (len(jobs) > 0) assets.ensure(present.node(evt.target,jobs[0].viewport),
-        url_resolve(evt.target.base_uri,"."),jobs[0].cell)
+    if ((len(jobs) > 0)^) assets.ensure(present.node(evt.target,jobs[0].viewport),
+        url_resolve(evt.target.base_uri,"."),jobs[0].cell)^
     // handle comparison models one at a time, painting each specimen's name first.
     session = publish(evt.target,session,{*:session,load_token:0})
     return 'handled'
@@ -79,7 +79,7 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     let drag = session.drag
     let x = evt.clientX-drag.x
     let y = evt.clientY-drag.y
@@ -89,7 +89,7 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.drag == null) { return 'pass' }
+    if ((session.drag == null)^) { return 'pass' }
     dom.release_pointer_capture(evt.target,evt.pointerId)
     session = {*:session,drag:null}
     return 'prevent-default'
@@ -112,12 +112,12 @@ on keydown(evt) {
         else if (key == "-" or key == "_") command(session,"zoom-out")
         else if (lower(key) == "r") command(session,"reset")
         else if (key == " ") command(session,"rotate") else null
-    if (next == null) { return 'pass' }
+    if ((next == null)^) { return 'pass' }
     session = publish(owner_of(evt),session,next)
     return 'prevent-default'
 }
 on cell_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.token or not session.rotating) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.token or not session.rotating)^) { return 'pass' }
     let elapsed = if (session.last_ms == null) 0.0 else min(0.1,max(0.0,(evt.time_stamp-session.last_ms)/1000))
     session = {*:model.orbit(session,elapsed*0.28,0.0),last_ms:evt.time_stamp,
         token:dom.request_frame(evt.target,"cell_frame")}
@@ -125,8 +125,8 @@ on cell_frame(evt) {
     return 'handled'
 }
 on closerequest(evt) {
-    if (session.token > 0) dom.cancel_frame(owner_of(evt),session.token)
-    if (session.load_token > 0) dom.cancel_frame(owner_of(evt),session.load_token)
+    if ((session.token > 0)^) dom.cancel_frame(owner_of(evt),session.token)^
+    if ((session.load_token > 0)^) dom.cancel_frame(owner_of(evt),session.load_token)^
     session = {*:session,token:0,load_token:0,rotating:false,drag:null}
     return 'pass'
 }

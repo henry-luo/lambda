@@ -361,7 +361,7 @@ run A "fn type return takes a count"       'fn h(f: fn (x: int) int{2}) { 1 }\nh
 run A "return type rank chain"             'fn f() int[][] { [[1]] }\nf()\n'
 run A "return type array of nullables"     'fn g() int?[] { [1] }\ng()\n'
 run A "return type nullable array"         'fn h() int[]? { null }\nh()\n'
-run A "error arm after a chained return"   'fn e() int[]? ^ error { null }\ne()\n'
+run A "broad error suffix after a chained return" 'fn e() int[]? ^ { null }\ne()\n'
 run R "no run suffix after a return array" 'fn f() int[]+ { [1] }\nf()\n'
 
 echo "--- S2.5.1v2 / S2.5.4 / S2.5.5v2 list literals (LR02-18) ---"
@@ -559,4 +559,13 @@ run A "initializer keeps handler tree" 'let x = 1 ^ { 2 }; x\n' 'handler_expr'
 run A "qualified error filter" 'import types: .mod_handler_error_types\n1 ^types.Failure { 2 }\n'
 run R "qualified filter crosses line" '1 ^types.\nFailure { 2 }\n'
 run A "propagation divided by block" 'fn f() int^ => 4\nf()^ / { 2 }\n'
+# S7.4.2v3: only broad T^ survives; particular outcomes are unions.
+run R "retired typed return caret" 'fn f() int^error => 1\n'
+run R "retired typed procedure caret" 'pn f() int^error { 1 }\n'
+run R "retired typed binding caret" 'let value: int^error = 1\n'
+run R "retired typed parameter caret" 'fn f(value: int^error) => value\n'
+run R "retired typed callable caret" 'type F = fn () int^error\n'
+run R "retired grouped error caret" 'fn f() int^(error | null) => 1\n'
+run A "broad callable outcome" 'type F = fn () int^\n'
+run A "union callable outcome" 'type F = fn () int | error\n'
 echo "pass=$pass fail=$fail"

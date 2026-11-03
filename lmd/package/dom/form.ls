@@ -114,7 +114,7 @@ pn move_within_group(radio, forward) {
         // backwards is stepping forwards by one short of a full lap.
         let step = if (forward) 1 else count - 1;
         let next = peers[(here + step) % count];
-        select_radio(next)
+        select_radio(next)^
         dom.focus_set(next, true)
         dom.scroll_into_view(next)
         'prevent-default'
@@ -179,8 +179,8 @@ pn notify_select_change(select) {
 pn commit_option(elem, index) {
     let options = tree.options_of(elem);
     // User commits must reject disabled rows; the programmatic setter remains unrestricted.
-    if (index < 0 or index >= len(options)) { return false }
-    if (not option_enabled(elem, options[index])) { return false }
+    if ((index < 0 or index >= len(options))^) { return false }
+    if ((not option_enabled(elem, options[index]))^) { return false }
     let before = dom.selected_index(elem);
     dom.set_selected_index(elem, index)
     dom.set_dropdown_open(elem, false)
@@ -196,7 +196,7 @@ pn dropdown_key(elem, evt) {
     if (evt.key == "ArrowUp") { if (hover > 0) dom.set_hover_index(elem, hover - 1) else true; "handled" }
     else if (evt.key == "ArrowDown") { if (hover < count - 1) dom.set_hover_index(elem, hover + 1) else true; "handled" }
     else if (evt.key == "Enter") {
-        if (hover >= 0 and hover < count) { commit_option(elem, hover) } else { true }
+        if (hover >= 0 and hover < count) { commit_option(elem, hover)^ } else { true }
         "handled"
     }
     else if (evt.key == "Escape") { dom.set_dropdown_open(elem, false); "handled" }
@@ -219,7 +219,7 @@ fn is_listbox(select) {
 // Deliberately one character, not an accumulated prefix: prefix typeahead is
 // defined by a timeout between keystrokes, and the package owns no timer. A
 // single character is the whole of the behavior that does not need one.
-fn typeahead_key(evt) {
+fn typeahead_key(evt) any^ {
     if (evt.ctrlKey or evt.altKey or evt.metaKey) { null }
     else if (len(evt.key) != 1 or evt.key == " ") { null }
     else { lower(evt.key) }
@@ -227,7 +227,7 @@ fn typeahead_key(evt) {
 
 // An option's label is its `label` attribute when it has one, and its text
 // otherwise — the same rule the engine's own option-text normalization follows.
-fn starts_with_letter(option, letter) {
+fn starts_with_letter(option, letter) any^ {
     let label = dom.get_attribute(option, "label");
     let text = if (label != null and label != "") label else dom.text_content(option);
     let trimmed = if (text == null) "" else lower(trim(text));
@@ -241,12 +241,12 @@ pn typeahead(select, letter) {
     let start = if (here == null or here < 0) 0 else here;
     // Search from the option after the current one and wrap, so the same key
     // pressed twice lands on the second match rather than staying put.
-    let matches = [for (offset in 1 to count
-                        where starts_with_letter(options[(start + offset) % count], letter))
+    let matches = [for (offset in ((1 to count) ^ { [] })
+                        where starts_with_letter(options[(start + offset) % count], letter)^)
                    (start + offset) % count];
     if (len(matches) == 0) { 'pass' }
     else {
-        commit_option(select, matches[0])
+        commit_option(select, matches[0])^
         'prevent-default'
     }
 }
@@ -262,7 +262,7 @@ fn option_enabled(select, option) {
 // The option an event landed on, as an index into this select's option list, or
 // null when the event did not land on one. A listbox row is an ordinary
 // hit-test target, so the click arrives on the <option> and bubbles here.
-fn option_index_at(select, node) {
+fn option_index_at(select, node) any^ {
     if (node == null) { null }
     else {
         let option = dom.closest(node, "option");
@@ -312,7 +312,7 @@ pn toggle_option(select, option) {
 // rather than wrapping, because a listbox stops at its ends where a radio group
 // wraps (ESO59).
 pn listbox_move(select, options, key, active) {
-    let enabled = [for (i, opt of options where option_enabled(select, opt)) i];
+    let enabled = [for (i, opt of options where option_enabled(select, opt)^) i];
     let n = len(enabled);
     if (n == 0) { null }
     else {
@@ -344,7 +344,7 @@ on click(evt) {
     // modifier conventions are the UA's, not the spec's; these are the ones
     // every desktop browser uses, and they apply only where multiple selection
     // is possible.
-    if (not is_listbox(~)) {
+    if ((not is_listbox(~))^) {
         dom.set_dropdown_open(~, not dom.dropdown_open(~))
         return true
     }
@@ -353,8 +353,8 @@ on click(evt) {
     // A click on the control's padding, or on a disabled row, changes nothing —
     // but it is still consumed, or it would fall through and open a dropdown
     // this control does not have.
-    if (index == null) { return 'prevent-default' }
-    if (not option_enabled(~, options[index])) { return 'prevent-default' }
+    if ((index == null)^) { return 'prevent-default' }
+    if ((not option_enabled(~, options[index]))^) { return 'prevent-default' }
     let multiple = dom.has_attribute(~, "multiple");
     let extending = multiple and evt.shiftKey and listbox_anchor >= 0;
     let additive = multiple and (evt.ctrlKey or evt.metaKey) and not extending;
@@ -362,10 +362,10 @@ on click(evt) {
                 else if (additive) toggle_option(~, options[index])
                 else select_only(~, options, index);
     // An extend keeps the anchor it extended from; the other two set it here.
-    if (not extending) { listbox_anchor = index }
+    if ((not extending)^) { listbox_anchor = index }
     listbox_active = index
     if (moved) {
-        notify_select_change(~)
+        notify_select_change(~)^
     }
     'prevent-default'
 }
@@ -384,7 +384,7 @@ on keydown(evt) {
     // ESO72: listbox navigation. The arrows move an *active row* rather than
     // opening anything, so it is tried before the dropdown and activation
     // policy below, which a listbox has no use for.
-    if (is_listbox(~) and count > 0) {
+    if ((is_listbox(~) and count > 0)^) {
         let multiple = dom.has_attribute(~, "multiple");
         let accelerator = evt.ctrlKey or evt.metaKey;
         // Ctrl/Cmd+A takes everything a multiple listbox can hold. In a single
@@ -395,7 +395,7 @@ on keydown(evt) {
             listbox_anchor = 0
             listbox_active = count - 1
             if (took) {
-                notify_select_change(~)
+                notify_select_change(~)^
             }
             return 'prevent-default'
         }
@@ -407,25 +407,25 @@ on keydown(evt) {
                    else 0;
         let target = if (accelerator or evt.altKey) null
                      else listbox_move(~, options, evt.key, here);
-        if (target != null) {
+        if ((target != null)^) {
             let extending = multiple and evt.shiftKey and listbox_anchor >= 0;
             let moved = if (extending) select_range(~, options, listbox_anchor, target)
                         else select_only(~, options, target);
-            if (not extending) { listbox_anchor = target }
+            if ((not extending)^) { listbox_anchor = target }
             listbox_active = target
             dom.scroll_into_view(options[target])
             if (moved) {
-                notify_select_change(~)
+                notify_select_change(~)^
             }
             return 'prevent-default'
         }
     }
     let dropdown_action = if (dom.dropdown_open(~)) dropdown_key(~, evt) else "pass";
-    if (dropdown_action == "handled") { return 'prevent-default' }
+    if ((dropdown_action == "handled")^) { return 'prevent-default' }
     // Typeahead precedes activation so that Space keeps opening the picker:
     // typeahead_key declines Space for exactly that reason.
     let letter = typeahead_key(evt);
-    if (letter == null) {
+    if ((letter == null)^) {
         if (keyboard.action(evt, true, "down") == "click") { return keyboard.click(~) }
         return 'pass'
     }
@@ -433,7 +433,7 @@ on keydown(evt) {
     // A typeahead match moved the selection, so the arrows have to resume from
     // it rather than from the row they last left behind. -1 means "resume from
     // whatever is selected".
-    if (found != 'pass') { listbox_active = -1 }
+    if ((found != 'pass')^) { listbox_active = -1 }
     found
 }
 
@@ -459,9 +459,9 @@ on keydown(evt) {
 // behavior templates: it fires before the value exists, and claiming it would
 // suppress the engine's own insert.
 view <input> state valid, invalid, keyboard_activation_armed: false {}
-on init(evt)  { validate.revalidate(~) aria.reflect(~) }
-on input(evt) { validate.revalidate(~) aria.reflect(~) }
-on blur(evt)  { keyboard_activation_armed = false; validate.revalidate(~) aria.reflect(~) }
+on init(evt)  { validate.revalidate(~)^ aria.reflect(~) }
+on input(evt) { validate.revalidate(~)^ aria.reflect(~) }
+on blur(evt)  { keyboard_activation_armed = false; validate.revalidate(~)^ aria.reflect(~) }
 on edit_commit(evt) { editing.commit_change(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, false) }
 on keydown(evt) {
@@ -472,7 +472,7 @@ on keydown(evt) {
     // activation — and it declines every key it does not define, so the
     // activation table below still sees them.
     let stepped = if (normalized == "number") stepper.key_default(~, evt, false) else 'pass';
-    if (stepped != 'pass') { return stepped }
+    if ((stepped != 'pass')^) { return stepped }
     let enter_activates = normalized == "submit" or normalized == "image" or normalized == "reset";
     let space_timing = if (normalized == "checkbox" or normalized == "radio") "up" else null;
     let verdict = keyboard.keydown_activation(~, evt, enter_activates, space_timing);
@@ -486,9 +486,9 @@ on keyup(evt) {
 }
 
 view <textarea> state valid, invalid {}
-on init(evt)  { validate.revalidate(~) aria.reflect(~) }
-on input(evt) { validate.revalidate(~) aria.reflect(~) }
-on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
+on init(evt)  { validate.revalidate(~)^ aria.reflect(~) }
+on input(evt) { validate.revalidate(~)^ aria.reflect(~) }
+on blur(evt)  { validate.revalidate(~)^ aria.reflect(~) }
 on edit_commit(evt) { editing.commit_change(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, true) }
 
@@ -512,12 +512,12 @@ on keydown(evt) { stepper.key_default(~, evt, true) }
 on mousedown(evt) {
     let moved = stepper.point_to_value(~, evt);
     range_moved = moved == true
-    if (moved != 'pass') { dom.capture_pointer(~) }
+    if ((moved != 'pass')^) { dom.capture_pointer(~) }
     moved
 }
 on pointerdrag(evt) {
     let moved = stepper.point_to_value(~, evt);
-    if (moved == true) { range_moved = true }
+    if ((moved == true)^) { range_moved = true }
     moved
 }
 on pointerdragend(evt) {
@@ -556,7 +556,7 @@ on keyup(evt) {
 on blur(evt) { keyboard_activation_armed = false }
 on submitactivation(evt) {
     let normalized = type_of(~, "submit");
-    if (normalized == "button" or normalized == "reset") { true }
+    if ((normalized == "button" or normalized == "reset")^) { true }
     submit.run(tree.form_of(~), ~)
 }
 on resetactivation(evt) {

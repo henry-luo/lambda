@@ -4,14 +4,14 @@ import normalize: lambda.graph.normalize
 import paint: lambda.graph.transform.paint
 import transform: lambda.graph.transform
 
-fn source_for(value) => parse(
+fn source_for(value) any^ => parse(
   "digraph G { graph [splines=\"" ++ value ++ "\"] a -> b }",
   {type: "graph", flavor: "dot"})^
 
 fn lowered(value) {
   let result = normalize.normalize(source_for(value));
   [value, result.graph["route-mode"], result.valid,
-    [for (diagnostic in result.diagnostics) diagnostic.code]]
+    [for (diagnostic in ((result.diagnostics) ^ { [] })) diagnostic.code]]
 }
 
 fn route_input(mode, use_splines = false) => {
@@ -48,7 +48,7 @@ let explicit = layout.compute(route_input("line", true))
 {
   lowered: [for (value in ["line", "false", "polyline", "ortho", "curved",
     "spline", "true", "none", ""]) lowered(value)],
-  invalid: [invalid.valid, [for (value in invalid.diagnostics) value.code]],
+  invalid: [invalid.valid, [for (value in ((invalid.diagnostics) ^ { [] })) value.code]],
   html: [normalized.graph["route-mode"], html["data-route-mode"],
     html["data-use-splines"], len(model.edges(normalized.graph))],
   compatibility: [legacy.edges[0].route_mode, explicit.edges[0].route_mode],

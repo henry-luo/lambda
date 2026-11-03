@@ -694,7 +694,7 @@ pn bi_div_rem_to(bi, m, q, r) {
         if (ra[i] == y0) {
             qd = BI_DM
         } else {
-            qd = int(float(ra[i]) * d1 + (float(ra[i - 1]) + e) * d2)
+            qd = int(float(ra[i]) * d1 + (float(ra[i - 1]) + e) * d2)^
         }
         ra[i] = ra[i] + am3(ya, 0, qd, ra, j, 0, ys)
         if (ra[i] < qd) {

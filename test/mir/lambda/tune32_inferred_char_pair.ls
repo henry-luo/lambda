@@ -42,7 +42,7 @@ pn tune32_borrowed_text(text) bool {
     tune32_clear_text(text)
     return text[0] == text[0]
 }
-pn tune32_captured_text(text) bool {
+pn tune32_captured_text(text) bool^ {
     fn read_snapshot(dummy: int) bool => text[0] == "ab"[0]
     let reader = read_snapshot
     text = null

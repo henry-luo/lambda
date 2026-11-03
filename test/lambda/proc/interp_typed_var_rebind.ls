@@ -5,17 +5,17 @@
 // edge passes the raw container and never reloads (CW33's typed `Container**`
 // half is not implemented there); the golden is T0's, which the auto tier
 // now matches.
-pn rebind(var x: float[], v: float) { x = fill(2, v) }
+pn rebind(var x: float[], v: float) { x = fill(2, v)^ }
 pn caller(var xs: float[], n: int) {
     var i = 0
-    while (i < n) { rebind(xs, float(i)); i = i + 1 }
+    while (i < n) { rebind(xs, float(i))^; i = i + 1 }
 }
 pn main() {
-    var rs: float[] = fill(4, 0.0)
+    var rs: float[] = fill(4, 0.0)^
     var n = 0
-    while (n < 6) { rebind(rs, float(n)); n = n + 1 }
+    while (n < 6) { rebind(rs, float(n))^; n = n + 1 }
     print(rs, "\n")
-    var ts: float[] = fill(3, 1.0)
-    caller(ts, 7)
+    var ts: float[] = fill(3, 1.0)^
+    caller(ts, 7)^
     print(ts, "\n")
 }

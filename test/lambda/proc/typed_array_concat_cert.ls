@@ -5,15 +5,15 @@
 type N = {kind: int, kids: N[]}
 let no_kids: N[] = []
 fn mk(k: int) N => {kind: k, kids: no_kids}
-fn build(acc: N[], k: int) N[] {
+fn build(acc: N[], k: int) N[]^ {
     if (k == 0) acc
     else build(acc ++ [mk(k)], k - 1)
 }
-fn total(xs: N[], i: int, sum: int) int {
+fn total(xs: N[], i: int, sum: int) int^ {
     if (i >= len(xs)) sum
     else total(xs, i + 1, sum + xs[i].kind)
 }
-fn ints(acc: int[], k: int) int[] {
+fn ints(acc: int[], k: int) int[]^ {
     if (k == 0) acc
     else ints(acc ++ [k], k - 1)
 }

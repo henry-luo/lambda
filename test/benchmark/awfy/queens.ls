@@ -62,7 +62,7 @@ pn queens() {
     var free_maxs = fill(16, true)
     var free_mins = fill(16, true)
     var queen_rows = fill(8, -1)
-    if (place_queen(free_rows, free_maxs, free_mins, queen_rows, 0) != 1) {
+    if ((place_queen(free_rows, free_maxs, free_mins, queen_rows, 0) != 1)^) {
         return 0
     }
     return is_valid(queen_rows)
@@ -71,7 +71,7 @@ pn queens() {
 pn benchmark() {
     var result = 1
     for i in 0 to 9 {
-        if (queens() != 1) {
+        if ((queens() != 1)^) {
             result = 0
         }
     }
@@ -82,7 +82,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("Queens: PASS\n")
     } else {
         print("Queens: FAIL\n")

@@ -72,7 +72,7 @@ pn child_positions(e) {
 pn codes(text) {
     var out = []
     for i of text {
-        out.push(ord(text[i]))
+        out.push(ord(text[i]))^
     }
     out
 }

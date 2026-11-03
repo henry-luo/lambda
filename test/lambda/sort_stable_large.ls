@@ -7,8 +7,8 @@ let keyed = sort([for (x in 0 to 65535) {k: x % 3, v: x}], (r) => r.k);
 [
     sort([5, 3, 9, 1, 3, 7]),
     sort([5, 3, 9, 1, 3, 7], 'desc'),
-    [for (r in sort(rows, (r) => r.a)) r.b],
-    [for (r in sort(rows, {dir: 'desc', by: (r) => r.a})) r.b],
+    [for (r in ((sort(rows, (r) => r.a)) ^ { [] })) r.b],
+    [for (r in ((sort(rows, {dir: 'desc', by: (r) => r.a})) ^ { [] })) r.b],
     [for (r in rows order by r.a) r.b],
     [for (r in rows order by r.a desc) r.b],
     [big[0], big[32767], big[65535]],

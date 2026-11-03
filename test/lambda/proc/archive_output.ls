@@ -1,4 +1,4 @@
-fn member(tree, name) => [for (entry in content(tree)^ where entry.name == name) entry][0]
+fn member(tree, name) any^ => [for (entry in content(tree)^ where entry.name == name) entry][0]
 pn main() {
     let tar = input("test/input/archive/sample.tar.xz")^
     output(tar, "temp/archive-tar-copy.zip", {format: 'zip', deterministic: true})^

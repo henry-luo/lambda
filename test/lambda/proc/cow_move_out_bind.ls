@@ -45,7 +45,7 @@ pn keys(n) {
     return [n.key, keys(n.left), keys(n.right)]
 }
 
-pn make() N? {
+pn make() N?^ {
     var leaf: N? = {key: 0.25, left: null, right: null}
     var mid: N? = {key: 0.5, left: null, right: leaf}
     var top: N? = {key: 1.0, left: mid, right: null}
@@ -56,7 +56,7 @@ pn main() {
     var k = 0
     var t: N? = null
     while (k < 40) {
-        var a: N? = make()
+        var a: N? = make()^
         t = rotate_typed(a)
         k = k + 1
     }

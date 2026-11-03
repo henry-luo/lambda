@@ -2,7 +2,7 @@ import s: lambda.ime.chinese.syllables
 import l: lambda.ime.chinese.lattice
 import f: .mod_fixture
 
-fn rejected(value) => (s.settings(value) ^ { ^.code }) == 7830
+fn rejected(value) any^ => (s.settings(value) ^ { ^.code }) == 7830
 
 pn main() {
     let table = f.engine()^.syllables
@@ -23,7 +23,7 @@ pn main() {
         }]),
         all([for (case in cases) case[2] in s.expand(table,case[1],s.settings([case[0]])^) and
             case[1] in s.expand(table,case[2],s.settings([case[0]])^)]),
-        all([for (word in table.words,value in s.expand(table,word,all_pairs)) table.full[value] == true]),
+        all([for (word in table.words,value in ((s.expand(table,word,all_pairs)) ^ { [] })) table.full[value] == true]),
         sort(combinations) == ["zan","zang","zhan","zhang"],
         not ("xiang" in s.expand(table,"xian",s.settings(["an=ang"])^)),
         not ("guang" in s.expand(table,"guan",s.settings(["an=ang"])^)),

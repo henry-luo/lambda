@@ -43,11 +43,11 @@ fn axes(definition, frame) => [for (key in (if (parameter.selection(definition).
     parameter.selection(definition).encodings else if (definition._axis == true) parameter.selection(definition).fields else ["x", "y"])
     where frame.encoding[key].field != null and frame.scales[key] != null) key]
 
-fn stream_matches(stream, event) => streams.matches(stream, event, event._values)
-fn start_matches(stream, event) => stream_matches(stream, event) or
+fn stream_matches(stream, event) any^ => streams.matches(stream, event, event._values)
+fn start_matches(stream, event) any^ => stream_matches(stream, event) or
     (event.type == "pointerdown" and stream_matches(stream, {*:event, type: "mousedown"}))
 
-fn nearest(frame, event, encodings) {
+fn nearest(frame, event, encodings) any^ {
     let keys = if (encodings != null) encodings else ["x", "y"];
     let display = if (event._display != null) event._display else [event.x, event.y];
     let candidates = [for (row in frame.data) (
@@ -55,8 +55,8 @@ fn nearest(frame, event, encodings) {
             scale.scale_apply(frame.scales[key], row[frame.encoding[key].field]) +
                 (if (frame.scales[key].bandwidth != null) frame.scales[key].bandwidth / 2.0 else 0.0) else null],
         let projected = if (frame.coordinate != null and all(coordinates |> util.finite_number(~))) spatial.pixel(frame.coordinate, coordinates) else coordinates,
-        let distances = [for (index, key in ["x", "y"] where contains(keys, key) and
-            util.finite_number(projected[index]) and util.finite_number(display[index])) (projected[index] - display[index]) ** 2.0],
+        let distances = [for (index, key in ["x", "y"] where ((contains(keys, key) and
+            util.finite_number(projected[index]) and util.finite_number(display[index])) ^ { false })) (projected[index] - display[index]) ** 2.0],
         {row: row, distance: if (len(distances) == 0) inf else sum(distances)})];
     let distance = min(candidates |> ~.distance);
     let found = candidates |: ~.distance == distance and ~.distance != inf;
@@ -64,7 +64,7 @@ fn nearest(frame, event, encodings) {
     else if (len(found) > 0) found[0].row else null
 }
 
-fn point(st, definition, event) {
+fn point(st, definition, event) any^ {
     let select = parameter.selection(definition);
     let input_bound = definition.bind != null and definition.bind != "scales";
     let event_stream = if (select.on != null) select.on else if (input_bound and definition.bind != "legend") false else "click";
@@ -90,11 +90,11 @@ fn brush_extent(mapping, begin, end) {
     if (mapping.kind == "band" or mapping.kind == "point" or mapping.kind == "ordinal")
         {kind: "discrete", values: [for (value in mapping.domain,
             let pixel = scale.scale_apply(mapping, value) + (if (mapping.bandwidth != null) mapping.bandwidth / 2.0 else 0.0)
-            where pixel >= low and pixel <= high) value]}
+            where ((pixel >= low and pixel <= high) ^ { false })) value]}
     else sort([scale.scale_invert(mapping, low), scale.scale_invert(mapping, high)])
 }
 fn axis_limit(frame, key) => if (key == "x") frame.width else if (key == "y") frame.height else max(frame.scales[key].range)
-fn angular_axis(model) => if (contains(["theta", "radial"], model.type) and model.direct_polar != true) "y" else "x"
+fn angular_axis(model) any^ => if (contains(["theta", "radial"], model.type) and model.direct_polar != true) "y" else "x"
 fn interval_extent(definition, frame, begin, end) => map([for (key in axes(definition, frame),
     let limit = axis_limit(frame, key),
     let bounds = brush_extent(frame.scales[key], util.clamp_val(begin[key], 0.0, limit), util.clamp_val(end[key], 0.0, limit)),
@@ -115,7 +115,7 @@ fn inside(extent, definition, frame, event) => all([for (key in axes(definition,
     else event[key] >= min([scale.scale_apply(frame.scales[key], bounds[0]), scale.scale_apply(frame.scales[key], bounds[1])]) and
          event[key] <= max([scale.scale_apply(frame.scales[key], bounds[0]), scale.scale_apply(frame.scales[key], bounds[1])])])
 
-fn interval_start(st, original, event) {
+fn interval_start(st, original, event) any^ {
     let definition = if (original._axis == true) {*:original, select: {*:parameter.selection(original), fields: null, encodings: [event.axis]}} else original;
     let select = parameter.selection(definition);
     let lifecycle = streams.lifecycle(select.on);
@@ -131,7 +131,7 @@ fn interval_start(st, original, event) {
     }
 }
 
-fn shifted_axis(gesture, event, key, zoom) {
+fn shifted_axis(gesture, event, key, zoom) any^ {
     let mapping = gesture.frame.scales[key];
     let bounds = gesture.extent[gesture.frame.encoding[key].field];
     let wrapped = bounds.kind == "wrapped";
@@ -161,10 +161,10 @@ fn shifted_axis(gesture, event, key, zoom) {
     }
     }
 }
-fn shifted_extent(gesture, event, zoom = null) => map([for (key in axes(gesture.definition, gesture.frame))
+fn shifted_extent(gesture, event, zoom = null) => map([for (key in ((axes(gesture.definition, gesture.frame)) ^ { [] }))
     for (part in [gesture.frame.encoding[key].field, shifted_axis(gesture, event, key, zoom)]) part])
 
-fn interval(st, definition, event) {
+fn interval(st, definition, event) any^ {
     let select = parameter.selection(definition);
     let zoom_stream = if (select.zoom == null or select.zoom == true) "wheel" else select.zoom;
     if (event.type != "wheel" or not stream_matches(zoom_stream, event) or
@@ -177,7 +177,7 @@ fn interval(st, definition, event) {
     }
 }
 
-fn update_parameters(st, definitions, event, index = 0) {
+fn update_parameters(st, definitions, event, index = 0) any^ {
     if (index >= len(definitions)) st else {
         let definition = definitions[index];
         let select = parameter.selection(definition);
@@ -197,17 +197,17 @@ fn clear_selection(st, definition) {
 }
 
 // A normalized event carries data-space metadata from the rendered chart, never a DOM handle.
-fn update_core(previous, raw_event) {
+fn update_core(previous, raw_event) any^ {
     let event = {*:raw_event, _values: parameter.expression_values(parameter.values(raw_event.frame.params, previous))};
     let st = if (previous is error or event.param != null) previous else update_parameters(previous, event.frame.params, event);
     if (st is error) st
     else if (event.param != null) {
         if (event.field == null) parameter.update_value(st, event.frame.params, event.param, event.value, event.frame.view)
         else (
-            let tuples = [for (owner, entries in st.values[event.param].stores) for (tuple in entries) tuple],
+            let tuples = [for (owner, entries in ((st.values[event.param].stores) ^ { [] })) for (tuple in entries) tuple],
             parameter.update_value(st, event.frame.params, event.param,
                 [{*:parse.attributes(tuples[0]), *:map([event.field, event.value])}], event.frame.view))
-    } else if (st.gesture != null and any([for (gesture in st.gesture)
+    } else if (st.gesture != null and any([for (gesture in ((st.gesture) ^ { [] }))
         stream_matches(gesture.lifecycle.move, event) or stream_matches(gesture.lifecycle.end, event)])) {
         let gestures = st.gesture;
         let updated = drag(st, gestures, event, 0);
@@ -217,11 +217,11 @@ fn update_core(previous, raw_event) {
     else {
         let definitions = event.frame.params;
         let starts = if (event.type == "pointerdown") [for (definition in definitions
-            where parameter.selection(definition).type == "interval") interval_start(st, definition, event)] |: ~ != null else [];
+            where ((parameter.selection(definition).type == "interval") ^ { false })) interval_start(st, definition, event)] |: ~ != null else [];
         if (len(starts) > 0) {*:st, gesture: starts} else st
     }
 }
-fn drag(st, gestures, event, index) {
+fn drag(st, gestures, event, index) any^ {
     if (index >= len(gestures)) st else {
         let gesture = gestures[index];
         let extent = if (gesture.translate) shifted_extent(gesture, event)
@@ -233,7 +233,7 @@ fn drag(st, gestures, event, index) {
     }
 }
 
-fn overlay_rect(frame, definition, st) {
+fn overlay_rect(frame, definition, st) any^ {
     let value = st.values[definition.name];
     let selected = if (value.stores[frame.view] != null) value.stores[frame.view] else value.stores.initial;
     if (selected == null or len(selected) == 0 or definition.bind == "scales") null else {
@@ -245,7 +245,7 @@ fn overlay_rect(frame, definition, st) {
                 [min(pixels), max(pixels) + (if (mapping.bandwidth != null) mapping.bandwidth else 0.0)])
             else sort([scale.scale_apply(mapping, extent[0]), scale.scale_apply(mapping, extent[1])])];
         let options = parameter.selection(definition).mark;
-        if (len([for (pair in bounds) for (value in pair where not util.finite_number(value)) value]) > 0) null else
+        if (len([for (pair in bounds) for (value in pair where ((not util.finite_number(value)) ^ { false })) value]) > 0) null else
         (let rect = <rect class: "chart-brush", 'data-chart-param': definition.name,
             x: bounds[0][0], y: bounds[1][0], width: bounds[0][1] - bounds[0][0], height: bounds[1][1] - bounds[1][0],
             fill: if (options.fill != null) options.fill else "#333", 'fill-opacity': if (options.fillOpacity != null) options.fillOpacity else 0.125,
@@ -254,7 +254,7 @@ fn overlay_rect(frame, definition, st) {
     }
 }
 
-fn overlay(frame, definition, st) {
+fn overlay(frame, definition, st) any^ {
     let value = st.values[definition.name];
     let selected = if (value.stores[frame.view] != null) value.stores[frame.view] else value.stores.initial;
     let wrapped = [for (field, bounds in selected where bounds.kind == "wrapped") {field: string(field), bounds: bounds}];
@@ -276,7 +276,7 @@ fn overlay(frame, definition, st) {
 fn crosshairs(frame, spec) => <g class: "chart-crosshairs", 'pointer-events': "none",
     for (item in spec._behaviors,
         let value = behavior.value(spec._parameter_state,item,spec._view_path)
-        where item.type == "crosshair" and value.display != null) (
+        where ((item.type == "crosshair" and value.display != null) ^ { false })) (
         let inverse = if (frame.coordinate != null) spatial.invert(frame.coordinate, value.display) else null,
         let x = if (inverse is array) inverse[0] * frame.width else value.display[0],
         let y = if (inverse is array) (1.0 - inverse[1]) * frame.height else value.display[1],
@@ -290,26 +290,26 @@ pub fn decorate(image, spec, lay, x_scale = null, y_scale = null, background = t
         // direct mark events already carry their row; only nearest picking needs sampled outlines.
         let nearest = any(base.params |> parameter.selection(~).nearest == true) or any(base.behaviors |> ~.nearest == true);
         let frame = {*:base, geometry:if (nearest) picking.collect(image) else []};
-        let invalid = [for (definition in spec._parameters where parameter.selection(definition).type == "interval")
+        let invalid = [for (definition in spec._parameters where ((parameter.selection(definition).type == "interval") ^ { false }))
             if (definition._axis!=true and frame.coordinate!=null and spatial.invert(frame.coordinate,[frame.width/2.0,frame.height/2.0]) is error)
                 error("chart: interval selection requires an invertible coordinate")
             else if (definition._axis != true and len(axes(definition, frame)) == 0) error("chart: interval selection requires positional field encodings")
-            else if (definition.bind == "scales" and len([for (key in axes(definition, frame)
-                where contains(["band", "point", "ordinal", "identity"], frame.scales[key].kind)) key]) > 0)
+            else if (definition.bind == "scales" and len([for (key in ((axes(definition, frame)) ^ { [] })
+                where ((contains(["band", "point", "ordinal", "identity"], frame.scales[key].kind)) ^ { false })) key]) > 0)
                 error("chart: scale binding requires continuous positional scales")];
         let failure = util.first_error(invalid);
         if (failure is error) failure else <g 'data-chart-frame': format(frame, 'json'),
             if (background) <rect class: "chart-interaction-plane", width: lay.plot_w, height: lay.plot_h,
                 fill: "transparent", 'pointer-events': "all">;
             image;
-            for (definition in spec._parameters where parameter.selection(definition).type == "interval")
+            for (definition in spec._parameters where ((parameter.selection(definition).type == "interval") ^ { false }))
                 overlay(frame, definition, spec._parameter_state);
             crosshairs(frame, spec)
         >
     }
 }
 
-fn position(frame, event) {
+fn position(frame, event) any^ {
     let model = frame.coordinate;
     let axis_models = if (frame.axis_models != null) frame.axis_models else [];
     let projected = [for (axis in axis_models, let dx = axis.b[0] - axis.a[0], let dy = axis.b[1] - axis.a[1],
@@ -326,20 +326,20 @@ fn position(frame, event) {
             for (part in [frame.encoding[key].field, scale.scale_invert(frame.scales[key],
                 if (key == "x") point[0] * frame.width else (1.0 - point[1]) * frame.height)]) part])}
 }
-fn cursor(st, event) {
+fn cursor(st, event) any^ {
     let items = event.frame.behaviors |: ~.type == "crosshair";
     if (len(items) == 0 or not contains(["pointermove", "mousemove", "pointerleave", "focusout"], event.type)) st else {
         let item = items[0];
         let displayed=if (event._display!=null) event._display else [event.x,event.y];
         let picked=if (item.nearest==true) picking.nearest(event.frame.geometry,displayed) else null;
-        let points=[for (line in picked.lines) for (point in line.points) point];
+        let points=[for (line in ((picked.lines) ^ { [] })) for (point in line.points) point];
         let value = if (contains(["pointerleave", "focusout"], event.type)) null else
             {display: if (len(points)>0) [avg(points |> ~[0]),avg(points |> ~[1])] else displayed, data: event.data_position,
                 datum: if (picked!=null) picked.row else if (item.nearest == true) nearest(event.frame, event, item.encodings) else event.row};
         parameter.update_value(st, event.frame.params, item.param, value, event.frame.view)
     }
 }
-fn navigation(st,event) {
+fn navigation(st,event) any^ {
     let items=event.frame.behaviors |: ~._geo==true;
     let active=if (st.gesture[0].kind=="projection") st.gesture[0] else null;
     let item=if (active!=null) active.behavior else items[0];
@@ -359,7 +359,7 @@ fn navigation(st,event) {
     } else st
 }
 // Native events and programmatic commands produce the same state and observational notices.
-pub fn update(previous, raw_event) {
+pub fn update(previous, raw_event) any^ {
     let event = position(raw_event.frame, raw_event);
     let next = if (previous is error) previous else if (event is error) event
         else if (event.command != null) behavior.command(previous, event.frame, event)

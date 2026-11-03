@@ -73,7 +73,7 @@ let svg = format(scene.svg(flipped.doc,"","",false,true),'xml');
 contains(svg,"rotate(90") and contains(svg,"scale(-1 1)") and not contains(svg,"selection-overlay")
 let copied = model.duplicate(model.select_ids(st,["n1","n2"]))
 len(model.objects(copied.doc)) == 12 and len(model.selected_ids(copied)) == 3
-let copied_edge = [for (node in model.objects(copied.doc) where node.tag == 'connector' and contains(model.selected_ids(copied),model.id(node))) node][0];
+let copied_edge = [for (node in ((model.objects(copied.doc)) ^ { [] }) where ((node.tag == 'connector' and contains(model.selected_ids(copied),model.id(node))) ^ { false })) node][0];
 contains(model.selected_ids(copied),model.attr(copied_edge,"from-shape")) and contains(model.selected_ids(copied),model.attr(copied_edge,"to-shape"))
 len(copied.hist.undo) == 1 and model.step_history(copied).doc == st.doc
 let inspector_free = model.edit_properties({*:st,selected:"e1"},{'to-shape':""})^;

@@ -4,7 +4,7 @@ import incremental: lambda.doc.spelling.incremental
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 
-fn checked(checker,units) => incremental.accept(units,[for (request in incremental.pending(units))
+fn checked(checker,units) any^ => incremental.accept(units,[for (request in incremental.pending(units))
     {*:request,report:spelling.check(checker,request.text)^}])
 
 pn main() {

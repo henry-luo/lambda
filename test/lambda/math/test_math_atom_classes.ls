@@ -1,8 +1,8 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn box(source) => math.render_box(ast(source))^
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
 fn close(a,b) => abs(a - b) < 0.00001
 let classes = ["ord", "bin", "rel", "open", "close", "punct", "inner"]
 let wrapped = [for (kind in classes) box("\\math" ++ kind ++ "{x}")]

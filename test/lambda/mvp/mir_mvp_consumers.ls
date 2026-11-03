@@ -4,9 +4,9 @@ pn quoted(s: string) string { return "<" ++ identity(s) ++ ">" }
 pn twice(s: string, unused: string) string { return s ++ s }
 pn marked(s: string) string { print(s); return s }
 pn add(a: int, b: int) int { return a + b }
-pn checked_inline(a: int[], key: int) int {
-    a[0] = add(a[0], 2)
-    a[0] = add(a[key], 2)
+pn checked_inline(a: int[], key: int) int^ {
+    a[0] = add(a[0], 2)^
+    a[0] = add(a[key], 2)^
     return a[0]
 }
 pn square_end(start: int, limit: int) int {
@@ -23,7 +23,10 @@ pn small_get(a: int[], i: int) int { return a[i] }
 pn inline_checks() {
     var a: int[] = [7]
     print(small_get(a, 0)); print(" ")
-    if (true) { let bad: int = small_get(a, 5); print("UNEXPECTED INLINE\n") }
+    if (true) {
+        let bad: int^ = small_get(a, 5);
+        if (not (bad is error)) { print("UNEXPECTED INLINE\n") }
+    }
     print(a[0]); print("\n")
 }
 pn truth_count(a: bool[], start: int, end: int, initial: int) int {
@@ -135,7 +138,10 @@ pn main() {
     let fused: string = quoted(marked("a")) ++ ":" ++ twice(marked("b"), marked("c"))
     print(" "); print(fused); print("\n")
     print(checked_inline(ints, 0)); print(" ")
-    if (true) { let failed: int = checked_inline(ints, 9); print("UNEXPECTED STORE\n") }
+    if (true) {
+        let failed: int^ = checked_inline(ints, 9);
+        if (not (failed is error)) { print("UNEXPECTED STORE\n") }
+    }
     print(ints[0]); print("\n")
     print(square_end(0, 15)); print(" "); print(square_end(0, 16)); print(" ")
     print(square_end(-5, 16)); print(" "); print(square_end(-4, 16)); print(" ")

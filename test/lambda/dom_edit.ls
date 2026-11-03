@@ -20,9 +20,9 @@ let sanitize = {
     single_crlf: editing.sanitize("a\r\nb", false),
     single_cr: editing.sanitize("a\rb", false),
     multi_kept: editing.sanitize("a\nb", true),
-    multi_crlf: for (i in 0 to len(editing.sanitize("a\r\nb", true)) - 1)
+    multi_crlf: for (i in ((0 to len(editing.sanitize("a\r\nb", true)) - 1) ^ { [] }))
         ord(slice(editing.sanitize("a\r\nb", true), i, i + 1)),
-    multi_cr: for (i in 0 to len(editing.sanitize("a\rb", true)) - 1)
+    multi_cr: for (i in ((0 to len(editing.sanitize("a\rb", true)) - 1) ^ { [] }))
         ord(slice(editing.sanitize("a\rb", true), i, i + 1))
 }
 

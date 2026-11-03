@@ -27,11 +27,11 @@ pub fn children(node,tag = null,ns = null) => [for (child in node.children where
     (tag == null or child.tag == tag) and (ns == null or child.uri == ns)) child]
 pub fn child(node,tag,ns = null) => first(children(node,tag,ns))
 pub fn attr(node,key,ns = "") => node.attrs[ns ++ "#" ++ key]
-pub fn text(node) => if (node is string) node else if (node is array or node is list)
+pub fn text(node) any^ => if (node is string) node else if (node is array or node is list)
     join([for (child in node) text(child)],"") else if (node is map) text(node.children) else ""
 pub fn descendants(node,tag = null,ns = null) => [for (child in children(node),found in
-    (if ((tag == null or child.tag == tag) and (ns == null or child.uri == ns)) [child] else []) ++
-    descendants(child,tag,ns)) found]
+    (((if ((tag == null or child.tag == tag) and (ns == null or child.uri == ns)) [child] else []) ++
+    descendants(child,tag,ns)) ^ { [] })) found]
 pub fn issue(code,part,message) => {code:code,severity:"warning",part:part,message:message}
 pub fn target(owner,value) map^ {
     let valid = if (not (value is string)) raise fail("invalid-target","Missing publication URL",owner) else true
@@ -39,7 +39,7 @@ pub fn target(owner,value) map^ {
     let path = if (pieces[0] == "") owner else uri.target(owner,pieces[0],fail)^;
     {href:path,fragment:if (len(pieces) > 1) uri.fragment(join(drop(pieces,1),"#"),fail)^ else null}
 }
-pub fn url(target) => uri.url(target.href,target.fragment)
+pub fn url(target) any^ => uri.url(target.href,target.fragment)
 pub fn tree(source,part) map^ {
     let document = parse(source,{type:"xml",flavor:"document"})^
     let root = xml.root(document);

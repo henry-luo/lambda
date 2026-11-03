@@ -47,7 +47,7 @@ pub pn source_paths() {
 
 pn add_include_edges(path: string, source: string, target: string,
                      resolution: string, var entries) {
-    for (hit in include_matches(source, target)) {
+    for (hit in include_matches(source, target)^) {
         entries = entries ++ [{path: path, line: hit.line,
                                token: hit.token, resolution: resolution}]
     }
@@ -58,12 +58,12 @@ pn include_inventory(paths) any^ {
     var upper_to_radiant = []
     for (target_path in paths) {
         let path = relative_path(target_path)
-        if (starts_with(path, "lib/") and not starts_with(path, "lib/gc/") and
-            path != "lib/side_stack.c" and not contains(compatibility_forwarders, path)) {
+        if ((starts_with(path, "lib/") and not starts_with(path, "lib/gc/") and
+            path != "lib/side_stack.c" and not contains(compatibility_forwarders, path))^) {
             let source = input(target_path, "text")^
             add_include_edges(path, source, "lambda",
                               "move caller upward or replace with lib-neutral API",
-                              lib_to_lambda)
+                              lib_to_lambda)^
         }
         if (starts_with(path, "lambda/input/") or starts_with(path, "lambda/network/") or
             starts_with(path, "lambda/js/") or starts_with(path, "lambda/module/")) {
@@ -131,15 +131,15 @@ pn boundary_failure_baseline(paths) any^ {
         let path = relative_path(target_path)
         if (starts_with(path, "lambda/") or starts_with(path, "radiant/")) {
             let source = input(target_path, "text")^
-            if (contains(source, "extern")) {
-                for (hit in upward_extern_matches(source)) {
+            if (contains(source, "extern")^) {
+                for (hit in upward_extern_matches(source)^) {
                     upward_externs = upward_externs ++ [{path: path, line: hit.line,
                         declaration: hit.declaration,
                         resolution: "replace with lower-owned provider or registered hook"}]
                 }
             }
             if (contains(source, "__attribute__")) {
-                for (hit in weak_matches(source)) {
+                for (hit in weak_matches(source)^) {
                     weak_providers = weak_providers ++ [{path: path, line: hit.line,
                         token: hit.token,
                         resolution: "P1b removes weak runtime fallbacks before DSO enforcement"}]
@@ -154,7 +154,7 @@ pn macro_hygiene_inventory() any^ {
     var entries = []
     for (item in public_headers) {
         let source = input(item.path, "text")^
-        for (hit in static_selector_matches(source)) {
+        for (hit in static_selector_matches(source)^) {
             entries = entries ++ [{path: item.path, line: hit.line,
                                    token: hit.token,
                                    resolution: "remove public-header ABI selector in P1a"}]

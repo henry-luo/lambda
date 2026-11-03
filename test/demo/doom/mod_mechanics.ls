@@ -4,7 +4,7 @@ import world: .mod_world
 import data: .mod_data
 import events: .mod_events
 
-fn crossed(old, next, line) => (geo.side(old, line.start, line.end) > 0) !=
+fn crossed(old, next, line) any^ => (geo.side(old, line.start, line.end) > 0) !=
     (geo.side(next, line.start, line.end) > 0)
 fn progress(entry, simulation_time, duration, target, eased) {
     let t = max(0, min(1, (simulation_time - entry.moved_at) / duration))
@@ -58,13 +58,13 @@ fn crusher_tick(crusher, game, sector_id, dt) {
 }
 pub fn advance(map_data, game, dt, rules) {
     let sector = world.sector_at(map_data, game.player)
-    let doors = map_events(game.doors, (entry) => door_tick(entry, game, sector.sectorIndex, rules))
+    let doors = map_events(game.doors, (entry) any^ => door_tick(entry, game, sector.sectorIndex, rules))
     let lifts = map_events(game.lifts, (entry) => lift_tick(entry, game))
-    let crushers = map_events(game.crushers, (entry) => crusher_tick(entry, game, sector.sectorIndex, dt))
+    let crushers = map_events(game.crushers, (entry) any^ => crusher_tick(entry, game, sector.sectorIndex, dt))
     events.with_events({*: game, doors: doors.entries, lifts: lifts.entries, crushers: crushers.entries},
         [*doors.effects, *lifts.effects, *crushers.effects])
 }
-pub fn open_door(game, sector_id, rules) {
+pub fn open_door(game, sector_id, rules) any^ {
     let door = world.motion(game.doors, sector_id)
     if (door == null) game
     else if (door.keyRequired != null and not contains(game.player.keys, door.keyRequired))
@@ -78,7 +78,7 @@ pub fn open_door(game, sector_id, rules) {
         if (already_open) changed else events.sound(changed, "DSDOROPN")
     }
 }
-pub fn lower_lift(game, sector_id, rules) {
+pub fn lower_lift(game, sector_id, rules) any^ {
     let lift = world.motion(game.lifts, sector_id)
     if (lift == null or lift.phase == "lowered" or lift.phase == "lowering") game
     else events.sound({*: game, lifts: [for (entry in game.lifts)
@@ -87,9 +87,9 @@ pub fn lower_lift(game, sector_id, rules) {
 }
 pub fn activate_tag(map_data, game, tag, rules) {
     let doors = reduce([game, *[for (door in game.doors where map_data.sectors[door.sectorIndex].tag == tag) door.sectorIndex]],
-        (acc, sector_id) => open_door(acc, sector_id, rules))
+        (acc, sector_id) any^ => open_door(acc, sector_id, rules))
     let lifts = reduce([doors, *[for (lift in game.lifts where lift.tag == tag) lift.sectorIndex]],
-        (acc, sector_id) => lower_lift(acc, sector_id, rules))
+        (acc, sector_id) any^ => lower_lift(acc, sector_id, rules))
     {*: lifts, crushers: [for (crusher in lifts.crushers)
         if (map_data.sectors[crusher.sectorIndex].tag == tag) {*: crusher, active: true} else crusher]}
 }
@@ -97,12 +97,12 @@ fn check_point(player, rules) {
     let forward = geo.forward(player.angle)
     {x: player.x + forward.x * rules.USE_RANGE / 2, y: player.y + forward.y * rules.USE_RANGE / 2}
 }
-pub fn use(map_data, game, rules) {
+pub fn use(map_data, game, rules) any^ {
     let point = check_point(game.player, rules)
     let nearby = [for (wall in map_data.walls where
-        geo.segment_distance_squared(point, wall.start, wall.end) < rules.USE_RANGE ** 2) wall]
-    let switch_wall = [for (wall in nearby where wall.texture != null and
-        (starts_with(wall.texture, rules.SWITCH_ON_PREFIX) or starts_with(wall.texture, rules.SWITCH_OFF_PREFIX))) wall][0]
+        ((geo.segment_distance_squared(point, wall.start, wall.end) < rules.USE_RANGE ** 2) ^ { false })) wall]
+    let switch_wall = [for (wall in nearby where ((wall.texture != null and
+        (starts_with(wall.texture, rules.SWITCH_ON_PREFIX) or starts_with(wall.texture, rules.SWITCH_OFF_PREFIX))) ^ { false })) wall][0]
     let line = if (switch_wall == null) null else map_data.linedefs[switch_wall.linedefIndex]
     let switched = if (switch_wall == null) game else {
         let toggle = {*: game, switches: if (contains(game.switches, switch_wall.id))
@@ -118,30 +118,30 @@ pub fn use(map_data, game, rules) {
     let lift_wall = [for (wall in nearby where map_data.linedefs[wall.linedefIndex].specialType == rules.LIFT_USE_SPECIAL) wall][0]
     if (lift_wall == null) opened else {
         let tag = map_data.linedefs[lift_wall.linedefIndex].sectorTag
-        reduce([opened, *[for (lift in opened.lifts where lift.tag == tag) lift.sectorIndex]],
-            (acc, sector_id) => lower_lift(acc, sector_id, rules))
+        reduce([opened, *[for (lift in ((opened.lifts) ^ { [] }) where lift.tag == tag) lift.sectorIndex]],
+            (acc, sector_id) any^ => lower_lift(acc, sector_id, rules))
     }
 }
-pub fn walk_triggers(map_data, game, old, rules) => reduce([game, *[for (i in 0 to (len(map_data.triggers) - 1),
+pub fn walk_triggers(map_data, game, old, rules) => reduce([game, *[for (i in ((0 to (len(map_data.triggers) - 1)) ^ { [] }),
     let trigger = map_data.triggers[i], let key = "lift:" ++ string(i)
-    where not contains(game.triggered, key) and crossed(old, game.player, trigger)) {trigger: trigger, key: key}]],
-    (acc, item) => {
+    where ((not contains(game.triggered, key) and crossed(old, game.player, trigger)) ^ { false })) {trigger: trigger, key: key}]],
+    (acc, item) any^ => {
         let next = reduce([acc, *[for (lift in acc.lifts where lift.tag == item.trigger.sectorTag) lift.sectorIndex]],
-            (value, sector_id) => lower_lift(value, sector_id, rules))
+            (value, sector_id) any^ => lower_lift(value, sector_id, rules))
         if (contains([10, 53, 36], item.trigger.specialType)) {*: next, triggered: [*next.triggered, item.key]} else next
     })
-pub fn teleport(map_data, game, old, rules) {
-    let crossing = [for (i in 0 to (len(map_data.teleporters) - 1), let target = map_data.teleporters[i],
+pub fn teleport(map_data, game, old, rules) any^ {
+    let crossing = [for (i in ((0 to (len(map_data.teleporters) - 1)) ^ { [] }), let target = map_data.teleporters[i],
         let key = "teleport:" ++ string(i)
-        where not contains(game.triggered, key) and crossed(old, game.player, target)) {target: target, key: key}][0]
+        where ((not contains(game.triggered, key) and crossed(old, game.player, target)) ^ { false })) {target: target, key: key}][0]
     if (crossing == null) game else {
         let target = crossing.target
         let position = {x: target.destX, y: target.destY}
         let floor_height = world.floor_height(map_data, game, position)
         let damage = [for (actor in game.actors, let radius = rules.PLAYER_RADIUS +
             (if (actor.ai != null) actor.ai.radius else rules.BARREL_RADIUS)
-            where not actor.collected and contains(rules.SHOOTABLE, actor.type) and
-                abs(actor.x - position.x) < radius and abs(actor.y - position.y) < radius)
+            where ((not actor.collected and contains(rules.SHOOTABLE, actor.type) and
+                abs(actor.x - position.x) < radius and abs(actor.y - position.y) < radius) ^ { false }))
             events.damage(actor.id, 10000, "player")]
         events.sound(events.with_events({*: game, player: {*: game.player, x: position.x, y: position.y,
             floor: floor_height, z: floor_height + rules.EYE_HEIGHT, angle: (target.destAngle - 90) * math.pi / 180},

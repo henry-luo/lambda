@@ -143,20 +143,20 @@ let known_words = ["emptyset", "infinity", "epsilon", "upsilon", "arcsin", "arcc
 
 let word_limit = max([for (word in known_words) len(word)])
 
-pub fn to_ascii(ast) => item(ast,0)
-fn item(value,depth) => common.item(value,depth,node,symbol_text)
-fn text(value) => common.text(value)
-fn mapped(value) => spellings[util.command_name(value)] or value
-fn symbol_text(value) => if (value=="row_sep") "; " else if (value=="col_sep") ", " else mapped(value)
-fn children(value,depth,separator=" ") {
+pub fn to_ascii(ast) any^ => item(ast,0)
+fn item(value,depth) any^ => common.item(value,depth,node,symbol_text)
+fn text(value) any^ => common.text(value)
+fn mapped(value) any^ => spellings[util.command_name(value)] or value
+fn symbol_text(value) any^ => if (value=="row_sep") "; " else if (value=="col_sep") ", " else mapped(value)
+fn children(value,depth,separator=" ") any^ {
     let items=util.content_items(value);
     sequence(items,0,len(items),depth,separator)
 }
 
 fn letter(value) => value is string and len(value)==1 and
     ((ord(value)>=65 and ord(value)<=90) or (ord(value)>=97 and ord(value)<=122))
-fn letter_end(items,i,end) => if (i<end and letter(items[i])) letter_end(items,i+1,end) else i
-fn close_paren(items,i,end,balance) {
+fn letter_end(items,i,end) any^ => if (i<end and letter(items[i])) letter_end(items,i+1,end) else i
+fn close_paren(items,i,end,balance) any^ {
     if (i>=end) -1
     else {
         let next=balance + (if (common.is_tag(items[i],"punctuation") and items[i].value=="(") 1
@@ -164,22 +164,22 @@ fn close_paren(items,i,end,balance) {
         if (next==0) i+1 else close_paren(items,i+1,end,next)
     }
 }
-fn matching_paren(items,i,end) => if (i<end and common.is_tag(items[i],"punctuation") and items[i].value=="(")
+fn matching_paren(items,i,end) any^ => if (i<end and common.is_tag(items[i],"punctuation") and items[i].value=="(")
     close_paren(items,i+1,end,1) else -1
 
-fn script(value,depth,separator=" ") => if (common.is_tag(value,"group")) "(" ++ children(value,depth+1,"") ++ ")"
+fn script(value,depth,separator=" ") any^ => if (common.is_tag(value,"group")) "(" ++ children(value,depth+1,"") ++ ")"
     else if (common.is_tag(value,"paren_script")) children(value,depth+1,separator) else item(value,depth+1)
-fn scripts(n,depth,separator=" ") =>
+fn scripts(n,depth,separator=" ") any^ =>
     (if (n.sub!=null) "_" ++ script(n.sub,depth,separator) else "") ++
     (if (n.sup!=null) "^" ++ script(n.sup,depth,separator) else "")
 
 // A TeX token run may end in the scripted last letter of an ASCII word.
-fn word_piece(items,i,end,depth,separator) {
+fn word_piece(items,i,end,depth,separator) any^ {
     // Bound lookahead by the vocabulary; rescanning an unknown run would be quadratic.
     let stop=letter_end(items,i,min(end,i+word_limit))
     let trailing=stop<end and common.is_tag(items[stop],"subsup") and letter(items[stop].base)
     let letters=join(slice(items,i,stop),"") ++ (if (trailing) items[stop].base else "")
-    let matches=[for (word in known_words where starts_with(letters,word)) word]
+    let matches=[for (word in known_words where ((starts_with(letters,word)) ^ { false })) word]
     let word=matches[0];
     if (word==null) {text:item(items[i],depth+1),next:i+1}
     else {
@@ -192,7 +192,7 @@ fn word_piece(items,i,end,depth,separator) {
     }
 }
 
-fn sequence(items,i,end,depth,separator,acc="",first=true) {
+fn sequence(items,i,end,depth,separator,acc="",first=true) any^ {
     if (i>=end) acc
     else {
         let piece=if (letter(items[i])) word_piece(items,i,end,depth,separator)
@@ -201,7 +201,7 @@ fn sequence(items,i,end,depth,separator,acc="",first=true) {
     }
 }
 
-fn command(n,depth) {
+fn command(n,depth) any^ {
     if (not (n.name is string)) "?"
     else {
         let args=content(n)
@@ -211,7 +211,7 @@ fn command(n,depth) {
     }
 }
 
-fn node(n,depth) {
+fn node(n,depth) any^ {
     let kind=string(name(n));
     if (kind in ["operator","relation"]) if (n.value is string) mapped(n.value) else ""
     else if (kind in ["punctuation","delimiter"]) text(n.value)

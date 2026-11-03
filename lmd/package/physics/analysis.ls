@@ -15,7 +15,7 @@ pub fn energy(trace, body, gravity = [0.0, -9.81, 0.0]) array => [for (sample in
      kinetic: 0.5 * sample.mass * sum(sample.velocity |> ~ * ~),
      potential: -sample.mass * sum([for (i in 0 to 2) gravity[i] * sample.centre_of_mass[i]])}]
 
-pub fn tracks(trace, body, target = null) array {
+pub fn tracks(trace, body, target = null) array^ {
     let states = trajectory(trace, body)
     let label = if (target == null) body else target;
     if (len(states) == 0) [] else [animation.track(label ++ ".position", states |> ~.time,

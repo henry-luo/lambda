@@ -1,7 +1,7 @@
 // Markdown dialect policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D7.1.5.
 let source = "First[^a], second[^b], repeated[^a], missing[^missing].\n\n[^b]: A nested note[^inner].\n\n[^a]: **Rich** text with [site][target].\n\n    Another paragraph.\n\n    - one\n    - two\n\n[^inner]: Nested content.\n\n[^unused]: Kept for formatting.\n\n[target]: https://example.com\n\n```text\n[^fake]: Not a definition.\n```\n\n<div>\n[^html]: Not a definition.\n</div>\n"
 let document = parse(source, 'markdown')^
-let references = [for (node in document?element where name(node) == 'footnote-ref') node]
+let references = [for (node in document?element where ((name(node) == 'footnote-ref') ^ { false })) node]
 let notes = document?<footnote>
 let written = format(document, 'markdown')^
 let rewritten = format(parse(written, 'markdown')^, 'markdown')^;
@@ -42,13 +42,13 @@ not contains(format(nested, 'markdown')^, "Ignored duplicate");
 
 // A reference cycle resolves each definition once and keeps stable numbering.
 let cycle = parse("Start[^a].\n\n[^a]: First[^b].\n[^b]: Second[^a].\n", 'markdown')^
-let cycle_refs = [for (node in cycle?element where name(node) == 'footnote-ref') node];
+let cycle_refs = [for (node in cycle?element where ((name(node) == 'footnote-ref') ^ { false })) node];
 [for (node in cycle_refs) node.number];
 count(cycle?<footnote>) == 2;
 
 // Unused definitions also retain linked content and literal unresolved markers.
 let unused = parse("[^unused]: See[^leaf] and [^missing].\n\n[^leaf]: Leaf.\n", 'markdown')^
-let unused_refs = [for (node in unused?element where name(node) == 'footnote-ref') node];
+let unused_refs = [for (node in unused?element where ((name(node) == 'footnote-ref') ^ { false })) node];
 [for (node in unused_refs) node.number];
 contains(unused?string, "[^missing]");
 count(unused?<footnote>) == 2

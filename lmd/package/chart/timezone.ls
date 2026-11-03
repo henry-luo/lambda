@@ -3,23 +3,23 @@ import numbers: .numbers
 
 let database = input(sys.lambda.home# ++ "/package/chart/timezone_data.json", 'json') ^ { ~ }
 
-pub fn valid_zone(zone) => if (zone is number) numbers.finite_number(zone) and floor(zone) == zone and abs(zone) <= 840
+pub fn valid_zone(zone) any^ => if (zone is number) numbers.finite_number(zone) and floor(zone) == zone and abs(zone) <= 840
     else zone is string and not (database is error) and database.names[zone] != null
 
-fn record(zone) {
+fn record(zone) any^ {
     if (database is error) database
     else if (not (zone is string) or database.names[zone] == null) error("chart: unknown IANA time zone " ++ string(zone))
     else database.records[database.names[zone]]
 }
 
 // Find the last transition at or before the instant without scanning its history.
-fn search(times, stamp, lo, hi) {
+fn search(times, stamp, lo, hi) any^ {
     if (lo >= hi) lo - 1
     else (let middle = int(floor(float(lo + hi) / 2.0)),
         if (times[middle] <= stamp) search(times, stamp, middle + 1, hi) else search(times, stamp, lo, middle))
 }
 
-fn rule_time(year, rule, future, before) {
+fn rule_time(year, rule, future, before) any^ {
     let parts = rule.values;
     let first = if (rule.kind == "M") date(year, parts[0], 1) else date(year, 1, 1);
     let next_month = if (rule.kind != "M") null else if (parts[0] == 12) date(year + 1, 1, 1) else date(year, parts[0] + 1, 1);
@@ -36,7 +36,7 @@ fn future_events(future, year) => if (future.daylight == null) [] else [
     {at: rule_time(year, future.start, future, future.standard), before: future.standard, after: future.daylight},
     {at: rule_time(year, future.end, future, future.daylight), before: future.daylight, after: future.standard}]
 
-fn future_info(stamp, future) {
+fn future_info(stamp, future) any^ {
     if (future.daylight == null) future.standard
     else {
         let local = datetime(i64(stamp + future.standard.offset * 1000.0)).utc;
@@ -47,7 +47,7 @@ fn future_info(stamp, future) {
     }
 }
 
-pub fn info(stamp, zone = 0) {
+pub fn info(stamp, zone = 0) any^ {
     if (not numbers.finite_number(stamp)) error("chart: temporal instant must be finite")
     else if (zone is number) (if (valid_zone(zone)) {offset: zone * 60, name: "", dst: false} else error("chart: invalid UTC offset minutes"))
     else {
@@ -59,19 +59,19 @@ pub fn info(stamp, zone = 0) {
     }
 }
 
-pub fn offset_at(stamp, zone = 0) {
+pub fn offset_at(stamp, zone = 0) any^ {
     let details = info(stamp, zone);
     if (details is error) details else float(details.offset) / 60.0
 }
 
-pub fn wall(stamp, zone = 0) {
+pub fn wall(stamp, zone = 0) any^ {
     let details = info(stamp, zone);
     if (details is error) details else stamp + details.offset * 1000.0
 }
 
-fn two_digits(value) => (if (value < 10) "0" else "") ++ string(int(value))
+fn two_digits(value) any^ => (if (value < 10) "0" else "") ++ string(int(value))
 
-pub fn format_timestamp(stamp, pattern, zone = 0) {
+pub fn format_timestamp(stamp, pattern, zone = 0) any^ {
     let details = info(stamp, zone);
     if (details is error) details else {
         let seconds = abs(details.offset);
@@ -84,31 +84,31 @@ pub fn format_timestamp(stamp, pattern, zone = 0) {
     }
 }
 
-pub fn transitions_between(lo, hi, zone) {
+pub fn transitions_between(lo, hi, zone) any^ {
     let data = record(zone);
     if (data is error) data
     else {
         let last_transition = if (len(data.times) > 0) data.times[len(data.times) - 1] * 1000.0 else -inf;
-        let historical = [for (index, at in data.times where at * 1000.0 >= lo and at * 1000.0 <= hi)
+        let historical = [for (index, at in ((((((data.times) ^ { [] }))))) where at * 1000.0 >= lo and at * 1000.0 <= hi)
             {at: at * 1000.0, before: data.types[if (index == 0) 0 else data.indices[index - 1]], after: data.types[data.indices[index]]}];
         let future = if (data.future == null or hi <= last_transition) [] else [
-            for (year in (datetime(i64(lo)).utc.year - 1) to (datetime(i64(hi)).utc.year + 1))
-                for (event in future_events(data.future, year) where event.at > last_transition and event.at >= lo and event.at <= hi) event];
+            for (year in (((datetime(i64(lo)).utc.year - 1) to (datetime(i64(hi)).utc.year + 1)) ^ { [] }))
+                for (event in ((future_events(data.future, year)) ^ { [] }) where ((event.at > last_transition and event.at >= lo and event.at <= hi) ^ { false })) event];
         sort([*historical, *future], {by: (event) => event.at})
     }
 }
 
-pub fn candidates(wall_stamp, zone) {
+pub fn candidates(wall_stamp, zone) any^ {
     if (zone is number) (if (valid_zone(zone)) [wall_stamp - zone * 60000.0] else error("chart: invalid UTC offset minutes"))
     else {
         let data = record(zone);
-        if (data is error) data else sort([for (offset in data.offsets,
-            let stamp = wall_stamp - offset * 1000.0 where info(stamp, zone).offset == offset) stamp])
+        if (data is error) data else sort([for (offset in ((((((data.offsets) ^ { [] }))))),
+            let stamp = wall_stamp - offset * 1000.0 where ((info(stamp, zone).offset == offset) ^ { false })) stamp])
     }
 }
 
 // Folds choose the earlier occurrence by default; gaps shift by the transition's actual jump.
-pub fn from_wall(wall_stamp, zone, preferred = null, gap = "forward") {
+pub fn from_wall(wall_stamp, zone, preferred = null, gap = "forward") any^ {
     let choices = candidates(wall_stamp, zone);
     if (choices is error) choices
     else if (len(choices) > 0) (
@@ -126,7 +126,7 @@ pub fn from_wall(wall_stamp, zone, preferred = null, gap = "forward") {
     }
 }
 
-pub fn segments(lo, hi, zone) {
+pub fn segments(lo, hi, zone) any^ {
     let events = transitions_between(lo, hi, zone);
     if (events is error) events else (
         let boundaries = [lo, for (event in events where event.at > lo and event.at < hi) event.at, hi],

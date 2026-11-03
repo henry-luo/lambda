@@ -5,18 +5,18 @@ pn vector_mix(v0: float[], v1: float[]) float[] {
     return [v0[0] + v1[1], v0[1] - v1[0], v0[2] * v1[2]]
 }
 
-pn fixed_result(v0: float[], v1: float[]) float {
-    var result: float[] = vector_mix(v0, v1)
+pn fixed_result(v0: float[], v1: float[]) float^ {
+    var result: float[] = vector_mix(v0, v1)^
     result[0] + result[1] + result[2]
 }
 
-pn escaping_result(v0: float[], v1: float[]) float[] {
-    var result: float[] = vector_mix(v0, v1)
+pn escaping_result(v0: float[], v1: float[]) float[]^ {
+    var result: float[] = vector_mix(v0, v1)^
     result
 }
 
-pn rebound_result(v0: float[], v1: float[]) float {
-    var result: float[] = vector_mix(v0, v1)
+pn rebound_result(v0: float[], v1: float[]) float^ {
+    var result: float[] = vector_mix(v0, v1)^
     result = [7.0, 8.0, 9.0]
     result[0]
 }

@@ -53,7 +53,7 @@ pn main() {
         let again = ws.open(ready2.endpoint)^
         ws.send(again, format({type: "hello", user: "maya"}, 'json'))^
         let replayed = event(again, "history")
-        if (len(replayed.messages) == 2) { reconnects = reconnects + 1 }
+        if ((len(replayed.messages) == 2)^) { reconnects = reconnects + 1 }
         ws.close(again)^
     }
     ws.close(live)^

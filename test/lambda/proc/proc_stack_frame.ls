@@ -45,11 +45,11 @@ pn main() {
     let joined = [wide()] ++ [reader()]
     let mapped = {value: wide()}
     let umapped = {value: uwide()}
-    let success: i64 | error = maybe_wide(true)
+    let success: i64^ = maybe_wide(true)
     var failure = null
     maybe_wide(false) ^ { failure = ^ }
     let failed = null
-    let usuccess: u64 | error = maybe_uwide(true)
+    let usuccess: u64^ = maybe_uwide(true)
     var ufailure = null
     maybe_uwide(false) ^ { ufailure = ^ }
     let ufailed = null

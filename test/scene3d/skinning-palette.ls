@@ -8,7 +8,7 @@ fn segment_x(k, count) => -1.2 + 2.4 * (k + 0.5) / count
 
 // one quad per segment, bound to child bone k + 1 (the root is bone 0); `bound`
 // overrides the bone so an over-sized skeleton still has valid skin indices
-fn ribbon(prefix, count, bound) element {
+fn ribbon(prefix, count, bound) element^ {
     let w = 2.4 / count
     let corners = [[-0.5, -0.15], [0.5, -0.15], [0.5, 0.15], [-0.5, 0.15]]
     let positions = [for (k in 0 to count - 1) for (v in corners) for (c in 0 to 2)
@@ -29,7 +29,7 @@ fn rig(prefix, count) element =>
 // the last eight bones rise by 0.6 over one second; a seek moves only a
 // playing action, so the clip autoplays, and it lasts two seconds so the
 // raised pose holds at 1s instead of wrapping back to the start
-fn lift(prefix, count) element => s.clip(prefix ++ "-lift", [for (k in count - 8 to count - 1)
+fn lift(prefix, count) element^ => s.clip(prefix ++ "-lift", [for (k in count - 8 to count - 1)
     s.track(prefix ++ "-b" ++ string(k) ++ ".position", [0.0, 1.0],
         [segment_x(k, count), 0.0, 0.0, segment_x(k, count), 0.6, 0.0], 'vector')],
     {autoplay: true, duration: 2.0})

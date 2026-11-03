@@ -52,4 +52,4 @@ let dynamic_map = {*:dynamic, id: "a"};
 
 let dynamic_element = <node *:dynamic, id: "a", "new">;
 [dynamic_element.shape, dynamic_element.id,
-  [for (item in content(dynamic_element)) item]]
+  [for (item in ((content(dynamic_element)) ^ { [] })) item]]

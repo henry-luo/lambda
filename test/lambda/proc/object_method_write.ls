@@ -13,10 +13,10 @@ type Counter {
 
 pn main() {
     var c = <Counter value: 5>
-    c.bump()
+    c.bump()^
     print(c.value); print("\n")
-    c.bump()
+    c.bump()^
     print(c.get()); print("\n")
-    c.add(10)
+    c.add(10)^
     print(c.value); print(" "); print(c.get()); print("\n")
 }

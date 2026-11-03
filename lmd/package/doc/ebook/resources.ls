@@ -4,7 +4,7 @@ import media: lambda.doc.media
 import uri: lambda.doc.uri
 
 pub fn escape(value) => replace(replace(replace(replace(string(value),"&","&amp;"),"<","&lt;"),">","&gt;"),"\"","&quot;")
-pub fn mime(book,path) {
+pub fn mime(book,path) any^ {
     let entry = c.first([for (entry in book.manifest where entry.href == path) entry]);
     if (entry != null) entry.media_type else c.get({svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",
         gif:"image/gif",woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf"},split(path,".")[len(split(path,"."))-1],"application/octet-stream")

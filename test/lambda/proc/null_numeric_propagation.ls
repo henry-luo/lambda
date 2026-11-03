@@ -24,7 +24,7 @@ fn opt(x: float?) { [math.sqrt(x), abs(x), floor(x), -x, x + 1.0] }
 fn opti(x: int?) { [math.sqrt(x), abs(x), floor(x), -x, x + 1, x / 2] }
 
 // the Tune30 libm probe: a float accumulator over a float[] row
-pn norms(v: float[], n: int) float {
+pn norms(v: float[], n: int) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < n) {

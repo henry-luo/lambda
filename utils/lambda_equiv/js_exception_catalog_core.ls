@@ -8,7 +8,7 @@ fn white(ch: string) bool =>
 
 pn skip_space(source: string, start: int) {
     var cursor = start
-    while (cursor < len(source) and white(slice(source, cursor, cursor + 1))) {
+    while ((cursor < len(source) and white(slice(source, cursor, cursor + 1)))^) {
         cursor = cursor + 1
     }
     return cursor
@@ -16,7 +16,7 @@ pn skip_space(source: string, start: int) {
 
 pn identifier(source: string, start: int) {
     var cursor = start
-    while (cursor < len(source) and ident_char(slice(source, cursor, cursor + 1))) {
+    while ((cursor < len(source) and ident_char(slice(source, cursor, cursor + 1)))^) {
         cursor = cursor + 1
     }
     return {text: slice(source, start, cursor), next: cursor}
@@ -24,13 +24,13 @@ pn identifier(source: string, start: int) {
 
 pn registry_row(source: string, start: int) {
     let name = identifier(source, start + 2)
-    if (name.text == "" or slice(source, name.next, name.next + 2) != "\",") {
+    if ((name.text == "" or slice(source, name.next, name.next + 2) != "\",")^) {
         return null
     }
     var cursor = skip_space(source, name.next + 2)
-    if (not starts_with(slice(source, cursor), "FPTR(")) { return null }
+    if ((not starts_with(slice(source, cursor), "FPTR("))^) { return null }
     let target = identifier(source, cursor + 5)
-    if (target.text == "" or slice(source, target.next, target.next + 1) != ")") {
+    if ((target.text == "" or slice(source, target.next, target.next + 1) != ")")^) {
         return null
     }
     return {name: name.text, target: target.text, start: start,
@@ -39,17 +39,17 @@ pn registry_row(source: string, start: int) {
 
 pn return_class(body: string, after_fptr: int, row_start: int) {
     var cursor = skip_space(body, after_fptr - row_start)
-    if (slice(body, cursor, cursor + 1) != ",") { return "JIT_VALUE_UNKNOWN" }
+    if ((slice(body, cursor, cursor + 1) != ",")^) { return "JIT_VALUE_UNKNOWN" }
     cursor = skip_space(body, cursor + 1)
-    if (slice(body, cursor, cursor + 1) != "{") { return "JIT_VALUE_UNKNOWN" }
+    if ((slice(body, cursor, cursor + 1) != "{")^) { return "JIT_VALUE_UNKNOWN" }
     cursor = cursor + 1
     var commas = 0
-    while (cursor < len(body) and commas < 2) {
-        if (slice(body, cursor, cursor + 1) == ",") { commas = commas + 1 }
+    while ((cursor < len(body) and commas < 2)^) {
+        if ((slice(body, cursor, cursor + 1) == ",")^) { commas = commas + 1 }
         cursor = cursor + 1
     }
     cursor = skip_space(body, cursor)
-    if (not starts_with(slice(body, cursor), "JIT_VALUE_")) {
+    if ((not starts_with(slice(body, cursor), "JIT_VALUE_"))^) {
         return "JIT_VALUE_UNKNOWN"
     }
     return identifier(body, cursor).text
@@ -62,13 +62,13 @@ pub pn registry_rows(source: string) {
     var part = 1
     while (part < len(fragments)) {
         let row = registry_row(source, start)
-        if (row != null) { locations = locations ++ [row] }
+        if ((row != null)^) { locations = locations ++ [row] }
         start = start + 2 + len(fragments[part])
         part = part + 1
     }
     var rows = []
     var i = 0
-    while (i < len(locations)) {
+    while ((i < len(locations))^) {
         let row = locations[i]
         let end = if (i + 1 < len(locations)) locations[i + 1].start else len(source)
         let body = slice(source, row.start, end)
@@ -80,12 +80,12 @@ pub pn registry_rows(source: string) {
             }
         }
         var ret_class = return_class(body, row.after_fptr, row.start)
-        if (contains(body, "JIT_IMPORT_RAW_SCALAR_PRESERVES") or
-            contains(body, "JIT_IMPORT_PURE_SCALAR")) {
+        if ((contains(body, "JIT_IMPORT_RAW_SCALAR_PRESERVES") or
+            contains(body, "JIT_IMPORT_PURE_SCALAR"))^) {
             ret_class = "JIT_VALUE_NON_GC_SCALAR"
             effect = "PRESERVES"
         }
-        if (contains(body, "JIT_IMPORT_VOID_PRESERVES")) { effect = "PRESERVES" }
+        if (contains(body, "JIT_IMPORT_VOID_PRESERVES")^) { effect = "PRESERVES" }
         rows = rows ++ [{name: row.name, target: row.target, effect: effect,
                          ret_class: ret_class}]
         i = i + 1
@@ -102,15 +102,15 @@ pub pn registry_rows(source: string) {
 
 pn return_declaration(source: string, start: int) {
     var cursor = skip_space(source, start + len("extern"))
-    if (not starts_with(slice(source, cursor), "\"C\"")) { return null }
+    if ((not starts_with(slice(source, cursor), "\"C\""))^) { return null }
     cursor = skip_space(source, cursor + 3)
     let ret = identifier(source, cursor)
-    if (ret.text == "") { return null }
+    if ((ret.text == "")^) { return null }
     cursor = skip_space(source, ret.next)
     let name = identifier(source, cursor)
-    if (name.text == "") { return null }
+    if ((name.text == "")^) { return null }
     cursor = skip_space(source, name.next)
-    if (slice(source, cursor, cursor + 1) != "(") { return null }
+    if ((slice(source, cursor, cursor + 1) != "(")^) { return null }
     return {name: name.text, ret: ret.text}
 }
 
@@ -119,10 +119,10 @@ pn scan_return_types(path: string, var types) any^ {
     let fragments = split(source, "extern")
     var position = len(fragments[0])
     var i = 1
-    while (i < len(fragments)) {
+    while ((i < len(fragments))^) {
         let declaration = return_declaration(source, position)
-        if (declaration != null and types[declaration.name] == null) {
-            types[declaration.name] = declaration.ret
+        if ((declaration != null and types[declaration.name] == null)^) {
+            types[declaration.name^] = declaration.ret^
         }
         position = position + len("extern") + len(fragments[i])
         i = i + 1

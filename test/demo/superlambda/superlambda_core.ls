@@ -73,20 +73,20 @@ fn horizontal_overlap(hero, solid) => hero.x < solid.x + solid.w and
   hero.x + HERO_WIDTH > solid.x
 
 // Resolve crossed faces separately, so landing and head bumps cannot tunnel.
-fn horizontal(hero, solids) {
+fn horizontal(hero, solids) any^ {
   let next_x = max(0.0, min(WORLD_WIDTH - HERO_WIDTH, hero.x + hero.vx))
-  let hits = [for (s in solids where vertical_overlap(hero, s) and
+  let hits = [for (s in solids where ((vertical_overlap(hero, s) and
     (if (hero.vx > 0) hero.x + HERO_WIDTH <= s.x and next_x + HERO_WIDTH > s.x
-     else hero.x >= s.x + s.w and next_x < s.x + s.w))
+     else hero.x >= s.x + s.w and next_x < s.x + s.w)) ^ { false }))
     if (hero.vx > 0) s.x - HERO_WIDTH else s.x + s.w]
   let x = if (len(hits) == 0) next_x else if (hero.vx > 0) min(hits) else max(hits)
   {*:hero, x: x, vx: if (len(hits) == 0) hero.vx else 0.0}
 }
-fn vertical(hero, solids) {
+fn vertical(hero, solids) any^ {
   let next_y = hero.y + hero.vy
-  let hits = [for (s in solids where horizontal_overlap(hero, s) and
+  let hits = [for (s in solids where ((horizontal_overlap(hero, s) and
     (if (hero.vy >= 0) hero.y + HERO_HEIGHT <= s.y and next_y + HERO_HEIGHT >= s.y
-     else hero.y >= s.y + s.h and next_y <= s.y + s.h)) s]
+     else hero.y >= s.y + s.h and next_y <= s.y + s.h)) ^ { false })) s]
   let y = if (len(hits) == 0) next_y
     else if (hero.vy >= 0) min([for (s in hits) s.y]) - HERO_HEIGHT
     else max([for (s in hits) s.y + s.h])
@@ -120,7 +120,7 @@ pub fn action(game, command) {
 }
 pub fn release_controls(game) => {*:game, keys: [], pointer: false,
   hero: {*:game.hero, vy: max(-5.0, game.hero.vy)}}
-pub fn set_control(game, command, pressed) {
+pub fn set_control(game, command, pressed) any^ {
   let already = contains(game.keys, command)
   let keys = if (pressed) [*game.keys, command] else [for (k in game.keys where k != command) k]
   if (not contains(["left", "right", "jump", "run", "pause", "restart"], command) or already == pressed) game
@@ -137,7 +137,7 @@ pub fn set_control(game, command, pressed) {
   }
 }
 // Look ahead for a wall, enemy or unsupported ground; hold each hop until landing.
-pub fn auto_controls(game) {
+pub fn auto_controls(game) any^ {
   let h = game.hero
   let front = h.x + HERO_WIDTH
   let feet = h.y + HERO_HEIGHT
@@ -153,7 +153,7 @@ pub fn auto_controls(game) {
   let released = if (h.grounded) set_control(moving, "jump", false) else moving
   set_control(released, "jump", jump)
 }
-pub fn tick(game) {
+pub fn tick(game) any^ {
   if (game.mode != "playing") game
   else {
     let h = game.hero
@@ -170,15 +170,15 @@ pub fn tick(game) {
       buffer: if (can_jump) 0 else max(0, h.buffer - 1)}
     let resolved = vertical(horizontal(moving, [*TERRAIN, *BLOCKS]), [*TERRAIN, *BLOCKS])
     let hero = resolved.hero
-    let gained = [for (c in COINS where not contains(game.collected, c.id) and overlap(hero_box(hero), c)) c.id]
-    let bumped = [for (id in resolved.bumped where not contains(game.used, id)) id]
+    let gained = [for (c in COINS where ((not contains(game.collected, c.id) and overlap(hero_box(hero), c)) ^ { false })) c.id]
+    let bumped = [for (id in ((((((resolved.bumped) ^ { [] }))))) where ((not contains(game.used, id)) ^ { false })) id]
     let enemies = [for (e in game.enemies) patrol(e)]
-    let stomps = [for (e in enemies where e.alive and hero.vy >= 0 and
-      h.y + HERO_HEIGHT <= e.y + 10 and overlap(hero_box(hero), e)) e.id]
-    let danger = len([for (e in enemies where e.alive and not contains(stomps, e.id) and
-      overlap(hero_box(hero), e)) e.id]) > 0
+    let stomps = [for (e in enemies where ((e.alive and hero.vy >= 0 and
+      h.y + HERO_HEIGHT <= e.y + 10 and overlap(hero_box(hero), e)) ^ { false })) e.id]
+    let danger = len([for (e in enemies where ((e.alive and not contains(stomps, e.id) and
+      overlap(hero_box(hero), e)) ^ { false })) e.id]) > 0
     let next_hero = if (len(stomps) == 0) hero else
-      {*:hero, y: min([for (e in enemies where contains(stomps, e.id)) e.y]) - HERO_HEIGHT,
+      {*:hero, y: min([for (e in enemies where ((contains(stomps, e.id)) ^ { false })) e.y]) - HERO_HEIGHT,
         vy: -10.0, grounded: false, coyote: 0}
     let next = {*:game, hero: next_hero, ticks: game.ticks + 1,
       camera: camera_x(next_hero.x), invincible: max(0, game.invincible - 1),

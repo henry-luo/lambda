@@ -56,18 +56,18 @@ pub let PRESETS = [
      note: "Use an app password from Yahoo's account security page."}
 ]
 
-pub fn domain_of(address) {
-    let at = [for (i, ch in split(address or "", "") where ch == "@") i];
+pub fn domain_of(address) any^ {
+    let at = [for (i, ch in ((split(address or "", "")) ^ { [] }) where ch == "@") i];
     if (len(at) == 0) "" else lower(trim(slice(address, at[len(at) - 1] + 1)))
 }
 
 pub fn preset(id) => [for (p in PRESETS where p.id == id) p][0]
-pub fn preset_for(address) => [for (p in PRESETS where domain_of(address) in p.domains) p][0]
+pub fn preset_for(address) => [for (p in PRESETS where ((domain_of(address) in p.domains) ^ { false })) p][0]
 
 fn scheme(server, implicit, starttls) => if (server.security == 'tls') implicit else starttls
-pub fn imap_url(server) => scheme(server, "imaps", "imap") ++ "://" ++ server.host ++ ":" ++ string(server.port)
-pub fn pop3_url(server) => scheme(server, "pop3s", "pop3") ++ "://" ++ server.host ++ ":" ++ string(server.port)
-pub fn smtp_url(server) => scheme(server, "smtps", "smtp") ++ "://" ++ server.host ++ ":" ++ string(server.port)
+pub fn imap_url(server) any^ => scheme(server, "imaps", "imap") ++ "://" ++ server.host ++ ":" ++ string(server.port)
+pub fn pop3_url(server) any^ => scheme(server, "pop3s", "pop3") ++ "://" ++ server.host ++ ":" ++ string(server.port)
+pub fn smtp_url(server) any^ => scheme(server, "smtps", "smtp") ++ "://" ++ server.host ++ ":" ++ string(server.port)
 
 // `tls: false` for a plain-text server, else nothing; a fn, since in a pn
 // `else {}` reads as an empty block rather than an empty map
@@ -79,15 +79,15 @@ pub fn session_options(server, user, password, pin) => {user: user, password: pa
 
 // ---- ISPDB autoconfig (https://wiki.mozilla.org/Thunderbird:Autoconfiguration) ----
 
-fn child(e, tag) => [for (c in content(e) where c is element and string(name(c)) == tag) c][0]
+fn child(e, tag) => [for (c in ((content(e)) ^ { [] }) where ((c is element and string(name(c)) == tag) ^ { false })) c][0]
 fn child_text(e, tag) {
     let c = if (e == null) null else child(e, tag);
-    if (c == null) null else trim(join([for (t in content(c) where t is string) t], ""))
+    if (c == null) null else trim(join([for (t in ((content(c)) ^ { [] }) where t is string) t], ""))
 }
-fn servers(provider, tag, kind) => [for (s in content(provider) where s is element and string(name(s)) == tag and s.type == kind) s]
+fn servers(provider, tag, kind) => [for (s in ((content(provider)) ^ { [] }) where ((s is element and string(name(s)) == tag and s.type == kind) ^ { false })) s]
 
 // ISPDB names the address's parts with placeholders
-fn username(template, address) {
+fn username(template, address) any^ {
     let local = slice(address, 0, len(address) - len(domain_of(address)) - 1);
     replace(replace(replace(template or "%EMAILADDRESS%", "%EMAILADDRESS%", address), "%EMAILLOCALPART%", local),
         "%EMAILDOMAIN%", domain_of(address))
@@ -101,12 +101,12 @@ fn server_of(s) {
 
 // a provider's servers of one kind over TLS or STARTTLS: plain text is refused off loopback
 fn secure(provider, tag, kind) => if (provider == null) []
-    else [for (s in servers(provider, tag, kind) where server_of(s).security != 'plain') s]
+    else [for (s in servers(provider, tag, kind) where ((server_of(s).security != 'plain') ^ { false })) s]
 
 // The settings in a clientConfig document, or null when it names neither an
 // IMAP nor a POP3 server over TLS or STARTTLS.
-pub fn from_autoconfig(doc, address) {
-    let config = [for (c in content(doc) where c is element and string(name(c)) == "clientConfig") c][0]
+pub fn from_autoconfig(doc, address) any^ {
+    let config = [for (c in ((content(doc)) ^ { [] }) where ((c is element and string(name(c)) == "clientConfig") ^ { false })) c][0]
     let provider = if (config == null) null else child(config, "emailProvider")
     let imap = secure(provider, "incomingServer", "imap")
     let pop3 = secure(provider, "incomingServer", "pop3")
@@ -120,9 +120,9 @@ pub fn from_autoconfig(doc, address) {
 }
 
 // Looks the address's domain up in the ISPDB; null when it has no entry.
-pub pn autoconfig(address) map^ {
+pub pn autoconfig(address) map?^ {
     let domain = domain_of(address)
-    if (domain == "") { return null }
+    if ((domain == "")^) { return null }
     let reply = io.fetch("https://autoconfig.thunderbird.net/v1.1/" ++ domain, {timeout: 15})^
     if (not reply.ok or not (reply.body is string)) { return null }
     from_autoconfig(parse(reply.body, 'xml')^, address)

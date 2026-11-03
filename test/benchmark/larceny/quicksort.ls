@@ -74,7 +74,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("quicksort: PASS\n")
     } else {
         print("quicksort: FAIL\n")

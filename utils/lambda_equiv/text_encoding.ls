@@ -4,11 +4,11 @@ pub pn utf8_bytes(source: string) {
     var i = 0
     while (i < len(source)) {
         let code = ord(slice(source, i, i + 1))
-        if (code < 128) {
+        if ((code < 128)^) {
             bytes = bytes ++ [code]
-        } else if (code < 2048) {
+        } else if ((code < 2048)^) {
             bytes = bytes ++ [bor(192, shr(code, 6)), bor(128, band(code, 63))]
-        } else if (code < 65536) {
+        } else if ((code < 65536)^) {
             bytes = bytes ++ [bor(224, shr(code, 12)), bor(128, band(shr(code, 6), 63)),
                               bor(128, band(code, 63))]
         } else {

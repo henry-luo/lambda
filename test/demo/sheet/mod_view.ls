@@ -48,7 +48,7 @@ pub fn toolbar(st) {
             tool("zoom-reset","100%","autofit",false,false,"home-large"),tool("zoom-in","Zoom In","grow_font",false,false,"home-large")])])>
 }
 // integer pieces avoid the general numeric formatter's significant-digit rounding.
-fn fixed(value,places=2) => {
+fn fixed(value,places=2) any^ => {
     let scale=10**places
     let rounded=int(round(abs(value)*scale))
     let whole=int(floor(rounded/scale))
@@ -56,9 +56,9 @@ fn fixed(value,places=2) => {
     (if (value<0) "-" else "") ++ string(whole) ++
         (if (places==0) "" else "." ++ join(fill(max(0,places-len(fraction)),"0"),"") ++ fraction)
 }
-fn trim_decimal(text) => if (ends_with(text,"0")) trim_decimal(slice(text,0,len(text)-1))
+fn trim_decimal(text) any^ => if (ends_with(text,"0")) trim_decimal(slice(text,0,len(text)-1))
     else if (ends_with(text,".")) slice(text,0,len(text)-1) else text
-pub fn formatted(value,style) => if (not (value is number)) string(value)
+pub fn formatted(value,style) any^ => if (not (value is number)) string(value)
     else if (style.format=="currency") "$" ++ fixed(value)
     else if (style.format=="percent") fixed(value*100,1) ++ "%"
     else if (style.format=="number") fixed(value)

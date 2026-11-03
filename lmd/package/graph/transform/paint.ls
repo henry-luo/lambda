@@ -2,18 +2,18 @@
 
 import route_geometry: lambda.graph.route_geometry
 
-fn route_tail(points, index, result) {
+fn route_tail(points, index, result) any^ {
   if (index >= len(points)) result
   else route_tail(points, index + 1,
     result ++ " " ++ string(points[index].x) ++ "," ++ string(points[index].y))
 }
 
-fn route_data(points) {
+fn route_data(points) any^ {
   if (len(points) == 0) ""
   else route_tail(points, 1, string(points[0].x) ++ "," ++ string(points[0].y))
 }
 
-fn route_kind(edge) {
+fn route_kind(edge) any^ {
   if (edge.route_mode == "none") "none"
   else if (edge.from == edge.to) "self-loop"
   // Basis interpolation of one segment is geometrically straight.
@@ -29,7 +29,7 @@ fn dash_array(style) {
   else "none"
 }
 
-fn marker_id(edge, end_name) => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
+fn marker_id(edge, end_name) any^ => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
 
 fn marker_spec(marker_type) {
   let parts = split(marker_type, ":");
@@ -94,7 +94,7 @@ fn marker_shape(marker_type, color) {
 }
 
 fn marker_tokens(marker_type) =>
-  [for (token in split(trim(marker_type), " ") where token != "") token]
+  [for (token in ((split(trim(marker_type), " ")) ^ { [] }) where token != "") token]
 
 fn marker_component(id, token, index, count, color) {
   let spec = marker_spec(token);
@@ -115,7 +115,7 @@ fn marker_component(id, token, index, count, color) {
   >
 }
 
-fn marker_content(id, marker_type, color) {
+fn marker_content(id, marker_type, color) any^ {
   let tokens = marker_tokens(marker_type);
   if (len(tokens) == 1 and marker_spec(tokens[0]).side == null)
     marker_shape(tokens[0], color)
@@ -124,7 +124,7 @@ fn marker_content(id, marker_type, color) {
   >
 }
 
-fn marker_ref_x(tokens) {
+fn marker_ref_x(tokens) any^ {
   let nearest = marker_spec(tokens[0]).base;
   len(tokens) * 8 - (if (nearest == "normal") 1 else 4)
 }
@@ -209,7 +209,7 @@ pub fn layers(result, opts = null) {
       content: cluster_svg(cluster, result.width, result.height),
       cluster_id: cluster.id
     },
-    for (edge in result.edges where len(edge.points) > 1) {
+    for (edge in result.edges where ((len(edge.points) > 1) ^ { false })) {
       z: if (edge.z != null) int(edge.z) else -1,
       content: edge_svg(edge, result.width, result.height, opts),
       edge_id: edge.id

@@ -56,24 +56,24 @@ pub pn build_path(var m, op, args) int^ {
         let checked = obj.require(m, m.graphics.current, "nocurrentpoint")^
     }
     let device = [for (i in 0 to (len(numbers) - 1) where i % 2 == 0)
-        for (v in point(m.graphics.ctm, numbers[i], numbers[i + 1])) v]
+        for (v in ((point(m.graphics.ctm, numbers[i], numbers[i + 1])) ^ { [] })) v]
     let result = path.apply_op(m.graphics.path, command, device)
-    m.graphics.path = result.state
+    m.graphics.path = (result.state)^
     m.graphics.current = true
     return 0
 }
 
 pub pn paint(var m, op) int^ {
     let p = m.graphics.path
-    if (path.has_segments(p)) {
+    if (path.has_segments(p)^) {
         // path points are frozen at construction; stroke metrics use the paint-time CTM.
         let inv = inverse(m, m.graphics.ctm)^
         let user_path = {*: p, segments: [for (s in p.segments) segment(s, inv)]}
         let result = path.paint(user_path, if (op == "stroke") "none" else p.fill_color,
             if (op == "stroke") p.stroke_color else "none", if (op == "eofill") "evenodd" else "nonzero")
-        for (node in result.emit) { push(m.draws, {node: node, matrix: m.graphics.ctm, clips: m.graphics.clips}) }
+        for (node in ((((((result.emit) ^ { [] })))))) { push(m.draws, {node: node, matrix: m.graphics.ctm, clips: m.graphics.clips}) }
     }
-    m.graphics.path = path.clear_current_path(p)
+    m.graphics.path = path.clear_current_path(p)^
     m.graphics.current = false
     return 0
 }
@@ -82,7 +82,7 @@ pub pn push_clip(var m, evenodd = false) int^ {
     let allowed = obj.require(m, len(m.graphics.clips) < m.limits.max_clip_depth, "limitcheck: clip depth")^
     let id = len(m.definitions)
     push(m.definitions, {kind: "clip", id: id, d: path.current_path_d(m.graphics.path),
-        rule: if (evenodd) "evenodd" else "nonzero"})
+        rule: if (evenodd) "evenodd" else "nonzero"})^
     push(m.graphics.clips, id)
     return 0
 }
@@ -116,24 +116,24 @@ pub pn arc(var m, args, clockwise) int^ {
 }
 
 pub pn dispatch(var m, op, args) int^ {
-    if (op == "newpath") { m.graphics.path = path.clear_current_path(m.graphics.path); m.graphics.current = false; return 0 }
-    if (op == "gsave") { push(m.gstack, m.graphics); return 0 }
+    if (op == "newpath") { m.graphics.path = path.clear_current_path(m.graphics.path)^; m.graphics.current = false; return 0 }
+    if (op == "gsave") { push(m.gstack, m.graphics)^; return 0 }
     if (op == "grestore") {
-        if (len(m.gstack) > 0) {
-            m.graphics = m.gstack[len(m.gstack) - 1]
-            m.gstack = slice(m.gstack, 0, len(m.gstack) - 1)
+        if ((len(m.gstack) > 0)^) {
+            m.graphics = m.gstack[len(m.gstack)^ - 1]
+            m.gstack = slice(m.gstack, 0, len(m.gstack) - 1)^
         }
         return 0
     }
     if (op == "grestoreall") {
-        if (len(m.gstack) > 0) { m.graphics = m.gstack[0] }
+        if ((len(m.gstack) > 0)^) { m.graphics = m.gstack[0] }
         m.gstack = []
         return 0
     }
     if (op == "initmatrix") { m.graphics.ctm = util.IDENTITY; return 0 }
     if (op == "currentpoint") {
         let p = current_point(m)^
-        obj.push_operand(m, p[0]); obj.push_operand(m, p[1])
+        obj.push_operand(m, p[0])^; obj.push_operand(m, p[1])^
         return 0
     }
     if (op == "stroke" or op == "fill" or op == "eofill") { let painted = paint(m, op)^; return 0 }
@@ -146,40 +146,40 @@ pub pn dispatch(var m, op, args) int^ {
         let c = if (op == "setgray") color.gray(components[0])
             else if (op == "setrgbcolor") color.rgb(components[0], components[1], components[2])
             else color.cmyk(components[0], components[1], components[2], components[3])
-        m.graphics.path = path.set_stroke_color(path.set_fill_color(m.graphics.path, c), c)
+        m.graphics.path = path.set_stroke_color(path.set_fill_color(m.graphics.path, c), c)^
         m.graphics.space = if (op == "setgray") "gray" else if (op == "setrgbcolor") "rgb" else "cmyk"
         m.graphics.components = components
         return 0
     }
     if (op == "setlinewidth") {
         let checked = obj.require(m, args[0] >= 0, "rangecheck: linewidth")^
-        m.graphics.path = path.set_line_width(m.graphics.path, args[0])
+        m.graphics.path = path.set_line_width(m.graphics.path, args[0])^
         return 0
     }
     if (op == "setlinecap" or op == "setlinejoin") {
         let checked = obj.require(m, args[0] >= 0 and args[0] <= 2, "rangecheck: line cap/join")^
-        m.graphics.path = if (op == "setlinecap") path.set_line_cap(m.graphics.path, args[0]) else path.set_line_join(m.graphics.path, args[0])
+        m.graphics.path = if (op == "setlinecap") path.set_line_cap(m.graphics.path, args[0])^ else path.set_line_join(m.graphics.path, args[0])^
         return 0
     }
     if (op == "setmiterlimit") {
         let checked = obj.require(m, args[0] >= 1, "rangecheck: miter limit")^
-        m.graphics.path = path.set_miter_limit(m.graphics.path, args[0])
+        m.graphics.path = path.set_miter_limit(m.graphics.path, args[0])^
         return 0
     }
     if (op == "setdash") {
         let dash = [for (v in obj.values(m, args[0])^) obj.number_value(v)]
         let checked = obj.require(m, all([for (n in dash) obj.is_number(n) and n >= 0]) and
             (len(dash) == 0 or sum(dash) > 0), "rangecheck: dash array")^
-        m.graphics.path = path.set_dash(m.graphics.path, dash, args[1])
+        m.graphics.path = path.set_dash(m.graphics.path, dash, args[1])^
         return 0
     }
-    if (op == "currentlinewidth") { obj.push_operand(m, m.graphics.path.line_width); return 0 }
-    if (op == "currentlinecap") { obj.push_operand(m, m.graphics.path.line_cap); return 0 }
-    if (op == "currentlinejoin") { obj.push_operand(m, m.graphics.path.line_join); return 0 }
-    if (op == "currentmiterlimit") { obj.push_operand(m, m.graphics.path.miter_limit); return 0 }
+    if (op == "currentlinewidth") { obj.push_operand(m, m.graphics.path.line_width)^; return 0 }
+    if (op == "currentlinecap") { obj.push_operand(m, m.graphics.path.line_cap)^; return 0 }
+    if (op == "currentlinejoin") { obj.push_operand(m, m.graphics.path.line_join)^; return 0 }
+    if (op == "currentmiterlimit") { obj.push_operand(m, m.graphics.path.miter_limit)^; return 0 }
     if (op == "currentdash") {
-        obj.push_operand(m, obj.allocate(m, "array", m.graphics.path.dash_array)^)
-        obj.push_operand(m, m.graphics.path.dash_phase)
+        obj.push_operand(m, obj.allocate(m, "array", m.graphics.path.dash_array)^)^
+        obj.push_operand(m, m.graphics.path.dash_phase)^
         return 0
     }
     if (op == "rectfill" or op == "rectstroke" or op == "rectclip") {

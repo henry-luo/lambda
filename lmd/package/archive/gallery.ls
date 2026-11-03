@@ -17,12 +17,12 @@ import radiant
 let MB = 1024 * 1024
 let THUMB = {width: 320, height: 320}
 
-fn is_image(url) => (let u = planning.parse(url), u != null and planning.extension(u.path) in platforms.IMAGE_EXT)
+fn is_image(url) any^ => (let u = planning.parse(url), u != null and planning.extension(u.path) in platforms.IMAGE_EXT)
 fn text_or_null(v) => if (v is string and trim(v) != "") trim(v) else null
 fn first_of(xs) => if (len(xs) == 0) null else xs[0]
 
 // the widest srcset candidate (by width, then density), else the fallback
-fn widest(srcset, fallback) {
+fn widest(srcset, fallback) any^ {
     let cs = n.srcset_candidates(srcset)
     let by_w = sort([for (c in cs where c.w != null) c], {dir: 'desc', by: (c) => c.w})
     let by_x = sort([for (c in cs where c.x != null) c], {dir: 'desc', by: (c) => c.x});
@@ -33,10 +33,10 @@ fn widest(srcset, fallback) {
 fn caption_of(img, figure, link) => first_of([for (v in [
     if (figure == null) null else (let c = n.first(figure, ["figcaption"]), if (c == null) null else n.inner_text(c)),
     n.attr(img, "alt"), n.attr(img, "title"), if (link == null) null else n.attr(link, "title"),
-    if (link == null) null else n.inner_text(link)], let t = text_or_null(v) where t != null) t])
+    if (link == null) null else n.inner_text(link)], let t = text_or_null(v) where ((t != null) ^ { false })) t])
 
 // one element's images; `figure` and `link` are its nearest enclosing ones
-fn images_in(e, base, figure, link) {
+fn images_in(e, base, figure, link) any^ {
     let fig = if (e.tag == "figure") e else figure
     let a = if (e.tag == "a" and n.attr(e, "href") != null and is_image(rewrite.resolve(base, n.attr(e, "href")))) e else link
     if (e.tag == "img") {
@@ -46,17 +46,17 @@ fn images_in(e, base, figure, link) {
         if (url == null) [] else [{url: rewrite.resolve(base, url), caption: caption_of(e, fig, a),
             thumb_of: if (a != null and src != null) rewrite.resolve(base, src) else null}]
     }
-    else if (e.tag == "picture") (let sources = [for (k in e.kids where n.is_el(k) and k.tag == "source") widest(n.attr(k, "srcset"), null)],
+    else if (e.tag == "picture") (let sources = [for (k in e.kids where ((n.is_el(k) and k.tag == "source") ^ { false })) widest(n.attr(k, "srcset"), null)],
         let img = n.first(e, ["img"]), let best = first_of([for (s in sources where s != null) s]),
-        if (best == null) [for (k in e.kids where n.is_el(k)) for (x in images_in(k, base, fig, a)) x]
+        if (best == null) [for (k in e.kids where ((n.is_el(k)) ^ { false })) for (x in ((images_in(k, base, fig, a)) ^ { [] })) x]
         else [{url: rewrite.resolve(base, best), caption: if (img == null) null else caption_of(img, fig, a), thumb_of: null}])
-    else [for (k in e.kids where n.is_el(k)) for (x in images_in(k, base, fig, a)) x]
+    else [for (k in e.kids where ((n.is_el(k)) ^ { false })) for (x in ((images_in(k, base, fig, a)) ^ { [] })) x]
 }
 
 // the page's image candidates in document order, og:image last, each URL once
 pub fn candidates(html, base) {
     let body = n.first(html, ["body"]) or html
-    let og = [for (m in n.find_all(html, ["meta"]) where lower(n.attr(m, "property") or "") == "og:image" and n.attr(m, "content") != null)
+    let og = [for (m in n.find_all(html, ["meta"]) where ((lower(n.attr(m, "property") or "") == "og:image" and n.attr(m, "content") != null) ^ { false }))
         {url: rewrite.resolve(base, n.attr(m, "content")), caption: null, thumb_of: null}]
     let all = [*images_in(body, base, null, null), *og];
     [for (i, c in all where not any([for (j, d in all where j < i) d.url == c.url])) c]
@@ -94,7 +94,7 @@ pub pn acquire(p, staging, settings, notify, r, fetched) map^ {
     var taken = []
     var done = 0
     var pos = 0
-    while (pos < len(found)) {
+    while ((pos < len(found))^) {
         let batch = take(drop(found, pos), per_batch)
         let handles = [for (c in batch) start(fetch_image, [c.url, settings, int(cfg.max_image_mb * MB)])]
         let results = [for (h in handles) wait(h)^]
@@ -122,9 +122,9 @@ pub pn acquire(p, staging, settings, notify, r, fetched) map^ {
             }
             done = done + 1
         }
-        say(notify, {type: "progress", tag: p.tag, stage: "media", received: done, total: len(found), rate: null})
+        say(notify, {type: "progress", tag: p.tag, stage: "media", received: done, total: len(found), rate: null})^
         pos = pos + per_batch
-        if (pos < len(found) and starts_with(p.url, "http") and settings.per_host_delay_ms > 0) sleep(int(settings.per_host_delay_ms))^
+        if ((pos < len(found) and starts_with(p.url, "http") and settings.per_host_delay_ms > 0)^) sleep(int(settings.per_host_delay_ms))^
     }
     if (len(kept) == 0) {
         if (exists(staging ++ "/media")) io.delete(staging ++ "/media")^

@@ -19,7 +19,7 @@ pn client(owner, endpoint, user, peer, options) {
 pn main() {
     let ids = launch.users(ARGS[3])^
     let options = slice(ARGS, 4)
-    if (len([for (argument in options where starts_with(argument, "user=")) argument]) > 0)
+    if (len([for (argument in options where starts_with(argument, "user=")^) argument]) > 0)
         raise error("Chat: specify user= only once")
     io.mkdir(config.root)^
     let owner = self()

@@ -2,8 +2,8 @@ import m: ~~.mod_model
 
 // a level stroke across the harp at y=500 crosses all thirteen strings
 fn draw(st, y, steps) => reduce([m.begin_stroke(st, 200.0, y, 1000.0), *[for (i in 1 to steps) i]],
-    (s, i) => m.extend(s, 200.0 + i * 900.0 / steps, y, 1000.0 + i * 20.0))
-fn run(st, from, frames) => reduce([st, *[for (i in 1 to frames) i]], (s, i) => m.tick(s, from + i * 16.0))
+    (s, i) any^ => m.extend(s, 200.0 + i * 900.0 / steps, y, 1000.0 + i * 20.0))
+fn run(st, from, frames) => reduce([st, *[for (i in 1 to frames) i]], (s, i) any^ => m.tick(s, from + i * 16.0))
 let st = m.initial()
 let drawn = draw(st, 500.0, 45)
 let looped = m.finish(drawn, 1900.0)
@@ -63,7 +63,7 @@ let sample = m.command(st, "sample", 0)
     relayout_keeps_strokes: len(m.command(looped, "layout", 1).strokes) == 1,
     sample: len(sample.strokes) == 4 and len(sample.history) == 1,
     clear_undo: len(m.command(m.command(looped, "clear", 0), "undo", 0).strokes) == 1,
-    cap: len(reduce([st, *[for (i in 1 to 14) i]], (s, i) => m.finish(draw(s, 300.0 + i * 20.0, 10), 0.0)).strokes) == m.MAX_STROKES,
+    cap: len(reduce([st, *[for (i in 1 to 14) i]], (s, i) any^ => m.finish(draw(s, 300.0 + i * 20.0, 10), 0.0)).strokes) == m.MAX_STROKES,
     export_seconds: m.export_seconds(looped),
     export_hits: len(m.export_plan(looped)[0].hits)
 }

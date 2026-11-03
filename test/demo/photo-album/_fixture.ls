@@ -15,7 +15,7 @@ let NAMES = ["Morning ridge", "Harbour lights", "Red fox", "Snowy pass", "Old to
     "Heron", "Frozen lake", "Market street", "Dune crest", "Owl", "Fog bank"]
 
 fn pad2(n) => if (n < 10) "0" ++ string(n) else string(n)
-fn pad4(n) => slice("0000", 0, 4 - len(string(n))) ++ string(n)
+fn pad4(n) any^ => slice("0000", 0, 4 - len(string(n))) ++ string(n)
 
 fn entry(i) {
     let album = ALBUMS[i % 4]
@@ -41,7 +41,7 @@ fn entry(i) {
 }
 
 // a 3x2 colour seed per album, shifted per photo, upscaled into a soft gradient
-fn pixels(i) {
+fn pixels(i) any^ {
     let p = PALETTE[i % 4]
     let shift = (i * 23) % 60
     fn c(rgb, k) => [min(255, rgb[0] + shift * k), min(255, rgb[1] + shift), max(0, rgb[2] - shift * k), 255]

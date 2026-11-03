@@ -21,7 +21,7 @@ let form = <bold.form id:"form",
     <bold.button id:"submit",type:'submit',"Submit">
     <bold.button id:"reset",type:'reset',"Reset">>
 
-view bold_controls: <bold_controls> state count:0, last_source:"", value_type:"", requested:"", accepted:"" {
+view bold_controls: <bold_controls> () any^ state count:0, last_source:"", value_type:"", requested:"", accepted:"" {
     <main style:"display:flex;flex-direction:column;align-items:flex-start;gap:12px;", *[
         *[for (source in controls) ui.render(source)],
         ui.render(ui.input({id:"accepted",label:"Accepted",value:accepted})^),

@@ -7,8 +7,8 @@ import color: .color
 import svg: .svg
 import scale: .scale
 
-fn positive(value) => util.finite_number(value) and value > 0
-fn grid_count(value) => positive(value) and floor(value) == value
+fn positive(value) any^ => util.finite_number(value) and value > 0
+fn grid_count(value) any^ => positive(value) and floor(value) == value
 
 pub fn density(data, options = {}) {
     let xf = if (options.x != null) options.x else "x";
@@ -29,7 +29,7 @@ pub fn density(data, options = {}) {
             len(bounds) != 2 or not all(bounds |> util.finite_number(~)) or bounds[0] >= bounds[1]])) error("chart: density requires increasing finite x/y extents"),
         if (any([for (row in data) not util.finite_number(row[xf]) or not util.finite_number(row[yf])])) error("chart: density requires finite x/y values")]);
     if (invalid is error) invalid else {
-        let cells = [for (j in 0 to (int(count[1]) - 1)) for (i in 0 to (int(count[0]) - 1),
+        let cells = [for (j in ((0 to (int(count[1]) - 1)) ^ { [] })) for (i in ((0 to (int(count[0]) - 1)) ^ { [] }),
             let x0 = util.lerp(extent[0][0], extent[0][1], float(i) / count[0]),
             let x1 = util.lerp(extent[0][0], extent[0][1], float(i + 1) / count[0]),
             let y0 = util.lerp(extent[1][0], extent[1][1], float(j) / count[1]),
@@ -44,21 +44,21 @@ pub fn density(data, options = {}) {
 }
 
 // Linear triangles resolve saddle cells consistently and preserve holes in filled level sets.
-pub fn contours(grid, levels = null) {
+pub fn contours(grid, levels = null) any^ {
     let count = grid.resolution;
     let top = max([0.0, for (cell in grid.cells) cell.density]);
-    let thresholds = if (levels is array) levels else [for (i in 1 to (if (levels != null) int(levels) else 8))
+    let thresholds = if (levels is array) levels else [for (i in ((1 to (if (levels != null) int(levels) else 8)) ^ { [] }))
         top * float(i) / float((if (levels != null) int(levels) else 8) + 1)];
     if (grid is error) grid
     else if (not (levels is array) and levels != null and not grid_count(levels)) error("chart: density levels require a positive integer or finite thresholds")
     else if (not all(thresholds |> util.finite_number(~))) error("chart: density contour thresholds must be finite")
-    else [for (level in thresholds) {level: level, polygons: [for (j in 0 to (int(count[1]) - 2))
-        for (i in 0 to (int(count[0]) - 2),
+    else [for (level in thresholds) {level: level, polygons: [for (j in ((0 to (int(count[1]) - 2)) ^ { [] }))
+        for (i in ((0 to (int(count[0]) - 2)) ^ { [] }),
             let a = grid.cells[j * count[0] + i], let b = grid.cells[j * count[0] + i + 1],
             let c = grid.cells[(j + 1) * count[0] + i + 1], let d = grid.cells[(j + 1) * count[0] + i])
             for (triangle in [[a, b, c], [a, c, d]],
                 let points = [for (cell in triangle) [cell.x, cell.y, cell.density]],
-                let clipped = geometry.clip(points, (point) => point[2] - level) where len(clipped) >= 3) clipped]}]
+                let clipped = geometry.clip(points, (point) => point[2] - level) where ((len(clipped) >= 3) ^ { false })) clipped]}]
 }
 
 fn swarm_points(points, padding, index = 0, placed = []) {
@@ -77,7 +77,7 @@ fn swarm_points(points, padding, index = 0, placed = []) {
     }
 }
 
-pub fn beeswarm(data, ctx, options = {}) {
+pub fn beeswarm(data, ctx, options = {}) any^ {
     let axis = if (options.axis != null) options.axis else "x";
     let measure = if (axis == "x") "y" else "x";
     let padding = if (options.padding != null) options.padding else 1.0;
@@ -90,12 +90,12 @@ pub fn beeswarm(data, ctx, options = {}) {
         not util.finite_number(padding) or padding < 0) error("chart: beeswarm requires a categorical axis and nonnegative padding")
     else if (any([for (point in points) not util.finite_number(point.measure) or not util.finite_number(point.radius)]))
         error("chart: beeswarm requires finite positions and nonnegative point sizes")
-    else [for (group in groups) for (point in swarm_points(points |: ~.row[field] == group, padding))
+    else [for (group in groups) for (point in ((swarm_points(points |: ~.row[field] == group, padding)) ^ { [] }))
         {*:point, x: if (axis == "x") point.category + point.offset else point.measure,
             y: if (axis == "x") point.measure else point.category + point.offset}]
 }
 
-pub fn render_swarm(data, ctx, options) {
+pub fn render_swarm(data, ctx, options) any^ {
     let points = beeswarm(data, ctx, options);
     if (points is error) points else svg.group_class("marks beeswarm", [for (point in points)
         <circle cx: point.x, cy: point.y, r: point.radius,

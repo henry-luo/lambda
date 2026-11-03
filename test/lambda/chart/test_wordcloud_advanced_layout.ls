@@ -10,7 +10,7 @@ fn corners(word, padding = 0) {
     }]
 }
 
-fn overlapping(a, b, padding) {
+fn overlapping(a, b, padding) any^ {
     let ac = corners(a, padding);
     let bc = corners(b, padding);
     let separating = [for (r in [a.rotation, b.rotation], offset in [0, 90]) (
@@ -23,10 +23,10 @@ fn overlapping(a, b, padding) {
     not contains(separating, true)
 }
 
-fn all_inside(result) {
+fn all_inside(result) any^ {
     let rx = (if (result.shape == "circle") min([result.width, result.height]) else result.width) / 2.0 - result.margin;
     let ry = (if (result.shape == "circle") min([result.width, result.height]) else result.height) / 2.0 - result.margin;
-    let outside = [for (word in result.words, p in corners(word)) (
+    let outside = [for (word in result.words, p in ((corners(word)) ^ { [] })) (
         let x = abs(p.x - result.width / 2.0) / rx,
         let y = abs(p.y - result.height / 2.0) / ry,
         if (result.shape == "rectangle") x > 1.000001 or y > 1.000001
@@ -36,8 +36,8 @@ fn all_inside(result) {
     not contains(outside, true)
 }
 
-fn no_overlap(result) => len([for (i, a in result.words, j, b in result.words
-    where i < j and overlapping(a, b, result.padding)) true]) == 0
+fn no_overlap(result) any^ => len([for (i, a in result.words, j, b in result.words
+    where ((i < j and overlapping(a, b, result.padding)) ^ { false })) true]) == 0
 
 fn by_text(result, text) => [for (word in result.words where word.text == text) word][0]
 

@@ -11,7 +11,7 @@ pn main() {
     let env = sys.proc.self.env
     let dir = env.READABILITY_PAGES or DEFAULT_DIR
     let only = env.READABILITY_PAGE
-    let pages = [for (p in split(trim(cmd("ls", [dir])^), "\n") where only == null or p == only) p]
+    let pages = [for (p in split(trim(cmd("ls", [dir])^), "\n")^ where only == null or p == only) p]
     var passed = 0
     var content_ok = 0
     var total_seconds = 0.0

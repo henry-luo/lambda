@@ -43,4 +43,4 @@ let reversed = draw.exec(curved,{kind:'reverse',id:"c"})^;
 draw.route(reversed.doc,draw.lookup(reversed.doc,"c").shape).points[0] == r.points[last]
 draw.route(reversed.doc,draw.lookup(reversed.doc,"c").shape).points[last] == r.points[0]
 let parallel_points = draw.route(st.doc,e).points;
-all([for (i in 1 to len(parallel_points)-1) parallel_points[i].x == parallel_points[i-1].x or parallel_points[i].y == parallel_points[i-1].y])
+all([for (i in ((1 to len(parallel_points)-1) ^ { [] })) parallel_points[i].x == parallel_points[i-1].x or parallel_points[i].y == parallel_points[i-1].y])

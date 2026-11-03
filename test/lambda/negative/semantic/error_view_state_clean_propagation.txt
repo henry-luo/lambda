@@ -1,0 +1,1 @@
+error[E228]: propagation requires an enclosing return contract that admits error

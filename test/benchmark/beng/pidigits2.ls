@@ -57,9 +57,9 @@ pn main() {
     }
 
     // handle last partial line (fewer than 10 digits)
-    if (len(digits) > 0) {
+    if ((len(digits) > 0)^) {
         // pad with spaces to 10 characters
-        while (len(digits) < 10) {
+        while ((len(digits) < 10)^) {
             digits = digits ++ " "
         }
         print(digits ++ "\t:" ++ i ++ "\n")

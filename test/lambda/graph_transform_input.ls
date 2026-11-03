@@ -3,10 +3,10 @@ import transform: lambda.graph.transform
 let source = (input("test/input/simple_flowchart.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let graph = transform.to_html(source, {theme: "nord"})
-let nodes = [for (i in 0 to (len(graph) - 1), let child = graph[i]
-  where string(name(child)) == "node") child]
-let edges = [for (i in 0 to (len(graph) - 1), let child = graph[i]
-  where string(name(child)) == "edge") child]
+let nodes = [for (i in ((0 to (len(graph) - 1)) ^ { [] }), let child = graph[i]
+  where ((string(name(child)) == "node") ^ { false })) child]
+let edges = [for (i in ((0 to (len(graph) - 1)) ^ { [] }), let child = graph[i]
+  where ((string(name(child)) == "edge") ^ { false })) child]
 
 {
   tag: name(graph),

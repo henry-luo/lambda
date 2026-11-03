@@ -94,17 +94,17 @@ fn _starts_at_loop(s: string, needle: string, i: int, k: int, m: int) {
     else { _starts_at_loop(s, needle, i, k + 1, m) }
 }
 
-fn _starts_at(s: string, needle: string, i: int) {
+fn _starts_at(s: string, needle: string, i: int) any^ {
     _starts_at_loop(s, needle, i, 0, int(len(needle)))
 }
 
-fn _contains_loop(s: string, needle: string, i: int, limit: int) {
+fn _contains_loop(s: string, needle: string, i: int, limit: int) any^ {
     if (i > limit) { false }
     else if (_starts_at(s, needle, i)) { true }
     else { _contains_loop(s, needle, i + 1, limit) }
 }
 
-fn _contains(s: string, needle: string) {
+fn _contains(s: string, needle: string) any^ {
     let n = int(len(s))
     let m = int(len(needle))
     if (m == 0) { true }
@@ -137,7 +137,7 @@ fn _family_stack_with_stretch(name: string, gen: string, condensed: bool) {
 // Infer family/weight/style from arbitrary BaseFont name (e.g.
 // "ABCDEF+TimesNewRomanPSMT-Bold"). The leading "ABCDEF+" subset prefix
 // is ignored.
-pub fn from_basefont(name: string) {
+pub fn from_basefont(name: string) any^ {
     // strip subset prefix "XXXXXX+"
     let stripped = _strip_subset(name)
 
@@ -184,7 +184,7 @@ pub fn from_basefont(name: string) {
 
 // Helper: extract BaseFont string with `let x = if` lifted out of pn
 // (vibe/Lambda_Issues5.md #15 — let-bound `if` returns null in pn).
-fn _basefont_or(name: string, dict) {
+fn _basefont_or(name: string, dict) any^ {
     if (dict.BaseFont) string(dict.BaseFont) else name
 }
 
@@ -197,7 +197,7 @@ fn _encoding_or_null(dict) {
     else { null }
 }
 
-fn _widths_or_null(pdf, dict) {
+fn _widths_or_null(pdf, dict) any^ {
     if (dict.Widths == null) { null }
     else {
         let w = resolve.deref(pdf, dict.Widths)
@@ -205,13 +205,13 @@ fn _widths_or_null(pdf, dict) {
     }
 }
 
-fn _num_width(v) {
+fn _num_width(v) any^ {
     if (v is int) { float(v) }
     else if (v is float) { v }
     else { 500.0 }
 }
 
-fn _first_descendant_font(pdf, dict) {
+fn _first_descendant_font(pdf, dict) any^ {
     let descendants = if (dict.DescendantFonts) resolve.deref(pdf, dict.DescendantFonts) else null
     if (descendants is array and len(descendants) > 0) { resolve.deref(pdf, descendants[0]) }
     else { null }
@@ -225,7 +225,7 @@ fn _cid_width_range(first, final_code, width, acc) {
     acc ++ [{ first: first, last: final_code, width: width }]
 }
 
-fn _cid_width_pairs_loop(w, i, n, acc) {
+fn _cid_width_pairs_loop(w, i, n, acc) any^ {
     if (i >= n) { acc }
     else if (i + 1 >= n) { acc }
     else {
@@ -244,7 +244,7 @@ fn _cid_width_pairs_loop(w, i, n, acc) {
     }
 }
 
-fn _cid_widths_or_null(pdf, dict) {
+fn _cid_widths_or_null(pdf, dict) any^ {
     let desc = _first_descendant_font(pdf, dict)
     let source = if (dict.W != null) { dict } else { desc }
     let w = if (source and source.W != null) resolve.deref(pdf, source.W) else null
@@ -252,18 +252,18 @@ fn _cid_widths_or_null(pdf, dict) {
     else { null }
 }
 
-fn _default_width_or_500(pdf, dict) {
+fn _default_width_or_500(pdf, dict) any^ {
     let desc = _first_descendant_font(pdf, dict)
     if (dict.DW != null) { _num_width(dict.DW) }
     else if (desc and desc.DW != null) { _num_width(desc.DW) }
     else { 500.0 }
 }
 
-fn _first_char_or_zero(dict) {
+fn _first_char_or_zero(dict) any^ {
     util.int_or(dict.FirstChar, 0)
 }
 
-fn _last_char_or_zero(dict) {
+fn _last_char_or_zero(dict) any^ {
     util.int_or(dict.LastChar, 0)
 }
 
@@ -348,7 +348,7 @@ fn _ends_with(s: string, suffix: string) {
     }
 }
 
-fn _override_family_from_flags(pdf, stripped: string, dict, info) {
+fn _override_family_from_flags(pdf, stripped: string, dict, info) any^ {
     let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
     if (fd == null or fd.Flags == null) { info }
     else {
@@ -371,7 +371,7 @@ fn _override_family_from_flags(pdf, stripped: string, dict, info) {
 // Wraps the pick + flags-override into a single fn so it can be called
 // from `resolve_font` without hitting the `let x = if` → null
 // gotcha (vibe/Lambda_Issues5.md #15).
-fn _final_info(pdf, stripped, dict, s14, fb) {
+fn _final_info(pdf, stripped, dict, s14, fb) any^ {
     let info_pre = _pick_info(s14, fb)
     if (s14 == _UNKNOWN) _override_family_from_flags(pdf, stripped, dict, info_pre)
     else info_pre
@@ -380,7 +380,7 @@ fn _final_info(pdf, stripped, dict, s14, fb) {
 // Look up the embedded font program info attached by the C-side
 // post-processor (input-pdf-postprocess.cpp `encode_embedded_fonts`).
 // Returns { uri, fmt } or null.
-fn _embedded_font_info(pdf, dict) {
+fn _embedded_font_info(pdf, dict) any^ {
     let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
     if (fd == null) { null }
     else if (fd.font_data_uri == null) { null }
@@ -415,7 +415,7 @@ fn _info_with_embedded(info, emb_family) {
       weight: info.weight, style: info.style }
 }
 
-pub fn resolve_font(pdf, page, name: string) {
+pub fn resolve_font(pdf, page, name: string) any^ {
     let dict = resolve.page_font(pdf, page, name)
     if (dict == null) { _unknown_descriptor(name) }
     else {
@@ -461,15 +461,15 @@ pub fn resolve_font(pdf, page, name: string) {
 // 4-digit CIDs need multi-byte CMap traversal which we'll add later.
 
 // Convert a hex string (without delimiters) to a list of byte codes.
-fn _hex_to_codes(hex: string) {
+fn _hex_to_codes(hex: string) any^ {
     let clean = util.clean_hex(hex)
     let n = len(clean)
     // C14c makes `div` produce a float; this loop bound needs the integer
     // ceiling count so retain that boundary explicitly.
-    let pairs: int = int((n + 1) div 2)
+    let pairs: int = int((n + 1) div 2)^
     if (pairs == 0) { [] }
     else {
-        [for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)]
+        [for (k in ((0 to (pairs - 1)) ^ { [] })) util.hex_byte_at(clean, k * 2)]
     }
 }
 
@@ -599,7 +599,7 @@ fn _symbol_special(code) {
     else { code }
 }
 
-fn _decode_byte_with_encoding(code, encoding) {
+fn _decode_byte_with_encoding(code, encoding) any^ {
     if (encoding == "WinAnsiEncoding") {
         let sp = _winansi_special(code)
         if (sp != null) { sp }
@@ -610,17 +610,17 @@ fn _decode_byte_with_encoding(code, encoding) {
     else { _decode_unicode_code(code) }
 }
 
-fn _decode_code_with_encoding(code, cmap, encoding) {
+fn _decode_code_with_encoding(code, cmap, encoding) any^ {
     let key = string(code)
     if (cmap and cmap[key]) { _decode_unicode_string(cmap[key]) }
     else { _decode_byte_with_encoding(code, encoding) }
 }
 
-fn _decode_code(code, cmap) {
+fn _decode_code(code, cmap) any^ {
     _decode_code_with_encoding(code, cmap, null)
 }
 
-fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) {
+fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) any^ {
     let n = len(hex)
     if (i >= n) { "" }
     else {
@@ -645,7 +645,7 @@ fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) {
 }
 
 // Decode a Tj/TJ hex operand to a unicode string.
-pub fn decode_hex(hex: string, to_unicode) {
+pub fn decode_hex(hex: string, to_unicode) any^ {
     let clean = util.clean_hex(hex)
     if (to_unicode != null) { _decode_hex_cmap_at(clean, 0, to_unicode, null) }
     else {
@@ -655,7 +655,7 @@ pub fn decode_hex(hex: string, to_unicode) {
     }
 }
 
-pub fn decode_hex_with_font(hex: string, font_info) {
+pub fn decode_hex_with_font(hex: string, font_info) any^ {
     let cmap = if (font_info) font_info.to_unicode else null
     let enc = if (font_info) font_info.encoding else null
     let clean = util.clean_hex(hex)

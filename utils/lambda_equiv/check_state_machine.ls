@@ -32,25 +32,25 @@ pn validate(enums, rules, bindings) {
     for (rule in rules) {
         if (rule.name == "") {
             errors = errors ++ ["rule with event " ++ rule.event ++ " has an empty name"]
-        } else if (contains(seen_names, rule.name)) {
+        } else if (contains(seen_names, rule.name)^) {
             errors = errors ++ ["duplicate rule name: " ++ rule.name]
         }
         seen_names = seen_names ++ [rule.name]
-        if (not contains(families, rule.family)) {
+        if ((not contains(families, rule.family))^) {
             errors = errors ++ [rule.name ++ ": unknown family " ++ rule.family]
         }
-        if (not contains(view_classes, rule.view_class)) {
+        if ((not contains(view_classes, rule.view_class))^) {
             errors = errors ++ [rule.name ++ ": unknown view class " ++ rule.view_class]
         }
-        if (not contains(events, rule.event)) {
+        if ((not contains(events, rule.event))^) {
             errors = errors ++ [rule.name ++ ": unknown event " ++ rule.event]
         }
-        if (len(rule.to_states) == 0) {
+        if ((len(rule.to_states) == 0)^) {
             errors = errors ++ [rule.name ++ ": empty to-state list " ++ rule.to_array]
         }
         let action_expr = trim(rule.actions)
         if (action_expr != "0" and action_expr != "SM_ACT_NONE") {
-            for (part in split(action_expr, "|")) {
+            for (part in split(action_expr, "|")^) {
                 let action_name = trim(part)
                 if (not contains(actions, action_name)) {
                     errors = errors ++ [rule.name ++ ": unknown action " ++ action_name]
@@ -76,11 +76,11 @@ pn validate(enums, rules, bindings) {
                     missing_initial = missing_initial ++ [state_name]
                 }
             }
-            if (len(missing_active) > 0) {
+            if ((len(missing_active) > 0)^) {
                 errors = errors ++ [config.label ++ ": configured active states missing from " ++
                                     config.state_enum ++ ": " ++ join(missing_active, ", ")]
             }
-            if (len(missing_initial) > 0) {
+            if ((len(missing_initial) > 0)^) {
                 errors = errors ++ [config.label ++ ": configured initial states missing from " ++
                                     config.state_enum ++ ": " ++ join(missing_initial, ", ")]
             }
@@ -93,8 +93,8 @@ pn validate(enums, rules, bindings) {
                 errors = errors ++ [config.label ++ ": no rules for complete family " ++ config.family]
             } else {
                 for (rule in family_rules) {
-                    if (rule.from_state != "SM_STATE_ANY" and
-                        not contains(enum_states, rule.from_state)) {
+                    if ((rule.from_state != "SM_STATE_ANY" and
+                        not contains(enum_states, rule.from_state))^) {
                         errors = errors ++ [rule.name ++ ": from_state " ++ rule.from_state ++
                                             " is not valid for " ++ config.label]
                     }
@@ -120,7 +120,7 @@ pn validate(enums, rules, bindings) {
                     }
                 }
                 let expected = len(config.active) * len(config.events)
-                if (covered != expected) {
+                if ((covered != expected)^) {
                     errors = errors ++ [config.label ++ ": missing state/event coverage: " ++
                                         join(missing, ", ")]
                 }
@@ -140,7 +140,7 @@ pn validate(enums, rules, bindings) {
                         unreachable = unreachable ++ [state_name]
                     }
                 }
-                if (len(unreachable) > 0) {
+                if ((len(unreachable) > 0)^) {
                     errors = errors ++ [config.label ++ ": active states have no incoming transition: " ++
                                         join(unreachable, ", ")]
                 }
@@ -179,7 +179,7 @@ pn validate(enums, rules, bindings) {
             extra_families = extra_families ++ [rule.family]
         }
     }
-    if (len(extra_families) > 0) {
+    if ((len(extra_families) > 0)^) {
         warnings = warnings ++ ["rules exist for families not marked complete: " ++
                                 join(sort(extra_families), ", ")]
     }
@@ -190,14 +190,14 @@ pn validate(enums, rules, bindings) {
         if (binding.name == "") {
             errors = errors ++ ["invariant binding with id " ++ binding.invariant ++
                                 " has an empty name"]
-        } else if (contains(seen_invariant_names, binding.name)) {
+        } else if (contains(seen_invariant_names, binding.name)^) {
             errors = errors ++ ["duplicate invariant binding name: " ++ binding.name]
         }
         seen_invariant_names = seen_invariant_names ++ [binding.name]
-        if (not contains(families, binding.family)) {
+        if ((not contains(families, binding.family))^) {
             errors = errors ++ [binding.name ++ ": unknown invariant family " ++ binding.family]
         }
-        if (not contains(invariants, binding.invariant)) {
+        if ((not contains(invariants, binding.invariant))^) {
             errors = errors ++ [binding.name ++ ": unknown invariant id " ++ binding.invariant]
         }
         if (binding.state != "SM_STATE_ANY") {
@@ -227,7 +227,7 @@ pn main() {
     let report = validate(enums, rules, bindings)
 
     print("Radiant state-machine schema check\n")
-    for (summary in report.summaries) {
+    for (summary in report.summaries^) {
         print("  " ++ summary.label ++ ": " ++ string(summary.states) ++
               " active state(s), " ++ string(summary.events) ++ " event(s), coverage " ++
               string(summary.covered) ++ "/" ++ string(summary.expected) ++ "\n")
@@ -236,9 +236,9 @@ pn main() {
         }
     }
     print("  invariants: " ++ string(len(bindings)) ++ " binding(s)\n")
-    for (warning in report.warnings) { print("warning: " ++ warning ++ "\n") }
-    for (failure in report.errors) { print("error: " ++ failure ++ "\n") }
-    if (len(report.errors) > 0) {
+    for (warning in report.warnings^) { print("warning: " ++ warning ++ "\n") }
+    for (failure in report.errors^) { print("error: " ++ failure ++ "\n") }
+    if ((len(report.errors) > 0)^) {
         print("check-state-machine: FAIL (" ++ string(len(report.errors)) ++ " error(s))\n")
         raise error("check-state-machine: schema validation failed")
     }

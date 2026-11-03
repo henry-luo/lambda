@@ -18,7 +18,7 @@ import scientific: .scientific
 import mesh: .mesh
 
 // Pie and ranged arcs use identical scale, style, and radius validation in every view.
-pub fn arc_context(data, encoding, options, width, height, paints, cx = null, cy = null) {
+pub fn arc_context(data, encoding, options, width, height, paints, cx = null, cy = null) any^ {
     let outer = if (options.outer_radius != null) options.outer_radius else min([width, height]) / 2.0;
     let inner = if (options.inner_radius != null) options.inner_radius else 0.0;
     let angles = scale.angular_scale(encoding.theta, data, encoding.theta2);
@@ -33,7 +33,7 @@ pub fn arc_context(data, encoding, options, width, height, paints, cx = null, cy
         inner_radius: inner, outer_radius: outer}
 }
 
-fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) {
+fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) any^ {
     let s = if (y_ch) y_ch.stack else null
     if (s == "zero" or s == "normalize" or s == "center" or s == "wiggle") s
     else if (s == false or s == "none") null
@@ -43,7 +43,7 @@ fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) {
 }
 
 // Ordering and stacking must be identical in single views and layer leaves.
-pub fn prepare_mark_data(spec) {
+pub fn prepare_mark_data(spec) any^ {
     if (spec._mark_prepared) spec
     else if (mesh.supports(spec.data) or scientific.supports(spec.mark.kind)) scientific.prepare(spec)
     else if (spec.mark.kind=="density") field.prepare(spec) else {
@@ -98,7 +98,7 @@ pub fn mark_context(data, encoding, x_scale, y_scale, lay, stack_mode) {
         x_offset_cats: if (offset_field != null) util.unique_vals(data |> ~[offset_field]) else null}
 }
 
-pub fn render(mark_type, data, ctx, mark_spec) {
+pub fn render(mark_type, data, ctx, mark_spec) any^ {
     let image = render_mark_raw(mark_type, data, ctx, mark_spec);
     if (image is error) image else if (mark_spec.clip) clip_marks(image, ctx.plot_w, ctx.plot_h) else image
 }
@@ -107,7 +107,7 @@ pub fn render(mark_type, data, ctx, mark_spec) {
 pub fn clip_marks(marks, width, height) => <svg class: "plot-clip", x: 0, y: 0, width: width, height: height,
     viewBox: "0 0 " ++ util.fmt_num(width) ++ " " ++ util.fmt_num(height), overflow: "hidden", marks>
 
-fn render_mark_raw(mark_type, data, ctx, mark_spec) {
+fn render_mark_raw(mark_type, data, ctx, mark_spec) any^ {
     if (scientific.supports(mark_type)) scientific.render(data,ctx,mark_spec)
     else if (contains(["sankey", "chord", "force_graph"], mark_type))
         network.render({*:ctx._graph, nodes: data}, ctx, mark_spec)

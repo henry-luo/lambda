@@ -84,9 +84,9 @@ pub fn glossary_entry(key, raw_keys) {
      sort: field(keys.sort) or entry_name, see: field(keys.see)}
 }
 
-fn field(value) => if (value == null) null else unbrace(trim(string(value)))
+fn field(value) any^ => if (value == null) null else unbrace(trim(string(value)))
 
-fn unbrace(text) =>
+fn unbrace(text) any^ =>
     if (starts_with(text, "{") and ends_with(text, "}") and len(text) >= 2) slice(text, 1, len(text) - 1) else text
 
 // \newacronym[keys]{label}{short}{long}: in the acronym glossary under the acronym
@@ -103,7 +103,7 @@ pub fn acronym_entry(key, short, long, raw_keys, separate) {
 }
 
 // the source an entry's use prints
-pub fn use_source(entry, form, first) {
+pub fn use_source(entry, form, first) any^ {
     let chosen = if (form.field == "auto") (if (first) (if (form.plural) entry.firstplural else entry.first)
             else (if (form.plural) entry.plural else entry.text))
         else if (form.field == "text") (if (form.plural) entry.plural else entry.text)
@@ -117,13 +117,13 @@ pub fn use_source(entry, form, first) {
 }
 
 // the first letter up, when the source starts with one (a command or math is left)
-pub fn capitalised(source) {
+pub fn capitalised(source) any^ {
     let head = slice(source, 0, 1)
     if (head >= "a" and head <= "z") upper(head) ++ slice(source, 1, len(source)) else source
 }
 
 // a glossary's title: one \printglossary gave, \newglossary's, or the default
-pub fn type_title(gtype, titles, given = null) {
+pub fn type_title(gtype, titles, given = null) any^ {
     let custom = util.lookup(titles, gtype)
     if (given != null) given else if (custom != null) custom else if (gtype == "acronym") "Acronyms" else "Glossary"
 }
@@ -202,10 +202,10 @@ pub let IMAKEIDX_OPTIONS = ["makeindex", "xindy", "texindy", "truexindy", "noaut
     "original", "splitindex", "quiet"]
 
 // makeindex's quote character makes the next character literal
-fn unquote(text) => replace(replace(replace(replace(text, "\"!", "!"), "\"@", "@"), "\"|", "|"), "\"\"", "\"")
+fn unquote(text) any^ => replace(replace(replace(replace(text, "\"!", "!"), "\"@", "@"), "\"|", "|"), "\"\"", "\"")
 
 // the positions of `ch` outside braces and not after the quote character
-fn cuts(text, ch, i, depth, acc) {
+fn cuts(text, ch, i, depth, acc) any^ {
     if (i >= len(text)) acc
     else {
         let c = slice(text, i, i + 1)
@@ -230,7 +230,7 @@ pub fn index_entry(raw) {
     let bar = cuts(raw, "|", 0, 0, [])
     let entry_text = if (len(bar) == 0) raw else slice(raw, 0, bar[0])
     let encap = if (len(bar) == 0) "" else slice(raw, bar[0] + 1, len(raw))
-    let levels = [for (level in split_at(entry_text, "!"), let at = cuts(level, "@", 0, 0, []))
+    let levels = [for (level in ((split_at(entry_text, "!")) ^ { [] }), let at = cuts(level, "@", 0, 0, []))
         {sort: unquote(trim(if (len(at) == 0) level else slice(level, 0, at[0]))),
          display: unquote(trim(if (len(at) == 0) level else slice(level, at[0] + 1, len(level))))}]
     let span = if (starts_with(encap, "(")) "open" else if (starts_with(encap, ")")) "close" else null

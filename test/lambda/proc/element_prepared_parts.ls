@@ -1,7 +1,7 @@
 // S12.1.1v3: procedural preparation precedes pure element construction.
 pn load_parts() { return "prepared bytes\n" }
 fn pure_parts() => "pure bytes"
-function build(f: function) => <doc f()^>
+function build(f: function) any^ => <doc f()^>
 
 pn main() {
     let parts = load_parts();

@@ -1,9 +1,9 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn box(source) => math.render_box(ast(source))^
-fn paint(source) => svg.painted_text(box(source).element)
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
+fn paint(source) any^ => svg.painted_text(box(source).element)
 fn close(a,b) => abs(a - b) < 0.00001
 let checks = [
     {name:"kern does not consume the following variable", ok:paint("a\\kern1emb") == "ab"},

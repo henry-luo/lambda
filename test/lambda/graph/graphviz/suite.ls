@@ -27,7 +27,7 @@ fn run_reference(test_case) {
   let reference = input(reference_path, {type: "json"}) ^ { null }
   let normalized = normalize.normalize(source);
   let expected = adapter.from_dot_json(reference, true,
-    [for (edge in model.edges(normalized.graph)) edge.id]);
+    [for (edge in ((model.edges(normalized.graph)) ^ { [] })) edge.id]);
   let result = conformance.compare(source, expected, test_case, 640, 480);
   {id: string(test_case.id), equal: result.comparison["equal"],
     diagnostics: result.comparison.diagnostics}

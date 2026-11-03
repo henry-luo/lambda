@@ -1,20 +1,20 @@
 // Evaluate the parser's finite PGF math expression tree, never Lambda source.
-fn binding(context, variable) {
+fn binding(context, variable) any^ {
     let matches = if (context == null) []
         else [for (entry in context.variables where entry.name == variable) entry.value]
     if (len(matches) == 0) null else matches[len(matches) - 1]
 }
 
-fn declared_function(context, function_name) {
+fn declared_function(context, function_name) any^ {
     let matches = if (context == null) []
         else [for (entry in context.functions where entry.name == function_name) entry]
     if (len(matches) == 0) null else matches[len(matches) - 1]
 }
 
-fn has_radian_mark(node) {
+fn has_radian_mark(node) any^ {
     if (not (node is element)) false
     else if (string(name(node)) == "radian_value") true
-    else len([for (child in node where has_radian_mark(child)) child]) > 0
+    else len([for (child in node where ((has_radian_mark(child)) ^ { false })) child]) > 0
 }
 
 pub fn evaluate(node, x, context = null, function_depth = 0) float^ {

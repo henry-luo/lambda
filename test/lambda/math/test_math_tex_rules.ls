@@ -4,10 +4,10 @@ import font: lambda.doc.math.font
 import sp: lambda.doc.math.spacing_table
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
 fn close(a, b) => abs(a - b) < 0.02
-fn render(source, options = null) => math.render_box(ast(source), options)^
-fn glyphs(box) => [for (g in svg.geometry(box.element) where g.text != "") g]
+fn render(source, options = null) any^ => math.render_box(ast(source), options)^
+fn glyphs(box) => [for (g in ((svg.geometry(box.element)) ^ { [] }) where g.text != "") g]
 fn exponent(box) => [for (g in glyphs(box) where g.text == "2") g][0]
 
 let options = {}
@@ -21,7 +21,7 @@ let cramped = render("\\sqrt{b^2}", options)
 let under = render("\\underline{b^2}", options)
 let accent = render("\\hat{b}^2", options)
 let bar = render("\\genfrac{}{}{2pt}{0}{a}{b}", options)
-let bar_ink = [for (g in svg.geometry(bar.element) where name(g.node) == 'rect') g][0]
+let bar_ink = [for (g in ((svg.geometry(bar.element)) ^ { [] }) where ((name(g.node) == 'rect') ^ { false })) g][0]
 let bar_glyphs = glyphs(bar)
 let b_height = render("b", options).height * 1000.0
 let a_depth = render("a", options).depth * 1000.0
@@ -58,9 +58,9 @@ let checks = [
     {name:"inter-atom glue follows the current style", ok:close(typed.width - pieces[0].width - pieces[1].width - raw_plus.width * font.scale(profile, "script"), 4.0 / 18.0)},
     {name:"explicit thick fraction uses its own clearance", ok:0.0 - bar_glyphs[0].y - a_depth -
         (c.axis_height + bar_ink.node.height / 2.0) >= 3.0 * bar_ink.node.height - 0.02},
-    {name:"empty genfrac thickness selects default rule", ok:len([for (g in svg.geometry(
-        render("\\genfrac{}{}{}{0}{a}{b}", options).element) where name(g.node) == 'rect' and
-            close(g.node.height, c.fraction_rule_thickness)) g]) == 1},
+    {name:"empty genfrac thickness selects default rule", ok:len([for (g in ((svg.geometry(
+        render("\\genfrac{}{}{}{0}{a}{b}", options).element)) ^ { [] }) where ((name(g.node) == 'rect' and
+            close(g.node.height, c.fraction_rule_thickness)) ^ { false })) g]) == 1},
     {name:"mathop has display limits", ok:glyphs(render("\\mathop{x}_a^b", {*:options, display:true}))[1].x <
         glyphs(render("\\mathop{x}\\nolimits_a^b", {*:options, display:true}))[1].x}
 ];

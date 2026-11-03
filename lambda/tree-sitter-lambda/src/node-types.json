@@ -5911,16 +5911,6 @@
     "type": "return_type",
     "named": true,
     "fields": {
-      "error": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "return_type_pattern",
-            "named": true
-          }
-        ]
-      },
       "ok": {
         "multiple": false,
         "required": true,
@@ -6292,16 +6282,6 @@
     "type": "value_error_type",
     "named": true,
     "fields": {
-      "error": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "primary_type",
-            "named": true
-          }
-        ]
-      },
       "ok": {
         "multiple": false,
         "required": true,

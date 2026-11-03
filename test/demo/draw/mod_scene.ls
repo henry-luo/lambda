@@ -16,7 +16,7 @@ import drawing_scene: lambda.editor.draw.scene
 // compatibility exports; the drawing package owns the implementation.
 
 
-pub fn svg(drawing,selected="",source="",grid=false,standalone=false,selection=[],zoom=1.0,marquee=null) => drawing_scene.svg(drawing,selected,source,grid,standalone,selection,zoom,marquee)
+pub fn svg(drawing,selected="",source="",grid=false,standalone=false,selection=[],zoom=1.0,marquee=null) any^ => drawing_scene.svg(drawing,selected,source,grid,standalone,selection,zoom,marquee)
 
 fn icon_path(kind) => if (kind == "select") "M 5 3 L 19 13 L 12 14 L 9 21 Z"
     else if (kind == "marquee") "M 3 8 V 3 H 8 M 16 3 H 21 V 8 M 21 16 V 21 H 16 M 8 21 H 3 V 16"

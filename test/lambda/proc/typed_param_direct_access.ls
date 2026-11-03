@@ -13,9 +13,9 @@ fn read_counter(c: Counter) => c.val
 
 pn main() {
     var cnt = <Counter>
-    cnt.inc()
-    cnt.inc()
-    cnt.inc()
+    cnt.inc()^
+    cnt.inc()^
+    cnt.inc()^
     print(read_counter(cnt)); print("\n")
     print(cnt.doubled()); print("\n")
 }

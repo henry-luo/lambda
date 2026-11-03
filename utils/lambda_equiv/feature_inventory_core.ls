@@ -12,7 +12,7 @@ fn space(ch: string) bool =>
 
 pn skip_space(source: string, start: int) {
     var pos = start
-    while (pos < len(source) and space(slice(source, pos, pos + 1))) { pos = pos + 1 }
+    while ((pos < len(source) and space(slice(source, pos, pos + 1)))^) { pos = pos + 1 }
     return pos
 }
 
@@ -22,23 +22,23 @@ pn enum_values(path: string, declaration: string, prefix: string) string[]^ {
     if (found == null) { raise error("missing declaration " ++ declaration ++ " in " ++ path) }
     let stripped = strip_c_comments(slice(source, found))
     let close = index_of(stripped, "}")
-    if (close == null) { raise error("unterminated declaration " ++ declaration ++ " in " ++ path) }
+    if ((close == null)^) { raise error("unterminated declaration " ++ declaration ++ " in " ++ path) }
     let block = slice(stripped, 0, close)
     var values = []
     var pos = 0
-    while (pos < len(block)) {
-        if (word_char(slice(block, pos, pos + 1))) {
+    while ((pos < len(block))^) {
+        if (word_char(slice(block, pos, pos + 1))^) {
             let start = pos
-            while (pos < len(block) and word_char(slice(block, pos, pos + 1))) {
+            while ((pos < len(block) and word_char(slice(block, pos, pos + 1)))^) {
                 pos = pos + 1
             }
             let token = slice(block, start, pos)
-            if (starts_with(token, prefix) and len(token) > len(prefix)) {
+            if ((starts_with(token, prefix) and len(token) > len(prefix))^) {
                 let suffix = slice(token, len(prefix))
                 var valid = true
                 var i = 0
-                while (i < len(suffix)) {
-                    if (not enum_char(slice(suffix, i, i + 1))) { valid = false }
+                while ((i < len(suffix))^) {
+                    if ((not enum_char(slice(suffix, i, i + 1)))^) { valid = false }
                     i = i + 1
                 }
                 if (valid) { values = values ++ [token] }
@@ -54,31 +54,31 @@ pn system_function_rows(path: string) string[]^ {
     let source = input(path, "text")^
     var rows = []
     var offset = 0
-    while (offset < len(source)) {
+    while ((offset < len(source))^) {
         let hit = index_of(slice(source, offset), "{SYSFUNC_")
-        if (hit == null) { break }
+        if ((hit == null)^) { break }
         let start = offset + hit + 1
         offset = start + len("SYSFUNC_")
         var pos = start
-        while (pos < len(source) and enum_char(slice(source, pos, pos + 1))) { pos = pos + 1 }
+        while ((pos < len(source) and enum_char(slice(source, pos, pos + 1)))^) { pos = pos + 1 }
         let identifier = slice(source, start, pos)
-        if (slice(source, pos, pos + 1) == ",") {
+        if ((slice(source, pos, pos + 1) == ",")^) {
             pos = skip_space(source, pos + 1)
-            if (slice(source, pos, pos + 1) == "\"") {
+            if ((slice(source, pos, pos + 1) == "\"")^) {
                 let name_start = pos + 1
                 let end_quote = index_of(slice(source, name_start), "\"")
-                if (end_quote != null) {
+                if ((end_quote != null)^) {
                     let name = slice(source, name_start, name_start + end_quote)
                     pos = skip_space(source, name_start + end_quote + 1)
-                    if (slice(source, pos, pos + 1) == ",") {
+                    if ((slice(source, pos, pos + 1) == ",")^) {
                         pos = skip_space(source, pos + 1)
                         let arity_start = pos
-                        if (slice(source, pos, pos + 1) == "-") { pos = pos + 1 }
+                        if ((slice(source, pos, pos + 1) == "-")^) { pos = pos + 1 }
                         let digits_start = pos
-                        while (pos < len(source) and digit(slice(source, pos, pos + 1))) {
+                        while ((pos < len(source) and digit(slice(source, pos, pos + 1)))^) {
                             pos = pos + 1
                         }
-                        if (pos > digits_start) {
+                        if ((pos > digits_start)^) {
                             rows = rows ++ [identifier ++ ":" ++ name ++ "/" ++
                                              slice(source, arity_start, pos)]
                         }
@@ -87,7 +87,7 @@ pn system_function_rows(path: string) string[]^ {
             }
         }
     }
-    if (len(rows) == 0) { raise error("no SysFuncInfo rows found in " ++ path) }
+    if ((len(rows) == 0)^) { raise error("no SysFuncInfo rows found in " ++ path) }
     return sort(unique(rows))
 }
 
@@ -125,11 +125,11 @@ pn campaign_statuses(path: string) any^ {
     var statuses = {}
     var names = []
     var line_number = 1
-    for (raw_line in split(source, "\n")) {
+    for (raw_line in split(source, "\n")^) {
         let line = trim(raw_line)
-        if (line != "" and not starts_with(line, "#")) {
+        if ((line != "" and not starts_with(line, "#"))^) {
             let fields = split(line, "\t")
-            if (len(fields) != 4) {
+            if ((len(fields) != 4)^) {
                 raise error(path ++ ":" ++ string(line_number) ++ ": expected 4 tab-separated fields")
             }
             let surface = fields[0]
@@ -168,7 +168,7 @@ pub pn check_inventory() string^ {
     for (surface in campaigns.names) {
         if (not contains(surfaces, surface)) { stale = stale ++ [surface] }
     }
-    if (len(missing) > 0 or len(stale) > 0) {
+    if ((len(missing) > 0 or len(stale) > 0)^) {
         raise error("feature campaign map mismatch: missing=" ++ string(sort(missing)) ++
                     " stale=" ++ string(sort(stale)))
     }
@@ -176,7 +176,7 @@ pub pn check_inventory() string^ {
     let lock_path = "test/fuzzy/lambda/feature_inventory.lock"
     if (not exists(lock_path)) { raise error("missing feature inventory lock: " ++ lock_path) }
     let actual = input(lock_path, "text")^
-    if (actual != expected_lock(rows)) {
+    if ((actual != expected_lock(rows))^) {
         raise error("feature inventory changed; review campaign coverage and update " ++ lock_path)
     }
 
@@ -192,7 +192,7 @@ pub pn check_inventory() string^ {
     for (name in semantics.names) {
         if (not contains(semantic_names, name)) { stale = stale ++ [name] }
     }
-    if (len(missing) > 0 or len(stale) > 0) {
+    if ((len(missing) > 0 or len(stale) > 0)^) {
         raise error("semantic campaign map mismatch: missing=" ++ string(sort(missing)) ++
                     " stale=" ++ string(sort(stale)))
     }

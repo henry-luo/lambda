@@ -4,7 +4,7 @@ import theme: lambda.slide.theme
 
 let deck = <presentation id: "d", ui: {accent: "#ff9500", radius: "4px"}, <slide <text "One">>>
 let plain = <presentation <slide <text "One">>>
-fn body_style(doc) => [for (c in content(doc) where c is element and name(c) == 'body') c.style][0];
+fn body_style(doc) => [for (c in ((content(doc)) ^ { [] }) where ((c is element and name(c) == 'body') ^ { false })) c.style][0];
 {
     tokens: len(theme.ui_tokens),
     style: theme.ui_style({accent: "#0a84ff", control_border: "rgba(255,255,255,0.1)", font: "-apple-system, sans-serif"})^,

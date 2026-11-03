@@ -22,7 +22,7 @@ pub fn configure(raw) {
 fn enabled(spec) => spec.motion=="full" and spec.animate.enabled==true and spec.animate.duration+spec.animate.delay>0
 fn rows(plan) array | error => sort([for (item in plan.events) {id:item.id,item:item}],{by:(row)=>row.id})
 fn between(a, b, t) => map([for (key,value in b) (key,util.lerp(a[key],value,t))])
-fn at(a,b,t) => dates.offset(a,decimal(b-a)*decimal(t))
+fn at(a,b,t) any^ => dates.offset(a,decimal(b-a)*decimal(t))
 fn item_frame(a, b, t, options) {
     let phase=if (b==null) "exit" else if (a==null) "enter" else "update";
     let amount=if (options[phase]==true) t else 1.0;
@@ -38,7 +38,7 @@ fn item_frame(a, b, t, options) {
 }
 
 // Metadata changes only timing; retained SVG geometry remains the interruption source.
-fn timed(node, progress, options) {
+fn timed(node, progress, options) any^ {
     if (not (node is element)) node else {
         let event=node["data-timeline-id"]!=null or node["data-timeline-cluster"]!=null or node["data-chart-animation"]!=null;
         let guide=node["data-timeline-axis"]!=null or node["data-timeline-annotation"]!=null;
@@ -46,10 +46,10 @@ fn timed(node, progress, options) {
             else if (event or guide) map([for (phase in ["enter","update","exit"])
                 (phase,{type:if (phase=="update") "morph" else "fade",progress:if (options[phase]) progress else 1.0})]) else null;
         svg.rebuild(name(node),{*:map(node),*:(if (phases!=null) {'data-chart-animation':format(phases,'json')} else {})},
-            [for (child in content(node)) timed(child,progress,options)])
+            [for (child in ((content(node)) ^ { [] })) timed(child,progress,options)])
     }
 }
-pub fn sample(previous, target, elapsed, spec) {
+pub fn sample(previous, target, elapsed, spec) any^ {
     let options=spec.animate;
     let progress=if (not enabled(spec)) 1.0 else animation.progress(options,elapsed);
     if (not util.finite_number(elapsed) or elapsed<0) c.fail("animate.time","expected nonnegative elapsed milliseconds")
@@ -57,7 +57,7 @@ pub fn sample(previous, target, elapsed, spec) {
         let aa=rows(previous.plan);
         let bb=rows(target.plan);
         let events=[for (item in target.plan.events) item_frame(index.lookup(aa,item.id).item,item,progress,options),
-            for (item in previous.plan.events where index.lookup(bb,item.id)==null)
+            for (item in previous.plan.events where ((index.lookup(bb,item.id)==null) ^ { false }))
                 item_frame(item,null,progress,options)] |: ~!=null;
         let window=if (previous.plan.window!=null and options.update) {
             from:at(previous.plan.window.from,target.plan.window.from,progress),
@@ -68,7 +68,7 @@ pub fn sample(previous, target, elapsed, spec) {
         if (image is error) image else {plan:plan,svg:image}
     }
 }
-pub fn advance(previous, target, now, spec) {
+pub fn advance(previous, target, now, spec) any^ {
     let changed=previous==null or previous.target!=target;
     let source=if (previous==null) {plan:{*:target.plan,events:[]},svg:null} else previous.displayed;
     let elapsed=if (changed) 0.0 else max(0,now-previous.anchor);

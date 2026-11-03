@@ -899,7 +899,7 @@ typedef struct PlanCtx {
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)decl)->init);
+    AstNode* init = ast_cow_value_source(((AstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
         NameEntry* src = ((AstIdentNode*)init)->entry;
@@ -1655,6 +1655,11 @@ static void plan_view(PlanCtx* outer, AstViewNode* view) {
     pc.plan = &view->interp_plan;
     pc.storage = BINDING_STORAGE_REGISTER;
     plan_assign_scope(&pc, view->vars);
+    if (view->signature && view->signature->return_contract) {
+        pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
+            view->signature->return_contract);
+        plan_destination(pc.script->pool, view->body, view->signature->return_contract);
+    }
     for (AstStateEntry* state = view->state; state; state = state->next_state) {
         plan_walk(state->value, &pc);
         // The model occupies a scratch home while a state default evaluates.

@@ -4,12 +4,12 @@ import world: .mod_world
 import sprites: .mod_sprites
 import camera: .mod_camera
 
-pub fn fmt(value) => string(round(value * 100000) / 100000)
-fn px(value) => fmt(value) ++ "px"
-fn property(key, value) => "--" ++ key ++ ":" ++ fmt(value) ++ ";"
-pub fn image_url(base, path) => "url('" ++ url_resolve(base, path) ++ "')"
+pub fn fmt(value) any^ => string(round(value * 100000) / 100000)
+fn px(value) any^ => fmt(value) ++ "px"
+fn property(key, value) any^ => "--" ++ key ++ ":" ++ fmt(value) ++ ";"
+pub fn image_url(base, path) any^ => "url('" ++ url_resolve(base, path) ++ "')"
 pub fn light(level) => max(0.12, 1 - max(0, min(31, (15 - level / 16) * 4 - 4)) / 32)
-pub fn light_filter(point, viewpoint, spectator) {
+pub fn light_filter(point, viewpoint, spectator) any^ {
     let relative = geo.subtract(point, viewpoint), forward = geo.forward(viewpoint.angle)
     let falloff = if (spectator != "player") 1 else
         max(0.15, min(1, 1 - (relative.x * forward.x + relative.y * forward.y) / 1500))
@@ -17,7 +17,7 @@ pub fn light_filter(point, viewpoint, spectator) {
 }
 fn light_class(special) => {'1': "light-flicker", '2': "light-blink-fast", '3': "light-blink",
     '8': "light-glow", '12': "light-blink-fast", '13': "light-blink", '17': "light-fire-flicker"}[string(special)] or ""
-fn plane_class(plane) => plane.kind ++ (if (plane.wall.isScrolling) " scroll-texture" else "") ++
+fn plane_class(plane) any^ => plane.kind ++ (if (plane.wall.isScrolling) " scroll-texture" else "") ++
     (if (plane.mover != null and plane.kind == "wall") " unpegged" else "") ++
     (if (plane.kind == "floor" and starts_with(plane.texture or "", "NUKAGE")) " nukage" else "")
 fn adjacent(a, b) => a.start == b.start or a.start == b.end or a.end == b.start or a.end == b.end
@@ -27,14 +27,14 @@ fn wall_descriptor(wall, id, mover = null, motion_base = 0) {
         center: {x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2},
         radius: math.sqrt(geo.distance_squared(wall.start, wall.end)) / 2, bounds: bounds}
 }
-fn motion_for_wall(game, wall) {
+fn motion_for_wall(game, wall) any^ {
     let door = world.motion(game.doors, wall.door_id)
     let crusher = [for (entry in game.crushers where wall.isUpperWall and
         (entry.sectorIndex == wall.frontSectorIndex or entry.sectorIndex == wall.backSectorIndex)) entry][0]
     if (door != null) {kind: "door", sector: door.sectorIndex, base: door.closedHeight}
     else if (crusher != null) {kind: "crusher", sector: crusher.sectorIndex, base: crusher.topHeight} else null
 }
-fn valid_wall(wall) => wall.texture != null and wall.texture != "" and wall.texture != "-" and
+fn valid_wall(wall) any^ => wall.texture != null and wall.texture != "" and wall.texture != "-" and
     wall.topHeight > wall.bottomHeight and geo.distance_squared(wall.start, wall.end) >= 1
 fn surface_descriptor(sector, kind, game) {
     let bounds = geo.bounds(sector.boundaries[0])
@@ -52,9 +52,9 @@ fn surface_descriptor(sector, kind, game) {
         center: {x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2},
         radius: math.sqrt(width ** 2 + height ** 2) / 2}
 }
-pub fn prepare(map_data, game) {
+pub fn prepare(map_data, game) any^ {
     let walls = [for (wall in map_data.walls, let mover = motion_for_wall(game, wall)
-        where valid_wall(wall) and not wall.isLiftWall)
+        where ((valid_wall(wall) and not wall.isLiftWall) ^ { false }))
         wall_descriptor(wall, "wall-" ++ string(wall.id), mover, mover.base or 0)]
     let tracks = [for (door in game.doors, wall in map_data.walls,
         let faces = [for (face_wall in map_data.walls where face_wall.door_id == door.sectorIndex) face_wall]
@@ -63,16 +63,16 @@ pub fn prepare(map_data, game) {
             wall.texture != null and wall.texture != "-")
         wall_descriptor({*: wall, bottomHeight: door.closedHeight, topHeight: door.openHeight},
             "track-" ++ string(door.sectorIndex) ++ "-" ++ string(wall.id))]
-    let shafts = [for (lift in game.lifts, i in 0 to (len(lift.shaftWalls) - 1), let wall = lift.shaftWalls[i])
+    let shafts = [for (lift in game.lifts, i in ((0 to (len(lift.shaftWalls) - 1)) ^ { [] }), let wall = lift.shaftWalls[i])
         wall_descriptor({*: wall, sectorIndex: lift.sectorIndex, bottomHeight: lift.lowerHeight, topHeight: lift.upperHeight},
             "shaft-" ++ string(lift.sectorIndex) ++ "-" ++ string(i),
             if (wall.isPlatformFace) {kind: "lift", sector: lift.sectorIndex} else null, lift.upperHeight)]
     let surfaces = [for (sector in map_data.polygons, kind in ["floor", "ceiling"],
-        let surface = surface_descriptor(sector, kind, game) where surface.width > 0 and surface.height > 0) surface]
+        let surface = surface_descriptor(sector, kind, game) where ((((surface.width > 0 and surface.height > 0) ^ { false })))) surface]
     {*: map_data, planes: [*walls, *tracks, *shafts, *surfaces],
         actor_sectors: [for (actor in game.actors) world.sector_at(map_data, actor).sectorIndex]}
 }
-pub fn plane_visible(plane, player, range_limit = 2250, horizontal_fov = math.pi / 2) {
+pub fn plane_visible(plane, player, range_limit = 2250, horizontal_fov = math.pi / 2) any^ {
     let relative = geo.subtract(plane.center, player)
     let forward = geo.forward(player.angle), right = geo.right(player.angle)
     let depth = relative.x * forward.x + relative.y * forward.y
@@ -84,10 +84,10 @@ pub fn plane_visible(plane, player, range_limit = 2250, horizontal_fov = math.pi
         depth + plane.radius >= 0 and abs(side) <= depth * tangent + plane.radius * math.sqrt(1 + tangent ** 2)
 }
 fn clip_shape(surface) => "shape(evenodd from 0% 0%, " ++ join([for (boundary in surface.boundaries)
-    join([for (i in 0 to (len(boundary) - 1)) (if (i == 0) "move to " else "line to ") ++
+    join([for (i in ((0 to (len(boundary) - 1)) ^ { [] })) (if (i == 0) "move to " else "line to ") ++
         fmt((boundary[i].x - surface.bounds.min_x) * 100 / surface.width) ++ "% " ++
         fmt((surface.bounds.max_y - boundary[i].y) * 100 / surface.height) ++ "%"], ", ") ++ ", close"], ", ") ++ ")"
-fn plane_style(plane, base, visible) {
+fn plane_style(plane, base, visible) any^ {
     let common = "visibility:" ++ (if (visible) "visible" else "hidden") ++ ";" ++
         property("x", plane.center.x) ++ property("y", plane.center.y)
     if (plane.kind == "wall") {
@@ -124,10 +124,10 @@ pub fn thing_tree(actor, player, visuals, images, base) {
             ";animation:" ++ pose.animation ++ ";")>
     >
 }
-pub fn camera_transform(player, perspective = 320, viewport_height = 336) => "translate3d(0px," ++ px((player.offset_y or 0) * viewport_height) ++ "," ++ px(perspective) ++ ") rotateX(" ++
+pub fn camera_transform(player, perspective = 320, viewport_height = 336) any^ => "translate3d(0px," ++ px((player.offset_y or 0) * viewport_height) ++ "," ++ px(perspective) ++ ") rotateX(" ++
     fmt(player.pitch) ++ "rad) rotateY(" ++ fmt(-player.angle) ++ "rad) translate3d(" ++
     px(-player.x) ++ "," ++ px(player.z) ++ "," ++ px(player.y) ++ ")"
-pub fn thing_transform(actor, floor_height) => "translate3d(" ++ px(actor.x) ++ "," ++ px(-floor_height) ++ "," ++ px(-actor.y) ++ ")"
+pub fn thing_transform(actor, floor_height) any^ => "translate3d(" ++ px(actor.x) ++ "," ++ px(-floor_height) ++ "," ++ px(-actor.y) ++ ")"
 pub fn fuzz_filter() => <svg width:"0", height:"0", style:"display:block", 'aria-hidden':"true",
     <defs <filter id:"fuzz", x:"-10%", y:"-10%", width:"120%", height:"120%",
         <feTurbulence id:"fuzz-noise", type:"turbulence", baseFrequency:"0.8 0.03", numOctaves:"3", seed:"0", result:"noise">
@@ -147,7 +147,7 @@ pub fn tree(map_data, game, rules, visuals, images, base) =>
             <div id:"viewport", style:("background-image:" ++ image_url(base, "assets/textures/SKY1.png") ++ ";"),
                 <div id:"scene", style:("transform:" ++ camera_transform(camera.pose(game)) ++ ";" ++
                     property("camera-x", game.player.x) ++ property("camera-y", game.player.y) ++ property("camera-angle", game.player.angle)),
-                    *[for (sector_id in 0 to (len(map_data.sectors) - 1))
+                    *[for (sector_id in ((0 to (len(map_data.sectors) - 1)) ^ { [] }))
                         <div class:("sector " ++ light_class(map_data.sectors[sector_id].specialType)), id:("sector-" ++ string(sector_id)),
                             style:property("light", light(map_data.sectors[sector_id].lightLevel)),
                             *[for (plane in map_data.planes where plane.sector_id == sector_id)

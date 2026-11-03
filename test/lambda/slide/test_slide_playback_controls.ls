@@ -8,7 +8,7 @@ let deck = <presentation
         <cue start: 'entry', <effect target: "title", kind: 'fade-in', duration: 100.0>>>
     <slide id: "c", <text "C">>>
 let plan = slide.compile(deck, {autoplay_dwell_ms: 500.0})^
-fn control(ps, action, at_ms) => slide.reduce(plan, ps, {command: action, time_ms: at_ms})^
+fn control(ps, action, at_ms) any^ => slide.reduce(plan, ps, {command: action, time_ms: at_ms})^
 let initial = slide.initial_state(plan)
 let opening = control(initial, 'activate', 0.0)
 let parked = control(opening, 'frame', 100.0)
@@ -37,7 +37,7 @@ let continued_cue = control(control(paused_cue, 'play', 1000.0), 'frame', 1030.0
 let late = control(running, 'frame', 2000.0)
 let reduced = control(slide.initial_state(plan, {reduced_motion: true}), 'play', 0.0)
 let reduced_end = control(reduced, 'frame', 1500.0)
-fn speed(ps, rate, at_ms) => slide.reduce(plan, ps, {command: 'speed', rate: rate, time_ms: at_ms})^
+fn speed(ps, rate, at_ms) any^ => slide.reduce(plan, ps, {command: 'speed', rate: rate, time_ms: at_ms})^
 let faster = speed(running, 2.0, 25.0)
 let fastest = speed(running, 4.0, 25.0)
 let fastest_end = control(fastest, 'frame', 618.75)

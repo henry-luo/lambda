@@ -15,7 +15,7 @@ pub pn sync(owner,voice,plan,ps,stopped=false) map {
         if (source != null) {
             let src = if (plan.base_uri == null or starts_with(source.src,"data:")) source.src else url_resolve(plan.base_uri,source.src)
             var bytes = null
-            if (starts_with(src,"data:")) { let __error_outcome_1 = media.data_uri_bytes(src) ^ { ^ }; if (__error_outcome_1 is error) { current = {*:current,error:__error_outcome_1.message} } else match __error_outcome_1 { case any { bytes = ~ } } }
+            if (starts_with(src,"data:") ^ { return {*:current,error:^.message} }) { let __error_outcome_1 = media.data_uri_bytes(src) ^ { ^ }; if (__error_outcome_1 is error) { current = {*:current,error:__error_outcome_1.message} } else match __error_outcome_1 { case any { bytes = ~ } } }
             else { let __error_outcome_2 = input(src,'binary') ^ { ^ }; if (__error_outcome_2 is error) { current = {*:current,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { bytes = ~ } } }
             if (bytes != null) {
                 let token = dom.audio_open(owner,bytes)

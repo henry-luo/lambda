@@ -30,7 +30,7 @@ pn write_row(var row) {
 
 pn test_leading_axis_row_write() {
     var m = [[1, 2, 3], [4, 5, 6]]
-    write_row(m[1])              // leading-axis row 1 borrowed -> [4, 5, 6]
+    write_row(m[1])^              // leading-axis row 1 borrowed -> [4, 5, 6]
     print(m[1][0]); print(" "); print(m[1][1]); print(" "); print(m[1][2]); print("\n")  // 99 5 88
 }
 
@@ -44,6 +44,6 @@ pn test_compact_view_write() {
 pn main() {
     test_subview_write_through()
     test_float_view_write_through()
-    test_leading_axis_row_write()
+    test_leading_axis_row_write()^
     test_compact_view_write()
 }

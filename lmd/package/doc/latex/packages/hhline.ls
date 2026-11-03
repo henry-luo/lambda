@@ -5,7 +5,7 @@
 // vertical rules. *{n}{…} repeats a pattern.
 
 // the column segments of a spec: "double", "single" or "none"
-fn segments(spec, i, acc) {
+fn segments(spec, i, acc) any^ {
     if (i >= len(spec)) acc
     else {
         let ch = slice(spec, i, i + 1)
@@ -21,7 +21,7 @@ fn segments(spec, i, acc) {
             else {
                 let pattern = segments(slice(rest, 1, close), 0, [])
                 segments(spec, i + count_end + 1 + close + 1,
-                    acc ++ (if (copies <= 0) [] else [for (k in 1 to copies, segment in pattern) segment]))
+                    acc ++ (if (copies <= 0) [] else [for (k in ((1 to copies) ^ { [] }), segment in pattern) segment]))
             }
         }
         else segments(spec, i + 1, acc)

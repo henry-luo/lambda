@@ -1,4 +1,4 @@
-fn member(tree, name) => [for (entry in content(tree)^ where entry.name == name) entry][0]
+fn member(tree, name) any^ => [for (entry in content(tree)^ where entry.name == name) entry][0]
 let tar = input("test/input/archive/sample.tar")^
 let seven = input("test/input/archive/7z-solid.7z", '7z')^
 let legacy = input("test/input/archive/legacy.rar", 'rar')^

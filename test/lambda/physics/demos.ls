@@ -10,7 +10,7 @@ let sorter=physics.simulate(descriptions[2],{steps:1200,sample_every:1200})^;
 let bounce=physics.simulate(descriptions[3],{steps:150,sample_every:150,bodies:scenes.bounce_ids})^;
 let checks={
     valid:all([for (scene in descriptions) physics.validate(scene)^]),
-    cascade:len([for (body in domino.frames[1].bodies where starts_with(body.id,"tile-") and body.position[1]<0.5) body])==32,
+    cascade:len([for (body in domino.frames[1].bodies where ((starts_with(body.id,"tile-") and body.position[1]<0.5) ^ { false })) body])==32,
     compounds:len(cargo.frames[1].bodies)==10 and abs(cargo.frames[1].bodies[1].quaternion[3]-1.0)>0.001,
     sensor_events:len([for (event in sorter.events where event.type=="sensor-enter") event])>=12,
     kinematic:abs(sorter.frames[1].bodies[1].quaternion[3]-1.0)>0.001,

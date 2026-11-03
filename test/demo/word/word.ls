@@ -138,14 +138,14 @@ on render(evt) {
             dom.set_attribute(word,"data-ribbon-render-key",ribbon_key)
             dom.request_frame(word,"word_ribbon_ready")
         }
-        spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
-        spelling.reposition(evt.target,"word")
-        if (st.dialog!=null) {
+        spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)^
+        spelling.reposition(evt.target,"word")^
+        if ((st.dialog!=null)^) {
             let dialog = dom.query_selector(evt.target,".edit-dialog")
             // custom focusable controls, including the picker's listbox, must retain focus across renders.
             let controls = if (dialog==null) [] else dom.query_selector_all(dialog,"input,textarea,select,button:not([disabled]),[tabindex='0']")
             // native caret paints last; moving focus into the modal hides it without losing the saved range.
-            if (len(controls)>0 and not any([for (control in controls) dom.focused(control)])) dom.focus_set(controls[0],false)
+            if ((len(controls)>0 and not any([for (control in controls) dom.focused(control)]))^) dom.focus_set(controls[0],false)
         }
     }
     return 'pass'
@@ -165,20 +165,20 @@ on word_ribbon_ready(evt) {
     return 'pass'
 }
 on word_toolbar_ready(evt) {
-    if (not ruler.dragging(evt.target)) mini.position(evt.target)
+    if ((not ruler.dragging(evt.target))^) mini.position(evt.target)^
     return 'pass'
 }
 on word_object_select(req) {
     st = {*:st,object_picks:[],editor:image.select_image(app.mounted(st.editor,req.node),req.path)}
     // a click inside an equation places Word's in-place caret at the nearest slot.
     st = {*:st,math:if (req.point==null or st.read_only) null else math_edit.start(st.editor,req.point)}
-    app.focus_document(req.node)
+    app.focus_document(req.node)^
     app.finish(st,req.node)
 }
 on word_table_select(req) {
     st = {*:st,context:null,editor:{*:edit_set_selection(app.mounted(st.editor,req.node),req.selection),
         table_range:req.range},status:"Table selection"}
-    app.focus_document(req.node)
+    app.focus_document(req.node)^
     app.finish(st,req.node)
 }
 on word_context_ready(evt) {
@@ -193,8 +193,8 @@ on word_navigation_tab_ready(evt) {
 }
 on word_navigation_ready(evt) {
     // wait for the new pane and the restored source range before scrolling, including in Read Mode.
-    if (st.read_only) navigation.select_readonly(st.editor,controller.surface(evt.target))
-    else controller.restore(tables.native_editor(st.editor))
+    if (st.read_only^) navigation.select_readonly(st.editor,controller.surface(evt.target))^
+    else controller.restore(tables.native_editor(st.editor))^
     let root = dom.root_node(evt.target)
     let bounds = dom.selection_boundaries(dom.document_selection(evt.target))
     let target = if (st.nav_target.kind=="object") image.image_element(st.editor,controller.surface(evt.target))
@@ -216,12 +216,12 @@ on word_ruler_geometry_ready(evt) { ruler.position(st.editor,evt.target,st.zoom)
 on word_equation_ready(evt) { equation_edit.focus(st,evt.target); return 'pass' }
 on word_ruler_end(evt) { app.refresh_toolbar(st,evt.target); return 'pass' }
 on word_viewport_changed(evt) {
-    ruler.position(st.editor,evt.target,st.zoom)
+    ruler.position(st.editor,evt.target,st.zoom)^
     // the scrollport consumes scroll events and forwards this notification to viewport overlays.
-    spelling.reposition(evt.target,"word")
-    if (st.layout=="web" and not st.read_only) {
-        handles.fit_surface(evt.target)
-        handles.position(st.editor,evt.target,st.zoom)
+    spelling.reposition(evt.target,"word")^
+    if ((st.layout=="web" and not st.read_only)^) {
+        handles.fit_surface(evt.target)^
+        handles.position(st.editor,evt.target,st.zoom)^
     }
     if (mini.visible(st) and not ruler.dragging(evt.target)) mini.refresh(evt.target)
 }
@@ -229,35 +229,35 @@ on resize(evt) {
     // Native live resize can repaint before a requested frame runs.
     let handoff = ribbon_overflow.begin_resize(evt.target,
         dom.get_element_by_id(dom.root_node(evt.target),"edit-surface"))
-    ribbon_overflow.update(evt.target)
-    ribbon_overflow.end_resize(handoff)
+    ribbon_overflow.update(evt.target)^
+    ribbon_overflow.end_resize(handoff)^
     dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_ribbon_ready")
-    if (st.layout=="web" and not st.read_only)
+    if ((st.layout=="web" and not st.read_only)^)
         dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_viewport_changed")
-    if (mini.visible(st)) mini.refresh(evt.target)
-    spelling.reposition(evt.target,"word")
+    if (mini.visible(st)^) mini.refresh(evt.target)^
+    spelling.reposition(evt.target,"word")^
     font_picker.reposition(evt.target)
     return 'pass'
 }
 on scroll(evt) { spelling.reposition(evt.target,"word"); return 'pass' }
 on dblclick(evt) {
-    if (st.read_only) { return 'pass' }
+    if (st.read_only^) { return 'pass' }
     if (dom.closest(evt.target,"[data-word-citation]")!=null) {
         st = app.command(app.adopt(st,evt),"ui.editCitation",{},evt.target)
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         return 'prevent-default'
     }
     let story = dom.closest(evt.target,".word-story")
     if (story!=null) {
         st = app.command(st,"ui.headerFooter",{},evt.target)
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         return 'prevent-default'
     }
     let path = handles.hit(st.editor,evt.target)
-    if (path!=null) {
+    if ((path!=null)^) {
         st = {*:st,editor:image.select_image(app.mounted(st.editor,evt.target),path)}
         st = app.command(st,if (equation.settings(image.selected(st.editor).node)!=null) "ui.equationEdit" else "ui.pictureSettings",{},evt.target)
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         return 'prevent-default'
     }
     return 'pass'
@@ -266,38 +266,38 @@ on mousedown(evt) {
     // the ruler owns this gesture; redrawing the shell here would retire its capture target.
     if (dom.closest(evt.target,".ruler-control")!=null) { return 'prevent-default' }
     // changing shell state without a popup would reset a just-started object gesture.
-    if (mini.visible(st) and dom.closest(evt.target,"#selection-toolbar,#edit-surface")==null) { st = app.hide_toolbar(st) }
+    if ((mini.visible(st) and dom.closest(evt.target,"#selection-toolbar,#edit-surface")==null)^) { st = app.hide_toolbar(st) }
     // contextmenu precedes mousedown; keep its saved range out of native hit testing.
-    if (evt.button==1 and st.context!=null and dom.closest(evt.target,"#edit-surface,#object-handles")!=null) { return 'prevent-default' }
-    if (st.context!=null and dom.closest(evt.target,"#word-context-menu,.ribbon-menu-trigger")==null) { st = {*:st,context:null} }
+    if ((evt.button==1 and st.context!=null and dom.closest(evt.target,"#edit-surface,#object-handles")!=null)^) { return 'prevent-default' }
+    if ((st.context!=null and dom.closest(evt.target,"#word-context-menu,.ribbon-menu-trigger")==null)^) { st = {*:st,context:null} }
     if (dom.closest(evt.target,".ribbon-group[data-open=true],.ribbon-group-trigger")==null)
-        ribbon_overflow.close(evt.target)
+        ribbon_overflow.close(evt.target)^
     return 'pass'
 }
 on click(evt) {
     let trigger = dom.closest(evt.target,".ribbon-group-trigger")
     if (trigger!=null) {
-        ribbon_overflow.toggle(trigger)
+        ribbon_overflow.toggle(trigger)^
         return 'prevent-default'
     }
     return 'pass'
 }
 on mouseup(evt) {
     // an armed Format Painter applies once the drag selection is complete; a plain click keeps it armed.
-    if (st.home.painter==null or st.read_only or dom.closest(evt.target,"#edit-surface")==null) { return 'pass' }
+    if ((st.home.painter==null or st.read_only or dom.closest(evt.target,"#edit-surface")==null)^) { return 'pass' }
     let adopted = app.adopt(st,evt)
     let sel = adopted.editor.selection
-    if (sel.kind=='text' and pos_equal(sel.anchor,sel.head)) { return 'pass' }
+    if ((sel.kind=='text' and pos_equal(sel.anchor,sel.head))^) { return 'pass' }
     st = app.command({*:adopted,home:{*:adopted.home,painter:null}},"format.painter",{marks:st.home.painter},evt.target)
     app.finish(st,evt.target)
     return 'pass'
 }
 on contextmenu(evt) {
-    if (st.dialog!=null or dom.closest(evt.target,"#edit-surface,#object-handles")==null) { return 'pass' }
+    if ((st.dialog!=null or dom.closest(evt.target,"#edit-surface,#object-handles")==null)^) { return 'pass' }
     let path = handles.hit(st.editor,evt.target)
     let story = focused.story(evt.target)
     let editor = app.mounted(app.adopt(st,evt).editor,evt.target)
-    let keep_cells = tables.structural(editor) and any([for (entry in tables.selected(editor))
+    let keep_cells = tables.structural(editor) and any([for (entry in ((tables.selected(editor)) ^ { [] }))
         path_is_prefix(entry.path,evt.source_pos.path)])
     let target = if (keep_cells) editor else if (path!=null) image.select_image(editor,path)
         else if (story==null) focused.at_pointer(editor,evt.source_pos,false) else editor
@@ -308,7 +308,7 @@ on contextmenu(evt) {
     let copied_text = dom.selection_to_string(dom.document_selection(evt.target))
     st = {*:app.hide_toolbar(st),context:{x:evt.clientX,y:evt.clientY,copy_text:copied_text,story:story,item_selection:target.selection,
         cell_path:tables.hit(st.editor,evt.target)}}
-    app.finish(st,evt.target)
+    app.finish(st,evt.target)^
     dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_context_ready")
     return 'prevent-default'
 }
@@ -319,9 +319,9 @@ on editaction(evt) {
         st = {*:st,status:run.message}
         return {*:edit_result.model_applied(false,false,false,"",st.editor.selection,st.editor.model_revision),failure:run.message}
     }
-    if (st.read_only or evt.input_type=="copy") { return run.result }
+    if ((st.read_only or evt.input_type=="copy")^) { return run.result }
     st = {*:st,object_picks:[],editor:model.clean(run.editor),status:if (not (run.result.failure is null)) "This edit is unavailable here." else "Writing"}
-    spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
+    spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)^
     dom.set_close_guard(evt.target,session.is_dirty(st.file_state,st.editor.doc))
     return run.result
 }
@@ -335,64 +335,64 @@ on word_selectionchange(req) {
 }
 on keyup(evt) {
     // native navigation completes after keydown; promote its final source range.
-    if (st.dialog==null and not tables.structural(st.editor) and not app.is_control(evt.target) and
-        contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"],evt.key)) {
+    if ((st.dialog==null and not tables.structural(st.editor) and not app.is_control(evt.target) and
+        contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"],evt.key))^) {
         st = app.selection_changed(st,evt)
-        if (evt.shiftKey and st.mini_hidden and dom.closest(evt.target,"#edit-surface")!=null) {
+        if ((evt.shiftKey and st.mini_hidden and dom.closest(evt.target,"#edit-surface")!=null)^) {
             st = {*:st,mini_hidden:false}
-            app.finish(st,evt.target)
+            app.finish(st,evt.target)^
         }
     }
     return 'pass'
 }
 on word_command(req) {
     // a nested ribbon menu needs its compact group visible while it reads the trigger geometry.
-    if (req.id!="ui.editingMenu") ribbon_overflow.close(req.node)
+    if (req.id!="ui.editingMenu") ribbon_overflow.close(req.node)^
     if (dom.closest(req.node,"#selection-toolbar")==null) { st = app.hide_toolbar(st) }
     let menu = st.context
     if (req.id=="ui.editingMenu") {
         st = app.command(if (menu!=null or st.read_only) st else app.adopt(st,req.event),req.id,req.params,req.node)
-        app.finish(st,req.node)
+        app.finish(st,req.node)^
         return 'handled'
     }
     // deletion already has a source selection; a clipboard round trip can lose block atoms.
     let id = if (req.id=="clipboard.delete") (if (tables.structural(st.editor)) "table.clear" else "text.delete") else req.id
     // menu commands keep the source target captured when the menu opened.
     st = {*:if (st.read_only or menu!=null) st else app.adopt(st,req.event),context:null}
-    if (req.selection!=null and not st.read_only) {
+    if ((req.selection!=null and not st.read_only)^) {
         st = {*:st,editor:edit_set_selection(st.editor,req.selection)}
     }
-    if (id=="clipboard.pasteText") {
+    if ((id=="clipboard.pasteText")^) {
         // Keep Text Only reads plain clipboard text and inserts it with the destination formatting.
         st = app.command(st,"edit.pasteText",{text:dom.clipboard_text() or ""},req.node)
-        app.finish(st,req.node)
+        app.finish(st,req.node)^
         return 'handled'
     }
-    if (starts_with(id,"clipboard.")) {
-        if (st.read_only and id=="clipboard.copy") {
-            dom.clipboard_write(menu.copy_text or "")
+    if (starts_with(id,"clipboard.")^) {
+        if ((st.read_only and id=="clipboard.copy")^) {
+            dom.clipboard_write(menu.copy_text or "")^
             return 'handled'
         }
-        if (id=="clipboard.selectAll") {
-            if (st.read_only) {
+        if ((id=="clipboard.selectAll")^) {
+            if (st.read_only^) {
                 // static ranges bind to the live surface after the menu's removal.
                 dom.request_frame(dom.get_element_by_id(dom.root_node(req.node),"word"),"word_select_all")
                 return 'handled'
             }
             st = {*:st,editor:edit_set_selection(app.mounted(st.editor,req.node),all_selection())}
-            app.focus_document(req.node)
-            app.finish(st,req.node)
+            app.focus_document(req.node)^
+            app.finish(st,req.node)^
             return 'handled'
         }
-        app.finish(st,req.node)
-        if (not st.read_only) { app.focus_document(req.node) }
+        app.finish(st,req.node)^
+        if ((not st.read_only)^) { app.focus_document(req.node)^ }
         let host = controller.surface(req.node)
         let command = {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste"}[slice(id,10)]
         dom.keyboard_command(host,command)
         return 'handled'
     }
     st = app.command(st,id,req.params,req.node,req.ruler_focus!=null)
-    app.finish(st,req.node)
+    app.finish(st,req.node)^
     if (req.ruler_focus!=null) {
         st = {*:st,ruler_focus:req.ruler_focus}
         dom.request_frame(dom.get_element_by_id(dom.document_element(req.node),"word"),"word_ruler_focus_ready")
@@ -409,11 +409,11 @@ on word_lookup(evt) {
 }
 // a finished or failed reading frees the speaker button; a reading it already replaced changes nothing.
 on speechend(evt) {
-    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null}} }
+    if ((st.lookup!=null and evt.token==st.lookup.speech)^) { st = {*:st,lookup:{*:st.lookup,speech:null}} }
     return 'handled'
 }
 on speecherror(evt) {
-    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null},status:"The word could not be read aloud"} }
+    if ((st.lookup!=null and evt.token==st.lookup.speech)^) { st = {*:st,lookup:{*:st.lookup,speech:null},status:"The word could not be read aloud"} }
     return 'handled'
 }
 on word_lookup_ready(evt) {
@@ -432,7 +432,7 @@ on word_picker_ready(evt) {
     if (st.dialog.kind=="open") picker.focus(st.dialog,evt.target)
 }
 on word_picker_closed(evt) {
-    if (st.dialog==null) { app.focus_document(evt.target); app.finish(st,evt.target) }
+    if (st.dialog==null) { app.focus_document(evt.target)^; app.finish(st,evt.target) }
 }
 on word_open(evt) {
     let next = app.open_finished(st,evt.detail,evt.target)
@@ -451,12 +451,12 @@ on control_change(req) {
 on keydown(evt) {
     if (dom.closest(evt.target,"#word-font-picker")!=null) { return 'pass' }
     // the picker owns navigation and text-field shortcuts while its modal is open.
-    if (st.dialog.kind=="open" and dom.closest(evt.target,"#word-file-picker")!=null) { return 'pass' }
-    if (evt.key=="Escape" and st.context==null) {
+    if ((st.dialog.kind=="open" and dom.closest(evt.target,"#word-file-picker")!=null)^) { return 'pass' }
+    if ((evt.key=="Escape" and st.context==null)^) {
         let opened = dom.query_selector(dom.root_node(evt.target),".ribbon-group[data-open=true]")
         if (opened!=null) {
             let trigger = dom.query_selector(opened,".ribbon-group-trigger")
-            ribbon_overflow.close(evt.target)
+            ribbon_overflow.close(evt.target)^
             dom.focus_set(trigger,false)
             return 'prevent-default'
         }
@@ -469,57 +469,57 @@ on keydown(evt) {
     }
     if (app.primary(evt) and evt.key=="Enter" and dom.closest(evt.target,"#equation-editor-pane")!=null) {
         st = app.command(st,"ui.equationApply",{},evt.target)
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         return 'prevent-default'
     }
-    if (st.dialog==null and st.context==null and not app.is_control(evt.target) and math_edit.active(st)) {
+    if ((st.dialog==null and st.context==null and not app.is_control(evt.target) and math_edit.active(st))^) {
         let next = app.math_key(st,evt,evt.target)
-        if (next!=null) {
+        if ((next!=null)^) {
             st = next
-            app.finish(st,evt.target)
+            app.finish(st,evt.target)^
             return 'prevent-default'
         }
     }
     // a child widget that claimed the key owns its command and focus restoration.
     if (evt.defaultPrevented==true and dom.closest(evt.target,"#ruler-workspace")!=null) { return 'pass' }
-    if (evt.key=="Escape" and mini.visible(st)) {
+    if ((evt.key=="Escape" and mini.visible(st))^) {
         st = app.hide_toolbar(st)
-        app.focus_document(evt.target)
-        app.finish(st,evt.target)
+        app.focus_document(evt.target)^
+        app.finish(st,evt.target)^
         return 'prevent-default'
     }
     if (evt.key=="Tab" and dom.closest(evt.target,"#selection-toolbar,.ruler-control")!=null) { return 'pass' }
-    if (st.context==null and st.dialog==null and tables.structural(st.editor) and
-        (evt.key=="Escape" or contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"],evt.key))) {
+    if ((st.context==null and st.dialog==null and tables.structural(st.editor) and
+        (evt.key=="Escape" or contains(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"],evt.key)))^) {
         if (evt.shiftKey and evt.key!="Escape") {
             st = {*:st,editor:tables.extend(st.editor,evt.key)}
-            app.finish(st,evt.target)
+            app.finish(st,evt.target)^
             return 'prevent-default'
         }
         st = {*:st,editor:edit_set_selection(st.editor,tables.native_editor(st.editor).selection)}
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         if (evt.key=="Escape") { return 'prevent-default' }
         return 'pass'
     }
-    if (st.context!=null) {
-        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) {
-            context.navigate(evt.target,"word-context-menu",evt.key)
+    if ((st.context!=null)^) {
+        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)^) {
+            context.navigate(evt.target,"word-context-menu",evt.key)^
             return 'prevent-default'
         }
-        if (contains(["Escape","Tab"],evt.key)) {
+        if (contains(["Escape","Tab"],evt.key)^) {
             st = {*:st,context:null}
-            ribbon_overflow.close(evt.target)
-            app.focus_document(evt.target)
-            app.finish(st,evt.target)
+            ribbon_overflow.close(evt.target)^
+            app.focus_document(evt.target)^
+            app.finish(st,evt.target)^
             return 'prevent-default'
         }
     }
-    if (st.dialog==null and (evt.key=="ContextMenu" or (evt.key=="F10" and evt.shiftKey)) and
-        dom.closest(evt.target,"#edit-surface")!=null) {
+    if ((st.dialog==null and (evt.key=="ContextMenu" or (evt.key=="F10" and evt.shiftKey)) and
+        dom.closest(evt.target,"#edit-surface")!=null)^) {
         let box = dom.bounding_box(evt.target)
         st = {*:app.adopt(st,evt),context:{x:box.x+20,y:box.y+20,
             copy_text:dom.selection_to_string(dom.document_selection(evt.target)),story:focused.story(evt.target)}}
-        app.finish(st,evt.target)
+        app.finish(st,evt.target)^
         dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_context_ready")
         return 'prevent-default'
     }
@@ -539,7 +539,7 @@ on keydown(evt) {
         else if (app.primary(evt) and key==" " and st.dialog==null and not app.is_control(evt.target)) "format.clear"
         else if (app.primary(evt) and st.dialog==null and not app.is_control(evt.target)) model.shortcut(key,evt.shiftKey==true)
         else null
-    if (id==null) { return 'pass' }
+    if ((id==null)^) { return 'pass' }
     st = app.command({*:adopted,context:null},id,{},evt.target)
     app.finish(st,evt.target)
     return 'prevent-default'

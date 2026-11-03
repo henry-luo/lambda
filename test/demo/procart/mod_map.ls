@@ -4,13 +4,13 @@ import terrain: lambda.procart.terrain
 let CELL = 6.0
 let COLORS = terrain.biome_colors()
 
-fn rgb(c) string => "rgb(" ++ string(c[0]) ++ "," ++ string(c[1]) ++ "," ++ string(c[2]) ++ ")"
+fn rgb(c) string^ => "rgb(" ++ string(c[0]) ++ "," ++ string(c[1]) ++ "," ++ string(c[2]) ++ ")"
 
 // one rect per run of equal cells in a row, so wide oceans and plains stay a few elements.
 fn runs(row) array => (let starts = [for (x, v in row where x == 0 or v != row[x - 1]) x],
     [for (j, s in starts) [s, (if (j + 1 < len(starts)) starts[j + 1] else len(row)) - s, row[s]]])
 
-fn river_width(flow) float => 0.6 + math.sqrt(float(flow)) * 0.22
+fn river_width(flow) float^ => 0.6 + math.sqrt(float(flow)) * 0.22
 
 // a town's name, left of its dot near the right edge so it stays on the map.
 fn label(t, width: float) element {
@@ -19,7 +19,7 @@ fn label(t, width: float) element {
         class:(if (t.capital) "label capital" else "label"), t.name>
 }
 
-pub fn world_map(world, show_rivers) element {
+pub fn world_map(world, show_rivers) element^ {
     let w = float(len(world.land.biomes[0])) * CELL
     let h = float(len(world.land.biomes)) * CELL
     let columns = len(world.land.biomes[0])
@@ -27,7 +27,7 @@ pub fn world_map(world, show_rivers) element {
     let flows = map([for (s in world.land.rivers) for (v in [string(int(s[1]) * columns + int(s[0])), s[4]]) v]);
     // element content takes one spread, so the layers join in one array
     <svg class:"map", viewBox:"0 0 " ++ string(w) ++ " " ++ string(h), width:w, height:h, preserveAspectRatio:"xMidYMid meet",
-        *[*[for (y, row in world.land.biomes) for (r in runs(row))
+        *[*[for (y, row in world.land.biomes) for (r in ((runs(row)) ^ { [] }))
             <rect x:float(r[0]) * CELL, y:float(y) * CELL, width:float(r[1]) * CELL + 0.5, height:CELL + 0.5, fill:rgb(COLORS[r[2]])>],
           *[for (cell in world.districts) <polygon class:"district", fill:"none", stroke:"#64593f", opacity:0.45,
             'stroke-width':0.8, 'stroke-dasharray':"4 3", points:join([for (p in cell) string(p[0] * CELL) ++ "," ++ string(p[1] * CELL)], " ")>],
@@ -42,13 +42,13 @@ pub fn world_map(world, show_rivers) element {
 }
 
 // the ruin: floor tiles as runs, rooms outlined.
-pub fn floor_plan(dungeon) element {
+pub fn floor_plan(dungeon) element^ {
     let s = 5.0
     let w = float(len(dungeon.tiles[0])) * s
     let h = float(len(dungeon.tiles)) * s;
     <svg class:"plan", viewBox:"0 0 " ++ string(w) ++ " " ++ string(h), width:w, height:h,
         *[<rect x:0, y:0, width:w, height:h, fill:"#2a2420">,
-          *[for (y, row in dungeon.tiles) for (r in runs(row) where r[2] == 0)
+          *[for (y, row in dungeon.tiles) for (r in ((runs(row)) ^ { [] }) where r[2] == 0)
             <rect x:float(r[0]) * s, y:float(y) * s, width:float(r[1]) * s, height:s, fill:"#d6c7a8">],
           *[for (room in dungeon.rooms) <rect x:float(room[0]) * s, y:float(room[1]) * s, width:float(room[2]) * s, height:float(room[3]) * s,
             fill:"none", stroke:"#8a6d3b", 'stroke-width':1>]]>

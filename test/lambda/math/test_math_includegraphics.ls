@@ -5,9 +5,9 @@ import radiant
 
 let directory = "test/lambda/math/assets/katex/website/static/img"
 let source = "khan-academy.png"
-fn ast(text) => parse(text, {type: "math", flavor: "latex"})^
-fn box(opts) => math.render_box(ast("\\includegraphics[" ++ opts ++ "]{" ++ source ++ "}"), {base_uri: directory})^
-fn image(b) => [for (g in svg.geometry(b.element) where name(g.node) == 'image') g.node][0]
+fn ast(text) any^ => parse(text, {type: "math", flavor: "latex"})^
+fn box(opts) any^ => math.render_box(ast("\\includegraphics[" ++ opts ++ "]{" ++ source ++ "}"), {base_uri: directory})^
+fn image(b) => [for (g in ((svg.geometry(b.element)) ^ { [] }) where ((name(g.node) == 'image') ^ { false })) g.node][0]
 fn close(a, b) => abs(a - b) < 0.00001
 
 let bytes = input(directory ++ "/" ++ source, 'binary')^
@@ -37,8 +37,8 @@ let checks = [
         image(explicit)["aria-label"] == "KA, logo" and image(explicit).preserveAspectRatio == "none"},
     {name: "unitless image dimensions use big points", ok: close(scaled.height, 1.0) and close(scaled.width, 2.0)},
     {name: "scripts and fractions retain actual images", ok:
-        len([for (g in svg.geometry(script.element) where name(g.node) == 'image') g]) == 1 and
-        len([for (g in svg.geometry(fraction.element) where name(g.node) == 'image') g]) == 2},
+        len([for (g in ((svg.geometry(script.element)) ^ { [] }) where ((name(g.node) == 'image') ^ { false })) g]) == 1 and
+        len([for (g in ((svg.geometry(fraction.element)) ^ { [] }) where ((name(g.node) == 'image') ^ { false })) g]) == 2},
     {name: "row spacing reserves height without painting bracket text", ok:
         close(rows[1].height + rows[1].depth - rows[0].height - rows[0].depth, 1.0) and
         svg.painted_text(rows[1].element) == svg.painted_text(rows[0].element)},

@@ -14,7 +14,7 @@ pub fn settings(n,key,defaults=null) {
     if (not (stored is map)) null else if (defaults==null) stored else {*:defaults,*:stored}
 }
 pub fn source(graphic) string^ => media.data_uri(binary(format(graphic,'xml')^),"image/svg+xml")^
-pub fn dimensions_valid(p) => geom.finite_number(p.width) and p.width>=16 and p.width<=650 and
+pub fn dimensions_valid(p) any^ => geom.finite_number(p.width) and p.width>=16 and p.width<=650 and
     geom.finite_number(p.height) and p.height>=16 and p.height<=2000 and
     geom.finite_number(p.rotation) and p.rotation>=-180 and p.rotation<=180
 pub fn transform_style(n,angle=null,layout=null) {
@@ -25,7 +25,7 @@ pub fn transform_style(n,angle=null,layout=null) {
             string(if (p.flip_y==true) -1 else 1) ++ ")"] else []];
     if (len(parts)==0) null else join(parts," ")
 }
-pub fn rotate_transaction(tx,path,angle) {
+pub fn rotate_transaction(tx,path,angle) any^ {
     let n = node_at(tx.doc_after,path)
     let style = inline_format.css_set(attrs_get(n.attrs,'style'),"transform",transform_style(n,angle))
     tx_step(tx_step(tx,step_set_attr(path,'style',style)),step_set_attr(path,'data-word-rotation',angle))

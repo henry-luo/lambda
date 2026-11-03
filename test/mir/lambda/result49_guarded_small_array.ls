@@ -4,7 +4,7 @@ pn guarded_pair(v0: float[], v1: float[]) float {
     pair[0] + pair[1]
 }
 
-pn escaping_pair(v0: float[], v1: float[]) float[] {
+pn escaping_pair(v0: float[], v1: float[]) float[]^ {
     let pair: float[] = [v0[1] + v1[0], v0[0] - v1[1]]
     pair
 }

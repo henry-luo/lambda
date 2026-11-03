@@ -38,19 +38,19 @@ pn main() {
                                     {n: 3, flag: false, tag: "c"}],
                   rec: {n: 0, flag: false, tag: "r"},
                   grid: [[{n: 0}, {n: 0}], [{n: 0}, {n: 0}]]}
-    run_hot(b)
+    run_hot(b)^
     print([b.items[0].n, b.items[1].n, b.items[2].n, b.items[0].flag, b.rec.n])
     print("\n")
 
     // an open leaf accepts any non-error value; the bracket key is an Item
     var idx = 1
-    set_any(b, idx, "text")
-    set_any(b, 2.0, 7)
+    set_any(b, idx, "text")^
+    set_any(b, 2.0, 7)^
     print([b.items[1].n, b.items[2].n])
     print("\n")
 
     // four keys take the array descriptor
-    set_deep(b, 1, 0, 42)
+    set_deep(b, 1, 0, 42)^
     print(b.grid[1][0].n)
     print("\n")
 

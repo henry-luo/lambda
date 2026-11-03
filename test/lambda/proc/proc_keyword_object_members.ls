@@ -12,7 +12,7 @@ pn main() {
     var t = <Toggle>
     print(t.state()); print("\n")
     print(t.on); print("\n")
-    t.enable()
+    t.enable()^
     print(t.on); print("\n")
     // a method named `sum` is NOT a shadow: S12.3.7 governs module bindings
     // only, and a method is reached solely as `t.sum()`.

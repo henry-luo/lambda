@@ -19,7 +19,7 @@ pub fn render_newline(ctx) {
 // Horizontal space
 // ============================================================
 
-pub fn render_hspace(node, ctx) {
+pub fn render_hspace(node, ctx) any^ {
     let amount = get_length_arg(node)
     if (amount != null) {
         let result = <span class: "latex-hspace", style: "margin-left:" ++ amount>
@@ -31,7 +31,7 @@ pub fn render_hspace(node, ctx) {
 // Vertical space
 // ============================================================
 
-pub fn render_vspace(node, ctx) {
+pub fn render_vspace(node, ctx) any^ {
     let amount = get_length_arg(node)
     if (amount != null) {
         let result = <div class: "latex-vspace", style: "margin-top:" ++ amount>
@@ -150,7 +150,7 @@ pub fn render_slash_el() {
 }
 
 // element-returning versions for two-pass rendering
-pub fn render_hspace_el(node) {
+pub fn render_hspace_el(node) any^ {
     let amount = get_length_arg(node)
     // \hspace{\stretch{n}} is rubber length: a fill like \hfill
     if (util.find_descendant(node, 'stretch') != null) <span class: "latex-hfill">
@@ -159,7 +159,7 @@ pub fn render_hspace_el(node) {
     } else { null }
 }
 
-pub fn render_vspace_el(node) {
+pub fn render_vspace_el(node) any^ {
     let amount = get_length_arg(node)
     // vertical rubber has no page to fill in continuous output
     if (util.find_descendant(node, 'stretch') != null) null
@@ -173,7 +173,7 @@ pub fn render_vspace_el(node) {
 // ============================================================
 
 // extract the length argument like {1cm}, {2em}, {0.5in} from a node
-fn get_length_arg(node) {
+fn get_length_arg(node) any^ {
     let cg = util.find_child(node, 'curly_group')
     if (cg != null) {
         trim(util.text_of(cg))

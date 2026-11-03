@@ -9,7 +9,7 @@
 // Unified shape: all nodes carry t, v, l, r (leaves set l/r to null)
 type Expr = {t: int, v: int, l: Expr?, r: Expr?}
 
-fn deriv(e: Expr) Expr {
+fn deriv(e: Expr) Expr^ {
     if (e.t == 0) {
         var r: Expr = {t: 0, v: 0, l: null, r: null}
         return r
@@ -33,14 +33,14 @@ fn deriv(e: Expr) Expr {
     return r
 }
 
-fn count_nodes(e: Expr) int {
+fn count_nodes(e: Expr) int^ {
     if (e.t == 0 or e.t == 1) {
         return 1
     }
     return 1 + count_nodes(e.l) + count_nodes(e.r)
 }
 
-fn make_expr() Expr {
+fn make_expr() Expr^ {
     // 3*x*x*x + 2*x*x + x + 5
     var c3: Expr = {t: 0, v: 3, l: null, r: null}
     var c2: Expr = {t: 0, v: 2, l: null, r: null}
@@ -62,7 +62,7 @@ fn make_expr() Expr {
     return a3
 }
 
-fn benchmark() int {
+fn benchmark() int^ {
     var result = 0
     var iter = 0
     while (iter < 5000) {
@@ -78,7 +78,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 45) {
+    if ((result == 45)^) {
         print("deriv: PASS\n")
     } else {
         print("deriv: FAIL result=")

@@ -1,12 +1,12 @@
 // GPU simulations, their variables, samplers and uniform tracks in the package validator (SH5)
 import s: lambda.scene3d
-fn message(scene) => s.normalize(scene) ^ { ^.message }
+fn message(scene) any^ => s.normalize(scene) ^ { ^.message }
 let camera = s.camera({id: "main"})
 let STEP = "void main() { fragment_color = texelFetch(position, ivec2(gl_FragCoord.xy), 0); }"
 let QUAD = "uniform sampler2D records; void main() { gl_Position = vec4(position, 1.0) + texelFetch(records, ivec2(0), 0); }"
 let WHITE = "void main() { fragment_color = vec4(1.0); }"
-fn walker(variables, uniforms = {time: 0.0}, options = {}) element => s.simulation("swarm", 2, 2, variables, uniforms, options)
-fn scene(simulation, sampled = "swarm.position", extra = []) element => s.scene([camera, simulation,
+fn walker(variables, uniforms = {time: 0.0}, options = {}) element^ => s.simulation("swarm", 2, 2, variables, uniforms, options)
+fn scene(simulation, sampled = "swarm.position", extra = []) element^ => s.scene([camera, simulation,
     s.mesh(s.plane(), s.shader_material(QUAD, WHITE, {records: sampled}, {id: "wing"})), *extra]);
 [
  s.validate(scene(walker([s.variable("position", STEP, [for (i in 0 to 15) 0.0]), s.variable("velocity", STEP)],

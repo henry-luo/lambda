@@ -53,7 +53,7 @@ fn ray_intersection(center,direction,a,b) {
         let u = cross(delta,direction)/denominator,
         if (t>=0 and u>=0 and u<=1) t else null)
 }
-pub fn anchor(kind,b,direction,descriptor=null) {
+pub fn anchor(kind,b,direction,descriptor=null) any^ {
     let center = geom.rect_center(b)
     let contour = outline(kind,b,descriptor)
     let intersections = [for (i,p in contour) ray_intersection(center,direction,p,contour[(i+1)%len(contour)])]

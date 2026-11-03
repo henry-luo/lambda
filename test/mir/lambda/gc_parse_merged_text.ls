@@ -8,10 +8,10 @@
 // unless they live in the Input's pool.
 
 fn runs(doc) {
-  let body = [for (c in content(doc) where type(c) == element and name(c) == 'body') c][0]
-  let para0 = [for (c in content(body) where type(c) == element) c][0]
+  let body = [for (c in ((content(doc)) ^ { [] }) where ((type(c) == element and name(c) == 'body') ^ { false })) c][0]
+  let para0 = [for (c in ((content(body)) ^ { [] }) where type(c) == element) c][0]
   let para = if (name(content(para0)[0]) == 'span') content(para0)[0] else para0;
-  [for (k in content(para)) if (type(k) == string) k else name(k)]
+  [for (k in ((content(para)) ^ { [] })) if (type(k) == string) k else name(k)]
 }
 
 // forced collection needs allocations, not a large retained graph: scanning a

@@ -17,23 +17,23 @@ pub let select_image = image.select_image
 pub let resize_image = image.resize_image
 pub let move_image = image.move_image
 pub let image_move_transaction = image.move_transaction
-pub fn image_html(entry) => html.inline_html([entry.node])
+pub fn image_html(entry) any^ => html.inline_html([entry.node])
 
 pub let color_properties = {color:"color",highlight:"background-color"}
 pub let default_colors = {color:"#000000",highlight:"#fff09b"}
-pub fn clipboard_command(id) => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
-pub fn color_value(editor,kind) => inline_format.char_value(editor,color_properties[kind],default_colors[kind])
+pub fn clipboard_command(id) any^ => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
+pub fn color_value(editor,kind) any^ => inline_format.char_value(editor,color_properties[kind],default_colors[kind])
 pub fn format_color(editor,kind,value) map^ {
     let chosen = lower(trim(string(value)))
     if (color_properties[kind] is null) raise error("Unknown color style.")
     else if (chosen!="" and not component.hex_color(chosen)) raise error("Use a six-digit hex color, such as #ff0000.")
     else edit_apply(editor,inline_format.transaction(editor,
-        (marks)=>inline_format.styled_marks(marks,color_properties[kind],chosen)))
+        (marks)any^ =>inline_format.styled_marks(marks,color_properties[kind],chosen)))
 }
 
 pub fn paragraph(words) => node('p',[text(words)])
 pub fn blank() => node('doc',[paragraph("")])
-pub fn open_editor(doc) => edit_open(doc,html.schema,null)
+pub fn open_editor(doc) any^ => edit_open(doc,html.schema,null)
 pub fn clean(editor) => {*:editor,events:[]}
 fn detached(editor) => {*:clean(editor),mounted:false,preset:null,surface_handle:null,native_selection_revision:0}
 pub fn note(id,folder,doc,updated,pinned=false) =>
@@ -41,15 +41,15 @@ pub fn note(id,folder,doc,updated,pinned=false) =>
 pub fn current(st) => [for (n in st.notes where n.id==st.selected) n][0]
 pub fn lines(n) => [for (block in n.editor.doc.content) trim(doc_text(block))]
 pub fn title(n) => lines(n)[0] or "New Note"
-pub fn preview(n) => slice(join([for (s in drop(lines(n),1) where s!="") s]," "),0,130) or "No additional text"
+pub fn preview(n) any^ => slice(join([for (s in ((drop(lines(n),1)) ^ { [] }) where s!="") s]," "),0,130) or "No additional text"
 pub fn folder_name(st,id) => [for (f in st.folders where f.id==id) f.name][0] or "Notes"
-pub fn scope_name(st) => if (st.folder=="all") "All Notes" else if (st.folder=="trash") "Recently Deleted" else folder_name(st,st.folder)
+pub fn scope_name(st) any^ => if (st.folder=="all") "All Notes" else if (st.folder=="trash") "Recently Deleted" else folder_name(st,st.folder)
 pub fn in_scope(n,folder) => if (folder=="trash") n.deleted else not n.deleted and (folder=="all" or n.folder==folder)
-pub fn count(st,folder) => len([for (n in st.notes where in_scope(n,folder)) n])
+pub fn count(st,folder) => len([for (n in st.notes where ((in_scope(n,folder)) ^ { false })) n])
 pub fn visible(st) {
     let query = lower(trim(st.query))
-    let rows = [for (n in st.notes where in_scope(n,st.folder) and
-        (query=="" or contains(lower(join(lines(n)," ")),query))) n];
+    let rows = [for (n in st.notes where ((in_scope(n,st.folder) and
+        (query=="" or contains(lower(join(lines(n)," ")),query))) ^ { false })) n];
     let ordered = sort(rows,{dir:if (st.sort=="title") 'asc' else 'desc',
         by:(n)=>if (st.sort=="title") lower(title(n)) else n.updated});
     [*[for (n in ordered where n.pinned) n],*[for (n in ordered where not n.pinned) n]]
@@ -63,18 +63,18 @@ pub fn select(st,id) {
     else if (id==st.selected) st
     else {*:st,selected:id,editor:controller.replace(st.editor,chosen.editor)}
 }
-pub fn reconcile(st) {
+pub fn reconcile(st) any^ {
     let rows = visible(st);
     if (contains([for (n in rows) n.id],st.selected)) st else select(st,rows[0].id or "")
 }
-pub fn scope(st,folder) => reconcile({*:st,folder:folder,query:""})
+pub fn scope(st,folder) any^ => reconcile({*:st,folder:folder,query:""})
 pub fn update_editor(st,editor,stamp) {
     let changed = editor.doc!=st.editor.doc;
     {*:st,editor:clean(editor),notes:[for (n in st.notes)
         if (n.id==st.selected) {*:n,editor:detached(editor),updated:if (changed) stamp else n.updated} else n]}
 }
-pub fn change_note(st,values) => reconcile({*:st,notes:[for (n in st.notes) if (n.id==st.selected) {*:n,*:values} else n]})
-pub fn create(st,stamp) {
+pub fn change_note(st,values) any^ => reconcile({*:st,notes:[for (n in st.notes) if (n.id==st.selected) {*:n,*:values} else n]})
+pub fn create(st,stamp) any^ {
     let id = "note-" ++ string(st.sequence)
     let folder = if (contains(["all","trash"],st.folder)) "notes" else st.folder
     let next = {*:st,notes:[note(id,folder,blank(),stamp),*st.notes],sequence:st.sequence+1,folder:folder,query:""};
@@ -90,37 +90,37 @@ pub fn add_folder(st,label) map^ {
         scope({*:st,folders:[*st.folders,{id:id,name:name}],sequence:st.sequence+1},id)
     }
 }
-pub fn move(st,folder) => if (not contains([for (f in st.folders) f.id],folder)) st else change_note(st,{folder:folder})
-pub fn purge(st) => reconcile({*:st,notes:[for (n in st.notes where n.id!=st.selected or not n.deleted) n]})
-pub fn navigate(st,delta) {
+pub fn move(st,folder) any^ => if (not contains([for (f in st.folders) f.id],folder)) st else change_note(st,{folder:folder})
+pub fn purge(st) any^ => reconcile({*:st,notes:[for (n in st.notes where n.id!=st.selected or not n.deleted) n]})
+pub fn navigate(st,delta) any^ {
     let rows = visible(st)
     let at = [for (i,n in rows where n.id==st.selected) i][0] or 0;
     select(st,rows[max(0,min(len(rows)-1,at+delta))].id or "")
 }
-pub fn selection_path(editor) => inline_format.selection_path(editor.selection)
-pub fn task_path(editor,path=null) => commands.ancestor_tag(editor.doc,path or selection_path(editor),'li')
+pub fn selection_path(editor) any^ => inline_format.selection_path(editor.selection)
+pub fn task_path(editor,path=null) any^ => commands.ancestor_tag(editor.doc,path or selection_path(editor),'li')
 pub fn tasks(doc,path=[]) => [for (entry in descendants(doc,path),let n=entry.node
-    where is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
-pub fn toggle_task(editor,path=null) {
+    where ((is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) ^ { false })) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
+pub fn toggle_task(editor,path=null) any^ {
     let target = path or task_path(editor)
     let item = node_at(editor.doc,target);
     if (target==null or item.tag!='li' or attrs_get(item.attrs,'checked')==null) editor
     else edit_apply(editor,tx_step(tx_begin(editor.doc,editor.selection),
         step_set_attr(target,'checked',not attrs_get(item.attrs,'checked'))))
 }
-pub fn checklist(editor) {
+pub fn checklist(editor) any^ {
     let inside = edit_inside(editor,'ul')
     let tx = if (inside) tx_begin(editor.doc,editor.selection) else commands.cmd_wrap_list(editor,'bullet');
     if (tx==null) editor else {
         let selected = {*:editor,doc:tx.doc_after,selection:tx.sel_after}
         let path = commands.ancestor_tag(selected.doc,selection_path(selected),'ul')
         let items = node_at(selected.doc,path)
-        let remove = all([for (item in items.content) attrs_get(item.attrs,'checked')!=null]);
+        let remove = all([for (item in ((items.content) ^ { [] })) attrs_get(item.attrs,'checked')!=null]);
         // wrapping and task attributes form one undoable command.
         if (path==null) editor else edit_apply(editor,checklist_steps(tx,items,path,0,if (remove) null else false))
     }
 }
-fn checklist_steps(tx,items,path,i,value) => if (i>=len(items.content)) tx else
+fn checklist_steps(tx,items,path,i,value) any^ => if (i>=len(items.content)) tx else
     checklist_steps(tx_step(tx,step_set_attr([*path,i],'checked',value)),items,path,i+1,value)
 pub fn initial(book) {
     let notes = [for (n in book.notes) note(n.id,n.folder,n.doc,n.updated,n.pinned)]

@@ -26,34 +26,34 @@ let factories = {
     hr:(a,k)=><hr>, br:(a,k)=><br>, img:(a,k)=><img *:a>,
     div:(a,k)=><div *:a, *k>
 }
-fn make(tag,attrs,kids) {
+fn make(tag,attrs,kids) any^ {
     let factory = factories[tag] or factories.div
     factory(attrs,kids)
 }
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
-fn projected_attrs(attrs,preview=false,extra=[]) => {*:map([for (a in attrs where contains([*extra,'style','align','start','indent','colspan','rowspan','data-word-style',
+fn projected_attrs(attrs,preview=false,extra=[]) => {*:map([for (a in attrs where ((contains([*extra,'style','align','start','indent','colspan','rowspan','data-word-style',
     'src','alt','width','height','href','title','data-word-citation','data-word-bibliography',*table_design.attributes,'data-word-repeat-header','data-word-formula','data-word-page-break','data-word-comment',
     'data-word-cover','data-word-blank-page',*[for (entry in graphics.catalog) entry.key],'data-word-rotation',object_layout.key,group_data.key,
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
-    (not preview and a.name=='id' and (starts_with(string(a.value),insert.bookmark_prefix) or starts_with(string(a.value),"word-source-"))))
+    (not preview and a.name=='id' and (starts_with(string(a.value),insert.bookmark_prefix) or starts_with(string(a.value),"word-source-")))) ^ { false }))
     (string(a.name),string(a.value))])}
-fn wrap_marks(marks,i,child,preview=false,extra=[]) => if (i >= len(marks)) child else {
+fn wrap_marks(marks,i,child,preview=false,extra=[]) any^ => if (i >= len(marks)) child else {
     let m = marks[i]
     let projected = if (m.value is array) projected_attrs(m.value,preview,extra) else {}
     let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
     wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview,extra)
 }
-pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") {
+pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") any^ {
     // one wrapper per leaf preserves source identity (S2.6.5) and lets read-only navigation resolve text ranges.
     if (n.kind=='text') <span class:text_class,wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview,extra)>
     else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview,extra),rendering.surface_children(n,child))
     else ""
 }
 // Thumbnails share document painting but never apply source nodes or duplicate bookmark IDs.
-fn preview_node(n) => project(n,(child)=>preview_node(child),true)
-fn column_body(doc,children,preview=false) {
-    let render = (child)=>if (preview) preview_node(child) else apply(child)
+fn preview_node(n) any^ => project(n,(child)any^ =>preview_node(child),true)
+fn column_body(doc,children,preview=false) any^ {
+    let render = (child)any^ =>if (preview) preview_node(child) else apply(child)
     if (columns.settings(doc).count==1) [for (child in children) render(child)]
     else [<div class:"word-columns",style:columns.style(doc),*[for (child in children) render(child)]>]
 }
@@ -117,8 +117,8 @@ fn render_pages(doc,web=false) => <div class:"word-pages",
         *column_body(doc,children);
         stories.story(doc,"footer",i+1,len(page.sheets(doc)))>]>
 // Explicit root-template selection changes presentation while each child still applies its source node.
-view word_web_document: map { render_pages(~,true) }
-view word_document: map {
+view word_web_document: map () any^ { render_pages(~,true) }
+view word_document: map () any^ {
     if (~.kind=='node' and ~.tag=='doc') render_pages(~)
     else project(~,(child)=>apply(child))
 }

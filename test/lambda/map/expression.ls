@@ -3,7 +3,7 @@ import expressions: lambda.map.expression
 let feature = {type:"Feature",id:7,properties:{kind:"city",radius:8,color:"#f00",present:null,truth:0},
     geometry:{type:"MultiPoint",coordinates:[[0,0]]}};
 fn layer(paint, filter = null) => <layer id:"dots",type:"circle",source:"places",paint:paint,filter:filter>
-fn size(expression) => expressions.evaluate(layer({'circle-radius':expression}),feature,1.5).size
+fn size(expression) any^ => expressions.evaluate(layer({'circle-radius':expression}),feature,1.5).size
 fn rejected(expression) => expressions.validate(layer({'circle-radius':expression})) is error
 let filtered = layer({'circle-radius':["interpolate",["linear"],["zoom"],0,4,2,12],
     'circle-color':["match",["get","kind"],["city","capital"],"#f00","#00f"]},

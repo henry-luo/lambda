@@ -12,7 +12,7 @@ import paint: .paint
 // Render all annotations from the annotation element
 // ============================================================
 
-pub fn render_annotations(annotation_el, x_scale, y_scale, plot_w, plot_h, theme) {
+pub fn render_annotations(annotation_el, x_scale, y_scale, plot_w, plot_h, theme) any^ {
     let plan = prepare(annotation_el, x_scale, y_scale, plot_w, plot_h, theme);
     let selected = collision.select(plan.items |: ~.bounds != null) |> ~.index;
     render_plan({*:plan, visible: selected})
@@ -21,7 +21,7 @@ pub fn render_annotations(annotation_el, x_scale, y_scale, plot_w, plot_h, theme
 // Batch text metrics once; rendering and cross-guide selection share these exact positions.
 pub fn prepare(annotation_el, x_scale, y_scale, plot_w, plot_h, theme, clipped = false) {
     let notes = if (annotation_el != null) content(annotation_el) else [];
-    let texts = [for (index, note in notes where name(note) == 'text_note')
+    let texts = [for (index, note in notes where ((name(note) == 'text_note') ^ { false }))
         {index: index, label: if (note.text != null) string(note.text) else "", font: note_font(note, theme)}];
     let metrics = text.measure_requests(texts);
     let items = if (metrics is error) [] else [for (index, note in notes) (
@@ -41,7 +41,7 @@ pub fn prepare(annotation_el, x_scale, y_scale, plot_w, plot_h, theme, clipped =
     {items: items, _error: if (metrics is error) metrics else null}
 }
 
-pub fn render_plan(plan) => if (plan._error is error) plan._error else
+pub fn render_plan(plan) any^ => if (plan._error is error) plan._error else
     svg.group_class("annotations", [for (item in plan.items where item.element != null and
         (item.bounds == null or plan.visible == null or item.index in plan.visible)) item.element])
 
@@ -49,7 +49,7 @@ fn clip_bounds(bounds, width, height) => if (bounds.right <= 0 or bounds.left >=
     else {left: max([0.0, bounds.left]), right: min([width, bounds.right]),
         top: max([0.0, bounds.top]), bottom: min([height, bounds.bottom])}
 
-fn note_font(note, theme) => text.style({font_family: if (note.font_family != null) note.font_family else theme.font,
+fn note_font(note, theme) any^ => text.style({font_family: if (note.font_family != null) note.font_family else theme.font,
     label_font_size: note.font_size, label_font_weight: note.font_weight, label_font_style: note.font_style,
     label_letter_spacing: note.letter_spacing, label_word_spacing: note.word_spacing})
 
@@ -89,7 +89,7 @@ fn note_position(note, x_scale, y_scale) {
 // Rule annotation (horizontal or vertical reference line)
 // ============================================================
 
-fn render_rule_note(note, x_scale, y_scale, plot_w, plot_h, paints) {
+fn render_rule_note(note, x_scale, y_scale, plot_w, plot_h, paints) any^ {
     let color = paint.value(if (note.color) note.color else "#888", paints)
     let stroke_w = if (note.stroke_width) note.stroke_width else 1.0
     let dash = if (note.stroke_dash) note.stroke_dash else null

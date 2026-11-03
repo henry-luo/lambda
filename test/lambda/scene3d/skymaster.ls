@@ -4,7 +4,7 @@ import mesh: ~~.~~.demo.scene3d.skymaster.mod_mesh
 
 fn near(a, b) => abs(a - b) < 0.000001
 fn same(a, b) => len(a) == len(b) and all([for (i, x in a) near(x, b[i])])
-fn finite_mesh(m) => len(m.p) == len(m.n) and len(m.i) % 3 == 0 and
+fn finite_mesh(m) any^ => len(m.p) == len(m.n) and len(m.i) % 3 == 0 and
     all([for (i in m.i) i >= 0 and i < len(m.p)])
 
 let land = rig.SEQUENCES.landing

@@ -25,7 +25,7 @@ let checks={
     grid:len(prepared.vertices)==252 and len(prepared.faces)==442 and len(prepared.edges)==693,
     samples:(samples |> ~.values.value) == [1.5,23.5,45.5],
     identities:(samples |> ~.cell_id) == [[0,0],[8,6],[16,12]],
-    adjacency:all([for (i,neighbors in prepared.adjacency) all([for (j in neighbors) contains(prepared.adjacency[j],i)])]),
+    adjacency:all([for (i,neighbors in ((prepared.adjacency) ^ { [] })) all([for (j in neighbors) contains(prepared.adjacency[j],i)])]),
     nested:mesh.prepare(nested) is error,
     crossing:mesh.prepare(crossing) is error,
     winding:mesh.prepare({*:nested,faces:[for (f in nested.faces) {*:f,vertices:reverse(f.vertices)}]}) is error,

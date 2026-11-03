@@ -20,8 +20,8 @@ pn main() {
         page.settings(loaded.editor.doc).paper==page.settings(doc).paper,
         abs(page.settings(loaded.editor.doc).left-page.settings(doc).left)<0.3,
         own.path=="" and own.saved_doc==doc,
-        len([for (entry in descendants(loaded.editor.doc) where entry.node.tag=='table') entry])==1,
-        len([for (entry in descendants(loaded.editor.doc) where entry.node.tag=='tr') entry])==4,
-        all([for (entry in descendants(loaded.editor.doc) where entry.node.tag=='td') contains(attrs_get(entry.node.attrs,'style'),"width:")])
+        len([for (entry in descendants(loaded.editor.doc)^ where entry.node.tag=='table') entry])==1,
+        len([for (entry in descendants(loaded.editor.doc)^ where entry.node.tag=='tr') entry])==4,
+        all([for (entry in descendants(loaded.editor.doc)^ where entry.node.tag=='td') contains(attrs_get(entry.node.attrs,'style'),"width:")])
     ]
 }

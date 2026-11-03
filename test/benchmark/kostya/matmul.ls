@@ -34,21 +34,21 @@ pn main() {
     let size = N * N
     var a = fill(size, 0.0)
     var b = fill(size, 0.0)
-    var c: float[] = fill(size, 0.0)
+    var c: float[] = fill(size, 0.0)^
 
     // Initialize with pseudo-random values in [-1.0, 1.0)
     var seed = 42
     var i = 0
     while (i < size) {
         seed = next_rand(seed)
-        a[i] = float(seed % 2000) / 1000.0 - 1.0
+        a[i] = (float(seed % 2000) / 1000.0 - 1.0)^
         seed = next_rand(seed)
-        b[i] = float(seed % 2000) / 1000.0 - 1.0
+        b[i] = (float(seed % 2000) / 1000.0 - 1.0)^
         i = i + 1
     }
 
     // Multiply
-    matmul(a, b, c, N)
+    matmul(a, b, c, N)^
 
     // Sum result matrix
     var total = 0.0

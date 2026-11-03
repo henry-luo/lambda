@@ -1,7 +1,7 @@
 // vCard/iCalendar share RFC content lines, folding, and ordered property traversal.
 import c: .common
 fn property_name(value,target) string^ => upper(c.token(value,"property name",if (target == "vcf") "." else "")^)
-fn base_name(value) => upper(slice(string(value),c.get({i:last_index_of(string(value),".")},"i",-1)+1))
+fn base_name(value) any^ => upper(slice(string(value),c.get({i:last_index_of(string(value),".")},"i",-1)+1))
 fn entries(record) array^ {
     if (record.entries != null and not (record.entries is array)) raise c.fail("entries must be an array")
     else if (record.entries != null) [for (entry in record.entries) {
@@ -9,7 +9,7 @@ fn entries(record) array^ {
         else {*:entry,raw:c.get(entry,"raw",true)}
     }]
     else if (record.properties != null and not (record.properties is map)) raise c.fail("properties must be a map")
-    else [for (name,value in c.get(record,"properties",{}),item in c.sequence(value)) {name:string(name),value:item,raw:true}]
+    else [for (name,value in c.get(record,"properties",{}),item in ((c.sequence(value)) ^ { [] })) {name:string(name),value:item,raw:true}]
 }
 fn param_value(value,raw,version) string^ {
     let text = string(value)
@@ -24,7 +24,7 @@ fn parameters(values,raw,version) string^ {
     if (values != null and not (values is map)) raise c.fail("parameters must be a map")
     else join([for (key,value in c.get({v:values},"v",{}))
         ";" ++ upper(c.token(key,"parameter name")^) ++ "=" ++
-        join([for (item in c.sequence(value)) param_value(item,raw,version)^],",")],"")
+        join([for (item in ((c.sequence(value)) ^ { [] })) param_value(item,raw,version)^],",")],"")
 }
 fn property(entry,target,version) string^ {
     let name = property_name(entry.name,target)^
@@ -43,28 +43,28 @@ fn property(entry,target,version) string^ {
 }
 fn structured(value,keys) string^ {
     if (not (value is map)) raise c.fail("structured contact field must be a map")
-    else join([for (key in keys) join([for (part in c.sequence(value[key])) c.text_escape(part)],",")],";")
+    else join([for (key in keys) join([for (part in ((c.sequence(value[key])) ^ { [] })) c.text_escape(part)],",")],";")
 }
 fn fresh(name,value,parameters = null) => {name:name,value:value,parameters:parameters,raw:false}
 fn contact_fields(value,version) array^ {
     let names = {full_name:"FN",email:"EMAIL",phone:"TEL",organization:"ORG",title:"TITLE",note:"NOTE",url:"URL",birthday:"BDAY"}
-    let ordinary = [for (field,name in names,item in c.sequence(value[field]))
+    let ordinary = [for (field,name in names,item in ((c.sequence(value[field])) ^ { [] }))
         if (item is map and item.value != null) fresh(name,item.value,c.get(item,"parameters",{}))
         else fresh(name,if (field == "organization") c.text_escape(item) else item,
             if (field == "phone" and version == "4.0" and not starts_with(string(item),"tel:")) {VALUE:"text"} else null)]
     let name = if (value.name == null) [] else [fresh("N",structured(value.name,["family","given","additional","prefix","suffix"])^)]
-    let address = [for (item in c.sequence(value.address)) fresh("ADR",structured(item,["po_box","extended","street","city","state","postal_code","country"])^)];
+    let address = [for (item in ((c.sequence(value.address)) ^ { [] })) fresh("ADR",structured(item,["po_box","extended","street","city","state","postal_code","country"])^)];
     [*ordinary,*name,*address]
 }
 fn contains_property(values,name) => any([for (entry in values) base_name(entry.name) == name and entry.value != null and entry.value != ""])
 fn contact(value) map^ {
     let valid_contact = if (not (value is map)) raise c.fail("vCard contact must be a map")
     let retained = entries(value)^
-    let versions = [for (entry in retained where base_name(entry.name) == "VERSION") string(entry.value)]
+    let versions = [for (entry in retained where ((base_name(entry.name) == "VERSION") ^ { false })) string(entry.value)]
     let version = if (len(versions) > 0) versions[0] else c.get(value,"version","4.0");
     let valid_version = if (not (version in ["3.0","4.0"]) or len(versions) > 1) raise c.fail("vCard requires one VERSION, 3.0 or 4.0")
     let fields = if (value.entries != null or value.properties != null) retained else contact_fields(value,version)^
-    let body = join([for (entry in fields where base_name(entry.name) != "VERSION") property(entry,"vcf",version)^],"")
+    let body = join([for (entry in fields where ((base_name(entry.name) != "VERSION") ^ { false })) property(entry,"vcf",version)^],"")
     let issues = (if (not contains_property(fields,"FN")) [c.issue("missing-property",value,"vCard requires FN")] else []) ++
         (if (version == "3.0" and not contains_property(fields,"N")) [c.issue("missing-property",value,"vCard 3.0 requires N")] else []) ++
         c.unknown(value,["entries","properties","version","full_name","name","email","phone","organization","title","note","url","birthday","address"],"contact field");
@@ -98,7 +98,7 @@ fn duration(value) string^ {
     else if (not (value is map)) raise c.fail("duration must be text or a duration map")
     else {
         let keys = {weeks:"W",days:"D",hours:"H",minutes:"M",seconds:"S"}
-        let invalid = [for (key,item in value where not (string(key) in ["weeks","days","hours","minutes","seconds","negative"])) key]
+        let invalid = [for (key,item in value where ((not (string(key) in ["weeks","days","hours","minutes","seconds","negative"])) ^ { false })) key]
         let time_text = join([for (key in ["hours","minutes","seconds"] where value[key] != null) digits(value[key],len(string(value[key])),key)^ ++ keys[key]],"");
         if (len(invalid) > 0 or (value.weeks != null and any([for (key in ["days","hours","minutes","seconds"]) value[key] != null]))) raise c.fail("invalid duration units")
         else (if (value.negative == true) "-" else "") ++ "P" ++
@@ -108,7 +108,7 @@ fn duration(value) string^ {
 }
 fn component_fields(value) array^ {
     let names = {summary:"SUMMARY",description:"DESCRIPTION",location:"LOCATION",status:"STATUS",priority:"PRIORITY",organizer:"ORGANIZER",attendee:"ATTENDEE",uid:"UID",stamp:"DTSTAMP",created:"CREATED",modified:"LAST-MODIFIED",sequence:"SEQUENCE",due:"DUE",recurrence_rule:"RRULE",categories:"CATEGORIES",action:"ACTION",trigger:"TRIGGER"}
-    let ordinary = [for (field,name in names,item in c.sequence(value[field]))
+    let ordinary = [for (field,name in names,item in ((c.sequence(value[field])) ^ { [] }))
         if (item is map and item.value != null) fresh(name,item.value,c.get(item,"parameters",{})) else fresh(name,item)]
     let dates = [for (field,name in {start_time:"DTSTART",end_time:"DTEND"} where value[field] != null) {
         let date_parts = calendar_date(value[field])^;
@@ -124,10 +124,10 @@ fn component(value,depth,method) map^ {
     let values = if (value.entries != null or value.properties != null) entries(value)^ else component_fields(value)^
     let emitted = c.merge([for (entry in values) if (entry.value is map and entry.value.type != null)
         component(entry.value,depth+1,method)^ else c.result(property(entry,"ics","2.0")^)])^
-    let nested = if (value.entries != null) c.result("") else c.merge([for (child in c.sequence(value.components)) component(child,depth+1,method)^])^
+    let nested = if (value.entries != null) c.result("") else c.merge([for (child in ((c.sequence(value.components)) ^ { [] })) component(child,depth+1,method)^])^
     let required = if (component_type == "VEVENT") ["UID","DTSTAMP",*if (method == null) ["DTSTART"] else []]
         else if (component_type in ["VTODO","VJOURNAL","VFREEBUSY"]) ["UID","DTSTAMP"] else if (component_type == "VALARM") ["ACTION","TRIGGER"] else []
-    let issues = [for (name in required where not contains_property(values,name)) c.issue("missing-property",value,component_type ++ " requires " ++ name)] ++
+    let issues = [for (name in required where ((not contains_property(values,name)) ^ { false })) c.issue("missing-property",value,component_type ++ " requires " ++ name)] ++
         (if (component_type == "VCALENDAR") [c.issue("nested-calendar",value,"VCALENDAR cannot be nested")] else []) ++
         c.unknown(value,["type","entries","properties","components","summary","description","start_time","end_time","duration","location","status","priority","organizer","attendee","uid","stamp","created","modified","sequence","due","recurrence_rule","categories","action","trigger"],"component field");
     c.result("BEGIN:" ++ component_type ++ "\r\n" ++ emitted.text ++ nested.text ++ "END:" ++ component_type ++ "\r\n",emitted.diagnostics ++ nested.diagnostics ++ issues)
@@ -136,14 +136,14 @@ fn calendar(value) map^ {
     let valid_calendar = if (not (value is map)) raise c.fail("iCalendar requires a calendar map")
     let values = if (value.entries != null or value.properties != null) entries(value)^ else
         [for (field,name in {version:"VERSION",product_id:"PRODID",calendar_scale:"CALSCALE",method:"METHOD"} where value[field] != null) fresh(name,value[field])]
-    let version_entries = [for (entry in values where base_name(entry.name) == "VERSION") entry]
+    let version_entries = [for (entry in values where ((base_name(entry.name) == "VERSION") ^ { false })) entry]
     let version = if (len(version_entries) == 0) "2.0" else string(version_entries[0].value);
     let valid_version = if (version != "2.0" or len(version_entries) > 1) raise c.fail("iCalendar requires one VERSION:2.0")
-    let method_entries = [for (entry in values where base_name(entry.name) == "METHOD") entry.value]
+    let method_entries = [for (entry in values where ((base_name(entry.name) == "METHOD") ^ { false })) entry.value]
     let method = if (len(method_entries) > 0) method_entries[0] else value.method
-    let emitted = c.merge([for (entry in values where base_name(entry.name) != "VERSION")
+    let emitted = c.merge([for (entry in values where ((base_name(entry.name) != "VERSION") ^ { false }))
         if (entry.value is map and entry.value.type != null) component(entry.value,0,method)^ else c.result(property(entry,"ics","2.0")^)])^
-    let children = if (value.entries != null) c.result("") else c.merge([for (child in c.sequence(value.components)) component(child,0,method)^])^
+    let children = if (value.entries != null) c.result("") else c.merge([for (child in ((c.sequence(value.components)) ^ { [] })) component(child,0,method)^])^
     let product = if (contains_property(values,"PRODID")) "" else "PRODID:-//Lambda//doc.misc//EN\r\n"
     let component_count = if (value.entries != null) len([for (entry in values where entry.value is map and entry.value.type != null) entry]) else len(c.sequence(value.components))
     let issues = c.unknown(value,["version","product_id","calendar_scale","method","components","properties","entries"],"calendar field") ++
@@ -152,7 +152,7 @@ fn calendar(value) map^ {
 }
 pub fn render(value,target) map^ {
     if (target == "ics") calendar(value)^
-    else if (value is map and value.contacts != null) c.merge([for (item in c.sequence(value.contacts)) contact(item)^])^
+    else if (value is map and value.contacts != null) c.merge([for (item in ((c.sequence(value.contacts)) ^ { [] })) contact(item)^])^
     else if (value is array or value is list) c.merge([for (item in value) contact(item)^])^
     else contact(value)^
 }

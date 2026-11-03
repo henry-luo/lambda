@@ -18,20 +18,27 @@ pn writer(socket) {
         ws.send(socket, format(m, 'json'))^
     }
 }
-pn report(notify, m) { if (notify != null) notify(m) }
-pn enqueue(outbox, event) { if (outbox != null) send(outbox, event)^ }
+// S7.5.1v6: notification failures are best-effort and must not stop the service.
+pn report(notify: any, m: any) null {
+    (if (notify != null) notify(m)) ^ { null }
+    return null
+}
+pn enqueue(outbox: any, event: any) null {
+    (if (outbox != null) send(outbox, event)) ^ { null }
+    return null
+}
 
 pn peer(socket, service) {
     let outbox = start(writer, [socket])
     var user = null
     while (true) {
         let frame = ws.receive(socket) ^ { ^ }
-        if (frame is error or frame.type == "close") { break }
-        if (frame.type != "text") { continue }
+        if ((frame is error or frame.type == "close")^) { break }
+        if ((frame.type != "text")^) { continue }
         let m = parse(frame.data, 'json') ^ { ^ }
         if (m is error) { enqueue(outbox, {type: "error", message: "Invalid JSON."}); continue }
-        if (user == null) {
-            if (m.type != "hello" or model.profile(m.user) == null) {
+        if ((user == null)^) {
+            if ((m.type != "hello" or model.profile(m.user) == null)^) {
                 enqueue(outbox, {type: "error", message: "Choose a demo profile first."})
                 continue
             }
@@ -49,7 +56,7 @@ pn peer_worker(service, dispatcher) {
     while (true) {
         send(dispatcher, {worker: self()})^
         let request = receive()^
-        peer(request.socket, service)
+        peer(request.socket, service) ^ { null }
     }
 }
 pn accept_clients(listener, service) {
@@ -58,7 +65,7 @@ pn accept_clients(listener, service) {
     while (true) {
         let available = receive()^
         var socket = null
-        while (socket == null) {
+        while ((socket == null)^) {
             let accepted = ws.accept(listener) ^ { ^ }
             if (accepted is error) { sleep(10)^; continue }
             socket = accepted
@@ -109,7 +116,7 @@ pub pn serve(port, path, notify) {
         let r = m.request
         if (r.type == "send") {
             let next = model.accept(messages, m.user, r, now().format("hh:mm"))
-            if (next.error != null) { enqueue(m.writer, {type: "error", message: next.error}); continue }
+            if ((next.error != null)^) { enqueue(m.writer, {type: "error", message: next.error}); continue }
             let stored = persist_history(path, next.messages) ^ { ^ }
             if (stored is error) { enqueue(m.writer, {type: "error", message: "Could not save the message: " ++ stored.message}); continue }
             messages = next.messages
@@ -118,7 +125,7 @@ pub pn serve(port, path, notify) {
         }
         if (r.type == "received" or r.type == "read") {
             let next = model.receipt(messages, m.user, r.id, r.from, if (r.type == "read") "read" else "delivered")
-            if (next == messages) { continue }
+            if ((next == messages)^) { continue }
             let stored = persist_history(path, next) ^ { ^ }
             if (stored is error) { enqueue(m.writer, {type: "error", message: "Could not save a receipt."}); continue }
             messages = next
@@ -138,14 +145,14 @@ pub pn connect(endpoint, user, notify) {
     report(notify, {type: "connected", user: user, client: self(), writer: outbox})
     while (true) {
         let frame = ws.receive(socket) ^ { ^ }
-        if (frame is error or frame.type == "close") { break }
-        if (frame.type != "text") { continue }
+        if ((frame is error or frame.type == "close")^) { break }
+        if ((frame.type != "text")^) { continue }
         let event = parse(frame.data, 'json') ^ { ^ }
         if (event is error) { report(notify, {type: "error", user: user, client: self(), message: "The server sent invalid JSON."}); continue }
-        if (event.type == "message" and event.message.to == user and event.message.status == "sent")
+        if ((event.type == "message" and event.message.to == user and event.message.status == "sent")^)
             enqueue(outbox, {type: "received", id: event.message.id, from: event.message.from})
-        if (event.type == "history") {
-            for (m in event.messages where m.to == user and m.status == "sent")
+        if ((event.type == "history")^) {
+            for (m in event.messages^ where (m.to == user and m.status == "sent")^)
                 enqueue(outbox, {type: "received", id: m.id, from: m.from})
         }
         report(notify, {*: event, user: user, client: self()})

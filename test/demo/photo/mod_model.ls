@@ -11,7 +11,7 @@ pub fn recipe() => {turns:0,flip_x:false,flip_y:false,angle:0.0,crop:geometry.fu
     preset:"original",intensity:1.0,output_width:0,output_height:0,black:0.0,white:1.0,
     shadows:0.0,highlights:0.0,vignette:0.0,softness:0.0,sharpen:0.0,layers:[]}
 pub fn upgrade(value) => {*:recipe(),*:value}
-pub fn valid(value) => value is map and value.turns is int and value.turns >= 0 and value.turns < 4 and
+pub fn valid(value) any^ => value is map and value.turns is int and value.turns >= 0 and value.turns < 4 and
     value.flip_x is bool and value.flip_y is bool and geometry.valid(value.crop) and
     all([for (key,interval in limits) value[key] is number and value[key] >= interval[0] and value[key] <= interval[1]]) and
     value.white > value.black and value.layers is array and len(value.layers) <= 24 and
@@ -36,7 +36,7 @@ pub fn commit_edit(history_state, value) {
 }
 pub fn step_back(history_state) => {*:history_state,cursor:max(0,history_state.cursor-1),draft:null}
 pub fn step_forward(history_state) => {*:history_state,cursor:min(len(history_state.entries)-1,history_state.cursor+1),draft:null}
-pub fn change(value, key, requested) => if (contains(limits,key))
+pub fn change(value, key, requested) any^ => if (contains(limits,key))
     {*:value,[key]:geometry.clamp(requested,
         if (key == "white") value.black+0.01 else limits[key][0],
         if (key == "black") value.white-0.01 else limits[key][1])} else value

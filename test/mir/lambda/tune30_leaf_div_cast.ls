@@ -11,13 +11,13 @@ pn tune30_lcg(seed: int) int {
     return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
-pn tune30_walk(n: int) int {
+pn tune30_walk(n: int) int^ {
     var total: int = 0
     var seed: int = 7
     var i: int = 0
     while (i < n) {
         total = total + tune30_ms2(i)
-        seed = tune30_lcg(seed)
+        seed = tune30_lcg(seed)^
         i = i + 1
     }
     return total + seed

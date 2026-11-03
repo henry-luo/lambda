@@ -4,7 +4,7 @@ import world: .mod_world
 import controls: .mod_input
 import events: .mod_events
 
-fn wall_blocks(map_data, game, wall, old, next, floor_height, rules) {
+fn wall_blocks(map_data, game, wall, old, next, floor_height, rules) any^ {
     let door = world.door_for(map_data, game, wall)
     if (door != null) not door.passable
     else if (wall.isUpperWall) wall.topHeight > floor_height and
@@ -18,14 +18,14 @@ pub fn can_move(map_data, game, old, next, radius, floor_height, rules, max_drop
     let box = {min_x: next.x - radius, max_x: next.x + radius,
         min_y: next.y - radius, max_y: next.y + radius}
     let walls = [for (i in world.query(map_data, "walls", box), let wall = map_data.walls[i]
-        where wall_blocks(map_data, game, wall, old, next, floor_height, rules) and
-            geo.circle_hits_segment(next, radius, wall.start, wall.end)) i]
+        where ((wall_blocks(map_data, game, wall, old, next, floor_height, rules) and
+            geo.circle_hits_segment(next, radius, wall.start, wall.end)) ^ { false })) i]
     let actors = [for (actor in game.actors, let solid_radius = actor_radius(actor, rules)
-        where not actor.collected and actor.id != exclude_id and solid_radius > 0 and
-            geo.distance_squared(next, actor) < (radius + solid_radius) ** 2) actor.id]
+        where ((not actor.collected and actor.id != exclude_id and solid_radius > 0 and
+            geo.distance_squared(next, actor) < (radius + solid_radius) ** 2) ^ { false })) actor.id]
     let lifts = [for (lift in game.lifts, edge in lift.collisionEdges
-        where floor_height < lift.height - rules.MAX_STEP_HEIGHT and
-            geo.circle_hits_segment(next, radius, edge.start, edge.end)) lift.sectorIndex]
+        where ((floor_height < lift.height - rules.MAX_STEP_HEIGHT and
+            geo.circle_hits_segment(next, radius, edge.start, edge.end)) ^ { false })) lift.sectorIndex]
     let new_floor = world.floor_height(map_data, game, next)
     len(walls) == 0 and len(actors) == 0 and len(lifts) == 0 and
         new_floor - floor_height <= rules.MAX_STEP_HEIGHT and floor_height - new_floor <= max_drop
@@ -33,10 +33,10 @@ pub fn can_move(map_data, game, old, next, radius, floor_height, rules, max_drop
 pub fn slide(map_data, game, old, next, radius, floor_height, rules, max_drop = inf, exclude_id = null) {
     let candidates = [next, {x: next.x, y: old.y}, {x: old.x, y: next.y}]
     let accepted = [for (candidate in candidates
-        where can_move(map_data, game, old, candidate, radius, floor_height, rules, max_drop, exclude_id)) candidate]
+        where ((can_move(map_data, game, old, candidate, radius, floor_height, rules, max_drop, exclude_id)) ^ { false })) candidate]
     if (len(accepted) == 0) {x: old.x, y: old.y} else accepted[0]
 }
-pub fn move(map_data, game, input_state, dt, rules) {
+pub fn move(map_data, game, input_state, dt, rules) any^ {
     let player = game.player
     let multiplier = if (contains(input_state.held, "run")) rules.RUN_MULTIPLIER else 1
     let angle = player.angle + controls.axis(input_state, "turn_left", "turn_right") * rules.TURN_SPEED * multiplier * dt -

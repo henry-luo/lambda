@@ -7,7 +7,7 @@ import game_state: ~~.mod_state
 import mechanics: ~~.mod_mechanics
 let oracle = input("test/demo/doom/reference/upstream-oracle.json", 'json')^
 fn point(args, offset = 0) => {x: args[offset], y: args[offset + 1]}
-fn geometry_case(entry) {
+fn geometry_case(entry) any^ {
     let args = entry.args
     let actual = if (entry.kind == "polygon") geo.point_in_polygon(point(entry.point), entry.polygon)
         else if (entry.kind == "circle") geo.circle_hits_segment(point(args), args[2], point(args, 3), point(args, 5))
@@ -20,7 +20,7 @@ fn result(game) => {health: game.player.health, armor: game.player.armor,
 let level = fixture.level()
 let arena = fixture.map_data(level)
 let initial = fixture.game(level)
-fn damage_case(entry) {
+fn damage_case(entry) any^ {
     let input_data = entry.input
     let game = {*: initial, time: input_data.time, skill: input_data.skill,
         player: {*: initial.player, health: input_data.health, armor: input_data.armor,
@@ -31,7 +31,7 @@ fn damage_case(entry) {
 // Match the controlled upstream stream's threshold branch; RNG algorithms differ.
 let bypass_seed = [for (seed in 1 to 512 where game_state.roll(seed, 256).value <= 5) seed][0]
 let protected_seed = [for (seed in 1 to 512 where game_state.roll(seed, 256).value > 5) seed][0]
-fn hazard_case(entry) {
+fn hazard_case(entry) any^ {
     let input_data = entry.input
     let hazard_arena = fixture.map_data(fixture.level([], [], input_data.special))
     let game = {*: initial, seed: if (input_data.random != null and input_data.random < 5 / 256)
@@ -56,7 +56,7 @@ fn door_step(acc, entry) {
     let next = if (contains(["key", "use"], entry.action)) mechanics.open_door(keyed, 1, fixture.rules) else keyed
     let door = next.doors[0]
     let actual = {open: contains(["opening", "open"], door.phase), passable: door.passable,
-        sounds: [for (event in next.effects where event.kind == "sound") event.sound]}
+        sounds: [for (event in ((next.effects) ^ { [] }) where event.kind == "sound") event.sound]}
     {game: next, checks: [*acc.checks, actual == entry.expected]}
 }
 let door_result = reduce([{game: fixture.game(door_level), checks: []}, *oracle.doors], door_step);

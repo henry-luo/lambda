@@ -26,6 +26,6 @@ let moved_numbers = m.reorder_slide(numbered,0,4)^;
     ids(m.reorder_slide(start,2,100)^)==["a","b","d","e","c"],
     ids(m.reorder_slide(start,3,-100)^)==["d","a","b","c","e"],
     m.move_slide(start,3)^.doc==down.doc,
-    all([for (i,s in m.scenes(moved_numbers.doc)) m.text(c.children(s,'text')[1])==string(i+1)]),
+    all([for (i,s in ((m.scenes(moved_numbers.doc)) ^ { [] })) m.text(c.children(s,'text')[1])==string(i+1)]),
     m.initial(parse(format(up.doc,'mark'),'mark')^).doc==up.doc
 ]

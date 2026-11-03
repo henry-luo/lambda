@@ -1,6 +1,6 @@
 import maps: lambda.map
 let camera={width:256,height:192,zoom:0};
-fn p(x,y) => maps.unproject(camera,[x,y])
+fn p(x,y) any^ => maps.unproject(camera,[x,y])
 let image=maps.geomap([
     maps.source("land",{type:"Polygon",coordinates:[[p(20,20),p(120,20),p(120,100),p(20,100),p(20,20)]]}),
     maps.source("dot",{type:"Point",coordinates:p(180,50)}),

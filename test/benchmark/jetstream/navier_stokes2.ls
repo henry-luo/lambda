@@ -81,7 +81,7 @@ pn lin_solve(b: int, var x: float[], x0: float[], a: float, c: float, iterations
                 }
                 j = j + 1
             }
-            set_bnd(b, x)
+            set_bnd(b, x)^
             return 0
         }
     }
@@ -106,7 +106,7 @@ pn lin_solve(b: int, var x: float[], x0: float[], a: float, c: float, iterations
             }
             j = j + 1
         }
-        set_bnd(b, x)
+        set_bnd(b, x)^
         k = k + 1
     }
     return 0
@@ -130,23 +130,23 @@ pn advect(b: int, var d: float[], d0: float[], u: float[], v: float[], dt: float
             pos = pos + 1
             var x: float = float(i) - w_dt0 * u[pos]
             var y: float = float(j) - h_dt0 * v[pos]
-            if (x < 0.5) {
+            if ((x < 0.5)^) {
                 x = 0.5
             } else {
-                if (x > wp5) {
+                if ((x > wp5)^) {
                     x = wp5
                 }
             }
-            var i0: int = int(floor(x))
+            var i0: int = int(floor(x))^
             var i1: int = i0 + 1
-            if (y < 0.5) {
+            if ((y < 0.5)^) {
                 y = 0.5
             } else {
-                if (y > hp5) {
+                if ((y > hp5)^) {
                     y = hp5
                 }
             }
-            var j0: int = int(floor(y))
+            var j0: int = int(floor(y))^
             var j1: int = j0 + 1
             var s1: float = x - float(i0)
             var s0: float = 1.0 - s1
@@ -154,8 +154,8 @@ pn advect(b: int, var d: float[], d0: float[], u: float[], v: float[], dt: float
             var t0: float = 1.0 - t1
             var row1: int = j0 * ROW_SIZE
             var row2: int = j1 * ROW_SIZE
-            d[pos] = s0 * (t0 * d0[i0 + row1] + t1 * d0[i0 + row2]) +
-                     s1 * (t0 * d0[i1 + row1] + t1 * d0[i1 + row2])
+            d[pos] = (s0 * (t0 * d0[i0 + row1] + t1 * d0[i0 + row2]) +
+                     s1 * (t0 * d0[i1 + row1] + t1 * d0[i1 + row2]))^
             i = i + 1
         }
         j = j + 1
@@ -177,9 +177,9 @@ pn project(var u: float[], var v: float[], var p: float[], var dv: float[], iter
         }
         j = j + 1
     }
-    set_bnd(0, dv)
-    set_bnd(0, p)
-    lin_solve(0, p, dv, 1.0, 4.0, iterations)
+    set_bnd(0, dv)^
+    set_bnd(0, p)^
+    lin_solve(0, p, dv, 1.0, 4.0, iterations)^
 
     var w_scale: float = 0.5 * float(WIDTH)
     var h_scale: float = 0.5 * float(HEIGHT)
@@ -195,19 +195,19 @@ pn project(var u: float[], var v: float[], var p: float[], var dv: float[], iter
         }
         j = j + 1
     }
-    set_bnd(1, u)
+    set_bnd(1, u)^
     set_bnd(2, v)
 }
 
 pn dens_step(var x: float[], var x0: float[], u: float[], v: float[], dt: float, iterations: int) any {
-    add_fields(x, x0, dt)
-    diffuse(0, x0, x, dt, iterations)
+    add_fields(x, x0, dt)^
+    diffuse(0, x0, x, dt, iterations)^
     advect(0, x, x0, u, v, dt)
 }
 
 pn vel_step(var u: float[], var v: float[], var u0: float[], var v0: float[], dt: float, iterations: int) any {
-    add_fields(u, u0, dt)
-    add_fields(v, v0, dt)
+    add_fields(u, u0, dt)^
+    add_fields(v, v0, dt)^
     // swap u,u0 and v,v0 by copying
     var i: int = 0
     while (i < GRID_SIZE) {
@@ -219,9 +219,9 @@ pn vel_step(var u: float[], var v: float[], var u0: float[], var v0: float[], dt
         v[i] = tmp_v
         i = i + 1
     }
-    diffuse(1, u, u0, dt, iterations)
-    diffuse(2, v, v0, dt, iterations)
-    project(u, v, u0, v0, iterations)
+    diffuse(1, u, u0, dt, iterations)^
+    diffuse(2, v, v0, dt, iterations)^
+    project(u, v, u0, v0, iterations)^
     // swap again
     i = 0
     while (i < GRID_SIZE) {
@@ -233,8 +233,8 @@ pn vel_step(var u: float[], var v: float[], var u0: float[], var v0: float[], dt
         v[i] = tmp_v
         i = i + 1
     }
-    advect(1, u, u0, u0, v0, dt)
-    advect(2, v, v0, u0, v0, dt)
+    advect(1, u, u0, u0, v0, dt)^
+    advect(2, v, v0, u0, v0, dt)^
     project(u, v, u0, v0, iterations)
 }
 
@@ -262,15 +262,15 @@ pn add_points(var dens: float[], var u: float[], var v: float[]) any {
     }
 }
 
-pn run_navier_stokes() int {
+pn run_navier_stokes() int^ {
     let iterations: int = 20
     let dt: float = 0.1
-    var dens: float[] = fill(GRID_SIZE, 0.0)
-    var dens_prev: float[] = fill(GRID_SIZE, 0.0)
-    var u: float[] = fill(GRID_SIZE, 0.0)
-    var u_prev: float[] = fill(GRID_SIZE, 0.0)
-    var v: float[] = fill(GRID_SIZE, 0.0)
-    var v_prev: float[] = fill(GRID_SIZE, 0.0)
+    var dens: float[] = fill(GRID_SIZE, 0.0)^
+    var dens_prev: float[] = fill(GRID_SIZE, 0.0)^
+    var u: float[] = fill(GRID_SIZE, 0.0)^
+    var u_prev: float[] = fill(GRID_SIZE, 0.0)^
+    var v: float[] = fill(GRID_SIZE, 0.0)^
+    var v_prev: float[] = fill(GRID_SIZE, 0.0)^
 
     var frames_till_add: int = 0
     var frames_between: int = 5
@@ -288,15 +288,15 @@ pn run_navier_stokes() int {
 
         // UI callback: add points when timer fires
         if (frames_till_add == 0) {
-            add_points(dens_prev, u_prev, v_prev)
+            add_points(dens_prev, u_prev, v_prev)^
             frames_till_add = frames_between
             frames_between = frames_between + 1
         } else {
             frames_till_add = frames_till_add - 1
         }
 
-        vel_step(u, v, u_prev, v_prev, dt, iterations)
-        dens_step(dens, dens_prev, u, v, dt, iterations)
+        vel_step(u, v, u_prev, v_prev, dt, iterations)^
+        dens_step(dens, dens_prev, u, v, dt, iterations)^
 
         frame = frame + 1
     }
@@ -315,7 +315,7 @@ pn main() {
     var __t0 = clock()
     let result = run_navier_stokes()
     var __t1 = clock()
-    if (result == 77) {
+    if ((result == 77)^) {
         print("navier-stokes: PASS (checksum=" ++ result ++ ")\n")
     } else {
         print("navier-stokes: FAIL (checksum=" ++ result ++ ", expected 77)\n")

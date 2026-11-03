@@ -1,8 +1,8 @@
 import util: ~~.util
 
-pub fn options(el) => util.parse_kv_options(el.options_raw)
+pub fn options(el) any^ => util.parse_kv_options(el.options_raw)
 
-fn label_type(label) {
+fn label_type(label) any^ {
     if (label == null) null
     else if (not ends_with(trim(label), "*.") and
              not (ends_with(trim(label), "*)") and
@@ -15,13 +15,13 @@ fn label_type(label) {
     else null
 }
 
-pub fn parenthesized_alpha(opts) {
+pub fn parenthesized_alpha(opts) any^ {
     if (opts.label == null) false
     else ends_with(trim(opts.label), "*)") and
         index_of(opts.label, "\\alph") != null
 }
 
-pub fn list_style(opts, kind) {
+pub fn list_style(opts, kind) any^ {
     let margin = if (opts.leftmargin != null and util.css_dimension(opts.leftmargin) != null)
         "padding-left:" ++ util.css_dimension(opts.leftmargin) ++ ";" else ""
     let label = if (kind == "enumerate") label_type(opts.label) else null
@@ -40,7 +40,7 @@ pub fn start(opts) {
     if (value != null and value > 0) value else null
 }
 
-pub fn unsupported_keys(opts, kind) {
+pub fn unsupported_keys(opts, kind) any^ {
     let spacing = ["leftmargin", "topsep", "itemsep", "parsep", "nosep"]
     let allowed = if (kind == "enumerate") spacing ++ ["label", "start", "resume"]
         else spacing
@@ -54,7 +54,7 @@ pub fn unsupported_keys(opts, kind) {
     let margin_issue = if (opts.leftmargin != null and util.css_dimension(opts.leftmargin) == null)
         ["leftmargin"] else []
     let spacing_issues = [for (key in ["topsep", "itemsep", "parsep"]
-        where opts[key] != null and util.css_dimension(opts[key]) == null) key]
+        where ((opts[key] != null and util.css_dimension(opts[key]) == null) ^ { false })) key]
     let nosep_issue = if (opts.nosep != null and opts.nosep != "true" and opts.nosep != "false")
         ["nosep"] else []
     keys ++ label_issue ++ start_issue ++ resume_issue ++ margin_issue ++ spacing_issues ++ nosep_issue

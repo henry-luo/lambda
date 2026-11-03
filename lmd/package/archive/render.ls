@@ -7,23 +7,25 @@ import radiant
 let THUMB = {width: 1280, height: 800, scale: 0.3125}
 
 pub pn export(html, dest, dir, options) map {
-    let done = radiant.export_document(html, dest, {*: options, base_url: "file://" ++ dir ++ "/", local_resources: true});
+    let done = radiant.export_document(html, dest, {*: options, base_url: "file://" ++ dir ++ "/", local_resources: true}) ^ {
+        return {status: "failed", message: ^.message}
+    };
     if (done == true) {status: "ok"} else {status: "failed", message: string(done)}
 }
 
-pub pn pdf(html, dest, dir, settings) map {
+pub pn pdf(html, dest, dir, settings) map^ {
     export(html, dest, dir, {format: 'pdf', width: int(settings.width), height: int(settings.height), pagination: settings.pagination})
 }
 
-pub pn thumbnail(html, dest, dir) map { export(html, dest, dir, {format: 'png', *: THUMB}) }
+pub pn thumbnail(html, dest, dir) map^ { export(html, dest, dir, {format: 'png', *: THUMB}) }
 
 // the list thumbnail from an image (a poster, a gallery's first image): no
 // larger than the page thumbnail, aspect kept, never enlarged
 pub pn image_thumbnail(src, dest) map {
-    var failure = null
-    var img = null
-    { let __error_outcome_1 = load({data: input(src, 'binary')^, thumbnail: {width: int(THUMB.width * THUMB.scale), height: int(THUMB.height * THUMB.scale)}}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { img = ~ } } }
-    if (failure is error) { return {status: "failed", message: failure.message} }
-    save(img, dest) ^ { failure = ^ }
-    if (failure is error) {status: "failed", message: failure.message} else {status: "ok"}
+    let data = input(src, 'binary') ^ { return {status: "failed", message: ^.message} }
+    let img = load({data: data, thumbnail: {width: int(THUMB.width * THUMB.scale), height: int(THUMB.height * THUMB.scale)}}) ^ {
+        return {status: "failed", message: ^.message}
+    }
+    save(img, dest) ^ { return {status: "failed", message: ^.message} }
+    {status: "ok"}
 }

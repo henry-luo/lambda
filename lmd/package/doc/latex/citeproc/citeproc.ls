@@ -17,7 +17,7 @@ fn reference_for(references, id) {
     if (len(found) > 0) found[0] else null
 }
 
-fn layout(style, mode) => c.child(if (mode == "bibliography") style.bibliography else style.citation, "layout")
+fn layout(style, mode) any^ => c.child(if (mode == "bibliography") style.bibliography else style.citation, "layout")
 
 fn signatures(references, compiled) {
     let loc = locale.sources(compiled.style, compiled.locales, compiled.language);
@@ -29,13 +29,13 @@ fn signatures(references, compiled) {
 fn ambiguous(signatures, index) => any([for (i, value in signatures
     where i != index and value == signatures[index]) true])
 
-fn suffix(index) {
+fn suffix(index) any^ {
     let alphabet = "abcdefghijklmnopqrstuvwxyz"
     if (index < 26) slice(alphabet, index, index + 1)
     else suffix(int(floor(index / 26)) - 1) ++ slice(alphabet, index % 26, index % 26 + 1)
 }
 
-fn add_names(references, compiled, count_value, limit) {
+fn add_names(references, compiled, count_value, limit) any^ {
     if (not c.truth(compiled.style.citation["disambiguate-add-names"]) or count_value > limit) references
     else {
         let keys = signatures(references, compiled)
@@ -46,9 +46,9 @@ fn add_names(references, compiled, count_value, limit) {
     }
 }
 
-fn primary(ref) => c.get(ref, "author", c.get(ref, "editor", []))[0]
+fn primary(ref) any^ => c.get(ref, "author", c.get(ref, "editor", []))[0]
 
-fn add_given(references, compiled) {
+fn add_given(references, compiled) any^ {
     if (not c.truth(compiled.style.citation["disambiguate-add-givenname"])) references
     else {
         let rule = c.get(compiled.style.citation, "givenname-disambiguation-rule", "by-cite")
@@ -58,8 +58,8 @@ fn add_given(references, compiled) {
         let keys = signatures(references, compiled)
         let chosen = [for (i, ref in references) {
             let person = primary(ref)
-            let names_differ = any([for (other in references where other.id != ref.id and
-                primary(other).family == person.family and primary(other).given != person.given) true])
+            let names_differ = any([for (other in references where ((other.id != ref.id and
+                primary(other).family == person.family and primary(other).given != person.given) ^ { false })) true])
             let collision = names_differ and (global or ambiguous(keys, i))
             if (collision and person.family != null) {*:ref, expand_given: true,
                 given_initials: initials, given_primary_only: primary_only} else ref
@@ -115,7 +115,7 @@ fn history(requests, index, processed, seen, previous, near_distance) {
     }
 }
 
-fn rendered_item(item, request, references, compiled, loc) {
+fn rendered_item(item, request, references, compiled, loc) any^ {
     let reference = reference_for(references, item.id)
     if (reference == null) out.result([<span class: "latex-unsupported", "[?" ++ string(item.id) ++ "]">])
     else {
@@ -137,7 +137,7 @@ fn rendered_item(item, request, references, compiled, loc) {
     }
 }
 
-fn numeric_runs(items, index, runs, references) {
+fn numeric_runs(items, index, runs, references) any^ {
     if (index >= len(items)) runs
     else {
         let item = items[index]
@@ -155,13 +155,13 @@ fn numeric_runs(items, index, runs, references) {
     }
 }
 
-fn rendered_cluster(request, references, compiled, loc) {
+fn rendered_cluster(request, references, compiled, loc) any^ {
     let ordered_refs = ordering.references([for (item in request.items
-        where reference_for(references, item.id) != null) reference_for(references, item.id)],
+        where ((reference_for(references, item.id) != null) ^ { false })) reference_for(references, item.id)],
         compiled.style.citation, compiled.style, loc)
     let items = if (c.child(compiled.style.citation, "sort") == null) request.items else
-        [for (reference in ordered_refs, item in request.items where string(item.id) == reference.id) item] ++
-        [for (item in request.items where reference_for(references, item.id) == null) item]
+        [for (reference in ordered_refs, item in request.items where ((((((string(item.id) == reference.id) ^ { false })))))) item] ++
+        [for (item in request.items where ((reference_for(references, item.id) == null) ^ { false })) item]
     let node = layout(compiled.style, "citation")
     let context = {locales: loc}
     let collapse = compiled.style.citation.collapse
@@ -175,7 +175,7 @@ fn rendered_cluster(request, references, compiled, loc) {
             c.get(request, "mode", "normal") == "normal")
         year_parts(items, 0, [], null, request, references, compiled, loc)
         else if (collapse == "citation-number" and c.get(request, "mode", "normal") == "normal")
-        [for (run in numeric_runs(items, 0, [], references))
+        [for (run in ((numeric_runs(items, 0, [], references)) ^ { [] }))
             if (len(run.items) >= 3) out.combine([
                 rendered_item(run.items[0], request, references, compiled, loc),
                 rendered_item(run.items[len(run.items) - 1], request, references, compiled, loc)], "–")
@@ -189,7 +189,7 @@ fn rendered_cluster(request, references, compiled, loc) {
     else out.decorate(node, combined, context)
 }
 
-fn year_parts(items, index, parts, previous, request, references, compiled, loc) {
+fn year_parts(items, index, parts, previous, request, references, compiled, loc) any^ {
     if (index >= len(items)) parts
     else {
         let item = items[index]
@@ -216,7 +216,7 @@ pub fn process(compiled, references, requests, options = {}) map^ {
         let cited = unique([for (request in requests, item in request.items) string(item.id)])
         let nocite = c.get(options, "nocite", [])
         let selected_ids = unique(cited ++ (if (c.has(nocite, "*")) ids else nocite))
-        let selected = [for (i, id in selected_ids where reference_for(references, id) != null)
+        let selected = [for (i, id in selected_ids where ((reference_for(references, id) != null) ^ { false }))
             {*:reference_for(references, id), citation_number: i + 1}]
         let loc = locale.sources(compiled.style, compiled.locales, compiled.language)
         let ordered = ordering.references(selected, compiled.style.bibliography, compiled.style, loc)
@@ -241,7 +241,7 @@ pub fn process(compiled, references, requests, options = {}) map^ {
                     context), loc);
                 {id: reference.id, content: rendered.content, text: rendered.text, reference: reference}
             }]
-        let missing = [for (id in selected_ids where reference_for(references, id) == null)
+        let missing = [for (id in selected_ids where ((reference_for(references, id) == null) ^ { false }))
             c.issue("unresolved-citation", "Unresolved citation " ++ id, null, id)]
         {citations: citations, bibliography: bibliography, references: resolved,
             diagnostics: missing ++ [for (citation in citations where citation.empty == true)

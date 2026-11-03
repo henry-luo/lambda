@@ -9,7 +9,7 @@ import lambda.editor.mod_step
 import lambda.editor.mod_source_pos
 import image: lambda.editor.mod_image
 
-fn equation_editor() {
+fn equation_editor() any^ {
     let base = edit_set_selection(model.open_editor(node('doc',[node('p',[text("BeforeAfter")])])),
         text_selection(pos([0,0],6),pos([0,0],6)))
     let inserted = model.execute(base,"insert.equation",equation.defaults)^;
@@ -17,7 +17,7 @@ fn equation_editor() {
         number:"(1)",display:true,linear:false,justify:"center",size:28,color:"#805bc5"})^
 }
 
-fn shape_editor() {
+fn shape_editor() any^ {
     let base = files.read_document("test/demo/word/tests/object_layout.word.json")^.editor
     let selected = edit_set_selection(base,node_selection([1,0]));
     model.execute(selected,"shape.format",{values:{text:"Final sign",font:"Georgia",direction:90,
@@ -25,7 +25,7 @@ fn shape_editor() {
         opacity:85,alt:"Studio sign"}})^
 }
 
-fn group_editor() {
+fn group_editor() any^ {
     let base = files.read_document("test/demo/word/tests/object_layout.word.json")^.editor
     let pictures = image.images(base.doc)
     let boxes = [for (i in 0 to 1) {path:pictures[i].path,x:20+i*200,y:30,

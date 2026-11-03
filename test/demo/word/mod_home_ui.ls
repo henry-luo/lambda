@@ -19,10 +19,10 @@ fn color_icon(graphic,color) => <span class:"color-split-icon",ribbon_icons.icon
 fn split(ui,id,command,label,graphic,params,menu,opened,pressed=false,disabled=false) => <div class:"split-tool",
     ui.button(id,command,label,graphic,params,pressed,disabled,"icon-only")
     ui.menu(id ++ "-menu",label ++ " options",null,menu,opened,"icon-only split-chevron",disabled)>
-fn tool(ui,id,command,label,graphic,params={},pressed=false,disabled=false) =>
+fn tool(ui,id,command,label,graphic,params={},pressed=false,disabled=false) any^ =>
     ui.button(id,command,label,graphic,params,pressed,disabled,"icon-only")
-pub fn font_size(editor) => model.points(model.char_value(editor,"font-size","11pt"),11)
-fn block_css(editor,key) => model.css_get(attrs_get(model.current_block(editor).node.attrs,'style'),key)
+pub fn font_size(editor) any^ => model.points(model.char_value(editor,"font-size","11pt"),11)
+fn block_css(editor,key) any^ => model.css_get(attrs_get(model.current_block(editor).node.attrs,'style'),key)
 
 pub fn ribbon(editor,read_only,opened,font_families,chrome,ui) {
     let block = model.current_block(editor)
@@ -33,7 +33,7 @@ pub fn ribbon(editor,read_only,opened,font_families,chrome,ui) {
     let boxed = model.char_value(editor,"border","")!="";
     <div class:"ribbon-groups home-ribbon",
         // icon-only history row with Save and Print below it, like Google Docs' toolbar start.
-        ui.group("Undo",ribbon.history_tools((action,label,graphic)=>{
+        ui.group("Undo",ribbon.history_tools((action,label,graphic)any^ =>{
             let command = (if (action in ["undo","redo"]) "edit." else "file.") ++ action;
             tool(ui,if (action=="save") "home-save" else command,command,label,graphic,{},false,
                 if (action=="undo") not edit_can_undo(editor) else if (action=="redo") not edit_can_redo(editor) else false)}))
@@ -96,7 +96,7 @@ fn color_menu(ui,id,command,colors,none_label,disabled) => <div
     <div class:"context-rule",role:"separator">;
     <div class:"color-grid",role:"group",["aria-label"]:"Colors",*[for (c in colors)
         ui.button("context-" ++ id ++ "-" ++ slice(c.value,1),command,c.label,swatch(c.value),{color:c.value},false,disabled,"color-choice")]>>
-pub fn menu(st,ui) {
+pub fn menu(st,ui) any^ {
     let menu = st.context.menu
     let editor = st.editor
     let ro = st.read_only;
@@ -112,7 +112,7 @@ pub fn menu(st,ui) {
         let list_node = model.current_node(editor,if (kind=="ordered") 'ol' else 'ul').node
         let current = if (list_node==null) null else home.list_style(list_node) or (if (kind=="ordered") "decimal" else "disc");
         <div <div class:"context-caption",if (kind=="ordered") "Numbering Library" else "Bullet Library">;
-            <div class:"list-style-grid",*[for (s in home.list_styles(kind))
+            <div class:"list-style-grid",*[for (s in ((home.list_styles(kind)) ^ { [] }))
                 ui.button("context-list-" ++ s.id,"para.listStyle",s.label,<span class:"list-glyph",s.glyph>,{kind:kind,style:s.id},current==s.id,ro,"list-style-choice")]>>
     }
     else if (menu=="home-sort") <div

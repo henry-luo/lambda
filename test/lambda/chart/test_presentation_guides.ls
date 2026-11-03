@@ -3,9 +3,9 @@ import vega: lambda.chart.vega
 import axis: lambda.chart.axis
 import scale: lambda.chart.scale
 
-fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
-fn with_class(tree, label) => elements(tree) |: ~.class == label
-fn tags(tree, tag) => elements(tree) |: name(~) == tag
+fn elements(tree) any^ => if (tree is element) [tree, for (child in ((content(tree)) ^ { [] })) for (item in ((elements(child)) ^ { [] })) item] else []
+fn with_class(tree, label) any^ => elements(tree) |: ~.class == label
+fn tags(tree, tag) any^ => elements(tree) |: name(~) == tag
 
 let records = [{x: 0, low: 0, high: 0, category: "A"}, {x: 1, low: 10, high: 1000, category: "B"}]
 let independent = chart.render_spec(vega.convert({width: 450, height: 300, padding: 0, data: {values: records},

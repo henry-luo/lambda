@@ -10,26 +10,26 @@ pub pn close(owner, audio) {
 }
 pub pn synchronize(owner, previous, game, base) any^ {
     var current = previous
-    if (current == null or current.generation != game.generation) {
-        if (current != null) close(owner, current)
+    if ((current == null or current.generation != game.generation)^) {
+        if ((current != null)^) close(owner, current)
         current = initial(game.generation)
     }
     var voices = []
-    for (voice in current.voices) {
+    for (voice in ((((((current.voices) ^ { [] })))))) {
         let status = dom.audio_state(owner, voice.token)
         if (status == "error" or status == null) {
-            close(owner, current)
+            close(owner, current)^
             raise error("DOOM audio failed: " ++ voice.sound)
         }
         if (status == "ended") { dom.audio_close(owner, voice.token); continue }
-        if (paused(game.mode)) dom.audio_pause(owner, voice.token)
-        if (not paused(game.mode) and status == "paused" and not dom.audio_play(owner, voice.token, voice.volume)) {
-            close(owner, current)
+        if (paused(game.mode)^) dom.audio_pause(owner, voice.token)
+        if ((not paused(game.mode) and status == "paused" and not dom.audio_play(owner, voice.token, voice.volume))^) {
+            close(owner, current)^
             raise error("DOOM audio resume failed: " ++ voice.sound)
         }
         voices = [*voices, voice]
     }
-    for (event in pending(game, current.seen_id)) {
+    for (event in ((pending(game, current.seen_id)) ^ { [] })) {
         // The voice budget is application policy; steal the oldest active cue.
         if (len(voices) >= MAX_VOICES) {
             dom.audio_close(owner, voices[0].token)
@@ -47,7 +47,7 @@ pub pn synchronize(owner, previous, game, base) any^ {
             close(owner, {*: current, voices: voices})
             raise error("DOOM audio playback failed: " ++ event.sound)
         }
-        if (paused(game.mode)) dom.audio_pause(owner, token)
+        if (paused(game.mode)^) dom.audio_pause(owner, token)
         voices = [*voices, {token: token, sound: event.sound, volume: event.volume}]
     }
     return {*: current, seen_id: max(current.seen_id, (game.next_effect_id or 0) - 1), voices: voices}

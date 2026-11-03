@@ -30,16 +30,16 @@ pn publish_navigation(owner,st,rendered,bounds,camera_box) any^ {
     let lines = navigation.grid_lines(st,bounds)
     let grid_rect = navigation.visible(st,bounds)
     let grid_scene = if (len(lines)==0) null else {lines:lines,rect:grid_rect,scale:camera_box.scale}
-    if (grid != null and (st.painted_doc == null or grid_scene != st.painted_grid)) {
+    if ((grid != null and (st.painted_doc == null or grid_scene != st.painted_grid))^) {
         // clip the SVG itself, so deep zoom never allocates a document-sized overlay bitmap.
-        if (len(lines)>0) place_box(grid,grid_rect,camera_box.scale)
-        dom.set_inner_html(grid,if (len(lines)==0) "" else format(<svg width:grid_rect.width*camera_box.scale,height:grid_rect.height*camera_box.scale,
+        if ((len(lines)>0)^) place_box(grid,grid_rect,camera_box.scale)^
+        dom.set_inner_html(grid,if ((len(lines)==0)^) "" else format(<svg width:grid_rect.width*camera_box.scale,height:grid_rect.height*camera_box.scale,
             viewBox:join([for (value in [grid_rect.x,grid_rect.y,grid_rect.width,grid_rect.height]) string(value)]," "), *[
             for (major in [false,true]) <path fill:"none",stroke:if (major) "#b4bdce" else "#788293",
                 opacity:if (major) 0.65 else 0.35,'stroke-width':1/camera_box.scale,
                 d:join([for (line in lines where line.major == major)
                     if (line.axis == "x") "M " ++ string(line.value) ++ " " ++ string(grid_rect.y) ++ " V " ++ string(grid_rect.y+grid_rect.height)
-                    else "M " ++ string(grid_rect.x) ++ " " ++ string(line.value) ++ " H " ++ string(grid_rect.x+grid_rect.width)]," ")>]>,'xml'))
+                    else "M " ++ string(grid_rect.x) ++ " " ++ string(line.value) ++ " H " ++ string(grid_rect.x+grid_rect.width)]," ")>]>,'xml')^)
     }
     let ruler_scene = if (not st.rulers_visible) ({visible:false}) else
         ({visible:true,x:camera_box.x,y:camera_box.y,scale:camera_box.scale,width:bounds.width,height:bounds.height})
@@ -63,7 +63,7 @@ pn publish_navigation(owner,st,rendered,bounds,camera_box) any^ {
             }
         }
         let stage = node(owner,".raster-stage")
-        dom.set_attribute(stage,"data-rulers",string(st.rulers_visible))
+        dom.set_attribute(stage,"data-rulers",string(st.rulers_visible)^)
     }
     let navigator = node(owner,".raster-navigator")
     let navigation_cache = {painted_grid:grid_scene,painted_rulers:ruler_scene,navigator_raster:st.navigator_raster,
@@ -84,10 +84,10 @@ pn publish_navigation(owner,st,rendered,bounds,camera_box) any^ {
         let rect = navigation.visible(st,bounds)
         let scene = {thumb:thumb,rect:rect,width:st.doc.width,height:st.doc.height}
         if (st.painted_doc == null or scene != st.painted_navigator) {
-            place_box(node(owner,".raster-navigator canvas"),thumb,1)
+            place_box(node(owner,".raster-navigator canvas"),thumb,1)^
             let target = node(owner,".raster-navigator-viewport")
             place_box(target,{x:thumb.x+rect.x*thumb.width/st.doc.width,y:thumb.y+rect.y*thumb.height/st.doc.height,
-                width:rect.width*thumb.width/st.doc.width,height:rect.height*thumb.height/st.doc.height},1)
+                width:rect.width*thumb.width/st.doc.width,height:rect.height*thumb.height/st.doc.height},1)^
             dom.style_set_property(target,"display",if (rect.width>0 and rect.height>0) "block" else "none")
         }
         return {*:navigation_cache,navigator_raster:if (refresh) rendered else st.navigator_raster,navigator_size:size,painted_navigator:scene}
@@ -103,9 +103,9 @@ pub pn publish(owner,st) any^ {
     let scale = camera.scale
     let geometry = {width:camera.width,height:camera.height,left:camera.x,top:camera.y}
     // unchanged geometry must not invalidate layout before the next pointer sample.
-    if (st.painted_doc == null or geometry != st.painted_geometry or scale != st.scale) {
+    if ((st.painted_doc == null or geometry != st.painted_geometry or scale != st.scale)^) {
         for (property,requested in geometry) dom.style_set_property(surface,string(property),string(requested) ++ "px")
-        dom.set_attribute(stage,"data-scale",string(scale))
+        dom.set_attribute(stage,"data-scale",string(scale)^)
     }
     let frame = presentation.frame(st)^
     let rendered = frame.raster
@@ -118,15 +118,15 @@ pub pn publish(owner,st) any^ {
         dom.set_canvas_pixels(selection,img.coverage_overlay(st.selection)^.pixels)^
     let overlay = node(owner,".raster-target")
     let box = model.selection_bounds(st)
-    if (st.painted_doc == null or box != st.painted_bounds or scale != st.scale) {
-        dom.style_set_property(overlay,"display",if (box == null) "none" else "block")
-        if (box != null) place_box(overlay,box,scale)
+    if ((st.painted_doc == null or box != st.painted_bounds or scale != st.scale)^) {
+        dom.style_set_property(overlay,"display",if ((box == null)^) "none" else "block")
+        if ((box != null)^) place_box(overlay,box,scale)^
     }
     let controls = node(owner,".raster-transform")
     let handles_visible = st.tool == "transform" and transforms.available(st) and box.width>0 and box.height>0
-    if (controls != null and (st.painted_doc == null or box != st.painted_bounds or scale != st.scale or handles_visible != st.painted_handles)) {
+    if ((controls != null and (st.painted_doc == null or box != st.painted_bounds or scale != st.scale or handles_visible != st.painted_handles))^) {
         dom.style_set_property(controls,"display",if (handles_visible) "block" else "none")
-        if (handles_visible) place_box(controls,box,scale)
+        if (handles_visible) place_box(controls,box,scale)^
     }
     let guide_layer = node(owner,".raster-guides")
     let guide_scene = {items:guides.items(st.doc),visible:st.guides_visible,scale:scale,width:size.width,height:size.height,interactive:st.tool == "move" and not st.guides_locked}
@@ -149,10 +149,10 @@ pub pn publish(owner,st) any^ {
                 string(line.end.x*scale) ++ " " ++ string(line.end.y*scale),stroke:"#ffdb7b",'stroke-width':2,fill:"none">,
             *[for (axis in ["x","y"] where snap[axis] != null) <path stroke:"#ff7dd6",'stroke-width':1,fill:"none",
                 d:if (axis == "x") "M " ++ string(snap.x*scale) ++ " 0 V " ++ string(size.height*scale)
-                    else "M 0 " ++ string(snap.y*scale) ++ " H " ++ string(size.width*scale)>]]>,'xml'))
+                    else "M 0 " ++ string(snap.y*scale) ++ " H " ++ string(size.width*scale)>]]>,'xml')^)
     let crop = node(owner,".raster-crop")
     let crop_box = if (st.tool == "crop") st.crop else null
-    if (crop != null and (st.painted_doc == null or crop_box != st.painted_crop or scale != st.scale)) {
+    if ((crop != null and (st.painted_doc == null or crop_box != st.painted_crop or scale != st.scale))^) {
         dom.style_set_property(crop,"display",if (crop_box == null) "none" else "block")
         let shade = node(owner,".raster-crop-shade")
         if (shade != null) {
@@ -167,7 +167,7 @@ pub pn publish(owner,st) any^ {
                 place_box(panel,rect,scale)
             }
         }
-        if (crop_box != null) place_box(crop,crop_box,scale)
+        if (crop_box != null) place_box(crop,crop_box,scale)^
     }
     let navigation_state = publish_navigation(owner,st,rendered,viewport_box,camera)^
     return {*:st,*:navigation_state,painted_doc:st.doc,painted_raster:rendered,painted_channel:st.channel_view,painted_selection:st.selection,

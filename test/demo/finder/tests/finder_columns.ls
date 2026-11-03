@@ -28,7 +28,7 @@ fn paths(st) => [for (c in st.columns) c.path];
     m.activate_column(child,1) == child,
     paths(branch) == ["/demo","/demo/Projects"] and branch.entries == [],
     filtered.query == "" and m.column(filtered,0).query == "assets",
-    [for (e in m.visible(m.column(filtered,0))) e.name] == ["Assets"],
+    [for (e in ((m.visible(m.column(filtered,0))) ^ { [] })) e.name] == ["Assets"],
     m.activate_column(filtered,0).query == "assets",
     paths(refreshed) == paths(child) and m.column(refreshed,1).entries == [],
     back.cursor == 0 and paths(back) == ["/demo"],

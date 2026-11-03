@@ -4,7 +4,7 @@ import model: lambda.graph.model
 import structurizr: lambda.graph.structurizr.structurizr
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 let source = (input("test/lambda/graph/structurizr/advanced_static.dsl",
@@ -26,26 +26,26 @@ let routed = layout.compute({
 })
 
 {
-  terminology: [for (term in children(children(workspace, "c4-terminology")[0], "term"))
+  terminology: [for (term in ((children(children(workspace, "c4-terminology")[0], "term")) ^ { [] }))
     [term.kind, term.value]],
-  elements: [for (entry in elements where contains(["api", "worker", "user"], entry.id))
+  elements: [for (entry in elements where ((contains(["api", "worker", "user"], entry.id)) ^ { false }))
     [entry.id, entry.terminology, entry.group]],
   canonical_groups: [for (entry in elements where entry.kind == "group")
     [entry.id, entry.parent, entry.group]],
   expression: expression.element_ids(elements, relationships,
     "(element.tag==Core || element.tag==External) && element.tag!=Hidden"),
-  groups: [for (entry in model.subgraph_entries(graph))
+  groups: [for (entry in ((model.subgraph_entries(graph)) ^ { [] }))
     [entry.value.id, entry.value.label, entry.parent]],
-  nodes: [for (node in model.nodes(graph))
+  nodes: [for (node in ((model.nodes(graph)) ^ { [] }))
     [node.id, node.shape, node["structurizr-shape"]]],
-  edges: [for (edge in model.edges(graph)) [edge.id, edge["route-mode"], edge.style]],
-  selected: [for (node in model.nodes(selected)) node.id],
+  edges: [for (edge in ((model.edges(graph)) ^ { [] })) [edge.id, edge["route-mode"], edge.style]],
+  selected: [for (node in ((model.nodes(selected)) ^ { [] })) node.id],
   html: [
-    for (node in children(html, "node"))
+    for (node in ((children(html, "node")) ^ { [] }))
       [node["data-node-id"], node["data-shape"], node["data-style-declarations"]],
-    for (edge in children(html, "edge"))
+    for (edge in ((children(html, "edge")) ^ { [] }))
       [edge["data-edge-id"], edge["data-route-mode"], edge["data-dash-array"]]
   ],
-  routed: [for (edge in routed.edges) [edge.id, edge.route_mode, edge.is_bezier]],
-  diagnostics: [for (value in model.diagnostics(workspace)) [value.code, value.path]]
+  routed: [for (edge in ((routed.edges) ^ { [] })) [edge.id, edge.route_mode, edge.is_bezier]],
+  diagnostics: [for (value in ((model.diagnostics(workspace)) ^ { [] })) [value.code, value.path]]
 }

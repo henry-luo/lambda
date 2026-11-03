@@ -3,9 +3,9 @@ import s: lambda.scene3d
 import post: lambda.scene3d.postprocessing
 let COPY = "void main(){fragment_color=texture(color_input,gl_FragCoord.xy/resolution);}"
 let TINT = "uniform float amount;void main(){fragment_color=texture(color_input,gl_FragCoord.xy/resolution)*amount;}"
-fn scene(passes, options = {}) element => s.scene([s.camera({id: "main"}),
+fn scene(passes, options = {}) element^ => s.scene([s.camera({id: "main"}),
     s.mesh(s.plane(), s.material()), post.chain(passes)], {camera: "main", background: "#123456", *: options})
-fn valid(scene) => s.validate(scene) ^ { ^.message }
+fn valid(scene) any^ => s.validate(scene) ^ { ^.message }
 fn message(scene) => s.normalize(scene) ^ { ^.message }
 [
  valid(scene([])),

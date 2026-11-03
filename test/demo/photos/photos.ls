@@ -52,8 +52,8 @@ pn publish(owner,st,workspace=null) {
             dom.set_inner_html(target,markup)
             dom.set_attribute(target,"data-items",markup)
         }
-        dom.set_attribute(owner,"data-tabs",string(len(rows)))
-        dom.set_attribute(owner,"data-tab",model.value(workspace.active,""))
+        dom.set_attribute(owner,"data-tabs",string(len(rows))^)
+        dom.set_attribute(owner,"data-tab",model.value(workspace.active,"")^)
         dom.set_close_guard(owner,workspaces.any_dirty(workspace,interaction.cancel(next))^)
         if (next.dialog == "discard" and previous_tab != workspace.active) dom.focus_set(present.node(owner,"discard-cancel"),false)
     }
@@ -70,7 +70,7 @@ pn show_file(owner,st,kind) {
         else if (kind == "psd") "Use .photos to keep transforms, blend modes and editable effects. Flatten the image for the supported PSD raster profile."
         else "Enter a local image, PSD or .photos project path.")
     dom.set_state(present.node(owner,"file-path"),"value",if (kind == "action-save") "temp/photos/action.laction" else if (kind == "save")
-        (if (ends_with(lower(st.path),".photos")) st.path else "temp/photos/composition.photos")
+        (if (ends_with(lower(st.path),".photos")^) st.path else "temp/photos/composition.photos")
         else if (kind == "psd") "temp/photos/composition.psd"
         else if (kind == "export") "temp/photos/composition.png" else "")
     if (kind == "export") {
@@ -125,14 +125,14 @@ pn command(owner,st,action) any^ {
     if (action in ["curve-reset","curve-remove"]) {
         let curves = if (action == "curve-reset") tone.with_points(st.curve_draft,st.curve_channel,tone.identity)^
             else tone.remove(st.curve_draft,st.curve_channel,st.curve_point)^;
-        if (action == "curve-reset") present.set_value(present.node(owner,"curve-points"),format(tone.identity,'mark'))
+        if (action == "curve-reset") present.set_value(present.node(owner,"curve-points"),format(tone.identity,'mark'))^
         return {*:st,curve_draft:curves,curve_point:1}
     }
     if (action in ["levels-add","levels-apply","curves-add","curves-apply","levels-layer","curves-layer"]) {
         let layer = ends_with(action,"layer")
         let adding = layer or ends_with(action,"add")
         let current = if (layer) null else effects.items(model.active(st)^.node)[st.effect_index]
-        if (not adding and current == null) raise error("Photos: select an effect to update")
+        if ((not adding and current == null)^) raise error("Photos: select an effect to update")
         let initial = if (adding) ({}) else current.options
         let options = if (starts_with(action,"levels-")) reduce([initial,*[for (control in tone.levels)
             {[control.key]:float(field(owner,"levels-" ++ control.key))/control.scale}]],(result,entry) => {*:result,*:entry})
@@ -142,7 +142,7 @@ pn command(owner,st,action) any^ {
             name:if (adding) (if (starts_with(action,"levels-")) "Levels" else "Curves") else current.name})^;
         return {*:changed,effect_index:if (adding) len(effects.items(model.active(changed)^.node))-1 else st.effect_index}
     }
-    if (starts_with(action,"align-") or starts_with(action,"distribute-")) {
+    if ((starts_with(action,"align-") or starts_with(action,"distribute-"))^) {
         return editor.exec(st,{id:if (starts_with(action,"align-")) "layer.align" else "layer.distribute",
             *:if (starts_with(action,"align-")) ({mode:slice(action,6,len(action))}) else ({axis:slice(action,11,len(action))}),
             relative:field(owner,"align-relative")})^
@@ -159,10 +159,10 @@ pn command(owner,st,action) any^ {
     if (action == "new-tab") { return {*:replace_document(st,"new")^,tab_request:"add"} }
     if (action == "open-tab") { return show_file(owner,st,"open-tab") }
     if (action == "tab-close") {
-        if (editor.dirty(st)) { return {*:st,dialog:"discard",pending:"tab-close"} }
+        if (editor.dirty(st)^) { return {*:st,dialog:"discard",pending:"tab-close"} }
         return {*:st,tab_request:"close-tab"}
     }
-    if (starts_with(action,"channel-")) {
+    if (starts_with(action,"channel-")^) {
         let selected = field(owner,"saved-channel")
         let component = field(owner,"channel-component")
         let label = field(owner,"channel-name");
@@ -222,7 +222,7 @@ pn command(owner,st,action) any^ {
     if (action == "selection-feather") { return editor.exec(st,{id:"selection.feather",radius:float(field(owner,"feather-radius"))})^ }
     if (action == "swap-colors") { return editor.exec(st,{id:"tool.configure",foreground:st.background,background:st.foreground})^ }
     if (action == "file-cancel" or action == "discard-cancel") {
-        dom.focus_set(present.node(owner,if (st.dialog == "discard") "stage" else st.dialog),false)
+        dom.focus_set(present.node(owner,if (st.dialog == "discard") "stage" else st.dialog)^,false)
         return {*:st,dialog:"",pending:"",error:""}
     }
     if (action == "discard-save") { return show_file(owner,st,"save") }
@@ -232,7 +232,7 @@ pn command(owner,st,action) any^ {
         return show_file(owner,{*:st,dialog:"",pending:""},"open")
     }
     if (action == "new" or action == "open") {
-        if (editor.dirty(st)) { return {*:st,dialog:"discard",pending:action} }
+        if (editor.dirty(st)^) { return {*:st,dialog:"discard",pending:action} }
         if (action == "new") { return replace_document(st,"new")^ }
         return show_file(owner,st,"open")
     }
@@ -268,7 +268,7 @@ pn command(owner,st,action) any^ {
     }
     if (action == "front" or action == "back") {
         let row = model.active(st)^
-        let siblings = [for (candidate in editor.layers(st.doc) where candidate.parent == row.parent) candidate]
+        let siblings = [for (candidate in ((editor.layers(st.doc)) ^ { [] }) where candidate.parent == row.parent) candidate]
         let current = [for (i,candidate in siblings where candidate.id == row.id) i][0]
         let index = max(0,min(len(siblings)-1,current+(if (action == "front") -1 else 1)));
         return editor.exec(st,{id:"layer.reorder",index:index})^
@@ -325,7 +325,7 @@ pn capture_node(owner,st) {
     return present.node(owner,if (st.gesture.mode == "navigator") "navigator" else "stage")
 }
 pn cancel_preview(owner,st) {
-    if (st.gesture.pointer != null) dom.release_pointer_capture(capture_node(owner,st),st.gesture.pointer)
+    if (st.gesture.pointer != null) dom.release_pointer_capture(capture_node(owner,st)^,st.gesture.pointer)
     if (st.token > 0) dom.cancel_frame(owner,st.token)
     if (st.curve_drag != null) dom.release_pointer_capture(present.node(owner,"curve-editor"),st.curve_drag.pointer)
     return {*:interaction.cancel(st),token:0,curve_drag:null,
@@ -347,7 +347,7 @@ fn tab_transition(workspace,before,after) any^ {
     } else if (after.tab_request in ["close-tab","close-window"]) {
         let current = {*:after,tab_request:"",dialog:"",pending:""}
         let changed = workspaces.close(workspaces.capture(workspace,current)^,workspace.active,true)^
-        let dirty = [for (tab in changed.tabs where editor.dirty(tab.session)) tab]
+        let dirty = [for (tab in changed.tabs where ((editor.dirty(tab.session)) ^ { false })) tab]
         if (after.tab_request == "close-window" and len(dirty)==0) ({workspace:changed,session:current,close:true})
         else {
             let ready = if (len(changed.tabs)>0) changed else workspaces.add(changed,base_session(editor.open_session(editor.new_document()^)^))^
@@ -359,7 +359,7 @@ fn tab_transition(workspace,before,after) any^ {
     } else ({workspace:workspace,session:after,close:false})
 }
 
-view <photos_session> state session:base_session(~.initial,"Coast" ),
+view <photos_session>() any^ state session:base_session(~.initial,"Coast")^,
     documents:(workspaces.add(workspaces.create(),base_session(~.initial,"Coast"))^) { ~.rendered }
 on photos_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
@@ -370,7 +370,7 @@ on photos_activate(evt) {
     return 'handled'
 }
 on photos_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != session.token)^) { return 'pass' }
     var next = {*:session,token:0}
     { let __error_outcome_4 = interaction.render(next) ^ { ^ }; if (__error_outcome_4 is error) { next = {*:cancel_preview(evt.target,next),error:__error_outcome_4.message,status:__error_outcome_4.message} } else match __error_outcome_4 { case any { next = ~ } } }
     if (next.gesture == null) {
@@ -382,7 +382,7 @@ on photos_frame(evt) {
 }
 on click(evt) {
     let owner = owner_of(evt)
-    if (session.dialog != "" and dom.closest(evt.target,if (session.dialog == "discard") "#discard-dialog" else "#file-dialog") == null) {
+    if ((session.dialog != "" and dom.closest(evt.target,if (session.dialog == "discard") "#discard-dialog" else "#file-dialog") == null)^) {
         return 'prevent-default'
     }
     let button = dom.closest(evt.target,"[data-action]")
@@ -408,7 +408,7 @@ on click(evt) {
         let visible = dom.get_attribute(layer,"data-visibility")
         let id = if (mask != null) mask else if (visible != null) visible else dom.get_attribute(layer,"data-layer")
         let ids = if (evt.shiftKey and mask == null and visible == null)
-            (if (id in session.selected) [for (chosen in session.selected where chosen != id) chosen] else [*session.selected,id]) else [id]
+            (if (id in session.selected) [for (chosen in ((session.selected) ^ { [] }) where chosen != id) chosen] else [*session.selected,id]) else [id]
         { let __error_outcome_7 = editor.exec(next,{id:"layer.select",ids:ids,target:if (mask != null) "mask" else "pixels"}) ^ { ^ }; if (__error_outcome_7 is error) { next = {*:next,error:__error_outcome_7.message,status:__error_outcome_7.message} } else match __error_outcome_7 { case any { next = ~ } } }
         if (visible != null) {
             { let __error_outcome_8 = editor.exec(next,{id:"layer.visibility"}) ^ { ^ }; if (__error_outcome_8 is error) { next = {*:next,error:__error_outcome_8.message,status:__error_outcome_8.message} } else match __error_outcome_8 { case any { next = ~ } } }
@@ -441,17 +441,17 @@ on change(evt) {
         session = publish(owner,{*:clear_error(session),canvas_anchor:field(owner,id)},documents)
         return 'handled'
     }
-    if (starts_with(id,"export-")) {
+    if (starts_with(id,"export-")^) {
         if (id == "export-format") {
             let format = field(owner,id)
-            present.set_value(present.node(owner,"file-path"),exports.destination(field(owner,"file-path"),format)^)
-            present.set_value(present.node(owner,"export-alpha"),if (format == "jpeg") "flatten" else "preserve")
+            present.set_value(present.node(owner,"file-path"),exports.destination(field(owner,"file-path"),format)^)^
+            present.set_value(present.node(owner,"export-alpha"),if (format == "jpeg") "flatten" else "preserve")^
         }
-        if (id in ["export-width","export-height"] and field(owner,"export-aspect") == "locked") {
+        if ((id in ["export-width","export-height"] and field(owner,"export-aspect") == "locked")^) {
             let width = id == "export-width"
             let value = float(field(owner,id))
-            if (model.finite(value) and value>0) present.set_value(present.node(owner,if (width) "export-height" else "export-width"),
-                string(exports.proportional_extent(session.doc,value,width)))
+            if ((model.finite(value) and value>0)^) present.set_value(present.node(owner,if (width) "export-height" else "export-width"),
+                string(exports.proportional_extent(session.doc,value,width)))^
         }
         session = publish(owner,session,documents)
         return 'handled'
@@ -463,7 +463,7 @@ on change(evt) {
         return 'handled'
     }
     if (id == "guide-layout-preset") {
-        dom.style_set_property(present.node(owner,"guide-layout-custom"),"display",if (field(owner,id) == "custom") "grid" else "none")
+        dom.style_set_property(present.node(owner,"guide-layout-custom")^,"display",if ((field(owner,id) == "custom")^) "grid" else "none")
         return 'handled'
     }
     if (id in ["crop-ratio-width","crop-ratio-height"]) {
@@ -499,7 +499,7 @@ on change(evt) {
         session = publish(owner,next,documents)
         return 'handled'
     }
-    if (starts_with(id,"effect-")) {
+    if (starts_with(id,"effect-")^) {
         let key = slice(id,7,len(id))
         let current = effects.items(model.active(session)^.node)[session.effect_index]
         if (current == null) { session = {*:session,effect_draft:{*:session.effect_draft,[key]:float(field(owner,id))}}; return 'handled' }
@@ -519,67 +519,67 @@ on change(evt) {
             let box = model.bounds(active.node),
             {id:"layer.move",dx:if (id == "position-x") int(field(owner,id))-int(box.x) else 0,
                 dy:if (id == "position-y") int(field(owner,id))-int(box.y) else 0}) else null
-    if (action == null) { return 'pass' }
+    if ((action == null)^) { return 'pass' }
     { let __error_outcome_19 = editor.exec(next,action) ^ { ^ }; if (__error_outcome_19 is error) { next = {*:next,error:__error_outcome_19.message,status:__error_outcome_19.message} } else match __error_outcome_19 { case any { next = ~ } } }
     session = publish(owner,next,documents)
     return 'handled'
 }
 on pointerdown(evt) {
     let owner = owner_of(evt)
-    if (evt.button == 0 and session.dialog == "" and dom.closest(evt.target,"#curve-chart") != null) {
+    if ((evt.button == 0 and session.dialog == "" and dom.closest(evt.target,"#curve-chart") != null)^) {
         var next = clear_error(session)
         { let __error_outcome_20 = begin_curve(owner,next,evt) ^ { ^ }; if (__error_outcome_20 is error) { next = {*:next,error:__error_outcome_20.message,status:__error_outcome_20.message} } else match __error_outcome_20 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'prevent-default'
     }
-    if (evt.button != 0 or session.dialog != "" or (dom.closest(evt.target,"#stage") == null and dom.closest(evt.target,"#navigator") == null) or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
-    dom.focus_set(present.node(owner,if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
+    if ((evt.button != 0 or session.dialog != "" or (dom.closest(evt.target,"#stage") == null and dom.closest(evt.target,"#navigator") == null) or dom.closest(evt.target,"#crop-controls") != null)^) { return 'pass' }
+    dom.focus_set(present.node(owner,if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage")^,false)
     var next = clear_error(session)
     { let __error_outcome_21 = interaction.begin(next,pointer_input(owner,next,evt)) ^ { ^ }; if (__error_outcome_21 is error) { next = {*:next,error:__error_outcome_21.message,status:__error_outcome_21.message} } else match __error_outcome_21 { case any { next = ~ } } }
-    if (next.gesture != null) dom.set_pointer_capture(capture_node(owner,next),evt.pointerId)
-    if (next.gesture.mode in ["brush","erase",*retouch.kinds]) { session = publish_preview(owner,next,documents) }
+    if ((next.gesture != null)^) dom.set_pointer_capture(capture_node(owner,next)^,evt.pointerId)
+    if ((next.gesture.mode in ["brush","erase",*retouch.kinds])^) { session = publish_preview(owner,next,documents) }
     else { session = publish(owner,next,documents) }
     return 'prevent-default'
 }
 on mousedown(evt) {
     // crop bar controls retain native focus instead of being redirected to the painting surface.
     if (dom.closest(evt.target,"#stage,#navigator") != null and dom.closest(evt.target,"#crop-controls") == null) {
-        dom.focus_set(present.node(owner_of(evt),if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
+        dom.focus_set(present.node(owner_of(evt),if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage")^,false)
         return 'prevent-default'
     }
     return 'pass'
 }
 on pointermove(evt) {
-    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+    if ((session.curve_drag != null and evt.pointerId == session.curve_drag.pointer)^) {
         let owner = owner_of(evt)
         session = curve_sample(owner,session,evt)^
-        if (session.token == 0) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
+        if ((session.token == 0)^) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
         return 'prevent-default'
     }
-    if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
+    if ((session.gesture == null or evt.pointerId != session.gesture.pointer)^) { return 'pass' }
     let owner = owner_of(evt)
     session = interaction.sample(session,pointer_input(owner,session,evt))
-    if (session.token == 0) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
+    if ((session.token == 0)^) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+    if ((session.curve_drag != null and evt.pointerId == session.curve_drag.pointer)^) {
         let owner = owner_of(evt)
-        if (session.token>0) dom.cancel_frame(owner,session.token)
+        if ((session.token>0)^) dom.cancel_frame(owner,session.token)^
         let next = curve_sample(owner,session,evt)^
-        dom.release_pointer_capture(present.node(owner,"curve-editor"),evt.pointerId)
+        dom.release_pointer_capture(present.node(owner,"curve-editor")^,evt.pointerId)
         session = publish(owner,{*:next,curve_drag:null,token:0},documents)
         return 'prevent-default'
     }
-    if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
+    if ((session.gesture == null or evt.pointerId != session.gesture.pointer)^) { return 'pass' }
     let owner = owner_of(evt)
-    if (session.token > 0) dom.cancel_frame(owner,session.token)
+    if ((session.token > 0)^) dom.cancel_frame(owner,session.token)^
     // capture retargets pointer-up to the stage; query the actual drop beneath it.
     let drop = if (session.gesture.mode == "guide-new") dom.element_from_point(dom.root_node(owner),evt.clientX,evt.clientY) else null
     let rejected = session.gesture.mode == "guide-new" and (dom.closest(drop,"#stage") == null or
         dom.closest(drop,"[data-raster-ruler],#crop-controls") != null)
     var next = if (rejected) interaction.cancel(session) else session
-    if (not rejected) {
+    if ((not rejected)^) {
         { let __error_outcome_22 = interaction.finish(interaction.preview(session,pointer_input(owner,session,evt))^) ^ { ^ }; if (__error_outcome_22 is error) { next = {*:interaction.cancel(session),error:__error_outcome_22.message,status:__error_outcome_22.message} } else match __error_outcome_22 { case any { next = ~ } } }
     }
     dom.release_pointer_capture(capture_node(owner,session),evt.pointerId)
@@ -587,12 +587,12 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
-    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+    if ((session.curve_drag != null and evt.pointerId == session.curve_drag.pointer)^) {
         let owner = owner_of(evt)
         session = publish(owner,cancel_preview(owner,session),documents)
         return 'prevent-default'
     }
-    if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
+    if ((session.gesture == null or evt.pointerId != session.gesture.pointer)^) { return 'pass' }
     let owner = owner_of(evt)
     session = publish(owner,cancel_preview(owner,session),documents)
     return 'prevent-default'
@@ -607,20 +607,20 @@ on keydown(evt) {
         let editing_crop = session.gesture.mode == "crop" and session.gesture.crop_handle != null
         let cancelled = cancel_preview(owner,session)
         session = publish(owner,{*:cancelled,dialog:"",pending:"",crop:if (editing_crop) cancelled.crop else null},documents)
-        dom.focus_set(present.node(owner,trigger),false)
+        dom.focus_set(present.node(owner,trigger)^,false)
         return 'prevent-default'
     }
-    if (session.dialog != "" and evt.key == "Tab") {
+    if ((session.dialog != "" and evt.key == "Tab")^) {
         let controls = if (session.dialog == "discard") ["discard-cancel","discard-save","discard-confirm"]
             else if (session.dialog == "export") ["file-path","export-format","export-aspect","export-width","export-height",
                 *if (field(owner,"export-format") == "jpeg") ["export-quality"] else [],"export-alpha",
                 *if (field(owner,"export-alpha") == "flatten") ["export-background"] else [],"file-cancel","file-confirm"]
             else ["file-path","file-cancel","file-confirm"]
         let current = model.value([for (i,id in controls where id == dom.get_attribute(evt.target,"id")) i][0],0)
-        dom.focus_set(present.node(owner,controls[(current+(if (evt.shiftKey) len(controls)-1 else 1))%len(controls)]),false)
+        dom.focus_set(present.node(owner,controls[(current+(if (evt.shiftKey) len(controls)-1 else 1))%len(controls)])^,false)
         return 'prevent-default'
     }
-    if (session.dialog != "") { return 'pass' }
+    if ((session.dialog != "")^) { return 'pass' }
     if (dom.closest(evt.target,"#navigator") != null and evt.key in ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home"]) {
         let before = cancel_preview(owner,session)
         session = publish(owner,{*:before,pan:if (evt.key == "Home") ({x:0.0,y:0.0}) else
@@ -629,7 +629,7 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (typing) { return 'pass' }
-    if (evt.key == "Enter" and session.tool == "crop") { action = "crop-apply" }
+    if ((evt.key == "Enter" and session.tool == "crop")^) { action = "crop-apply" }
     else if (modifier and lower(evt.key) == "z") { action = if (evt.shiftKey) "history.redo" else "history.undo" }
     else if (modifier and lower(evt.key) == "s") { action = "save" }
     else if (modifier and lower(evt.key) == "a") { action = "selection.all" }
@@ -663,26 +663,26 @@ on keydown(evt) {
         session = publish(owner,session,documents)
         return 'prevent-default'
     }
-    if (action == "") { return 'pass' }
+    if ((action == "")^) { return 'pass' }
     session = cancel_preview(owner,session)
     { let __error_outcome_26 = command(owner,session,action) ^ { ^ }; if (__error_outcome_26 is error) { session = {*:session,error:__error_outcome_26.message,status:__error_outcome_26.message} } else match __error_outcome_26 { case any { session = ~ } } }
     session = publish(owner,session,documents)
     return 'prevent-default'
 }
 on resize(evt) {
-    if (session.token == 0) { session = {*:session,token:dom.request_frame(owner_of(evt),"photos_frame")} }
+    if ((session.token == 0)^) { session = {*:session,token:dom.request_frame(owner_of(evt),"photos_frame")} }
     return 'pass'
 }
 on closerequest(evt) {
     let owner = owner_of(evt)
     // a preview is disposable; the close decision uses the last committed snapshot.
     session = cancel_preview(owner,session)
-    if (session.recording != null) {
+    if ((session.recording != null)^) {
         session = publish(owner,{*:session,error:"Stop action recording before closing documents",status:"Stop action recording before closing documents"},documents)
         return 'prevent-default'
     }
     documents = workspaces.capture(documents,session)^
-    let dirty = [for (tab in documents.tabs where editor.dirty(tab.session)) tab]
+    let dirty = [for (tab in documents.tabs where ((editor.dirty(tab.session)) ^ { false })) tab]
     if (len(dirty)>0) {
         let target = if (editor.dirty(session)) workspaces.lookup(documents,documents.active) else dirty[0]
         documents = {*:documents,active:target.id}

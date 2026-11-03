@@ -10,8 +10,8 @@ pn guarded_store(a: float[], i: int) {
     return a[i]
 }
 
-pn dense_int_sum(n: int) int {
-    var values = fill(n * n, 1)
+pn dense_int_sum(n: int) int^ {
+    var values = fill(n * n, 1)^
     var i: int = 0
     var total: int = 0
     while (i < n) {
@@ -25,8 +25,8 @@ pn dense_int_sum(n: int) int {
     return total
 }
 
-pn dense_int_linear_sum(n: int) int {
-    var values = fill(n, 1)
+pn dense_int_linear_sum(n: int) int^ {
+    var values = fill(n, 1)^
     var i: int = 0
     var total: int = 0
     while (i < n) {
@@ -37,7 +37,7 @@ pn dense_int_linear_sum(n: int) int {
 }
 
 pn main() {
-    var values = fill(4, 1.25)
+    var values = fill(4, 1.25)^
     print(string(guarded_load(values, 2)) ++ "\n")
     print(string(guarded_store(values, 1)) ++ "\n")
     print(string(dense_int_sum(2)) ++ "\n")

@@ -4,10 +4,10 @@ import transform: lambda.graph.transform
 let graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let html = transform.to_html(graph)
-let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
-  where string(name(child)) == "node") child]
-let html_edges = [for (i in 0 to (len(html) - 1), let child = html[i]
-  where string(name(child)) == "edge") child]
+let html_nodes = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[i]
+  where ((string(name(child)) == "node") ^ { false })) child]
+let html_edges = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[i]
+  where ((string(name(child)) == "edge") ^ { false })) child]
 let assignments = model.style_assignments(graph)
 
 {

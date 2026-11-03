@@ -13,7 +13,7 @@ let CHROME_H = 52.0 + 64.0
 
 fn node(owner, id) => dom.get_element_by_id(owner, id)
 fn player(owner) => dom.get_element_by_id(owner, "album-film")
-fn pct(v) => string(round(v * 10000.0) / 100.0) ++ "%"
+fn pct(v) any^ => string(round(v * 10000.0) / 100.0) ++ "%"
 fn attr_num(el, name) => float(dom.get_attribute(el, name)) ^ { 0.0 }
 
 // the deck clock now: {position, running, ended}
@@ -35,15 +35,15 @@ pn send(owner, detail) {
 pn paint(owner, fs, now_ms) {
     let c = clock(owner, fs, now_ms)
     let f = c.position / max(1.0, fs.film.duration_ms)
-    updates.style(node(owner, "film-fill"), "width", pct(f))
-    updates.style(node(owner, "film-thumb"), "left", pct(f))
-    updates.text(owner, "film-time", F.clock_label(c.position))
-    updates.attr(node(owner, "film-track"), "aria-valuenow", string(int(c.position / 1000.0)))
-    updates.attr(node(owner, "film"), "data-playing", c.running)
-    updates.attr(node(owner, "film"), "data-ended", c.ended)
+    updates.style(node(owner, "film-fill"), "width", pct(f))^
+    updates.style(node(owner, "film-thumb"), "left", pct(f))^
+    updates.text(owner, "film-time", F.clock_label(c.position))^
+    updates.attr(node(owner, "film-track"), "aria-valuenow", string(int(c.position / 1000.0)))^
+    updates.attr(node(owner, "film"), "data-playing", c.running)^
+    updates.attr(node(owner, "film"), "data-ended", c.ended)^
     let label = if (c.running) "Pause" else if (c.ended) "Play again" else "Play"
-    updates.attr(node(owner, "film-play"), "aria-label", label)
-    updates.attr(node(owner, "film-play"), "title", label ++ " (Space)")
+    updates.attr(node(owner, "film-play"), "aria-label", label)^
+    updates.attr(node(owner, "film-play"), "title", label ++ " (Space)")^
     let beat = c.position / F.BEAT_MS
     let current = len([for (ch in fs.film.chapters where beat >= ch.start_beat) ch]) - 1
     for (b in dom.query_selector_all(owner, "[data-film-chapter]"))
@@ -87,9 +87,9 @@ pub pn begin(owner, ctx, ids, title) {
     let width = (if (screen == null) 1400.0 else screen.width)
     let height = max(240.0, (if (screen == null) 900.0 else screen.height) - CHROME_H)
     updates.text(owner, "film-title", title)
-    updates.text(owner, "film-length", F.clock_label(film.duration_ms))
-    updates.attr(node(owner, "film-track"), "aria-valuemax", string(int(film.duration_ms / 1000.0)))
-    updates.markup(node(owner, "film-ticks"), chapters_markup(film))
+    updates.text(owner, "film-length", F.clock_label(film.duration_ms))^
+    updates.attr(node(owner, "film-track"), "aria-valuemax", string(int(film.duration_ms / 1000.0)))^
+    updates.markup(node(owner, "film-ticks"), chapters_markup(film))^
     dom.dispatch(node(owner, "film-stage"), {type:"album_film_open", bubbles:false, detail:{deck:deck, width:width, height:height}})
     return {film:film, sound:true, token:null, drag:null, frame:dom.request_frame(owner, "film_start")}
 }
@@ -104,7 +104,7 @@ pub pn start(owner, fs, now_ms) {
 // one bar frame; frames continue only while the film plays
 pub pn frame(owner, fs, now_ms) {
     let c = paint(owner, fs, now_ms)
-    if (c.running) { return {*:fs, frame:dom.request_frame(owner, "film_frame")} }
+    if ((c.running)^) { return {*:fs, frame:dom.request_frame(owner, "film_frame")} }
     // the film ended or was paused by the player: the soundtrack stops with it
     return {*:sync_sound(owner, fs, c), frame:0}
 }
@@ -112,7 +112,7 @@ pub pn frame(owner, fs, now_ms) {
 pn after(owner, fs, now_ms) {
     let c = paint(owner, fs, now_ms)
     let synced = sync_sound(owner, fs, c)
-    if (c.running and fs.frame == 0) { return {*:synced, frame:dom.request_frame(owner, "film_frame")} }
+    if ((c.running and fs.frame == 0)^) { return {*:synced, frame:dom.request_frame(owner, "film_frame")} }
     return synced
 }
 

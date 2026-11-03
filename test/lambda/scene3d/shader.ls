@@ -1,11 +1,11 @@
 // Shader materials, shader instances and uniform tracks in the package validator (SH1–SH3)
 import s: lambda.scene3d
-fn message(scene) => s.normalize(scene) ^ { ^.message }
+fn message(scene) any^ => s.normalize(scene) ^ { ^.message }
 let camera = s.camera({id: "main"})
 let VERTEX = "void main() { gl_Position = projection_matrix * view_matrix * vec4(position, 1.0); }"
 let FRAGMENT = "void main() { fragment_color = vec4(1.0); }"
-fn shader(uniforms, options = {}) element => s.shader_material(VERTEX, FRAGMENT, uniforms, options)
-fn scene(mesh_options, uniforms = {time: 0.0}, extra = []) element => s.scene([camera,
+fn shader(uniforms, options = {}) element^ => s.shader_material(VERTEX, FRAGMENT, uniforms, options)
+fn scene(mesh_options, uniforms = {time: 0.0}, extra = []) element^ => s.scene([camera,
     s.resources([s.texture("image.png", {id: "atlas"})]),
     s.mesh(s.plane(), shader(uniforms, {id: "wing"}), {id: "flock", *: mesh_options}), *extra]);
 [

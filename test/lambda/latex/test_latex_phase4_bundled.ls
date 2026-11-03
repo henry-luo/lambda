@@ -10,7 +10,7 @@ let result = latex.render_result(ast, {base_uri: "test/lambda/latex/fixtures/loc
 let out = html.to_html(result.elements) ^ { "" };
 
 "engine packages:"; ast.tex_packages
-"diagnostics:"; [for (issue in result.diagnostics) issue.code]
+"diagnostics:"; [for (issue in ((result.diagnostics) ^ { [] })) issue.code]
 "kvoptions:"; index_of(out, "in green") != null and index_of(out, "<strong") != null
 "ifthen:"; index_of(out, "alpha, other") != null
 "etoolbox:"; index_of(out, "is-x, not-x") != null and index_of(out, "stored value") != null

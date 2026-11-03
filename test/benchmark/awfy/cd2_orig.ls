@@ -93,14 +93,17 @@ type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
 pn arr_new() any {
-    var a: Arr = { l0: null16(), sz: 0 }
+    let _admitted_a_96: Arr = { l0: null16(), sz: 0 }
+    var a: Arr = _admitted_a_96^
     return a
 }
 
 pn arr_get(a, idx: int) any {
-    var i2: int = int(idx % 32)
+    let _admitted_i2_101: int = int(idx % 32)
+    var i2: int = _admitted_i2_101^
     var mid: int = shr(idx, 5)
-    var i1: int = int(mid % 16)
+    let _admitted_i1_103: int = int(mid % 16)
+    var i1: int = _admitted_i1_103^
     var i0: int = shr(mid, 4)
     var l0 = (a.l0)
     var c1 = l0[i0]
@@ -112,14 +115,16 @@ pn arr_get(a, idx: int) any {
 }
 
 pn arr_set(var a, idx: int, val) any {
-    var i2: int = int(idx % 32)
+    let _admitted_i2_115: int = int(idx % 32)
+    var i2: int = _admitted_i2_115^
     var mid: int = shr(idx, 5)
-    var i1: int = int(mid % 16)
+    let _admitted_i1_117: int = int(mid % 16)
+    var i1: int = _admitted_i1_117^
     var i0: int = shr(mid, 4)
     // S9.3.1: binding a trie level and mutating the local writes a copy.
     // Write the whole path so each store lands in `a` (O(depth), no subtree copy).
-    if (a.l0[i0] == null) { a.l0[i0] = null16() }
-    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32() }
+    if (a.l0[i0] == null) { a.l0[i0] = null16()^ }
+    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32()^ }
     a.l0[i0][i1][i2] = val
     return 0
 }
@@ -147,7 +152,8 @@ pn vec_at(v, idx: int) any {
 // =====================================================
 
 pn rbt_new() any {
-    var nd: Arr = arr_new()
+    let _admitted_nd_150: Arr = arr_new()
+    var nd: Arr = _admitted_nd_150^
     var t: RbtTree = { root: -1, cnt: 0, nd: nd }
     return t
 }
@@ -157,7 +163,8 @@ pn rbt_nd(tree, id: int) any {
 }
 
 pn rbt_mk_node(var tree, key: int, val) any {
-    var c: int = (tree.cnt)
+    let _admitted_c_160: int = (tree.cnt)
+    var c: int = _admitted_c_160^
     var n = [key, val, NIL, NIL, NIL, RED]
     var nd = (tree.nd)
     arr_set(nd, c, n)
@@ -168,9 +175,11 @@ pn rbt_mk_node(var tree, key: int, val) any {
 
 pn rbt_left_rotate(var tree, xId: int) any {
     var xn = rbt_nd(tree, xId)
-    var yId: int = xn[NR]
+    let _admitted_yId_171: int = xn[NR]
+    var yId: int = _admitted_yId_171^
     var yn = rbt_nd(tree, yId)
-    var ylId: int = yn[NL]
+    let _admitted_ylId_173: int = yn[NL]
+    var ylId: int = _admitted_ylId_173^
     // x.right = y.left
     xn[NR] = ylId
     if (ylId != NIL) {
@@ -178,14 +187,16 @@ pn rbt_left_rotate(var tree, xId: int) any {
         yln[NP] = xId
     }
     // y.parent = x.parent
-    var xpId: int = xn[NP]
+    let _admitted_xpId_181: int = xn[NP]
+    var xpId: int = _admitted_xpId_181^
     yn[NP] = xpId
     if (xpId == NIL) {
         tree.root = yId
     }
     if (xpId != NIL) {
         var xpn = rbt_nd(tree, xpId)
-        var xplId: int = xpn[NL]
+        let _admitted_xplId_188: int = xpn[NL]
+        var xplId: int = _admitted_xplId_188^
         if (xId == xplId) {
             xpn[NL] = yId
         }
@@ -201,9 +212,11 @@ pn rbt_left_rotate(var tree, xId: int) any {
 
 pn rbt_right_rotate(var tree, yId: int) any {
     var yn = rbt_nd(tree, yId)
-    var xId: int = yn[NL]
+    let _admitted_xId_204: int = yn[NL]
+    var xId: int = _admitted_xId_204^
     var xn = rbt_nd(tree, xId)
-    var xrId: int = xn[NR]
+    let _admitted_xrId_206: int = xn[NR]
+    var xrId: int = _admitted_xrId_206^
     // y.left = x.right
     yn[NL] = xrId
     if (xrId != NIL) {
@@ -211,14 +224,16 @@ pn rbt_right_rotate(var tree, yId: int) any {
         xrn[NP] = yId
     }
     // x.parent = y.parent
-    var ypId: int = yn[NP]
+    let _admitted_ypId_214: int = yn[NP]
+    var ypId: int = _admitted_ypId_214^
     xn[NP] = ypId
     if (ypId == NIL) {
         tree.root = xId
     }
     if (ypId != NIL) {
         var ypn = rbt_nd(tree, ypId)
-        var yplId: int = ypn[NL]
+        let _admitted_yplId_221: int = ypn[NL]
+        var yplId: int = _admitted_yplId_221^
         if (yId == yplId) {
             ypn[NL] = xId
         }
@@ -234,16 +249,20 @@ pn rbt_right_rotate(var tree, yId: int) any {
 
 pn rbt_put(var tree, key: int, value) any {
     var yId: int = NIL
-    var xId: int = (tree.root)
+    let _admitted_xId_237: int = (tree.root)
+    var xId: int = _admitted_xId_237^
     while (xId != NIL) {
         yId = xId
         var xn = rbt_nd(tree, xId)
-        var xk: int = xn[NK]
+        let _admitted_xk_241: int = xn[NK]
+        var xk: int = _admitted_xk_241^
         if (key < xk) {
-            xId = xn[NL]
+            let _admitted_xId_243: int = xn[NL]
+            xId = _admitted_xId_243^
         }
         if (key > xk) {
-            xId = xn[NR]
+            let _admitted_xId_246: int = xn[NR]
+            xId = _admitted_xId_246^
         }
         if (key == xk) {
             var oldVal = xn[NV]
@@ -251,7 +270,8 @@ pn rbt_put(var tree, key: int, value) any {
             return oldVal
         }
     }
-    var zId: int = rbt_mk_node(tree, key, value)
+    let _admitted_zId_254: int = rbt_mk_node(tree, key, value)
+    var zId: int = _admitted_zId_254^
     var zn = rbt_nd(tree, zId)
     zn[NP] = yId
     if (yId == NIL) {
@@ -259,7 +279,8 @@ pn rbt_put(var tree, key: int, value) any {
     }
     if (yId != NIL) {
         var yn = rbt_nd(tree, yId)
-        var yk: int = yn[NK]
+        let _admitted_yk_262: int = yn[NK]
+        var yk: int = _admitted_yk_262^
         if (key < yk) {
             yn[NL] = zId
         }
@@ -269,25 +290,32 @@ pn rbt_put(var tree, key: int, value) any {
     }
     // Fix up
     var curId: int = zId
-    var rootId: int = (tree.root)
+    let _admitted_rootId_272: int = (tree.root)
+    var rootId: int = _admitted_rootId_272^
     while (curId != rootId) {
         var cur = rbt_nd(tree, curId)
-        var pId: int = cur[NP]
+        let _admitted_pId_275: int = cur[NP]
+        var pId: int = _admitted_pId_275^
         var parn = rbt_nd(tree, pId)
-        var pcol: int = parn[NC]
+        let _admitted_pcol_277: int = parn[NC]
+        var pcol: int = _admitted_pcol_277^
         if (pcol != RED) {
             curId = rootId
         }
         if (pcol == RED) {
-            var ppId: int = parn[NP]
+            let _admitted_ppId_282: int = parn[NP]
+            var ppId: int = _admitted_ppId_282^
             var ppn = rbt_nd(tree, ppId)
-            var ppLId: int = ppn[NL]
+            let _admitted_ppLId_284: int = ppn[NL]
+            var ppLId: int = _admitted_ppLId_284^
             if (pId == ppLId) {
-                var uncId: int = ppn[NR]
+                let _admitted_uncId_286: int = ppn[NR]
+                var uncId: int = _admitted_uncId_286^
                 var uncCol: int = BLACK
                 if (uncId != NIL) {
                     var uncN = rbt_nd(tree, uncId)
-                    uncCol = uncN[NC]
+                    let _admitted_uncCol_290: int = uncN[NC]
+                    uncCol = _admitted_uncCol_290^
                 }
                 if (uncCol == RED) {
                     parn[NC] = BLACK
@@ -295,34 +323,42 @@ pn rbt_put(var tree, key: int, value) any {
                     uncN2[NC] = BLACK
                     ppn[NC] = RED
                     curId = ppId
-                    rootId = (tree.root)
+                    let _admitted_rootId_298: int = (tree.root)
+                    rootId = _admitted_rootId_298^
                 }
                 if (uncCol != RED) {
                     var curRN = rbt_nd(tree, curId)
-                    var crpId: int = curRN[NP]
+                    let _admitted_crpId_302: int = curRN[NP]
+                    var crpId: int = _admitted_crpId_302^
                     var crpN = rbt_nd(tree, crpId)
-                    var crprId: int = crpN[NR]
+                    let _admitted_crprId_304: int = crpN[NR]
+                    var crprId: int = _admitted_crprId_304^
                     if (curId == crprId) {
                         curId = pId
-                        rbt_left_rotate(tree, curId)
+                        rbt_left_rotate(tree, curId)^
                     }
                     var cur3 = rbt_nd(tree, curId)
-                    var p3Id: int = cur3[NP]
+                    let _admitted_p3Id_310: int = cur3[NP]
+                    var p3Id: int = _admitted_p3Id_310^
                     var p3 = rbt_nd(tree, p3Id)
                     p3[NC] = BLACK
-                    var pp3Id: int = p3[NP]
+                    let _admitted_pp3Id_313: int = p3[NP]
+                    var pp3Id: int = _admitted_pp3Id_313^
                     var pp3 = rbt_nd(tree, pp3Id)
                     pp3[NC] = RED
-                    rbt_right_rotate(tree, pp3Id)
-                    rootId = (tree.root)
+                    rbt_right_rotate(tree, pp3Id)^
+                    let _admitted_rootId_317: int = (tree.root)
+                    rootId = _admitted_rootId_317^
                 }
             }
             if (pId != ppLId) {
-                var uncId2: int = ppn[NL]
+                let _admitted_uncId2_321: int = ppn[NL]
+                var uncId2: int = _admitted_uncId2_321^
                 var uncCol2: int = BLACK
                 if (uncId2 != NIL) {
                     var uncN3 = rbt_nd(tree, uncId2)
-                    uncCol2 = uncN3[NC]
+                    let _admitted_uncCol2_325: int = uncN3[NC]
+                    uncCol2 = _admitted_uncCol2_325^
                 }
                 if (uncCol2 == RED) {
                     parn[NC] = BLACK
@@ -330,26 +366,32 @@ pn rbt_put(var tree, key: int, value) any {
                     uncN4[NC] = BLACK
                     ppn[NC] = RED
                     curId = ppId
-                    rootId = (tree.root)
+                    let _admitted_rootId_333: int = (tree.root)
+                    rootId = _admitted_rootId_333^
                 }
                 if (uncCol2 != RED) {
                     var cur2N = rbt_nd(tree, curId)
-                    var c2pId: int = cur2N[NP]
+                    let _admitted_c2pId_337: int = cur2N[NP]
+                    var c2pId: int = _admitted_c2pId_337^
                     var c2pN = rbt_nd(tree, c2pId)
-                    var c2plId: int = c2pN[NL]
+                    let _admitted_c2plId_339: int = c2pN[NL]
+                    var c2plId: int = _admitted_c2plId_339^
                     if (curId == c2plId) {
                         curId = pId
-                        rbt_right_rotate(tree, curId)
+                        rbt_right_rotate(tree, curId)^
                     }
                     var cur4 = rbt_nd(tree, curId)
-                    var p4Id: int = cur4[NP]
+                    let _admitted_p4Id_345: int = cur4[NP]
+                    var p4Id: int = _admitted_p4Id_345^
                     var p4 = rbt_nd(tree, p4Id)
                     p4[NC] = BLACK
-                    var pp4Id: int = p4[NP]
+                    let _admitted_pp4Id_348: int = p4[NP]
+                    var pp4Id: int = _admitted_pp4Id_348^
                     var pp4 = rbt_nd(tree, pp4Id)
                     pp4[NC] = RED
-                    rbt_left_rotate(tree, pp4Id)
-                    rootId = (tree.root)
+                    rbt_left_rotate(tree, pp4Id)^
+                    let _admitted_rootId_352: int = (tree.root)
+                    rootId = _admitted_rootId_352^
                 }
             }
         }
@@ -360,23 +402,28 @@ pn rbt_put(var tree, key: int, value) any {
 }
 
 pn rbt_find_node(tree, key: int) any {
-    var curId: int = (tree.root)
+    let _admitted_curId_363: int = (tree.root)
+    var curId: int = _admitted_curId_363^
     while (curId != NIL) {
         var n = rbt_nd(tree, curId)
-        var nk: int = n[NK]
+        let _admitted_nk_366: int = n[NK]
+        var nk: int = _admitted_nk_366^
         if (key == nk) { return curId }
         if (key < nk) {
-            curId = n[NL]
+            let _admitted_curId_369: int = n[NL]
+            curId = _admitted_curId_369^
         }
         if (key > nk) {
-            curId = n[NR]
+            let _admitted_curId_372: int = n[NR]
+            curId = _admitted_curId_372^
         }
     }
     return NIL
 }
 
 pn rbt_get(tree, key: int) any {
-    var nId: int = rbt_find_node(tree, key)
+    let _admitted_nId_379: int = rbt_find_node(tree, key)
+    var nId: int = _admitted_nId_379^
     if (nId == NIL) { return null }
     var n = rbt_nd(tree, nId)
     var v = n[NV]
@@ -386,7 +433,8 @@ pn rbt_get(tree, key: int) any {
 pn rbt_tree_min(tree, xId: int) any {
     while (xId != NIL) {
         var n = rbt_nd(tree, xId)
-        var lId: int = n[NL]
+        let _admitted_lId_389: int = n[NL]
+        var lId: int = _admitted_lId_389^
         if (lId == NIL) { return xId }
         xId = lId
     }
@@ -395,66 +443,83 @@ pn rbt_tree_min(tree, xId: int) any {
 
 pn rbt_successor(tree, xId: int) any {
     var xn = rbt_nd(tree, xId)
-    var rId: int = xn[NR]
+    let _admitted_rId_398: int = xn[NR]
+    var rId: int = _admitted_rId_398^
     if (rId != NIL) {
-        var r: int = rbt_tree_min(tree, rId)
+        let _admitted_r_400: int = rbt_tree_min(tree, rId)
+        var r: int = _admitted_r_400^
         return r
     }
-    var yId: int = xn[NP]
+    let _admitted_yId_403: int = xn[NP]
+    var yId: int = _admitted_yId_403^
     while (yId != NIL) {
         var yn = rbt_nd(tree, yId)
-        var yrId: int = yn[NR]
+        let _admitted_yrId_406: int = yn[NR]
+        var yrId: int = _admitted_yrId_406^
         if (xId != yrId) { return yId }
         xId = yId
-        yId = yn[NP]
+        let _admitted_yId_409: int = yn[NP]
+        yId = _admitted_yId_409^
     }
     return NIL
 }
 
 pn rbt_first(tree) any {
-    var rId: int = (tree.root)
+    let _admitted_rId_415: int = (tree.root)
+    var rId: int = _admitted_rId_415^
     if (rId == NIL) { return NIL }
-    var r: int = rbt_tree_min(tree, rId)
+    let _admitted_r_417: int = rbt_tree_min(tree, rId)
+    var r: int = _admitted_r_417^
     return r
 }
 
 pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
-    var rootId: int = (tree.root)
-    while (xId != rootId) {
+    let _admitted_rootId_422: int = (tree.root)
+    var rootId: int = _admitted_rootId_422^
+    while ((xId != rootId)^) {
         var xCol: int = BLACK
-        if (xId != NIL) {
+        if ((xId != NIL)^) {
             var xn = rbt_nd(tree, xId)
-            xCol = xn[NC]
+            let _admitted_xCol_427: int = xn[NC]
+            xCol = _admitted_xCol_427^
         }
         if (xCol != BLACK) {
             xId = rootId
         }
         if (xCol == BLACK) {
             var xpn = rbt_nd(tree, xParId)
-            var xplId: int = xpn[NL]
-            if (xId == xplId) {
-                var wId: int = xpn[NR]
+            let _admitted_xplId_434: int = xpn[NL]
+            var xplId: int = _admitted_xplId_434^
+            if ((xId == xplId)^) {
+                let _admitted_wId_436: int = xpn[NR]
+                var wId: int = _admitted_wId_436^
                 var wn = rbt_nd(tree, wId)
-                var wc: int = wn[NC]
+                let _admitted_wc_438: int = wn[NC]
+                var wc: int = _admitted_wc_438^
                 if (wc == RED) {
                     wn[NC] = BLACK
                     xpn[NC] = RED
-                    rbt_left_rotate(tree, xParId)
+                    rbt_left_rotate(tree, xParId)^
                     xpn = rbt_nd(tree, xParId)
-                    wId = xpn[NR]
+                    let _admitted_wId_444: int = xpn[NR]
+                    wId = _admitted_wId_444^
                     wn = rbt_nd(tree, wId)
                 }
                 var wlc: int = BLACK
-                var wlId: int = wn[NL]
+                let _admitted_wlId_448: int = wn[NL]
+                var wlId: int = _admitted_wlId_448^
                 if (wlId != NIL) {
                     var wln = rbt_nd(tree, wlId)
-                    wlc = wln[NC]
+                    let _admitted_wlc_451: int = wln[NC]
+                    wlc = _admitted_wlc_451^
                 }
                 var wrc: int = BLACK
-                var wrId: int = wn[NR]
+                let _admitted_wrId_454: int = wn[NR]
+                var wrId: int = _admitted_wrId_454^
                 if (wrId != NIL) {
                     var wrn = rbt_nd(tree, wrId)
-                    wrc = wrn[NC]
+                    let _admitted_wrc_457: int = wrn[NC]
+                    wrc = _admitted_wrc_457^
                 }
                 var didCase2: int = 0
                 if (wlc == BLACK) {
@@ -462,70 +527,86 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
                         wn[NC] = RED
                         xId = xParId
                         var xn2 = rbt_nd(tree, xId)
-                        xParId = xn2[NP]
-                        rootId = (tree.root)
+                        let checked_parent: int = xn2[NP]
+                        xParId = checked_parent^
+                        let _admitted_rootId_466: int = (tree.root)
+                        rootId = _admitted_rootId_466^
                         didCase2 = 1
                     }
                 }
                 if (didCase2 == 0) {
                     // Refresh
                     wn = rbt_nd(tree, wId)
-                    wrId = wn[NR]
+                    let _admitted_wrId_473: int = wn[NR]
+                    wrId = _admitted_wrId_473^
                     wrc = BLACK
                     if (wrId != NIL) {
                         var wrn2 = rbt_nd(tree, wrId)
-                        wrc = wrn2[NC]
+                        let _admitted_wrc_477: int = wrn2[NC]
+                        wrc = _admitted_wrc_477^
                     }
                     if (wrc == BLACK) {
-                        wlId = wn[NL]
+                        let _admitted_wlId_480: int = wn[NL]
+                        wlId = _admitted_wlId_480^
                         if (wlId != NIL) {
                             var wln2 = rbt_nd(tree, wlId)
                             wln2[NC] = BLACK
                         }
                         wn[NC] = RED
-                        rbt_right_rotate(tree, wId)
+                        rbt_right_rotate(tree, wId)^
                         xpn = rbt_nd(tree, xParId)
-                        wId = xpn[NR]
+                        let _admitted_wId_488: int = xpn[NR]
+                        wId = _admitted_wId_488^
                         wn = rbt_nd(tree, wId)
                     }
-                    var xpc: int = xpn[NC]
+                    let _admitted_xpc_491: int = xpn[NC]
+                    var xpc: int = _admitted_xpc_491^
                     wn[NC] = xpc
                     xpn[NC] = BLACK
-                    wrId = wn[NR]
+                    let _admitted_wrId_494: int = wn[NR]
+                    wrId = _admitted_wrId_494^
                     if (wrId != NIL) {
                         var wrn3 = rbt_nd(tree, wrId)
                         wrn3[NC] = BLACK
                     }
-                    rbt_left_rotate(tree, xParId)
+                    rbt_left_rotate(tree, xParId)^
                     xId = (tree.root)
-                    rootId = xId
+                    rootId = xId^
                     var xn3 = rbt_nd(tree, xId)
-                    xParId = xn3[NP]
+                    let checked_parent: int = xn3[NP]
+                    xParId = checked_parent^
                 }
             }
-            if (xId != xplId) {
-                var wId2: int = xpn[NL]
+            if ((xId != xplId)^) {
+                let _admitted_wId2_507: int = xpn[NL]
+                var wId2: int = _admitted_wId2_507^
                 var wn2 = rbt_nd(tree, wId2)
-                var wc2: int = wn2[NC]
+                let _admitted_wc2_509: int = wn2[NC]
+                var wc2: int = _admitted_wc2_509^
                 if (wc2 == RED) {
                     wn2[NC] = BLACK
                     xpn[NC] = RED
-                    rbt_right_rotate(tree, xParId)
+                    rbt_right_rotate(tree, xParId)^
                     xpn = rbt_nd(tree, xParId)
-                    wId2 = xpn[NL]
+                    let _admitted_wId2_515: int = xpn[NL]
+                    wId2 = _admitted_wId2_515^
                     wn2 = rbt_nd(tree, wId2)
                 }
                 var wrc2: int = BLACK
-                var wrId2: int = wn2[NR]
+                let _admitted_wrId2_519: int = wn2[NR]
+                var wrId2: int = _admitted_wrId2_519^
                 if (wrId2 != NIL) {
                     var wrn4 = rbt_nd(tree, wrId2)
-                    wrc2 = wrn4[NC]
+                    let _admitted_wrc2_522: int = wrn4[NC]
+                    wrc2 = _admitted_wrc2_522^
                 }
                 var wlc2: int = BLACK
-                var wlId2: int = wn2[NL]
+                let _admitted_wlId2_525: int = wn2[NL]
+                var wlId2: int = _admitted_wlId2_525^
                 if (wlId2 != NIL) {
                     var wln3 = rbt_nd(tree, wlId2)
-                    wlc2 = wln3[NC]
+                    let _admitted_wlc2_528: int = wln3[NC]
+                    wlc2 = _admitted_wlc2_528^
                 }
                 var didCase2b: int = 0
                 if (wrc2 == BLACK) {
@@ -533,48 +614,57 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
                         wn2[NC] = RED
                         xId = xParId
                         var xn4 = rbt_nd(tree, xId)
-                        xParId = xn4[NP]
-                        rootId = (tree.root)
+                        let checked_parent: int = xn4[NP]
+                        xParId = checked_parent^
+                        let _admitted_rootId_537: int = (tree.root)
+                        rootId = _admitted_rootId_537^
                         didCase2b = 1
                     }
                 }
                 if (didCase2b == 0) {
-                    wlId2 = wn2[NL]
+                    let _admitted_wlId2_542: int = wn2[NL]
+                    wlId2 = _admitted_wlId2_542^
                     wlc2 = BLACK
                     if (wlId2 != NIL) {
                         var wln4 = rbt_nd(tree, wlId2)
-                        wlc2 = wln4[NC]
+                        let _admitted_wlc2_546: int = wln4[NC]
+                        wlc2 = _admitted_wlc2_546^
                     }
                     if (wlc2 == BLACK) {
-                        wrId2 = wn2[NR]
+                        let _admitted_wrId2_549: int = wn2[NR]
+                        wrId2 = _admitted_wrId2_549^
                         if (wrId2 != NIL) {
                             var wrn5 = rbt_nd(tree, wrId2)
                             wrn5[NC] = BLACK
                         }
                         wn2[NC] = RED
-                        rbt_left_rotate(tree, wId2)
+                        rbt_left_rotate(tree, wId2)^
                         xpn = rbt_nd(tree, xParId)
-                        wId2 = xpn[NL]
+                        let _admitted_wId2_557: int = xpn[NL]
+                        wId2 = _admitted_wId2_557^
                         wn2 = rbt_nd(tree, wId2)
                     }
-                    var xpc2: int = xpn[NC]
+                    let _admitted_xpc2_560: int = xpn[NC]
+                    var xpc2: int = _admitted_xpc2_560^
                     wn2[NC] = xpc2
                     xpn[NC] = BLACK
-                    wlId2 = wn2[NL]
+                    let _admitted_wlId2_563: int = wn2[NL]
+                    wlId2 = _admitted_wlId2_563^
                     if (wlId2 != NIL) {
                         var wln5 = rbt_nd(tree, wlId2)
                         wln5[NC] = BLACK
                     }
-                    rbt_right_rotate(tree, xParId)
+                    rbt_right_rotate(tree, xParId)^
                     xId = (tree.root)
-                    rootId = xId
+                    rootId = xId^
                     var xn5 = rbt_nd(tree, xId)
-                    xParId = xn5[NP]
+                    let checked_parent: int = xn5[NP]
+                    xParId = checked_parent^
                 }
             }
         }
     }
-    if (xId != NIL) {
+    if ((xId != NIL)^) {
         var xfn = rbt_nd(tree, xId)
         xfn[NC] = BLACK
     }
@@ -582,21 +672,27 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
 }
 
 pn rbt_remove(var tree, key: int) any {
-    var zId: int = rbt_find_node(tree, key)
+    let _admitted_zId_585: int = rbt_find_node(tree, key)
+    var zId: int = _admitted_zId_585^
     if (zId == NIL) { return null }
     var zn = rbt_nd(tree, zId)
     var zv = zn[NV]
     var yId: int = zId
-    var zlId: int = zn[NL]
-    var zrId: int = zn[NR]
+    let _admitted_zlId_590: int = zn[NL]
+    var zlId: int = _admitted_zlId_590^
+    let _admitted_zrId_591: int = zn[NR]
+    var zrId: int = _admitted_zrId_591^
     if (zlId != NIL) {
         if (zrId != NIL) {
-            yId = rbt_successor(tree, zId)
+            let _admitted_yId_594: int = rbt_successor(tree, zId)
+            yId = _admitted_yId_594^
         }
     }
     var yn = rbt_nd(tree, yId)
-    var ylId: int = yn[NL]
-    var yrId: int = yn[NR]
+    let _admitted_ylId_598: int = yn[NL]
+    var ylId: int = _admitted_ylId_598^
+    let _admitted_yrId_599: int = yn[NR]
+    var yrId: int = _admitted_yrId_599^
     var xId: int = NIL
     if (ylId != NIL) {
         xId = ylId
@@ -604,18 +700,21 @@ pn rbt_remove(var tree, key: int) any {
     if (ylId == NIL) {
         xId = yrId
     }
-    var xParId: int = yn[NP]
+    let _admitted_xParId_607: int = yn[NP]
+    var xParId: int = _admitted_xParId_607^
     if (xId != NIL) {
         var xn = rbt_nd(tree, xId)
         xn[NP] = xParId
     }
-    var ypId: int = yn[NP]
+    let _admitted_ypId_612: int = yn[NP]
+    var ypId: int = _admitted_ypId_612^
     if (ypId == NIL) {
         tree.root = xId
     }
     if (ypId != NIL) {
         var ypn = rbt_nd(tree, ypId)
-        var yplId: int = ypn[NL]
+        let _admitted_yplId_618: int = ypn[NL]
+        var yplId: int = _admitted_yplId_618^
         if (yId == yplId) {
             ypn[NL] = xId
         }
@@ -624,28 +723,33 @@ pn rbt_remove(var tree, key: int) any {
         }
     }
     if (yId != zId) {
-        var ycol: int = yn[NC]
+        let _admitted_ycol_627: int = yn[NC]
+        var ycol: int = _admitted_ycol_627^
         if (ycol == BLACK) {
-            rbt_remove_fixup(tree, xId, xParId)
+            rbt_remove_fixup(tree, xId, xParId)^
         }
         yn[NP] = zn[NP]
         yn[NC] = zn[NC]
         yn[NL] = zn[NL]
         yn[NR] = zn[NR]
-        var znlId: int = zn[NL]
+        let _admitted_znlId_635: int = zn[NL]
+        var znlId: int = _admitted_znlId_635^
         if (znlId != NIL) {
             var znln = rbt_nd(tree, znlId)
             znln[NP] = yId
         }
-        var znrId: int = zn[NR]
+        let _admitted_znrId_640: int = zn[NR]
+        var znrId: int = _admitted_znrId_640^
         if (znrId != NIL) {
             var znrn = rbt_nd(tree, znrId)
             znrn[NP] = yId
         }
-        var zpId: int = zn[NP]
+        let _admitted_zpId_645: int = zn[NP]
+        var zpId: int = _admitted_zpId_645^
         if (zpId != NIL) {
             var zpn = rbt_nd(tree, zpId)
-            var zplId: int = zpn[NL]
+            let _admitted_zplId_648: int = zpn[NL]
+            var zplId: int = _admitted_zplId_648^
             if (zId == zplId) {
                 zpn[NL] = yId
             }
@@ -658,9 +762,10 @@ pn rbt_remove(var tree, key: int) any {
         }
     }
     if (yId == zId) {
-        var ycol2: int = yn[NC]
+        let _admitted_ycol2_661: int = yn[NC]
+        var ycol2: int = _admitted_ycol2_661^
         if (ycol2 == BLACK) {
-            rbt_remove_fixup(tree, xId, xParId)
+            rbt_remove_fixup(tree, xId, xParId)^
         }
     }
     return zv
@@ -687,8 +792,10 @@ pn v3d_new(x, y, z) any {
 // Voxel hashing (typed float → native division)
 // =====================================================
 pn voxel_hash_xy(px: float, py: float, var out) any {
-    var xdiv: int = int(px / GOOD_VOXEL_SIZE)
-    var ydiv: int = int(py / GOOD_VOXEL_SIZE)
+    let _admitted_xdiv_690: int = int(px / GOOD_VOXEL_SIZE)
+    var xdiv: int = _admitted_xdiv_690^
+    let _admitted_ydiv_691: int = int(py / GOOD_VOXEL_SIZE)
+    var ydiv: int = _admitted_ydiv_691^
     var rx: int = GOOD_VOXEL_SIZE * xdiv
     var ry: int = GOOD_VOXEL_SIZE * ydiv
     if (px < 0) { rx = rx - GOOD_VOXEL_SIZE }
@@ -728,7 +835,8 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
         }
     }
     if (xv != 0) {
-        xOk = check_overlap(lowX, highX)
+        let _admitted_xOk_731: int = check_overlap(lowX, highX)
+        xOk = _admitted_xOk_731^
     }
     if (xOk == 0) { return 0 }
 
@@ -746,21 +854,22 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
         }
     }
     if (yv != 0) {
-        yOk = check_overlap(lowY, highY)
+        let _admitted_yOk_749: int = check_overlap(lowY, highY)
+        yOk = _admitted_yOk_749^
     }
     if (yOk == 0) { return 0 }
 
     // Check combined condition
     if (xv == 0) { return 1 }
     if (yv == 0) { return 1 }
-    if (lowY <= highX) {
-        if (highX <= highY) { return 1 }
+    if ((lowY <= highX)^) {
+        if ((highX <= highY)^) { return 1 }
     }
-    if (lowY <= lowX) {
-        if (lowX <= highY) { return 1 }
+    if ((lowY <= lowX)^) {
+        if ((lowX <= highY)^) { return 1 }
     }
-    if (lowX <= lowY) {
-        if (highY <= highX) { return 1 }
+    if ((lowX <= lowY)^) {
+        if ((highY <= highX)^) { return 1 }
     }
     return 0
 }
@@ -774,30 +883,32 @@ pn recurse_draw(var voxelMap, var seenTree, vx: int, vy: int, ctx: DrawCtx) any 
     var p1y: float = (ctx.p1y)
     var p2x: float = (ctx.p2x)
     var p2y: float = (ctx.p2y)
-    var inV: int = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
+    let _admitted_inV_777: int = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
+    var inV: int = _admitted_inV_777^
     if (inV == 0) { return 0 }
 
-    var vk: int = v2d_key(vx, vy)
+    let _admitted_vk_780: int = v2d_key(vx, vy)
+    var vk: int = _admitted_vk_780^
     var oldSeen = rbt_put(seenTree, vk, 1)
-    if (oldSeen != null) { return 0 }
+    if ((oldSeen != null)^) { return 0 }
 
     var existVec = rbt_get(voxelMap, vk)
-    if (existVec == null) {
+    if ((existVec == null)^) {
         existVec = vec_new()
     }
     var motionIdx: int = (ctx.motionIdx)
-    vec_add(existVec, motionIdx)
+    vec_add(existVec, motionIdx)^
     // retain the edited value: COW may detach existVec from the stored snapshot.
-    rbt_put(voxelMap, vk, existVec)
+    rbt_put(voxelMap, vk, existVec)^
 
     var gs: int = GOOD_VOXEL_SIZE
-    recurse_draw(voxelMap, seenTree, vx - gs, vy, ctx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy, ctx)
-    recurse_draw(voxelMap, seenTree, vx, vy - gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx, vy + gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy - gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy + gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy - gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx - gs, vy, ctx)^
+    recurse_draw(voxelMap, seenTree, vx + gs, vy, ctx)^
+    recurse_draw(voxelMap, seenTree, vx, vy - gs, ctx)^
+    recurse_draw(voxelMap, seenTree, vx, vy + gs, ctx)^
+    recurse_draw(voxelMap, seenTree, vx - gs, vy - gs, ctx)^
+    recurse_draw(voxelMap, seenTree, vx - gs, vy + gs, ctx)^
+    recurse_draw(voxelMap, seenTree, vx + gs, vy - gs, ctx)^
     recurse_draw(voxelMap, seenTree, vx + gs, vy + gs, ctx)
     return 0
 }
@@ -943,11 +1054,11 @@ pn simulate_frame(numAircraft: int, tval) any {
         var py1 = math.cos(tval) * 2 + i * 3
         var pz1: int = 10
         var a1 = [cs1, px1, py1, pz1]
-        vec_add(frame, a1)
+        vec_add(frame, a1)^
         var cs2: int = i + 1
         var py2 = math.sin(tval) * 2 + i * 3
         var a2 = [cs2, px1, py2, pz1]
-        vec_add(frame, a2)
+        vec_add(frame, a2)^
         i = i + 2
     }
     return frame
@@ -956,50 +1067,56 @@ pn simulate_frame(numAircraft: int, tval) any {
 pn handle_new_frame(var stateTree, frame: Vec) any {
     var motions: Vec = vec_new()
     // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
-    var seenArr: Arr = arr_new()
-    var frameSz: int = len(frame)
+    let _admitted_seenArr_959: Arr = arr_new()
+    var seenArr: Arr = _admitted_seenArr_959^
+    var frameSz: int = len(frame)^
     var i: int = 0
     while (i < frameSz) {
         var aircraft = vec_at(frame, i)
-        var csId: int = aircraft[0]
+        let _admitted_csId_964: int = aircraft[0]
+        var csId: int = _admitted_csId_964^
         var npx = aircraft[1]
         var npy = aircraft[2]
         var npz = aircraft[3]
         var newPos = v3d_new(npx, npy, npz)
         var oldPos = rbt_put(stateTree, csId, newPos)
-        arr_set(seenArr, csId, 1)
+        arr_set(seenArr, csId, 1)^
         var usePos = get_old_or_new(oldPos, newPos)
         var opx = usePos[0]
         var opy = usePos[1]
         var opz = usePos[2]
         var m = motion_new(csId, opx, opy, opz, npx, npy, npz)
-        vec_add(motions, m)
+        vec_add(motions, m)^
         i = i + 1
     }
 
     // Remove aircraft no longer present
     var toRemove: Vec = vec_new()
-    var curId: int = rbt_first(stateTree)
+    let _admitted_curId_982: int = rbt_first(stateTree)
+    var curId: int = _admitted_curId_982^
     while (curId != NIL) {
         var curN = rbt_nd(stateTree, curId)
-        var ck: int = curN[NK]
+        let _admitted_ck_985: int = curN[NK]
+        var ck: int = _admitted_ck_985^
         var inSeen = arr_get(seenArr, ck)
-        if (inSeen == null) {
-            vec_add(toRemove, ck)
+        if ((inSeen == null)^) {
+            vec_add(toRemove, ck)^
         }
-        curId = rbt_successor(stateTree, curId)
+        let _admitted_curId_990: int = rbt_successor(stateTree, curId)
+        curId = _admitted_curId_990^
     }
-    var trSz: int = len(toRemove)
+    var trSz: int = len(toRemove)^
     var ri: int = 0
     while (ri < trSz) {
-        var rk: int = vec_at(toRemove, ri)
-        rbt_remove(stateTree, rk)
+        let _admitted_rk_995: int = vec_at(toRemove, ri)
+        var rk: int = _admitted_rk_995^
+        rbt_remove(stateTree, rk)^
         ri = ri + 1
     }
 
     // Reduce collision set
     var voxelMap = rbt_new()
-    var motionsSz: int = len(motions)
+    var motionsSz: int = len(motions)^
     var vxy = [null, null]
     var mi: int = 0
     while (mi < motionsSz) {
@@ -1008,34 +1125,40 @@ pn handle_new_frame(var stateTree, frame: Vec) any {
         var mp1y = mot[2]
         var mp2x = mot[4]
         var mp2y = mot[5]
-        voxel_hash_xy(mp1x, mp1y, vxy)
-        var vvx: int = vxy[0]
-        var vvy: int = vxy[1]
+        voxel_hash_xy(mp1x, mp1y, vxy)^
+        let _admitted_vvx_1012: int = vxy[0]
+        var vvx: int = _admitted_vvx_1012^
+        let _admitted_vvy_1013: int = vxy[1]
+        var vvy: int = _admitted_vvy_1013^
         var motSeen = rbt_new()
         // Bundle invariant params as typed DrawCtx map
-        var ctx: DrawCtx = { p1x: mp1x, p1y: mp1y, p2x: mp2x, p2y: mp2y, motionIdx: mi }
-        recurse_draw(voxelMap, motSeen, vvx, vvy, ctx)
+        let _admitted_ctx_1016: DrawCtx = { p1x: mp1x, p1y: mp1y, p2x: mp2x, p2y: mp2y, motionIdx: mi }
+        var ctx: DrawCtx = _admitted_ctx_1016^
+        recurse_draw(voxelMap, motSeen, vvx, vvy, ctx)^
         mi = mi + 1
     }
 
     // Collect voxels with >1 motion and check collisions
     var collisionCount: int = 0
-    var vmCur: int = rbt_first(voxelMap)
+    let _admitted_vmCur_1023: int = rbt_first(voxelMap)
+    var vmCur: int = _admitted_vmCur_1023^
     while (vmCur != NIL) {
         var vmN = rbt_nd(voxelMap, vmCur)
         var motVec: Vec = vmN[NV]
-        var mvsz: int = len(motVec)
+        var mvsz: int = len(motVec)^
         if (mvsz > 1) {
             var ii: int = 0
             while (ii < mvsz) {
-                var mIdx1: int = vec_at(motVec, ii)
+                let _admitted_mIdx1_1031: int = vec_at(motVec, ii)
+                var mIdx1: int = _admitted_mIdx1_1031^
                 var mot1 = vec_at(motions, mIdx1)
                 var jj: int = ii + 1
                 while (jj < mvsz) {
-                    var mIdx2: int = vec_at(motVec, jj)
+                    let _admitted_mIdx2_1035: int = vec_at(motVec, jj)
+                    var mIdx2: int = _admitted_mIdx2_1035^
                     var mot2 = vec_at(motions, mIdx2)
                     var coll = find_intersection(mot1, mot2)
-                    if (coll != null) {
+                    if ((coll != null)^) {
                         collisionCount = collisionCount + 1
                     }
                     jj = jj + 1
@@ -1043,7 +1166,8 @@ pn handle_new_frame(var stateTree, frame: Vec) any {
                 ii = ii + 1
             }
         }
-        vmCur = rbt_successor(voxelMap, vmCur)
+        let _admitted_vmCur_1046: int = rbt_successor(voxelMap, vmCur)
+        vmCur = _admitted_vmCur_1046^
     }
 
     return collisionCount
@@ -1051,13 +1175,15 @@ pn handle_new_frame(var stateTree, frame: Vec) any {
 
 pn cd(numAircraft: int) any {
     var numFrames: int = 200
-    var stateTree: RbtTree = rbt_new()
+    let _admitted_stateTree_1054: RbtTree = rbt_new()
+    var stateTree: RbtTree = _admitted_stateTree_1054^
     var actualCollisions: int = 0
     var i: int = 0
     while (i < numFrames) {
         var tval = i / 10
         var frame = simulate_frame(numAircraft, tval)
-        var c: int = handle_new_frame(stateTree, frame)
+        let _admitted_c_1060: int = handle_new_frame(stateTree, frame)
+        var c: int = _admitted_c_1060^
         actualCollisions = actualCollisions + c
         i = i + 1
     }
@@ -1084,12 +1210,14 @@ pn verify_result(collisions: int, numAircraft: int) any {
 
 pn main() {
     var __t0 = clock()
-    var collisions: int = cd(100)
+    let _admitted_collisions_1087: int = cd(100)
+    var collisions: int = _admitted_collisions_1087^
     var __t1 = clock()
     print("collisions=")
     print(collisions)
     print("\n")
-    var ok: int = verify_result(collisions, 100)
+    let _admitted_ok_1092: int = verify_result(collisions, 100)
+    var ok: int = _admitted_ok_1092^
     if (ok == 1) {
         print("CD: PASS\n")
     }

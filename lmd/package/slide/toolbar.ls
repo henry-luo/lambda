@@ -5,7 +5,7 @@ import dom
 let graphics = {previous:"step-backward",play:"caret-right",pause:"pause",resume:"play-circle",next:"step-forward",restart:"reload",
     console:"desktop",overview:"appstore",go:"arrow-right",blackout:"eye-invisible",pointer:"aim",fullscreen:"fullscreen",toolbar:"down"}
 let shortcuts = {previous:"Left Arrow",next:"Right Arrow / Space",console:"P",overview:"O",blackout:"B",pointer:"L",fullscreen:"F",toolbar:"H"}
-fn icon(name,cls="") => icons.render({name:name,width:18,height:18,class:cls})^
+fn icon(name,cls="") any^ => icons.render({name:name,width:18,height:18,class:cls})^
 pub fn hint(command,label) => label ++ (if (shortcuts[command] == null) "" else " (" ++ shortcuts[command] ++ ")")
 pub fn button(command,label,attribute="data-slide-tool",extra={},cls="") => <button type:"button",class:"slide-icon-button " ++ cls,
     [attribute]:command,'aria-label':label,title:hint(command,label),
@@ -31,6 +31,6 @@ pub pn show_hint(owner,target) {
     // hidden labels retain text metrics; the visible popup lives outside the scrolling row.
     let x = max(0.0,min(bar.width-size.width,box.x-bar.x+(box.width-size.width)/2.0))
     dom.set_text_content(popup,label)
-    dom.style_set_property(popup,"left",string(x) ++ "px")
+    dom.style_set_property(popup,"left",string(x)^ ++ "px")
     dom.style_set_property(popup,"display","block")
 }

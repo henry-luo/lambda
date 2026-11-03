@@ -6,8 +6,8 @@ pub pn relative_path(path) {
     var i = 2
     while (i < len(source)) {
         let ch = slice(source, i, i + 1)
-        if (ch == "'") { quoted = not quoted }
-        else if (ch == "." and not quoted) { out = out ++ "/" }
+        if ((ch == "'")^) { quoted = not quoted }
+        else if ((ch == "." and not quoted)^) { out = out ++ "/" }
         else { out = out ++ ch }
         i = i + 1
     }

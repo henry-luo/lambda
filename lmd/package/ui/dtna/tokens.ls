@@ -10,12 +10,12 @@ pub let defaults = {
     font_size:14, control_height:32, radius:6, spacing:8, line_height:22/14
 }
 // retain the DOCX byte formatter through the shared color implementation.
-pub fn hex_byte(value) => colors.hex_byte(value)
-pub fn color(value) bool => c.hex_color(value)
-fn hsv(seed) => colors.hsv(colors.parse(seed,"palette")^)
-fn rgb_hex(h,s,v) => colors.hex(colors.rgb(h,s,v))
+pub fn hex_byte(value) any^ => colors.hex_byte(value)
+pub fn color(value) bool^ => c.hex_color(value)
+fn hsv(seed) any^ => colors.hsv(colors.parse(seed,"palette")^)
+fn rgb_hex(h,s,v) any^ => colors.hex(colors.rgb(h,s,v))
 // HSV palette schedule: https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts
-fn shade(base, step, light) {
+fn shade(base, step, light) any^ {
     let hue = (round(base.h) + (if (round(base.h) >= 60 and round(base.h) <= 240) -1 else 1) * (if (light) 1 else -1) * 2 * step + 360) % 360
     let saturation = base.s + (if (light) -0.16*step else if (step == 4) 0.16 else 0.05*step)
     let bounded = if (base.s == 0) 0 else max(0.06,min(if (light and step == 5) 0.1 else 1,saturation))
@@ -46,13 +46,13 @@ fn heading_tokens(base) {
         (symbol("font_size_heading_" ++ string(level)),2*floor(base*math.exp((6-level)/5)/2))]);
     {*:sizes,*:map([for (key,value in sizes) (symbol(replace(string(key),"font_size","font_height")),value+8)])}
 }
-fn palette_tokens(values) => map([for (key in ["primary","error","success","warning"])
+fn palette_tokens(values) any^ => map([for (key in ["primary","error","success","warning"])
     (let colors = palette(values[key])^,
         *[for (part,index in {background:0,border:2,hover:4,active:6}) (symbol(key ++ "_" ++ string(part)),colors[index])])])
 pub fn resolve(overrides = {}) map^ {
     if (not (overrides is map)) raise c.fail("tokens", "overrides must be a map")
     else (
-        let unknown = [for (key, value in overrides where not contains(defaults, key)) string(key)],
+        let unknown = [for (key, value in overrides where ((not contains(defaults, key)) ^ { false })) string(key)],
         let result = {*:defaults, *:overrides},
         let colors = ["primary", "success", "warning", "error", "text", "text_secondary", "border", "background", "surface", "disabled_background", "disabled_text"],
         if (len(unknown) > 0) raise c.fail("tokens", "unknown token " ++ unknown[0])
@@ -67,7 +67,7 @@ pub fn resolve(overrides = {}) map^ {
             else {*:result,line_height:line_height,*:colors,*:headings})
     )
 }
-fn variable(key, value) => "--dtna-" ++ replace(key,"_","-") ++ ":" ++ string(value) ++
+fn variable(key, value) any^ => "--dtna-" ++ replace(key,"_","-") ++ ":" ++ string(value) ++
     (if (contains(["font_size","control_height","radius","spacing"],key) or
         starts_with(key,"font_size_heading_") or starts_with(key,"font_height_heading_")) "px" else "") ++ ";"
 pub fn variables(overrides = {}) string^ {
@@ -79,7 +79,7 @@ pub fn scoped_variables(overrides = {}) string^ {
     let fields = [*[for (key,value in overrides) string(key)],
         *[for (key in ["primary","error","success","warning"] where c.has(overrides,key))
             *[for (part in ["background","border","hover","active"]) key ++ "_" ++ part]],
-        *(if (c.has(overrides,"font_size")) [*[for (key,value in heading_tokens(values.font_size)) string(key)],
+        *(if (c.has(overrides,"font_size")) [*[for (key,value in ((heading_tokens(values.font_size)) ^ { [] })) string(key)],
             *(if (c.has(overrides,"line_height")) [] else ["line_height"])] else [])];
     join([for (key in fields) variable(key,values[key])],"")
 }

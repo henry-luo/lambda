@@ -6,15 +6,16 @@ type Cell = {n: int, f: float, tags: int[]}
 type Grid = {rows: Cell[][], label: string}
 type Deep = {grid: Grid, count: int}
 
-pn make_grid() Grid {
-    var g: Grid = {rows: [[{n: 1, f: 1.5, tags: [1]}, {n: 2, f: 2.5, tags: []}],
+pn make_grid() Grid^ {
+    let _admitted_g_10: Grid = {rows: [[{n: 1, f: 1.5, tags: [1]}, {n: 2, f: 2.5, tags: []}],
                           [{n: 3, f: 3.5, tags: [3]}]], label: "g"}
+    var g: Grid = _admitted_g_10^
     return g
 }
 
 // four keys through a local typed root; `f = 7` is admitted as 7.0
 pn local_root() {
-    var g: Grid = make_grid()
+    var g: Grid = make_grid()^
     g.rows[0][1].n = 20
     g.rows[1][0].f = 7
     print(g.rows[0][1].n) print(" ")
@@ -27,13 +28,14 @@ pn bump(var d: Deep, i: int, j: int) {
     d.grid.rows[i][j].f = 0
 }
 pn var_param_root() {
-    var d: Deep = {grid: make_grid(), count: 0}
+    let _admitted_d_30: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_30^
     var k = 0
     while (k < 3) {
-        bump(d, 0, 0)
+        bump(d, 0, 0)^
         k = k + 1
     }
-    bump(d, 1, 0)
+    bump(d, 1, 0)^
     print(d.grid.rows[0][0].n) print(" ")
     print(d.grid.rows[0][0].f) print(" ")
     print(d.grid.rows[1][0].n) print("\n")
@@ -41,7 +43,8 @@ pn var_param_root() {
 
 // the stored copy is a snapshot: a deep write must not reach it (S9.1.2)
 pn snapshot_isolation() {
-    var d: Deep = {grid: make_grid(), count: 0}
+    let _admitted_d_44: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_44^
     let before = d.grid.rows[0][1]
     d.grid.rows[0][1].n = 55
     print(before.n) print(" ") print(d.grid.rows[0][1].n) print("\n")
@@ -52,8 +55,9 @@ pn set_n(var d: Deep, v: any) {
     d.grid.rows[0][0].n = v
 }
 pn rejected() {
-    var d: Deep = {grid: make_grid(), count: 0}
-    set_n(d, 8)
+    let _admitted_d_55: Deep = {grid: make_grid(), count: 0}
+    var d: Deep = _admitted_d_55^
+    set_n(d, 8)^
     let bad = set_n(d, "x") ^ { print("rejected ") }
     print(d.grid.rows[0][0].n) print("\n")
 }
@@ -61,7 +65,7 @@ pn rejected() {
 // array roots: a certified unique spine stores inline, anything else (a
 // shared array, a mistyped leaf, a bad index) takes the checked setter
 type Node = {dfn: int, parentDfn: int}
-pn node_new(d: int) Node {
+pn node_new(d: int) Node^ {
     var n: Node = {dfn: d, parentDfn: d}
     return n
 }
@@ -69,15 +73,16 @@ pn set_parent(var nodes: Node[], i: int, p: any) {
     nodes[i].parentDfn = p
 }
 pn array_roots() {
-    var nodes: Node[] = []
+    let _admitted_nodes_72: Node[] = []
+    var nodes: Node[] = _admitted_nodes_72
     var i = 0
     while (i < 4) {
-        push(nodes, node_new(i))
+        push(nodes, node_new(i))^
         i = i + 1
     }
-    set_parent(nodes, 2, 0)
+    set_parent(nodes, 2, 0)^
     let snap = nodes
-    set_parent(nodes, 3, 1)
+    set_parent(nodes, 3, 1)^
     let bad = set_parent(nodes, 1, "x") ^ { print("rejected ") }
     let oob = set_parent(nodes, 9, 1) ^ { print("out of range ") }
     print(nodes[2].parentDfn) print(" ") print(nodes[3].parentDfn) print(" ")
@@ -88,8 +93,9 @@ pn array_roots() {
 // the inline arm; anything but a packed int takes the checked setter
 type Slot = {mark: int}
 type Holder = {cells: Slot?[], slots: Slot[]}
-pn holder_new() Holder {
-    var h: Holder = {cells: [null, {mark: 4}], slots: [{mark: 0}, {mark: 0}]}
+pn holder_new() Holder^ {
+    let _admitted_h_92: Holder = {cells: [null, {mark: 4}], slots: [{mark: 0}, {mark: 0}]}
+    var h: Holder = _admitted_h_92^
     return h
 }
 pn may_defect_index(var h: Holder) int {
@@ -105,7 +111,7 @@ pn set_slot(var h: Holder, i: any, m: int) {
     h.slots[i].mark = m
 }
 pn boxed_indices() {
-    var h: Holder = holder_new()
+    var h: Holder = holder_new()^
     var i = may_defect_index(h)
     h.slots[i].mark = 11
     set_slot(h, any_index(0), 12)
@@ -116,10 +122,10 @@ pn boxed_indices() {
 }
 
 pn main() {
-    local_root()
-    var_param_root()
-    snapshot_isolation()
-    rejected()
-    array_roots()
+    local_root()^
+    var_param_root()^
+    snapshot_isolation()^
+    rejected()^
+    array_roots()^
     boxed_indices()
 }

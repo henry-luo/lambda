@@ -34,7 +34,7 @@ pub fn part_style(settings, part, colors) {
 }
 
 // the hook macro's body for slot a–d, or null
-pub fn hook(info, slot) {
+pub fn hook(info, slot) any^ {
     let found = macros.last_macro(info.macros, "maketitlehook" ++ slot)
     if (found == null) null else found.body
 }
@@ -44,7 +44,7 @@ pub fn hook(info, slot) {
 pub let AUTHBLK_COMMANDS = ["author", "affil"]
 pub let AUTHBLK_OPTIONS = ["auth-sc", "auth-sc-lg", "auth-lg", "affil-sl", "affil-it", "noblocks", "blocks"]
 
-fn source(info, name, fallback) {
+fn source(info, name, fallback) any^ {
     let found = macros.last_macro(info.macros, name)
     if (found == null) fallback else found.source
 }
@@ -68,9 +68,9 @@ pub fn fonts(info, options) {
 
 
 // the marks of an \author or \affil: [1,2] → ["1", "2"]; none for a plain one
-pub fn marks(el) {
+pub fn marks(el) any^ {
     let raw = util.optional_raw(el)
-    if (raw == null) [] else [for (part in split(raw, ",") where trim(part) != "") trim(part)]
+    if (raw == null) [] else [for (part in ((split(raw, ",")) ^ { [] }) where trim(part) != "") trim(part)]
 }
 
 // names joined as authblk joins them; each name is a list of items

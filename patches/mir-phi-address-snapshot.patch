@@ -1,0 +1,64 @@
+Preserve saved PHI values when folding addresses across basic blocks.
+
+Approved 2026-11-03, USER. Conventional SSA assigns a PHI's register on its
+incoming edges. A move after the PHI snapshots its current value. Forwarding
+that PHI register into a later block can instead read the next iteration's
+assignment. The old same-block-cycle test missed multi-block loops.
+
+Use one guard for the existing add, multiply and indexed-address consumers:
+a PHI may only be forwarded within its own block. No optimization pass is
+disabled. Regression: test/mir/native/phi_saved_loop_value.mir and
+MirOptimizer.CrossBlockPhiAddressFoldingKeepsSavedValue.
+
+diff --git a/mir-gen.c b/mir-gen.c
+index c80c08b34b..36865e1ed8 100644
+--- a/mir-gen.c
++++ b/mir-gen.c
+@@ -5614,12 +5614,11 @@ static int get_int_const (gen_ctx_t gen_ctx, MIR_op_t *op_ref, int64_t *c) {
+   return TRUE;
+ }
+
+-static int cycle_phi_p (bb_insn_t bb_insn) { /* we are not in pure SSA at this stage */
+-  ssa_edge_t se;
+-  if (bb_insn->insn->code != MIR_PHI) return FALSE;
+-  for (size_t i = 1; i < bb_insn->insn->nops; i++)
+-    if ((se = bb_insn->insn->ops[i].data) != NULL && se->def->bb == bb_insn->bb) return TRUE;
+-  return FALSE;
++static int outside_phi_p (bb_insn_t bb_insn, bb_t from_bb) {
++  /* conventional SSA assigns phi registers on incoming edges. A saved move
++     snapshots that value; bypassing it in another block can read the next
++     iteration's assignment, including in multi-block loops. */
++  return bb_insn->bb != from_bb && bb_insn->insn->code == MIR_PHI;
+ }
+
+ static int var_plus_const (gen_ctx_t gen_ctx, ssa_edge_t se, bb_t from_bb, MIR_op_t **var_op_ref,
+@@ -5643,7 +5642,7 @@ static int var_plus_const (gen_ctx_t gen_ctx, ssa_edge_t se, bb_t from_bb, MIR_o
+   } else {
+     return FALSE;
+   }
+-  if ((se = res_ref->data) != NULL && se->def->bb != from_bb && cycle_phi_p (se->def)) return FALSE;
++  if ((se = res_ref->data) != NULL && outside_phi_p (se->def, from_bb)) return FALSE;
+   *var_op_ref = res_ref;
+   return TRUE;
+ }
+@@ -5672,7 +5671,7 @@ static int var_mult_const (gen_ctx_t gen_ctx, ssa_edge_t se, bb_t from_bb, MIR_o
+   }
+   if (res_ref == NULL) return FALSE;
+   if (*c < 0 || *c > MIR_MAX_SCALE) return FALSE;
+-  if ((se = res_ref->data) != NULL && se->def->bb != from_bb && cycle_phi_p (se->def)) return FALSE;
++  if ((se = res_ref->data) != NULL && outside_phi_p (se->def, from_bb)) return FALSE;
+   *var_op_ref = res_ref;
+   return TRUE;
+ }
+@@ -5686,9 +5685,9 @@ static int var_plus_var (gen_ctx_t gen_ctx, ssa_edge_t se, bb_t from_bb, MIR_op_
+   MIR_insn_t insn = se->def->insn;
+   if (insn->code != MIR_ADD || insn->ops[1].mode != MIR_OP_VAR || insn->ops[2].mode != MIR_OP_VAR)
+     return FALSE;
+-  if ((se = insn->ops[1].data) != NULL && se->def->bb != from_bb && cycle_phi_p (se->def))
++  if ((se = insn->ops[1].data) != NULL && outside_phi_p (se->def, from_bb))
+     return FALSE;
+-  if ((se = insn->ops[2].data) != NULL && se->def->bb != from_bb && cycle_phi_p (se->def))
++  if ((se = insn->ops[2].data) != NULL && outside_phi_p (se->def, from_bb))
+     return FALSE;
+   *var_op_ref1 = &insn->ops[1];
+   *var_op_ref2 = &insn->ops[2];

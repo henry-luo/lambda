@@ -18,13 +18,13 @@ fn fuel() => 5000
 // the fixture's term: the dump read back and lowered. A failed read or a
 // lowering that raises becomes an `unsupported` term, so every way of falling
 // outside the model shows up in one census rather than as a crash.
-pub fn term_of(dump_path) {
+pub fn term_of(dump_path) any^ {
   let dump = input(dump_path, 'mark') or null
   if (dump == null) (<unsupported kind: "dump", why: "unreadable">)
   else normalize(dump) ^ { <unsupported kind: "normalize", why: ^.message> }
 }
 
-fn detail(t) {
+fn detail(t) any^ {
   let k = string(t.kind)
   if (t.op != null) k ++ " " ++ string(t.op)
   else if (t.n != null) k ++ " " ++ string(t.n)
@@ -35,9 +35,9 @@ fn detail(t) {
 
 // every `unsupported` leaf of a term, as "kind", "kind op", "kind name" or
 // "kind: why" strings — the pending reason the manifest records
-pub fn unsupported_kinds(t) => if (type(t) != element) []
+pub fn unsupported_kinds(t) any^ => if (type(t) != element) []
   else if (name(t) == 'unsupported') [detail(t)]
-  else [for (c in content(t)) for (k in unsupported_kinds(c)) k]
+  else [for (c in ((content(t)) ^ { [] })) for (k in ((unsupported_kinds(c)) ^ { [] })) k]
 
 // the leading Mark value of an `// expect:` comment. Trailing prose is dropped
 // a word at a time until what is left parses: `125 (15 + 110)` is 125.
@@ -49,7 +49,7 @@ fn expect_value(text) any^ => parse(text, 'mark') ^ {
 // the same program with its value items replaced by one read of an annotated
 // binding at the end of its declarations, wrapped in an array so a list-valued binding keeps its spread
 // visible as the array's items (S2.5.1v2)
-fn probe(t, nm) => match name(t) {
+fn probe(t, nm) any^ => match name(t) {
   case 'lett': { let init = t[0]  let rest = probe(t[1], nm);  <lett n: t.n, init rest> }
   // a recursive group's last child is the rest of the block
   case 'letrec': {
@@ -86,8 +86,8 @@ fn check_expect(t, e) {
 // cannot rebuild stays a modelled container and keeps its fixture pending
 fn is_mapv(v) => type(v) == element and (name(v) == 'mapv' or name(v) == 'elmv')
 // a modelled map or element that survived `printable` cannot print as the host's does
-fn holds_mapv(v) => if (type(v) == element) (is_mapv(v) or len([for (c in content(v) where holds_mapv(c)) c]) > 0)
-  else if (type(v) == array or type(v) == list) len([for (c in v where holds_mapv(c)) c]) > 0
+fn holds_mapv(v) any^ => if (type(v) == element) (is_mapv(v) or len([for (c in ((content(v)) ^ { [] }) where ((holds_mapv(c)) ^ { false })) c]) > 0)
+  else if (type(v) == array or type(v) == list) len([for (c in v where ((holds_mapv(c)) ^ { false })) c]) > 0
   else false
 
 pub fn diag(dump_path, expects) {

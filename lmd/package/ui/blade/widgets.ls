@@ -46,7 +46,7 @@ pub fn lower_slots(value) any^ => shared.lower_slots(value,"blade",["page","conf
 fn corners() => [for (position in ["tl","tr","bl","br"]) art.corner(position)]
 
 // cache lowered children so nested uncontrolled collections retain their descriptor identity.
-view blade_panel: <blade.panel> state lowered:(lower_slots(~)^) {
+view blade_panel: <blade.panel>() element^ state lowered:(lower_slots(~)^) {
     let node = lowered
     let p = c.props(node);
     <section *:c.styled(node,"blade-material-" ++ c.text(p.material or "wood"),"blade"),*[
@@ -56,7 +56,7 @@ view blade_panel: <blade.panel> state lowered:(lower_slots(~)^) {
             if (p.extra == null) null else <div class:"blade-panel-extra",c.render(p.extra)>]> else null,
         <div class:"blade-panel-body",*c.contents(node)>]>
 }
-view blade_meter: <blade.meter> {
+view blade_meter: <blade.meter> () any^ {
     let node = checked(~)^
     let p = c.props(node)
     let kind = c.text(p.resource or "health")
@@ -71,7 +71,7 @@ view blade_meter: <blade.meter> {
             art.meter_frame(),
             if (c.option(p,"show_value",true)) <span class:"blade-meter-value",string(value) ++ " / " ++ string(maximum)> else null]>>
 }
-view blade_rpg_icon: <blade.rpg_icon> {
+view blade_rpg_icon: <blade.rpg_icon> () any^ {
     let node = checked(~)^
     let p = c.props(node);
     art.icon(p.name,c.option(p,"size",64),p.label,{*:c.attrs(p),class:p.class,style:p.style})
@@ -99,10 +99,10 @@ fn button(node) {
         if (ability and p.hotkey != null) <kbd class:"blade-hotkey",p.hotkey> else null]>
 }
 // native buttons supply Enter/Space activation; descriptors own effects only in handlers (S12.1.3).
-view blade_slot_button: <blade.item_slot> | <blade.ability> { button(checked(~)^) }
+view blade_slot_button: <blade.item_slot> | <blade.ability> () any^ { button(checked(~)^) }
 on click(evt) {
-    if (interaction.root(~,evt,"blade") == null) { return 'pass' }
-    if (c.props(~).disabled or (c.kind(~) == 'ability' and c.option(c.props(~),"cooldown",0) > 0)) { return 'prevent-default' }
-    emit("ui_action",c.action(~,'activate',c.props(~).icon))
+    if ((interaction.root(~,evt,"blade") == null)^) { return 'pass' }
+    if ((c.props(~).disabled or (c.kind(~) == 'ability' and c.option(c.props(~),"cooldown",0) > 0))^) { return 'prevent-default' }
+    emit("ui_action",c.action(~,'activate',c.props(~).icon)^)
     'pass'
 }

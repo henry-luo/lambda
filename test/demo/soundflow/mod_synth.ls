@@ -18,20 +18,20 @@ pn harp(f) {
     let frac = delay - whole
     // each recirculation loses rho: about 60 dB over 3 s, less for high strings
     let rho = math.pow(0.001, 1.0 / (f * max(1.4, 3.6 - f / 500.0)))
-    var out: float[] = fill(n, 0.0)
+    var out: float[] = fill(n, 0.0)^
     var seed = 7919 + int(f)
     var prev = 0.0
     var i = 0
-    while (i < whole + 3) {
+    while ((i < whole + 3)^) {
         seed = (seed * 16807) % 2147483647
         // a softened burst: a finger, not a pick
         let noise = seed / 1073741823.5 - 1.0
-        out[i] = 0.5 * (noise + prev)
+        out[i] = (0.5 * (noise + prev))^
         prev = noise
         i = i + 1
     }
     while (i < n) {
-        out[i] = rho * 0.5 * ((1.0 - frac) * out[i - whole] + out[i - whole - 1] + frac * out[i - whole - 2])
+        out[i] = (rho * 0.5 * ((1.0 - frac) * out[i - whole] + out[i - whole - 1] + frac * out[i - whole - 2]))^
         i = i + 1
     }
     return out
@@ -41,7 +41,7 @@ pn harp(f) {
 // y[n] = 2cos(w)·y[n-1] − y[n-2] instead of a sin() per sample
 pn additive(f, seconds, partials, attack) {
     let n = int(RATE * seconds)
-    var out: float[] = fill(n, 0.0)
+    var out: float[] = fill(n, 0.0)^
     for p in partials {
         let w = 2.0 * math.pi * f * p.ratio / RATE
         // a partial above Nyquist would fold back as noise
@@ -52,7 +52,7 @@ pn additive(f, seconds, partials, attack) {
             var y2 = -math.sin(w)
             var g = p.gain
             var i = 0
-            while (i < n) {
+            while ((i < n)^) {
                 out[i] = out[i] + g * y1
                 let y = k * y1 - y2
                 y2 = y1
@@ -66,7 +66,7 @@ pn additive(f, seconds, partials, attack) {
         let rise = math.exp(-1.0 / (RATE * attack))
         var e = 1.0
         var i = 0
-        while (i < n and e > 0.0001) {
+        while ((i < n and e > 0.0001)^) {
             out[i] = out[i] * (1.0 - e)
             e = e * rise
             i = i + 1
@@ -90,12 +90,12 @@ pub pn samples(voice, note) {
     let n = len(out)
     var peak = 0.0
     var i = 0
-    while (i < n) { peak = max(peak, abs(out[i])); i = i + 1 }
+    while ((i < n)^) { peak = max(peak, abs(out[i])); i = i + 1 }
     let gain = if (peak > 0.0) 0.85 / peak else 0.0
     let fade = int(RATE * 0.08)
     i = 0
-    while (i < n) {
-        out[i] = out[i] * gain * min(1.0, (n - i) / fade)
+    while ((i < n)^) {
+        out[i] = (out[i] * gain * min(1.0, (n - i) / fade))^
         i = i + 1
     }
     return out
@@ -112,11 +112,11 @@ pub pn tone(voice, note) { return wav(samples(voice, note)) }
 // plan: [{period, phase, hits: [{at, voice, note, gain}]}], times in ms.
 pub pn mixdown(plan, seconds) {
     let n = int(RATE * seconds)
-    var out: float[] = fill(n, 0.0)
+    var out: float[] = fill(n, 0.0)^
     var cache = {}
     for loop in plan {
         let cycle_len = max(1, int(loop.period * RATE / 1000.0))
-        var cycle: float[] = fill(cycle_len, 0.0)
+        var cycle: float[] = fill(cycle_len, 0.0)^
         for h in loop.hits {
             let key = h.voice ++ ":" ++ string(h.note)
             if (cache[key] == null) { cache = {*: cache, [key]: samples(h.voice, h.note)} }
@@ -124,7 +124,7 @@ pub pn mixdown(plan, seconds) {
             let first = int(h.at * RATE / 1000.0)
             let m = len(sound)
             var j = 0
-            while (j < m) {
+            while ((j < m)^) {
                 let at = (first + j) % cycle_len
                 cycle[at] = cycle[at] + h.gain * sound[j]
                 j = j + 1
@@ -132,20 +132,20 @@ pub pn mixdown(plan, seconds) {
         }
         let offset = int(loop.phase * RATE / 1000.0)
         var i = 0
-        while (i < n) {
-            out[i] = out[i] + cycle[(i + offset) % cycle_len]
+        while ((i < n)^) {
+            out[i] = (out[i] + cycle[(i + offset) % cycle_len])^
             i = i + 1
         }
     }
     var peak = 0.0
     var i = 0
-    while (i < n) { peak = max(peak, abs(out[i])); i = i + 1 }
+    while ((i < n)^) { peak = max(peak, abs(out[i])); i = i + 1 }
     let gain = if (peak > 0.0) 0.9 / peak else 0.0
     // a two-second fade lets the last loop ring out instead of stopping dead
     let fade = int(RATE * 2.0)
     i = 0
-    while (i < n) {
-        out[i] = out[i] * gain * min(1.0, (n - i) / fade)
+    while ((i < n)^) {
+        out[i] = (out[i] * gain * min(1.0, (n - i) / fade))^
         i = i + 1
     }
     return wav(out)

@@ -82,7 +82,7 @@ pub fn font_decl_style(tag_str) {
     FONT_DECL_STYLES[tag_str]
 }
 
-fn arg_text(el, i) {
+fn arg_text(el, i) any^ {
     let raw = util.raw_argument(el, "required", i)
     if (raw == null) null else trim(raw)
 }
@@ -91,7 +91,7 @@ fn nfss_part(table, key) => if (key == null) null else table[key]
 
 // The CSS of a font declaration element: a fixed switch, or an NFSS command
 // read from its arguments. Null for a value outside the tables.
-pub fn decl_css(el) {
+pub fn decl_css(el) any^ {
     let tag = string(name(el))
     if (FONT_DECL_STYLES[tag] != null) font_decl_style(tag)
     else if (tag == "fontfamily") {
@@ -120,7 +120,7 @@ pub fn decl_css(el) {
 pub fn line_height_for(factor) => 1.2 * factor
 
 // Family requests for faces Lambda does not ship, as font-substitution diagnostics.
-pub fn substitution_issues(node) {
+pub fn substitution_issues(node) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -131,7 +131,7 @@ pub fn substitution_issues(node) {
             [util.diagnostic("font-substitution", "latex", code,
                 "NFSS family " ++ code ++ " is not bundled; using an installed equivalent",
                 node.source_offset)] else [];
-        own ++ [for (child in node, issue in substitution_issues(child)) issue]
+        own ++ [for (child in node, issue in ((substitution_issues(child)) ^ { [] })) issue]
     }
 }
 
@@ -165,7 +165,7 @@ pub fn wrap_align_decl(tag_str, items, style = null) {
 //   space      a \vspace or \vskip length
 //   text       printed text, \\ and the environment commands aside
 //   unknown    other commands
-pub fn declarations(raw, custom_colors) =>
+pub fn declarations(raw, custom_colors) any^ =>
     read_declarations(raw or "", 0, {css: "", align: null, transform: null, rule: false,
         space: null, text: "", unknown: []}, custom_colors)
 
@@ -177,7 +177,7 @@ let ALIGN_ENVIRONMENTS = {center: "center", flushleft: "left", flushright: "righ
 let NEUTRAL_COMMANDS = ["selectfont", "par", "noindent", "relax", "normalsize", "quad", "qquad",
     "hfill", "hfil", "null", "strut", "nobreak"]
 
-fn read_declarations(raw, i, acc, colors) {
+fn read_declarations(raw, i, acc, colors) any^ {
     if (i >= len(raw)) acc
     else {
         let ch = slice(raw, i, i + 1)
@@ -196,7 +196,7 @@ fn read_declarations(raw, i, acc, colors) {
     }
 }
 
-fn letters_end(raw, i) {
+fn letters_end(raw, i) any^ {
     if (i >= len(raw)) i
     else {
         let ch = slice(raw, i, i + 1)
@@ -205,7 +205,7 @@ fn letters_end(raw, i) {
 }
 
 // the braced or bracketed group at i (after spaces): {value, next}, or null
-fn group_at(raw, i, opener, closer) {
+fn group_at(raw, i, opener, closer) any^ {
     let at = skip_spaces(raw, i)
     if (at >= len(raw) or slice(raw, at, at + 1) != opener) null
     else {
@@ -214,7 +214,7 @@ fn group_at(raw, i, opener, closer) {
     }
 }
 
-fn group_close(raw, i, depth, opener, closer) {
+fn group_close(raw, i, depth, opener, closer) any^ {
     if (i >= len(raw)) i
     else {
         let ch = slice(raw, i, i + 1)
@@ -225,7 +225,7 @@ fn group_close(raw, i, depth, opener, closer) {
     }
 }
 
-fn skip_spaces(raw, i) => if (i < len(raw) and slice(raw, i, i + 1) == " ") skip_spaces(raw, i + 1) else i
+fn skip_spaces(raw, i) any^ => if (i < len(raw) and slice(raw, i, i + 1) == " ") skip_spaces(raw, i + 1) else i
 
 // the length after \vskip: everything up to the next command or the end
 fn bare_length(raw, i) {
@@ -237,7 +237,7 @@ fn bare_length(raw, i) {
 
 fn add_css(acc, css) => if (css == null) acc else {*:acc, css: acc.css ++ css ++ ";"}
 
-fn declaration_command(raw, command, after, acc, colors) {
+fn declaration_command(raw, command, after, acc, colors) any^ {
     let size = sym.get_font_size(command)
     let group = group_at(raw, after, "{", "}")
     let option = group_at(raw, after, "[", "]")
@@ -299,7 +299,7 @@ let TEXT_COMMANDS = {textbf: "font-weight:bold", textit: "font-style:italic", em
     textsl: "font-style:oblique", textsc: "font-variant:small-caps", texttt: MONO_CSS,
     textsf: SANS_CSS, textrm: SERIF_CSS, textup: "font-style:normal",
     textmd: "font-weight:normal"}
-pub fn argument_font_css(source) {
+pub fn argument_font_css(source) any^ {
     let body = trim(source or "")
     let command = if (starts_with(body, "\\") and ends_with(body, "{#1}")) slice(body, 1, len(body) - 4) else null
     if (body == "" or body == "#1") null
@@ -310,7 +310,7 @@ pub fn argument_font_css(source) {
 
 // wrap rendered items in a span with the declaration's style; a declaration
 // whose value is outside the tables is reported in place
-pub fn wrap_font_decl(decl, items) {
+pub fn wrap_font_decl(decl, items) any^ {
     let tag_str = string(name(decl))
     let style = decl_css(decl)
     if (style == null) [util.unsupported_element("latex",

@@ -5,7 +5,7 @@ import layout: .layout
 import index: .index
 
 // Source indices survive window/selection changes; filters invalidate only visibility.
-pub fn record(raw, snapshot, normalized: map | error, previous = null) {
+pub fn record(raw, snapshot, normalized: map | error, previous = null) any^ {
     // S5.1.5: an error-bearing comparison is a cache miss, handled explicitly.
     let same=previous!=null and (normalized==previous.normalized) ^ { false };
     let base=if (same) previous.source_normalized else normalized;
@@ -33,7 +33,7 @@ pub fn geometry(spec, viewport, snapshot, previous = null) {
     if (previous!=null and previous.key==key) previous else {key:key,plan:layout.normalized(spec,viewport,snapshot)}
 }
 
-pub fn source(raw, snapshot = null, previous = null) {
+pub fn source(raw, snapshot = null, previous = null) any^ {
     if (previous!=null and previous.raw==raw and previous.entry==snapshot.resources.source)
         if (previous.normalized is error or layout.visibility_key(previous.normalized,snapshot)==previous.normalized._timeline.key) previous
         else record(raw,snapshot,previous.normalized,previous)

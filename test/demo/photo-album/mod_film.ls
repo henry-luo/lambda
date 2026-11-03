@@ -12,14 +12,14 @@ let W = 1280.0
 let H = 720.0
 let BEATS = {title:6, chapter:4, single:4, split:6, quick:2}
 
-fn photo(lib, id) => L.photo(lib, id)
+fn photo(lib, id) any^ => L.photo(lib, id)
 fn portrait(p) => p.aspect < 0.9
-fn year(lib, id) => photo(lib, id).year
-fn month(lib, id) => slice(photo(lib, id).taken, 0, 7)
+fn year(lib, id) any^ => photo(lib, id).year
+fn month(lib, id) any^ => slice(photo(lib, id).taken, 0, 7)
 
 // chapter starts: a new chapter at a key change once the current one holds `size` photos,
 // unless fewer than three photos would be left for the last one
-fn cuts(lib, ids, key, size, i, s) {
+fn cuts(lib, ids, key, size, i, s) any^ {
     if (i >= len(ids)) []
     else if (key(lib, ids[i]) != key(lib, ids[i - 1]) and i - s >= size and len(ids) - i >= 3)
         [i, *cuts(lib, ids, key, size, i + 1, i)]
@@ -29,13 +29,13 @@ fn cuts(lib, ids, key, size, i, s) {
 fn runs(ids, starts) => [for (j, s in starts) slice(ids, s, if (j + 1 < len(starts)) starts[j + 1] else len(ids))]
 
 // chronological chapters by year, or by month when the photos span a single year
-fn chapter_runs(lib, ids) {
+fn chapter_runs(lib, ids) any^ {
     let size = max(6, len(ids) / 5)
     let by_year = runs(ids, [0, *cuts(lib, ids, year, size, 1, 0)]);
     if (len(by_year) > 1 or len(ids) < 16) by_year else runs(ids, [0, *cuts(lib, ids, month, size, 1, 0)])
 }
 
-fn chapter_title(lib, ids) {
+fn chapter_title(lib, ids) any^ {
     let first = photo(lib, ids[0])
     let final_photo = photo(lib, ids[len(ids) - 1]);
     if (first.year != final_photo.year) D.years(lib, ids)
@@ -47,12 +47,12 @@ fn chapter_title(lib, ids) {
 // the albums a chapter draws on, most photos first
 fn chapter_albums(lib, ids) {
     let names = [for (id in ids) L.album_name(lib, photo(lib, id))]
-    let distinct = [for (i, n in names where index_of(names, n) == i) n];
+    let distinct = [for (i, n in names where ((index_of(names, n) == i) ^ { false })) n];
     slice([for (n in distinct order by len([for (m in names where m == n) m]) desc, n) n], 0, 2)
 }
 
 // shots of the photos before a chapter's quick-cut run: consecutive portraits pair up
-fn plain(lib, ids, i, k) {
+fn plain(lib, ids, i, k) any^ {
     if (i >= len(ids)) []
     else if (portrait(photo(lib, ids[i])) and i + 1 < len(ids) and portrait(photo(lib, ids[i + 1])))
         [{kind:"split", ids:[ids[i], ids[i + 1]], beats:BEATS.split, motion:"drift"}, *plain(lib, ids, i + 2, k)]
@@ -65,26 +65,26 @@ fn plain(lib, ids, i, k) {
 fn chapter_shots(lib, ids, k) {
     let quick = if (k % 3 == 2 and len(ids) >= 8) min(6, max(4, len(ids) / 3)) else 0
     let body = plain(lib, slice(ids, 0, len(ids) - quick), 0, k);
-    [*body, *[for (id in slice(ids, len(ids) - quick, len(ids))) {kind:"quick", ids:[id], beats:BEATS.quick, motion:"zoom"}]]
+    [*body, *[for (id in ((slice(ids, len(ids) - quick, len(ids))) ^ { [] })) {kind:"quick", ids:[id], beats:BEATS.quick, motion:"zoom"}]]
 }
 
 fn transition(shot, n) => if (shot.kind == "quick" or shot.kind == "title") "cut"
     else if (shot.first) "morph" else if (shot.kind == "split") "slide" else if (n % 5 == 4) "push" else "fade"
 
-fn credits_beats(n) => 6 + int(ceil(n / 3))
+fn credits_beats(n) any^ => 6 + int(ceil(n / 3))
 
 // Film model: {title, ids, chapters: [{title, albums, count, start_beat}], shots: [{kind, ids, beats,
 // motion, transition, chapter, start_beat}], beats, duration_ms}
-pub fn plan(lib, ids, title) {
-    let ordered = [for (id in slice(ids, 0, MAX_PHOTOS) order by photo(lib, id).taken, id) id]
+pub fn plan(lib, ids, title) any^ {
+    let ordered = [for (id in ((slice(ids, 0, MAX_PHOTOS)) ^ { [] }) order by (photo(lib, id).taken)^, id) id]
     let groups = chapter_runs(lib, ordered)
-    let landscapes = [for (id in ordered where not portrait(photo(lib, id))) id]
+    let landscapes = [for (id in ordered where ((not portrait(photo(lib, id))) ^ { false })) id]
     let hero = landscapes[0] or ordered[0]
     let story = [{kind:"title", ids:[hero], beats:BEATS.title, motion:"zoom", chapter:-1},
         *[for (k, g in groups) for (j, s in [{kind:"chapter", ids:[g[0]], beats:BEATS.chapter, motion:"none"}, *chapter_shots(lib, g, k)])
             {*:s, chapter:k, first:j == 1}],
         {kind:"credits", ids:ordered, beats:credits_beats(len(ordered)), motion:"roll", chapter:len(groups)}]
-    let starts = [for (i, s in story) sum([for (t in slice(story, 0, i)) t.beats])]
+    let starts = [for (i, s in story) sum([for (t in ((slice(story, 0, i)) ^ { [] })) t.beats])]
     let shots = [for (i, s in story) {*:s, start_beat:starts[i], transition:transition(s, i)}]
     let beats = sum([for (s in story) s.beats]);
     {title:title, ids:ordered, beats:beats, duration_ms:beats * BEAT_MS,
@@ -197,7 +197,7 @@ pub fn address(film, ms) {
 }
 
 // "1:05"
-pub fn clock_label(ms) {
+pub fn clock_label(ms) any^ {
     let s = int(floor(max(0.0, ms) / 1000.0));
     string(int(floor(s / 60))) ++ ":" ++ (if (s % 60 < 10) "0" else "") ++ string(s % 60)
 }

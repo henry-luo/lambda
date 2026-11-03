@@ -80,7 +80,7 @@ false
 ```text repl
 λ> t'2025-04-26'.weekday
 6
-λ> t'2025-04-26T10:30:00'.format("MMM DD, YYYY")
+λ> t'2025-04-26T10:30:00'.format("MMM DD, YYYY")^
 "Apr 26, 2025"
 ```
 

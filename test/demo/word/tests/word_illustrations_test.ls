@@ -15,7 +15,7 @@ import lambda.editor.mod_source_pos
 import lambda.editor.mod_step
 
 let empty = model.open_editor(node('doc',[node('p',[text("Keep this text")])]))
-let entries = [for (entry in graphics.catalog where contains(graphics.illustration_kinds,entry.kind)) entry]
+let entries = [for (entry in graphics.catalog where contains(graphics.illustration_kinds,entry.kind)^) entry]
 let inserted = [for (entry in entries) model.execute(empty,entry.insert,entry.defaults)^]
 all([for (i,e in inserted) entries[i].settings(image.selected(e).node)==entries[i].defaults])
 all([for (e in inserted) starts_with(attrs_get(image.selected(e).node.attrs,'src'),"data:image/svg+xml;base64,")])
@@ -29,7 +29,7 @@ all([for (i,e in changed) entries[i].settings(image.selected(e).node).width==240
 all([for (i,e in changed) model.execute(e,"edit.undo")^.doc==inserted[i].doc])
 all([for (e in changed) files.restore(files.archive(e.doc,"Illustrations"))^.doc==e.doc])
 all([for (i,e in changed) entries[i].settings(image.images(files.import_html_document(files.html_document(e.doc,"Illustrations")^)^)[0].node)==entries[i].settings(image.selected(e).node)])
-fn copied(e) => controller.clipboard_result(e,"copy",outcome.model_applied(false,false,false,"",e.selection,e.model_revision))
+fn copied(e) any^ => controller.clipboard_result(e,"copy",outcome.model_applied(false,false,false,"",e.selection,e.model_revision))
 let pasted = [for (e in changed) edit_exec(empty,edit_cmd_paste_html(copied(e).clipboard_html,""))]
 all([for (i,e in pasted) entries[i].settings(image.images(e.doc)[0].node)==entries[i].settings(image.selected(changed[i]).node)])
 all([for (i,e in changed) copied(e).clipboard_image==attrs_get(image.selected(e).node.attrs,'src')])

@@ -11,7 +11,7 @@ let rounds = 15
 //   | del(.note) | with_entries(select(.value != null)))
 pn transform_order(o) {
     var user = o.user
-    user["region"] = jq_alt(user["region"], "unknown")
+    user["region"] = jq_alt(user["region"], "unknown")^
     // def total: reduce .items[] as $it (0; . + $it.qty * $it.price)
     // jq numbers are doubles, so the float sums start from 0.0
     var total = 0.0
@@ -26,7 +26,7 @@ pn transform_order(o) {
         let value = if (key == "user") user else v
         if (key != "note" and value != null) { r[key] = value }
     }
-    r["total"] = int(floor(total * 100))
+    r["total"] = int(floor(total * 100))^
     r["skus"] = skus
     r
 }
@@ -48,7 +48,7 @@ pn top_skus_digest(orders) {
         let items = orders[i].items
         for j of items {
             let sku = items[j].sku
-            counts[sku] = jq_alt(counts[sku], 0) + items[j].qty
+            counts[sku] = (jq_alt(counts[sku], 0) + items[j].qty)^
         }
     }
     let entries = [for (k, v at counts) {key: string(k), value: v}]
@@ -66,7 +66,7 @@ pn running_last(orders) {
     var outs = []
     for i of orders {
         acc = acc + orders[i].total
-        outs.push(acc % 1000003)
+        outs.push(acc % 1000003)^
     }
     outs[len(outs) - 1]
 }
@@ -76,7 +76,7 @@ pn double_qty(v) {
     if (v is array) {
         var out = []
         for i of v {
-            out.push(double_qty(v[i]))
+            out.push(double_qty(v[i]))^
         }
         return out
     }
@@ -85,7 +85,7 @@ pn double_qty(v) {
         let keys = [for (k at v) string(k)]
         for j of keys {
             let child = double_qty(v[keys[j]])
-            r[keys[j]] = if (keys[j] == "qty") child * 2 else child
+            r[keys[j]] = (if (keys[j] == "qty") child * 2 else child)^
         }
         return r
     }
@@ -95,19 +95,19 @@ pn double_qty(v) {
 // [.. | numbers], in jq's pre-order
 pn collect_numbers(v, var out) {
     if (v is int or v is float) {
-        out.push(v)
+        out.push(v)^
         return null
     }
     if (v is array) {
         for i of v {
-            collect_numbers(v[i], out)
+            collect_numbers(v[i], out)^
         }
         return null
     }
     if (v is map) {
         let keys = [for (k at v) string(k)]
         for j of keys {
-            collect_numbers(v[keys[j]], out)
+            collect_numbers(v[keys[j]], out)^
         }
     }
     return null
@@ -122,7 +122,7 @@ pn sum_in_order(numbers) {
     total
 }
 
-fn tag_pair(tags) => jq_alt(jq_at(tags, 0), "-") ++ "/" ++ jq_alt(jq_at(tags, 1), "-")
+fn tag_pair(tags) any^ => jq_alt(jq_at(tags, 0), "-") ++ "/" ++ jq_alt(jq_at(tags, 1), "-")
 
 pn round_digest(orders_in, r) {
     let orders = [for (o in orders_in where o.status != "pending") transform_order(o)]
@@ -132,22 +132,22 @@ pn round_digest(orders_in, r) {
     let running = running_last(orders)
     let csvlen = len(join([for (o in orders) string(o.id) ++ "," ++ o.user.name ++ "," ++ string(o.total)], "\n"))
     var paths = []
-    jq_collect_paths(jq_slice(orders, null, 200), [], true, paths)
+    jq_collect_paths(jq_slice(orders, null, 200), [], true, paths)^
     let npaths = len(paths)
     var numbers = []
-    collect_numbers(double_qty(jq_slice(orders, null, 200)), numbers)
+    collect_numbers(double_qty(jq_slice(orders, null, 200)), numbers)^
     let doubled = int(floor(sum_in_order(numbers)))
     let tagpairs = len(jq_unique([for (o in orders) tag_pair(o.user.tags)]))
     let splits = sum([for (o in orders) len(split(upper(o.user.name), "R"))])
     // tojson | fromjson (Lambda's JSON writer has no compact mode, so the text
     // is indented; the parsed values are the same)
-    let roundtrip = sum([for (o in jq_slice(orders, null, 300)) (parse(format(o, 'json'), 'json') ^ { null }).id])
+    let roundtrip = sum([for (o in jq_slice(orders, null, 300)^) (parse(format(o, 'json'), 'json') ^ { null }).id])
     let parsed = sum([for (o in orders) jq_tonumber_or(jq_slice(o.user.name, 4, null), 0)])
     // {} | bump(.a) | bump(.a) | bump(.b) | .a * 10 + .b
     var c = {}
-    c["a"] = jq_alt(c["a"], 0) + 1
-    c["a"] = jq_alt(c["a"], 0) + 1
-    c["b"] = jq_alt(c["b"], 0) + 1
+    c["a"] = (jq_alt(c["a"], 0) + 1)^
+    c["a"] = (jq_alt(c["a"], 0) + 1)^
+    c["b"] = (jq_alt(c["b"], 0) + 1)^
     let counts = c["a"] * 10 + c["b"];
     (by_region + top_skus + running + csvlen + npaths + doubled + tagpairs +
         splits + roundtrip + parsed + counts + r) % jq_modulus
@@ -163,7 +163,7 @@ pn main() {
         r = r + 1
     }
     let t1 = clock()
-    if (checksum == 878885883) {
+    if ((checksum == 878885883)^) {
         print("jq_records: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("jq_records: FAIL checksum=" ++ string(checksum) ++ "\n")

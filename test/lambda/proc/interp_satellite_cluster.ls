@@ -22,13 +22,13 @@ pn warm(n) {
 }
 pn main() {
     print(warm(10), "\n")
-    var fs: float[] = fill(3, 0.5)
+    var fs: float[] = fill(3, 0.5)^
     var count = 0
     var k = 0
     while (k < 8) {
         count = count + sub_until(1000, 7) + half(k * 3)
         bump(count)
-        fs[k % 3] = float(pinned(k))
+        fs[k % 3] = float(pinned(k))^
         k = k + 1
     }
     print(count, " ", fs, " ", even_odd(7), " ", odd_even(6), "\n")

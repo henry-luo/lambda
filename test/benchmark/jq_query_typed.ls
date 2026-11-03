@@ -27,8 +27,8 @@ pub pn jq_collect_paths(v, prefix: array, numbers_only: bool, var out: array) {
         while (i < len(v)) {
             let path: array = prefix ++ [i]
             let child = v[i]
-            if (not numbers_only or child is int or child is float) { out.push(path) }
-            jq_collect_paths(child, path, numbers_only, out)
+            if (not numbers_only or child is int or child is float) { out.push(path)^ }
+            jq_collect_paths(child, path, numbers_only, out)^
             i = i + 1
         }
         return null
@@ -36,11 +36,11 @@ pub pn jq_collect_paths(v, prefix: array, numbers_only: bool, var out: array) {
     if (v is map) {
         let keys: string[] = [for (k at v) string(k)]
         var j: int = 0
-        while (j < len(keys)) {
+        while ((j < len(keys))^) {
             let path: array = prefix ++ [keys[j]]
             let child = v[keys[j]]
-            if (not numbers_only or child is int or child is float) { out.push(path) }
-            jq_collect_paths(child, path, numbers_only, out)
+            if (not numbers_only or child is int or child is float) { out.push(path)^ }
+            jq_collect_paths(child, path, numbers_only, out)^
             j = j + 1
         }
     }
@@ -52,7 +52,7 @@ pub pn jq_flatten_into(v, var out: int[]) {
     if (v is array) {
         var i: int = 0
         while (i < len(v)) {
-            jq_flatten_into(v[i], out)
+            jq_flatten_into(v[i], out)^
             i = i + 1
         }
         return null
@@ -62,14 +62,14 @@ pub pn jq_flatten_into(v, var out: int[]) {
 }
 
 // contains(b): jq's jv_contains, each search stopping at its first match
-pub pn jq_contains(a, b) bool {
+pub pn jq_contains(a, b) bool^ {
     if (a is array and b is array) {
         var j: int = 0
         while (j < len(b)) {
             var found: bool = false
             var i: int = 0
             while (i < len(a) and not found) {
-                found = jq_contains(a[i], b[j])
+                found = jq_contains(a[i], b[j])^
                 i = i + 1
             }
             if (not found) { return false }
@@ -80,9 +80,9 @@ pub pn jq_contains(a, b) bool {
     if (a is map and b is map) {
         let keys: string[] = [for (k at b) string(k)]
         var j: int = 0
-        while (j < len(keys)) {
+        while ((j < len(keys))^) {
             if (a[keys[j]] == null) { return false }
-            if (not jq_contains(a[keys[j]], b[keys[j]])) { return false }
+            if ((not jq_contains(a[keys[j]], b[keys[j]]))^) { return false }
             j = j + 1
         }
         return true
@@ -103,17 +103,17 @@ pub fn jq_digest(v) int {
 }
 
 // range($from; $upto; $by) as jq defines it (empty when $by is 0)
-pub pn jq_range(from: int, upto: int, by: int) int[] {
+pub pn jq_range(from: int, upto: int, by: int) int[]^ {
     var out: int[] = []
     var x: int = from
     if (by > 0) {
         while (x < upto) {
-            out.push(x)
+            out.push(x)^
             x = x + by
         }
     } else if (by < 0) {
         while (x > upto) {
-            out.push(x)
+            out.push(x)^
             x = x + by
         }
     }
@@ -122,25 +122,25 @@ pub pn jq_range(from: int, upto: int, by: int) int[] {
 
 // .[from:to] bounds: jq clamps, counts negatives from the end, and treats
 // null as an open bound
-pub fn jq_slice_start(n: int, from: int?) int {
+pub fn jq_slice_start(n: int, from: int?) int^ {
     let s0: int = if (from == null) 0 else if (from < 0) from + n else from
     if (s0 < 0) 0 else if (s0 > n) n else s0
 }
 
-pub fn jq_slice_end(n: int, start: int, to: int?) int {
+pub fn jq_slice_end(n: int, start: int, to: int?) int^ {
     let e0: int = if (to == null) n else if (to < 0) to + n else to
     if (e0 > n) n else if (e0 < start) start else e0
 }
 
-pub fn jq_slice_string(s: string, from: int?, to: int?) string {
+pub fn jq_slice_string(s: string, from: int?, to: int?) string^ {
     let n: int = len(s)
-    let start: int = jq_slice_start(n, from)
+    let start: int = jq_slice_start(n, from)^
     slice(s, start, jq_slice_end(n, start, to)) or ""
 }
 
-pub fn jq_slice_array(v: array, from: int?, to: int?) array {
+pub fn jq_slice_array(v: array, from: int?, to: int?) array^ {
     let n: int = len(v)
-    let start: int = jq_slice_start(n, from)
+    let start: int = jq_slice_start(n, from)^
     slice(v, start, jq_slice_end(n, start, to)) or []
 }
 
@@ -154,7 +154,7 @@ pub fn jq_at(arr: array, i: int) => if (i < len(arr)) arr[i] else null
 pub fn jq_tonumber_or(text: string, default: int) => parse(text, 'json') ^ { default }
 
 // explode | add
-pub pn jq_codepoint_sum(text: string) int {
+pub pn jq_codepoint_sum(text: string) int^ {
     var total: int = 0
     var i: int = 0
     while (i < len(text)) {

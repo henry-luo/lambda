@@ -3,8 +3,8 @@
 // non-int value reaches the checked setter, which still rejects it.
 fn mix(x) => x * 7
 
-pn fill_mod(n: int) int {
-    var bx: int[] = fill(n, 0)
+pn fill_mod(n: int) int^ {
+    var bx: int[] = fill(n, 0)^
     for i in 0 to n - 1 {
         bx[i] = mix(i) % 500
     }
@@ -17,8 +17,8 @@ pn fill_mod(n: int) int {
 
 fn pick(v) => v
 
-pn store_any(v) int {
-    var a: int[] = fill(2, 0)
+pn store_any(v) int^ {
+    var a: int[] = fill(2, 0)^
     a[1] = pick(v)
     return a[1]
 }

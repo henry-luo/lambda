@@ -7,13 +7,13 @@ fn dynamic(value) any { value }
 pn main() {
     var source = {value: "left"}
     var target: Row = source
-    target.value = dynamic(null)
+    target.value = dynamic(null)^
     var blank = target.value
     target.value = "right"
 
     var words: string[] = ["a", "b"]
     var optional_words: string?[] = words
-    optional_words[1] = dynamic(null)
+    optional_words[1] = dynamic(null)^
     print(string([source.value, target.value, blank, words[1], optional_words[0],
         optional_words[1], optional_words[2]]) ++ "\n")
 }

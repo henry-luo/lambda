@@ -21,7 +21,7 @@ pn main() {
     var names = []
     var i = 0
     let n = len(ops)
-    while (i < n) {
+    while ((i < n)^) {
         names = names ++ [ops[i].op]
         i = i + 1
     }

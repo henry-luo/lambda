@@ -4,7 +4,7 @@
 // Classifies 100000 test points against a 20-vertex polygon
 // Expected: 50000 (test points are generated on a grid, half inside)
 
-fn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool {
+fn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool^ {
     var inside = false
     var j: int = n - 1
     var i: int = 0
@@ -13,9 +13,9 @@ fn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool {
         var yj: float = ys[j]
         var yi_gt = yi > testy
         var yj_gt = yj > testy
-        if (yi_gt != yj_gt) {
+        if ((yi_gt != yj_gt)^) {
             var xtest: float = (xs[j] - xs[i]) * (testy - yi) / (yj - yi) + xs[i]
-            if (testx < xtest) {
+            if ((testx < xtest)^) {
                 if (inside) {
                     inside = false
                 } else {
@@ -29,7 +29,7 @@ fn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool {
     return inside
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     // standard Larceny polygon (20 vertices, irregular shape)
     var xs: float[] = [0.0, 1.0, 1.0, 0.0, 0.0,
               1.0, -0.5, -1.0, -1.0, -2.0,
@@ -50,7 +50,7 @@ pn benchmark() int {
         var iy: int = 0
         while (iy < 200) {
             var testy: float = -1.5 + float(iy) * 0.025
-            if (pnpoly(xs, ys, n, testx, testy)) {
+            if (pnpoly(xs, ys, n, testx, testy)^) {
                 count = count + 1
             }
             total = total + 1

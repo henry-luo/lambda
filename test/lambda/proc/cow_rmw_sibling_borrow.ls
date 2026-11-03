@@ -18,7 +18,7 @@ pn put_slot(var t: Table, key: int, value: any) any {
         }
         i = i + 1
     }
-    push(keys, key)
+    push(keys, key)^
     push(vals, value)
     t.keys = keys
     t.vals = vals
@@ -27,7 +27,7 @@ pn put_slot(var t: Table, key: int, value: any) any {
 
 // the handle is written before the early return, which has no store-back:
 // the write must not reach the caller (the borrow is refused)
-pn put_discard(var t: Table, key: int, stop: bool) int {
+pn put_discard(var t: Table, key: int, stop: bool) int^ {
     var keys = t.keys
     push(keys, key)
     if (stop) {
@@ -38,7 +38,7 @@ pn put_discard(var t: Table, key: int, stop: bool) int {
 }
 
 // a sibling store of the handle itself would alias it into two slots
-pn cross_store(var t: Table, key: int) int {
+pn cross_store(var t: Table, key: int) int^ {
     var keys = t.keys
     push(keys, key)
     t.vals = keys
@@ -49,21 +49,21 @@ pn cross_store(var t: Table, key: int) int {
 pn run_hot(var t: Table) {
     var k = 0
     while (k < 60) {
-        put_slot(t, k % 20, k)
+        put_slot(t, k % 20, k)^
         k = k + 1
     }
 }
 
 pn main() {
     var t: Table = {keys: [], vals: []}
-    run_hot(t)
+    run_hot(t)^
     print([len(t.keys), len(t.vals), t.keys[3], t.vals[3], t.vals[19]])
     print("\n")
 
     // a snapshot of the root before the puts keeps its own arrays
     let before = t
-    put_slot(t, 100, "x")
-    put_slot(t, 3, "y")
+    put_slot(t, 100, "x")^
+    put_slot(t, 3, "y")^
     print([len(before.keys), len(t.keys), before.vals[3], t.vals[3], t.vals[20]])
     print("\n")
 
@@ -71,7 +71,7 @@ pn main() {
     // up in `vals`
     var shared = ["a", "b"]
     var s: Table = {keys: shared, vals: shared}
-    put_slot(s, 7, 8)
+    put_slot(s, 7, 8)^
     print([s.keys, s.vals, shared])
     print("\n")
 
@@ -90,7 +90,7 @@ pn main() {
     var y = ["b"]
     u.keys = y
     u.vals = y
-    put_slot(u, 9, 10)
+    put_slot(u, 9, 10)^
     print([u.keys, u.vals, y])
     print("\n")
 }

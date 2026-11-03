@@ -124,7 +124,7 @@ pn test_u32_to_int_map_assignment() {
     var st = {seed: 49734321}
     var next: u32 = st.seed
     next = next * 1103515245u32 + 12345u32
-    st.seed = int(next)
+    st.seed = int(next)^
     print(st.seed)
     print("\n")
 }

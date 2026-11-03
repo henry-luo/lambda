@@ -16,7 +16,7 @@ fn submit_attr(form, submitter, submitter_name, form_name, fallback) {
     else attr_or(form, form_name, fallback)
 }
 
-fn encoded_pair(pair) {
+fn encoded_pair(pair) any^ {
     ue.form_encode(string(pair[0])) ++ "=" ++
         ue.form_encode(string(pair[1]))
 }
@@ -25,7 +25,7 @@ fn urlencoded(entries) {
     join([for (pair in entries) encoded_pair(pair)], "&")
 }
 
-fn multipart_part(pair, boundary) {
+fn multipart_part(pair, boundary) any^ {
     "--" ++ boundary ++ "\r\n" ++
     "Content-Disposition: form-data; name=\"" ++ string(pair[0]) ++ "\"\r\n\r\n" ++
     string(pair[1]) ++ "\r\n"

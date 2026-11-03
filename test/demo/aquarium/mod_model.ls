@@ -52,20 +52,20 @@ pub fn record(st,before,after) => if (before == after) {*:st,doc:after} else {*:
     hist:history.history_snapshot(st.hist,before,after)}
 pub fn select(st,id) => {*:st,selected:if (lookup(st.doc,id) != null) id else ""}
 fn free_id(doc,n) => if (lookup(doc,"item-" ++ string(n)) == null) n else free_id(doc,n+1)
-pub fn add(st,kind) => if (species(kind) == null or len(st.doc) >= 60) {*:st,status:"The tank holds up to 60 objects."} else (
+pub fn add(st,kind) any^ => if (species(kind) == null or len(st.doc) >= 60) {*:st,status:"The tank holds up to 60 objects."} else (
     let serial = free_id(st.doc,st.next_id),
     let id = "item-" ++ string(serial),
     let fish = species(kind).category == "fish",
     let added = make_object(id,kind,[0.0,if (fish) 3.5 else 0.0,1.0],if (kind == "tetra") 0.8 else 1.0),
     {*:record(st,st.doc,[*st.doc,added]),selected:id,next_id:serial+1,status:species(kind).name ++ " added. Drag it or use the inspector."})
 pub fn remove(st) => {*:record(st,st.doc,[for (o in st.doc where o.id != st.selected) o]),selected:"",status:"Object removed. Undo brings it back."}
-pub fn duplicate(st) => (let chosen = lookup(st.doc,st.selected),
+pub fn duplicate(st) any^ => (let chosen = lookup(st.doc,st.selected),
     if (chosen == null or len(st.doc) >= 60) st else (
         let serial = free_id(st.doc,st.next_id),let id = "item-" ++ string(serial),
         let copied = constrain({*:chosen,id:id,position:camera.add(chosen.position,[0.4,0.0,0.4])}),
         {*:record(st,st.doc,[*st.doc,copied]),selected:id,next_id:serial+1,status:"Object duplicated."}))
 pub fn preview(st,edited_object) => {*:st,doc:[for (o in st.doc) if (o.id == edited_object.id) constrain(edited_object) else o]}
-pub fn property(st,key,value) => (let o = lookup(st.doc,st.selected),
+pub fn property(st,key,value) any^ => (let o = lookup(st.doc,st.selected),
     if (o == null or not numeric.numeric(value)) st else (
         let edited = if (key == "size" or key == "yaw") {*:o,[key]:value}
             else {*:o,position:[for (i in 0 to 2) if (key == ["x","y","z"][i]) value else o.position[i]]},
@@ -101,11 +101,11 @@ fn object_hit(st,ray,o) {
 }
 pub fn pick(st,cam,x,y) {
     let ray = camera.ray(cam,x,y)
-    let hits = [for (o in st.doc,let hit = object_hit(st,ray,o) where hit != null) hit]
+    let hits = [for (o in st.doc,let hit = object_hit(st,ray,o) where ((hit != null) ^ { false })) hit]
     let nearest = min([for (h in hits) h.distance]);
     [for (h in hits where h.distance == nearest) h.id][0]
 }
-pub fn drag_point(cam,x,y,anchor,ground=false) => if (not ground)
+pub fn drag_point(cam,x,y,anchor,ground=false) any^ => if (not ground)
     camera.unproject(cam,x,y,camera.project(cam,anchor).depth)
     else (let ray = camera.ray(cam,x,y),
         if (abs(ray.direction[1]) < 0.00001) anchor else

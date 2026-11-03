@@ -83,7 +83,7 @@ pub fn lower_slots(value, family, boundaries = ["page","config-provider"], custo
         not contains(boundaries,c.text(c.kind(value)))) (
         let kind = c.text(c.kind(value)),
         let props = lower_slots(c.props(value),family,boundaries,custom)^,
-        let children = [for (child in content(value)) lower_slots(child,family,boundaries,custom)^],
+        let children = [for (child in ((content(value)) ^ { [] })) lower_slots(child,family,boundaries,custom)^],
         if (custom != null and contains(custom.kinds,kind)) custom.build(kind,props,children)^
         else native(kind,props,children,family)^
     )

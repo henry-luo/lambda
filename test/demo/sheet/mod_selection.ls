@@ -22,7 +22,7 @@ pub pn begin(owner,st,evt) {
 pub pn move(owner,st,x,y) {
     // captured moves target the scrollport; hit-test the pointer to find the cell underneath.
     let hit=cell(dom.element_from_point(dom.owner_document(owner),x,y))
-    if (hit==null or (hit.row==st.row and hit.col==st.col)) { return st }
+    if ((hit==null or (hit.row==st.row and hit.col==st.col))^) { return st }
     return m.select(st,hit.row,hit.col,true)
 }
 pub pn finish(owner,st,cancel=false) {

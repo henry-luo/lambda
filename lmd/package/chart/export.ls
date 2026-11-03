@@ -1,7 +1,7 @@
 // common tabular presentation and Open XML packaging; I/O stays at the caller.
 import util: .util
 
-fn cell_text(value) => if (value==null) "" else if (value is map or value is array) format(value,'json') else string(value)
+fn cell_text(value) any^ => if (value==null) "" else if (value is map or value is array) format(value,'json') else string(value)
 
 pub fn html_table(columns, rows, options = {}) {
     <table class:"lambda-export-table",
@@ -11,7 +11,7 @@ pub fn html_table(columns, rows, options = {}) {
     >
 }
 
-fn csv_cell(value) => "\"" ++ replace(cell_text(value),"\"","\"\"") ++ "\""
+fn csv_cell(value) any^ => "\"" ++ replace(cell_text(value),"\"","\"\"") ++ "\""
 pub fn csv(columns, rows) => join([
     join([for (column in columns) csv_cell(column.heading)],","),
     *[for (row in rows) join([for (column in columns) csv_cell(row[column.field])],",")]],"\r\n") ++ "\r\n"
@@ -20,7 +20,7 @@ pub fn column_name(index) {
     let digit=index%26;
     (if (index>=26) column_name(index div 26-1) else "") ++ chr(65+digit)
 }
-fn xlsx_cell(value, address) {
+fn xlsx_cell(value, address) any^ {
     // dates and wide exact numbers are strings, avoiding Excel's 15-digit limit.
     if (value is bool) <c r:address,t:"b",<v if (value) "1" else "0">>
     else if (util.finite_number(value) and not (value is decimal) and abs(value)<1000000000000000)

@@ -1,4 +1,4 @@
-fn retained_member() {
+fn retained_member() any^ {
     let archive = input("test/input/zip/sample.docx")^
     content(archive)^[1]
 }

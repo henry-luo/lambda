@@ -12,11 +12,11 @@ fn aspects(n) => [for (i in 0 to (n - 1)) L.photo(lib, ids30[i]).aspect]
 fn r2(v) => round(v * 100) / 100
 fn overlap(a, b) => min(a.x + a.w, b.x + b.w) - max(a.x, b.x) > 0.01 and min(a.y + a.h, b.y + b.h) - max(a.y, b.y) > 0.01
 // area covered exactly (sum of cell areas) and no two cells overlap
-fn tiles(m, n) {
+fn tiles(m, n) any^ {
     let lay = C.layout(m, aspects(n))
     let cells = lay.cells
     let target = if (lay.mask != null) lay.mask.w * lay.mask.h else lay.width * lay.height
-    let pairs = [for (i in 0 to (len(cells) - 1), j in 0 to (len(cells) - 1) where i < j and overlap(cells[i], cells[j])) [i, j]];
+    let pairs = [for (i in ((0 to (len(cells) - 1)) ^ { [] }), j in ((0 to (len(cells) - 1)) ^ { [] }) where ((i < j and overlap(cells[i], cells[j])) ^ { false })) [i, j]];
     {cells:len(cells), covered:r2(sum([for (c in cells) c.w * c.h]) / target), overlaps:len(pairs),
         slots:len([for (c in cells) c.slot]) == n}
 }
@@ -53,7 +53,7 @@ fn text_at(t) => (let l = C.layout({*:model(7, t), caption:"Summer", note:"By th
     lattices: [for (t in ["diamonds", "honeycomb"]) [t, [for (n in [2, 7, 30]) lattice(t, n)]]],
     // the frame's hero is ringed: every other cell lies on the ring, outside the hero
     frame: (let c = C.layout(model(15, "frame"), aspects(15)).cells, let h = c[0],
-        all([for (k in slice(c, 1, 15)) not overlap(h, k)]) and h.x > 0.0 and h.y > 0.0),
+        all([for (k in ((slice(c, 1, 15)) ^ { [] })) not overlap(h, k)]) and h.x > 0.0 and h.y > 0.0),
     pile: [pile[last].slot, pile[last].w > pile[0].w, all([for (c in pile) not c.label])],
     polaroids: [all([for (c in polaroids) c.rot == 0.0 and r2(c.h) == r2(C.print_height(c.w, 1.0))]),
         // the short last row is centred
@@ -73,9 +73,9 @@ fn text_at(t) => (let l = C.layout({*:model(7, t), caption:"Summer", note:"By th
     bands: [banded.caption.h, banded.credits.h, r2(banded.cells[0].y)],
     gutters: (let g = C.layout({*:model(2, "grid"), aspect:"landscape", gutter:20}, aspects(2)).cells,
         [[r2(g[0].x), r2(g[0].w)], [r2(g[1].x), r2(g[1].w)], r2(g[1].x - g[0].x - g[0].w)]),
-    swap: [for (s in swapped.slots) s.id] == [for (i, s in base.slots) if (i == 0) base.slots[3].id else if (i == 3) base.slots[0].id else s.id],
-    assign_present: [for (s in C.assign(base, 0, base.slots[5].id).slots) s.id][0] == base.slots[5].id,
-    assign_new: [for (s in C.assign(base, 0, 999).slots) s.id][0],
+    swap: [for (s in ((swapped.slots) ^ { [] })) s.id] == [for (i, s in base.slots) if (i == 0) base.slots[3].id else if (i == 3) base.slots[0].id else s.id],
+    assign_present: [for (s in ((C.assign(base, 0, base.slots[5].id).slots) ^ { [] })) s.id][0] == base.slots[5].id,
+    assign_new: [for (s in ((C.assign(base, 0, 999).slots) ^ { [] })) s.id][0],
     crop: [panned.slots[2].zoom, panned.slots[2].fx, panned.slots[2].fy, C.zoom(base, 0, 10.0).slots[0].zoom],
     undo: [undone.model == base, len(undone.history.future), redone.model == swapped, C.undo(C.history(), base)],
     settings: [C.set(base, "template", "grid").template, C.set(base, "template", "bogus").template,

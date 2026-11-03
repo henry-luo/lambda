@@ -43,4 +43,4 @@ on statechange(evt) { if (evt.controller == "cat-motion") { playing = string(evt
 
 ui.page("Cube pets", "LAMBDA MOTION / RIGID RIGS",
     "A cat, a dog and a penguin from Kenney's Cube Pets. Each is a stack of rigid FBX parts with no skeleton; the converter turns every part into a joint, so the pets play their own clips through the same character pipeline as skinned bodies.",
-    apply(<parade>))
+    apply(<parade>))^

@@ -11,7 +11,7 @@ pn bump(var c: Counter, step: number as T) T {
     return step
 }
 
-pn drive() Counter {
+pn drive() Counter^ {
     var c: Counter = {hits: 0, tag: 100}
     let a = bump(c, 3)
     let b = bump(c, 4)

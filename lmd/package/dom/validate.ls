@@ -19,7 +19,7 @@ fn attr_or_null(elem, name) {
     if (raw == null or raw == "") null else raw
 }
 
-fn as_number(text) {
+fn as_number(text) any^ {
     if (text == null) null
     else {
         let n = float(text);
@@ -30,7 +30,7 @@ fn as_number(text) {
 }
 
 // A number input's value must parse; an empty value is checked by `required`.
-pub fn value_is_number(text) {
+pub fn value_is_number(text) any^ {
     // float() accepts a leading numeric prefix ("12abc" parses as 12), so the
     // whole string has to be checked, not just whether a parse succeeds
     if (as_number(text) == null) { false }
@@ -49,7 +49,7 @@ fn numeric_char(c, i) {
 
 // Structural checks, deliberately the same approximation the native pass used:
 // a full grammar belongs in a regex engine, not in hand-rolled string tests.
-pub fn value_is_email(text) {
+pub fn value_is_email(text) any^ {
     let at = index_of(text, "@");
     // index_of yields null when the needle is absent, and null propagates
     // through comparisons — so decide the "no @" case before comparing
@@ -69,7 +69,7 @@ pub fn value_is_url(text) {
 // --- the constraint pass ---------------------------------------------------
 
 // Returns true when every constraint the control declares is satisfied.
-pub fn is_valid(elem, text, input_type) {
+pub fn is_valid(elem, text, input_type) any^ {
     // A custom validity message set through the IDL overrides everything.
     if (dom.custom_validity(elem) != "") { false }
     else if (dom.get_state(elem, "required") and len(text) == 0) { false }

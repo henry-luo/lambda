@@ -48,7 +48,7 @@ fn stepper(caption, verb, delta, value, unit = " cm") => <div class:"stepper", <
     (icon_btn(verb, 0.0 - delta, G.minus, "Less")); <b value ++ unit>; (icon_btn(verb, delta, G.plus, "More"))>
 fn swatches(verb, colors, current) => <div class:"swatches", for (c in colors)
     act(verb, c, if (lower(current) == c) "swatch on" else "swatch", [], {style:"background:" ++ c, title:c})>
-fn cm(x) => string(int(round(x)))
+fn cm(x) any^ => string(int(round(x)))
 
 // ---- top bar ---------------------------------------------------------------------------
 
@@ -77,13 +77,13 @@ fn topbar(st) => <header class:"topbar",
 
 // ---- catalog -------------------------------------------------------------------------------
 
-fn matches(it, q) => q == "" or contains(lower(it.name), lower(q)) or contains(lower(it.key), lower(q))
+fn matches(it, q) any^ => q == "" or contains(lower(it.name), lower(q)) or contains(lower(it.key), lower(q))
 fn tile(it) => act("add", it.key, "tile", [<span class:"thumb", TH.thumb(it.key)>, <span class:"tile-name", it.name>,
     <span class:"tile-size", cm(it.w) ++ " × " ++ cm(it.d) ++ (if (it.opening != null) "" else " × " ++ cm(it.h))>],
     {title:"Add " ++ lower(it.name) ++ (if (it.opening != null) " to a wall" else "")})
-fn catalog(st) {
+fn catalog(st) any^ {
     let q = trim(st.query)
-    let shown = [for (it in C.ITEMS where (if (q == "") it.cat == st.cat else matches(it, q))) it];
+    let shown = [for (it in C.ITEMS where (((if (q == "") it.cat == st.cat else matches(it, q))) ^ { false })) it];
     <aside class:"catalog", 'aria-label':"Catalog",
         <header class:"pane-head", <h2 "Catalog">; <p "Click a piece to place it in the plan.">>
         <div class:"search", (icons.icon("search", 16));
@@ -98,7 +98,7 @@ fn catalog(st) {
 
 // ---- panes ------------------------------------------------------------------------------------
 
-fn hint(st) => if (st.tool == "wall") "Drag to draw a wall · ends snap to other walls · Shift draws at any angle · Esc stops"
+fn hint(st) any^ => if (st.tool == "wall") "Drag to draw a wall · ends snap to other walls · Shift draws at any angle · Esc stops"
     else if (st.tool == "room") "Drag a rectangle to add a room with its four walls · Esc stops"
     else if (st.sel != null and M.kind_of(st.sel) == "wall") "Drag the wall to move it with its corners · drag an end to reshape"
     else if (st.sel != null) "Drag to move · round knob rotates · corner resizes · R turns 90° · Delete removes"
@@ -126,11 +126,11 @@ fn view3d_pane(st, p) => <section id:"view3d-pane", class:"pane-3d", style:"heig
 // ---- inspector -----------------------------------------------------------------------------
 
 fn head(title, sub = "") => <header class:"pane-head inspector-head", <div <h2 title>; if (sub != "") <p sub>>; (icon_btn("deselect", "", "M6 6l12 12 M18 6L6 18", "Done"))>
-fn item_inspector(it) {
+fn item_inspector(it) any^ {
     let c = C.item_of(it.key)
     let opening = c.opening;
     <div class:"pane",
-        (head(c.name, if (opening != null) "In a wall" else C.CATEGORIES[[for (i, k in C.CATEGORIES where k.key == c.cat) i][0]].name));
+        (head(c.name, if (opening != null) "In a wall" else C.CATEGORIES[[for (i, k in C.CATEGORIES where ((k.key == c.cat) ^ { false })) i][0]].name));
         if (opening != null) (section("Size", [stepper("Width", "size-w", 10.0, cm(it.w)), stepper("Height", "size-h", 10.0, cm(it.h)),
             if (opening == "window") stepper("Sill", "elev", 5.0, cm(it.elev)) else null]))
         else (section("Size", [stepper("Width", "size-w", 5.0, cm(it.w)), stepper("Depth", "size-d", 5.0, cm(it.d)),
@@ -159,7 +159,7 @@ fn room_inspector(r) => <div class:"pane",
         act("floor", f.key, if (r.floor == f.key) "floor-tile on" else "floor-tile",
             [<span class:"floor-chip", style:"background:repeating-linear-gradient(90deg," ++ f.color ++ " 0 9px," ++ f.line ++ " 9px 10px)">, <span f.name>])>]));
     (section("Arrange", [<div class:"tool-row", (act("delete", "", "tool-btn wide danger", [glyph(G.trash, 15), "Delete floor"]))>]))>
-fn home_inspector(st) {
+fn home_inspector(st) any^ {
     let h = st.home;
     <div class:"pane",
         <header class:"pane-head", <h2 "Home">; <p "Choose anything in the plan to change it.">>;
@@ -169,7 +169,7 @@ fn home_inspector(st) {
             else <div class:"rows", for (r in h.rooms) act("select", r.id, "row", [<span class:"row-chip", style:"background:" ++ C.floor_of(r.floor).color>,
                 <span class:"row-name", r.name>, <span class:"row-meta", A.n(M.area(r.pts) / 10000.0) ++ " m²">])>]));
         (section("Furniture", [if (len(M.furniture(h)) == 0) <p class:"hint", "Nothing yet. Pick a piece from the catalog.">
-            else <div class:"rows", for (it in M.furniture(h)) act("select", it.id, "row",
+            else <div class:"rows", for (it in ((M.furniture(h)) ^ { [] })) act("select", it.id, "row",
                 [<span class:"row-chip", style:"background:" ++ it.color>, <span class:"row-name", C.item_of(it.key).name>,
                  <span class:"row-meta", cm(it.w) ++ "×" ++ cm(it.d) ++ "×" ++ cm(it.h)>])>]))>
 }

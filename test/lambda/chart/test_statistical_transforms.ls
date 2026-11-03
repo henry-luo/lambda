@@ -2,8 +2,8 @@ import tr: lambda.chart.transform
 import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 
-fn run(data, step) => tr.apply_transforms(data, [step])
-fn close(a, b) => abs(float(a) - float(b)) < 1e-7
+fn run(data, step) any^ => tr.apply_transforms(data, [step])
+fn close(a, b) any^ => abs(float(a) - float(b)) < 1e-7
 
 let line = [for (x in 0 to 4) {x: x, y: 2 + 3 * x}]
 let linear = run(line, {type: "regression", x: "x", y: "y", params: true})
@@ -60,7 +60,7 @@ let checks = {
     centered_predictor: close(large_predictor[0].y, 1) and close(large_predictor[1].y, 1) and close(large_predictor[2].y, 9),
     groups: len(grouped) == 4 and grouped[0].g == "A" and grouped[2].g == "B",
     extrapolation: close(grouped[0].v, 1) and close(grouped[1].v, 7) and close(grouped[3].v, 11),
-    loess_line: len(smoothed) == 5 and len([for (row in smoothed where not close(row.y, 2 + 3 * row.x)) row]) == 0,
+    loess_line: len(smoothed) == 5 and len([for (row in smoothed where ((not close(row.y, 2 + 3 * row.x)) ^ { false })) row]) == 0,
     loess_pair: close(pair[0].y, 3) and close(pair[1].y, 5),
     loess_smoothing: spike[2].y > 0 and spike[2].y < 100,
     repeated_predictor: len(repeated) == 1 and close(repeated[0].y, 3),

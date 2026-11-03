@@ -2,11 +2,11 @@
 import math: lambda.doc.math.math
 import font_files: lambda.doc.font
 
-fn descendants(el, tag) {
+fn descendants(el, tag) any^ {
     if (not (el is element)) []
-    else [*if (string(name(el)) == string(tag)) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
+    else [*if (string(name(el)) == string(tag)) [el] else [], *[for (child in ((content(el)) ^ { [] }), found in ((descendants(child, tag)) ^ { [] })) found]]
 }
-fn render(source, opts = null) => math.render_math(parse(source, {type: "math", flavor: "latex"})^, opts)^
+fn render(source, opts = null) any^ => math.render_math(parse(source, {type: "math", flavor: "latex"})^, opts)^
 let plain = render("x+1")
 let styles = render("\\mathbf{x}+\\mathit{x}+\\mathrm{x}")
 let text = descendants(styles, 'text')

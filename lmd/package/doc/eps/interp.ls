@@ -23,7 +23,7 @@ pn execute_value(var m, value) int^ {
     else if (value is map and value.kind == "name" and value.executable) {
         let resolved = obj.lookup(m, value.value)^
         let scheduled = obj.schedule(m, resolved)^
-    } else { obj.push_operand(m, value) }
+    } else { obj.push_operand(m, value)^ }
     return 0
 }
 
@@ -38,7 +38,7 @@ pub pn run(doc, options) map^ {
         limits: {*: budget, source_end: doc.program.offset + doc.program.length}}
     m.source = obj.allocate(m, "file", {source: doc.source, offset: doc.program.offset, end: doc.program.offset + doc.program.length})^
     push(m.exec, {kind: "source"})
-    while (len(m.exec) > 0) {
+    while ((len(m.exec) > 0)^) {
         let allowed = obj.require(m, m.steps < budget.max_steps and len(m.stack) <= budget.max_stack and
             len(m.exec) <= budget.max_execution_depth and len(m.dicts) <= budget.max_dictionary_depth and
             len(m.gstack) <= budget.max_graphics_depth and len(m.graphics.path.segments) <= budget.max_path_segments and
@@ -46,7 +46,7 @@ pub pn run(doc, options) map^ {
         m.steps = m.steps + 1
         let index = len(m.exec) - 1
         let frame = m.exec[index]
-        m.exec = slice(m.exec, 0, index)
+        m.exec = slice(m.exec, 0, index)^
         if (frame.kind == "composite") { let executed = execute_value(m, frame.value)^ }
         else if (frame.kind == "source") {
             let source = obj.values(m, m.source)^
@@ -58,7 +58,7 @@ pub pn run(doc, options) map^ {
                 if (token.kind != "eof") {
                     let progress = obj.require(m, token.next > source.offset and token.next <= source.end, "syntaxerror: invalid source boundary")^
                     m.heap[m.source.id].value.offset = token.next
-                    push(m.exec, frame)
+                    push(m.exec, frame)^
                     let value = obj.materialize(m, token)^
                     let executed = execute_value(m, value)^
                 }
@@ -67,30 +67,30 @@ pub pn run(doc, options) map^ {
         else if (frame.kind == "procedure") {
             let body = obj.values(m, frame.value, true)^
             if (frame.index < len(body)) {
-                push(m.exec, {*: frame, index: frame.index + 1})
+                push(m.exec, {*: frame, index: frame.index + 1})^
                 let executed = execute_value(m, body[frame.index])^
             }
         } else if (frame.kind == "repeat") {
             if (frame.remaining != 0) {
-                push(m.exec, {*: frame, remaining: if (frame.remaining < 0) -1 else frame.remaining - 1})
+                push(m.exec, {*: frame, remaining: if (frame.remaining < 0) -1 else frame.remaining - 1})^
                 let scheduled = obj.schedule(m, frame.value)^
             }
         } else if (frame.kind == "for") {
-            if ((obj.number_value(frame.step) >= 0 and obj.number_value(frame.current) <= obj.number_value(frame.limit)) or
-                (obj.number_value(frame.step) < 0 and obj.number_value(frame.current) >= obj.number_value(frame.limit))) {
-                push(m.exec, {*: frame, current: ops.numeric(m, "add", [frame.current, frame.step])^})
-                obj.push_operand(m, frame.current)
+            if (((obj.number_value(frame.step) >= 0 and obj.number_value(frame.current) <= obj.number_value(frame.limit)) or
+                (obj.number_value(frame.step) < 0 and obj.number_value(frame.current) >= obj.number_value(frame.limit)))^) {
+                push(m.exec, {*: frame, current: ops.numeric(m, "add", [frame.current, frame.step])^})^
+                obj.push_operand(m, frame.current)^
                 let scheduled = obj.schedule(m, frame.value)^
             }
         } else if (frame.kind == "forall") {
             let data = obj.values(m, frame.composite)^
             let n = if (frame.keys == null) len(data) else len(frame.keys)
-            if (frame.index < n) {
-                push(m.exec, {*: frame, index: frame.index + 1})
+            if ((frame.index < n)^) {
+                push(m.exec, {*: frame, index: frame.index + 1})^
                 if (frame.keys != null) {
                     let key = frame.keys[frame.index]
-                    obj.push_operand(m, obj.literal_name(key)); obj.push_operand(m, data[key])
-                } else { obj.push_operand(m, data[frame.index]) }
+                    obj.push_operand(m, obj.literal_name(key))^; obj.push_operand(m, data[key])^
+                } else { obj.push_operand(m, data[frame.index])^ }
                 let scheduled = obj.schedule(m, frame.value)^
             }
         } else raise obj.failure(m, "invalid execution frame")

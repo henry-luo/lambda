@@ -1,0 +1,6 @@
+[true, true, false]
+[true, false, null, null, null]
+[10, 30, null, null]
+[1.5, true, "s", 8]
+[7, 9, 128]
+[0, 1, 0]

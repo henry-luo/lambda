@@ -8,9 +8,9 @@ pub let ENTRY_TYPES = ["article", "book", "inbook", "incollection",
 pub fn supported_entry_type(kind) => any([for (entry_type in ENTRY_TYPES)
     entry_type == kind])
 
-fn char_at(source, index) => slice(source, index, index + 1)
+fn char_at(source, index) any^ => slice(source, index, index + 1)
 
-fn source_line(source, index, line) {
+fn source_line(source, index, line) any^ {
     if (index >= len(source)) line
     else source_line(source, index + 1,
         line + (if (char_at(source, index) == "\n") 1 else 0))
@@ -28,7 +28,7 @@ fn entry_issue(code, entry, item, message) {
 }
 
 // Replace comment bytes with spaces so field parsing keeps original offsets.
-fn without_comments(source, index, braces, quoted, escaped, comment, acc) {
+fn without_comments(source, index, braces, quoted, escaped, comment, acc) any^ {
     if (index >= len(source)) acc
     else {
         let ch = char_at(source, index)
@@ -51,12 +51,12 @@ fn without_comments(source, index, braces, quoted, escaped, comment, acc) {
     }
 }
 
-fn skip_comment(source, index) {
+fn skip_comment(source, index) any^ {
     if (index >= len(source) or char_at(source, index) == "\n") index
     else skip_comment(source, index + 1)
 }
 
-fn find_at(source, index) {
+fn find_at(source, index) any^ {
     if (index >= len(source)) null
     else if (char_at(source, index) == "%")
         find_at(source, skip_comment(source, index + 1))
@@ -64,7 +64,7 @@ fn find_at(source, index) {
     else find_at(source, index + 1)
 }
 
-fn find_open(source, index) {
+fn find_open(source, index) any^ {
     if (index >= len(source)) null
     else if (char_at(source, index) == "{" or char_at(source, index) == "(") index
     else if (char_at(source, index) == "@") null
@@ -72,7 +72,7 @@ fn find_open(source, index) {
 }
 
 // Track quotes and braces so a closing delimiter inside a field is not a record end.
-fn find_close(source, index, close, depth, braces, quoted, escaped) {
+fn find_close(source, index, close, depth, braces, quoted, escaped) any^ {
     if (index >= len(source)) null
     else {
         let ch = char_at(source, index)
@@ -109,7 +109,7 @@ let MONTHS = [
     {key: "nov", val: "November"}, {key: "dec", val: "December"}
 ]
 
-fn value_atom(source, macros, path, position, file_text) {
+fn value_atom(source, macros, path, position, file_text) any^ {
     let atom = trim(source)
     if (len(atom) >= 2 and starts_with(atom, "{") and ends_with(atom, "}"))
         {text: util.unwrap_braces(atom), diagnostics: []}
@@ -127,7 +127,7 @@ fn value_atom(source, macros, path, position, file_text) {
     }
 }
 
-fn value_parts(parts, index, macros, path, position, file_text, text, issues) {
+fn value_parts(parts, index, macros, path, position, file_text, text, issues) any^ {
     if (index >= len(parts)) {raw: text, text: replace(replace(text, "{", ""), "}", ""),
         diagnostics: issues}
     else {
@@ -137,11 +137,11 @@ fn value_parts(parts, index, macros, path, position, file_text, text, issues) {
     }
 }
 
-fn value_of(source, macros, path, position, file_text) {
+fn value_of(source, macros, path, position, file_text) any^ {
     value_parts(util.split_top_level(source, "#"), 0, macros, path, position, file_text, "", [])
 }
 
-fn parse_fields(parts, index, macros, path, position, file_text, values, raw_values, issues) {
+fn parse_fields(parts, index, macros, path, position, file_text, values, raw_values, issues) any^ {
     if (index >= len(parts))
         {fields: map(values), raw_fields: map(raw_values), diagnostics: issues}
     else {
@@ -181,7 +181,7 @@ fn parse_entry(body, kind, macros, path, position, file_text, entry_types) {
         diagnostics: issues ++ type_issues ++ parsed.diagnostics}
 }
 
-fn parse_string(body, macros, path, position, file_text) {
+fn parse_string(body, macros, path, position, file_text) any^ {
     let clean = without_comments(body, 0, 0, false, false, false, "")
     let eq = util.top_level_separator(clean, "=")
     if (eq == null) {macros: macros,
@@ -196,7 +196,7 @@ fn parse_string(body, macros, path, position, file_text) {
     }
 }
 
-fn parse_records(source, path, index, macros, entries, issues, entry_types) {
+fn parse_records(source, path, index, macros, entries, issues, entry_types) any^ {
     let at = find_at(source, index)
     if (at == null) {macros: macros, entries: entries, diagnostics: issues}
     else {
@@ -230,25 +230,25 @@ fn parse_records(source, path, index, macros, entries, issues, entry_types) {
     }
 }
 
-pub fn resources(node) {
+pub fn resources(node) any^ {
     if (not (node is element)) []
     else if (string(name(node)) == "addbibresource")
         [{source: trim(util.text_of_skip_brack(node)), offset: node.source_offset}]
     else if (string(name(node)) == "bibliography")
-        [for (raw in util.split_top_level(util.text_of(node), ","))
+        [for (raw in ((util.split_top_level(util.text_of(node), ",")) ^ { [] }))
             {source: if (ends_with(trim(raw), ".bib")) trim(raw)
                 else trim(raw) ++ ".bib", offset: node.source_offset}]
-    else [for (child in node, resource in resources(child)) resource]
+    else [for (child in node, resource in ((resources(child)) ^ { [] })) resource]
 }
 
 // filecontents is a document-local resource; its raw body never reaches the filesystem.
-pub fn inline_resources(node) {
+pub fn inline_resources(node) any^ {
     if (not (node is element)) []
     else if (string(name(node)) == "filecontents" or
         string(name(node)) == "filecontents*")
         [{key: node.filename, source: node.source,
             offset: node.body_offset}]
-    else [for (child in node, resource in inline_resources(child)) resource]
+    else [for (child in node, resource in ((inline_resources(child)) ^ { [] })) resource]
 }
 
 pub fn inline_source(inline, name) {
@@ -256,13 +256,13 @@ pub fn inline_source(inline, name) {
     if (len(matches) == 0) null else matches[0]
 }
 
-pub fn resource_path(source, base_uri) =>
+pub fn resource_path(source, base_uri) any^ =>
     if (base_uri == null or starts_with(source, "/")) source
     else paths.resolve_path(base_uri, source)
 
 pub fn resource_assets(ast, base_uri) {
     let inline = inline_resources(ast);
-    [for (resource in resources(ast)) resource_asset(resource, base_uri, inline)]
+    [for (resource in ((resources(ast)) ^ { [] })) resource_asset(resource, base_uri, inline)]
 }
 
 fn resource_asset(resource, base_uri, inline) {
@@ -273,7 +273,7 @@ fn resource_asset(resource, base_uri, inline) {
      available: local != null or exists(path), offset: resource.offset}
 }
 
-fn load_resources(names, index, base_uri, inline, macros, entries, issues) {
+fn load_resources(names, index, base_uri, inline, macros, entries, issues) any^ {
     if (index >= len(names)) {entries: entries, diagnostics: issues}
     else {
         let resource = names[index]
@@ -313,13 +313,13 @@ fn entry_by_key(entries, key) {
 
 fn parent_keys(entry) {
     let xdata = if (entry.fields.xdata == null) [] else
-        [for (part in util.split_top_level(entry.fields.xdata, ",")
+        [for (part in ((util.split_top_level(entry.fields.xdata, ",")) ^ { [] })
             where trim(part) != "") trim(part)]
     if (entry.fields.crossref == null) xdata
     else xdata ++ [trim(entry.fields.crossref)]
 }
 
-fn inherit_entry(entry, entries, stack) {
+fn inherit_entry(entry, entries, stack) any^ {
     if (any([for (key in stack) key == entry.key]))
         {fields: entry.fields, raw_fields: entry.raw_fields,
             diagnostics: [entry_issue("cyclic-bib-inheritance", entry, entry.key,
@@ -328,7 +328,7 @@ fn inherit_entry(entry, entries, stack) {
         entry, entry.fields, entry.raw_fields, [])
 }
 
-fn inherit_parents(keys, index, entries, stack, child, fields, raw_fields, issues) {
+fn inherit_parents(keys, index, entries, stack, child, fields, raw_fields, issues) any^ {
     if (index >= len(keys))
         {fields: fields, raw_fields: raw_fields, diagnostics: issues}
     else {
@@ -349,7 +349,7 @@ fn inherit_parents(keys, index, entries, stack, child, fields, raw_fields, issue
     }
 }
 
-fn inherited_entries(entries, index, resolved, issues) {
+fn inherited_entries(entries, index, resolved, issues) any^ {
     if (index >= len(entries)) {entries: resolved, diagnostics: issues}
     else {
         let entry = entries[index]
@@ -371,14 +371,14 @@ fn unique_issues(issues, index, seen, unique) {
     }
 }
 
-pub fn load(ast, base_uri) {
+pub fn load(ast, base_uri) any^ {
     let loaded = load_resources(resources(ast), 0, base_uri,
         inline_resources(ast), [], [], [])
     finalize(loaded.entries, loaded.diagnostics)
 }
 
 // Shared parsing and inheritance preserve the legacy profile while CSL accepts more types.
-pub fn parse_source(source, path = "<bibliography>", macros = [], entry_types = ENTRY_TYPES) =>
+pub fn parse_source(source, path = "<bibliography>", macros = [], entry_types = ENTRY_TYPES) any^ =>
     parse_records(source, path, 0, macros, [], [], entry_types)
 
 pub fn finalize(entries, issues = []) {

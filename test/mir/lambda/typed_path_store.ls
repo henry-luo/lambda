@@ -11,7 +11,8 @@ pn write(var world: World, index: int, value) any {
 }
 
 pn append(var world: World, index: int) any {
-    var values: int[] = world.rows[index].values
+    let checked_values: int[] = world.rows[index].values
+    var values: int[] = checked_values^
     push(values, 9)
     world.rows[index].values = values
 }
@@ -30,11 +31,13 @@ pn replace_values(var world: World, index: int, values) any {
 }
 
 pn main() {
-    var world: World = {rows: [{value: 4, values: [1]}, null], counter: 0}
+    // S7.7.2v2: discharge deferred admission before using the mutable record.
+    let initial: World = {rows: [{value: 4, values: [1]}, null], counter: 0}
+    var world: World = initial^
     let original = world
-    bump(world, 0)
-    append(world, 0)
-    bump(world, 0)
+    bump(world, 0)^
+    append(world, 0)^
+    bump(world, 0)^
     // Both a shared spine and its now-unique successor preserve COW snapshots.
     print([original.rows[0].value, world.rows[0].value,
         len(original.rows[0].values), len(world.rows[0].values)])
@@ -57,18 +60,18 @@ pn main() {
     print("\n")
     let before_replace = world
     world.rows[0] = {value: 15, values: [7]}
-    bump(world, 0)
+    bump(world, 0)^
     print([before_replace.rows[0].value, world.rows[0].value])
     print("\n")
-    write_element(world, 0, 9007199254740991)
+    write_element(world, 0, 9007199254740991)^
     var bad_element = false
     write_element(world, 3, 2) ^ { bad_element = true }
     print([world.rows[0].values[0], bad_element])
     print("\n")
     var replacement: int[] = [2, 3]
-    replace_values(world, 0, replacement)
-    push(replacement, 4)
-    append(world, 0)
+    replace_values(world, 0, replacement)^
+    push(replacement, 4)^
+    append(world, 0)^
     var rejected_array = false
     replace_values(world, 0, ["wrong"]) ^ { rejected_array = true }
     print([world.rows[0].values, replacement, rejected_array])

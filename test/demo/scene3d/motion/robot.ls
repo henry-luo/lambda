@@ -43,4 +43,4 @@ on statechange(evt) { playing = string(evt.to) }
 
 ui.page("Animated robot", "LAMBDA MOTION / SKINNED CHARACTER",
     "Quaternius' robot walks, runs, dances and gestures. Its FBX converts into the same character schema as every other rig; pick a move and the controller crossfades into it, and gestures return to idling when they finish.",
-    apply(<workshop>))
+    apply(<workshop>))^

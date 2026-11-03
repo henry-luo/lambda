@@ -2,8 +2,8 @@
 
 **Revision:** 7 (2026-10-23) — consolidation of the three string-pattern records into one.
 **Status:** SP1–SP24 are user-ruled and implemented on all three execution tiers (interp, jit, auto); superseded rulings are in Appendix S. `io.grep` is user-ruled and built; file-based `find(path)` and file `replace` are designed but not built (§7.3, §7.4). Open questions are in §9.
-**Formal linkage:** the island surface and domains S11.1.2v4; ranges S11.1.3; value runs against text repetition S11.1.6v3; counts and wildcards S16.8.6v4; the type operators S10.1.1v4; the empty type S11.1.7; `match` S11.2.1; `split` S17.1.1; `find` positions S17.4.1; `replace` S17.6.1; case S17.7.1, S17.7.2; option maps S17.8.1; module-wide pattern names and cycles S11.4.12; open issues SO32, SO47; type values D3.1.1v5, D3.1.2.
-**Spec mapping:** SP1, SP4–SP8, SP10–SP12, SP24 → S11.1.2v4; SP5 → S11.1.3; SP17–SP20 → S11.1.2v4 and S10.1.1v4; SP21 → S17.6.1; SP22 → S17.7.1; SP23 → S17.7.2; SPO14 → SO47.
+**Formal linkage:** the island surface and domains S11.1.2v4; ranges S11.1.3; value runs against text repetition S11.1.6v3; counts and wildcards S16.8.6v4; the type operators S10.1.1v5; the empty type S11.1.7; `match` S11.2.1; `split` S17.1.1; `find` positions S17.4.1; `replace` S17.6.1; case S17.7.1, S17.7.2; option maps S17.8.1; module-wide pattern names and cycles S11.4.12; open issues SO32, SO47; type values D3.1.1v5, D3.1.2.
+**Spec mapping:** SP1, SP4–SP8, SP10–SP12, SP24 → S11.1.2v4; SP5 → S11.1.3; SP17–SP20 → S11.1.2v4 and S10.1.1v5; SP21 → S17.6.1; SP22 → S17.7.1; SP23 → S17.7.2; SPO14 → SO47.
 **Scope:** string and symbol patterns end to end — what a pattern is as a type, its surface syntax and domains, the operations that use one, its relation to regular expressions, the matching engine and file search — with the reasons and the history of what was rejected, reversed or superseded.
 **ID series:** SP# (decisions, §8) and SPO# (open questions, §9). GRP# belongs to [Lib_Grep.md](lib/Lib_Grep.md).
 **Consolidates:** `Lambda_Design_String_Pattern.md` rev 1–6 (2026-08-07 to 2026-10-09, the delimited-syntax design, SP1–SP24); `Lambda_Expr_String_Pattern.md` (2026-09-27, the regular-expression compatibility audit, SP17–SP23 and SPO7–SPO14); and `Lambda_Type_String_Pattern.md` rev 2 (2026-10-23), itself the consolidation of the 2026-01-27 pattern-type proposal, the 2026-02-28 pattern-operations proposal and the 2026-02-28 file find/replace proposal. Implementation anchors, probe inventories and examples are not carried; the git history keeps them.
@@ -50,7 +50,7 @@ The authority for every point in this section is S11.1.2v4.
 - **Ranges.** `"a" to "z"` is the set of code points between its bounds; each bound is one code point (S11.1.3). `X to Y` is purposely overloaded across value, type and pattern position because it denotes one set in all three: the literal array of consecutive values, a range type matched by membership, and a character class (SP5).
 - **Operators.** Whitespace concatenates; `|` is the only binary operator; prefix `!` complements a single-character set (SP17); suffixes are `?`, `+`, `*` and the counts `{n}`, `{n+}`, `{n,m}` (S11.1.6v3). Tiers, tightest first: atom (a range is one), prefix `!`, suffix, concatenation, `|` (SP19). There is no `&` and no binary `!` inside an island (SP18, SP20).
 - **Composition.** A named pattern is referenced by name and keeps its domain. Top-level pattern names bind module-wide, so islands compile in dependency order; any reference cycle is E240, since no regular pattern can recurse (S11.4.12).
-- **Whole-pattern operators.** Intersecting, excluding or complementing whole patterns is the type operators between islands: `\(A) & \(B)`, `\(A) ! \(B)`, `!\(P)` (S10.1.1v4). They combine two full matches and need no regex support.
+- **Whole-pattern operators.** Intersecting, excluding or complementing whole patterns is the type operators between islands: `\(A) & \(B)`, `\(A) ! \(B)`, `!\(P)` (S10.1.1v5). They combine two full matches and need no regex support.
 - **Inline or named.** An island may be written wherever a type or value is expected, including as a function argument.
 
 ### 3.2 One domain per island
@@ -85,7 +85,7 @@ Together, SP17–SP20 give an island exactly regex's operators plus a prefix `!`
 
 A literal union such as `type Method = "GET" | "POST"` and the island `\("GET" | "POST")` denote **the same type**; a literal-only island is represented as its literal union, groups included (SP6, SP7, S11.1.2v4). General type expressions admit literals and literal unions without a delimiter; anything beyond literals and `|` needs one. Use a literal union for a finite set of exact values and an island for a format.
 
-*History.* The 2026-01 proposal drew the opposite line: `type T = "a" | "b"` was an exact-value enum while `string S = "a" | "b"` was regex alternation, so `|` meant two things. That contradicted `|` meaning union everywhere (S10.1.1v4); a literal alternation *is* a union of singleton types, so the readings coincide.
+*History.* The 2026-01 proposal drew the opposite line: `type T = "a" | "b"` was an exact-value enum while `string S = "a" | "b"` was regex alternation, so `|` meant two things. That contradicted `|` meaning union everywhere (S10.1.1v5); a literal alternation *is* a union of singleton types, so the readings coincide.
 
 ## 4. Operations
 
@@ -184,7 +184,7 @@ Measured against ECMAScript `RegExp` first, with Python and RE2 where they diffe
 
 ### 5.5 The same operators in value expressions
 
-S10.1.1v4 makes `|`, `&` and `!` the type operators in type expressions, match or-patterns, string patterns and value expressions alike, and promises a type operation the same meaning wherever it is written. The type-pattern parser and the reference grammar rank them `to` above `&` above `!` above `|`; the C expression parser gives all four one binding power, left-associative. So `type T = "a" | "b" & "c"` admits `"a"` while `let x = "a" | "b" & "c"` admits nothing, and `let r = 5 | 1 to 3` fails at run time while the same type admits 5 and 1 to 3. No ruling fixes the value-expression tiers (SPO7); the divergence is [LR02-37](Lambda_Issue_Ledger.md#lr02-37). The recommendation is to make the reference-grammar order a clause of S10.1.1 and align the C expression parser with it.
+**Ruled 2026-11-03 (USER; S10.1.1v5).** Ordinary expressions use the same left-associative type-operator precedence as type patterns: `to`, `&`, `!`, `|`, from tightest to loosest. The reference grammar already states this order; the production C parser now has distinct binding powers for each tier. Thus `type T = "a" | "b" & "c"` and `let x = "a" | "b" & "c"` denote the same type, and `5 | 1 to 3` groups as `5 | (1 to 3)`. This resolves the precedence question in SPO7; qualification of the parser change remains pending under [LR02-37](Lambda_Issue_Ledger.md#lr02-37).
 
 ## 6. The matching engine
 
@@ -250,7 +250,7 @@ Decisions on the operations predate the SP series and carry no ID: full match fo
 | **SPO4** | Migration strategy | resolved: atomic cutover, no dual-parse window |
 | **SPO5** | Constrained-type predicate enforcement | outside this design; SO9 |
 | **SPO6** | Meaning of `symbol(P)` on a type value | dissolved; `symbol()` stays a value conversion |
-| **SPO7** | Precedence of the type operators in value expressions | **open**; the island half is SP19. Recommendation in §5.5; divergence [LR02-37](Lambda_Issue_Ledger.md#lr02-37) |
+| **SPO7** | Precedence of the type operators in value expressions | resolved 2026-11-03 by S10.1.1v5; see §5.5 and [LR02-37](Lambda_Issue_Ledger.md#lr02-37) for implementation qualification |
 | **SPO8** | Prefix `!` against a suffix | resolved by SP19 |
 | **SPO9** | What island `!` may negate | resolved by SP17 |
 | **SPO10** | What `.`, `...` and `"\s"` match | **open** for `.` and `"\s"` (`...` matches newlines). Recommendation: a dotall `.`, so `...` ≡ `.*` keeps holding and "any single character" is true (JS with the `s` flag); `"\s"` as the ECMAScript set; `"\d"`, `"\w"` and `"\a"` stay ASCII |
@@ -299,7 +299,7 @@ Other deferred and open items:
 - **S-9. The empty string (2026-01-27).** ~~`""` is null, so a pattern match on it returns an error.~~ **Replaced by S2.2.1:** `""` is a string, and a pattern admitting the empty string matches it.
 - **S-10. File `find` without line numbers (2026-02-28).** ~~`find(path, p)` returns `{value, index}` only, with options `{limit, ignore_case}`, searching whole file contents.~~ **Revised 2026-10-04** (GRP4, GRP27): line-oriented on `lib/grep`, opt-in `line` and `byte_offset`.
 - **S-11. Case-insensitive spelling (2026-01-27).** ~~A `/i` modifier, or later a `\tag( … )` island (SP16), spells case-insensitivity.~~ SP24 introduces no tagged form; the spelling is open (SPO12), while folding is S17.7.1.
-- **S-12. `|` as two operators (2026-01-27).** ~~`|` is exact-value alternation in `type T = …` and regex alternation in `string S = …`.~~ **Replaced by SP7 and S10.1.1v4** (§3.5).
+- **S-12. `|` as two operators (2026-01-27).** ~~`|` is exact-value alternation in `type T = …` and regex alternation in `string S = …`.~~ **Replaced by SP7 and S10.1.1v5** (§3.5).
 - **S-13. S11.1.2v3 (2026-09-27 to 2026-10-09).** ~~`\( … )` is a string-domain pattern and `\symbol( … )` a symbol-domain one; inside, `d w s a . ...` are reserved atoms; named structural patterns may be reused as content in either domain.~~ **Replaced by S11.1.2v4 (SP24).** Its tier, `!` and `&` clauses carried over unchanged.
 
 ## Appendix A — Implementation history

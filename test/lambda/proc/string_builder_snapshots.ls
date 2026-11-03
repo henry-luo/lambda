@@ -5,7 +5,7 @@ pn main() {
     var history: array = []
     var i: int = 0
     while (i < 4) {
-        history.push(text)
+        history.push(text)^
         text = text ++ "x"
         if (i == 1) { saved = text }
         else { i = i }

@@ -86,7 +86,7 @@ Consequences:
 - **No repetition operator.** `"ab" * 3` is an error value, not `"ababab"`. *Why:* `*` stays purely numeric, so `3 * x` never depends on whether `x` is text, and the overload buys little. A dedicated function was proposed and is not built (§8).
 - **Ordering.** `< <= > >=` compare strings in dictionary order; symbols are names and are not ordered (S6.1.1).
 - **Equality** compares characters; a string never equals a symbol.
-- **`|`, `&`, `!` are type operators**, not text operators: `"GET" | "POST"` is the type admitting either string — a string enum — never a concatenation or a character set (S10.1.1v4). String enums and string patterns are distinguished in [Lambda_Design_String_Pattern.md §3.5](Lambda_Design_String_Pattern.md).
+- **`|`, `&`, `!` are type operators**, not text operators: `"GET" | "POST"` is the type admitting either string — a string enum — never a concatenation or a character set (S10.1.1v5). String enums and string patterns are distinguished in [Lambda_Design_String_Pattern.md §3.5](Lambda_Design_String_Pattern.md).
 
 ## 5. The system-function surface
 

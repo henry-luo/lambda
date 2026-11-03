@@ -5,8 +5,8 @@ import archive: lambda.archive
 // outputs ok (AR9) and `refresh` retries it from the stored capture without
 // the network (AR3); `search` finds phrases, prefixes and negations over
 // text.txt with snippets, title matches first (AR8).
-fn size_of(dir, name) => (let hits = [for (f in input(dir)^ where f.name == name) f.size], if (len(hits) == 0) 0 else hits[0])
-fn members(path) => sort([for (m in content(input(path)^)^) m.name])
+fn size_of(dir, name) any^ => (let hits = [for (f in ((input(dir)^) ^ { [] }) where f.name == name) f.size], if (len(hits) == 0) 0 else hits[0])
+fn members(path) any^ => sort([for (m in content(input(path)^)^) m.name])
 fn titles(hits) => [for (h in hits) h.snapshot.title]
 
 pn main() {
@@ -21,7 +21,7 @@ pn main() {
     let reader = archive.add(lib, articles ++ "fieldnotes-reader-mode.html")^
     let home = archive.add(lib, articles ++ "meridian-home.html")^
     let snaps = [trees, bread, reader, home]
-    let dir_of = (s) => root ++ "/snapshots/" ++ s.id
+    let dir_of = (s) any^ => root ++ "/snapshots/" ++ s.id
     // a page size Radiant cannot lay out: the PDF fails, nothing else does
     let forced = archive.add(lib, articles ++ "crumb-focaccia.html", {on_duplicate: "new", pdf: {width: 3000000000}})^
     let forced_zip = members(dir_of(forced) ++ "/snapshot.zip")

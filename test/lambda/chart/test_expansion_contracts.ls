@@ -10,8 +10,8 @@ import timeline:lambda.chart.playback
 import picking:lambda.chart.picking
 import util:lambda.chart.util
 fn check(label,valid)=>if (valid) null else label
-fn elements(node)=>if (node is element) [node,for (child in content(node)) for (value in elements(child)) value] else []
-fn records(image)=>[for (node in elements(image) where node["data-chart-row"]!=null)
+fn elements(node)any^ =>if (node is element) [node,for (child in ((content(node)) ^ { [] })) for (value in ((elements(child)) ^ { [] })) value] else []
+fn records(image)=>[for (node in ((elements(image)) ^ { [] }) where node["data-chart-row"]!=null)
     {row:parse(node["data-chart-row"],'json') ^ {~},view:node["data-chart-view"],focus:node["data-focus-key"]}]
 let enc={x:{field:"x",dtype:"quantitative",axis_enabled:false},y:{field:"y",dtype:"quantitative",axis_enabled:false},key:{field:"id"}}
 let rows=[{id:"a",g:"A",x:1,y:2},{id:"b",g:"B",x:3,y:4}]

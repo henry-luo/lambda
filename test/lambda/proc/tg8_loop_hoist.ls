@@ -4,7 +4,7 @@
 fn choose_type(value: any as T) int => 1;
 let seed = choose_type(0);
 
-pn count_selected(value: any) int {
+pn count_selected(value: any) int^ {
     var total: int = 0
     var i: int = 0
     while (i < 4) {

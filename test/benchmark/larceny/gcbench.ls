@@ -10,7 +10,7 @@ fn make_tree(depth) {
     return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
-fn check_tree(node) {
+fn check_tree(node) any^ {
     if (node.left == null) {
         return 1
     }
@@ -23,7 +23,7 @@ pn populate(depth, node) {
     }
     node.left = {left: null, right: null}
     node.right = {left: null, right: null}
-    populate(depth - 1, node.left)
+    populate(depth - 1, node.left)^
     populate(depth - 1, node.right)
     return 0
 }

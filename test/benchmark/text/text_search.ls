@@ -9,7 +9,7 @@ pn build_corpus() {
     while (index < 512) {
         rows.push("record-" ++ string(index) ++
             " alpha aaaaaaaaaaaaaaaaaaaaaaaa token-" ++ string(index % 23) ++
-            " omega needle-" ++ string(index % 11))
+            " omega needle-" ++ string(index % 11))^
         index = index + 1
     }
     join(rows, "\n")
@@ -24,7 +24,7 @@ let patterns = [
 pn to_codes(text) {
     var codes = []
     for index of text {
-        codes.push(ord(text[index]))
+        codes.push(ord(text[index]))^
     }
     codes
 }
@@ -107,7 +107,7 @@ pn main() {
     let corpus_codes = to_codes(corpus)
     var pattern_codes = []
     for pattern_index of patterns {
-        pattern_codes.push(to_codes(patterns[pattern_index]))
+        pattern_codes.push(to_codes(patterns[pattern_index]))^
     }
     var checksum: int = 0
     let t0 = clock()
@@ -119,7 +119,7 @@ pn main() {
             let naive = naive_search(corpus_codes, pattern_codes[index], start)
             let kmp = kmp_search(corpus_codes, pattern_codes[index], start)
             let boyer_moore = boyer_moore_search(corpus_codes, pattern_codes[index], start)
-            if (naive != kmp or kmp != boyer_moore) {
+            if ((naive != kmp or kmp != boyer_moore)^) {
                 print("text_search: FAIL algorithm disagreement\n")
                 return
             }
@@ -128,7 +128,7 @@ pn main() {
         }
         round = round + 1
     }
-    if (checksum == 91395120) {
+    if ((checksum == 91395120)^) {
         print("text_search: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("text_search: FAIL checksum=" ++ string(checksum) ++ "\n")

@@ -16,7 +16,7 @@ pub fn warnings(diagnostics) element {
 }
 // The expanded list overlays the canvas, keeping the summary and player controls in place.
 pub let css = ".pptx-import-warnings{box-sizing:border-box;position:relative;z-index:10;background:#fff4ce;color:#624a00;padding:8px 20px;font:14px/1.4 Arial,sans-serif;}.pptx-import-warnings summary{cursor:pointer;font-weight:600;}.pptx-import-warnings ul{box-sizing:border-box;position:absolute;top:100%;left:0;right:0;max-height:25vh;overflow:auto;margin:0;padding:8px 20px 8px 40px;background:#fff4ce;box-shadow:0 3px 6px #0002;}"
-pub fn preview(result) element {
+pub fn preview(result) element^ {
     <div class:"pptx-preview-content",
         if (result.error is string) <p class:"preview-error","Unable to open PowerPoint presentation: " ++ result.error>
         else {

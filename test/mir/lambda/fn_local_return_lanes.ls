@@ -11,11 +11,11 @@ fn owned() {
     var record = {value: 3}
     return record
 }
-fn partial(flag, seed) {
+fn partial(flag, seed) any^ {
     if (flag) { return float(seed) + 0.5 }
     7
 }
-fn routed(flag, seed) {
+fn routed(flag, seed) any^ {
     if (flag) {
         let ignored = error("route") ^ { return float(seed) + 0.25 }
     }

@@ -52,7 +52,7 @@ pub fn page(root, options = {}) element^ {
         <body style:"margin:0;", <div class:"dtna-root", style:variables, *c.children(c.render(root))>>>
 }
 // direct element documents share the constructor's shell and validation (S12.1.3).
-view dtna_page: <dtna.page> {
+view dtna_page: <dtna.page> () any^ {
     page(content(~),c.props(~))^
 }
 pub fn button(props = {}, child = null) element^ => button_parts.descriptor(props,child)^

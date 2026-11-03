@@ -25,7 +25,7 @@ on image_ready(evt) {
     } else {
         if (session.channel=="export") {
             let preserved=load("temp/image-jobs-existing.png")^
-            dom.set_attribute(evt.target,"data-preserved",string(not done.success and preserved==BLUE))
+            dom.set_attribute(evt.target,"data-preserved",string(not done.success and preserved==BLUE)^)
             io.delete("temp/image-jobs-existing.png")^
         } else {
             dom.set_canvas_pixels(dom.get_element_by_id(evt.target,"canvas"),done.pixels^)^

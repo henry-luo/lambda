@@ -18,8 +18,8 @@ pub fn update(card, key, id, patch) => with_items(card, key, [for (it in items(c
 pub fn add(card, key, it) => with_items(card, key, [*items(card, key), it])
 // ids the studio adds are "n1", "n2", …; the next is past every such id on the card,
 // so a card opened from a file or restored by undo never gets a duplicate
-fn added_numbers(pg) => [for (it in pg.items where starts_with(it.id, "n")) (int(slice(it.id, 1, len(it.id))) ^ { 0 })]
-pub fn fresh_id(card) => (let used = [*added_numbers(card.pages.front), *added_numbers(card.pages.left),
+fn added_numbers(pg) => [for (it in pg.items where ((starts_with(it.id, "n")) ^ { false })) (int(slice(it.id, 1, len(it.id))) ^ { 0 })]
+pub fn fresh_id(card) any^ => (let used = [*added_numbers(card.pages.front), *added_numbers(card.pages.left),
     *added_numbers(card.pages.right), *added_numbers(card.pages.back)],
     "n" ++ string(if (len(used) == 0) 1 else max(used) + 1))
 pub fn remove(card, key, id) => with_items(card, key, [for (it in items(card, key) where it.id != id) it])

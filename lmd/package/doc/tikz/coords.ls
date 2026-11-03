@@ -27,7 +27,7 @@ pub fn component(raw, basis) any^ {
     }
 }
 
-pub fn has_unit(raw) {
+pub fn has_unit(raw) any^ {
     let source = trim(raw)
     ends_with(source, "cm") or ends_with(source, "mm") or ends_with(source, "pt") or
         ends_with(source, "bp") or ends_with(source, "in")
@@ -64,12 +64,12 @@ pub fn literal_point(point, basis_x, basis_y, program_data = null) any^ {
     }
 }
 
-fn skip_space(source, at) =>
+fn skip_space(source, at) any^ =>
     if (at < len(source) and index_of(" \n\t\r", slice(source, at, at + 1)) != null)
         skip_space(source, at + 1)
     else at
 
-fn identifier_body(body) {
+fn identifier_body(body) any^ {
     let raw = trim(body)
     let dot = index_of(raw, ".")
     let named = if (dot == null) raw else trim(slice(raw, 0, dot))
@@ -180,7 +180,7 @@ pub fn parse_calc(source, frame) any^ {
     else terms(source, first_at, direction, frame, [])^
 }
 
-fn ref_names(ref) {
+fn ref_names(ref) any^ {
     if (ref == null) []
     else if (ref.calc != null) refs(ref.calc)
     else if (ref.ref != null) [ref.ref]
@@ -265,7 +265,7 @@ let PLACEMENTS = [
 
 pub let PLACEMENT_KEYS = [for (entry in PLACEMENTS) entry.key]
 
-fn word_of(value) {
+fn word_of(value) any^ {
     // The `of` keyword splits the shift from the reference node.
     let padded = " " ++ trim(value) ++ " "
     let found = index_of(padded, " of ")
@@ -276,7 +276,7 @@ fn word_of(value) {
 // `y and x` or a single distance; the positioning library scales a single
 // diagonal distance by 1/sqrt(2) on each axis, with or without `of`.
 fn shift_pair(raw, diagonal) any^ {
-    let parts = [for (part in split(" " ++ trim(raw) ++ " ", " and ")) trim(part)]
+    let parts = [for (part in ((split(" " ++ trim(raw) ++ " ", " and ")) ^ { [] })) trim(part)]
     if (len(parts) == 2)
         {y: component(parts[0], 1.0)^, x: component(parts[1], 1.0)^}
     else if (len(parts) == 1) {
@@ -287,8 +287,8 @@ fn shift_pair(raw, diagonal) any^ {
 }
 
 // Option keys with their source position, for key-order rules.
-fn ordered_options(node) => [for (index, child in node
-    where child is element and string(name(child)) == "option")
+fn ordered_options(node) any^ => [for (index, child in node
+    where ((child is element and string(name(child)) == "option") ^ { false }))
     {index: index, key: opts.normalize_key(child.key), value: child.value}]
 
 // A node's positioning request, or null. `node_distance` is the inherited default.

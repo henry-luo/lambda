@@ -24,7 +24,7 @@ pub fn normalize(doc) element^ {
  let paints=[for (k,v in a) color.parse(v)^];
  <avatar *:{*:map(doc),parameters:p,appearance:a}>
 }
-pub fn resources() element => s.resources([s.sphere(10,16,{id:"avatar-round"}),s.box([1.0,1.0,1.0],{id:"avatar-box"})])
+pub fn resources() element^ => s.resources([s.sphere(10,16,{id:"avatar-round"}),s.box([1.0,1.0,1.0],{id:"avatar-box"})])
 fn part(id,joint,position,scale,paint,shape="round",opacity=1.0) map =>
  {id:id,joint:joint,position:position,scale:scale,color:paint,shape:shape,opacity:opacity}
 fn bone(id,parent,position) map => {id:id,parent:parent,position:position}
@@ -80,7 +80,7 @@ fn anatomy(doc) array {
   *(if (doc.form=="genie") [for (i in 0 to 4) part("magic-"++string(i),"hips",[sin(float(i)*1.8)*0.08,-0.08-float(i)*0.05,0.0],
    [0.3-float(i)*0.04,0.1,0.25-float(i)*0.035],a.accent,"round",0.5)] else [])]
 }
-fn origin(joints,id) array => if (id==null) [0.0,0.0,0.0] else
+fn origin(joints,id) array^ => if (id==null) [0.0,0.0,0.0] else
  (let j=[for (j in joints where j.id==id) j][0],j.position+origin(joints,j.parent))
 pub fn generate(description) map^ {
  let doc=normalize(description)^,joints=rig(doc.parameters),parts=anatomy(doc)
@@ -89,7 +89,7 @@ pub fn generate(description) map^ {
  {document:doc,joints:joints,parts:parts,lo:lo,hi:hi,scale:doc.parameters.height/(hi[1]-lo[1])}
 }
 // local poses keep feet at the root's ground anchor; sit bends hips and knees together.
-fn angle(id,action,phase) float {
+fn angle(id,action,phase) float^ {
  let wave=sin(phase*2.0*math.pi),side=if (starts_with(id,"left")) -1.0 else 1.0
  let walking=contains(["walk","run"],action)
  if (ends_with(id,"-wing")) side*(0.25+sin(phase*4.0*math.pi)*0.55)
@@ -99,11 +99,11 @@ fn angle(id,action,phase) float {
  else if (ends_with(id,"-arm")) if (action=="wave" and side>0) -2.0+wave*0.1 else if (walking) -side*wave*0.45 else if (action=="play") -0.6+side*wave*0.7 else 0.05*wave
  else if (id=="head") wave*0.035 else 0.0
 }
-fn axis(id) array => if (ends_with(id,"-wing")) [0.0,1.0,0.0] else if (id=="head") [0.0,1.0,0.0] else [1.0,0.0,0.0]
+fn axis(id) array^ => if (ends_with(id,"-wing")) [0.0,1.0,0.0] else if (id=="head") [0.0,1.0,0.0] else [1.0,0.0,0.0]
 fn position(model,j,action,phase) array => j.position+(if (j.id!="hips") [0.0,0.0,0.0] else
  [0.0,if (action=="sit") -0.2*model.document.parameters.limbs else if (action=="play") abs(sin(phase*2.0*math.pi))*0.14 else
   if (contains(["walk","run"],action)) abs(sin(phase*2.0*math.pi))*0.018 else 0.003*sin(phase*2.0*math.pi),0.0])
-fn joint_node(model,j,prefix,action,phase) element => s.group([
+fn joint_node(model,j,prefix,action,phase) element^ => s.group([
  *[for (p in model.parts where p.joint==j.id) <mesh id:prefix++"-part-"++p.id,geometry:"avatar-"++p.shape,position:p.position,scale:p.scale,
   'cast-shadow':true,'receive-shadow':true,s.material('standard',{color:p.color,roughness:if (model.document.form=="robot") 0.35 else 0.85,
    metalness:if (model.document.form=="robot") 0.5 else 0.0,opacity:p.opacity,transparent:p.opacity<1.0})>],

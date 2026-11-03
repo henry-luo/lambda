@@ -1,9 +1,9 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,'math')^
-fn box(source) => math.render_box(ast(source))^
-fn paint(source) => svg.painted_text(box(source).element)
+fn ast(source) any^ => parse(source,'math')^
+fn box(source) any^ => math.render_box(ast(source))^
+fn paint(source) any^ => svg.painted_text(box(source).element)
 let checks = [
     {name:"text includes math without dollar glyphs", ok:paint("\\text{for $a<b$ and $c<d$}") == "for a<b and c<d"},
     {name:"nested text styles preserve content", ok:paint("\\textsf{a \\textbf{b} \\textit{c}}") == "a b c"},

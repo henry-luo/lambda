@@ -5,7 +5,7 @@ let tabs = <blade.panel title:"Retained journal",<blade.tabs id:"tabs",keep_moun
     {key:'locked',label:"Locked",disabled:true},
     {key:'items',label:"Items",children:<blade.item_slot id:"nested",icon:'shield',label:"Nested shield">}]>>
 let table = <blade.table id:"table",page_size:2,selection:'multiple',columns:[{key:'name',title:"Name",sortable:true}],rows:[{key:1,name:"Cora"},{key:2,name:"Ada"},{key:3,name:"Bea"}]>
-view blade_behavior: <blade_behavior> state selected:false, actions:0, action_name:"", accepted:"", requests:"" {
+view blade_behavior: <blade_behavior> () any^ state selected:false, actions:0, action_name:"", accepted:"", requests:"" {
     ui.render(<blade.flex direction:'vertical',align:"stretch",gap:18,
         <blade.space gap:16,wrap:true,
             <blade.item_slot id:"select",icon:'sword',label:"Select sword",selected:selected,quantity:2,rarity:'legendary'>

@@ -6,7 +6,7 @@ pn tune15_array_consumer(values: int[], bias: int) int {
 }
 
 pn main() {
-    var values: int[] = fill(2, 7)
+    var values: int[] = fill(2, 7)^
     print(tune15_array_consumer(values, 1))
     print("\n")
 }

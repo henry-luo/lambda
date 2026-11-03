@@ -44,7 +44,8 @@ pn source_write() {
     var r2 = keep_if(b2, o, true)
     b2.size = 9
     print("keep_if=" ++ r2.size ++ "\n")
-    var h: Holder = {items: [{size: 1, tag: 0}], n: 0}
+    let _admitted_h_47: Holder = {items: [{size: 1, tag: 0}], n: 0}
+    var h: Holder = _admitted_h_47^
     var r3 = kid(h)
     h.items[0].size = 9
     print("kid=" ++ r3.size ++ "\n")
@@ -64,7 +65,8 @@ pn source_write() {
     var r7 = rec(b7, 3)
     b7.size = 9
     print("rec=" ++ r7.size ++ "\n")
-    var xs: Box[] = [{size: 1, tag: 0}]
+    let _admitted_xs_67: Box[] = [{size: 1, tag: 0}]
+    var xs: Box[] = _admitted_xs_67^
     var r8 = pick(xs)
     xs[0].size = 9
     print("pick=" ++ r8.size ++ "\n")
@@ -120,8 +122,8 @@ pn plain_param_call(q: Box) int {
 }
 
 pn main() {
-    source_write()
-    result_write()
+    source_write()^
+    result_write()^
     var_results()
     var c: Box = {size: 1, tag: 0}
     print("plain=" ++ plain_param_call(c) ++ " caller=" ++ c.size ++ "\n")

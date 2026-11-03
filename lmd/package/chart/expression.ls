@@ -32,26 +32,26 @@ let precedence = {'||': 1, '&&': 2, '|': 3, '^': 4, '&': 5,
     '<<': 8, '>>': 8, '>>>': 8, '+': 9, '-': 9, '*': 10, '/': 10, '%': 10, '**': 11}
 
 fn failure(message, position) error => error("chart: expression " ++ message ++ " at " ++ string(position))
-fn character(source, index) => slice(source, index, index + 1)
+fn character(source, index) any^ => slice(source, index, index + 1)
 fn digit(ch) => ch != "" and ch >= "0" and ch <= "9"
 fn identifier(ch) => ch != "" and ((ch >= "a" and ch <= "z") or
     (ch >= "A" and ch <= "Z") or ch == "_" or ch == "$")
-pub fn binding_name(name) bool => (name is string and identifier(character(name, 0)) and
+pub fn binding_name(name) bool^ => (name is string and identifier(character(name, 0)) and
     len([for (index in 1 to (len(name) - 1), let ch = character(name, index)
-        where not identifier(ch) and not digit(ch)) ch]) == 0 and
+        where ((not identifier(ch) and not digit(ch)) ^ { false })) ch]) == 0 and
     not contains(["datum", "event", "item", "parent", "undefined"], name) and
     not contains([for (key, value in constants) string(key)], name)) or false
-fn scan(source, index, numeric = false) {
+fn scan(source, index, numeric = false) any^ {
     let ch = character(source, index);
     if (if (numeric) digit(ch) else identifier(ch) or digit(ch)) scan(source, index + 1, numeric) else index
 }
-fn hex_value(ch) => index_of("0123456789abcdef", lower(ch))
-fn hex_number(source, begin, end) {
+fn hex_value(ch) any^ => index_of("0123456789abcdef", lower(ch))
+fn hex_number(source, begin, end) any^ {
     let digits = [for (i in begin to (end - 1)) hex_value(character(source, i))];
     if (end > len(source) or len(digits) == 0 or contains(digits, null)) failure("invalid hexadecimal escape", begin)
     else sum([for (i, value in digits) value * (16.0 ** float(len(digits) - i - 1))])
 }
-fn string_token(source, index, quote, parts) {
+fn string_token(source, index, quote, parts) any^ {
     let ch = character(source, index);
     if (ch == "") failure("unterminated string", index)
     else if (ch == quote) {kind: "literal", value: join(parts, ""), end: index + 1}
@@ -75,7 +75,7 @@ fn string_token(source, index, quote, parts) {
             [*parts, if (escapes[escaped] != null) escapes[escaped] else escaped])
     }
 }
-fn number_token(source, index) {
+fn number_token(source, index) any^ {
     let whole_end = scan(source, index, true);
     let fraction_end = if (character(source, whole_end) == ".") scan(source, whole_end + 1, true) else whole_end;
     let exponent = lower(character(source, fraction_end)) == "e";
@@ -87,7 +87,7 @@ fn number_token(source, index) {
     if (value is error or (exponent and end == exponent_digits)) failure("invalid number", index)
     else {kind: "literal", value: value, end: end}
 }
-fn next_token(source, index) {
+fn next_token(source, index) any^ {
     let ch = character(source, index);
     if (ch == "\"" or ch == "'") string_token(source, index + 1, ch, [])
     else if (digit(ch) or (ch == "." and digit(character(source, index + 1)))) number_token(source, index)
@@ -96,12 +96,12 @@ fn next_token(source, index) {
         {kind: "identifier", value: slice(source, index, end), end: end}
     } else {
         let operators = [for (width in [3, 2, 1], let op = slice(source, index, index + width)
-            where len(op) == width and (precedence[op] != null or contains(["!", "~", "?", ":", ".", ",", "(", ")", "[", "]", "{", "}"], op))) op];
+            where ((len(op) == width and (precedence[op] != null or contains(["!", "~", "?", ":", ".", ",", "(", ")", "[", "]", "{", "}"], op))) ^ { false })) op];
         if (len(operators) == 0) failure("unexpected character " ++ ch, index)
         else {kind: "operator", value: operators[0], end: index + len(operators[0])}
     }
 }
-fn tokenize(source, index = 0, tokens = []) {
+fn tokenize(source, index = 0, tokens = []) any^ {
     let ch = character(source, index);
     if (index >= len(source)) tokens
     else if (contains([" ", "\t", "\n", "\r"], ch)) tokenize(source, index + 1, tokens)
@@ -112,10 +112,10 @@ fn tokenize(source, index = 0, tokens = []) {
 }
 fn literal(value) => {kind: "literal", value: value}
 fn parsed(node, index) => {node: node, index: index}
-fn expect(tokens, index, text) => if (tokens[index].value == text) index + 1
+fn expect(tokens, index, text) any^ => if (tokens[index].value == text) index + 1
     else failure("expected " ++ text, if (tokens[index] != null) tokens[index].position else -1)
 
-fn parse_list(tokens, index, close, items = [], object_value = false) {
+fn parse_list(tokens, index, close, items = [], object_value = false) any^ {
     if (tokens[index].value == close) {items: items, index: index + 1}
     else {
         let key = tokens[index];
@@ -132,7 +132,7 @@ fn parse_list(tokens, index, close, items = [], object_value = false) {
         }
     }
 }
-fn parse_primary(tokens, index) {
+fn parse_primary(tokens, index) any^ {
     let token = tokens[index];
     let value = token.value;
     if (token == null) failure("expected operand", index)
@@ -160,7 +160,7 @@ fn parse_primary(tokens, index) {
     else if (contains([for (key, item in constants) string(key)], value)) parsed(literal(constants[value]), index + 1)
     else parsed({kind: "variable", name: value, position: token.position}, index + 1)
 }
-fn parse_postfix(tokens, value) {
+fn parse_postfix(tokens, value) any^ {
     if (value is error) value
     else if (tokens[value.index].value == ".") {
         let key = tokens[value.index + 1];
@@ -172,8 +172,8 @@ fn parse_postfix(tokens, value) {
         if (end is error) end else parse_postfix(tokens, parsed({kind: "member", object_value: value.node, key: key.node}, end))
     } else value
 }
-fn parse_unary(tokens, index) => parse_postfix(tokens, parse_primary(tokens, index))
-fn parse_binary(tokens, left, minimum) {
+fn parse_unary(tokens, index) any^ => parse_postfix(tokens, parse_primary(tokens, index))
+fn parse_binary(tokens, left, minimum) any^ {
     if (left is error) left else {
         let op = tokens[left.index].value;
         let rank = precedence[op];
@@ -185,7 +185,7 @@ fn parse_binary(tokens, left, minimum) {
         }
     }
 }
-fn parse_expression(tokens, index) {
+fn parse_expression(tokens, index) any^ {
     let test = parse_binary(tokens, parse_unary(tokens, index), 1);
     if (test is error or tokens[test.index].value != "?") test else {
         let yes = parse_expression(tokens, test.index + 1);
@@ -196,7 +196,7 @@ fn parse_expression(tokens, index) {
 }
 
 // Bind only explicitly supplied parameter names; expressions never read ambient state.
-fn bind_variables(node, bindings) {
+fn bind_variables(node, bindings) any^ {
     if (node.kind == "variable") {
         if (contains([for (key, value in bindings) string(key)], node.name)) literal(bindings[node.name])
         else failure("unknown variable " ++ node.name, node.position)
@@ -211,7 +211,7 @@ fn bind_variables(node, bindings) {
     } else node
 }
 
-pub fn compile(source, bindings = null) {
+pub fn compile(source, bindings = null) any^ {
     if (not (source is string)) failure("must be a string", 0) else {
         let tokens = tokenize(source);
         let parsed = if (tokens is error) tokens else parse_expression(tokens, 0);
@@ -227,8 +227,8 @@ fn absent() => {defined: false, value: null}
 fn truth(value) => value.defined and value.value != null and value.value != false and
     not (value.value is nan) and (not (value.value is number) or value.value != 0) and
     (not (value.value is string) or value.value != "")
-pub fn truthy(value) => truth(defined(value))
-fn numeric(value) {
+pub fn truthy(value) any^ => truth(defined(value))
+fn numeric(value) any^ {
     let raw = value.value;
     if (not value.defined) nan else if (raw == null or raw == false) 0.0
     else if (raw == true) 1.0 else if (raw is number) float(raw)
@@ -237,7 +237,7 @@ fn numeric(value) {
         if (trim(text) == "") 0.0 else float(text) ^ {nan}
     } else if (raw is datetime) float(raw.unix) else nan
 }
-fn textual(value) => if (not value.defined) "undefined" else if (value.value == null) "null"
+fn textual(value) any^ => if (not value.defined) "undefined" else if (value.value == null) "null"
     else if (value.value == true) "true" else if (value.value == false) "false"
     else if (value.value is nan) "NaN" else if (value.value == inf) "Infinity" else if (value.value == -inf) "-Infinity"
     else if (value.value is array) join([for (item in value.value) if (item == null) "" else textual(defined(item))], ",")
@@ -245,11 +245,11 @@ fn textual(value) => if (not value.defined) "undefined" else if (value.value == 
 fn strict_equal(a, b) => if (not a.defined or not b.defined) a.defined == b.defined
     else if (a.value is number and b.value is number) a.value == b.value
     else type(a.value) == type(b.value) and a.value == b.value
-fn loose_equal(a, b) => if ((not a.defined or a.value == null) and (not b.defined or b.value == null)) true
+fn loose_equal(a, b) any^ => if ((not a.defined or a.value == null) and (not b.defined or b.value == null)) true
     else if (type(a.value) == type(b.value)) strict_equal(a, b)
     else if ((a.value is number or a.value is bool or a.value is string) and
              (b.value is number or b.value is bool or b.value is string)) numeric(a) == numeric(b) else false
-fn property(object_value, key) {
+fn property(object_value, key) any^ {
     let value = object_value.value;
     let name = key.value;
     if (not object_value.defined or value == null) error("chart: expression property access on null or undefined")
@@ -264,14 +264,14 @@ fn property(object_value, key) {
         if (contains([for (key, item in fields) string(key)], string(name))) defined(value[string(name)]) else absent()
     } else absent()
 }
-fn int32(value) {
+fn int32(value) any^ {
     let n = numeric(value);
     if (not util.finite_number(n) or n == 0) 0 else {
         let unsigned = ((if (n < 0) ceil(n) else floor(n)) % 4294967296.0 + 4294967296.0) % 4294967296.0;
         int(if (unsigned >= 2147483648.0) unsigned - 4294967296.0 else unsigned)
     }
 }
-fn binary_value(op, a, b) {
+fn binary_value(op, a, b) any^ {
     let x = numeric(a);
     let y = numeric(b);
     if (op == "==" or op == "!=") (if (op == "==") loose_equal(a, b) else not loose_equal(a, b))
@@ -296,7 +296,7 @@ fn evaluate_list(nodes, row) {
     let failure = util.first_error(values);
     if (failure is error) failure else values
 }
-fn call_function(function_name, args) {
+fn call_function(function_name, args) any^ {
     let values = args |> ~.value;
     let a = values[0];
     let b = values[1];
@@ -321,8 +321,8 @@ fn call_function(function_name, args) {
         else if (function_name == "max") max(numbers) else min(numbers)
     } else if (function_name == "pow") x ** numeric(args[1])
     else if (function_name == "indexof" or function_name == "lastindexof") {
-        let hits = if (a is array) [for (i, item in a where strict_equal(defined(item), args[1])) i]
-            else [for (i in 0 to (len(a) - len(b)) where slice(a, i, i + len(b)) == b) i];
+        let hits = if (a is array) [for (i, item in a where ((strict_equal(defined(item), args[1])) ^ { false })) i]
+            else [for (i in ((0 to (len(a) - len(b))) ^ { [] }) where ((slice(a, i, i + len(b)) == b) ^ { false })) i];
         if (len(hits) == 0) -1 else hits[if (function_name == "indexof") 0 else len(hits) - 1]
     } else if (function_name == "slice" or function_name == "substring") {
         let start = int(numeric(args[1]));
@@ -344,10 +344,10 @@ fn call_function(function_name, args) {
     else if (function_name == "format") numbers.format_number(a, b)
     else error("chart: expression unknown function " ++ string(function_name))
 }
-fn nested_property(value, keys, index) => if (index >= len(keys)) value else nested_property(value[keys[index]], keys, index + 1)
+fn nested_property(value, keys, index) any^ => if (index >= len(keys)) value else nested_property(value[keys[index]], keys, index + 1)
 fn merge_objects(values, index, result) => if (index >= len(values)) result
     else merge_objects(values, index + 1, {*:result, *:values[index]})
-fn run(node, row) {
+fn run(node, row) any^ {
     if (node.kind == "literal") defined(node.value)
     else if (node.kind == "undefined") absent()
     else if (node.kind == "datum") defined(row)
@@ -383,13 +383,13 @@ fn run(node, row) {
     } else error("chart: invalid compiled expression")
 }
 
-pub fn evaluate(compiled, row) {
+pub fn evaluate(compiled, row) any^ {
     if (compiled is error) compiled else {
         let result = run(compiled, row);
         if (result is error) result else result.value
     }
 }
-pub fn test(compiled, row) {
+pub fn test(compiled, row) any^ {
     if (compiled is error) compiled else {
         let result = run(compiled, row);
         if (result is error) result else truth(result)

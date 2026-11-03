@@ -8,10 +8,10 @@ let html = transform.to_html(graph)
 let default_graph = (input('./test/input/test_graph.mmd',
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let default_html = transform.to_html(default_graph)
-let nodes = [for (child in model.child_items(html)
-  where child is element and model.tag(child) == "node") child]
-let html_edges = [for (child in model.child_items(html)
-  where child is element and model.tag(child) == "edge") child];
+let nodes = [for (child in ((model.child_items(html)) ^ { [] })
+  where ((child is element and model.tag(child) == "node") ^ { false })) child]
+let html_edges = [for (child in ((model.child_items(html)) ^ { [] })
+  where ((child is element and model.tag(child) == "edge") ^ { false })) child];
 
 [
   [graph[0].value, graph[1].value, html["data-node-sep"], html["data-curve"],

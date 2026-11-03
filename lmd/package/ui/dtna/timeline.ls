@@ -32,11 +32,11 @@ fn item_color(item) {
     else if (color == "green") "var(--dtna-success)" else if (color == "gray") "#bfbfbf" else color
 }
 // dtna translates props and supplies its skin; the chart package owns structure.
-fn marker_content(item) {
+fn marker_content(item) any^ {
     let custom = c.option(item,"icon",item.dot);
     if (custom != null) c.render(custom) else if (item.loading) icons.render({name:"loading"})^ else null
 }
-pub fn specification(props) {
+pub fn specification(props) any^ {
     let mode = placement(c.option(props,"mode","start"));
     let options=core.attrs(props.timeline_options);
     let defaults={id:props.id,view:"cards",spacing:"sequence",order:"source",placement:mode,
@@ -62,7 +62,7 @@ pub fn specification(props) {
 }
 fn source(node) => {spec:specification(c.props(node)),legacy_list:c.props(node).timeline_options==null}
 // the dtna source owns its instance; all state, effects and presentation delegate to core.
-view dtna_timeline: <dtna.timeline> state live_state:{interaction:null,token:0} { live.presentation(source(~),live_state) }
+view dtna_timeline: <dtna.timeline> () any^ state live_state:{interaction:null,token:0} { live.presentation(source(~),live_state) }
 on render(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }
 on timeline_frame(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }
 on click(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }

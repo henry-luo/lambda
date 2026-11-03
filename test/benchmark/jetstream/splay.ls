@@ -18,7 +18,7 @@ fn create_node(key, value) {
 pn next_random(var st) {
     var s: u32 = st.seed
     s = s * 1103515245u32 + 12345u32
-    st.seed = int(s)
+    st.seed = int(s)^
     return float(s) / 4294967296.0
 }
 
@@ -81,18 +81,18 @@ pn splay_node(var node, key) {
             return node
         }
         var left = node.left
-        if (key < left.key) {
+        if ((key < left.key)^) {
             var branch = left.left
             branch = splay_node(branch, key)
             left.left = branch
             node.left = left
             node = rotate_right(node)
         }
-        if (key > left.key) {
+        if ((key > left.key)^) {
             var branch = left.right
             branch = splay_node(branch, key)
             left.right = branch
-            if (left.right != null) {
+            if ((left.right != null)^) {
                 left = rotate_left(left)
             }
             node.left = left
@@ -107,18 +107,18 @@ pn splay_node(var node, key) {
             return node
         }
         var right = node.right
-        if (key > right.key) {
+        if ((key > right.key)^) {
             var branch = right.right
             branch = splay_node(branch, key)
             right.right = branch
             node.right = right
             node = rotate_left(node)
         }
-        if (key < right.key) {
+        if ((key < right.key)^) {
             var branch = right.left
             branch = splay_node(branch, key)
             right.left = branch
-            if (right.left != null) {
+            if ((right.left != null)^) {
                 right = rotate_right(right)
             }
             node.right = right
@@ -213,7 +213,7 @@ pn splay_find_greatest_less_than(var tree, key) {
 }
 
 // Count nodes for verification
-fn count_nodes(node) {
+fn count_nodes(node) any^ {
     if (node == null) {
         return 0
     }
@@ -243,7 +243,7 @@ fn generate_payload(depth: int, tag) {
 
 pn insert_new_node(var tree, var rng) {
     var key = next_random(rng)
-    while (splay_find(tree, key) != null) {
+    while ((splay_find(tree, key) != null)^) {
         key = next_random(rng)
     }
     var payload = generate_payload(5, key)
@@ -258,7 +258,7 @@ pn run_splay() {
     // Setup: insert TREE_SIZE nodes
     var i: int = 0
     while (i < TREE_SIZE) {
-        insert_new_node(tree, rng)
+        insert_new_node(tree, rng)^
         i = i + 1
     }
 
@@ -269,10 +269,10 @@ pn run_splay() {
         while (j < TREE_MODIFICATIONS) {
             var key = insert_new_node(tree, rng)
             var greatest = splay_find_greatest_less_than(tree, key)
-            if (greatest == null) {
-                splay_remove(tree, key)
+            if ((greatest == null)^) {
+                splay_remove(tree, key)^
             } else {
-                splay_remove(tree, greatest.key)
+                splay_remove(tree, greatest.key)^
             }
             j = j + 1
         }
@@ -288,7 +288,7 @@ pn main() {
     var __t0 = clock()
     let count = run_splay()
     var __t1 = clock()
-    if (count == TREE_SIZE) {
+    if ((count == TREE_SIZE)^) {
         print("splay: PASS (nodes=" ++ count ++ ")\n")
     } else {
         print("splay: FAIL (nodes=" ++ count ++ ", expected " ++ TREE_SIZE ++ ")\n")

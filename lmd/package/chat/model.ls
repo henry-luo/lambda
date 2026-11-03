@@ -11,7 +11,7 @@ pub fn for_user(messages, user) => [for (m in messages where m.from == user or m
 pub fn conversation(messages, user, peer) => [for (m in messages
     where (m.from == user and m.to == peer) or (m.from == peer and m.to == user)) m]
 pub fn message_of(messages, user, id) => [for (m in messages where m.from == user and m.id == id) m][0]
-pub fn accept(messages, user, request, stamp) {
+pub fn accept(messages, user, request, stamp) any^ {
     let old = message_of(messages, user, request.id)
     let attachment = if (request.attachment == null) null else attachments.checked(request.attachment) ^ { ^ }
     let invalid = profile(user) == null or profile(request.to) == null or user == request.to
@@ -38,11 +38,11 @@ pub fn preview(messages, user, peer) => (let ms = conversation(messages, user, p
 
 // keep each replay frame bounded even when several persisted attachments are large.
 pub fn history_batches(messages) array^ {
-    let result = reduce([{batches:[], batch:[], bytes:0}, *messages], (acc, m) => (
+    let result = reduce([{batches:[], batch:[], bytes:0}, *messages], (acc, m) any^ => (
         let size = len(format(m, 'json')^),
         let split_batch = len(acc.batch) > 0 and acc.bytes + size > 1024 * 1024,
         {batches:if (split_batch) [*acc.batches, acc.batch] else acc.batches,
             batch:if (split_batch) [m] else [*acc.batch, m],
-            bytes:if (split_batch) size else acc.bytes + size}));
+            bytes:if (split_batch) size else acc.bytes + size}))^;
     [*result.batches, result.batch]
 }

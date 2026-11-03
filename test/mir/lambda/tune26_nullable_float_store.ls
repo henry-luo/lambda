@@ -19,7 +19,7 @@ pn tune26_nullable_float_oob(var dst: float[], src: float[]) any^ {
 }
 
 pn main() {
-    var dst: float[] = fill(4, 1.0)
+    var dst: float[] = fill(4, 1.0)^
     let snapshot = dst
     let src: float[] = [0.0, 2.0, 3.0, 4.0, 5.0]
     print(tune26_nullable_float_store(dst, src, 4)); print(" ")

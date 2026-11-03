@@ -4,18 +4,18 @@ import geo: .mod_geometry
 import world: .mod_world
 import movement: .mod_player
 
-fn first_visible(map_data, game, candidates, index, rules) {
+fn first_visible(map_data, game, candidates, index, rules) any^ {
     if (index >= len(candidates)) null
     else if (world.visible(map_data, game, game.player, candidates[index], rules)) candidates[index]
     else first_visible(map_data, game, candidates, index + 1, rules)
 }
-pub fn decide(map_data, game, dt, rules) {
+pub fn decide(map_data, game, dt, rules) any^ {
     let player = game.player
-    let targets = sort([for (actor in game.actors where not actor.collected and
+    let targets = sort([for (actor in game.actors where ((not actor.collected and
         ((actor.ai != null and actor.hp > 0) or contains(rules.PICKUPS, actor.type)) and
         geo.distance_squared(player, actor) < rules.MAX_RENDER_DISTANCE ** 2 and
-        (actor.ai != null or geo.distance_squared(player, actor) > rules.PICKUP_RANGE ** 2)) actor],
-        (actor) => (if (actor.ai != null) 0 else 1000000) + geo.distance_squared(player, actor))
+        (actor.ai != null or geo.distance_squared(player, actor) > rules.PICKUP_RANGE ** 2)) ^ { false })) actor],
+        (actor) any^ => (if (actor.ai != null) 0 else 1000000) + geo.distance_squared(player, actor))
     // Stop at the first visible nearby candidate instead of scanning the whole map.
     let target = first_visible(map_data, game, slice(targets, 0, 8), 0, rules)
     let desired = if (target == null) player.angle else math.atan2(player.x - target.x, target.y - player.y)

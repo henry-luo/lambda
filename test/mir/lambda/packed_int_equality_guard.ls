@@ -1,10 +1,10 @@
 // S5.1.1–S5.1.2: packed int equality is a word comparison only after
 // both Item tags are proven; cross-family numeric values need fn_eq.
-pn one(x: any) bool {
+pn one(x: any) bool^ {
     return x == 1
 }
 
-pn not_one(x: any) bool {
+pn not_one(x: any) bool^ {
     return x != 1
 }
 

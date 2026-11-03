@@ -135,11 +135,25 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
     return mvp_pure_key(node);
 }
 
+TypeMap* mvp_scalar_record_contract(Type* contract) {
+    TypeMap* record = contract && contract->type_id == LMD_TYPE_MAP
+        ? (TypeMap*)lambda_type_nonnull_map_contract(contract) : NULL;
+    if (!record || !record->is_trusted_contract || record->has_spread || !record->shape) return NULL;
+    for (ShapeEntry* field = record->shape; field; field = typemap_next_field(record, field)) {
+        const LaneStorageDesc* lane = shape_entry_storage(field);
+        if (!shape_entry_storage_fits_data(field, record->byte_size) ||
+                (lane->kind != LANE_STORAGE_INT && lane->kind != LANE_STORAGE_FLOAT64 &&
+                 lane->kind != LANE_STORAGE_BOOL)) return NULL;
+    }
+    return record;
+}
+
 static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter,
         bool writes, NameEntry** active, unsigned depth, bool forwarding = true) {
     MvpBinding* binding = mvp_binding(m, parameter->entry);
     TypeParam* type = lambda_type_param(parameter->type);
-    if (!binding || !mvp_array_element(binding->contract) || !type || type->is_var_param != writes ||
+    TypeMap* record = binding ? mvp_scalar_record_contract(binding->contract) : NULL;
+    if (!binding || (!mvp_array_element(binding->contract) && !record) || !type || type->is_var_param != writes ||
             binding->owner >= m->function_count) return false;
     // sibling-borrow snapshots are a call-site alias obligation, not an
     // escape effect. Direct calls capture aliases; dense callers guard COW
@@ -155,9 +169,16 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
     const AstFunctionReference* references = ast_index_function_references(index, binding->owner, &count);
     // assignment targets contain index-expression children too; the shared
     // write references distinguish those lvalues from ordinary scalar reads.
-    for (uint32_t i = 0; i < count; i++)
-        if (references[i].binding_id == binding_id && (references[i].flags & AST_FUNCTION_REF_WRITE) &&
-                (!writes || index->nodes[references[i].node_id]->node_type != AST_NODE_INDEX_ASSIGN_STAM)) return false;
+    for (uint32_t i = 0; i < count; i++) {
+        if (references[i].binding_id != binding_id || !(references[i].flags & AST_FUNCTION_REF_WRITE)) continue;
+        AstNode* write = index->nodes[references[i].node_id];
+        if (!writes || write->node_type != (record ? AST_NODE_MEMBER_ASSIGN_STAM : AST_NODE_INDEX_ASSIGN_STAM)) return false;
+        if (record) {
+            AstAssignStamNode* assignment = (AstAssignStamNode*)write;
+            AstFieldNode field = {}; field.object = assignment->object; field.field = assignment->key;
+            if (!mvp_member_field(m, &field)) return false;
+        }
+    }
     const AstNodeId* uses = ast_index_binding_uses(index,
         binding_id, &count);
     for (uint32_t i = 0; i < count; i++) {
@@ -169,6 +190,8 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
             parent = ast_index_parent_id(index, parent);
         AstNode* consumer = parent < index->count ? index->nodes[parent] : NULL;
         if (consumer && consumer->node_type == AST_NODE_INDEX_EXPR &&
+                mvp_local_binding(m, ((AstFieldNode*)consumer)->object) == binding) continue;
+        if (record && consumer && consumer->node_type == AST_NODE_MEMBER_EXPR &&
                 mvp_local_binding(m, ((AstFieldNode*)consumer)->object) == binding) continue;
         if (!consumer || consumer->node_type != AST_NODE_CALL_EXPR) return false;
         AstCallNode* call = (AstCallNode*)consumer;
@@ -184,6 +207,9 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
         AstNamedNode* formal = target->ast->param;
         for (AstNode* arg = call->argument; arg; arg = arg->next, formal = (AstNamedNode*)formal->next) {
             if (mvp_local_binding(m, arg) != binding) continue;
+            // a cached record layout survives forwarding only when the
+            // callee enforces the identical shape, not a compatible retag.
+            if (record && mvp_scalar_record_contract(mvp_contract(formal)) != record) return false;
             bool child_writes = lambda_type_param(formal->type)->is_var_param;
             if (writes && !child_writes) {
                 // match direct_call's read-only borrow rule: an effectful
@@ -207,8 +233,8 @@ bool mvp_parameter_borrowable(LambdaMvpModule* m, AstNamedNode* parameter, bool 
 }
 
 bool mvp_parameter_storage_stable(LambdaMvpModule* m, AstNamedNode* parameter) {
-    // indexed writes may detach, but keep length/lane and cannot turn a
-    // unique owner shared when no reference escapes the closed call graph.
+    // indexed/field writes may detach but retain their storage contract;
+    // no reference escapes the closed call graph to make a unique owner shared.
     NameEntry* active[32];
     return parameter_storage_closed(m, parameter, true, active, 0);
 }
@@ -2129,6 +2155,11 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             }
         }
     } while (changed);
+    for (AstNodeId i = 0; i < index->count; i++) {
+        if (index->nodes[i]->node_type != AST_NODE_MEMBER_ASSIGN_STAM) continue;
+        MvpBinding* binding = mvp_local_binding(m, ((AstAssignStamNode*)index->nodes[i])->object);
+        if (binding) binding->record_written = true;
+    }
     bool module_scalars = false;
     for (uint32_t i = 0; i < m->binding_count; i++) {
         MvpBinding* b = &m->bindings[i];

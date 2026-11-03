@@ -11,7 +11,7 @@ pub fn result(value = [], attempted = 0, successful = 0, used = []) =>
 
 pub fn literal(value) => result([{csl_literal: value}])
 
-pub fn combine(parts, delimiter = "", suppress = false) {
+pub fn combine(parts, delimiter = "", suppress = false) any^ {
     let attempted = sum([for (part in parts) part.attempted])
     let successful = sum([for (part in parts) part.successful])
     let shown = [for (part in parts where part.text != "") part]
@@ -23,7 +23,7 @@ pub fn combine(parts, delimiter = "", suppress = false) {
     result(body, attempted, successful, unique([for (part in parts, key in part.used) key]))
 }
 
-fn first_case(value, capital, index = 0) {
+fn first_case(value, capital, index = 0) any^ {
     if (index >= len(value)) value
     else {
         let ch = slice(value, index, index + 1)
@@ -33,7 +33,7 @@ fn first_case(value, capital, index = 0) {
     }
 }
 
-fn title_word(word, first, is_last) {
+fn title_word(word, first, is_last) any^ {
     let minor = ["a", "an", "and", "as", "at", "but", "by", "for", "from", "in",
         "into", "nor", "of", "on", "or", "over", "per", "the", "to", "via", "with"]
     if (contains(word, "-") or contains(word, "/") or contains(word, " ")) {
@@ -46,7 +46,7 @@ fn title_word(word, first, is_last) {
     else first_case(word, true)
 }
 
-fn case_text(value, mode) {
+fn case_text(value, mode) any^ {
     if (mode == "uppercase") upper(value)
     else if (mode == "lowercase") lower(value)
     else if (mode == "capitalize-first") first_case(value, true)
@@ -59,7 +59,7 @@ fn case_text(value, mode) {
     } else value
 }
 
-fn transform(value, mode, strip) {
+fn transform(value, mode, strip) any^ {
     if (mode == "sentence" or mode == "capitalize-first")
         capitalize_tree(transform(value, if (mode == "sentence") "lowercase" else "", strip), false).value
     else if (value is string)
@@ -67,7 +67,7 @@ fn transform(value, mode, strip) {
     else if (value is element) {
         if (value.class == "nocase" or value.class == "nodecor") value
         else {
-            let children = [for (child in content(value)) transform(child, mode, strip)]
+            let children = [for (child in ((content(value)) ^ { [] })) transform(child, mode, strip)]
             rebuild(value, children)
         }
     } else if (value is array or value is list)
@@ -77,7 +77,7 @@ fn transform(value, mode, strip) {
     else value
 }
 
-fn capitalize_parts(parts, index, values, done) {
+fn capitalize_parts(parts, index, values, done) any^ {
     if (index >= len(parts)) {value: values, done: done}
     else {
         let current = capitalize_tree(parts[index], done)
@@ -85,7 +85,7 @@ fn capitalize_parts(parts, index, values, done) {
     }
 }
 
-fn capitalize_tree(value, done) {
+fn capitalize_tree(value, done) any^ {
     if (value is string) {value: if (done) value else first_case(value, true),
         done: done or lower(value) != upper(value)}
     else if (value is element) {
@@ -130,10 +130,10 @@ pub fn decorate(node, value, context) {
     }
 }
 
-fn has_link(value) => if (value is element) name(value) == 'a' or has_link(content(value))
+fn has_link(value) any^ => if (value is element) name(value) == 'a' or has_link(content(value))
     else if (value is array or value is list) any([for (child in value) has_link(child)]) else false
 
-pub fn linked(value, target) => if (target == null or target == "" or has_link(value.content)) value
+pub fn linked(value, target) any^ => if (target == null or target == "" or has_link(value.content)) value
     else {*:value, content: [<a class: "latex-cite", href: target, value.content>]}
 
 pub fn safe_url(value) bool {
@@ -143,24 +143,24 @@ pub fn safe_url(value) bool {
         (starts_with(lower(value), "mailto:") ^ { false })
 }
 
-fn edge(value, front, replacement) {
+fn edge(value, front, replacement) any^ {
     if (value is string) {
         if (len(value) == 0) value
         else if (front) replacement ++ slice(value, 1, len(value))
         else slice(value, 0, len(value) - 1) ++ replacement
     } else if (value is element) rebuild(value, edge(content(value), front, replacement))
     else if (value is array or value is list) {
-        let visible = [for (i, item in value where c.text(item) != "") i]
+        let visible = [for (i, item in value where ((c.text(item) != "") ^ { false })) i]
         let chosen = if (front) visible[0] else visible[len(visible) - 1];
         [for (i, item in value) if (i == chosen) edge(item, front, replacement) else item]
     } else value
 }
 
-fn flatten(value) => if (value is array or value is list)
-    [for (item in value, child in flatten(item)) child]
+fn flatten(value) any^ => if (value is array or value is list)
+    [for (item in value, child in ((flatten(item)) ^ { [] })) child]
     else if (value == null or value == "") [] else [value]
 
-fn smooth(parts, index, result, quotes, punctuation) {
+fn smooth(parts, index, result, quotes, punctuation) any^ {
     if (index >= len(parts)) result
     else {
         let part = parts[index]
@@ -180,13 +180,13 @@ fn smooth(parts, index, result, quotes, punctuation) {
     }
 }
 
-fn clean(value, quotes, punctuation) {
-    let parts = [for (part in flatten(value))
+fn clean(value, quotes, punctuation) any^ {
+    let parts = [for (part in ((flatten(value)) ^ { [] }))
         if (part is element) rebuild(part, clean(content(part), quotes, punctuation)) else part]
     smooth(parts, 0, [], quotes, punctuation)
 }
 
-fn unwrap(value) => if (value is map and value.csl_literal != null) value.csl_literal
+fn unwrap(value) any^ => if (value is map and value.csl_literal != null) value.csl_literal
     else if (value is element) rebuild(value, unwrap(content(value)))
     else if (value is array or value is list) [for (part in value) unwrap(part)] else value
 

@@ -6,8 +6,8 @@ let graph = input("test/lambda/graph/mermaid/rich_labels.mmd",
 let html = transform.to_html(graph)
 let nodes = model.nodes(graph)
 let edges = model.edges(graph)
-let measured_labels = [for (child in content(html)
-  where string(name(child)) == "node" or string(name(child)) == "edge-label") child]
+let measured_labels = [for (child in ((content(html)) ^ { [] })
+  where ((string(name(child)) == "node" or string(name(child)) == "edge-label") ^ { false })) child]
 
 {
   source: {
@@ -18,6 +18,6 @@ let measured_labels = [for (child in content(html)
     tag: name(label),
     id: if (name(label) == 'node') label["data-node-id"] else label["data-edge-id"],
     format: label["data-label-format"],
-    content: [for (item in content(label)) item]
+    content: [for (item in ((content(label)) ^ { [] })) item]
   }]
 }

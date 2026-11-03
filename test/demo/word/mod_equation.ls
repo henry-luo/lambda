@@ -13,7 +13,7 @@ import field: .mod_math_field
 
 pub let examples = catalog.examples
 pub let defaults = {source:"a^2+b^2=c^2",size:22,color:"#24334b",display:true,justify:"center",linear:false,number:""}
-pub fn settings(n) => objects.settings(n,"data-word-equation",defaults)
+pub fn settings(n) any^ => objects.settings(n,"data-word-equation",defaults)
 pub fn render(p) map^ {
     if (not (p.source is string) or trim(p.source)=="" or len(p.source)>4000 or
         not (p.size is number) or p.size<10 or p.size>72 or not colors.hex_color(p.color) or not (p.display is bool) or

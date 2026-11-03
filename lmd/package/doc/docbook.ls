@@ -15,13 +15,13 @@ let partial_attributes = {xref:["endterm","xrefstyle"],orderedlist:["continuatio
     table:["frame","pgwide","orient"],informaltable:["frame","pgwide","orient"],
     imagedata:["width","depth","scale","scalefit","align","valign"]}
 fn diagnostics(parsed,opts) => [for (node in parsed.nodes,issue in
-    (if (starts_with(node.tag,"?"))
+    (((if (starts_with(node.tag,"?"))
         [c.issue("unsupported-processing-instruction","Processing instruction is not executed or interpreted: " ++ node.tag,node)]
     else if (node.uri != c.DB and not starts_with(node.tag,"!"))
         [c.issue("unsupported-namespace","Unsupported namespace " ++ node.uri,node)]
     else if (node.uri == c.DB and not render.supported(node) and opts.customization[node.tag] == null)
         [c.issue("unsupported-element","Unsupported DocBook element " ++ node.tag,node)] else []) ++
-    [for (key in c.get(partial_attributes,node.tag,[]) where c.attr(node,key) != null)
+    [for (key in ((c.get(partial_attributes,node.tag,[])) ^ { [] }) where ((c.attr(node,key) != null) ^ { false }))
         c.issue("unsupported-attribute","Unsupported " ++ node.tag ++ " attribute " ++ key,node)] ++
     (if (node.tag in ["programlisting","screen","literallayout","synopsis","address",
         "funcsynopsisinfo","classsynopsisinfo"] and len(c.children(node)) > 0)
@@ -34,7 +34,7 @@ fn diagnostics(parsed,opts) => [for (node in parsed.nodes,issue in
         [c.issue("unresolved-reference","Unresolved ID " ++ c.attr(node,"linkend"),node)] else []) ++
     (if ((node.parent == null or c.attr(node,"lang",c.XML) != null) and
         node.language != "en" and not starts_with(node.language,"en-"))
-        [c.issue("unsupported-language","Generated text currently uses the English locale",node)] else [])) issue]
+        [c.issue("unsupported-language","Generated text currently uses the English locale",node)] else [])) ^ { [] })) issue]
 
 pub fn convert(source,options = null) map^ {
     let opts = config.checked(options)^
@@ -54,7 +54,7 @@ pub fn to_html(source,options = null) string^ {
 
 pub pn read(path,options = null) map^ {
     let opts = config.checked(options)^
-    if (not (path is string) or path == "" or contains(path,"://"))
+    if ((not (path is string) or path == "" or contains(path,"://"))^)
         raise c.fail("invalid-source","read expects a local XML filename")
     let document = input(path,{type:"xml",flavor:"document"})^
     let snapshot = {document:document,source_uri:path,base_uri:path,resources:{}}
@@ -67,18 +67,18 @@ pub pn read(path,options = null) map^ {
     return {*:snapshot,resources:resources}
 }
 
-fn safe_path(path) => path is string and path != "" and not starts_with(path,"/") and
+fn safe_path(path) any^ => path is string and path != "" and not starts_with(path,"/") and
     not (".." in split(path,"/")) and not contains(path,"\\") and not contains(path,":")
 
 pub pn write(result,destination) map^ {
-    if (not (destination is string) or destination == "" or contains(destination,"://"))
+    if ((not (destination is string) or destination == "" or contains(destination,"://"))^)
         raise c.fail("invalid-path","write expects a local destination directory")
     if (not (result is map) or not (result.pages is array) or not (result.assets is array))
         raise c.fail("invalid-source","write expects a publication returned by convert")
     let entries = result.pages ++ result.assets
     if (any([for (entry in entries) not safe_path(entry.path)]))
         raise c.fail("invalid-path","Publication contains a non-relative output path")
-    if (len(unique([for (entry in entries) entry.path])) != len(entries))
+    if ((len(unique([for (entry in entries) entry.path])) != len(entries))^)
         raise c.fail("invalid-path","Publication contains duplicate output paths")
     io.mkdir(destination)^
     for (page in result.pages) {

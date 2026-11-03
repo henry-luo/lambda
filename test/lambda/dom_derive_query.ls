@@ -8,32 +8,32 @@ import dom
 
 // chain helpers: a comma sequence of one element IS that element (ESO97), so a
 // chain is counted and indexed rather than accumulated.
-fn chain_len(c) { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
-fn nth_from(c, i) { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
-fn kids(n) array | error { [for (i in 0 to chain_len(dom.first_child(n)) - 1) nth_from(dom.first_child(n), i)] }
+fn chain_len(c) any^ { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
+fn nth_from(c, i) any^ { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
+fn kids(n) array | error { [for (i in ((0 to chain_len(dom.first_child(n)) - 1) ^ { [] })) nth_from(dom.first_child(n), i)] }
 
 // tree-order descendants, over core only
-fn descendants(n) { [for (c in kids(n)) (c, *descendants(c))] }
+fn descendants(n) any^ { [for (c in ((kids(n)) ^ { [] })) (c, *descendants(c))] }
 
 // the derivations
 fn d_query_selector_all(root, sel) array | error {
-  [for (d in descendants(root) where dom.node_type(d) == 1 and dom.matches(d, sel)) d]
+  [for (d in ((descendants(root)) ^ { [] }) where dom.node_type(d) == 1 and dom.matches(d, sel)) d]
 }
-fn d_query_selector(root, sel) {
+fn d_query_selector(root, sel) any^ {
   let hits = d_query_selector_all(root, sel)
   if (len(hits) == 0) null else hits[0]
 }
 // closest is an Element operation (DOM 4.9): on anything else it is not
 // applicable, and the fast path answers null. The oracle made the derivation
 // say so rather than quietly walking up from a text node.
-fn d_closest(n, sel) {
+fn d_closest(n, sel) any^ {
   if (dom.node_type(n) != 1) null
   else if (dom.matches(n, sel)) n
   else if (dom.parent_element(n) != null) d_closest(dom.parent_element(n), sel)
   else null
 }
 fn d_get_element_by_id(root, id) {
-  let hits = [for (d in descendants(root) where dom.node_type(d) == 1 and dom.get_attribute(d, "id") == id) d]
+  let hits = [for (d in ((descendants(root)) ^ { [] }) where dom.node_type(d) == 1 and dom.get_attribute(d, "id") == id) d]
   if (len(hits) == 0) null else hits[0]
 }
 fn d_has_attribute(n, attr) { dom.get_attribute(n, attr) != null }
@@ -68,7 +68,7 @@ fn node_agrees(n) bool | error {
 {
   selectors_checked: len(selectors),
   nodes_checked: len(nodes),
-  divergent_selectors: [for (s in selectors where selector_agrees(s) != true) s],
-  divergent_nodes: [for (n in nodes where node_agrees(n) != true) dom.node_name(n)],
+  divergent_selectors: [for (s in selectors where ((selector_agrees(s) != true) ^ { false })) s],
+  divergent_nodes: [for (n in nodes where ((node_agrees(n) != true) ^ { false })) dom.node_name(n)],
   by_id_agrees: node_eq(d_get_element_by_id(root, "intro"), dom.get_element_by_id(root, "intro"))
 }

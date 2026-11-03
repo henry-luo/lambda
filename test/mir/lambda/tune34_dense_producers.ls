@@ -9,7 +9,7 @@ pn rows(n) {
     var current = fill(n + 1, 0)
     var j = 1
     while (j <= n) {
-        current[j] = least(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + 1)
+        current[j] = least(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + 1)^
         j = j + 1
     }
     return current
@@ -23,7 +23,7 @@ pn changing_lane() {
 pn uncertain_argument() {
     var values = fill(3, 0)
     var i = 1
-    while (i < 3) { values[i] = least(values[i - 1], 1, null); i = i + 1 }
+    while (i < 3) { values[i] = least(values[i - 1], 1, null)^; i = i + 1 }
     return values
 }
 pn retained_owner() {

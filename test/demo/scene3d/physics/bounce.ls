@@ -5,7 +5,7 @@ import chart: lambda.chart.chart
 
 let scene=scenes.bounce();
 let trace=physics.simulate(scene,{steps:720,sample_every:4,bodies:scenes.bounce_ids})^;
-let samples=[for (row in physics.chart_data(trace)) {
+let samples=[for (row in ((physics.chart_data(trace)) ^ { [] })) {
     time:row.time,height:row.height,material:"e = "++string(scenes.bounce_coefficients[int(slice(row.body,5,len(row.body)))])}];
 let figure=chart.figure({width:990,height:210,padding:18,data:samples,mark:{kind:"line"},
     encoding:{x:{field:"time",dtype:"quantitative",title:"Time (s)"},

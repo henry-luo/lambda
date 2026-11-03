@@ -17,9 +17,9 @@ import signal: .signal
 // Public API: Apply a sequence of transforms to data
 // ============================================================
 
-pub fn apply_transforms(data, transform_el, datasets = null) => resolve_transforms(data,transform_el,datasets).data
+pub fn apply_transforms(data, transform_el, datasets = null) any^ => resolve_transforms(data,transform_el,datasets).data
 
-pub fn resolve_transforms(data, transform_el, datasets = null) {
+pub fn resolve_transforms(data, transform_el, datasets = null) any^ {
     if (not transform_el) {data:data}
     else (let steps = if (transform_el is element) content(transform_el) else transform_el,
           let n = len(steps),
@@ -28,7 +28,7 @@ pub fn resolve_transforms(data, transform_el, datasets = null) {
 }
 
 // recursive helper: apply transforms one at a time
-fn apply_transform_list(data, transforms, index: int, count: int, datasets, analysis=null) {
+fn apply_transform_list(data, transforms, index: int, count: int, datasets, analysis=null) any^ {
     if (data is error or index >= count) {data:data,_analysis:analysis}
     else (let t = transforms[index],
           let tag = if (t is element) string(name(t)) else t.type,
@@ -46,7 +46,7 @@ fn apply_transform_list(data, transforms, index: int, count: int, datasets, anal
               else if (tag == "window") window.evaluate(data, t)
               else if (tag == "joinaggregate") window.evaluate(data,
                   {*:parse.attributes(t), window: if (t.joinaggregate != null) t.joinaggregate
-                      else if (t is element) [for (child in content(t)) parse.attributes(child)] else t.window,
+                      else if (t is element) [for (child in ((content(t)) ^ { [] })) parse.attributes(child)] else t.window,
                       frame: [null, null], sort: null})
               else if (tag == "pivot") reshape.pivot(data, t)
               else if (tag == "impute") reshape.impute(data, t)
@@ -61,7 +61,7 @@ fn apply_transform_list(data, transforms, index: int, count: int, datasets, anal
           apply_transform_list(result, transforms, index + 1, count, datasets,if (analyzed!=null) analyzed else analysis))
 }
 
-fn apply_timeunit(data, step) {
+fn apply_timeunit(data, step) any^ {
     if (step.field == null or step.as == null) error("chart: timeunit requires field and as")
     else {
         let values = [for (row in data) calendar.time_unit(row[step.field],
@@ -75,7 +75,7 @@ fn apply_timeunit(data, step) {
 // Filter transform
 // ============================================================
 
-fn apply_filter(data, filter_el) {
+fn apply_filter(data, filter_el) any^ {
     let predicate = parse.prepare_predicate(filter_el);
     let tests = if (predicate is error) predicate else [for (row in data) parse.test_predicate(predicate, row)];
     let failure = if (tests is error) tests else util.first_error(tests);
@@ -86,7 +86,7 @@ fn apply_filter(data, filter_el) {
 // Sort transform
 // ============================================================
 
-fn apply_sort(data, sort_el) {
+fn apply_sort(data, sort_el) any^ {
     records.sort_rows(data, if (sort_el.sort != null) sort_el.sort else sort_el)
 }
 
@@ -94,7 +94,7 @@ fn apply_sort(data, sort_el) {
 // Aggregate helper (public for external use)
 // ============================================================
 
-pub fn compute_agg(data, op, field) {
+pub fn compute_agg(data, op, field) any^ {
     records.aggregate(data, op, field)
 }
 
@@ -102,23 +102,23 @@ pub fn compute_agg(data, op, field) {
 // Aggregate transform
 // ============================================================
 
-fn apply_aggregate(data, agg_el) {
+fn apply_aggregate(data, agg_el) any^ {
     let n = len(agg_el);
     let group_fields = [for (i in 0 to (n - 1),
                             let child = agg_el[i]
-                            where child and name(child) == 'group') child.field];
+                            where ((child and name(child) == 'group') ^ { false })) child.field];
     let agg_specs = [for (i in 0 to (n - 1),
                          let child = agg_el[i]
-                         where child and name(child) == 'agg')
+                         where ((child and name(child) == 'agg') ^ { false }))
                      {op: child.op, field: child.field, as: child.as}];
     do_aggregate(data, group_fields, agg_specs)
 }
 
-fn do_aggregate(data, group_fields, agg_specs) {
+fn do_aggregate(data, group_fields, agg_specs) any^ {
     let summaries = if len(group_fields) == 0 {
         [build_agg_row(data, [], agg_specs)]
     } else {
-        [for (partition in records.group_by(data, group_fields))
+        [for (partition in ((records.group_by(data, group_fields)) ^ { [] }))
             build_agg_row(partition.rows, group_fields, agg_specs)]
     };
     let failure = util.first_error(summaries);
@@ -137,7 +137,7 @@ fn build_agg_row(items, group_fields, agg_specs) {
 // Calculate transform
 // ============================================================
 
-fn apply_calculate(data, calc_el) {
+fn apply_calculate(data, calc_el) any^ {
     let as_field = calc_el.as;
     let op = calc_el.op;
     let field1 = calc_el.field1;
@@ -154,7 +154,7 @@ fn apply_calculate(data, calc_el) {
     }
 }
 
-fn calc_value(d, op, field, field2) {
+fn calc_value(d, op, field, field2) any^ {
     if (not op or op == "copy") d[field]
     else if (op == "string") string(d[field])
     else if (op == "float") float(d[field])
@@ -170,7 +170,7 @@ fn calc_value(d, op, field, field2) {
 // Bin transform
 // ============================================================
 
-fn apply_bin(data, bin_el) {
+fn apply_bin(data, bin_el) any^ {
     let field = bin_el.field;
     let as_field = if (bin_el.as) bin_el.as else field ++ "_bin";
     let maxbins = if (bin_el.maxbins) bin_el.maxbins else 10;
@@ -199,7 +199,7 @@ fn apply_bin(data, bin_el) {
 // Fold transform (unpivot wide to long)
 // ============================================================
 
-fn apply_fold(data, fold_el) {
+fn apply_fold(data, fold_el) any^ {
     let fields = fold_el.fields;
     let as_names = if (fold_el.as) fold_el.as else ["key", "value"];
     if not fields or len(fields) == 0 {
@@ -216,7 +216,7 @@ fn apply_fold(data, fold_el) {
 // Flatten transform
 // ============================================================
 
-fn apply_flatten(data, flat_el) {
+fn apply_flatten(data, flat_el) any^ {
     let fields = flat_el.fields;
     let as_names = flat_el.as;
     if not fields or len(fields) == 0 {
@@ -230,7 +230,7 @@ fn apply_flatten(data, flat_el) {
     }
 }
 
-fn flatten_fields(source, row, fields, as_names, index, field_index) {
+fn flatten_fields(source, row, fields, as_names, index, field_index) any^ {
     if (field_index >= len(fields)) row
     else flatten_fields(source, add_field(row,
         if (as_names != null and field_index < len(as_names)) as_names[field_index] else fields[field_index],
@@ -241,11 +241,11 @@ fn flatten_fields(source, row, fields, as_names, index, field_index) {
 // Helper: add a field to a map
 // ============================================================
 
-pub fn add_field(row, field_name, value) {
+pub fn add_field(row, field_name, value) any^ {
     records.add_field(row, field_name, value)
 }
 
-fn apply_lookup(data, step, datasets) {
+fn apply_lookup(data, step, datasets) any^ {
     let from = step.from;
     let foreign = source.resolve(null, if (from.data != null) from.data else from, datasets);
     let field = if (step.lookup != null) step.lookup else step.field;
@@ -263,7 +263,7 @@ fn apply_lookup(data, step, datasets) {
         lookup_fields(row, found, fields, names, step.default, 0)]
 }
 
-fn lookup_fields(row, found, fields, names, fallback, index) {
+fn lookup_fields(row, found, fields, names, fallback, index) any^ {
     if (index >= len(names)) row
     else lookup_fields(add_field(row, names[index],
         if (found == null) fallback else if (fields == null) found else found[fields[index]]),
@@ -271,7 +271,7 @@ fn lookup_fields(row, found, fields, names, fallback, index) {
 }
 
 // Encoding shorthand is normalized before any renderer or composition derives its scales.
-pub fn prepare_encoding(data, encoding, partition_fields = []) {
+pub fn prepare_encoding(data, encoding, partition_fields = []) any^ {
     let prepared = parse.prepare_channels(encoding);
     if (prepared is error) {data: prepared, encoding: encoding}
     else {
@@ -315,7 +315,7 @@ fn prepare_encoding_channels(data, encoding, partition_fields) {
     let summarized = if (temporal_data is error) temporal_data else if (sort_error is error) sort_error else if (binned_data is error) binned_data
         else if (len(aggregates) > 0) do_aggregate(binned_data, groups, aggregates) else binned_data;
     let normalized = map([for (key, channel in binned_enc,
-        let matches = [for (spec in aggregates where spec.channel == string(key)) spec])
+        let matches = [for (spec in aggregates where ((spec.channel == string(key)) ^ { false })) spec])
         for (item in [string(key), if (len(matches) > 0)
             {*:channel, field: matches[0].as, dtype: "quantitative", aggregate: null} else channel]) item]);
     {data: summarized, encoding: normalized}

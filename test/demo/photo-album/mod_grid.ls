@@ -33,7 +33,7 @@ fn pack(P, s, n, width, target, gap) {
 pub fn layout(items, width, target, gap) {
     let secs = sections(items)
     let packed = [for (sec in secs) (
-        let aspects = [for (it in slice(items, sec.start, sec.end)) it.aspect],
+        let aspects = [for (it in ((slice(items, sec.start, sec.end)) ^ { [] })) it.aspect],
         let P = [0.0, *math.cumsum(aspects)],
         let rows = pack(P, 0, len(aspects), width, target, gap),
         {sec:sec, P:P, rows:rows, height:HEADER + sum([for (r in rows) r.h + gap]) + SECTION_GAP})]
@@ -76,7 +76,7 @@ pub fn anchored_top(before, after, pointer_y, scroll_top) {
 }
 
 // grid neighbour for arrow keys: previous/next in order, or the nearest tile in the adjacent row
-pub fn neighbour(lay, ids, id, key) {
+pub fn neighbour(lay, ids, id, key) any^ {
     let at = index_of(ids, id)
     let here = locate(lay, id);
     if (at == null or here == null) ids[0]

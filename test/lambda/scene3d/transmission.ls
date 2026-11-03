@@ -1,9 +1,9 @@
 // S12.1.1v3 / D7.2.4v4: glass properties and tracks are pure descriptions.
 import s: lambda.scene3d
-fn scene(options = {}, kind = 'physical') => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "glass", *: options}))])
-fn message(description) => s.normalize(description) ^ { ^.message }
-fn export_message(description) => format(description, 'gltf') ^ { ^.message }
-fn animated(key, values, kind = 'number') => s.scene([s.camera(), s.mesh(s.box(), s.material('physical', {id: "glass"})),
+fn scene(options = {}, kind = 'physical') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "glass", *: options}))])
+fn message(description) any^ => s.normalize(description) ^ { ^.message }
+fn export_message(description) any^ => format(description, 'gltf') ^ { ^.message }
+fn animated(key, values, kind = 'number') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material('physical', {id: "glass"})),
     s.clip("glass-change", [s.track("glass." ++ key, [0.0, 1.0], values, kind)])]);
 [
  s.validate(scene({transmission: 1.0, ior: 1.5, thickness: 0.4, 'attenuation-color': "#99ccff", 'attenuation-distance': 2.0}))^,

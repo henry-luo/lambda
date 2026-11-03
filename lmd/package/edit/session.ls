@@ -23,7 +23,7 @@ pub let normal_path = paths.normal_path
 // a native save panel opens).
 pub let resolve_path = paths.resolve_path
 
-fn same_path(a, b) => normal_path(a) == normal_path(b)
+fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
 
 pub fn new_session(path, format, source, loaded) =>
   {path: path, name: basename(path), format: format, disk_text: source,
@@ -33,7 +33,7 @@ pub fn new_session(path, format, source, loaded) =>
 // saved document is clean again and selection or view changes never dirty it.
 // A format whose documents are too large to compare whole supplies `same_doc`
 // (the source buffer compares versions, Radiant_Design_Source_Editor §5.1).
-pub fn is_dirty(session, doc) =>
+pub fn is_dirty(session, doc) any^ =>
   if (session.format.same_doc != null) not session.format.same_doc(doc, session.saved_doc)
   else doc != session.saved_doc
 
@@ -50,7 +50,7 @@ fn outcome(ok, session, status, conflict) =>
 // Why a Save As target cannot take this document, or null. Save As keeps the
 // format (proposal §8); a new folder would need its relative references
 // rebased, which is not implemented yet, and copying assets is never implicit.
-fn new_target_problem(session, doc, target) {
+fn new_target_problem(session, doc, target) any^ {
   let format = session.format
   let folder = dirname(target)
   let named = any([for (s in format.suffixes) ends_with(lower(target), s)]) or false
@@ -72,7 +72,7 @@ pub pn save(session, doc, target, overwrite) {
   let format = session.format
   let text = format.export_text(doc, session.envelope)
   let mismatch = format.check_roundtrip(doc, session.envelope)
-  if (mismatch != null) {
+  if ((mismatch != null)^) {
     return outcome(false, session, "Not saved: " ++ mismatch ++ " when written as " ++
                    format.name ++ ".", null)
   }
@@ -87,15 +87,13 @@ pub pn save(session, doc, target, overwrite) {
                  else if (same_file and on_disk != session.disk_text) 'changed'
                  else if (not same_file and on_disk != null) 'exists'
                  else null
-  if (conflict == 'changed') {
+  if ((conflict == 'changed')^) {
     return outcome(false, session, basename(target) ++ " changed on disk since it was opened.", 'changed')
   }
-  if (conflict == 'exists') {
+  if ((conflict == 'exists')^) {
     return outcome(false, session, basename(target) ++ " already exists.", 'exists')
   }
-  // `output` is a procedure: its failure is an error value to test, since a
-  // braced handler on a pn call is a statement and yields no binding value;
-  // the error-admitting binding acknowledges the raised channel (S7.5.1)
+  // S7.5.1v6: retain output's ordinary outcome to report a failed save.
   let written: any^ = output(text, target, {format: 'text', atomic: true})
   if (written is error) {
     return outcome(false, session, "Not saved: could not write " ++ target ++ ".", null)

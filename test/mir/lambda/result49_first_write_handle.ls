@@ -30,12 +30,12 @@ pn main() {
         null
     ]}
     let snapshot = w
-    set_flags(w, 0)
+    set_flags(w, 0)^
     print(w.tasks[0].pp); print(" ")
     print(w.tasks[0].tw); print(" ")
     print(w.tasks[0].th); print(" ")
     print(snapshot.tasks[0].tw); print(" ")
-    move_flags(w, 0)
+    move_flags(w, 0)^
     print(w.tasks[0].pp); print(" ")
     print(w.tasks[1].tw); print(" ")
     print(w.tasks[0].marker); print(" ")
@@ -45,7 +45,7 @@ pn main() {
     print(bad_null); print(" ")
     var mixed: MixedWorld = {rows: [{a: false, b: 7, c: false}]}
     let before_mixed = mixed
-    set_mixed(mixed, 0)
+    set_mixed(mixed, 0)^
     print(mixed.rows[0].a); print(" ")
     print(mixed.rows[0].b); print(" ")
     print(mixed.rows[0].c); print(" ")

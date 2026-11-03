@@ -22,7 +22,7 @@ pub fn point(a,b,t) {
     {x:u*u*u*a.x+3.0*u*u*t*c.x1+3.0*u*t*t*c.x2+t*t*t*b.x,
      y:u*u*u*a.y+3.0*u*u*t*c.y1+3.0*u*t*t*c.y2+t*t*t*b.y}
 }
-pub fn rail(a,b) {
+pub fn rail(a,b) any^ {
     let c = controls(a,b)
     "M" ++ string(a.x) ++ " " ++ string(a.y) ++ " C" ++ string(c.x1) ++ " " ++ string(c.y1) ++ " " ++
         string(c.x2) ++ " " ++ string(c.y2) ++ " " ++ string(b.x) ++ " " ++ string(b.y)
@@ -49,7 +49,7 @@ pub fn start(a,b,speed = 0.0) {
         {kind:"rail",a:a,b:b,duration:end.ms,speed:end.speed,samples:table}
     }
 }
-fn upper(table,ms,lo,hi) int {
+fn upper(table,ms,lo,hi) int^ {
     if (hi-lo <= 1) hi
     else {
         let middle = int(floor((lo+hi)/2.0))
@@ -57,7 +57,7 @@ fn upper(table,ms,lo,hi) int {
         else upper(table,ms,middle,hi)
     }
 }
-pub fn position(track,elapsed) {
+pub fn position(track,elapsed) any^ {
     let ms = min(track.duration,max(0.0,elapsed))
     if (track.kind == "flight") point(track.a,track.b,ms/track.duration)
     else {

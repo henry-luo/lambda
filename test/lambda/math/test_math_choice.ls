@@ -2,9 +2,9 @@ import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 import util: lambda.doc.math.util
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn box(source) => math.render_box(ast(source))^
-fn paint(source) => svg.painted_text(box(source).element)
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
+fn paint(source) any^ => svg.painted_text(box(source).element)
 let choice = "\\mathchoice{D}{T}{S}{SS}"
 let nested = "\\displaystyle x_{\\mathchoice{1}{2}{3}{4}_{\\mathchoice{1}{2}{3}{4}}}"
 let roundtrip = util.content_items(ast(format(ast(choice), {type:"math", flavor:"latex"})^))[0]

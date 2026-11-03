@@ -6,18 +6,18 @@ import page: .mod_page
 import objects: .mod_objects
 
 pub let defaults = {header:"",footer:"",header_align:"left",footer_align:"center",size:10,distance:8,different_first:false}
-pub fn settings(doc) {
+pub fn settings(doc) any^ {
     let p = objects.settings(doc,"data-word-stories",defaults)
     if (valid(p)) p else defaults
 }
-pub fn field_text(value,page_no,total) => replace(replace(value,"{PAGE}",string(page_no)),"{NUMPAGES}",string(total))
-fn required_margin(value,p) => if (value=="") 0 else p.distance*96/25.4+len(split(value,"\n"))*p.size*96/72*1.2+4
-fn fits(value,margin,p) => required_margin(value,p)<=margin
-pub fn minimum_margin(doc,side) {
+pub fn field_text(value,page_no,total) any^ => replace(replace(value,"{PAGE}",string(page_no)),"{NUMPAGES}",string(total))
+fn required_margin(value,p) any^ => if (value=="") 0 else p.distance*96/25.4+len(split(value,"\n"))*p.size*96/72*1.2+4
+fn fits(value,margin,p) any^ => required_margin(value,p)<=margin
+pub fn minimum_margin(doc,side) any^ {
     let p = settings(doc);
     required_margin(if (side=="top") p.header else if (side=="bottom") p.footer else "",p)*25.4/96
 }
-fn valid(p) => p.header is string and p.footer is string and len(p.header)<=1000 and len(p.footer)<=1000 and
+fn valid(p) any^ => p.header is string and p.footer is string and len(p.header)<=1000 and len(p.footer)<=1000 and
     contains(["left","center","right"],p.header_align) and contains(["left","center","right"],p.footer_align) and
     p.size is number and p.size>=8 and p.size<=24 and p.distance is number and p.distance>=3 and p.distance<=30 and p.different_first is bool
 pub fn validate(doc,p) bool^ {
@@ -31,7 +31,7 @@ pub fn transaction(editor,p) map^ {
     let checked = validate(editor.doc,p)^
     tx_step(tx_begin(editor.doc,editor.selection),step_set_attr([],'data-word-stories',format(p,'json')^))
 }
-pub fn story(doc,kind,page_no,total) {
+pub fn story(doc,kind,page_no,total) any^ {
     let p = settings(doc)
     let value = p[kind]
     let g = page.geometry(doc,page_no)
@@ -41,11 +41,11 @@ pub fn story(doc,kind,page_no,total) {
                 "px;right:" ++ string(g.right) ++ "px;font-size:" ++ string(p.size) ++ "pt;text-align:" ++ p[kind ++ "_align"] ++ ";",
             field_text(value,page_no,total)>
 }
-fn css_literal(value) => "\"" ++ replace(replace(replace(replace(value,"\\","\\\\"),"\"","\\\""),"\r",""),"\n","\\A ") ++ "\""
+fn css_literal(value) any^ => "\"" ++ replace(replace(replace(replace(value,"\\","\\\\"),"\"","\\\""),"\r",""),"\n","\\A ") ++ "\""
 // Tokenize first so user strings cannot inject CSS while page fields remain counters.
-fn css_content(value) => join([for (part in split(value,"{PAGE}"))
-    join([for (piece in split(part,"{NUMPAGES}")) css_literal(piece)]," counter(pages) ")]," counter(page) ")
-pub fn export_css(doc) {
+fn css_content(value) => join([for (part in ((split(value,"{PAGE}")) ^ { [] }))
+    join([for (piece in ((split(part,"{NUMPAGES}")) ^ { [] })) css_literal(piece)]," counter(pages) ")]," counter(page) ")
+pub fn export_css(doc) any^ {
     let p = settings(doc)
     let regions = [{kind:"header",edge:"top",align:p.header_align},{kind:"footer",edge:"bottom",align:p.footer_align}]
     let rules = [for (r in regions where p[r.kind]!="") "@" ++ r.edge ++ "-" ++ r.align ++ " { content:" ++ css_content(p[r.kind]) ++

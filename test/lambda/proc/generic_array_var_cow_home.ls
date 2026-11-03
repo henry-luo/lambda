@@ -3,7 +3,7 @@
 // the appended replacement.
 type Box = {values: array}
 
-pn append(var values: array, value: int) int {
+pn append(var values: array, value: int) int^ {
     push(values, value)
     return len(values)
 }

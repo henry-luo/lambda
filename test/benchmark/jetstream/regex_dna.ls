@@ -61,7 +61,7 @@ pn main() {
         output = output ++ "agggtaa[cgt]|[acg]ttaccct " ++ c9 ++ "\n"
 
         // Validate pattern counts
-        if (output != expected_output) {
+        if ((output != expected_output)^) {
             print("FAIL: pattern output mismatch (iter " ++ iter ++ ")\n")
             print("output len=" ++ len(output) ++ " expected len=" ++ len(expected_output) ++ "\n")
             pass = false
@@ -81,7 +81,7 @@ pn main() {
         dna = replace(dna, "Y", "(c|t)", first_only)
 
         // Validate substituted DNA
-        if (dna != expected_dna) {
+        if ((dna != expected_dna)^) {
             print("FAIL: IUPAC substitution mismatch (iter " ++ iter ++ ")\n")
             print("Expected length: " ++ len(expected_dna) ++ " Got length: " ++ len(dna) ++ "\n")
             pass = false

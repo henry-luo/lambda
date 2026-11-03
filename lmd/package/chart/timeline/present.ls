@@ -15,7 +15,7 @@ import primitives: lambda.chart.svg
 import editing: .edit
 import story: .story
 
-fn marker(item, spec, p) {
+fn marker(item, spec, p) any^ {
     let appearance=c.attrs(item.appearance);
     let area=c.option(item,"size",c.option(spec.markers,"size",80));
     let extent=2.0*math.sqrt(area/math.pi)+4;
@@ -30,14 +30,14 @@ fn marker(item, spec, p) {
         else <span class:p ++ "-dot">;
     theme.render(spec,"marker",item,fallback)
 }
-fn callback(value, item, spec) => card.callback(value,item,spec)
-pub fn body(item, spec, snapshot = null) => card.body(item,spec,snapshot)
+fn callback(value, item, spec) any^ => card.callback(value,item,spec)
+pub fn body(item, spec, snapshot = null) any^ => card.body(item,spec,snapshot)
 
-pub fn responsive(spec, viewport = null) {
+pub fn responsive(spec, viewport = null) any^ {
     let vp=sizing.viewport(viewport);
     let width=if (vp.width!=null) vp.width else if (spec.width is number) spec.width else null;
-    let matching=[for (rule in c.items(spec.cards.breakpoints) where width!=null and
-        (rule.min_width==null or width>=rule.min_width) and (rule.max_width==null or width<=rule.max_width)) rule];
+    let matching=[for (rule in ((c.items(spec.cards.breakpoints)) ^ { [] }) where ((width!=null and
+        (rule.min_width==null or width>=rule.min_width) and (rule.max_width==null or width<=rule.max_width)) ^ { false })) rule];
     let override=matching[len(matching)-1];
     {*:spec,orientation:if (override.orientation!=null) c.text(override.orientation) else spec.orientation,
         placement:if (override.placement!=null) c.text(override.placement) else spec.placement,
@@ -86,7 +86,7 @@ pub fn cards(spec, snapshot = null, displayed = null) {
                     *[if (not split and item.display_date != null) <div class:p ++ "-title",style:theme.card_style(spec,item,"date"),callback(item.display_date,item,spec)> else null,
                     *body(item,spec,if (item._motion.exiting==true) {*:c.attrs(snapshot),passive:true} else snapshot)]>)]>]>
 }
-fn sequence_style(item, plan) {
+fn sequence_style(item, plan) any^ {
     let bounds=item.bounds;
     let target=item.target_bounds;
     let origin=plan.sequence_origin;
@@ -96,7 +96,7 @@ fn sequence_style(item, plan) {
         else if (target!=null) "transform:translate(" ++ c.text(bounds.left-target.left) ++ "px," ++ c.text(bounds.top-target.top) ++ "px);" else "")
 }
 
-pub fn html(raw, viewport = null, snapshot = null, displayed = null) {
+pub fn html(raw, viewport = null, snapshot = null, displayed = null) any^ {
     let spec=responsive(raw,viewport);
     let plan=if (displayed!=null) displayed.plan else if (spec.view!="cards" or spec.spacing=="time") layout.normalized(spec,viewport,snapshot) else null;
     let active=if (snapshot.active_id!=null) snapshot.active_id else if (spec.story.active_id!=null) c.text(spec.story.active_id)
@@ -124,7 +124,7 @@ pub fn html(raw, viewport = null, snapshot = null, displayed = null) {
         else [if (spec.view=="story") story_stage(spec,snapshot,active,sampled),
             <div class:"lambda-timeline-canvas",style:"position:relative;width:" ++ c.text(plan.width) ++ "px;height:" ++ c.text(plan.height) ++ "px;",
                 if (displayed!=null) displayed.svg else vector.render(plan,snapshot,{unsupported:"omit",cards:spec.view=="story"});
-                *[for (item in plan.events where spec.view!="story" and (spec.cards.visibility!="active" or item.id==active),
+                *[for (item in ((plan.events) ^ { [] }) where ((spec.view!="story" and (spec.cards.visibility!="active" or item.id==active)) ^ { false }),
                     let b=item.bounds)
                     <article *:theme.part(spec,"card",{class:"lambda-timeline-overlay-card" ++ (if (spec.cards.text_overlay==true) " lambda-timeline-text-overlay" else ""),
                         *:(if (item.exiting==true) {'data-timeline-outgoing':item.id,inert:"",'aria-hidden':"true"}
@@ -139,7 +139,7 @@ pub fn html(raw, viewport = null, snapshot = null, displayed = null) {
                         else theme.render(spec,"card",item.event,card.slots(item.event,spec,
                             if (item.exiting==true) {*:c.attrs(snapshot),passive:true} else snapshot))>]>,
             <ol class:"lambda-timeline-chronology",style:"position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);",
-                *[for (item in plan.visible_events) <li 'data-timeline-id':item.id,
+                *[for (item in ((plan.visible_events) ^ { [] })) <li 'data-timeline-id':item.id,
                     <time c.text(item.display_date)>
                     layout.plain(item.title) ++ " " ++ layout.plain(item.content)>]>,
             if (plan.offscreen_count>0) <p class:"lambda-timeline-window-summary",role:"status",
@@ -166,7 +166,7 @@ fn story_card(spec, snapshot, item, outgoing) =>
         style:(if (outgoing) "position:absolute;inset:0;pointer-events:none;z-index:-1;" else "position:relative;") ++ story.style(spec,snapshot,outgoing),
         *body(item,spec,if (outgoing) {*:c.attrs(snapshot),passive:true} else snapshot)>
 
-pub fn status(spec, snapshot = null) {
+pub fn status(spec, snapshot = null) any^ {
     let resource=snapshot.resources.source;
     let problem=if (not (snapshot.presentation_error is null)) snapshot.presentation_error else resource.error;
     let loading=spec.source.url!=null and (resource==null or resource.status=="pending");
@@ -198,7 +198,7 @@ let button_labels={first:"First",previous:"Previous",next:"Next",last:"Last",fit
 fn button(spec, kind, title) => <button *:theme.part(spec,"toolbar_button",{type:"button",'data-timeline-command':kind,
     'data-timeline-action':format({type:kind},'json'),title:title,'aria-label':title}),
     *[c.render(spec.toolbar.icons[kind]),title]>
-pub fn controls(spec, snapshot = null) {
+pub fn controls(spec, snapshot = null) any^ {
     let buttons=c.option(spec.toolbar,"buttons",["first","previous","next","last","fit"]);
     let shown=layout.visible(spec,snapshot);
     let count=len(shown.matches);
@@ -210,9 +210,9 @@ pub fn controls(spec, snapshot = null) {
         *[for (kind in buttons,let key=c.text(kind),let label=c.option(labels,key,c.message(spec,key,c.option(button_labels,key,key))))
             if (contains(["quick_jump","layout","theme"],key)) <label *[label,
                 <select 'data-timeline-setting':key,'aria-label':label,
-                    *[for (entry in (if (key=="quick_jump") [for (item in story.items(spec,snapshot)) {value:item.id,label:c.plain(item.title)}]
+                    *[for (entry in (((if (key=="quick_jump") [for (item in story.items(spec,snapshot)) {value:item.id,label:c.plain(item.title)}]
                         else if (key=="layout") [for (mode in (if (spec.spacing=="time") ["cards","axis","story"] else ["cards","story"])) {value:mode,label:c.message(spec,mode,mode)}]
-                        else [for (preset in ["light","dark","high_contrast"]) {value:preset,label:c.message(spec,preset,preset)}]))
+                        else [for (preset in ["light","dark","high_contrast"]) {value:preset,label:c.message(spec,preset,preset)}])) ^ { [] }))
                         <option value:entry.value,*:(if (entry.value==(if (key=="quick_jump") snapshot.active_id else if (key=="layout") snapshot.view else snapshot.theme)) {selected:""} else {}),entry.label>]>]>
             else button(spec,key,label)];
         if (spec.search.enabled!=false and (spec.search.fields!=null or spec.search.mode!=null)) <input type:"search",

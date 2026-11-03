@@ -6,8 +6,8 @@ let source = (input("test/lambda/graph/mermaid/multi_node_length.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let source_edges = model.edges(source)
 let html = transform.to_html(source)
-let html_edges = [for (i in 0 to (len(html) - 1), let child = html[i]
-  where string(name(child)) == "edge") child]
+let html_edges = [for (i in ((0 to (len(html) - 1)) ^ { [] }), let child = html[i]
+  where ((string(name(child)) == "edge") ^ { false })) child]
 let result = layout.compute({
   nodes: [for (node in model.nodes(source)) {
     id: string(node.id), width: 40.0, height: 20.0
@@ -22,5 +22,5 @@ let result = layout.compute({
   edges: [for (edge in source_edges)
     [edge.from, edge.to, edge["min-length"]]],
   html_lengths: [for (edge in html_edges) edge["data-min-length"]],
-  ranks: [for (node in result.nodes) [node.id, node.rank]]
+  ranks: [for (node in ((result.nodes) ^ { [] })) [node.id, node.rank]]
 }

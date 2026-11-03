@@ -2,11 +2,11 @@
 // `a` stays live across allocating calls and a loop back edge, `b` is dead
 // after its last read, and every read after an allocation must see the
 // compacted buffer (D5.3.4).
-pn tune27_alloc(n: int) float[] { return fill(n, 1.0) }
+pn tune27_alloc(n: int) float[]^ { return fill(n, 1.0) }
 
-pn tune27_layout_reload_liveness(n: int) float {
-    var a: float[] = fill(8, 2.0)
-    var b: float[] = fill(8, 3.0)
+pn tune27_layout_reload_liveness(n: int) float^ {
+    var a: float[] = fill(8, 2.0)^
+    var b: float[] = fill(8, 3.0)^
     var total: float = b[0] + b[7]
     var i: int = 0
     while (i < n) {

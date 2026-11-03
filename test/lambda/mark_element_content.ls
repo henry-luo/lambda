@@ -22,7 +22,7 @@ let lit = <root
   <quoted 'quoted name':1, 'sym'>
 >;
 // nan is unequal to itself (S4.2.1), so the shape spells it as a string
-fn child_shapes(e) => [for (c in content(e)) [name(c), [for (x in content(c)) [type(x), if (x is nan) "nan" else x]]]];
+fn child_shapes(e) any^ => [for (c in ((content(e)) ^ { [] })) [name(c), [for (x in ((content(c)) ^ { [] })) [type(x), if (x is nan) "nan" else x]]]];
 [
   child_shapes(doc) == child_shapes(lit), len(content(doc)) == len(content(lit)),
   doc[0][0] == true, doc[1][0] == false, doc[2][0] == 'quoted symbol', doc[3][0] == 'bare_word',

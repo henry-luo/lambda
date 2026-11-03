@@ -2,8 +2,8 @@
 import s: lambda.scene3d
 let mesh=s.mesh(s.box(),s.material())
 let levels=[s.group([mesh]),s.group([s.points(s.geometry([0,0,0]),s.material())]),s.group([s.sprite(s.material())])]
-fn scene(node,opts={}) => s.scene([s.camera(),node],opts)
-fn message(node,opts={}) => s.normalize(scene(node,opts)) ^ { ^.message };
+fn scene(node,opts={}) any^ => s.scene([s.camera(),node],opts)
+fn message(node,opts={}) any^ => s.normalize(scene(node,opts)) ^ { ^.message };
 [
  s.validate(scene(s.lod(levels,[0,10,30])))^,
  s.validate(scene(s.lod([s.group([s.lod(levels,[0,5,20])])],[0])))^,

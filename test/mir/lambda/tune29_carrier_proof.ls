@@ -15,15 +15,16 @@ pn make_grid() Grid {
     return {cells: [{k: 0, n: 0}], size: 1}
 }
 
-pn set_inferred(v: int) int {
-    var g = make_grid()
+pn set_inferred(v: int) int^ {
+    var g = make_grid()^
     g.cells[0].k = v
     return g.cells[0].k
 }
 
 pn main() {
-    var g: Grid = {cells: [{k: 1, n: 0}, {k: 2, n: 0}], size: 2}
-    set_cell(g, 1, 20)
+    let initial: Grid = {cells: [{k: 1, n: 0}, {k: 2, n: 0}], size: 2}
+    var g: Grid = initial^
+    set_cell(g, 1, 20)^
     print(g.cells[1].k); print(" ")
     print(set_inferred(5)); print("\n")
 }

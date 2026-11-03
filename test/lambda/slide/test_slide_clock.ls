@@ -11,7 +11,7 @@ let deck = <presentation
         <cue start: 'entry', <effect target: "end", kind: 'fade-in', duration: 250.0>>>>
 let options = {autoplay_dwell_ms: 1000.0}
 let plan = slide.compile(deck, options)^
-fn control(ps, event) => slide.reduce(plan, ps, event)^
+fn control(ps, event) any^ => slide.reduce(plan, ps, event)^
 
 // autoplay from the start, sampled every 50 ms: the clock must read the elapsed time
 fn run(ps, t, end) => if (t > end) [] else (
@@ -23,7 +23,7 @@ let line = slide.timeline(deck, options)^
 fn r(v) => round(v * 1000.0) / 1000.0
 
 // a seek lands where asked, keeps playing, and the clock continues from there
-fn seeked(ps, at, when) => control(ps, {command: 'seek_time', position_ms: at, time_ms: when})
+fn seeked(ps, at, when) any^ => control(ps, {command: 'seek_time', position_ms: at, time_ms: when})
 let points = [0.0, 200.0, 400.0, 900.0, 1450.0, 1500.0, 2650.0, 2800.0, 3400.0, 4500.0, 4650.0, 4700.0, 9000.0]
 let paused = control(started, {command: 'pause', time_ms: 0.0})
 let mid = seeked(started, 1450.0, 10000.0)

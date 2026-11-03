@@ -1,7 +1,7 @@
 // Expand abbreviated page endpoints before applying the style's range policy.
 import c: .common
 
-fn expanded(start, end) {
+fn expanded(start, end) any^ {
     if (len(end) >= len(start)) end
     else {
         let prefix = slice(start, 0, len(start) - len(end))
@@ -13,12 +13,12 @@ fn expanded(start, end) {
     }
 }
 
-fn common_prefix(a, b, index) {
+fn common_prefix(a, b, index) any^ {
     if (index >= len(a) or index >= len(b) or slice(a, index, index + 1) != slice(b, index, index + 1)) index
     else common_prefix(a, b, index + 1)
 }
 
-fn endpoint(start, end, policy) {
+fn endpoint(start, end, policy) any^ {
     let full = expanded(start, end)
     let common = common_prefix(start, full, 0)
     let a = int(start) ^ { null }
@@ -35,10 +35,10 @@ fn endpoint(start, end, policy) {
     }
 }
 
-pub fn render(value, policy = null, delimiter = "–") {
+pub fn render(value, policy = null, delimiter = "–") any^ {
     let source = replace(replace(c.text(value), "--", "–"), "-", "–")
     let ranges = split(source, ",")
-    if (contains(source, "&")) join([for (part in split(source, "&")) render(trim(part), policy, delimiter)], " & ")
+    if (contains(source, "&")) join([for (part in ((split(source, "&")) ^ { [] })) render(trim(part), policy, delimiter)], " & ")
     else join([for (passage in ranges) {
         let pair = split(trim(passage), "–")
         if (len(pair) == 2 and (int(pair[0]) ^ { null }) != null and (int(pair[1]) ^ { null }) != null)

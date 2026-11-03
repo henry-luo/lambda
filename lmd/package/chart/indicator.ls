@@ -7,14 +7,14 @@ import color: .color
 import text: .text
 import axis: .axis
 
-fn value(row, ctx, options) => parse.channel_value(ctx.encoding.y, row,
+fn value(row, ctx, options) any^ => parse.channel_value(ctx.encoding.y, row,
     row[if (options.value_field != null) options.value_field else "value"])
 
-pub fn funnel(data, ctx, options) {
+pub fn funnel(data, ctx, options) any^ {
     let stage_ctx=mark.part_context(ctx,options,"stage",data);
     let label_ctx=mark.part_context(ctx,options,"label",data);
     let connector_ctx=mark.part_context(ctx,options,"connector",data);
-    let rows = if (options.sort != null) sort(data, {by: (row) => value(row, ctx, options),
+    let rows = if (options.sort != null) sort(data, {by: (row) any^ => value(row, ctx, options),
         dir: if (options.sort == "descending") "desc" else "asc"}) else data;
     let values = [for (row in rows) value(row, ctx, options)];
     let largest = max([0.0, *values]);
@@ -41,7 +41,7 @@ pub fn funnel(data, ctx, options) {
             if (label != null) string(label) else string(values[i])>)])
 }
 
-pub fn fraction(value, options) {
+pub fn fraction(value, options) any^ {
     let domain = options.domain;
     if (not (domain is array) or len(domain) != 2 or not all(domain |> util.finite_number(~)) or domain[0] == domain[1] or
         not util.finite_number(value)) error("chart: gauge and liquid require a finite value and a distinct two-bound domain")
@@ -57,12 +57,12 @@ fn threshold_color(options, value, fallback) {
     if (len(candidates) > 0) candidates[len(candidates) - 1] else fallback
 }
 
-fn dial_scale(options, cx, cy, radius, thickness, start, end, theme) {
+fn dial_scale(options, cx, cy, radius, thickness, start, end, theme) any^ {
     let count = int(if (options.tick_count != null) options.tick_count else 4);
     let minor = int(if (options.minor_tick_count != null) options.minor_tick_count else 4);
     let font = text.style(options, "tick", 9);
     let inner = radius - thickness;
-    let nodes = [for (i in 0 to (count * minor), let t = float(i) / float(count * minor),
+    let nodes = [for (i in ((0 to (count * minor)) ^ { [] }), let t = float(i) / float(count * minor),
         let angle = util.lerp(start, end, t), let major = i % minor == 0,
         let label_radius = max(0.0, inner - font.font_size - 8.0))
         <g class: if (major) "tick" else "gauge-minor-tick",
@@ -94,7 +94,7 @@ fn gauge_pointer(ctx, options, appearance, cx, cy, length, angle, thickness) {
             <circle cx: cx, cy: cy, r: hub * 0.45, fill: if (needle) appearance.fill else appearance.stroke, stroke: "none">>>])
 }
 
-pub fn render(data, ctx, options) {
+pub fn render(data, ctx, options) any^ {
     let row = if (len(data) > 0) data[0] else {};
     let parts=map([for (part in ["value","track","pointer","target","label"]) for (value in [part,
         mark.part_context(ctx,options,part,[row])]) value]);
@@ -164,7 +164,7 @@ pub fn render(data, ctx, options) {
                     "Target " ++ util.format_value(options.target, options.format) ++ unit>>])
 }
 
-fn liquid(row, ctx, track_ctx, options, t, appearance, track, radius) {
+fn liquid(row, ctx, track_ctx, options, t, appearance, track, radius) any^ {
     let cx = ctx.plot_w / 2.0; let cy = ctx.plot_h / 2.0;
     let surface = cy + radius - 2.0 * radius * t;
     let amplitude = if (options.wave == false or t == 0 or t == 1) 0.0

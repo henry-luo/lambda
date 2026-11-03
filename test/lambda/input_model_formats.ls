@@ -1,5 +1,5 @@
 // model input stays ordinary Lambda values, with dependencies left as references
-fn child(doc, tag) => [for (node in content(doc) where name(node) == tag) node][0]
+fn child(doc, tag) any^ => [for (node in ((content(doc)) ^ { [] }) where ((name(node) == tag) ^ { false })) node][0]
 
 let obj = input("test/input/model/triangle.obj")^
 let mtl = input("test/input/model/triangle.mtl")^

@@ -9,7 +9,7 @@ pn abort(host, token) {
     false
 }
 
-fn canonical_tag(value) {
+fn canonical_tag(value) any^ {
     let raw = lower(trim(if (value == null) "" else string(value)));
     let without_open = replace(replace(raw, "<", ""), ">", "");
     if (without_open == "div" or without_open == "p" or
@@ -25,7 +25,7 @@ pn copy_attributes(source, destination, names, index) {
     else {
         let attr_name = names[index];
         dom.set_attribute(destination, attr_name,
-                          value_or_empty(dom.get_attribute(source, attr_name)))
+                          value_or_empty(dom.get_attribute(source, attr_name)))^
         copy_attributes(source, destination, names, index + 1)
     }
 }
@@ -49,7 +49,7 @@ pn move_children(source, destination) {
     move_children_from(dom.first_child(source), destination)
 }
 
-fn style_without_property(parts, property, index) {
+fn style_without_property(parts, property, index) any^ {
     if (index >= len(parts)) ""
     else {
         let entry = parts[index];
@@ -66,7 +66,7 @@ pn set_style_property(node, property, value) {
     let base = style_without_property(split(current, ";"), lower(property), 0);
     // CSSOM-style declarations serialize the property/value separator with a
     // space, matching browser-visible `innerHTML` (D7.2.5).
-    dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")
+    dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")^
     true
 }
 

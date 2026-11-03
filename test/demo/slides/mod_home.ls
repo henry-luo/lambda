@@ -8,27 +8,27 @@ import alignment: lambda.editor.mod_alignment
 import ins: .mod_insert
 
 let character_keys = ["font-family","font-weight","font-style","text-decoration","letter-spacing","background-color","line-height"]
-pub fn value(st,key,fallback="") => c.value(css.css_get(m.chosen(st).source.style,key),fallback)
+pub fn value(st,key,fallback="") any^ => c.value(css.css_get(m.chosen(st).source.style,key),fallback)
 pub fn style(st,values) any^ => m.properties(st,{style:css.css_set_many(m.chosen(st).source.style,values)})^
-pub fn family(st) => value(st,"font-family",c.value(m.chosen(st).font_family,st.plan.palette.font_family))
+pub fn family(st) any^ => value(st,"font-family",c.value(m.chosen(st).font_family,st.plan.palette.font_family))
 // editor-owned alignment wrappers keep paragraph operations inside the text body.
 fn layout_wrapper(node) => node.class in ["slide-text-layout","slide-text-content"]
 fn body_wrapper(node) => layout_wrapper(node) or name(node) in ['sup','sub']
-fn body(children,change,scripts=false) {
+fn body(children,change,scripts=false) any^ {
     let child = children[0];
     if (len(children) == 1 and (layout_wrapper(child) or (scripts and body_wrapper(child))))
         [m.rebuild(child,map(child),body(content(child),change,scripts))]
     else change(children)
 }
-fn body_children(children) {
+fn body_children(children) any^ {
     let child = children[0];
     if (len(children) == 1 and body_wrapper(child)) body_children(content(child)) else children
 }
-fn script_kind(children) {
+fn script_kind(children) any^ {
     let child = children[0];
     if (layout_wrapper(child)) script_kind(content(child)) else name(child)
 }
-pub fn pressed(st,action) {
+pub fn pressed(st,action) any^ {
     if (action == "bold") value(st,"font-weight") in ["700","bold"]
     else if (action == "italic") value(st,"font-style") == "italic"
     else if (action in ["underline","strike"]) contains(split(value(st,"text-decoration")," "),if (action == "underline") "underline" else "line-through")
@@ -36,8 +36,8 @@ pub fn pressed(st,action) {
     else if (action in ["superscript","subscript"]) script_kind(if (m.chosen(st) == null) [] else content(m.chosen(st).source)) == (if (action == "superscript") 'sup' else 'sub')
     else false
 }
-fn decoration(st,kind) {
-    let values = [for (part in split(value(st,"text-decoration")," ") where part != "" and part != "none") part]
+fn decoration(st,kind) any^ {
+    let values = [for (part in ((split(value(st,"text-decoration")," ")) ^ { [] }) where part != "" and part != "none") part]
     let next = if (contains(values,kind)) [for (part in values where part != kind) part] else [*values,kind];
     if (len(next) == 0) "none" else join(next," ")
 }
@@ -49,12 +49,12 @@ pub fn emphasis(st,action) any^ {
     else {
         let obj = m.chosen(st)
         let script = if (action == "superscript") 'sup' else 'sub'
-        let transform = (items) => {
+        let transform = (items) any^ => {
             let child = items[0]
             let children = if (len(items) == 1 and name(child) in ['sup','sub']) content(child) else items;
             if (name(child) == script) children else if (script == 'sup') [<sup *children>] else [<sub *children>]
         };
-        m.edit_object(st,(node) => m.rebuild(node,map(node),body(content(node),transform)))^
+        m.edit_object(st,(node) any^ => m.rebuild(node,map(node),body(content(node),transform)))^
     }
 }
 fn clear_runs(children) => [for (child in children) {
@@ -63,7 +63,7 @@ fn clear_runs(children) => [for (child in children) {
     else if (name(child) in ['b','strong','i','em','u','s','del','sup','sub','span']) nested
     else [m.rebuild(child,map(child),nested)]
 }]
-pub fn clear(st) any^ => m.edit_object(st,(node) => m.rebuild(node,
+pub fn clear(st) any^ => m.edit_object(st,(node) any^ => m.rebuild(node,
     {*:map(node),font_size:null,color:null,style:css.css_set_many(node.style,
         map([for (key in character_keys) (key,null)]))},clear_runs(content(node))))^
 
@@ -73,10 +73,10 @@ fn highlight_runs(children,color) => [for (child in children) {
     else if (child is element and m.rebuildable(child)) [m.rebuild(child,map(child),highlight_runs(content(child),color))]
     else [child]
 }]
-pub fn highlight(st,color) any^ => m.edit_object(st,(node) => m.rebuild(node,map(node),highlight_runs(content(node),color)))^
-pub fn highlight_color(node) => if (not (node is element)) null else [for (child in content(node),
+pub fn highlight(st,color) any^ => m.edit_object(st,(node) any^ => m.rebuild(node,map(node),highlight_runs(content(node),color)))^
+pub fn highlight_color(node) => if (not (node is element)) null else [for (child in ((content(node)) ^ { [] }),
     let color = if (child.class == "slide-text-highlight") css.css_get(child.style,"background-color")
-        else if (child is element) highlight_color(child) else null where color != null) color][0]
+        else if (child is element) highlight_color(child) else null where ((color != null) ^ { false })) color][0]
 
 fn case_children(children,mode,initial) => reduce([{children:[],state:initial},*children],(acc,child) => {
     let out = if (child is string) text_format.case_text(child,mode,acc.state) else null
@@ -85,18 +85,18 @@ fn case_children(children,mode,initial) => reduce([{children:[],state:initial},*
     {children:[*acc.children,if (out != null) out.text else if (nested != null) m.rebuild(child,map(child),nested.children) else child],
         state:if (out != null) {word:out.word,sentence:out.sentence} else if (nested != null) nested.state else acc.state}
 })
-pub fn change_case(st,mode) any^ => m.edit_object(st,(node) => m.rebuild(node,map(node),
+pub fn change_case(st,mode) any^ => m.edit_object(st,(node) any^ => m.rebuild(node,map(node),
     case_children(content(node),mode,{word:true,sentence:true}).children))^
 
-pub fn list_node(node) => if (not (node is element)) null else [for (child in content(node))
+pub fn list_node(node) => if (not (node is element)) null else [for (child in ((content(node)) ^ { [] }))
     *if (name(child) in ['ul','ol']) [child] else if (body_wrapper(child)) [list_node(child)] else []][0]
-pub fn list_kind(st) => name(list_node(m.chosen(st).source))
+pub fn list_kind(st) any^ => name(list_node(m.chosen(st).source))
 // split inside rich inline runs, preserving the marks on each resulting paragraph.
 fn line_tokens(children) => reduce([{lines:[[]],block:false},*children],(acc,child) => {
     let block = name(child) in ['p','div']
-    let parts = if (child is string) [for (part in split(child,"\n")) [part]]
+    let parts = if (child is string) [for (part in ((split(child,"\n")) ^ { [] })) [part]]
         else if (name(child) == 'br') [[],[]]
-        else if (child is element and m.rebuildable(child)) [for (part in line_tokens(content(child))) [m.rebuild(child,map(child),part)]]
+        else if (child is element and m.rebuildable(child)) [for (part in ((line_tokens(content(child))) ^ { [] })) [m.rebuild(child,map(child),part)]]
         else [[child]]
     let separate = (block or acc.block) and len(acc.lines[last])>0;
     {lines:if (separate) [*acc.lines,*parts] else [*slice(acc.lines,0,len(acc.lines)-1),[*acc.lines[last],*parts[0]],*slice(parts,1)],block:block}
@@ -106,13 +106,13 @@ pub fn set_list(st,kind,preset=null) any^ {
     let existing = list_node(obj.source)
     let tag = if (kind == "numbering") 'ol' else 'ul'
     let off = name(existing) == tag and preset == null
-    let children = if (existing != null) [for (item in content(existing)) content(item)] else line_tokens(body_children(content(obj.source)))
+    let children = if (existing != null) [for (item in ((content(existing)) ^ { [] })) content(item)] else line_tokens(body_children(content(obj.source)))
     let list_style = c.value(preset,if (tag == 'ol') "decimal" else "disc")
     let attrs = {style:"margin:0;padding-left:1.3em;white-space:normal;list-style-type:" ++ list_style ++ ";"}
     let items = [for (line in children) <li style:"white-space:pre-wrap;",*line>]
     let next = if (off) [for (i,line in children) *[*(if (i>0) ["\n"] else []),*line]]
         else if (tag == 'ol') [<ol *:attrs,*items>] else [<ul *:attrs,*items>];
-    m.edit_object(st,(node) => m.rebuild(node,map(node),body(content(node),(items) => next,true)))^
+    m.edit_object(st,(node) any^ => m.rebuild(node,map(node),body(content(node),(items) any^ => next,true)))^
 }
 pub fn indent(st,increase=true) any^ {
     let current = float(replace(value(st,"padding-left","0"),"px","")) ^ { 0.0 };
@@ -123,7 +123,7 @@ pub fn vertical(st,position) any^ {
     let current = content(obj.source)[0]
     let children = if (current.class == "slide-text-layout") content(content(current)[0]) else content(obj.source)
     let justify = if (position == "middle") "center" else if (position == "bottom") "flex-end" else "flex-start";
-    m.edit_object(st,(node) => m.rebuild(node,map(node),[<div class:"slide-text-layout",
+    m.edit_object(st,(node) any^ => m.rebuild(node,map(node),[<div class:"slide-text-layout",
         style:"width:100%;height:100%;display:flex;flex-direction:column;justify-content:" ++ justify ++ ";",
         <div class:"slide-text-content",style:"width:100%;",*children>>]))^
 }
@@ -153,7 +153,7 @@ pub fn paint(st) any^ {
     let obj = m.chosen(st)
     if (obj == null) st
     else if (obj.tag != st.format_clipboard.tag) raise error("Slides: choose the same kind of object as the format source")
-    else {*:m.edit_object(st,(node) => m.rebuild(node,{*:map(node),*:st.format_clipboard.values},
+    else {*:m.edit_object(st,(node) any^ => m.rebuild(node,{*:map(node),*:st.format_clipboard.values},
         if (obj.tag == 'text') highlight_runs(content(node),st.format_clipboard.highlight) else content(node)))^,
         painter:false,status:"Formatting applied."}
 }

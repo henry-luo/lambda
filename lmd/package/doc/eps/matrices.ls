@@ -22,17 +22,17 @@ pub pn write_matrix(var m, composite, matrix) int^ {
 pub pn dispatch(var m, op, supplied) int^ {
     if (op == "matrix") {
         let matrix = obj.allocate(m, "array", util.IDENTITY)^
-        obj.push_operand(m, matrix)
+        obj.push_operand(m, matrix)^
         return 0
     }
     if (op == "currentmatrix" or op == "defaultmatrix") {
         let stored = write_matrix(m, supplied[0], if (op == "currentmatrix") m.graphics.ctm else util.IDENTITY)^
-        obj.push_operand(m, supplied[0])
+        obj.push_operand(m, supplied[0])^
         return 0
     }
     if (op == "setmatrix" or op == "concat") {
         let matrix = read_matrix(m, supplied[0])^
-        m.graphics.ctm = if (op == "setmatrix") matrix else util.matrix_mul(matrix, m.graphics.ctm)
+        m.graphics.ctm = (if (op == "setmatrix") matrix else util.matrix_mul(matrix, m.graphics.ctm))^
         return 0
     }
     if (op == "concatmatrix" or op == "invertmatrix") {
@@ -41,7 +41,7 @@ pub pn dispatch(var m, op, supplied) int^ {
             else util.matrix_mul(first, read_matrix(m, supplied[1])^)
         let dest = supplied[len(supplied) - 1]
         let stored = write_matrix(m, dest, result)^
-        obj.push_operand(m, dest)
+        obj.push_operand(m, dest)^
         return 0
     }
     let checked = obj.require(m, len(m.stack) > 0, "stackunderflow")^
@@ -58,16 +58,16 @@ pub pn dispatch(var m, op, supplied) int^ {
             else [math.cos(angle), math.sin(angle), -math.sin(angle), math.cos(angle), 0.0, 0.0]
         if (explicit) {
             let stored = write_matrix(m, destination, matrix)^
-            obj.push_operand(m, destination)
+            obj.push_operand(m, destination)^
             return 0
         }
-        m.graphics.ctm = util.matrix_mul(matrix, m.graphics.ctm)
+        m.graphics.ctm = util.matrix_mul(matrix, m.graphics.ctm)^
         return 0
     }
     let matrix = if (explicit) read_matrix(m, destination)^ else m.graphics.ctm
     let active = if (op == "itransform" or op == "idtransform") gfx.inverse(m, matrix)^ else matrix
     let linear = if (op == "dtransform" or op == "idtransform") [active[0], active[1], active[2], active[3], 0.0, 0.0] else active
     let p = gfx.point(linear, args[0], args[1])
-    obj.push_operand(m, p[0]); obj.push_operand(m, p[1])
+    obj.push_operand(m, p[0])^; obj.push_operand(m, p[1])
     return 0
 }

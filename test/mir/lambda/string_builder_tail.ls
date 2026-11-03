@@ -3,7 +3,7 @@ fn tail_builder(i: int, count: int, acc: string) string {
     if (i >= count) acc else tail_builder(i + 1, count, acc ++ "x")
 }
 
-fn tail_snapshots(count: int, previous: array, acc: string) array {
+fn tail_snapshots(count: int, previous: array, acc: string) array^ {
     if (count <= 0) previous ++ [acc]
     else tail_snapshots(count - 1, previous ++ [acc], acc ++ "x")
 }
@@ -36,8 +36,10 @@ fn error_tail(count: int, acc: string) string^ {
     if (count <= 0) acc else error_tail(count - 1, acc ++ checked_piece(count)^)^
 }
 
-fn nested_call(count: int, acc: string) string {
-    if (count <= 0) acc
+fn nested_call(count: int, acc: string) string^ {
+    if (count <= 0) {
+        if (starts_with(acc, "fail")) raise error("nested stopped") else acc
+    }
     else if (count == 1) {
         let piece = "x"
         wrap(nested_call(count - 1, acc ++ piece))
@@ -57,4 +59,7 @@ pn main() {
     print(nested_call(2, "")); print("\n")
     let failed = error_tail(3, "") ^ { ^.message }
     print(failed); print("\n")
+    // the recursive call's ordinary error must survive the native tail join.
+    let nested_failed = nested_call(2, "fail") ^ { ^.message }
+    print(nested_failed); print("\n")
 }

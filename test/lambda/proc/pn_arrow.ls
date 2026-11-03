@@ -5,7 +5,7 @@
 
 function apply_all(f: function, xs) => for (x in xs) f(x)
 pn apply_pn(f: pn (x: int), v: int) { f(v) }
-fn apply_fn(f, v) => f(v)
+fn apply_fn(f, v) any^ => f(v)
 fn make_greeter(greeting) => pn (who) => { print(greeting ++ ", " ++ who ++ "\n") }
 
 // created at the top level, which is `fn` context

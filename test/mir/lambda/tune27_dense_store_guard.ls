@@ -22,10 +22,10 @@ pn matmul(a: float[], b: float[], var c: float[], n: int) any {
 }
 
 pn main() {
-    var a: float[] = fill(4, 1.5)
-    var b: float[] = fill(4, 2.0)
-    var c: float[] = fill(4, 0.0)
-    matmul(a, b, c, 2)
+    var a: float[] = fill(4, 1.5)^
+    var b: float[] = fill(4, 2.0)^
+    var c: float[] = fill(4, 0.0)^
+    matmul(a, b, c, 2)^
     print(c)
     print("\n")
 }

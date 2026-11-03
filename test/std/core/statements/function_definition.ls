@@ -18,7 +18,7 @@ greet("World")
 let double = (x: int) => x * 2
 double(10)
 
-fn apply_fn(f, x: int) => f(x)
+fn apply_fn(f, x: int) any^ => f(x)
 apply_fn((x) => x + 100, 5)
 
 fn make_adder(n: int) => (x: int) => x + n

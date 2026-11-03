@@ -8,6 +8,5 @@ type Grid = {cells: Cell?[], size: int}
 
 pn main() {
     var g: Grid = {cells: null, size: 1}
-    print("bound: ")
-    print(g.cells)
+    g
 }

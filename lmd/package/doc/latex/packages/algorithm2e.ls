@@ -35,7 +35,7 @@ pub let COMMANDS = [for (k, v at BLOCKS) string(k)] ++ [for (k, v at IO_LABELS) 
 
 // The lines of an algorithm body: statement, head, end, io and blank records with
 // a depth; other block elements (captions, labels) come back separately.
-pub fn fold(nodes, depth, settings) {
+pub fn fold(nodes, depth, settings) any^ {
     fold_rec(nodes, 0, depth, settings, [], [], [])
 }
 
@@ -44,7 +44,7 @@ fn is_blank(nodes) => all([for (node in nodes) node is string and len(trim(node)
 fn flush(current, acc, depth, semicolon) =>
     if (is_blank(current)) acc else acc ++ [{kind: "statement", nodes: current, depth: depth, semicolon: semicolon}]
 
-fn fold_rec(nodes, i, depth, settings, current, acc, blocks) {
+fn fold_rec(nodes, i, depth, settings, current, acc, blocks) any^ {
     if (i >= len(nodes)) {lines: flush(current, acc, depth, false), blocks: blocks}
     else {
         let node = nodes[i]
@@ -72,7 +72,7 @@ fn fold_rec(nodes, i, depth, settings, current, acc, blocks) {
 }
 
 // a block command's argument i as nodes, read back from its raw source
-pub fn argument(el, i) => util.parse_fragment(util.raw_argument(el, "required", i))
+pub fn argument(el, i) any^ => util.parse_fragment(util.raw_argument(el, "required", i))
 
 fn block_lines(el, desc, depth, settings) {
     let condition = if (desc.condition) argument(el, 0) else []
@@ -91,9 +91,9 @@ fn block_lines(el, desc, depth, settings) {
 }
 
 // numbers every line but blanks when lines are numbered
-pub fn numbered(lines, on) => number_rec(lines, 0, 0, on, [])
+pub fn numbered(lines, on) any^ => number_rec(lines, 0, 0, on, [])
 
-fn number_rec(lines, i, count, on, acc) {
+fn number_rec(lines, i, count, on, acc) any^ {
     if (i >= len(lines)) acc
     else {
         let counts = on and lines[i].kind != "blank"

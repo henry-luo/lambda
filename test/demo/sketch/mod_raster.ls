@@ -28,19 +28,19 @@ pub fn from_uri(uri,label="Pasted image") any^ {
         raise error("Sketch: paste an embedded raster image.")
     from_bytes(media.data_uri_bytes(uri)^,label)^
 }
-pub fn clipboard_source(snapshot) {
+pub fn clipboard_source(snapshot) any^ {
     if (snapshot.image is string and starts_with(snapshot.image,"data:image/")) snapshot.image
     else {
         let markup = snapshot.html
         let tree = if (markup is string and len(markup)<=MAX_EMBEDDED) parse(markup,'html') ^ { null } else null
-        let sources = if (tree==null) [] else [for (node in html.all_elements(html.of(tree)),
-            let src = html.attr(node,"src") where node.tag=="img" and src is string and starts_with(lower(src),"data:image/")) src]
+        let sources = if (tree==null) [] else [for (node in ((html.all_elements(html.of(tree))) ^ { [] }),
+            let src = html.attr(node,"src") where ((node.tag=="img" and src is string and starts_with(lower(src),"data:image/")) ^ { false })) src]
         if (len(sources)>0) sources[0]
         else if (snapshot.text is string and starts_with(lower(trim(snapshot.text)),"data:image/")) trim(snapshot.text)
         else null
     }
 }
-pub fn valid_descriptor(o) => o.src is string and len(o.src)<=MAX_EMBEDDED and starts_with(o.src,"data:image/png;base64,") and
+pub fn valid_descriptor(o) any^ => o.src is string and len(o.src)<=MAX_EMBEDDED and starts_with(o.src,"data:image/png;base64,") and
     o.image_width is int and o.image_height is int and o.image_width>0 and o.image_height>0 and
     o.image_width<=16000000 and o.image_height<=16000000 and
     o.image_width*o.image_height<=16000000 and o.image_name is string and len(o.image_name)<=500

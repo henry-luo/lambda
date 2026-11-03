@@ -36,8 +36,8 @@ let st = model.loaded(model.initial(), [r1, r2, r3]);
 [[for (r in st.records) r.id], st.selected, st.loaded]
 model.kind_counts(st.records)
 model.site_counts(st.records);
-[for (r in model.visible(model.action(st, "kind", "page"))) r.id];
-[for (r in model.visible(model.action(st, "site", "Local files"))) r.id]
+[for (r in ((model.visible(model.action(st, "kind", "page"))) ^ { [] })) r.id];
+[for (r in ((model.visible(model.action(st, "site", "Local files"))) ^ { [] })) r.id]
 model.action(model.action(st, "site", "Local files"), "site", "Local files").site;
 [model.badges(r1), model.badges(r2)]
 model.output_rows(r2)
@@ -71,10 +71,10 @@ let failed = model.apply_job(q, {type: "failed", tag: "job-1", url: "https://x.e
 
 // search hits replace the list, keep the filters, and show snippets
 let hits = model.with_hits(st, "harbour", [{snapshot: r2, score: 1.5, snippet: "…the harbour wakes…"}]);
-[[for (r in model.visible(hits)) r.id], model.snippet_of(hits, "b"), model.with_hits(hits, " ", []).hits]
+[[for (r in ((model.visible(hits)) ^ { [] })) r.id], model.snippet_of(hits, "b"), model.with_hits(hits, " ", []).hits]
 // deleting asks first, then picks the next snapshot
 let asked = model.action(st, "delete", null);
 [asked.confirm, model.action(asked, "keep", null).confirm]
 let gone = model.removed(asked, "b");
-[[for (r in gone.records) r.id], gone.selected, gone.confirm];
+[[for (r in ((gone.records) ^ { [] })) r.id], gone.selected, gone.confirm];
 [model.date_label("2026-10-21T14:30:12Z"), model.date_label(null), model.size_label(1536), model.size_label(5242880), model.size_label(12)]

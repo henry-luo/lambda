@@ -9,12 +9,12 @@ fn lcg_next(seed: int) int {
     return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
-pn partition(var arr: int[], lo: int, hi: int) int {
+pn partition(var arr: int[], lo: int, hi: int) int^ {
     var pivot: int = arr[hi]
     var i: int = lo
     var j: int = lo
     while (j < hi) {
-        if (arr[j] <= pivot) {
+        if ((arr[j] <= pivot)^) {
             var tmp: int = arr[i]
             arr[i] = arr[j]
             arr[j] = tmp
@@ -28,14 +28,14 @@ pn partition(var arr: int[], lo: int, hi: int) int {
     return i
 }
 
-pn quicksort(var arr: int[], lo: int, hi: int) int {
+pn quicksort(var arr: int[], lo: int, hi: int) int^ {
     if (lo >= hi) {
         return 0
     }
-    var p: int = partition(arr, lo, hi)
+    var p: int = partition(arr, lo, hi)^
     var left_hi: int = p - 1
     var right_lo: int = p + 1
-    quicksort(arr, lo, left_hi)
+    quicksort(arr, lo, left_hi)^
     quicksort(arr, right_lo, hi)
     return 0
 }
@@ -51,17 +51,17 @@ fn is_sorted(arr: int[], n: int) int {
     return 1
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     let size: int = 5000
     // The annotation binds the public contract while preserving packed int
     // storage for direct indexing.
-    var arr: int[] = fill(size, 0)
+    var arr: int[] = fill(size, 0)^
 
     // Fill with deterministic descending + modular values
     var seed: int = 42
     var i: int = 0
     while (i < size) {
-        seed = lcg_next(seed)
+        seed = lcg_next(seed)^
         arr[i] = seed
         i = i + 1
     }
@@ -76,7 +76,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("quicksort: PASS\n")
     } else {
         print("quicksort: FAIL\n")

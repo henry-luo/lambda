@@ -2,4 +2,4 @@
 // error and no diagnostic; the rejection now reports like every other boundary.
 let xs = [-1]
 let x: u32 = xs[0]
-"bound: " ++ string(x)
+"bound: " ++ string(x^)

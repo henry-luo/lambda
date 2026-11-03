@@ -18,7 +18,7 @@ let exceptions = {
 pub fn effective_style(ch, style) => if (style == "auto")
     (if (ord(ch) >= 0x391 and ord(ch) <= 0x3A9) "normal" else "italic") else style
 
-pub fn variant(ch, style) {
+pub fn variant(ch, style) any^ {
     let cp = ord(ch)
     let actual = effective_style(ch, style)
     let alphabet = alphabets[if (actual == "cal") "script" else actual]
@@ -61,7 +61,7 @@ let styled_commands = [
 let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb", bm: "\\boldsymbol", hm: "\\boldsymbol"}
 pub fn alphabet_alias(name) => ALPHABET_ALIASES[name]
 
-pub fn command_variant(cmd) {
+pub fn command_variant(cmd) any^ {
     let direct = [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
     let alias = alphabet_alias(if (starts_with(cmd, "\\")) slice(cmd, 1, len(cmd)) else cmd);
     if (direct != null) direct else if (alias != null) command_variant(alias) else null
@@ -79,7 +79,7 @@ pub fn decode(ch) {
         {character:chr(cp-start+[65,97,48][i]),style:string(style)}][0]
     let greek=if (cp<0x1D6A8) null else [for (style in ["italic","bold","bolditalic"],
         base in [*[for (i in 0x391 to 0x3A9) chr(i)],*[for (i in 0x3B1 to 0x3C9) chr(i)],"ϴ","∇","∂","ϵ","ϑ","ϰ","ϕ","ϱ","ϖ"]
-        where variant(base,style)==cp and ord(base)!=cp) {character:base,style:style}][0];
+        where ((variant(base,style)==cp and ord(base)!=cp) ^ { false })) {character:base,style:style}][0];
     special or latin or greek or {character:ch,style:null}
     }
 }

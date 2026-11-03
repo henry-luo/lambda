@@ -34,7 +34,7 @@ pub fn timeline(plan, options = {}) map {
     {duration_ms: sum(lengths), slides: [for (i, scene in plan.slides) {id: scene.id, start_ms: starts[i], end_ms: starts[i] + lengths[i]}]}
 }
 
-fn slide_layout(plan, ps, index) {
+fn slide_layout(plan, ps, index) any^ {
     let line = timeline(plan, ps)
     laid_out(plan, index, ps.reduced_motion, ps.autoplay_dwell_ms, line.slides[index].start_ms)
 }
@@ -60,7 +60,7 @@ pub fn seek(plan, ps, position_ms, now_ms) map^ {
     let line = timeline(plan, ps)
     let at = max(0.0, min(line.duration_ms, float(position_ms)))
     let final_slide = len(plan.slides) - 1
-    let index = [for (i, s in line.slides where at >= s.start_ms and (at < s.end_ms or i == final_slide)) i][0]
+    let index = [for (i, s in line.slides where ((at >= s.start_ms and (at < s.end_ms or i == final_slide)) ^ { false })) i][0]
     let segs = laid_out(plan, index, ps.reduced_motion, ps.autoplay_dwell_ms, line.slides[index].start_ms)
     let cues = plan.slides[index].cues
     // a seek to the very end parks on the final build, as finished autoplay does

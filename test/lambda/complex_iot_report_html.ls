@@ -157,7 +157,7 @@ pub fn analyze_traffic_patterns(traffic_data) {
 
     let safety_analysis = {
         total_incidents: sum([for (data in traffic_data) len(data.incident_reports)]),
-        incident_hotspots: [for (data in traffic_data where len(data.incident_reports) >= 2) {
+        incident_hotspots: [for (data in traffic_data where ((len(data.incident_reports) >= 2) ^ { false })) {
                 intersection_id: data.intersection_id,
                 location: data.location,
                 incident_count: len(data.incident_reports),

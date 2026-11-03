@@ -3,11 +3,11 @@ import structurizr: lambda.graph.structurizr.structurizr
 import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
-  for (child in model.element_children(value) where model.tag(child) == wanted) child
+  for (child in model.element_children(value) where ((model.tag(child) == wanted) ^ { false })) child
 ]
 
 fn route_points(edge) => [
-  for (route in children(edge, "route"), point in children(route, "point")) point
+  for (route in children(edge, "route"), point in ((children(route, "point")) ^ { [] })) point
 ]
 
 let source = (input(

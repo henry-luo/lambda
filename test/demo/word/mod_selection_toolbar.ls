@@ -2,9 +2,9 @@
 import dom
 import lambda.editor.mod_source_pos
 
-pub fn available(editor) => editor.selection.kind=='text' and
+pub fn available(editor) any^ => editor.selection.kind=='text' and
     editor.selection.anchor!=editor.selection.head and selection_to_string(editor.doc,editor.selection)!=""
-pub fn visible(st) => not st.read_only and st.dialog==null and st.context==null and
+pub fn visible(st) any^ => not st.read_only and st.dialog==null and st.context==null and
     not st.mini_hidden and available(st.editor)
 
 // use visible selection fragments so a scrolled multiline range never anchors in the ribbon.
@@ -44,7 +44,7 @@ pn request(node,event) {
     if (owner!=null) dom.request_frame(owner,event)
 }
 pub pn refresh(node) { request(node,"word_toolbar_ready") }
-fn frame_style(box) => "left:" ++ string(box.left or 0) ++ "px;top:" ++ string(box.top or 0) ++ "px;visibility:" ++
+fn frame_style(box) any^ => "left:" ++ string(box.left or 0) ++ "px;top:" ++ string(box.top or 0) ++ "px;visibility:" ++
     (if (box.visible) "visible" else "hidden") ++
     (if (box.max_width==null) "" else ";max-width:" ++ string(box.max_width) ++ "px")
 // viewport movement updates presentation geometry without a document-state redraw.

@@ -13,3 +13,7 @@ error
 nan inf nan
 nan -inf nan
 nan nan nan
+[2, -19, nan, nan]
+[2, -2, 9007199254740991, inf]
+true
+nan

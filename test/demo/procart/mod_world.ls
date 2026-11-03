@@ -28,7 +28,7 @@ let LORE = {origin: "#[realm:#place#]story#", place: "THE REALM",
     deed: ["count the stars", "trade in amber", "tell the old songs", "map every stream", "keep the high passes"],
     endures: ["endures", "waits", "remembers", "keeps its counsel"]}
 
-fn title_case(s) => upper(slice(s, 0, 1)) ++ slice(s, 1, len(s))
+fn title_case(s) any^ => upper(slice(s, 0, 1)) ++ slice(s, 1, len(s))
 
 fn settles(biome) bool => not contains(["ocean", "beach", "snow", "scorched", "bare"], biome)
 
@@ -38,9 +38,9 @@ pub fn generate(seed, options = {}) map^ {
         erosion: options.erosion != false, climate: options.climate == true})^
     let sites = sample.poisson(rng.derive(k, "towns"), {width: float(WIDTH), height: float(HEIGHT), radius: 13.0})^
     // Poisson points come out row by row: shuffle so the towns spread over the whole land
-    let homes = rng.shuffle(rng.derive(k, "homes"), [for (p in sites where settles(land.biomes[int(p[1])][int(p[0])])) p])
+    let homes = rng.shuffle(rng.derive(k, "homes"), [for (p in sites where ((settles(land.biomes[int(p[1])][int(p[0])])) ^ { false })) p])
     let model = text.markov(PLACES, 2)^
-    let names = [for (i, p in slice(homes, 0, min(7, len(homes)))) title_case(text.name(rng.at(rng.derive(k, "names"), i), model)^)]
+    let names = [for (i, p in ((slice(homes, 0, min(7, len(homes)))) ^ { [] })) title_case(text.name(rng.at(rng.derive(k, "names"), i), model)^)]
     let towns = [for (i, n in names) {name: n, x: homes[i][0], y: homes[i][1], capital: i == 0}]
     let realm = if (len(names) > 0) names[0] else "The Realm"
     let lore = text.expand({*: LORE, place: realm}, rng.derive(k, "lore"))^

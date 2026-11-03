@@ -4,8 +4,8 @@ import pkg: .package
 import theme: .theme
 import presentation: .presentation
 
-pub fn run_props(node, colors = null) => {*:map([for (child in c.children(node)
-    where contains(["b","i","u","strike","dstrike","vertAlign","caps","smallCaps"],child.tag))
+pub fn run_props(node, colors = null) any^ => {*:map([for (child in ((c.children(node)) ^ { [] })
+    where ((contains(["b","i","u","strike","dstrike","vertAlign","caps","smallCaps"],child.tag)) ^ { false }))
     (child.tag,if (child.tag == "vertAlign") c.attr(child,"val") else c.on(child))]),
     *:presentation.run_props(node,colors)}
 
@@ -26,16 +26,16 @@ pub fn prepare(package) map^ {
     let colors = theme.load(package)^
     let nodes = c.children(root,"style")
     let invalid = [for (i,node in nodes, let id = c.attr(node,"styleId")
-        where id == null or any([for (j,prior in nodes where j < i and c.attr(prior,"styleId") == id) true])) node];
+        where ((id == null or any([for (j,prior in nodes where ((j < i and c.attr(prior,"styleId") == id) ^ { false })) true])) ^ { false })) node];
     if ((root != null and (root.tag != "styles" or root.uri != c.W)) or
         (numbering != null and (numbering.tag != "numbering" or numbering.uri != c.W)) or len(invalid) > 0)
         raise c.fail("invalid-package","Invalid styles or numbering part",package.main)
     else {
         let defaults = c.child(root,"docDefaults")
-        let default_style = c.first([for (node in nodes where c.attr(node,"type") == "paragraph" and
-            contains(["1","true","on"],c.attr(node,"default"))) c.attr(node,"styleId")])
-        let default_table = c.first([for (node in nodes where c.attr(node,"type") == "table" and
-            contains(["1","true","on"],c.attr(node,"default"))) c.attr(node,"styleId")]);
+        let default_style = c.first([for (node in nodes where ((c.attr(node,"type") == "paragraph" and
+            contains(["1","true","on"],c.attr(node,"default"))) ^ { false })) c.attr(node,"styleId")])
+        let default_table = c.first([for (node in nodes where ((c.attr(node,"type") == "table" and
+            contains(["1","true","on"],c.attr(node,"default"))) ^ { false })) c.attr(node,"styleId")]);
         {styles:c.dictionary([for (node in nodes) {key:c.attr(node,"styleId"),value:node}]),
             default_style:default_style,default_table:default_table,theme:colors,
             run_defaults:run_props(c.child(c.child(defaults,"rPrDefault"),"rPr"),colors),
@@ -90,15 +90,15 @@ pub fn table(styles, node) map^ {
             run_defaults:styled_run(inherited.nodes,0,styles.run_defaults,styles.theme)},
         diagnostics:inherited.diagnostics}
 }
-pub fn list_info(styles, props) {
+pub fn list_info(styles, props) any^ {
     let id = props.num_id
     let level = c.as_int(props.level,0)
-    let num = c.first([for (n in c.children(styles.numbering,"num") where c.attr(n,"numId") == id) n])
+    let num = c.first([for (n in ((c.children(styles.numbering,"num")) ^ { [] }) where ((c.attr(n,"numId") == id) ^ { false })) n])
     let abstract_id = c.attr(c.child(num,"abstractNumId"),"val")
-    let abstract = c.first([for (n in c.children(styles.numbering,"abstractNum") where c.attr(n,"abstractNumId") == abstract_id) n])
-    let override = c.first([for (n in c.children(num,"lvlOverride") where c.as_int(c.attr(n,"ilvl"),-1) == level) n])
+    let abstract = c.first([for (n in ((c.children(styles.numbering,"abstractNum")) ^ { [] }) where ((c.attr(n,"abstractNumId") == abstract_id) ^ { false })) n])
+    let override = c.first([for (n in ((c.children(num,"lvlOverride")) ^ { [] }) where ((c.as_int(c.attr(n,"ilvl"),-1) == level) ^ { false })) n])
     let definition = if (c.child(override,"lvl") != null) c.child(override,"lvl") else
-        c.first([for (n in c.children(abstract,"lvl") where c.as_int(c.attr(n,"ilvl"),-1) == level) n])
+        c.first([for (n in ((c.children(abstract,"lvl")) ^ { [] }) where ((c.as_int(c.attr(n,"ilvl"),-1) == level) ^ { false })) n])
     let fmt = c.attr(c.child(definition,"numFmt"),"val")
     let start_value = c.get(c.child(override,"startOverride").attrs,c.W ++ "#val",
         c.attr(c.child(definition,"start"),"val"))

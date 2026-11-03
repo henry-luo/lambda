@@ -8,8 +8,8 @@ import ui_model: ~~.~~.demo.slides.mod_transitions
 fn deck(kind,variant=null,direction='left') => <presentation width:400.0,height:240.0,
     <slide id:"before",background:"#ff0000">
     <slide id:"after",background:"#0000ff",transition:kind,transition_variant:variant,direction:direction,transition_duration:1000.0>>
-fn plan(kind,variant=null,direction='left') => slide.compile(deck(kind,variant,direction))^
-fn sample(kind,variant=null,direction='left',elapsed=500.0) => fx.sample(plan(kind,variant,direction),{slide:1,phase:'transition',time_ms:elapsed})
+fn plan(kind,variant=null,direction='left') any^ => slide.compile(deck(kind,variant,direction))^
+fn sample(kind,variant=null,direction='left',elapsed=500.0) any^ => fx.sample(plan(kind,variant,direction),{slide:1,phase:'transition',time_ms:elapsed})
 let wipe = sample('wipe')
 let reveal = sample('reveal')
 let split = sample('split','in')
@@ -25,7 +25,7 @@ let timed_plan = slide.compile(<presentation
         <cue start:'entry',<effect target:"text",kind:'fade-in',duration:100.0>>>
     <slide id:"b",advance_after:300.0,transition:'wipe',transition_duration:100.0>
     <slide id:"c">>)^
-fn command(st,key,at) => slide.reduce(timed_plan,st,{command:key,time_ms:at})^
+fn command(st,key,at) any^ => slide.reduce(timed_plan,st,{command:key,time_ms:at})^
 let active = command(slide.initial_state(timed_plan),"activate",0.0)
 let built = command(active,"frame",100.0)
 let paused = command(built,"pause",150.0)

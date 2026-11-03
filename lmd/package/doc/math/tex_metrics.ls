@@ -1,8 +1,8 @@
 // TeX companion metrics for explicitly matched bundled font resources only.
 // Decode the original TFM files; provenance and hashes live beside the resources.
-fn halfword(data, offset) => int(data[offset]) * 256 + int(data[offset + 1])
+fn halfword(data, offset) any^ => int(data[offset]) * 256 + int(data[offset + 1])
 
-fn fix_word(data, offset) {
+fn fix_word(data, offset) any^ {
     let first = int(data[offset]);
     ((if (first >= 128) first - 256 else first) * 16777216.0 +
         int(data[offset + 1]) * 65536.0 + int(data[offset + 2]) * 256.0 + int(data[offset + 3])) / 1048576.0
@@ -19,7 +19,7 @@ fn parameters_from(data, file, required) array | error {
     let words = halfword(data, 0)
     let count = halfword(data, 22);
     if (count < required or count > words - 6) error("math: invalid Computer Modern TFM parameter table: " ++ file)
-    else [for (i in 0 to (count - 1)) fix_word(data, (words - count + i) * 4)]
+    else [for (i in ((0 to (count - 1)) ^ { [] })) fix_word(data, (words - count + i) * 4)]
 }
 
 fn parameters(file, required) array | error => parameters_from(tfm_data(file)^,file,required)^
@@ -30,7 +30,7 @@ fn table_metric(data, file, start, count, index) number | error {
     else fix_word(data, (start + index) * 4) * 1000.0
 }
 
-fn character_tables(data) => 6 + halfword(data,2) + halfword(data,6) - halfword(data,4) + 1
+fn character_tables(data) any^ => 6 + halfword(data,2) + halfword(data,6) - halfword(data,4) + 1
 
 fn extension_recipe(data, file, index) array | error {
     let start = character_tables(data) + sum([for (offset in [8,10,12,14,16,18]) halfword(data,offset)]);
@@ -60,7 +60,7 @@ fn character_metrics(data, file, slot) map | error {
 }
 
 // mathtools uses the logical TFM height of family-3 slot 0x7a (\braceld).
-fn character_height(file, slot) => character_metrics(tfm_data(file)^, file, slot)^.height
+fn character_height(file, slot) any^ => character_metrics(tfm_data(file)^, file, slot)^.height
 
 fn character_chain(data, file, slot, seen = []) array | error {
     if (contains(seen,slot)) error("math: cyclic TeX delimiter character list")

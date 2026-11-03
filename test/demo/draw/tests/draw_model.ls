@@ -48,4 +48,4 @@ match (model.restore(parse(format(model.archive(invalid),'json'),'json')^) ^ { ^
 let loaded = model.open_document(st,restored)
 let first = model.add(loaded,"rect",0,0)
 let second = model.add(first,"rect",0,100);
-first.selected != second.selected and len(unique([for (node in model.objects(second.doc)) model.id(node)])) == 11
+first.selected != second.selected and len(unique([for (node in ((model.objects(second.doc)) ^ { [] })) model.id(node)])) == 11

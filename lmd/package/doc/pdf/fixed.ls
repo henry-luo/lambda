@@ -3,9 +3,9 @@ import resolve: .resolve
 
 fn finite(v) => (v is int or v is float) and not (v is nan) and not (v is inf) and v != -inf
 
-fn page_ordinal(raw) {
+fn page_ordinal(raw) any^ {
     let text = trim(string(raw))
-    if (len(text) == 0 or len([for (i in 0 to len(text) - 1 where not contains("0123456789", text[i])) i]) > 0) null
+    if (len(text) == 0 or len([for (i in 0 to len(text) - 1 where ((not contains("0123456789", text[i])) ^ { false })) i]) > 0) null
     else int(text)
 }
 
@@ -27,10 +27,10 @@ pub fn selected_pages(pdf, opts) array^ {
     else if (budget == null or budget < 1) raise error("pdf paged intake: invalid page budget")
     else if (selection == "all") {
         if (total > budget) raise error("pdf paged intake: complete sequence exceeds its page budget")
-        else [for (i in 0 to total - 1) i]
+        else [for (i in ((0 to total - 1) ^ { [] })) i]
     } else {
-        let ranges = [for (part in split(selection, ",")) page_range(part, total)^]
-        let pages = [for (i in 0 to total - 1 where
+        let ranges = [for (part in ((split(selection, ",")) ^ { [] })) page_range(part, total)^]
+        let pages = [for (i in ((0 to total - 1) ^ { [] }) where
             len([for (span in ranges where i + 1 >= span.first and i + 1 <= span.last) span]) > 0) i]
         if (len(pages) == 0) raise error("pdf paged intake: source selection is empty")
         else if (len(pages) > budget) raise error("pdf paged intake: selected sequence exceeds its page budget")
@@ -41,7 +41,7 @@ pub fn selected_pages(pdf, opts) array^ {
 fn box(pdf, raw, required) any^ {
     let value = resolve.deref(pdf, raw)
     if (value == null and not required) null
-    else if (not (value is array) or len(value) != 4 or len([for (v in value where not finite(v)) v]) > 0)
+    else if (not (value is array) or len(value) != 4 or len([for (v in value where ((not finite(v)) ^ { false })) v]) > 0)
         raise error("pdf paged intake: page box requires four finite coordinates")
     else if (value[2] <= value[0] or value[3] <= value[1])
         raise error("pdf paged intake: reversed or empty page boxes are unsupported")
@@ -73,7 +73,7 @@ fn svg_resources(node) bool^ {
     if (not (node is element)) true
     else if ((node.href != null and starts_with(string(node.href), "img:")) or node['data-pdf-form'] != null)
         raise error("pdf paged intake: unresolved image or form resource")
-    else all([for (child in content(node)) svg_resources(child)^])
+    else all([for (child in ((content(node)) ^ { [] })) svg_resources(child)^])
 }
 
 pub fn page(parts, geometry, ordinal, label) element^ {

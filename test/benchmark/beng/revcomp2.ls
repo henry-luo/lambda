@@ -69,25 +69,25 @@ pn main() {
     var header: string = ""
     var seq: string = ""
     var i: int = 0
-    while (i < num_lines) {
+    while ((i < num_lines)^) {
         let line = lines[i]
-        if (len(line) > 0 and slice(line, 0, 1) == ">") {
+        if ((len(line) > 0 and slice(line, 0, 1) == ">")^) {
             // output previous sequence if any
-            if (len(seq) > 0) {
-                output_reverse_complement(header, seq)
+            if ((len(seq) > 0)^) {
+                output_reverse_complement(header, seq)^
             }
             header = line
             seq = ""
         } else {
-            if (len(line) > 0) {
+            if ((len(line) > 0)^) {
                 seq = seq ++ upper(line)
             }
         }
         i = i + 1
     }
     // output last sequence
-    if (len(seq) > 0) {
-        output_reverse_complement(header, seq)
+    if ((len(seq) > 0)^) {
+        output_reverse_complement(header, seq)^
     }
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

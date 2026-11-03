@@ -2,10 +2,10 @@ import s: lambda.scene3d
 import geometry: ~~.scene3d._geometry
 import model: .mod_model
 
-fn material(color,opacity=1.0) => s.material('lambert',{color:color,opacity:opacity,side:'double'})
+fn material(color,opacity=1.0) any^ => s.material('lambert',{color:color,opacity:opacity,side:'double'})
 fn ellipsoid(position,scale,color,options={}) => <mesh geometry:"smooth",position:position,scale:scale,*:options,material(color)>
-fn box(position,size,color,opacity=1.0) => s.mesh(s.box(size),material(color,opacity),{position:position})
-fn fin(points,color,options={}) => s.mesh(s.geometry(points),material(color,0.85),options)
+fn box(position,size,color,opacity=1.0) any^ => s.mesh(s.box(size),material(color,opacity),{position:position})
+fn fin(points,color,options={}) any^ => s.mesh(s.geometry(points),material(color,0.85),options)
 
 fn fish(o) array {
     let angel = o.kind == "angel"
@@ -27,7 +27,7 @@ fn fish(o) array {
 }
 
 // two triangles per curved blade keep plants light enough to sway as retained groups.
-fn blade(angle,height,width,color,bend) {
+fn blade(angle,height,width,color,bend) any^ {
     let x = cos(angle),z = sin(angle)
     let positions = [0.0,-height/2,0.0,x*width,height*0.14,z*width,x*bend,height/2,z*bend,
         0.0,-height/2,0.0,x*bend,height/2,z*bend,0-x*width,height*0.14,0-z*width];
@@ -53,11 +53,11 @@ fn decor(o) array => if (o.kind == "wood") [
         material(model.species(o.kind).color)>,
         if (o.kind == "slate") ellipsoid([0.15,0.3,0.25],[0.7,0.12,0.45],"#94aaa3",{rotation:[0.1,0.0,-0.2]})]
 
-pub fn object_tree(o,seconds=0.0,still=false) => (let entry = model.species(o.kind),let pose = model.pose(o,seconds,still),
+pub fn object_tree(o,seconds=0.0,still=false) any^ => (let entry = model.species(o.kind),let pose = model.pose(o,seconds,still),
     s.group([*(if (entry.category == "fish") fish(o) else if (entry.category == "plant") plant(o) else decor(o))],
         {id:o.id,'data-kind':o.kind,position:pose.position,rotation:pose.rotation,scale:[o.size,o.size,o.size]}))
 
-fn tank() => [
+fn tank() any^ => [
     box([0.0,-0.25,0.0],[12.4,0.5,6.4],"#173b42"),
     box([0.0,0.015,0.0],[12.0,0.22,6.0],"#c9c3a0"),
     box([0.0,3.5,-3.04],[12.0,7.0,0.06],"#21616a",0.25),
@@ -74,7 +74,7 @@ fn tank() => [
     for (i in 0 to 14) ellipsoid([-5.4+(i*17%31)/31.0*10.8,0.13,-2.5+(i*7%19)/19.0*5.0],
         [0.5,0.006,0.15],"#dfd8ae",{rotation:[0.0,i*1.4,0.0]})
 ]
-pub fn viewport(st) => s.scene([
+pub fn viewport(st) any^ => s.scene([
     s.camera({id:"tank-camera",position:st.camera.position,target:st.camera.target,fov:st.camera.fov}),
     s.light('ambient',{color:"#cce9e0",intensity:0.63}),
     s.light('directional',{position:[-4.0,12.0,8.0],color:"#fff4d2",intensity:0.85}),

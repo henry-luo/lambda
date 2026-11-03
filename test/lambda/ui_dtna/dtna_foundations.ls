@@ -15,7 +15,7 @@ let steps = ui.render(ui.steps({id:"flow",clickable:true,status:'error',current:
     ["space separators omit null slots",len(content(spacer)) == 3 and content(content(spacer)[1])[0] == "/"],
     ["labelled dashed divider",contains(divider.class,"dtna-divider-dashed") and len(content(divider)) == 3],
     ["bounded page window",collection.page_window(500000,1000000) == [1,499998,499999,500000,500001,500002,1000000] and collection.page_window(1,1) == [1] and collection.page_window(1,3) == [1,2,3]],
-    ["bounded rendered pager",len([for (child in content(pager) where child is element and name(child) == 'button') child]) <= 11],
+    ["bounded rendered pager",len([for (child in ((content(pager)) ^ { [] }) where ((child is element and name(child) == 'button') ^ { false })) child]) <= 11],
     ["step status",contains(content(steps)[1].class,"dtna-step-status-error")],
     ["column ranges",((ui.col({span:25}) ^ { null }) or null) == null and ((ui.col({offset:-1}) ^ { null }) or null) == null and ((ui.col({order:1.5}) ^ { null }) or null) == null],
     ["breakpoint validation",((ui.col({md:25}) ^ { null }) or null) == null and ((ui.col({xs:{other:2}}) ^ { null }) or null) == null and ((ui.col({xxxl:null}) ^ { null }) or null) == null],

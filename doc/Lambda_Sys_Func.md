@@ -1245,7 +1245,7 @@ let remote = input(api)^
 ### Input and Parsing Functions
 
 These functions can be used in both `fn` and `pn` functions, but `input` is an
-effectful `T^E` operation: invalid targets, failed loads, and parse failures
+effectful `T^` operation: invalid targets, failed loads, and parse failures
 raise an error. Propagate it with `^` or handle it with `^ { ... }`; a failed
 `input` never returns successful `null`.
 
@@ -2419,7 +2419,7 @@ channels continue to process pixel-array input. See the
 ### I/O Functions (Input/Parsing)
 | Function | Args | Description |
 |----------|------|-------------|
-| `input` | 1-2 | Parse file/URL; raises `T^E` on failure |
+| `input` | 1-2 | Parse file/URL; raises `T^` on failure |
 | `parse` | 1-3 | Parse string content (a format, or a grammar and rule) |
 | `exists` | 1 | Check if target exists |
 | `format` | 1-2 | Format data as string |

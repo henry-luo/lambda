@@ -26,6 +26,6 @@ pub fn camera(st) {
     [st.pan_x+distance*cos(st.pitch)*sin(st.yaw),
         st.pan_y+distance*sin(st.pitch),distance*cos(st.pitch)*cos(st.yaw)]
 }
-pub fn matches(st,cell) => not st.library or (contains(st.favorites,cell.id) or false)
+pub fn matches(st,cell) any^ => not st.library or (contains(st.favorites,cell.id) or false)
 pub fn favorite(st) => {*:st,favorites:if (contains(st.favorites,st.cell))
     [for (id in st.favorites where id != st.cell) id] else [*st.favorites,st.cell]}

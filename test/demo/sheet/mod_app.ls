@@ -32,8 +32,8 @@ pub pn command(st,id,owner) map^ {
         let path=trim(dom.get_state(dom.get_element_by_id(dom.root_node(owner),"file-path"),"value") or "")
         if (path=="") { return {*:st,status:"Enter a name or file path",error:"Enter a name or file path"} }
         if (st.dialog=="rename") {
-            if (len(path)>31 or contains(path,":") or contains(path,"/") or contains(path,"\\") or
-                any([for (i,s in st.book.sheets where i!=st.sheet) s.title==path])) {
+            if ((len(path)>31 or contains(path,":") or contains(path,"/") or contains(path,"\\") or
+                any([for (i,s in st.book.sheets where i!=st.sheet) s.title==path]))^) {
                 return {*:st,status:"Use a unique sheet name of 1–31 characters without :, / or \\"}
             }
             let next=m.change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) {*:s,title:path} else s]},"Sheet renamed")
@@ -62,7 +62,7 @@ pub pn command(st,id,owner) map^ {
     }
     if (id=="clear") { return m.clear(st) }
     if (id in ["bold","italic","underline","wrap","border"]) { return m.format_cells(st,id,m.active(st).style[id]!=true) }
-    if (starts_with(id,"align-")) { return m.format_cells(st,"align",slice(id,6)) }
+    if (starts_with(id,"align-")^) { return m.format_cells(st,"align",slice(id,6)) }
     if (id=="currency" or id=="percent") { return m.format_cells(st,"format",id) }
     if (id=="autosum") { return m.autosum(st) }
     if (id=="sort-asc" or id=="sort-desc") { return m.sort_rows(st,id=="sort-desc") }

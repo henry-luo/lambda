@@ -13,20 +13,20 @@ let b = buf.from_text(text)
 let full = syn.highlight(b, 0, b.count - 1, syn.empty_scan(), 'markdown')
 
 fn key(runs) => join([for (r in runs or []) string(r.s) ++ "-" ++ string(r.e) ++ r.c], ",")
-fn same(h1, b1, h2, b2, first, final) =>
-  len([for (l in first to final where key(syn.runs_for(h1, b1, l)) != key(syn.runs_for(h2, b2, l))) l])
+fn same(h1, b1, h2, b2, first, final) any^ =>
+  len([for (l in first to final where ((key(syn.runs_for(h1, b1, l)) != key(syn.runs_for(h2, b2, l))) ^ { false })) l])
 
 let W = 30
-let starts = [for (s in 0 to b.count - W where s % 7 == 0) s]
+let starts = [for (s in ((0 to b.count - W) ^ { [] }) where s % 7 == 0) s]
 
 "lines, highlighted lines:";
-[b.count, len([for (l in 0 to b.count - 1 where len(syn.runs_for(full.hl, b, l) or []) > 0) l])]
+[b.count, len([for (l in ((0 to b.count - 1) ^ { [] }) where ((len(syn.runs_for(full.hl, b, l) or []) > 0) ^ { false })) l])]
 
 "windows without a cache, mismatched lines:";
 sum([for (s in starts) same(syn.highlight(b, s, s + W - 1, syn.empty_scan(), 'markdown').hl, b, full.hl, b, s, s + W - 1)])
 
 // thread the cache through the windows in order, as the editor scrolls
-fn cached(b1, ss, i, scan, bad) {
+fn cached(b1, ss, i, scan, bad) any^ {
   if (i >= len(ss)) bad
   else {
     let s = ss[i]

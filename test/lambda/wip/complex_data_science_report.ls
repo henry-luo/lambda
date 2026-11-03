@@ -45,7 +45,7 @@ pub fn correlation(x_vals, y_vals) {
 }
 
 // Data preprocessing pipeline
-pub fn preprocess_dataset(raw_data) {
+pub fn preprocess_dataset(raw_data) any^ {
     // Handle missing values
     let cleaned_data = for (row in raw_data) {
         {
@@ -56,7 +56,7 @@ pub fn preprocess_dataset(raw_data) {
     };
     
     // Feature scaling (min-max normalization)
-    let feature_count = len(cleaned_data[0].features);
+    let feature_count = len(cleaned_data[0].features)^;
     let feature_mins = for (i in 0 to feature_count-1) 
         min(for (row in cleaned_data) row.features[i]);
     let feature_maxs = for (i in 0 to feature_count-1) 
@@ -65,7 +65,7 @@ pub fn preprocess_dataset(raw_data) {
     let normalized_data = for (row in cleaned_data) {
         {
             id: row.id,
-            features: for (i in 0 to len(row.features)-1) (
+            features: for (i in 0 to len(row.features)^-1) (
                 let range_val = feature_maxs[i] - feature_mins[i],
                 if (range_val == 0.0) 0.0 
                 else (row.features[i] - feature_mins[i]) / range_val
@@ -85,17 +85,17 @@ pub fn preprocess_dataset(raw_data) {
 }
 
 // Advanced feature engineering
-pub fn engineer_features(dataset) {
+pub fn engineer_features(dataset) any^ {
     for row in dataset {
         let base_features = row.features;
         let engineered = {
             // Polynomial features (degree 2)
-            poly_features: for (i in 0 to len(base_features)-1)
-                for (j in i to len(base_features)-1)
+            poly_features: for (i in 0 to len(base_features)^-1)
+                for (j in i to len(base_features)^-1)
                     base_features[i] * base_features[j],
 
             // Interaction features
-            interactions: for (i in 0 to len(base_features)-2)
+            interactions: for (i in 0 to len(base_features)^-2)
                 base_features[i] * base_features[i+1],
             
             // Statistical features
@@ -186,11 +186,11 @@ let timeseries_data = [
 // Execute comprehensive analysis pipeline
 '=== Data Science Pipeline Results ==='
 
-let preprocessing_results = preprocess_dataset(synthetic_dataset);
+let preprocessing_results = preprocess_dataset(synthetic_dataset)^;
 "Preprocessing completed for " ++ (len(preprocessing_results.processed_data)) ++ " samples"
 
 '---'
-let feature_engineering_results = engineer_features(preprocessing_results.processed_data);
+let feature_engineering_results = engineer_features(preprocessing_results.processed_data)^;
 "Feature engineering completed with " ++ (len(feature_engineering_results[0].engineered_features.poly_features)) ++ " polynomial features"
 
 let correlation_analysis = (

@@ -18,7 +18,7 @@ pub fn specification(spec) {
         encoding:{*:channels,*:clock}}
 }
 
-pub fn render(spec, viewport = null, snapshot = null) {
+pub fn render(spec, viewport = null, snapshot = null) any^ {
     let canonical=schema.validate(specification(spec));
     let plan=if (canonical is error) canonical else layout.normalized(canonical,viewport,snapshot);
     if (plan is error) plan else vector.render(plan,snapshot,c.attrs(spec.timeline_options.export))

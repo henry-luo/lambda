@@ -4,7 +4,7 @@
 // read below is a raw lane load on the dense arm and the body has no
 // contract boundary.
 
-pn pair_sums(bx: float[], by: float[]) float {
+pn pair_sums(bx: float[], by: float[]) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < 4) {
@@ -22,7 +22,7 @@ pn pair_sums(bx: float[], by: float[]) float {
 
 // S7.7.2: reject at this function's boundary. A rejection inside pair_sums'
 // inner while body skips its counter update and cannot finish that loop.
-pn checked_delta(xs: float[]) float {
+pn checked_delta(xs: float[]) float^ {
     let delta: float = xs[0] - xs[1]
     return delta
 }

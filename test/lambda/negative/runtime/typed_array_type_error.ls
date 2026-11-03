@@ -6,3 +6,4 @@ let arr: int[] = [1, 2, "hello"]
 
 // Mixed types in typed float array
 let farr: float[] = [1.0, "bad", 3.0]
+arr

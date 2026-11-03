@@ -68,7 +68,7 @@ fn dialog(d) => if (d == null) null else <div class:"chat-dialog-layer",
         <p if (d.kind == "attach") "Files are zipped before sending. Up to 8 MiB original / 4 MiB ZIP." else "Choose where to save " ++ d.attachment.name ++ ".">
         if (d.kind == "attach") <div class:"folder-bar", <button 'data-action':"folder-up", 'aria-label':"Enclosing folder", "↑">; <span d.folder>>;
         if (d.kind == "attach") <div id:"attachment-files", class:"attachment-files", role:"list",
-            for (e in files.rows(d)) <button class:"attachment-file", 'data-action':"file-select", 'data-path':e.path,
+            for (e in (files.rows(d) ^ { [] })) <button class:"attachment-file", 'data-action':"file-select", 'data-path':e.path,
                 'data-dir':string(e.dir), role:"listitem", <span if (e.dir) "📁 " ++ e.name else e.name>;
                 <span if (e.dir) "Folder" else files.size_label(e.size)>>>;
         <label 'for':"attachment-path", if (d.kind == "attach") "File or folder path" else "Destination path">
@@ -99,7 +99,7 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
             <div class:"filters", <span class:"filter selected", "All">; <span class:"filter", "Personal">>
             <div id:"contacts", class:"contacts",
                 for (p in chat.profiles where p.id != st.user and
-                    (st.query == "" or contains(lower(p.name ++ " " ++ chat.preview((st.inboxes[st.user] or []), st.user, p.id)), lower(st.query))))
+                    (st.query == "" or (contains(lower(p.name ++ " " ++ chat.preview((st.inboxes[st.user] or []), st.user, p.id)), lower(st.query)) ^ { false })))
                     contact(st, p)>
             <div class:"sidebar-bottom", <span class:"demo-pill", if (st.shared) "SHARED SERVER" else "LOCAL DEMO">
                 <p "A conversation has two sides.">

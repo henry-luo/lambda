@@ -7,10 +7,10 @@ pn make_chain18(length: int) {
     return {next: make_chain18(length - 1)}
 }
 
-pn walk_chain18(node: map?) int {
+pn walk_chain18(node: map?) int^ {
     var cursor: map? = node
     var count = 0
-    while (cursor != null) {
+    while ((cursor != null)^) {
         count = count + 1
         cursor = cursor.next
     }

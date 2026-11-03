@@ -6,7 +6,7 @@ pn tune27_step(x: int) int {
     return x * 2
 }
 
-pn tune27_classify(v: any) int {
+pn tune27_classify(v: any) int^ {
     let r = match v {
         case int: v + 1
         case string: len(v)
@@ -17,7 +17,7 @@ pn tune27_classify(v: any) int {
     return r
 }
 
-pn tune27_satellite_match(n: int) int {
+pn tune27_satellite_match(n: int) int^ {
     var total: int = 0
     var i: int = 0
     while (i < n) {

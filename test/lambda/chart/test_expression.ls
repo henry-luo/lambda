@@ -31,7 +31,7 @@ let cases = [
 let invalid = ["", "datum.", "datum[", "datum.value +", "'unterminated", "1e+", "1 = 2",
     "datum.value()", "unknown", "random()", "sqrt()", "if(true, 1)", "{a 1}", "[1 2]", "'\\uD800'"];
 [
-    for (test in cases where expr.evaluate(expr.compile(test[0]), row) != test[1]) {expression: test[0], failed: true},
+    for (test in cases where ((expr.evaluate(expr.compile(test[0]), row) != test[1]) ^ { false })) {expression: test[0], failed: true},
     for (source in invalid where not (expr.compile(source) is error)) {invalid: source},
     for (check in [
         {label: "missing property", passed: expr.evaluate(expr.compile("datum.missing.value"), row) is error},

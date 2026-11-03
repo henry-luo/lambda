@@ -18,7 +18,7 @@ pn tune30_mul_row(n: int, v: float[], var out: float[]) any {
 pn main() {
     var v: float[] = [1.0, 1.0, 1.0, 1.0]
     var out: float[] = [0.0, 0.0, 0.0, 0.0]
-    tune30_mul_row(4, v, out)
+    tune30_mul_row(4, v, out)^
     print(out)
     print("\n")
 }

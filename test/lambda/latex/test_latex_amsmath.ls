@@ -21,5 +21,5 @@ let order_html = latex.render_to_html(order_ast, null);
 "operator issues:"; [for (issue in order_result.diagnostics) issue.code]
 "operator issue locations:"; all([for (issue in order_result.diagnostics) issue.offset != null])
 // Font payloads can contain the same ASCII sequence; inspect only source titles.
-let order_titles = [for (i, part in split(order_html, "<title>") where i > 0) split(part, "</title>")[0]]
+let order_titles = [for (i, part in ((split(order_html, "<title>")) ^ { [] }) where i > 0) split(part, "</title>")[0]]
 "operator source order:"; sum([for (title in order_titles) len(split(replace(title, " ", ""), "Foo")) - 1]) == 1

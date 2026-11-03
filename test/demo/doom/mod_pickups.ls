@@ -7,7 +7,7 @@ import events: .mod_events
 pub fn active(player, powerup, simulation_time) => (player.powerups[powerup] or 0) > simulation_time
 fn ammo(player, kind, amount) => if (kind == null) player else {*: player,
     ammo: {*: player.ammo, [kind]: min(player.max_ammo[kind], player.ammo[kind] + amount)}}
-fn apply_item(player, actor, game, rules) {
+fn apply_item(player, actor, game, rules) any^ {
     let effect = rules.PICKUP_EFFECTS[string(actor.type)]
     let weapon = rules.WEAPON_PICKUPS[string(actor.type)]
     let key_color = rules.KEY_TYPES[string(actor.type)]
@@ -43,21 +43,21 @@ fn apply_item(player, actor, game, rules) {
     }
     else if (contains(rules.PICKUPS, actor.type)) player else null
 }
-fn collect_one(game, actor, rules) {
+fn collect_one(game, actor, rules) any^ {
     let next = apply_item(game.player, actor, game, rules)
     if (next == null) game else events.sound({*: game,
         player: {*: next, pickup_until: game.time + 0.3},
         actors: [for (entry in game.actors) if (entry.id == actor.id) {*: entry, collected: true} else entry]}, "DSITEMUP")
 }
-pub fn collect(game, rules) => if (game.player.health <= 0) game else
-    reduce([game, *[for (actor in game.actors where not actor.collected and
-        geo.distance_squared(game.player, actor) < rules.PICKUP_RANGE ** 2) actor]],
-        (acc, actor) => collect_one(acc, actor, rules))
+pub fn collect(game, rules) any^ => if (game.player.health <= 0) game else
+    reduce([game, *[for (actor in game.actors where ((((not actor.collected and
+        geo.distance_squared(game.player, actor) < rules.PICKUP_RANGE ** 2) ^ { false })))) actor]],
+        (acc, actor) any^ => collect_one(acc, actor, rules))
 
 pub fn expire(game) => {*: game, player: {*: game.player, powerups:
     map([for (powerup, deadline at game.player.powerups where deadline > game.time) *[powerup, deadline]])}}
-pub fn hazard(map_data, game, dt, rules) {
-    let sectors = [for (sector in world.sectors_at(map_data, game.player),
+pub fn hazard(map_data, game, dt, rules) any^ {
+    let sectors = [for (sector in ((((world.sectors_at(map_data, game.player)) ^ { [] }))),
         let lift = world.motion(game.lifts, sector.sectorIndex))
         {*: sector, effective_floor: if (lift == null) sector.floorHeight else lift.height}]
     let sector = sort(sectors, (entry) => -entry.effective_floor)[0]

@@ -6,7 +6,7 @@ let svg = <svg xmlns: "http://www.w3.org/2000/svg", width: 64, height: 32,
     <path d: "M32 0h32v16H32z", fill: "#00ff00">
     <path d: "M0 16h32v16H0z", fill: "#0000ff">
     <path d: "M32 16h32v16H32z", fill: "#ffffff">>
-fn stage(id, texture, shader = true) element => s.scene([
+fn stage(id, texture, shader = true) element^ => s.scene([
     s.camera({id: "camera", type: 'orthographic', view_height: 2.0}),
     s.resources([texture]),
     s.mesh(s.plane([4.0, 2.0, 1.0]), if (shader) fx.material('channel-split', "art", {amount: 0.0})^

@@ -50,15 +50,15 @@ files.restore(files.archive(grouped.doc,"Group"))^.doc==grouped.doc
 let resized = model.execute(grouped,"object.transform",{width:510,height:300,rotation:90})^
 let ungrouped = model.execute(resized,"object.ungroup")^
 len(image.images(ungrouped.doc))==2
-all([for (e in image.images(ungrouped.doc)) shapes.settings(e.node).width==240 and shapes.settings(e.node).height==150])
-all([for (e in image.images(ungrouped.doc)) transform.rotation(e.node)==90])
+all([for (e in image.images(ungrouped.doc)^) shapes.settings(e.node).width==240 and shapes.settings(e.node).height==150])
+all([for (e in image.images(ungrouped.doc)^) transform.rotation(e.node)==90])
 model.execute(ungrouped,"edit.undo")^.doc==resized.doc
 match (model.execute(grouped,"object.transform",{width:510,height:200,rotation:0}) ^ { ^ }) { case error: true default: false }
 match (model.execute(pair,"object.group",{paths:[[0,0]],boxes:boxes}) ^ { ^ }) { case error: true default: false }
 match (model.execute(shape,"object.ungroup") ^ { ^ }) { case error: true default: false }
 let flipped_group = model.execute(grouped,"object.flip",{axis:"x"})^
 let unflipped = model.execute(flipped_group,"object.ungroup")^
-all([for (e in image.images(unflipped.doc)) layout.settings(e.node).flip_x])
+all([for (e in image.images(unflipped.doc)^) layout.settings(e.node).flip_x])
 let raised = model.execute(edit_set_selection(pair,node_selection([0,0])),"object.layer",{action:"front"})^;
 (layout.settings(node_at(raised.doc,[0,0])).z>layout.settings(node_at(raised.doc,[1,0])).z)
 let lowered = model.execute(raised,"object.layer",{action:"back"})^;

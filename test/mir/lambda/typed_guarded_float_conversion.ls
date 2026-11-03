@@ -27,10 +27,10 @@ pn scalar_conversion(values: float[], index: int) {
 pn main() {
     print([typed([5], 0), inferred([5], 0), mixed([5], [1.5], 0)])
     print([type(typed([5], 1)), type(inferred([5], -1))])
-    var empty_float: float[] = fill(0, 0.0)
-    var empty_int: int[] = fill(0, 0)
+    var empty_float: float[] = fill(0, 0.0)^
+    var empty_int: int[] = fill(0, 0)^
     print([type(mixed([5], empty_float, 0)), type(mixed(empty_int, [1.5], 0))])
-    var poison: int[] = fill(3, 0)
+    var poison: int[] = fill(3, 0)^
     poison[0] = int(1.0 / 0.0)
     poison[1] = int(-1.0 / 0.0)
     poison[2] = int(0.0 / 0.0)

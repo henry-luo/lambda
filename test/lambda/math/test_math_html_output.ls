@@ -6,4 +6,4 @@ import latex: lambda.doc.latex.latex
 import snapshot: .mod_svg_snapshot
 
 let html = latex.render_file_to_html("test/input/math_intensive_test.tex")
-snapshot.normalize(html)
+snapshot.normalize(html)^

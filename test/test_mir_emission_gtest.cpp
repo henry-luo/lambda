@@ -14,6 +14,7 @@
 #include "test_mir_check_helpers.hpp"
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
+#include "../lib/file.h"
 
 static const char* kLambdaMirDir = "test/mir/lambda";
 
@@ -226,4 +227,48 @@ TEST(MirOptimizer, Aarch64LongConditionalBranchesAndLabelAddresses) {
 #else
     GTEST_SKIP() << "ARM64 branch displacement regression";
 #endif
+}
+
+TEST(MirOptimizer, CrossBlockPhiAddressFoldingKeepsSavedValue) {
+    // GVN exposes the saved index; address folding must retain its snapshot.
+    char* program = read_text_file("test/mir/native/phi_saved_loop_value.mir");
+    ASSERT_NE(program, nullptr);
+    for (unsigned level = 0; level <= 3; level++) {
+        SCOPED_TRACE(level);
+        MIR_context_t ctx = MIR_init();
+        ASSERT_NE(ctx, nullptr);
+        MIR_gen_init(ctx);
+        MIR_gen_set_optimize_level(ctx, level);
+        MIR_scan_string(ctx, program);
+        MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+        ASSERT_NE(module, nullptr);
+        MIR_item_t function = nullptr;
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items); item;
+                item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type == MIR_func_item) function = item;
+        }
+        ASSERT_NE(function, nullptr);
+        MIR_load_module(ctx, module);
+        MIR_link(ctx, MIR_set_gen_interface, nullptr);
+        using Probe = int64_t (*)(void*, uintptr_t, int64_t, int64_t);
+        Probe run = (Probe)MIR_gen(ctx, function);
+        ASSERT_NE(run, nullptr);
+        int64_t plain[] = {1, 2, 3, 4};
+        int64_t mixed[] = {1, -1, 2, -3, 4, 2};
+        int64_t handoff[] = {9007199254740992LL, 1, -1};
+        uint64_t header[6] = {};
+        auto invoke = [&](int64_t* items, int64_t length) {
+            header[4] = (uintptr_t)items;
+            header[5] = (uint64_t)length;
+            return run(nullptr, (uintptr_t)header, length, 1);
+        };
+        EXPECT_EQ(invoke(plain, 4), 9990);
+        EXPECT_EQ(invoke(mixed, 6), 8991);
+        EXPECT_EQ(invoke(plain, 4), 9990);
+        EXPECT_EQ(invoke(plain, 0), 0);
+        EXPECT_EQ(invoke(handoff, 3), 9007199254740993LL * 999);
+        MIR_gen_finish(ctx);
+        MIR_finish(ctx);
+    }
+    free(program);
 }

@@ -45,7 +45,7 @@ pn main() {
     print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9, match_options)) ++ "\n")
 
     // step 3: IUPAC code substitutions — each single letter expands to alternatives
-    var result: string = seq
+    var result: string = seq^
     result = replace(result, "B", "(c|g|t)")
     result = replace(result, "D", "(a|g|t)")
     result = replace(result, "H", "(a|c|t)")

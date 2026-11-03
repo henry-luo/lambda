@@ -15,7 +15,7 @@ pn may_fail_proc(x) int^ {
 // 2. Procedural function with explicit error type
 // ============================================
 
-pn safe_divide(a, b) int^error {
+pn safe_divide(a, b) int^ {
     if (b == 0) {
         raise error("division by zero")
     }

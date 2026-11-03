@@ -2,9 +2,9 @@
 
 import model: lambda.graph.model
 
-fn metadata_values(graph, wanted_tag) => [
+fn metadata_values(graph, wanted_tag) any^ => [
   for (child in model.element_children(graph)
-    where model.tag(child) == wanted_tag and child.value != null) string(child.value)
+    where ((model.tag(child) == wanted_tag and child.value != null) ^ { false })) string(child.value)
 ]
 
 fn last_or(values, fallback = null) =>

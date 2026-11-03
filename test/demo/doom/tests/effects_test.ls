@@ -18,10 +18,10 @@ let wall_arena = fixture.map_data(fixture.level([], [wall]))
 let missile = combat.spawn_projectile(game, {x: 0, y: 0, z: 41}, {x: 100, y: 0, z: 141},
     {speed: 1000, damage: 20, hitSound: "DSBAREXP", sound: "DSRLAUNC", sprite: "MISLA1", size: 11, is_player_rocket: true}, "player", fixture.rules)
 let impact = combat.projectiles(wall_arena, {*: missile, time: 0.1}, fixture.rules)
-let explosion = [for (event in impact.effects where event.kind == "explosion") event][0];
+let explosion = [for (event in ((impact.effects) ^ { [] }) where event.kind == "explosion") event][0];
 {
-    identities: [for (event in audible.effects) event.id], next_id: audible.next_effect_id,
+    identities: [for (event in ((audible.effects) ^ { [] })) event.id], next_id: audible.next_effect_id,
     lifetimes: [len(first.particles), len(second.particles), len(third.particles), len(expired.particles)],
-    transient_keys: [for (entry in sprites.transients(first)) entry.key],
+    transient_keys: [for (entry in ((sprites.transients(first)) ^ { [] })) entry.key],
     wall_impact: [round(explosion.position.x), round(explosion.position.y), len(impact.projectiles)]
 }

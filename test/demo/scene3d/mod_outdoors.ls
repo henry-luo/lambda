@@ -8,7 +8,7 @@ fn decorate(n,path,organ,options) element^ {
     let tag=name(n)
     let role=if (tag=='mesh' and n.id=="pond-water") "water"
         else if (map(n)["data-organ"]!=null) string(map(n)["data-organ"]) else organ
-    let children=[for (i,child in content(n)) decorate(child,path++"-"++string(i),role,options)^]
+    let children=[for (i,child in ((content(n)) ^ { [] })) decorate(child,path++"-"++string(i),role,options)^]
     let attrs=map(n)
     if (tag=='material') {
         if (role=="water") o.water(0.4,{id:"outdoor-water",roughness:0.14})
@@ -34,7 +34,7 @@ fn tracks(n) array => [
         [s.track(n.id++".wind-phase",[0.0,8.0],[0.0,2.0*math.pi])] else []),
     *(if (name(n)=='material' and n.id=="outdoor-water")
         [s.track(n.id++".water-phase",[0.0,8.0],[0.0,2.0*math.pi])] else []),
-    *[for (child in content(n)) *tracks(child)]]
+    *[for (child in ((content(n)) ^ { [] })) *tracks(child)]]
 pub fn viewport(model,options,lens=home()) element^ {
     let base=decorate(meadow.viewport(model,{},false,lens)^,"root","",options)^
     let motion=tracks(base);

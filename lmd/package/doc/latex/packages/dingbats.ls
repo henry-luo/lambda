@@ -22,7 +22,7 @@ pub fn ding_point(n) {
 }
 
 // \ding{n} as text, or null for a code outside the font
-pub fn ding(raw) {
+pub fn ding(raw) any^ {
     let n = if (raw == null) null else int(trim(raw)) ^ { null }
     let point = if (n == null) null else ding_point(n)
     if (point == null) null else chr(point)

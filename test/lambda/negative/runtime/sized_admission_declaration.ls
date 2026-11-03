@@ -2,4 +2,4 @@
 // on every tier; the interpreter had bound 300 as 44.
 fn dyn(v) => v
 let x: i8 = dyn(300)
-"bound: " ++ string(x)
+"bound: " ++ string(x^)

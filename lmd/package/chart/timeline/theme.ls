@@ -13,7 +13,7 @@ pub fn tokens(spec, snapshot = null) {
         *:c.attrs(authored)}
 }
 pub fn prefix(spec) string | error => c.text(c.option(c.attrs(spec.theme), "class_prefix", "lambda-timeline"))
-pub fn variables(spec, snapshot = null) {
+pub fn variables(spec, snapshot = null) any^ {
     let t = tokens(spec, snapshot);
     let p = prefix(spec);
     join([for (key in ["background", "text", "muted", "border", "primary", "selected", "card"])
@@ -27,9 +27,9 @@ pub fn part(spec, key, base = {}) {
     {*:base, *:c.attrs(recipe.attributes), class:c.text(base.class) ++ (if (recipe.class != null) " " ++ c.text(recipe.class) else ""),
         style:c.text(base.style) ++ c.text(recipe.style)}
 }
-pub fn render(spec, key, model, fallback) => if (spec.parts[key].render is fn) spec.parts[key].render(model,fallback) else fallback
+pub fn render(spec, key, model, fallback) any^ => if (spec.parts[key].render is fn) spec.parts[key].render(model,fallback) else fallback
 
-pub fn card_style(spec, item, slot = "body", positioned = false) {
+pub fn card_style(spec, item, slot = "body", positioned = false) any^ {
     let cards=spec.cards;
     let alignment=c.option(cards,slot ++ "_align",item.align);
     (if (alignment!=null) "text-align:" ++ c.text(alignment) ++ ";" else "") ++

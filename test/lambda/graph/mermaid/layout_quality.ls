@@ -59,7 +59,7 @@ let label1 = placement_by_index(labels.placements, 2)
 let label2 = placement_by_index(labels.placements, 3)
 
 {
-  grouped: [for (node in grouped.layers[0].nodes) node.id],
+  grouped: [for (node in ((grouped.layers[0].nodes) ^ { [] })) node.id],
   cluster_separated: grouped.clusters[0].x + grouped.clusters[0].width <=
     by_id(grouped.nodes, "outside").x - by_id(grouped.nodes, "outside").width / 2.0,
   obstacle_detour: len(ac.points) >= 4,

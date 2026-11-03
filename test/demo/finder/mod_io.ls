@@ -29,9 +29,9 @@ fn archive_member(node,members,index=0) element^ {
 pub fn read_location(path,st=null) map^ {
     let target = model.absolute(path,sys.proc.self.cwd#)
     let known = known_entry(st,target)
-    let saved = [for (location in st.locations or [] where location.path == target) location.locator][0]
+    let saved = [for (location in st.locations or [] where ((location.path == target) ^ { false })) location.locator][0]
     let entry = if (known != null or saved != null or target == "/") known
-        else [for (e in read_folder(model.parent(target))^ where e.path == target) e][0]
+        else [for (e in read_folder(model.parent(target))^ where ((e.path == target) ^ { false })) e][0]
     let locator = saved or entry.locator or (if (model.archive(entry)) {outer:target,members:[]} else null);
     if (locator == null) {
         if (entry != null and not entry.dir) raise error("Choose a folder or ZIP archive.")
@@ -40,7 +40,7 @@ pub fn read_location(path,st=null) map^ {
         let cached = st.archive_cache
         let cache = if (cached.path == locator.outer) cached else (
             let root = input(locator.outer,'zip')^,
-            let physical = [for (e in read_folder(model.parent(locator.outer))^ where e.path == locator.outer) e][0],
+            let physical = [for (e in read_folder(model.parent(locator.outer))^ where ((((((e.path == locator.outer) ^ { false })))))) e][0],
             {path:locator.outer,root:root,entry:{*:physical,archive:true,kind:"Archive"}})
         let node = archive_member(cache.root,locator.members)^
         let container = if (len(locator.members)==0) {*:cache.entry,locator:locator}
@@ -60,7 +60,7 @@ pub fn navigate(st,path,cursor=-1) map^ {
 pub fn read_destination(path,excluded=[]) map^ {
     let entries = read_folder(path)^;
     {path:path,entries:[for (e in entries where e.dir order by lower(e.name))
-        {*:e,blocked:len([for (source in excluded where model.inside(e.path,source)) source])>0}]}
+        {*:e,blocked:len([for (source in excluded where ((model.inside(e.path,source)) ^ { false })) source])>0}]}
 }
 pub fn preview(entry) map^ {
     if (entry == null) {kind:"empty"}

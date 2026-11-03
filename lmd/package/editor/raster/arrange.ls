@@ -18,7 +18,7 @@ pub fn run_command(st,command) any^ {
         let offsets = alignment.offsets(boxes,reference,mode)
         let horizontal = alignment.horizontal(mode);
         // raster placement follows the existing integral-pixel movement contract.
-        {*:st,doc:reduce([st.doc,*rows],(image,row) => (
+        {*:st,doc:reduce([st.doc,*rows],(image,row) any^ => (
             let delta = int(round(offsets[row.id])),
             if (delta == 0) image else model.replace(image,row.id,
                 model.translated(row.node,if (horizontal) delta else 0,if (horizontal) 0 else delta)^)^))}

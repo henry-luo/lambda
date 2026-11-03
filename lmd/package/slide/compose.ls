@@ -5,8 +5,8 @@ import scene: .scene
 import transitions: .transitions
 
 let slide_attrs = ["id", "title", "background", "layout", "theme", "master", *transitions.attributes]
-fn fields(node, excluded = []) => map([for (key, value in node where (key is symbol or key is string) and
-    not contains(excluded, string(key))) (string(key), value)])
+fn fields(node, excluded = []) any^ => map([for (key, value in node where (((key is symbol or key is string) and
+    not contains(excluded, string(key))) ^ { false })) (string(key), value)])
 
 pub fn definitions(deck, tag) array^ {
     let entries = c.children(deck, tag)
@@ -17,7 +17,7 @@ pub fn definitions(deck, tag) array^ {
 }
 
 fn definition(entries, id, path) element^ {
-    let matches = [for (entry in entries where c.as_text(entry.id) == c.as_text(id)) entry]
+    let matches = [for (entry in entries where ((c.as_text(entry.id) == c.as_text(id)) ^ { false })) entry]
     if (len(matches) != 1) raise c.fail(path, "unknown definition " ++ c.as_text(id)) else matches[0]
 }
 
@@ -33,12 +33,12 @@ fn master(entries, id, seen = []) element^ {
 }
 
 // an explicit object ID replaces its inherited slot; other objects keep their order.
-fn merge_objects(inherited, local) => [
+fn merge_objects(inherited, local) any^ => [
     *[for (obj in inherited) {
-        let replacements = [for (next in local where obj.id != null and c.as_text(next.id) == c.as_text(obj.id)) next]
+        let replacements = [for (next in local where ((obj.id != null and c.as_text(next.id) == c.as_text(obj.id)) ^ { false })) next]
         if (len(replacements) > 0) replacements[0] else obj
     }],
-    *[for (obj in local where obj.id == null or not contains([for (prior in inherited where prior.id != null) c.as_text(prior.id)], c.as_text(obj.id))) obj]]
+    *[for (obj in local where ((obj.id == null or not contains([for (prior in inherited where prior.id != null) c.as_text(prior.id)], c.as_text(obj.id))) ^ { false })) obj]]
 
 pub fn layouts(deck, width, height) map^ {
     let entries = definitions(deck, 'layout')^;
@@ -69,11 +69,11 @@ pub fn slides(deck, width, height, palette, layouts) array^ {
         0, width, height, palette, layouts, "master." ++ c.as_text(node.id))^];
     [for (node in c.children(deck, 'slide')) {
         let checked = c.attributes(node, slide_attrs, "slide")^;
-        let checked_objects = c.check_unique([for (obj in c.objects(node) where obj.id != null) {id: c.as_text(obj.id)}], "slide")^;
+        let checked_objects = c.check_unique([for (obj in ((c.objects(node)) ^ { [] }) where obj.id != null) {id: c.as_text(obj.id)}], "slide")^;
         let selected = c.value(node.master, deck.master)
         let base = if (selected == null or selected == false) <master> else definition(checked_masters, selected, "slide.master")^;
         let attrs = {*: fields(base, ["id", "master"]), *: fields(node, ["master"])};
         <slide *: attrs, *[*merge_objects(c.objects(base), c.objects(node)),
-            *[for (child in content(node) where not (child is element) or not contains(['text', 'shape', 'image', 'content', 'group'], name(child))) child]]>
+            *[for (child in ((content(node)) ^ { [] }) where ((not (child is element) or not contains(['text', 'shape', 'image', 'content', 'group'], name(child))) ^ { false })) child]]>
     }]
 }

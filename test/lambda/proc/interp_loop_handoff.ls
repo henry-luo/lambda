@@ -101,7 +101,7 @@ pn arr_add(var arr, item) { vec_add(arr.vals, item) }
 pn fill_up(arr, n) {
     var i = 0
     while (i < n) {
-        arr_add(arr, i)
+        arr_add(arr, i)^
         i = i + 1
     }
     return arr
@@ -109,7 +109,7 @@ pn fill_up(arr, n) {
 
 // (i) a typed string live-in appended in place, and a typed string parameter
 // entered through a literal argument and through a function value
-pn digits(n: int) string {
+pn digits(n: int) string^ {
     var s: string = ""
     var i: int = 0
     while (i < n) {
@@ -118,7 +118,7 @@ pn digits(n: int) string {
     }
     return s
 }
-pn extend(s: string, n: int) string {
+pn extend(s: string, n: int) string^ {
     var i: int = 0
     while (i < n) {
         s = s ++ (i % 10)
@@ -131,8 +131,8 @@ pn main() {
     alias_write()
     print(find_first(100000)); print(" ")
     print(skip_and_stop()); print(" ")
-    var squares: int[] = fill(16, 0)
-    fill_squares(squares, 30000)
+    var squares: int[] = fill(16, 0)^
+    fill_squares(squares, 30000)^
     print(squares[3]); print(" "); print(squares[15]); print(" ")
     print(block_value()); print(" ")
     print(nested_in_if(true)); print(" ")

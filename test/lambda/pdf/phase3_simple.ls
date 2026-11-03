@@ -22,7 +22,7 @@ pn main() {
     var path_xml = []
     var i = 0
     let np = len(r.paths)
-    while (i < np) {
+    while ((i < np)^) {
         path_xml = path_xml ++ [format(r.paths[i], 'xml')]
         i = i + 1
     }

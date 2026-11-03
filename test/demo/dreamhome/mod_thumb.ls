@@ -38,7 +38,7 @@ fn faces(p, it) {
 fn bounds(shapes) => (let xs = [for (s in shapes) *(if (s.ball) [s.cx - s.rx, s.cx + s.rx] else [for (p in s.pts) p[0]])],
     let ys = [for (s in shapes) *(if (s.ball) [s.cy - s.ry, s.cy + s.ry] else [for (p in s.pts) p[1]])],
     {x0: min(xs), y0: min(ys), x1: max(xs), y1: max(ys)})
-fn n(x) => A.n(x)
+fn n(x) any^ => A.n(x)
 
 // nearer parts later: farther back (smaller x + y) first, lower first
 pub fn piece_svg(it) {

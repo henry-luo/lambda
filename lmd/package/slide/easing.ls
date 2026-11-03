@@ -15,7 +15,7 @@ pub fn valid(e) => contains(['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-o
     (e is array and len(e) == 4 and all([for (v in e) c.finite(v)]) and
         e[0] >= 0.0 and e[0] <= 1.0 and e[2] >= 0.0 and e[2] <= 1.0)
 
-pub fn sample(e, progress) {
+pub fn sample(e, progress) any^ {
     let t = clamp(progress)
     if (t == 0.0 or t == 1.0 or e == 'linear') t
     else if (e == 'ease-in-cubic') t ** 3

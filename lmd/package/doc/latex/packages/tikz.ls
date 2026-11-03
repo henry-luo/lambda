@@ -3,23 +3,23 @@ import bridge: ~~.tikz_bridge
 import util: ~~.util
 import people: lambda.doc.tikz.people
 
-fn declarations_in(node) {
+fn declarations_in(node) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
         if (tag == "tikzset") {
             let raw = util.raw_argument(node, "required", 0)
             if (raw == null) [] else [raw]
-        } else [for (child in node, declaration in declarations_in(child))
+        } else [for (child in node, declaration in ((declarations_in(child)) ^ { [] }))
             declaration]
     }
 }
 
 pub fn preamble_declarations(ast) => [for (child in ast,
-    declaration in if (child is element and string(name(child)) != "document")
-        declarations_in(child) else []) declaration]
+    declaration in ((if (child is element and string(name(child)) != "document")
+        declarations_in(child) else []) ^ { [] })) declaration]
 
-fn math_in(node) {
+fn math_in(node) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -32,16 +32,16 @@ fn math_in(node) {
               arity: util.raw_argument(node, "required", 1),
               source: util.raw_argument(node, "required", 2),
               offset: node.source_offset}]
-        else [for (child in node, declaration in math_in(child)) declaration]
+        else [for (child in node, declaration in ((math_in(child)) ^ { [] })) declaration]
     }
 }
 
 pub fn math_declarations(ast) => [for (child in ast,
-    declaration in math_in(child)) declaration]
+    declaration in ((math_in(child)) ^ { [] })) declaration]
 
 pub fn render_picture(island, definitions = [], declarations = [],
                       math_declarations = [], custom_colors = [],
-                      people_active = false, base_uri = null) =>
+                      people_active = false, base_uri = null) any^ =>
     bridge.render_picture(island, definitions, declarations,
         math_declarations, custom_colors, people_active, base_uri)
 

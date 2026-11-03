@@ -1,8 +1,8 @@
 // D3.3.3v3: element candidates never certify a collection's physical slots.
 pn tune32_phase2_words() {
     var words = []
-    words.push("al" ++ "pha")
-    words.push("é")
+    words.push("al" ++ "pha")^
+    words.push("é")^
     words
 }
 
@@ -15,7 +15,7 @@ pn tune32_phase2_key() { print("K"); 0 }
 
 pn tune32_phase2_mixed_words(mode) {
     var words = []
-    words.push("alpha")
+    words.push("alpha")^
     if (mode) { return words }
     words.push(7)
     return words

@@ -5,4 +5,4 @@ type spaces = \("\s"+)
 pub type word = \(("a" to "z")+)
 pub type pair = \(word "=" digits)
 pub fn words(s) => [for (m in find(s, word)) m.value]
-pub fn gaps(s) => len(find(s, spaces))
+pub fn gaps(s) any^ => len(find(s, spaces))

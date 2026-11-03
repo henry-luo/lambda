@@ -17,8 +17,8 @@ let st = {*: text.new_state(null), in_text: true, font_info: fi, font_size: 10.0
     tm: [0.0, 2.0, -2.0, 0.0, 30.0, 40.0], char_space: 1.0, hor_scale: 50.0, rise: 3.0}
 let run = text.apply_op(st, util.IDENTITY, "TJ", [{kind: "array", value:
     [{kind: "string", value: "A"}, -200, {kind: "hex", value: "41"}]}], 200.0)
-let paints = [for (el in run.emit where name(el) == 'g') el]
-let copies = [for (el in run.emit where name(el) == 'text') el]
+let paints = [for (el in ((run.emit) ^ { [] }) where ((name(el) == 'g') ^ { false })) el]
+let copies = [for (el in ((run.emit) ^ { [] }) where ((name(el) == 'text') ^ { false })) el]
 let overlay = html.text_layer(run.emit, 200, 200, null);
 
 [len(outlined) == 21, all(outlined),

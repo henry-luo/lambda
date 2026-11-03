@@ -3,9 +3,9 @@
 import L: .mod_library
 import C: .mod_collage
 
-fn px(v) => string(round(v * 100) / 100) ++ "px"
-fn pct(v) => string(round(v * 1000) / 10) ++ "%"
-fn box(x, y, w, h, s) => "position:absolute;left:" ++ px(x * s) ++ ";top:" ++ px(y * s) ++ ";width:" ++ px(w * s) ++ ";height:" ++ px(h * s) ++ ";"
+fn px(v) any^ => string(round(v * 100) / 100) ++ "px"
+fn pct(v) any^ => string(round(v * 1000) / 10) ++ "%"
+fn box(x, y, w, h, s) any^ => "position:absolute;left:" ++ px(x * s) ++ ";top:" ++ px(y * s) ++ ";width:" ++ px(w * s) ++ ";height:" ++ px(h * s) ++ ";"
 fn face(f) => "font-family:" ++ f.css ++ ";font-style:" ++ f.style ++ ";font-weight:" ++ f.weight ++ ";"
 
 // a photo filling its box at the slot's focal point and zoom; a missing file shows its colour
@@ -105,7 +105,7 @@ let SAMPLE_ASPECTS = [1.5, 0.67, 1.33, 1.0, 1.5, 0.75, 1.33, 1.78, 1.0]
 let SAMPLE_LIB = {photos:[for (c in SAMPLE_COLORS) {title:"", color:c, thumb_src:"", photo_src:"", has_photo:false}]}
 let PREVIEW_SIZE = 64.0
 
-fn preview(t) {
+fn preview(t) any^ {
     let m = {*:C.apply_template(C.create([for (i in 1 to len(SAMPLE_COLORS)) i], "Aa"), t.key), credits:false}
     let lay = C.layout(m, SAMPLE_ASPECTS);
     canvas(SAMPLE_LIB, m, lay, {scale:PREVIEW_SIZE / lay.width, source:"thumb", selected:-1, inert:true})

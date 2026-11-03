@@ -24,7 +24,7 @@ pn read_aloud(owner,voice,words,part) {
 }
 
 // `heard` is the card under a double-click's first click: in Level 2 that click already moved the card away.
-view <sentence_app> state game:game_model.new_game(), voice:null, heard:null {
+view <sentence_app> () any^ state game:game_model.new_game(), voice:null, heard:null {
     scene.page(game,voice != null and voice.part == "sentence")
 }
 on click(evt) {
@@ -54,17 +54,17 @@ on dblclick(evt) {
 }
 // a reading that ends or fails frees the read-aloud button; one it already replaced changes nothing.
 on speechend(evt) {
-    if (voice != null and evt.token == voice.token) { voice = null }
+    if ((voice != null and evt.token == voice.token)^) { voice = null }
     return 'handled'
 }
 on speecherror(evt) {
-    if (voice != null and evt.token == voice.token) { voice = null }
+    if ((voice != null and evt.token == voice.token)^) { voice = null }
     return 'handled'
 }
 on keydown(evt) {
     if (evt.ctrlKey or evt.metaKey or evt.altKey) { return 'pass' }
     let changed = game_model.shortcut(game,lower(string(evt.key)))
-    if (changed == game) { return 'pass' }
+    if ((changed == game)^) { return 'pass' }
     game = changed
     return 'prevent-default'
 }

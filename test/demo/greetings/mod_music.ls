@@ -13,7 +13,7 @@ pub pn schedule(owner) {
 }
 pub pn stop(owner, sound) {
     let frame = dom.get_attribute(owner, "data-frame")
-    if (frame != null) dom.cancel_frame(owner, int(frame))
+    if (frame != null) dom.cancel_frame(owner, int(frame)^)
     dom.set_attribute(owner, "data-running", "false")
     if (sound.token != null) dom.audio_close(owner, sound.token)
     return {*:sound, token: null, track: "none"}
