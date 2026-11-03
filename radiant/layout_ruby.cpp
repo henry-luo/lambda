@@ -861,6 +861,28 @@ static void ruby_measure_used_level(LayoutRubyLevel* level) {
     }
 }
 
+struct RubySourceFlowOrigin {
+    float advance;
+    float exclusion_start;
+    int line_number;
+    explicit RubySourceFlowOrigin(LayoutContext* context)
+        : advance(context->line.advance_x),
+          exclusion_start(context->line.has_float_intrusion ? context->line.effective_left : context->line.left),
+          line_number(context->block.line_number) {}
+};
+
+static float ruby_base_flow_start(LayoutContext* context, LayoutRubyLevel* base,
+        const RubySourceFlowOrigin& origin) {
+    // only a changed exclusion on this source line invalidates the captured, decoration-aware cursor.
+    if (context->block.line_number != origin.line_number || !context->line.has_float_intrusion ||
+            context->line.effective_left == origin.exclusion_start) return origin.advance;
+    for (LayoutRubyBox* box = base->first; box; box = box->next) {
+        Rect bounds = ruby_box_bounds(box);
+        if (bounds.width > 0.0f || bounds.height > 0.0f) return bounds.x;
+    }
+    return context->line.advance_x;
+}
+
 static float ruby_column_range_width(LayoutRubySegment* segment, int first, int count) {
     float width = 0.0f;
     for (int index = first; index < min(first + count, segment->column_count); index++) {
@@ -1328,9 +1350,10 @@ static void ruby_annotation_line_membership(LayoutRubySegment* segment, int line
 
 static bool ruby_finish_segment_flow(LayoutContext* context, ViewSpan* ruby,
         LayoutRubyModel* model, LayoutRubySegment* segment, ScratchScope* scope,
-        float start, bool source_fragments, float preceding_space = 0.0f) {
+        const RubySourceFlowOrigin& origin, bool source_fragments, float preceding_space = 0.0f) {
     // whole units and selected text fragments commit through one column/baseline stage.
     ruby_measure_used_level(&segment->base);
+    float start = ruby_base_flow_start(context, &segment->base, origin);
     Linebox base_line = context->line;
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
         ruby_layout_annotation_level(context, level, &base_line, segment->width);
@@ -1434,7 +1457,7 @@ static void ruby_flow_unbroken_segments(LayoutContext* context, ViewSpan* ruby,
         if (may_wrap && boundary && !context->line.is_line_start &&
                 context->line.advance_x + required > right + kTextLayoutSubpixelEpsilon)
             line_break(context);
-        float start = context->line.advance_x;
+        RubySourceFlowOrigin origin(context);
         float preceding_space = context->line.has_space
             ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;
         {
@@ -1442,7 +1465,7 @@ static void ruby_flow_unbroken_segments(LayoutContext* context, ViewSpan* ruby,
             ruby_flow_sources(context, model, segment->source_start, segment->source_end);
         }
         if (!ruby_finish_segment_flow(context, ruby, model, segment, scope,
-                start, false, preceding_space)) return;
+                origin, false, preceding_space)) return;
         previous = segment;
         source = segment->source_end;
     }
@@ -1814,13 +1837,13 @@ static bool ruby_flow_parallel_text(LayoutContext* context, ViewSpan* ruby,
             }
             bool final = !base || base->last + 1 == base->plan.count;
             if (base) each_box([](LayoutRubyBox* box) { ruby_select_source_intervals(box->fragment); });
-            float start = context->line.advance_x;
+            RubySourceFlowOrigin origin(context);
             {
                 LayoutInlineKeepScope keep(context, true);
                 ruby_flow_level(context, &segment->base);
                 if (!final) line_consume_trailing_collapsible_space(context, true, true, true);
             }
-            if (!ruby_finish_segment_flow(context, ruby, model, segment, scope, start, base != nullptr)) return true;
+            if (!ruby_finish_segment_flow(context, ruby, model, segment, scope, origin, base != nullptr)) return true;
             if (!final) {
                 ruby_finalize_flow_line(context, ruby, model);
                 line_break(context);
@@ -1884,6 +1907,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     ruby_clear_element_geometry(ruby);
     bool inline_root = ruby->view_type == RDT_VIEW_INLINE;
     float start = context->line.advance_x;
+    RubySourceFlowOrigin origin(context);
     float preceding_space = context->line.has_space
         ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;
     bool has_annotations = false;
@@ -1901,6 +1925,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         if (model.failed) return;
         ruby_prepare_unbroken_float_band(context, ruby, &model, sizes);
         start = context->line.advance_x;
+        origin = RubySourceFlowOrigin(context);
         if (parallel_wraps && ruby_flow_parallel_text(context, ruby, &model, &scope)) return;
         if (parallel_wraps && ruby_has_unbroken_segments(context, &model)) {
             ruby_flow_unbroken_segments(context, ruby, &model, &scope);
@@ -1917,6 +1942,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         if (!inline_root) ruby_finish_block_line(context);
         return;
     }
+    start = model.first ? ruby_base_flow_start(context, &model.first->base, origin) : start;
     float natural_advance = context->line.advance_x - start;
     if (inline_root) compute_span_bounding_box(ruby, false, font_box_handle(&context->font));
     float font_height = font_get_cell_height(font_box_handle(&context->font));

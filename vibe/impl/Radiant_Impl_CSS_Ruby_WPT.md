@@ -20,6 +20,8 @@ Semantic line-over/under mapping and internal block-start padding are qualified
 for ordinary Ruby across horizontal and both vertical writing modes.
 First-line position inheritance is qualified for selected horizontal source
 fragments, including retained line membership changes.
+Ruby column completion also retains newly introduced leading base-float
+exclusions; annotation-emitted float ownership remains partial.
 
 ## Objective and contracts
 
@@ -2716,3 +2718,79 @@ source-origin/column-completion protocol, keeping ordinary and disabled-reading
 controls and retained edits. Evidence and bounded acceptance cases:
 `temp/ruby-m30/next-milestone.json` and
 `temp/ruby-m31/{float-cause-coordinates.json,float-cause-debugger.log,float-browser.json}`.
+
+## M31: Ruby columns retain newly introduced source float exclusions
+
+P1, completed with the recorded limits below. A visible reading
+causes the same base that clears a leading float without annotations to move
+14px into its margin box. LLDB confirms the first incorrect translation:
+source flow has already selected local x14, but column allocation uses the x0
+cursor captured before the float was installed. Ordinary inline and disabled
+reading controls retain the correct position. Evidence:
+`temp/ruby-m31/{float-cause-coordinates.json,float-cause-debugger.log,
+focused-before-corrected.log}`.
+
+[CSS Ruby §2.1.1](https://drafts.csswg.org/css-ruby-1/#formatting-context)
+keeps internal floats in the Ruby container's containing block. A shared
+stack-owned source-origin descriptor now records the advance, exclusion edge
+and selected line before source emission. If that same line gains a different
+float exclusion edge, column completion reads the already-flowed base origin;
+otherwise it retains the captured cursor, which includes decorations. Whole
+and selected segment completion share this protocol. The descriptor owns no
+retained pointer or allocation (**D4.5.1v4 / D4.1.4v5**); APIs and ownership
+placement stay private to layout (**D7.3.3–D7.3.4**).
+
+An intermediate implementation unconditionally inferred the origin from base
+bounds. Raw qualification exposed block-Ruby decoration regressions; that
+implementation was rejected. The final exclusion-change protocol restores
+both documents' previous full text matches and preserves all existing full
+Ruby matches. The suite remains **60/212 full matches**; only
+`ruby-float-handling-001-ref` changes, improving **0% → 25% text matches**.
+References, upstream fixtures, tolerances and baselines remain unchanged.
+Evidence: `temp/ruby-m31/{delta-origin-1.json,delta-origin-2.json}`.
+
+Two regressions cover direct/nested leading floats, shorter/longer readings,
+padding, shared whole segments, ordinary/disabled-reading controls, left/right
+mutations and retained width/reading removal. Source character ranges and tail
+advance retain the occupied interval. A browser control independently confirms
+that trailing Ruby alignment space belongs to the final character's range.
+External-float browser controls retain **292 coordinate checks**: the twelve
+remaining differences are Chromium's optional 5px end overhang on the four
+long-reading examples. Their base/reading/source/float geometry agrees; those
+differences remain visible. Chromium computes nested Ruby floats to `none`,
+which is not used as justification to remove native floats. Evidence:
+`temp/ruby-m31/{focused-final.log,no-float-browser.json,
+float-external-comparison-final.json,float-browser.json}`. The frozen candidate's
+native before/after audit retains all 468 coordinates: only 68 horizontal
+coordinates move, each by the required 14px exclusion; other coordinates and
+tree/source structure remain identical (`fixture-before-after-audit.json`).
+
+Annotation-emitted floats remain partial. A separate padded unannotated-Ruby
+probe also retains an extra 10px origin discrepancy; the disabled-reading and
+ordinary controls agree. This milestone does not claim that independent path
+is repaired. Evidence: `temp/ruby-m31/float-cause-padding-native.json`.
+
+All **149 focused neighbors** pass. Dimension lint and the 421-name inventory
+check pass; only source/test reference columns 14–15 change. The required
+Radiant aggregate passes: **9,095 passed, 305 partial, 2 skipped, 0 failed /
+9,402 checks**, including **499 native text-query**, **504 paged-media** and
+**752 UI automation** checks. Layout retains 4,973 full / 301 partial matches.
+All four frozen inputs and the qualified CLI hash remain unchanged after the
+gate. No module API/import or persistent ownership placement changes, so M30's
+same-six-import boundary limit remains recorded without a redundant audit.
+Evidence: `temp/ruby-m31/{neighbors-final.log,lint-origin-2.log,
+inventory-check-final.log,radiant.log,qualification-result.json,source-inputs.json}`.
+
+The goal remains active with 152 raw mismatches. The next ownership milestone
+starts from an annotation float whose 104px outer bottom disappears before
+following `clear:both`: ordinary/external/base controls clear at 104px, while
+the reading case clears at 40px. LLDB records the new count/extent, then
+`LayoutContextScope` restores the empty BFC snapshot. An ordinary child context
+preserves the owner, and an existing list hides the clearance symptom through
+linked-node aliasing. Trace committed annotation ownership and speculative
+measurement separately; keep first/seeded lists and current/ancestor BFC
+controls. CSS Ruby §2.1.1 and [CSS 2.2 §9.5.2](https://www.w3.org/TR/CSS22/visuren.html#flow-control)
+govern containing-block ownership and clearance. Evidence and finite acceptance:
+`temp/ruby-m31/next-milestone.json` and
+`temp/ruby-m32/{clear-coordinate-audit.json,annotation-float-clear-debugger.log,
+owner-control-audit.json}`.

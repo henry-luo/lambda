@@ -15123,6 +15123,106 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyColumnsPreserveTheSourceOriginBesideInternalFloats) {
+    ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    const char* ids[] = {"p0-direct-short", "p0-direct-long", "p0-nested-short", "p0-nested-long",
+        "p10-direct-short", "p10-direct-long", "p10-nested-short", "p10-nested-long",
+        "p0-plain", "p0-hidden", "p10-plain", "p10-hidden"};
+    struct Case { DomElement* row; DomElement* ruby; DomElement* base; DomElement* reading;
+        DomElement* floating; DomElement* tail; DomText* source; DomNode* parent;
+        const unsigned char* data; float padding; bool long_reading; } cases[12] = {};
+    auto part = [&](const char* id, const char* suffix) {
+        char name[80]; str_fmt(name, sizeof(name), "%s-%s", id, suffix);
+        return dom_find_element_by_id(document->root, name);
+    };
+    for (size_t index = 0; index < sizeof(ids) / sizeof(*ids); index++) {
+        const char* id = ids[index]; Case& entry = cases[index];
+        entry.row = dom_find_element_by_id(document->root, id);
+        entry.ruby = part(id, "ruby"); entry.base = part(id, "base");
+        entry.reading = part(id, "reading"); entry.floating = part(id, "float"); entry.tail = part(id, "tail");
+        ASSERT_NE(entry.row, nullptr); ASSERT_NE(entry.ruby, nullptr); ASSERT_NE(entry.base, nullptr);
+        ASSERT_NE(entry.floating, nullptr); ASSERT_NE(entry.tail, nullptr);
+        entry.source = first_text_leaf(entry.base); ASSERT_NE(entry.source, nullptr);
+        entry.parent = entry.source->parent; entry.data = entry.source->text_data();
+        entry.padding = strncmp(id, "p10-", 4) == 0 ? 10.0f : 0.0f;
+        entry.long_reading = strstr(id, "-long") != nullptr;
+    }
+    auto check = [&](bool left, bool hidden) {
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.row->get_attribute("id"));
+            bool visible = entry.reading && entry.reading->view_type != RDT_VIEW_NONE && !hidden;
+            float column = visible && entry.long_reading ? 180.0f : 120.0f;
+            float origin = entry.row->x + (left ? 14.0f : 0.0f);
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(entry.floating, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE),
+                left ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT);
+            EXPECT_FLOAT_EQ(entry.floating->x, entry.row->x + (left ? 2.0f : entry.row->width - 12.0f));
+            EXPECT_FLOAT_EQ(entry.base->x, origin + entry.padding);
+            EXPECT_FLOAT_EQ(entry.base->width, column);
+            EXPECT_FLOAT_EQ(entry.ruby->x, origin);
+            EXPECT_FLOAT_EQ(entry.ruby->width, column + entry.padding);
+            EXPECT_FLOAT_EQ(entry.tail->x, origin + entry.padding + column);
+            EXPECT_EQ(first_text_leaf(entry.base), entry.source);
+            EXPECT_EQ(entry.source->parent.get(), entry.parent); EXPECT_EQ(entry.source->text_data(), entry.data);
+            ASSERT_NE(entry.source->rect, nullptr); EXPECT_EQ(entry.source->rect->line_number, 0);
+            Rect bounds = {};
+            view_get_visual_bounds(entry.base, &bounds.x, &bounds.y, &bounds.width, &bounds.height);
+            // ruby-align:start assigns remaining column space to the last source character's range.
+            for (unsigned character = 0; character < 6; character++)
+                expect_character_rect(range, entry.source, character,
+                    {origin + entry.padding + (float)character * 20.0f, bounds.y,
+                        20.0f + (character == 5 ? column - 120.0f : 0.0f), 20.0f});
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(true, false); }
+    for (bool left : {false, true}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-side", left ? "left" : "right"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "width", left ? "300px" : "400px"));
+        }
+        check(left, false);
+    }
+    for (bool hidden : {true, false}) {
+        for (size_t index = 0; index < 8; index++)
+            ASSERT_TRUE(dom_cssom_set_inline_property(cases[index].reading, "display", hidden ? "none" : "ruby-text"));
+        check(true, hidden);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyWholeSegmentsRetainNewFloatExclusions) {
+    ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* row = find("series"), *ruby = find("series-ruby"), *tail = find("series-tail");
+    DomElement* bases[] = {find("series-first"), find("series-second")};
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(tail, nullptr);
+    DomText* sources[2] = {};
+    for (size_t index = 0; index < 2; index++) {
+        ASSERT_NE(bases[index], nullptr); sources[index] = first_text_leaf(bases[index]);
+        ASSERT_NE(sources[index], nullptr);
+    }
+    for (bool left : {true, false, true}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(row, "--float-side", left ? "left" : "right"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float start = row->x + (left ? 14.0f : 0.0f);
+        EXPECT_FLOAT_EQ(ruby->x, start); EXPECT_FLOAT_EQ(ruby->width, 180.0f);
+        EXPECT_FLOAT_EQ(tail->x, start + 180.0f);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (size_t index = 0; index < 2; index++) {
+            EXPECT_EQ(first_text_leaf(bases[index]), sources[index]);
+            EXPECT_FLOAT_EQ(bases[index]->x, start + (float)index * 100.0f);
+            Rect bounds = {}; view_get_visual_bounds(bases[index], &bounds.x, &bounds.y, &bounds.width, &bounds.height);
+            for (unsigned character = 0; character < 4; character++)
+                expect_character_rect(range, sources[index], character,
+                    {start + (float)index * 100.0f + (float)character * 20.0f, bounds.y, 20.0f, 20.0f});
+        }
+        dom_range_release(range);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyFirstLinePositionChangesAcrossOneFragmentedSource) {
     ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
     process_document_font_faces(&ui, document);
