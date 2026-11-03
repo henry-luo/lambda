@@ -7,9 +7,10 @@ Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
 normalization, inline font boxes, Ruby spacing, nested envelopes and non-inline
 Ruby formatting and isolated-inline margin advances are also qualified. General flow
-integration and the remaining raw suite failures are still open. Base-only
-fragment flow and unbroken parallel units are qualified. The objective
-is not complete.
+integration and the remaining raw suite failures are still open. Coordinated
+horizontal flow is qualified for source-text fragments, complete shared columns
+and neighboring whole atomic units. Spanning/missing columns and vertical/RTL
+source fragmentation remain open. The objective is not complete.
 
 ## Objective and contracts
 
@@ -2124,3 +2125,77 @@ changed, so the M21 boundary audit's six deferred imports remain recorded rather
 than rerun. The unrelated M15 input/PDF build limit was not rerun. The full goal
 remains active with 157 raw Ruby mismatches; references, upstream fixtures,
 comparison tolerances and baseline floors remain unchanged.
+
+## M23: mixed atomic and breakable text units
+
+Four before-build controls reproduce lost pairing when an atomic base or
+reading precedes or follows a breakable text pair: native rows are 150px rather
+than the 120px shared by Chromium and independently segmented native controls.
+The reading stays on one line while its base wraps. Changing only the atomic
+neighbor's display selects the failing fallback. Evidence:
+`temp/ruby-m23/{mixed-atomic-pairs.html,mixed-atomic-comparison.json}`.
+
+The text formatter requires text-leaf plans in every segment; the whole-unit
+formatter requires every segment to lack interior paired opportunities. Their
+applicability gap sends this ordinary composition to the all-bases-first
+fallback. CSS Ruby §3.4 requires paired fragments to stay together and §3.4.1
+preserves real base-text seams. Atomic descendants retain their own formatting
+context under CSS Display §2.6–§2.7.
+
+P1 outcome: prepare whole and text units before source reset, then select and
+emit both through the existing coordinated loop and shared placement stages.
+Reuse the ordinary level walker and unbroken-unit predicate; do not add a third
+formatter or force the whole group onto a fresh line. Plans stay scratch-owned
+and source identities/parents/data remain under **D4.5.1v4 / D4.1.4v5**.
+
+Acceptance covers atomic prefix/suffix bases and readings, independent internal
+atomic wrapping, a fitting ordinary prefix, paint and every character Range,
+and initial/retained plus wide/narrow reflow. Existing shared-column and seam
+neighbors must remain strict. Spanning/missing columns and vertical/RTL source
+fragmentation stay open. Verification budget: failing native/browser controls,
+focused neighbors and raw Ruby delta, then one stable required Radiant gate,
+dimension lint and inventory.
+
+Whole units and text fragments now use one selection/emission loop. The
+existing unbroken-unit predicate determines whether a source without a text
+plan can participate; a real unsupported interior opportunity still rejects
+preparation before any source reset. Ordinary level walking, keep scopes,
+break-group caching and final placement remain shared. Selected-line envelopes
+now include atomic leaf boxes in their parent line's frame, while their local
+descendants remain independent. The first native run exposed that missing
+envelope after pairing was repaired; no coordinate offsets were added.
+
+All 101 focused Ruby/intrinsic/fragment/bidi neighbors pass, including strict
+paint, every character Range, source identities and internal atomic wrapping
+through retained wide/narrow flow. The forbidden Latin seam probe matches
+Chromium on all 84 coordinates. The broader explicit-font browser comparison
+checks 500 coordinates: two reading positions differ by 20px. Native keeps
+the reading adjacent to its corresponding 20px base; Chromium leaves the same
+20px gap even in the independently segmented control beside a tall atomic
+base. Native retains CSS Ruby §3.1.2 adjacency, and the browser discrepancy
+stays visible. Evidence: `temp/ruby-m23/{reproducer.log,focused-flow-2.log,
+neighbors-flow-1.log,browser-comparison-flow-2.json,browser-gap-analysis.json,
+forbidden-comparison.json}`. A final native cross-check also pairs an atomic
+column with fragmentable text inside a shared segment: all 29 source/row
+coordinates agree with independently segmented controls, including internal
+atomic wrapping (`shared-atomic-column-comparison.json`).
+
+The stable required Radiant gate passes **9392 checks; 9085 passed, 305 partial,
+0 failed, 2 skipped**, including 489/489 native text/layout and 752/752 UI.
+Layout retains 4973 full / 301 partial and CSS Text 894 full / 86 partial, with
+zero baseline regressions. Dimension lint, diff and generated inventory checks
+pass; all 421 names/IDs remain, with changes only in reference columns 14–15.
+All four frozen source/test inputs and the qualified CLI hash remain unchanged.
+Raw Ruby stays **55/212 full matches**, with no full or partial score changes.
+Evidence: `temp/ruby-m23/{qualification-result.json,radiant.log,delta-flow-2.json}`.
+No module API/import or ownership placement changed; the M21 boundary and M15
+unrelated input/PDF limits remain recorded without redundant reruns.
+
+The mixed whole/text core is qualified. The next diagnostic starts from the
+imported `collapse-trailing-whitespace`: the saved native `n ` rectangle is
+0px rather than 20px, while its reading retains a 40px column rather than 20px.
+Following text agrees with the browser. Verify the first trimming/allocation
+disagreement with fresh source controls before changing its owning stage;
+`temp/ruby-m23/next-milestone.json` records that finite plan. The full goal stays
+active with 157 raw mismatches. References, upstream fixtures, tolerances and
+baseline floors remain unchanged.

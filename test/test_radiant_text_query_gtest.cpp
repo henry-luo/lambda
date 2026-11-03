@@ -556,21 +556,33 @@ protected:
         expect_text_paint_sources<GlyphCount>(owner, text, control_owner, references, 1, GlyphCount);
     }
     template <size_t Capacity>
-    void expect_text_source_pair(DomRange* range, DomElement* owner, DomText* text,
-                                 DomElement* control_owner, DomText* control) {
-        ASSERT_EQ(dom_text_utf16_length(text), dom_text_utf16_length(control));
-        DomText* references[] = {control};
-        expect_text_paint_sources<Capacity>(owner, text, control_owner, references, 1);
+    void expect_text_source_parts(DomRange* range, DomElement* owner, DomText* text,
+                                  DomElement* control_owner, DomText* const* references, size_t count) {
+        unsigned length = 0;
+        for (size_t part = 0; part < count; part++) length += dom_text_utf16_length(references[part]);
+        ASSERT_EQ(dom_text_utf16_length(text), length);
+        expect_text_paint_sources<Capacity>(owner, text, control_owner, references, count);
         float x, y, control_x, control_y;
         view_get_visual_bounds(owner, &x, &y, nullptr, nullptr);
         view_get_visual_bounds(control_owner, &control_x, &control_y, nullptr, nullptr);
-        for (unsigned index = 0; index < dom_text_utf16_length(control); index++) {
-            SCOPED_TRACE(index);
-            Rect expected = {};
-            ASSERT_TRUE(character_rect(range, control, index, &expected));
-            expected.x += x - control_x; expected.y += y - control_y;
-            expect_character_rect(range, text, index, expected);
+        unsigned offset = 0;
+        for (size_t part = 0; part < count; part++) {
+            DomText* control = references[part];
+            for (unsigned index = 0; index < dom_text_utf16_length(control); index++) {
+                SCOPED_TRACE(offset + index);
+                Rect expected = {};
+                ASSERT_TRUE(character_rect(range, control, index, &expected));
+                expected.x += x - control_x; expected.y += y - control_y;
+                expect_character_rect(range, text, offset + index, expected);
+            }
+            offset += dom_text_utf16_length(control);
         }
+    }
+    template <size_t Capacity>
+    void expect_text_source_pair(DomRange* range, DomElement* owner, DomText* text,
+                                 DomElement* control_owner, DomText* control) {
+        DomText* references[] = {control};
+        expect_text_source_parts<Capacity>(range, owner, text, control_owner, references, 1);
     }
     DomText* first_text_leaf(DomNode* node) {
         return dom_range_edge_text(node, false);
@@ -16135,6 +16147,70 @@ TEST_F(RadiantTextQuery, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalF
     ASSERT_TRUE(dom_cssom_set_inline_property(find("descending"), "width", "400px"));
     ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
     check();
+}
+
+TEST_F(RadiantTextQuery, RubyMixedAtomicUnitsKeepParallelTextAndLocalWrapping) {
+    ASSERT_NE(load("test/html/layout_ruby_mixed_atomic.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* names[] = {"prefix-base", "prefix-reading", "suffix-base", "suffix-reading",
+        "wrapped-base", "wrapped-reading", "ordinary"};
+    const struct { const char* actual; const char* first; const char* last; } roles[] = {
+        {"before", "before", nullptr}, {"before-reading", "before-reading", nullptr},
+        {"base", "a", "b"}, {"reading", "ra", "rb"},
+        {"after", "after", nullptr}, {"after-reading", "after-reading", nullptr}
+    };
+    constexpr size_t row_count = sizeof(names) / sizeof(*names);
+    constexpr size_t role_count = sizeof(roles) / sizeof(*roles);
+    struct Source { DomText* text; DomNode* parent; const unsigned char* data; } sources[row_count][role_count] = {};
+    for (size_t row = 0; row < row_count; row++) for (size_t role = 0; role < role_count; role++) {
+        char id[80]; str_fmt(id, sizeof(id), "%s-%s", names[row], roles[role].actual);
+        DomText* text = first_text_leaf(find(id));
+        ASSERT_NE(text, nullptr);
+        sources[row][role] = {text, text->parent, text->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-mixed-atomic"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (size_t row = 0; row < row_count; row++) {
+            SCOPED_TRACE(names[row]);
+            char id[80]; str_fmt(id, sizeof(id), "%s-control", names[row]);
+            DomElement* owner = find(names[row]); DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(owner->height, control->height);
+            for (size_t role = 0; role < role_count; role++) {
+                SCOPED_TRACE(roles[role].actual);
+                const Source& source = sources[row][role];
+                str_fmt(id, sizeof(id), "%s-%s", names[row], roles[role].actual);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", names[row], roles[role].first);
+                DomText* references[] = {first_text_leaf(find(id)), nullptr};
+                if (roles[role].last) {
+                    str_fmt(id, sizeof(id), "%s-control-%s", names[row], roles[role].last);
+                    references[1] = first_text_leaf(find(id));
+                }
+                ASSERT_NE(references[0], nullptr);
+                expect_text_source_parts<32>(range, owner, source.text, control, references,
+                    roles[role].last ? 2 : 1);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial"); }
+    for (bool wide : {true, false}) {
+        for (const char* name : names) {
+            const char* width = wide ? "240px" : strcmp(name, "ordinary") == 0 ? "140px" : "100px";
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(name), "width", width));
+            char id[80]; str_fmt(id, sizeof(id), "%s-control", name);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", width));
+            str_fmt(id, sizeof(id), "%s-control-cut", name);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "display", wide ? "none" : "inline"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
 }
 
 TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
