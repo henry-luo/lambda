@@ -92,11 +92,24 @@ struct Scene3dStats {
     uint64_t visibility_tests, culled_draws, lod_skips; // decisions across presentation, capture and shadow views
     uint64_t lod_state_bytes; // document-owned hysteresis, separate from the disposable projection
     uint32_t lods;
-    unsigned raster_width, raster_height;
+    unsigned raster_width, raster_height;   // the rendered frame, at most max-pixel-ratio per CSS pixel
+    unsigned output_width, output_height;   // the published snapshot, at the page's raster scale
     float camera_aspect;
 };
 // all retained data is document/native-owned (D4.5.2); the DOM is borrowed only during projection.
 ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, float height, float raster_scale);
+// scene3d_snapshot, or with !materialize a frame whose snapshot pixels stay unread until a CPU consumer
+// asks (scene3d_materialize, or any later scene3d_snapshot): the GPU compositor draws the published
+// target instead (vibe/radiant/Radiant_Design_GPU_Compositor.md C4)
+ImageSurface* scene3d_frame(DomElement* root, UiContext* ui, float width, float height, float raster_scale,
+                            bool materialize);
+bool scene3d_materialize(DomElement* root);
+struct NativeGlContext;
+struct NativeGlResource;
+// the target the last frame published; `opaque` when every pixel of it is opaque, `upsampled` when it is
+// at a capped density below its snapshot's
+bool scene3d_external_image(DomElement* root, NativeGlContext** producer, NativeGlResource* image, bool* opaque,
+                            bool* upsampled);
 // the 16 x 16 RGBA split-sum DFG table standard materials sample (rows n·v, columns roughness)
 const float* scene3d_dfg_table();
 const char* scene3d_diagnostic(DomElement* root);

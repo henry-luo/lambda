@@ -1,5 +1,5 @@
 // platform_glfw.cpp — the desktop Radiant platform backend: GLFW windows and
-// input, a legacy-OpenGL texture blit for presentation, GLFW cursors and the
+// input, presentation through the window's core-profile presenter (gl_core), GLFW cursors and the
 // plain-text clipboard (platform.hpp, vibe/Lambda_Design_Mobile.md MB7).
 // Radiant's key, button and modifier codes use GLFW's numbering, so input
 // translation is the identity on codes; the static_asserts below hold it.
@@ -9,12 +9,11 @@
 #include "platform.hpp"
 #include "event.hpp"
 #include "view.hpp"
+#include "gl_core.hpp"
 #include "../lib/log.h"
 #include <math.h>
 
-#ifdef __APPLE__
-#include <OpenGL/gl.h>
-#endif
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 // GLFW's native-access functions, declared by their pointer-sized ABI rather
@@ -86,14 +85,26 @@ void radiant_platform_post_empty_event(void) { glfwPostEmptyEvent(); }
 
 RadiantWindow* radiant_platform_create_window(int width, int height, const char* title,
                                               bool visible) {
+    glfwDefaultWindowHints();
     glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
+    // the same core profile as native graphics contexts, so the presenter can later sample their textures
+    native_gl_core_profile_hints();
     GLFWwindow* window = glfwCreateWindow(width, height, title, NULL, NULL);
-    glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+    glfwDefaultWindowHints();
     return radiant_window(window);
 }
 
+// a window's presenter lives in its GLFW user pointer (unused otherwise)
+static NativeGlContext* glfw_presenter(RadiantWindow* window) {
+    return window ? (NativeGlContext*)glfwGetWindowUserPointer(glfw_window(window)) : nullptr;
+}
+
 void radiant_platform_destroy_window(RadiantWindow* window) {
-    if (window) glfwDestroyWindow(glfw_window(window));
+    if (!window) return;
+    // the presenter releases its GL objects while its window's context still exists
+    native_gl_destroy(glfw_presenter(window));
+    glfwSetWindowUserPointer(glfw_window(window), nullptr);
+    glfwDestroyWindow(glfw_window(window));
 }
 void radiant_platform_show_window(RadiantWindow* window) { glfwShowWindow(glfw_window(window)); }
 void radiant_platform_focus_window(RadiantWindow* window) { glfwFocusWindow(glfw_window(window)); }
@@ -409,18 +420,31 @@ void radiant_platform_set_clipboard(RadiantWindow* window, const char* text) {
 
 // --- presentation: the CPU surface becomes one texture drawn as a quad ---
 
+// the window's presenter, created on first use with the window's context current
+static NativeGlContext* glfw_presenter_ensure(RadiantWindow* window) {
+    NativeGlContext* presenter = glfw_presenter(window);
+    if (presenter || !window) return presenter;
+    glfwMakeContextCurrent(glfw_window(window));
+    char diagnostic[256];
+    presenter = native_gl_presenter_create(glfw_window(window), diagnostic, sizeof(diagnostic));
+    if (!presenter) { log_error("platform: window presenter unavailable: %s", diagnostic); return nullptr; }
+    glfwSetWindowUserPointer(glfw_window(window), presenter);
+    return presenter;
+}
+
 bool radiant_platform_present_init(RadiantWindow* window) {
     if (!window) return false;
     glfwMakeContextCurrent(glfw_window(window));
     glfwSwapInterval(1);  // vsync
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
-    return true;
+    return glfw_presenter_ensure(window) != nullptr;
 }
 
 void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface,
                               const Bound* damage, bool partial, uint32_t background_rgba,
-                              float pixel_scale_x, float pixel_scale_y) {
-    if (!window || !surface || !surface->pixels) return;
+                              float pixel_scale_x, float pixel_scale_y,
+                              const RadiantPresentLayers* composite) {
+    NativeGlContext* presenter = glfw_presenter_ensure(window);
+    if (!presenter || !surface || !surface->pixels) return;
     int framebuffer_width = 0, framebuffer_height = 0;
     glfwGetFramebufferSize(glfw_window(window), &framebuffer_width, &framebuffer_height);
     if (framebuffer_width <= 0 || framebuffer_height <= 0) return;
@@ -429,62 +453,21 @@ void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface
     // not zoom fixed-size content before the new layout arrives.
     int present_width = (int)lroundf(surface->width * pixel_scale_x); // INT_CAST_OK: GL drawable extent
     int present_height = (int)lroundf(surface->height * pixel_scale_y); // INT_CAST_OK: GL drawable extent
-    glViewport(0, framebuffer_height - present_height, present_width, present_height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1, 1, -1, 1, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glClearColor((background_rgba & 0xff) / 255.0f,
-        ((background_rgba >> 8) & 0xff) / 255.0f,
-        ((background_rgba >> 16) & 0xff) / 255.0f, ((background_rgba >> 24) & 0xff) / 255.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // One texture persists across presents (Radiant_Design_Animation_Repaint §3 A3): a frame
-    // that wrote only a damage rect uploads just those rows and columns.
-    static GLuint texture = 0;
-    static int texture_width = 0, texture_height = 0;
-    bool reuse = texture && glIsTexture(texture) && texture_width == surface->width &&
-        texture_height == surface->height;
-    if (!reuse) {
-        if (texture && glIsTexture(texture)) glDeleteTextures(1, &texture);
-        glGenTextures(1, &texture);
-        texture_width = surface->width;
-        texture_height = surface->height;
+    NativeGlPresentFrame frame = {};
+    frame.page = surface;
+    frame.damage = damage;
+    frame.partial = partial;
+    frame.background_rgba = background_rgba;
+    frame.present_width = present_width; frame.present_height = present_height;
+    frame.framebuffer_width = framebuffer_width; frame.framebuffer_height = framebuffer_height;
+    if (composite && composite->count) {
+        frame.layers = composite->layers;
+        frame.layer_count = composite->count;
+        frame.page_hidden = composite->surface_hidden;
+        frame.reference = composite->reference;
     }
-    glBindTexture(GL_TEXTURE_2D, texture);
-    if (!reuse || !partial) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, surface->width, surface->height, 0,
-            GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, surface->pixels);
-    } else if (damage && damage->right > damage->left && damage->bottom > damage->top) {
-        int x0 = (int)fmaxf(0.0f, floorf(damage->left)); // INT_CAST_OK: texel column
-        int y0 = (int)fmaxf(0.0f, floorf(damage->top)); // INT_CAST_OK: texel row
-        int x1 = (int)fminf((float)surface->width, ceilf(damage->right)); // INT_CAST_OK: texel column
-        int y1 = (int)fminf((float)surface->height, ceilf(damage->bottom)); // INT_CAST_OK: texel row
-        if (x1 > x0 && y1 > y0) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, surface->pitch / 4);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
-                (const uint8_t*)surface->pixels + (size_t)y0 * surface->pitch + (size_t)x0 * 4);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        }
-    }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    GLint filter = present_width == surface->width && present_height == surface->height
-        ? GL_NEAREST : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 1.0f); glVertex2f(-1, -1);
-    glTexCoord2f(1.0f, 1.0f); glVertex2f(1, -1);
-    glTexCoord2f(1.0f, 0.0f); glVertex2f(1, 1);
-    glTexCoord2f(0.0f, 0.0f); glVertex2f(-1, 1);
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
-
+    if (!native_gl_present(presenter, &frame))
+        log_error("platform: window present failed: %s", native_gl_diagnostic(presenter));
     glfwSwapBuffers(glfw_window(window));
 }
 

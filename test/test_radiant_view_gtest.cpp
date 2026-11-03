@@ -530,6 +530,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"scene3d", ".scene3d-index .demo-tile"},
         {"aquarium", "#aquarium #tank-scene", true},
         {"hamster", "#hamster #cage-scene", true},
+        {"midtown", "#midtown #city", true},
         {"slides", "#slides-editor #stage"},
         {"sheet", "#sheet-grid"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},

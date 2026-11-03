@@ -5,6 +5,7 @@
 
 struct ImageSurface;
 struct NativeGlContext;
+struct Bound;
 
 // native names never cross the graphics waist (D7.4.1v2); IDs are context branded.
 struct NativeGlResource { uint64_t id; };
@@ -47,8 +48,81 @@ struct NativeGlDraw {
     bool depth_test = true;
 };
 struct NativeGlUniform { NativeGlResource program; int location; uint64_t generation; };
+// Holds the context current across a run of calls (one scene frame): each call then skips
+// its own switch to the context and back. Owning thread only; a no-op elsewhere.
+struct NativeGlCurrent {
+    void* previous;
+    bool switched;
+    explicit NativeGlCurrent(NativeGlContext* context);
+    ~NativeGlCurrent();
+    NativeGlCurrent(const NativeGlCurrent&) = delete;
+    NativeGlCurrent& operator=(const NativeGlCurrent&) = delete;
+};
 
-NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacity);
+// share_window (a GLFWwindow*) joins the context to that window presenter's share group, so the
+// presenter can sample its published targets (Radiant_Design_GPU_Compositor Q7/C3).
+NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacity, void* share_window = nullptr);
+// true while `context` exists; a presenter checks producers it was handed in an earlier frame
+bool native_gl_alive(NativeGlContext* context);
+// Window presentation (vibe/radiant/Radiant_Design_GPU_Compositor.md, C5). Windows request the core
+// profile native contexts use, so a later step can share textures between them.
+void native_gl_core_profile_hints(void);
+// A presenter borrows a window's own context (a GLFWwindow*); destroying it leaves the window.
+NativeGlContext* native_gl_presenter_create(void* window, char* diagnostic, size_t capacity);
+// A native viewport the presenter composites (C4): the producer's published color target drawn into
+// dst, mapped affinely to surface pixels (top-left origin) inside a whole-pixel clip rectangle, then
+// the transparent, premultiplied page segment painted above it. The presenter samples as the CPU's
+// SCALE_MODE_LINEAR_EDGE does (render_image_quad_edges): bilinear between pixel centers, the quad's own
+// edges covered.
+static constexpr unsigned NATIVE_GL_PRESENT_LAYERS = 4; // Q12
+struct NativeGlPresentLayer {
+    NativeGlContext* producer;
+    uint64_t producer_generation;
+    NativeGlResource image;
+    uint64_t publication;        // the image's publication the frame was cut against
+    float dst_x, dst_y, dst_width, dst_height;
+    float inverse[6];            // surface pixel to dst space: u = i0 x + i1 y + i2, v = i3 x + i4 y + i5
+    float edges[4][3];           // the quad's edge lines in surface pixels: signed distance, positive inside
+    float opacity;               // the opacity groups that hold nothing but this viewport
+    bool upsampled;              // a capped-density image whose snapshot native_gl_upscale fills (C4)
+    float clip_left, clip_top, clip_right, clip_bottom;
+    // with clip shapes that cut into the layer (Q10): their coverage over the clip rectangle in the alpha
+    // channel, rasterized as the CPU's clip path is; `clip_mask_key` changes whenever its pixels do
+    const ImageSurface* clip_mask;
+    uint64_t clip_mask_key;
+    const ImageSurface* above;
+    bool above_changed;
+    // with above_changed: the rectangles of `above` repainted since the previous present; none uploads all
+    const Bound* above_damage;
+    unsigned above_damage_count;
+};
+struct NativeGlPresentFrame {
+    const ImageSurface* page;    // segment 0: the opaque page below every layer
+    const Bound* damage;         // with `partial`, the page pixels changed since the previous present
+    bool partial;
+    bool page_hidden;            // an opaque layer covers the page: neither uploaded nor drawn
+    uint32_t background_rgba;    // clears exposed framebuffer areas (surface format)
+    int present_width, present_height, framebuffer_width, framebuffer_height;
+    const NativeGlPresentLayer* layers;
+    unsigned layer_count;
+    const ImageSurface* reference; // the CPU composition RADIANT_PRESENT_CHECK compares; null: the page
+};
+// RADIANT_PRESENT_CHECK=1: compare each presented frame with its CPU result
+bool native_gl_present_check_enabled(void);
+// Draws the frame at the top left of the framebuffer, the page scaled to present_width x present_height.
+bool native_gl_present(NativeGlContext* presenter, const NativeGlPresentFrame* frame);
+// A producer publishes a target for the presenter after its last write (fence, resolve) and, before
+// writing it again, waits on the GPU until the presenter's last draw from it has finished.
+bool native_gl_publish(NativeGlContext* context, NativeGlResource target);
+// a target's latest publication (0 when it has none or no longer exists)
+uint64_t native_gl_publication(NativeGlContext* context, NativeGlResource target);
+// The layer still shows what its frame was cut against: the producer lives in the same generation and
+// its image exists, unpublished since. A scene re-rendered or reallocated after the cut (a snapshot read
+// at another size) makes the composite stale.
+bool native_gl_present_layer_current(const NativeGlPresentLayer* layer);
+void native_gl_await_presenter(NativeGlContext* context, NativeGlResource target);
+// reads a published target into an existing surface of the same size (a deferred snapshot)
+bool native_gl_snapshot_into(NativeGlContext* context, NativeGlResource target, ImageSurface* surface);
 void native_gl_destroy(NativeGlContext* context);
 void native_gl_lose(NativeGlContext* context);
 bool native_gl_stats(NativeGlContext* context, NativeGlStats* stats);
@@ -90,6 +164,11 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]);
 // transfer opaque visibility to the display target before forward transparent draws.
 bool native_gl_copy_depth(NativeGlContext* context, NativeGlResource source, NativeGlResource target);
+// A color-only sRGB copy of a drawing buffer at another size, stored top-down: native_gl_upscale fills
+// it with linear filtering (an exact copy at the same size), and its snapshot needs neither a multisample
+// resolve nor a row flip.
+NativeGlResource native_gl_upscale_target(NativeGlContext* context, unsigned width, unsigned height);
+bool native_gl_upscale(NativeGlContext* context, NativeGlResource source, NativeGlResource target);
 // A depth texture to render shadow casters into: `size` square, or six faces when
 // `cube`. It samples with depth comparison; outside its edges it reads as lit.
 NativeGlResource native_gl_depth_target(NativeGlContext* context, unsigned size, bool cube);
@@ -129,3 +208,13 @@ bool native_gl_webgl_resize(NativeGlContext*, unsigned, unsigned);
 bool native_gl_webgl_call(NativeGlContext*, const WebGlCommand*, WebGlReply*);
 void native_gl_webgl_error(NativeGlContext*, unsigned);
 ImageSurface* native_gl_webgl_snapshot(NativeGlContext*);
+// GPU compositing of a WebGL canvas (Radiant_Design_GPU_Compositor §7): the presenter samples the drawing
+// buffer's presented copy, so presenting consumes a frame by the same preserveDrawingBuffer rules as a
+// snapshot, and the copy keeps the frame after the buffer moves on. Publishing copies the buffer's latest
+// frame unless the copy holds it already, and returns the unfilled snapshot that stands for the copy;
+// null when nothing was copied (a frame still dirty after a failure is left for native_gl_webgl_snapshot).
+ImageSurface* native_gl_webgl_publish(NativeGlContext*);
+// the presented copy while it holds the buffer's latest presented frame; none otherwise
+NativeGlResource native_gl_webgl_presented(NativeGlContext*);
+// fills the snapshot of the copy's latest publication, normalized as native_gl_webgl_snapshot's
+bool native_gl_webgl_snapshot_into(NativeGlContext*, ImageSurface*);

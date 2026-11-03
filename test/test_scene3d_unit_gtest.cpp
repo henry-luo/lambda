@@ -30,6 +30,7 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
@@ -1801,10 +1802,13 @@ protected:
         Item source=builder.element("keyframe-track").attr("path",builder.createStringItem(path))
             .attr("type",builder.createSymbolItem("vector")).attr("times",times).attr("values",values).final();
         DomElement* track=build_dom_tree_from_element(source.element,&doc,clip);
-        if(track) doc.mutation_epoch++;return track;
+        if(track) mutated(clip);return track;
     }
+    // publish a test edit as the DOM does: the document epoch and the layer generation of the node and
+    // every ancestor advance, and scene caches compare both
+    void mutated(DomNode* node=nullptr) { dom_notify_mutation(DOM_JS_MUTATION_UNKNOWN,node?node:root,nullptr); }
     void attr(DomElement* node,const char* name,const char* value) {
-        ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
+        ASSERT_TRUE(node->set_attribute(name,value));mutated(node);
     }
     DomElement* layer_track(const char* id, const char* path, const char* values, bool additive = false,
                             const char* weight = "1", const char* reference = nullptr) {
@@ -2645,7 +2649,7 @@ protected:
             particle_rotation_curve(emitter);
         scene3d_follow_rebuild(&doc, previous, root);
         doc.root = lam::up(root);
-        doc.mutation_epoch++;
+        mutated();
         ASSERT_NE(snapshot(), nullptr);
         EXPECT_EQ(scene3d_particles(root), owner);
         ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
@@ -3023,7 +3027,7 @@ TEST_F(Scene3dTest, ParticlesRetainCompatibleEditsRejectBadDescriptionsAndRetire
     EXPECT_EQ(after.live, 0u);
     EXPECT_EQ(after.sequence, 0u);
     ASSERT_TRUE(root->remove_child(emitter));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     EXPECT_FALSE(scene3d_particles_view(owner, emitter, &after));
 }
@@ -3114,7 +3118,7 @@ TEST_F(Scene3dTest, ParticlesFiniteAndLoopingEmissionUseBoundedTickBirthsAndSour
     attr(curve, "values", "1 1 1 1");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(once->remove_child(curve));
-    doc.mutation_epoch++;
+    mutated();
     attr(loop, "id", "once");
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     attr(loop, "id", "loop");
@@ -3221,7 +3225,7 @@ TEST_F(Scene3dTest, ParticlesRotationCurveAdmissionKeepsLiveBuffersOnMalformedOr
     auto *duplicate = particle_rotation_curve(emitter);
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(emitter->remove_child(duplicate));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
 }
 
@@ -3371,7 +3375,7 @@ TEST_F(Scene3dTest, ParticlesCpuSceneCollisionRespectsGroupsAndSensorAdmission) 
                      .final();
     stage.collider = build_dom_tree_from_element(shape.element, &doc, stage.body);
     ASSERT_NE(stage.collider, nullptr);
-    doc.mutation_epoch++;
+    mutated();
     attr(stage.collision, "filter", "1");
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
@@ -3571,7 +3575,7 @@ TEST_F(Scene3dTest, ParticlesCpuSceneCollisionUsesInlineSphereCastsOnMeshAndHeig
     EXPECT_GT(view.collision_triangles, 0u);
     ASSERT_TRUE(stage.collider->remove_attribute("vertices"));
     ASSERT_TRUE(stage.collider->remove_attribute("indices"));
-    doc.mutation_epoch++;
+    mutated();
     attr(stage.body, "position", "-10 0 -10");
     attr(stage.collider, "shape", "heightfield");
     attr(stage.collider, "rows", "2");
@@ -3960,7 +3964,7 @@ TEST_F(Scene3dTest, ParticlesSurfaceSceneBudgetRejectsAdditionalTablesWithoutRep
     EXPECT_EQ(scene3d_particles(root), owner);
     EXPECT_EQ(scene3d_particles_generation(owner), generation);
     ASSERT_TRUE(root->remove_child(extra));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
 }
@@ -4045,7 +4049,7 @@ TEST_F(Scene3dTest, ParticlesGpuSurfaceToPointEditsRetainOldRecipesUntilExpiry) 
     ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &first));
     attr(emitter, "shape", "point");
     ASSERT_TRUE(emitter->remove_attribute("surface"));
-    doc.mutation_epoch++;
+    mutated();
     attr(emitter, "lifetime", "2");
     attr(emitter, "rate", "10");
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
@@ -4396,7 +4400,7 @@ TEST_F(Scene3dTest, AnimationNumericStreamsShareAcrossClipsAndInvalidateEdits) {
     for(int64_t i=0;i<keys;i++) values[i*3]=2*i;
     Item changed=builder.createNumericArray(ELEM_FLOAT64,1,&components,values);mem_free(times);mem_free(values);
     auto* parent=first->parent->as_element();ASSERT_TRUE(parent->remove_child(first));
-    ASSERT_NE(typed_track(builder,parent,"animated-0.position",timeline,changed),nullptr);doc.mutation_epoch++;
+    ASSERT_NE(typed_track(builder,parent,"animated-0.position",timeline,changed),nullptr);mutated();
     ASSERT_NE(snapshot(),nullptr);state=scene3d_animations(root);ASSERT_NE(state,nullptr);
     ASSERT_TRUE(scene3d_animation_seek(state,.5));ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_animation_value(state,targets[0],"position",&sampled));EXPECT_DOUBLE_EQ(sampled.numbers[0],1);
@@ -4420,7 +4424,7 @@ TEST_F(Scene3dTest, AnimationNumericStreamBudgetRejectsUniqueOverflowAndRecovers
     }
     mem_free(values);EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
     EXPECT_NE(strstr(scene3d_diagnostic(root),"animation key data quota exceeded"),nullptr);
-    ASSERT_TRUE(clip->remove_child(last));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(clip->remove_child(last));mutated();ASSERT_NE(snapshot(),nullptr);
 }
 
 TEST_F(Scene3dTest, AnimationCommandsPrepareCurrentSourceBeforePainting) {
@@ -4661,12 +4665,12 @@ TEST_F(Scene3dTest, AnimationReconciliationResetsOnlyNewOrIncompatibleClips) {
     auto* clip = first->parent->as_element();
     ASSERT_TRUE(root->remove_child(clip));
     ASSERT_TRUE(root->append_child(clip));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
     EXPECT_EQ(scene3d_animation_action(state, "first")->identity, identity);
     ASSERT_TRUE(root->remove_child(added->parent));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_EQ(scene3d_animation_action(state, "added"), nullptr);
     EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
@@ -4767,7 +4771,7 @@ TEST_F(Scene3dTest, RootRotationTransformsSourceAxesAndUniformScaleIntoWorldTurn
     attr(frame, "scale", "2 2 2");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
     Scene3dMatrix pose = {};
@@ -4860,7 +4864,7 @@ TEST_F(Scene3dTest, RootRotationRejectsNonuniformSourceFramesBeforeAdmission) {
     attr(frame, "scale", "1 2 1");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
     EXPECT_NE(strstr(scene3d_diagnostic(root), "uniform proper parent frame"), nullptr);
 }
@@ -4907,7 +4911,7 @@ TEST_F(Scene3dTest, RootMotionTransformsParentAxesAndKeepsVisibleMotionSingleApp
     attr(frame, "scale", "2 2 2");
     ASSERT_TRUE(stage.body->remove_child(stage.hips));
     ASSERT_TRUE(frame->append_child(stage.hips));
-    doc.mutation_epoch++;
+    mutated();
     auto* state = scene3d_prepare_animations(root);
     ASSERT_NE(state, nullptr);
     ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 10));
@@ -5092,7 +5096,7 @@ TEST_F(Scene3dTest, RootMotionRemovingTheLastControllerRetiresItsTickScratchAndC
     auto* physics = scene3d_physics(root);
     ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
     ASSERT_TRUE(stage.body->remove_attribute("root-motion-source"));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_FALSE(scene3d_physics_has_root_motion(physics));
     ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
@@ -5837,9 +5841,9 @@ TEST_F(Scene3dTest, CameraOnlyEditsRetainDrawsButMixedAndStructuralEditsReprojec
     // camera IDs and children are structural: they must still pass the full validator.
     attr(camera,"id","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
     attr(camera,"id","main");pixel(snapshot(),64,64,0,255,0);
-    DomElement* child=element("group",camera);doc.mutation_epoch++;
+    DomElement* child=element("group",camera);mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
-    camera->remove_child(child);doc.mutation_epoch++;pixel(snapshot(),64,64,0,255,0);
+    camera->remove_child(child);mutated();pixel(snapshot(),64,64,0,255,0);
     ASSERT_TRUE(scene3d_stats(root,&before));
     // parent transforms move scene objects too, even when a camera changes in the same turn.
     attr(root,"position","0.5 0 0");attr(camera,"fov","75");ASSERT_NE(snapshot(),nullptr);
@@ -5852,11 +5856,11 @@ TEST_F(Scene3dTest, TypedScalarEditsInvalidateWithoutReplacingTheBackingElement)
     ASSERT_TRUE(scene->set_attribute("tone-mapping","neutral"));
     MarkEditor editor(page,EDIT_MODE_INLINE);Item backing={.element=dom_element_backing(scene)};
     ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.25)).element,backing.element);
-    page->mutation_epoch++;
+    mutated(scene);
     pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,137,0,0);
     Scene3dStats before={},after={};ASSERT_TRUE(scene3d_stats(scene,&before));
     ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.5)).element,backing.element);
-    page->mutation_epoch++;
+    mutated(scene);
     pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,188,0,0);
     ASSERT_TRUE(scene3d_stats(scene,&after));EXPECT_EQ(after.projection_generation,before.projection_generation+1);
 }
@@ -5868,7 +5872,7 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     pixel(snapshot(),64,64,188,0,0);
     DomElement* second=element("light",root);attr(second,"type","hemisphere");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"hemisphere light quota"),nullptr);
-    root->remove_child(second);root->remove_child(hemisphere);doc.mutation_epoch++;
+    root->remove_child(second);root->remove_child(hemisphere);mutated();
     pixel(snapshot(),64,64,0,0,0);
     // a uniformly glowing box around the capture point: every prefiltered level holds its radiance,
     // which lights the Lambert plane as an ambient light of that color would; the box itself is never drawn
@@ -5893,7 +5897,7 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     EXPECT_NE(strstr(scene3d_diagnostic(root),"names no environment"),nullptr);
     attr(root,"environment","glow");DomElement* inner=element("camera",environment);attr(inner,"type","perspective");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cameras"),nullptr);
-    environment->remove_child(inner);element("environment",environment);doc.mutation_epoch++;
+    environment->remove_child(inner);element("environment",environment);mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot nest"),nullptr);
 }
 
@@ -5977,7 +5981,7 @@ TEST_F(Scene3dTest, ShadowMapsDarkenReceiversAndRenderOnlyWhenTheirCastersOrFram
     // ambient and hemisphere lights cast nothing; at most four lights cast
     DomElement* ambient=element("light",root);attr(ambient,"type","ambient");attr(ambient,"cast-shadow","true");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directional, point or spot"),nullptr);
-    root->remove_child(ambient);doc.mutation_epoch++;
+    root->remove_child(ambient);mutated();
     for (unsigned i=0;i<4;i++) {
         DomElement* extra=element("light",root);attr(extra,"type","directional");attr(extra,"position","0 1 1");attr(extra,"cast-shadow","true");
     }
@@ -6458,7 +6462,7 @@ TEST_F(Scene3dTest, SvgExportEmbedsScenePixelsAndRejectsInvalidScene) {
     ASSERT_FALSE(ui.render_failed);
     DomElement* scene=dom_find_element_by_id(page->root->as_element(),"viewport");
     ASSERT_NE(scene,nullptr);
-    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));page->mutation_epoch++;
+    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));mutated(scene);
     lam::Temp<char> invalid(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
     EXPECT_EQ(invalid.get(),nullptr);EXPECT_TRUE(ui.render_failed);
 }
@@ -6946,7 +6950,7 @@ TEST_F(Scene3dTest, CustomColorPassesRespectDomainsCacheProgramsAndReleaseTheirR
     pixel(snapshot(),64,64,0,255,0);
     attr(linear,"domain","display");attr(display,"domain","linear");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"linear effects before"),nullptr);
-    root->remove_child(chain);doc.mutation_epoch++;pixel(snapshot(),64,64,255,0,0);
+    root->remove_child(chain);mutated();pixel(snapshot(),64,64,255,0,0);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.shader_programs,0u);EXPECT_LT(after.graphics.resources,before.graphics.resources);
 }
 
@@ -7139,7 +7143,7 @@ TEST_F(Scene3dGcTest, TypedNumericGeometrySurvivesMovingGcAndProjectionRebuild) 
     DomElement* material=element("material",object);attr(material,"type","basic");attr(material,"color","#ff0000");
     pixel(snapshot(),64,64,255,0,0);double* previous=positions->float_items;
     gc_collect(heap.gc,nullptr,0);EXPECT_NE(positions->float_items,previous);
-    doc.mutation_epoch++;pixel(snapshot(),64,64,255,0,0);
+    mutated();pixel(snapshot(),64,64,255,0,0);
     for (unsigned pass=0;pass<3;pass++) { gc_collect(heap.gc,nullptr,0);pixel(snapshot(128,128,pass%2+1),64*(pass%2+1),64*(pass%2+1),255,0,0); }
 }
 
@@ -7178,6 +7182,45 @@ TEST_F(Scene3dTest, Es100ShaderAndDefaultFramebufferResolvePreserveApplicationSt
     EXPECT_EQ(call(WEBGL_getParameter,0x0B98).n[0],0x12);EXPECT_EQ(call(WEBGL_getParameter,0x8CA5).n[0],0x34);
     pixel(image,16,16,0,255,0);EXPECT_EQ(call(WEBGL_getError).n[0],0);
     image_surface_destroy(image);native_gl_destroy(graphics);
+}
+
+// The GPU compositor samples a WebGL canvas's presented copy (Radiant_Design_GPU_Compositor §7): publishing
+// consumes a frame by the drawing-buffer rules a snapshot follows, the copy keeps that frame after the buffer
+// is discarded, and its deferred snapshot is normalized as a readback is.
+TEST_F(Scene3dTest, WebGlPresentedCopyKeepsFrameUnderDrawingBufferRules) {
+    for (bool premultiplied : {true, false}) {
+        SCOPED_TRACE(premultiplied ? "premultiplied" : "straight alpha");
+        char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));
+        ASSERT_NE(graphics,nullptr)<<diagnostic;
+        // alpha, no depth or stencil, no antialiasing, preserveDrawingBuffer false
+        WebGlOptions options={true,false,false,false,premultiplied,false};
+        ASSERT_TRUE(native_gl_webgl_init(graphics,8,4,&options));
+        auto call=[&](WebGlOp op,double a=0,double b=0,double c=0,double d=0) {
+            WebGlCommand command={};command.op=op;command.n[0]=a;command.n[1]=b;command.n[2]=c;command.n[3]=d;
+            WebGlReply reply={};EXPECT_TRUE(native_gl_webgl_call(graphics,&command,&reply));return reply;
+        };
+        call(WEBGL_clearColor,1,.5,0,.5);call(WEBGL_clear,0x4000);
+        ImageSurface* pending=native_gl_webgl_publish(graphics);ASSERT_NE(pending,nullptr);
+        NativeGlResource copy=native_gl_webgl_presented(graphics);
+        EXPECT_NE(copy.id,0u);EXPECT_NE(native_gl_publication(graphics,copy),0u);
+        // the frame is consumed and the copy current: nothing to publish or read back
+        EXPECT_EQ(native_gl_webgl_publish(graphics),nullptr);EXPECT_EQ(native_gl_webgl_snapshot(graphics),nullptr);
+        // the next draw starts from a discarded buffer; the copy still holds the published frame
+        call(WEBGL_scissor,0,0,1,1);call(WEBGL_enable,0x0C11);call(WEBGL_clearColor,0,0,1,1);call(WEBGL_clear,0x4000);
+        ASSERT_TRUE(native_gl_webgl_snapshot_into(graphics,pending));
+        if (premultiplied) pixel(pending,4,2,255,128,0,128);else pixel(pending,4,2,128,64,0,128);
+        ImageSurface* next=native_gl_webgl_snapshot(graphics);ASSERT_NE(next,nullptr);
+        pixel(next,4,2,0,0,0,0);pixel(next,0,3,0,0,255,255);
+        // a readback leaves the copy behind the buffer until the next publication refreshes it
+        EXPECT_EQ(native_gl_webgl_presented(graphics).id,0u);
+        ImageSurface* refreshed=native_gl_webgl_publish(graphics);ASSERT_NE(refreshed,nullptr);
+        EXPECT_EQ(native_gl_webgl_presented(graphics).id,copy.id);
+        ASSERT_TRUE(native_gl_webgl_snapshot_into(graphics,refreshed));
+        pixel(refreshed,4,2,0,0,0,0);pixel(refreshed,0,3,0,0,255,255);
+        EXPECT_EQ(call(WEBGL_getError).n[0],0);
+        image_surface_destroy(pending);image_surface_destroy(next);image_surface_destroy(refreshed);
+        native_gl_destroy(graphics);
+    }
 }
 
 
@@ -7252,13 +7295,13 @@ TEST_F(Scene3dTest, ImportedCamerasFrameTheSceneAndExplicitSelectionWins) {
     DomElement* scene=dom_find_element_by_id(page->root->as_element(),"fidelity-scene");ASSERT_NE(scene,nullptr);
     ImageSurface* image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
     uint8_t finite[128*128*4];memcpy(finite,image->pixels,sizeof(finite));pixel(image,40,64,0,0,0);
-    ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-2"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-2"));mutated(scene);image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
     EXPECT_NE(memcmp(finite,image->pixels,sizeof(finite)),0);unsigned at40=64*image->pitch+40*4;
     EXPECT_GT(((const uint8_t*)image->pixels)[at40]+((const uint8_t*)image->pixels)[at40+1]+((const uint8_t*)image->pixels)[at40+2],100u);
-    ASSERT_TRUE(scene->set_attribute("camera","override"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","override"));mutated(scene);image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
     unsigned at10=64*image->pitch+10*4;EXPECT_GT(((const uint8_t*)image->pixels)[at10]+((const uint8_t*)image->pixels)[at10+1]+((const uint8_t*)image->pixels)[at10+2],100u);
     DomElement* model=dom_find_element_by_id(page->root->as_element(),"fidelity-asset-node-0-primitive-0");ASSERT_NE(model,nullptr);
-    ASSERT_TRUE(model->set_attribute("scale","10000 10000 1"));ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-3"));page->mutation_epoch++;
+    ASSERT_TRUE(model->set_attribute("scale","10000 10000 1"));ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-3"));mutated(scene);
     image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
     unsigned center=64*image->pitch+64*4;EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
     Scene3dMatrix lens=scene3d_perspective(90,1,.1f,INFINITY);
@@ -7272,7 +7315,7 @@ TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
     SCOPED_TRACE(path);if(model) root->remove_child(model);
     Input* source=input_from_url(builder.createString(path),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
-    model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
     unsigned center=64*image->pitch+64*4;
     EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
@@ -7281,7 +7324,7 @@ TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
         Url* uri=url_parse_with_base(binary?"roundtrip.glb":"roundtrip.gltf",doc.url);
         Input* again=input_from_source_n(bytes->str,bytes->length,uri,builder.createString("scene3d-asset"),nullptr);strbuf_free(bytes);
         ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;
-        root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+        root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
         image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
     }
     }
@@ -7341,7 +7384,7 @@ TEST_F(Scene3dTest, PhysicalMapsFourShadowsAndSkinPaletteFitTheCheckedBindingPla
     EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.environment_builds,after.environment_builds);
     EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
     // only map presence changes the shader variant; returning to a prior mask reuses it.
-    ASSERT_TRUE(m->remove_attribute("sheen-roughness-texture"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(m->remove_attribute("sheen-roughness-texture"));mutated();ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.material_links,before.material_links+1);
     attr(m,"sheen-roughness-texture","layer-9");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.material_links,before.material_links+1);
@@ -7401,7 +7444,7 @@ TEST_F(Scene3dTest, TransmissionMapsOverlapEmptyEdgesResizeAndRecoveryRetainTheS
     ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);EXPECT_EQ(after.graphics.frames,before.graphics.frames+1);
     EXPECT_EQ(after.postprocess_passes,before.postprocess_passes+5);
-    root->remove_child(post);doc.mutation_epoch++;image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
+    root->remove_child(post);mutated();image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
     attr(background,"visible","false");attr(glass,"position","1.4 0 .5");ASSERT_NE(snapshot(),nullptr);
     attr(m,"alpha-mode","blend");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"coverage"),nullptr);
     attr(m,"alpha-mode","opaque");attr(m,"attenuation-distance","0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"attenuation-distance"),nullptr);
@@ -7447,7 +7490,7 @@ TEST_F(Scene3dTest, SourceUvsDoNotChangePointCoverageAndLineCoordinatesInterpola
     DomElement* texture=map_texture("map","test/scene3d/assets/fidelity/colors.png");attr(texture,"uv-set","0");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),24u);pixel(image,64,64,255,0,0);
     pixel(image,54,54,0,0,0,0);pixel(image,64,55,255,0,0);
-    root->remove_child(cloud);doc.mutation_epoch++;
+    root->remove_child(cloud);mutated();
     DomElement* path=drawable("line-segments","-1 0 0 1 0 0","#ffffff");g=path->first_child->as_element();m=path->last_child->as_element();
     attr(path,"width","12");attr(g,"drawable-uvs","source");attr(g,"uvs",".25 .75 .75 .75");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
     image=snapshot();ASSERT_NE(image,nullptr);pixel(image,40,64,255,0,0);pixel(image,88,64,0,255,0);
@@ -7496,7 +7539,7 @@ TEST_F(Scene3dTest, MirroredPointInstancesStayInOneBatchAndSharedSourcesKeepThei
     Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.meshes,1u);EXPECT_EQ(before.graphics.draws,2u);
     for(unsigned i=0;i<100;i++) ASSERT_NE(snapshot(i%2?128:96,i%2?128:96),nullptr);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    ASSERT_TRUE(cloud->remove_attribute("instances"));attr(g,"id","shared");attr(g,"positions","-.6 -.5 0 .6 -.5 0 0 .5 0");doc.mutation_epoch++;
+    ASSERT_TRUE(cloud->remove_attribute("instances"));attr(g,"id","shared");attr(g,"positions","-.6 -.5 0 .6 -.5 0 0 .5 0");mutated();
     DomElement* triangle=element("mesh",root);attr(triangle,"geometry","shared");DomElement* material=element("material",triangle);attr(material,"type","basic");attr(material,"color","#0000ff");
     DomElement* unused=element("geometry",root);attr(unused,"type","buffer");attr(unused,"positions","0 0 0");
     ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.geometries,2u);
@@ -7507,12 +7550,12 @@ TEST_F(Scene3dTest, ImportedFaceFreePointAndLinePrimitivesRenderAndRetireTheirUp
     Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
     Input* source=input_from_url(builder.createString("test/scene3d/assets/fidelity/drawables.gltf"),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
-    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);mutated();
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);unsigned covered=0;
     for(unsigned y=0;y<image->height;y++) for(unsigned x=0;x<image->width;x++) covered+=((uint8_t*)image->pixels)[y*image->pitch+x*4+3]>0;
     EXPECT_GT(covered,80u);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.geometries,3u);
     scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    root->remove_child(model);doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    root->remove_child(model);mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.geometries,0u);EXPECT_LT(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
 }
 
@@ -7578,7 +7621,7 @@ TEST_F(Scene3dTest, DeformedAndShaderGeometryUsesAuthoredEnvelopesOrStaysUnculle
     attr(object,"position","10 0 0");attr(object,"morph-weights","1");attr(g,"morph-positions","-10 0 0 -10 0 0 -10 0 0");
     pixel(snapshot(),64,64,255,0,0);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.visibility_tests,0u);
     attr(object,"bounds","-11 -1 0 1 1 0");pixel(snapshot(),64,64,255,0,0);
-    ASSERT_TRUE(g->remove_attribute("morph-positions"));ASSERT_TRUE(object->remove_attribute("morph-weights"));ASSERT_TRUE(object->remove_attribute("bounds"));doc.mutation_epoch++;
+    ASSERT_TRUE(g->remove_attribute("morph-positions"));ASSERT_TRUE(object->remove_attribute("morph-weights"));ASSERT_TRUE(object->remove_attribute("bounds"));mutated();
     attr(m,"type","shader");attr(m,"vertex","void main(){gl_Position=projection_matrix*view_matrix*model_matrix*vec4(position+vec3(-10,0,0),1);}");
     attr(m,"fragment","void main(){fragment_color=vec4(1,0,0,1);}");pixel(snapshot(),64,64,255,0,0);
     ASSERT_TRUE(scene3d_stats(root,&before));attr(camera,"position","30 0 4");attr(camera,"target","30 0 0");ASSERT_NE(snapshot(),nullptr);
@@ -7603,9 +7646,9 @@ TEST_F(Scene3dTest, OffCameraCastersKeepTheirShadowWhenPresentationIsCulled) {
     // a distant presentation may choose an empty level; its highest-detail caster still shadows.
     attr(camera,"position","0 0 4");attr(caster,"cast-shadow","true");
     DomElement* lod=element("lod",root);attr(lod,"distances","0 1");DomElement* high=element("group",lod);element("group",lod);
-    ASSERT_TRUE(root->remove_child(caster));ASSERT_TRUE(high->append_child(caster));doc.mutation_epoch++;
+    ASSERT_TRUE(root->remove_child(caster));ASSERT_TRUE(high->append_child(caster));mutated();
     image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(shadowed,image->pixels,sizeof(shadowed)),0);
-    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.lod_state_bytes,0u);
+    ASSERT_TRUE(root->remove_child(lod));mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.lod_state_bytes,0u);
 }
 
 TEST_F(Scene3dTest, LodSwitchesBothWaysWithHysteresisAndRetainsEveryLevel) {
@@ -7644,9 +7687,9 @@ TEST_F(Scene3dTest, NestedLodKeepsInactiveAnimationAndRetiresItsSelectionState) 
     Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.lods,2u);
     attr(camera,"position","0 0 12");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,96,64,0,255,0);pixel(image,64,64,0,0,0,0);
     ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
-    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;
+    ASSERT_TRUE(root->remove_child(lod));mutated();
     // retire the disconnected binding before validating the reduced scene.
-    ASSERT_TRUE(root->remove_child(clip));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    ASSERT_TRUE(root->remove_child(clip));mutated();ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.lods,0u);EXPECT_EQ(after.lod_state_bytes,0u);
 }
 
@@ -8146,8 +8189,8 @@ TEST_F(Scene3dTest, NavigationAssetEditsPublishTogetherAndRetireStaleGenerations
     attr(first,"data","{\"size\":[4,3],\"type\":\"grid\"}");ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_EQ(current,a); // equivalent source order preserves paths
     attr(first,"revision","1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);a=current;
-    ASSERT_TRUE(resources->remove_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);EXPECT_FALSE(scene3d_navigation_generation(cache,"a",&current));
-    ASSERT_TRUE(resources->append_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(resources->remove_child(first));mutated();ASSERT_NE(snapshot(),nullptr);EXPECT_FALSE(scene3d_navigation_generation(cache,"a",&current));
+    ASSERT_TRUE(resources->append_child(first));mutated();ASSERT_NE(snapshot(),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);
 }
 
@@ -8155,11 +8198,11 @@ TEST_F(Scene3dTest, NavigationAssetsFollowEquivalentTemplateRebuildsAndRejectInv
     navigation_asset();ASSERT_NE(snapshot(),nullptr);auto* cache=scene3d_navigation(root);uint64_t generation=0,current=0;
     ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&generation));auto* previous=root;
     root=element("scene3d");camera=element("camera",root);attr(camera,"type","perspective");attr(camera,"id","main");attr(camera,"position","0 0 4");attr(camera,"target","0 0 0");attr(camera,"fov","90");attr(root,"camera","main");
-    auto* asset=navigation_asset();scene3d_follow_rebuild(&doc,previous,root);doc.root=lam::up(root);doc.mutation_epoch++;
+    auto* asset=navigation_asset();scene3d_follow_rebuild(&doc,previous,root);doc.root=lam::up(root);mutated();
     ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_navigation(root),cache);ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
     attr(asset,"position","1 0 0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"world coordinates"),nullptr);
-    ASSERT_TRUE(asset->remove_attribute("position"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
-    auto* parent=asset->parent->as_element();ASSERT_TRUE(parent->remove_child(asset));ASSERT_TRUE(root->append_child(asset));doc.mutation_epoch++;
+    ASSERT_TRUE(asset->remove_attribute("position"));mutated();ASSERT_NE(snapshot(),nullptr);
+    auto* parent=asset->parent->as_element();ASSERT_TRUE(parent->remove_child(asset));ASSERT_TRUE(root->append_child(asset));mutated();
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directly to scene resources"),nullptr);
     ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
 }
@@ -8755,7 +8798,7 @@ TEST_F(Scene3dAgentTest, ParticlesContactsRetainCopiedHistoryAcrossTemplateConte
     stage = particle_collision_stage("kill");
     scene3d_follow_rebuild(&doc, previous, root);
     doc.root = lam::up(root);
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
     EXPECT_EQ(scene3d_particles(root), owner);
     attr(stage.emitter, "rate", "10");
@@ -8809,7 +8852,7 @@ TEST_F(Scene3dAgentTest, TrackMappingRetainsMixedRootPlaybackAndNativeMasksWhenD
     auto* clip = stage.track->parent->as_element();
     ASSERT_TRUE(clip->remove_child(stage.track));
     ASSERT_TRUE(clip->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state) << scene3d_diagnostic(root);
     auto* action = scene3d_animation_action(state, "walk");
     EXPECT_EQ(action->identity, identity);
@@ -8857,7 +8900,7 @@ TEST_F(Scene3dAgentTest, TrackMappingPreservesRepeatedTargetOccurrencesAndDiscre
     ASSERT_TRUE(clip->remove_child(repeated));
     ASSERT_TRUE(clip->append_child(first));
     ASSERT_TRUE(clip->append_child(repeated));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     action = scene3d_animation_action(state, "pose");
     EXPECT_EQ(action->identity, identity);
@@ -8902,7 +8945,7 @@ TEST_F(Scene3dAgentTest, TrackMappingKeepsCompletedControllerHandoffsAndPhysical
     ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &before));
     ASSERT_TRUE(walk->remove_child(stage.track));
     ASSERT_TRUE(walk->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     action = scene3d_animation_action(state, "idle");
     EXPECT_EQ(action->identity, identity);
@@ -8953,7 +8996,7 @@ TEST_F(Scene3dAgentTest, TrackMappingInvalidatesOldChannelBatchesAndResetsOnlyIn
     auto* clip = stage.track->parent->as_element();
     ASSERT_TRUE(clip->remove_child(stage.track));
     ASSERT_TRUE(clip->append_child(stage.track));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_EQ(scene3d_prepare_animations(root), state);
     EXPECT_EQ(scene3d_animation_action(state, "walk")->identity, identity);
     Scene3dRuntimeStats stats = {};
@@ -9340,7 +9383,7 @@ TEST_F(Scene3dAgentTest, AnimationBatchesRejectCompatibilityControllerWritersAnd
     ASSERT_NE(state, nullptr);
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 1)));
     ASSERT_TRUE(root->remove_child(controller));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"phase","value":2)", 1, 1)));
     EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"mask","channel":0,"value":-1)", 1, 1)));
@@ -9578,7 +9621,7 @@ TEST_F(Scene3dAgentTest, RootMotionSourceAdmissionKeepsAnExistingNavigationOwner
     EXPECT_TRUE(scene3d_navigation_body_owned(scene3d_navigation(root), walker));
     EXPECT_FALSE(scene3d_physics_root_owns_body(physics, walker));
     ASSERT_TRUE(walker->remove_attribute("root-motion-source"));
-    doc.mutation_epoch++;
+    mutated();
     ASSERT_NE(scene3d_prepare_animations(root), nullptr);
     ASSERT_FALSE(
         item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
@@ -10070,7 +10113,7 @@ TEST_F(Scene3dAgentTest, NavigationAgentsDoNotHijackReusedBodyIdsAndFollowExplic
     for(DomNode* node=root->first_child;node;node=node->next_sibling)if(node->is_element()) {
         const char* id=scene3d_text(node->as_element(),"id");if(id&&!strcmp(id,"walker0"))original=node->as_element();
     }
-    ASSERT_NE(original,nullptr);ASSERT_TRUE(root->remove_child(original));doc.mutation_epoch++;
+    ASSERT_NE(original,nullptr);ASSERT_TRUE(root->remove_child(original));mutated();
     ASSERT_TRUE(scene3d_runtime_step(runtime,1));Item missing=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");EXPECT_STREQ(ItemReader(missing.to_const()).asMap().get("status").cstring(),"invalid");
     auto* replacement=element("rigid-body",root);attr(replacement,"id","walker0");attr(replacement,"type","kinematic-position");attr(replacement,"position","1.5 .51 1.5");
     auto* shape=element("collider",replacement);attr(shape,"id","capsule0");attr(shape,"shape","capsule");attr(shape,"radius",".2");attr(shape,"height",".6");

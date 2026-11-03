@@ -214,18 +214,27 @@ static void surface_metrics(RenderMetrics* metrics, ImageSurface* image) {
     metrics->put("premultiplied", image->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED);
 }
 
+// A snapshot at the simulation's size re-renders a scene drawn at another size, taking away the image a
+// composited window frame was cut around: the page takes its CPU copy first, as it holds one without
+// the compositor, so the window never re-renders the scene to present.
+static ImageSurface* sim_scene_snapshot(DomElement* element, UiContext* ui, double width, double height, double scale) {
+    ui_context_materialize_surface(ui);
+    return scene3d_snapshot(element, ui, width, height, scale);
+}
+
 static ImageSurface* read_surface(EventSimContext* context, UiContext* ui, MapReader& args) {
     const char* saved = args.get("surface").cstring();
     if (saved) { auto* entry = checkpoint(context, saved); return entry ? entry->surface : nullptr; }
     const char* source = text(args, "source", "page");
     if (!strcmp(source, "page")) {
         if (!args.has("render") || args.get("render").asBool()) event_sim_render_surface(ui);
+        else ui_context_materialize_surface(ui); // a composited frame left its native viewports out
         return ui->surface;
     }
     auto* element = target(ui, args);
     if (!element) return nullptr;
     if (!strcmp(source, "canvas")) return render_canvas_surface((ViewBlock*)element);
-    if (!strcmp(source, "scene3d")) return scene3d_snapshot(element, ui,
+    if (!strcmp(source, "scene3d")) return sim_scene_snapshot(element, ui,
         number(args.get("width"), element->width), number(args.get("height"), element->height),
         number(args.get("scale"), 1));
     return nullptr;
@@ -247,7 +256,7 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
         METRIC(shader_links); METRIC(material_links); METRIC(shader_programs); METRIC(simulation_steps); METRIC(transmission_captures); METRIC(postprocess_passes);
         METRIC(visibility_tests); METRIC(culled_draws); METRIC(lod_skips);
         METRIC(lods); METRIC(lod_state_bytes);
-        METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
+        METRIC(raster_width); METRIC(raster_height); METRIC(output_width); METRIC(output_height); METRIC(camera_aspect);
 #undef METRIC
         metrics->put("runtime_ticks",stats.runtime.ticks);
         metrics->put("runtime_debt",stats.runtime.debt);
@@ -481,7 +490,7 @@ static bool scene_command(EventSimContext* context, UiContext* ui, MapReader& ar
     auto* element = target(ui, args); if (!element) return false;
     const char* op = text(args, "op", "snapshot");
     if (!strcmp(op, "snapshot")) {
-        ImageSurface* image = scene3d_snapshot(element, ui, number(args.get("width"), 128),
+        ImageSurface* image = sim_scene_snapshot(element, ui, number(args.get("width"), 128),
             number(args.get("height"), 128), number(args.get("scale"), 1));
         bool expected = !args.has("success") || args.get("success").asBool();
         const char* diagnostic = args.get("diagnostic").cstring();
@@ -675,7 +684,7 @@ bool event_sim_render_execute(EventSimContext* context, UiContext* ui, SimEvent*
         passed = runtime && count >= 1 && count <= 100 && count == floor(count);
         if (passed) for (unsigned i = 0; i < count; i++) gc_collect(runtime_heap(runtime)->gc, nullptr, 0);
     } else if (!strcmp(name, "scene3d")) passed = scene_command(context, ui, args);
-    else if (!strcmp(name, "prepare_canvas")) { radiant_canvas_prepare_document(ui->document); passed = true; }
+    else if (!strcmp(name, "prepare_canvas")) { radiant_canvas_prepare_document(ui->document, false); passed = true; }
     else if (!strcmp(name, "capture_surface")) passed = capture_surface(context, ui, args);
     else if (!strcmp(name, "measure_frames")) passed = measure_frames(context, ui, args);
     else if (!strcmp(name, "snapshot_surface")) passed = save_surface(context, ui, args);

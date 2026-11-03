@@ -51,6 +51,35 @@ void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* sourc
     }
 }
 
+void render_pixel_resolve_matte(const uint32_t* over_black, const uint32_t* over_white, uint32_t* out,
+                                size_t count, bool premultiplied) {
+    for (size_t i = 0; i < count; i++) {
+        const uint8_t* b = (const uint8_t*)&over_black[i];
+        const uint8_t* w = (const uint8_t*)&over_white[i];
+        uint32_t lost = (uint32_t)(w[0] - b[0]) + (uint32_t)(w[1] - b[1]) + (uint32_t)(w[2] - b[2]);
+        uint32_t alpha = 255u - (lost + 1u) / 3u;
+        uint8_t* o = (uint8_t*)&out[i];
+        if (alpha == 0) {
+            out[i] = 0;
+            continue;
+        }
+        for (int c = 0; c < 3; c++) {
+            // over black the premultiplied color is what was drawn; rounding may not exceed coverage
+            uint32_t value = premultiplied ? b[c] : ((uint32_t)b[c] * 255u + alpha / 2u) / alpha;
+            uint32_t limit = premultiplied ? alpha : 255u;
+            o[c] = (uint8_t)(value > limit ? limit : value);
+        }
+        o[3] = (uint8_t)alpha;
+    }
+}
+
+bool render_pixel_row_opaque(const uint32_t* pixels, size_t count) {
+    // a branch-free AND over the row vectorizes; any translucent pixel clears an alpha bit
+    uint32_t all = 0xFFFFFFFFu;
+    for (size_t index = 0; index < count; index++) all &= pixels[index];
+    return (all >> 24) == 0xFFu;
+}
+
 float render_color_srgb_to_linear(float channel) {
     return (float)color_srgb_to_linear(clamp_unit(channel));
 }

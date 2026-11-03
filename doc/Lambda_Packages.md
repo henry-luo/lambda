@@ -3527,7 +3527,12 @@ playback without relinking (**S12.1.1v3, D2.11.4**). See the
 [qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#physical-materials-m4-selected-profile).
 
 The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
-`exposure` defaults to 1. Native light units retain Lambert's historical
+`exposure` defaults to 1. `max-pixel-ratio` caps the density a scene renders
+at: with `'max-pixel-ratio': 1.0` a full-window scene on a 2× display renders
+one pixel per CSS pixel, and the GPU upsamples the frame before the page
+composites it. Multisampled HDR targets cost about 92 bytes per rendered pixel,
+so the cap keeps large viewports inside the graphics budget and cuts fill
+cost; it is unlimited by default. Native light units retain Lambert's historical
 brightness. glTF punctual lights divide intensity by π on import and
 multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#10-decisions-for-the-user)).
 There are at most eight directional/point/spot lights, plus ambient and one

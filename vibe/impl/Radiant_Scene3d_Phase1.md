@@ -218,3 +218,50 @@ owned/allocation counters, not a measurement of driver-private memory or the
 existing document asset cache. Retained consumers can additionally hold prior
 snapshots until their display lists release them. An unchanged second frame
 reuses the snapshot and performs no additional GL frame/readback.
+
+## Retina frame pacing (Midtown, 2026-11-02)
+
+The design's performance section asks for the presentation stages to be measured
+separately (Radiant_Design_WebGL §12). Workload: `lambda view
+test/demo/midtown/midtown.ls` in a full 1280×800 window on a 2× Retina MacBook,
+release build, live driving replay. The scene renders at `max-pixel-ratio: 1`
+(1280×800, 4× MSAA HDR, three 2048² shadow cascades, bloom and FXAA) and is
+GPU-upscaled to 2560×1600 for readback. `sample` ran at 1 ms for 6 s; a stage is
+its main-thread samples divided by the frames presented.
+
+| Stage (ms per frame) | Before | After |
+|---|---:|---:|
+| Frame interval, mean | 36.7 | 31.2–31.9 |
+| Scene snapshot (CPU, GL calls and readback) | 15.8 | 11.6 |
+| ↳ GPU wait inside `glReadPixels` | 6.6 | 6.0 |
+| ↳ readback detile and alpha normalization | 2.8 | 1.7 |
+| ↳ uniform lookup and update, context switches | 2.6 | 0.4 |
+| Page replay | 8.0 | 5.9 |
+| ↳ HUD vectors (translucent panels and shadows) | 3.7 | 3.5 |
+| ↳ image blits (scene snapshot and cached layers) | 3.2 | 1.4 |
+| Window upload (`glTexImage2D`, 2560×1600) | 1.5 | 1.5 |
+| Animation tick (physics and the Lambda frame handler) | 3.0 | 2.6 |
+
+After the change, 420 of 544 frames presented on the second vsync (about 30 fps).
+The fixes are local and keep every contract: `gl_core` finds resource slots
+through an id hint instead of scanning 4,096 slots per call, caches uniform
+locations by program, link and name, skips the context switch inside a
+`NativeGlCurrent` scope (one per scene snapshot), and scans an index buffer for
+its range once per upload. A shared `render_pixel_row_opaque` skips the
+readback's alpha normalization and turns the 1:1 blit into a row copy for opaque
+rows. Each context grows by 40 KB for the two hint tables.
+
+Experiments bound the GPU wait. At `max-pixel-ratio: 0.5` (a quarter of the
+pixels) it fell only to 5.3 ms; without bloom and FXAA, to 6.8 ms; without sun
+shadows the CPU saved about 4 ms but the wait stayed near 7 ms. The wait is
+therefore mostly the fixed latency of a synchronous readback, not fill. Only a
+pipelined readback (presenting the previous frame) or the shared-texture
+compositor of §7's later presentation path would remove it, and with it the
+readback, blit and upload. Both change presentation contracts and need a
+ruling. The user chose the compositor; its design is
+[Radiant_Design_GPU_Compositor.md](../radiant/Radiant_Design_GPU_Compositor.md). With its step 2
+(`RADIANT_GPU_COMPOSITOR=on`) the same Midtown run averages 20.6 ms a frame (48.5 fps) against
+32.1 ms with it off. Step 3 limits each page segment to its damage: 17.7 ms mean and a 16.7 ms median
+(one 60 Hz vsync) against 30.9 ms with it off (release, 2026-11-03).
+The HUD cost is page compositing: translucent panels must be
+re-blended over a scene that changes every frame.

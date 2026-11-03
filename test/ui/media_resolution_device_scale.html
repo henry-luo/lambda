@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Resolution media queries follow the device scale</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  .probe { height: 20px; margin: 4px; width: 10px; background: #c33; }
+  @media (min-resolution: 2dppx) { #min { width: 200px; background: #3a3; } }
+  @media (resolution >= 2dppx) { #range { width: 200px; background: #3a3; } }
+  @media (max-resolution: 1dppx) { #low { width: 200px; background: #3a3; } }
+</style>
+</head>
+<body>
+  <div id="min" class="probe"></div>
+  <div id="range" class="probe"></div>
+  <div id="low" class="probe"></div>
+</body>
+</html>

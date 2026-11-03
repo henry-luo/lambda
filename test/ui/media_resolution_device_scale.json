@@ -1,0 +1,15 @@
+{
+  "name": "Resolution media queries follow the device scale",
+  "html": "test/ui/media_resolution_device_scale.html",
+  "viewport": {"width": 400, "height": 120},
+  "events": [
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('min')).width === '10px' && getComputedStyle(document.getElementById('low')).width === '200px'"},
+    {"type": "set_device_scale", "scale": 2},
+    {"type": "resize", "width": 401, "height": 120},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_script", "js": "window.devicePixelRatio === 2"},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('min')).width === '200px'"},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('range')).width === '200px'"},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('low')).width === '10px'"}
+  ]
+}

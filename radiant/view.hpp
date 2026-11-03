@@ -4607,6 +4607,10 @@ typedef struct UiContext {
     // since the last present lay inside it; false (the zeroed default) uploads the whole surface.
     bool present_partial;
     Bound present_rect;
+    // GPU compositing (vibe/radiant/Radiant_Design_GPU_Compositor.md): the viewports the last render cut
+    // out of `surface`, and a switch CPU consumers use to get the whole page into it
+    struct UiCompositorState* compositor;
+    bool compositor_suspended;
     bool export_native_graphics;    // file export may lazily create a hidden graphics host for scene snapshots
 
     // font handling
@@ -4718,6 +4722,12 @@ inline RdtDevicePoint ui_context_logical_to_device_point(
 bool ui_context_set_device_scale(UiContext* uicon,
                                  float scale_x,
                                  float scale_y);
+// Adds device pixels a surface write touched to the next partial present's upload.
+void ui_context_add_present_damage(UiContext* uicon, Bound damage);
+// a live window whose compositor no CPU consumer has suspended; RADIANT_GPU_COMPOSITOR=off (or 0) turns it off
+bool ui_context_gpu_compositor(UiContext* uicon);
+// After a composited render `surface` lacks its native viewports; re-render it whole for a CPU consumer.
+void ui_context_materialize_surface(UiContext* uicon);
 // Recompute one document's derived raster scale from its explicit page/output
 // inputs and the UI's device scale. The top-level call also refreshes physical
 // font resources; logical layout remains unchanged.

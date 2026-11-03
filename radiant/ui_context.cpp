@@ -105,10 +105,68 @@ void ui_context_present_surface(UiContext* uicon, const ImageSurface* surface) {
         ? uicon->document->view_tree->root : nullptr;
     // before reflow these are the retained frame's logical extents; the device
     // scale already reflects the destination display, independently of window size.
+    UiCompositorState* compositor = uicon->compositor;
+    // A scene re-rendered or reallocated since the composited render (a snapshot read at another size)
+    // no longer shows what the page segments were cut around: render the whole page on the CPU instead.
+    for (unsigned i = 0; compositor && surface == uicon->surface.get() && i < compositor->count; i++)
+        if (!native_gl_present_layer_current(&compositor->layers[i])) {
+            log_info("[COMPOSITOR] a scene changed after its frame was composited; presenting a CPU render");
+            ui_context_materialize_surface(uicon);
+            break;
+        }
     float scale_x = uicon->viewport_width * uicon->device_scale_x / surface->width;
     float scale_y = uicon->viewport_height * uicon->device_scale_y / surface->height;
+    RadiantPresentLayers composite = {};
+    if (compositor && compositor->count && surface == uicon->surface.get()) {
+        composite.layers = compositor->layers;
+        composite.count = compositor->count;
+        composite.surface_hidden = compositor->surface_hidden;
+        composite.reference = compositor->reference;
+    }
+    for (unsigned i = 0; i < composite.count; i++) {
+        const CompositorDamage& damage = compositor->above_damage[i];
+        compositor->layers[i].above_damage = damage.full ? nullptr : damage.rects;
+        compositor->layers[i].above_damage_count = damage.full ? 0 : damage.count;
+    }
     radiant_platform_present(uicon->window, surface, &uicon->present_rect,
-        uicon->present_partial, render_document_output_background(root).c, scale_x, scale_y);
+        uicon->present_partial, render_document_output_background(root).c, scale_x, scale_y,
+        composite.count ? &composite : nullptr);
+    // the presenter keeps each uploaded segment until a render repaints it
+    for (unsigned i = 0; i < composite.count; i++) {
+        compositor->layers[i].above_changed = false;
+        compositor->above_damage[i] = {};
+    }
+}
+
+bool ui_context_gpu_compositor(UiContext* uicon) {
+    static int enabled = -1;
+    // on by default for live windows since the parity pages and the Radiant baseline qualified it
+    // (Radiant_Design_GPU_Compositor Q11); headless and export paths never composite
+    if (enabled < 0) {
+        const char* env = getenv("RADIANT_GPU_COMPOSITOR");
+        enabled = !env || (strcmp(env, "off") != 0 && strcmp(env, "0") != 0);
+    }
+    return enabled && uicon && !uicon->headless && uicon->window && !uicon->export_native_graphics &&
+        !uicon->compositor_suspended;
+}
+
+void ui_context_materialize_surface(UiContext* uicon) {
+    if (!uicon || !uicon->compositor || !uicon->compositor->count || !uicon->document ||
+        !uicon->document->view_tree) return;
+    DocState* state = uicon->document->state;
+    uicon->compositor_suspended = true;
+    if (state) doc_state_mark_dirty(state);
+    render_html_doc(uicon, uicon->document->view_tree, nullptr);
+    if (state) doc_state_clear_render_flags(state);
+    uicon->compositor_suspended = false;
+}
+
+void ui_context_add_present_damage(UiContext* uicon, Bound damage) {
+    if (!uicon || !(damage.right > damage.left && damage.bottom > damage.top)) return;
+    Bound& r = uicon->present_rect;
+    if (!(r.right > r.left && r.bottom > r.top)) r = damage;
+    else r = {fminf(r.left, damage.left), fminf(r.top, damage.top),
+              fmaxf(r.right, damage.right), fmaxf(r.bottom, damage.bottom)};
 }
 
 bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pixel_height) {
@@ -668,6 +726,14 @@ void UiContext::destroy() {
     render_pool_shutdown();  // destroy worker threads before ThorVG engine
     rdt_engine_term();
     image_surface_destroy(window_surface);
+    if (compositor) {
+        for (ImageSurface* above : compositor->above) image_surface_destroy(above);
+        for (ImageSurface* mask : compositor->masks) image_surface_destroy(mask);
+        for (CompositorSegmentSummary& summary : compositor->summaries) mem_free(summary.items);
+        image_surface_destroy(compositor->reference);
+        mem_free(compositor);
+        compositor = nullptr;
+    }
     window_surface = nullptr;
     surface = nullptr;
 

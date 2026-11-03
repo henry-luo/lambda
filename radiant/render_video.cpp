@@ -477,9 +477,16 @@ void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiConte
             continue;
         }
 
+        // the frame and controls draw inside the destination box; the centred play button and error
+        // mark reach up to 40 px (plus stroke and antialiasing) from its centre even in a smaller box
+        float cx = p.dst_x + p.dst_w / 2, cy = p.dst_y + p.dst_h / 2;
+        Bound written = {fminf(p.dst_x, cx - 42), fminf(p.dst_y, cy - 42),
+                         fmaxf(p.dst_x + p.dst_w, cx + 42), fmaxf(p.dst_y + p.dst_h, cy + 42)};
+
         // error state: draw error overlay
         if (state == RDT_VIDEO_STATE_ERROR) {
             render_error_state(surface, p.dst_x, p.dst_y, p.dst_w, p.dst_h);
+            ui_context_add_present_damage(uicon, written);
             continue;
         }
 
@@ -509,6 +516,7 @@ void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiConte
         if (state == RDT_VIDEO_STATE_PAUSED || state == RDT_VIDEO_STATE_READY) {
             render_play_button_overlay(surface, p.dst_x, p.dst_y, p.dst_w, p.dst_h);
         }
+        ui_context_add_present_damage(uicon, written);
     }
 
     doc_state_clear_video_frame_pending(rstate);

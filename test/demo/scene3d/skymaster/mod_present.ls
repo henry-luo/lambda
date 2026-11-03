@@ -7,17 +7,11 @@ import rig: .mod_rig
 import cam: .mod_camera
 import sc: .mod_scene
 import ui: .mod_ui
+import numbers: ~~.~~.mod_number_text
 
 pub fn node(owner, id) => dom.get_element_by_id(dom.root_node(owner), id)
-fn fixed(value, places) {
-    let factor = 10 ** places
-    let whole = int(round(abs(value) * factor))
-    let fraction = string(whole % factor);
-    (if (value < 0 and whole > 0) "-" else "") ++ string(whole div factor) ++ "." ++
-        join(fill(max(0, places - len(fraction)), "0"), "") ++ fraction
-}
-fn px(x) => fixed(x, 1) ++ "px"
-fn deg(a) => fixed(a * 180.0 / rig.PI, 1) ++ "deg"
+fn px(x) => numbers.fixed(x, 1) ++ "px"
+fn deg(a) => numbers.fixed(a * 180.0 / rig.PI, 1) ++ "deg"
 pn paint(target, property, value) { dom.presentation_style_set_property(target, property, value) }
 pn show(owner, id, visible) { paint(node(owner, id), "opacity", if (visible) "1" else "0") }
 
@@ -26,7 +20,7 @@ pub fn locked(g) => g < 0.0005 or g > rig.PI - 0.0005
 fn status(g) => if (g > rig.PI - 0.0005) 0 else if (g < 0.0005) 2 else 1
 // the flight trace: tyre height across the whole sequence
 pub fn trace(seq) => join([for (i in 0 to 48, let at = seq.duration * i / 48.0)
-    fixed(6.0 + 174.0 * i / 48.0, 1) ++ "," ++ fixed(48.0 - 42.0 * rig.moment(seq, at).height / 1.7, 1)], " ")
+    numbers.fixed(6.0 + 174.0 * i / 48.0, 1) ++ "," ++ numbers.fixed(48.0 - 42.0 * rig.moment(seq, at).height / 1.7, 1)], " ")
 pub fn speed_fraction(speed) => (speed - 0.25) / 1.75
 
 // odometer: digit cells hold the characters "#" stands for in the pattern; blanks lead short numbers
@@ -51,7 +45,7 @@ pn panels(owner, st, m) {
     show(owner, "swatch-locked", locked(g))
     show(owner, "note-air", m.height > 0.005)
     show(owner, "note-ground", m.height <= 0.005)
-    digits(owner, "note-height", "#.##", fixed(m.height, 2))
+    digits(owner, "note-height", "#.##", numbers.fixed(m.height, 2))
     // schematic: the rod strokes with the rack, the pinion turns, the legs sweep through 180°
     paint(node(owner, "schematic-rod"), "transform", "translateX(" ++ px(20.0 * m.stroke / rig.STROKE) ++ ")")
     paint(node(owner, "schematic-pinion"), "transform", "rotate(" ++ deg(g) ++ ")")
@@ -62,9 +56,9 @@ pn panels(owner, st, m) {
     let slope = math.atan2(42.0 * (m.height - ahead.height) / 1.7, 174.0 * 0.05 / seq.duration)
     paint(node(owner, "flight-marker"), "transform", "translate(" ++ px(6.0 + 174.0 * m.sec / seq.duration) ++ ", " ++
         px(48.0 - 42.0 * m.height / 1.7) ++ ") rotate(" ++ deg(slope) ++ ")")
-    for (row in [["height", m.height / 1.7, "#.##", fixed(m.height, 2)], ["gear", g / rig.PI, "###", whole(g * 180.0 / rig.PI)],
+    for (row in [["height", m.height / 1.7, "#.##", numbers.fixed(m.height, 2)], ["gear", g / rig.PI, "###", whole(g * 180.0 / rig.PI)],
             ["stroke", m.stroke / rig.STROKE, "###", whole(m.stroke * 1000.0)]]) {
-        paint(node(owner, "fill-" ++ row[0]), "transform", "scaleX(" ++ fixed(rig.clamp(row[1], 0.0, 1.0), 4) ++ ")")
+        paint(node(owner, "fill-" ++ row[0]), "transform", "scaleX(" ++ numbers.fixed(rig.clamp(row[1], 0.0, 1.0), 4) ++ ")")
         digits(owner, "value-" ++ row[0], row[2], row[3])
     }
     paint(node(owner, "wheel-icon"), "transform", "rotate(" ++ deg(0.0 - m.roll) ++ ")")
@@ -75,14 +69,14 @@ pn panels(owner, st, m) {
     digits(owner, "clock-now", "##", two(int(floor(m.sec))))
     slider(owner, "scrub", m.sec / seq.duration)
     slider(owner, "speed", speed_fraction(st.speed))
-    digits(owner, "speed-value", "#.##", fixed(st.speed, 2))
+    digits(owner, "speed-value", "#.##", numbers.fixed(st.speed, 2))
     show(owner, "play-glyph-0", st.playing)
     show(owner, "play-glyph-1", not st.playing)
 }
 pn slider(owner, id, fraction) {
     let f = rig.clamp(fraction, 0.0, 1.0)
-    paint(node(owner, id ++ "-fill"), "transform", "scaleX(" ++ fixed(f, 4) ++ ")")
-    paint(node(owner, id ++ "-carrier"), "transform", "translateX(" ++ fixed(f * 100.0, 2) ++ "%)")
+    paint(node(owner, id ++ "-fill"), "transform", "scaleX(" ++ numbers.fixed(f, 4) ++ ")")
+    paint(node(owner, id ++ "-carrier"), "transform", "translateX(" ++ numbers.fixed(f * 100.0, 2) ++ "%)")
 }
 
 // camera attributes are the one scene edit made per frame, and only while the camera moves
@@ -114,7 +108,7 @@ pn callouts(owner, st, m) {
         let dy = tip[1] - start[1]
         paint(node(owner, "callout-text-" ++ k.id), "transform", "translate(" ++ px(x) ++ ", " ++ px(y) ++ ")")
         paint(node(owner, "callout-line-" ++ k.id), "transform", "translate(" ++ px(start[0]) ++ ", " ++ px(start[1]) ++ ") rotate(" ++
-            deg(math.atan2(dy, dx)) ++ ") scaleX(" ++ fixed(sqrt(dx * dx + dy * dy) / 100.0, 4) ++ ")")
+            deg(math.atan2(dy, dx)) ++ ") scaleX(" ++ numbers.fixed(sqrt(dx * dx + dy * dy) / 100.0, 4) ++ ")")
         paint(node(owner, "callout-dot-" ++ k.id), "transform", "translate(" ++ px(tip[0]) ++ ", " ++ px(tip[1]) ++ ")")
     }
 }
@@ -145,8 +139,8 @@ pub pn sync(owner, st) {
     scene_dom.attr(node(owner, "play"), "aria-pressed", st.playing)
     scene_dom.attr(node(owner, "scrub"), "aria-valuemin", 0)
     scene_dom.attr(node(owner, "scrub"), "aria-valuemax", sequence(st).duration)
-    scene_dom.attr(node(owner, "scrub"), "aria-valuenow", fixed(st.at, 2))
+    scene_dom.attr(node(owner, "scrub"), "aria-valuenow", numbers.fixed(st.at, 2))
     scene_dom.attr(node(owner, "speed"), "aria-valuemin", 0.25)
     scene_dom.attr(node(owner, "speed"), "aria-valuemax", 2.0)
-    scene_dom.attr(node(owner, "speed"), "aria-valuenow", fixed(st.speed, 2))
+    scene_dom.attr(node(owner, "speed"), "aria-valuenow", numbers.fixed(st.speed, 2))
 }

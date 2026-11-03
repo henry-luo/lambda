@@ -1239,8 +1239,8 @@ void render(RadiantWindow* window) {
             // Video-only dirty path: skip full DL rebuild, just blit new video frames
             if (ui_context.document->state->has_active_video &&
                 ui_context.document->state->video_placement_count > 0) {
+                // adds each blitted placement to the present damage
                 render_video_frames_cached(ui_context.document->state, ui_context.surface, &ui_context);
-                ui_context.present_partial = false;  // the cached blit wrote outside any damage rect
             }
         }
     }

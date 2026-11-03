@@ -2537,6 +2537,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
+    {"midtown", "test/demo/midtown/midtown.ls"},
     {"photo", "test/demo/photo/photo.ls"},
     {"photos", "test/demo/photos/photos.ls"},
     {"draw", "test/demo/draw/draw.ls"},

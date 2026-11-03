@@ -203,6 +203,8 @@ fn check_node(n, all_nodes) bool^ {
     let checked_lighting = if (kind == 'scene3d' and n.environment != null) definition(all_nodes, n.environment, 'environment')^
     let checked_intensity = if (kind == 'scene3d' and n["environment-intensity"] != null and
         (not numeric(n["environment-intensity"]) or n["environment-intensity"] < 0)) raise fail("invalid environment intensity")
+    let checked_density = if (kind == 'scene3d' and n["max-pixel-ratio"] != null and
+        (not numeric(n["max-pixel-ratio"]) or n["max-pixel-ratio"] <= 0)) raise fail("max-pixel-ratio must be a positive number")
     let children = content(n)
     let allowed = if (kind == 'scene3d') ['fog', 'postprocessing', *OBJECT_CHILDREN]
         else if (kind == 'group' or kind == 'rigid-body') OBJECT_CHILDREN

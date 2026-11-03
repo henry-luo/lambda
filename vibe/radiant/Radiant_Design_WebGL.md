@@ -22,6 +22,8 @@ directional/spot/point shadows and camera-only cache reuse are implemented
 on macOS as of 2026-10-27. Dreamhome adopts them; acceptance results,
 release frame times and aggregate-gate limits are in the
 [native PBR implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md).
+On 2026-11-02 the user accepted the [GPU compositor design](Radiant_Design_GPU_Compositor.md)
+for §7's later presentation path; it revises §5's context sharing (Appendix S).
 
 **Date:** 2026-10-08
 
@@ -233,7 +235,7 @@ class and option.
 
 | Lambda description | Native meaning / Three.js concept |
 |---|---|
-| `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. `environment` names an environment resource; `environment-intensity` defaults to 1. `tone-mapping` is `'none'` (default), `'neutral'` or `'aces'`; `exposure` defaults to 1. |
+| `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. `environment` names an environment resource; `environment-intensity` defaults to 1. `tone-mapping` is `'none'` (default), `'neutral'` or `'aces'`; `exposure` defaults to 1. `max-pixel-ratio` (positive, default unlimited) caps the device pixels per CSS pixel the scene renders at; above the cap the frame renders at the cap and the GPU upsamples it once, filtering the encoded sRGB bytes, into the published snapshot at the page's raster scale. Render stats report both `raster_*` (rendered) and `output_*` (published) sizes. |
 | `<group>` | Hierarchy and inherited transforms, corresponding to Group/Object3D. |
 | `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV and optional `infinite-far:true`, orthographic permits near 0 and uses positive `view_height` (full vertical scene span). |
 | `<light type:'ambient'/'hemisphere'/'directional'/'point'/'spot'>` | Color/intensity; directional and spot lights aim from `position` toward `target`. Point and spot lights fall off with inverse-square distance, cut off smoothly at `distance` (0 = unbounded). A spot's `angle` (radians, default π/3, at most π/2) is its outer cone edge; `penumbra` (0..1) softens that fraction of the cone. At most eight directional/point/spot lights, plus ambient and one hemisphere light per scene/environment. Hemisphere light uses `color`, `ground-color` (default white), and the direction toward its position. Directional, spot and point lights opt into shadows with `cast-shadow`; settings and limits are in §5. |
@@ -620,9 +622,14 @@ different scene/API policy above that waist.
 ### Ownership and validation
 
 A document-owned registry tracks scene viewport, scene projection, asset,
-context, and GPU-resource generations. Initially use isolated contexts per
-viewport and share resources only within their valid context. Resource IDs
-and native GL names have separate identities. Changes/removal invalidate the
+context, and GPU-resource generations. Each viewport has its own context, and
+no other client sees that context's GL state. A window's presenter context and
+the native contexts of its documents form one share group, so the presenter can
+sample a viewport's presented texture without a readback (USER, 2026-11-02;
+[GPU compositor](Radiant_Design_GPU_Compositor.md) Q7/C3). The shared object
+namespace never reaches scripts or packages: GL names stay inside the native
+core (D7.4.1v2), and budgets remain per context. Resource IDs and native GL
+names have separate identities. Changes/removal invalidate the
 appropriate projection or cache entries; stale retained paint data keeps its
 published image alive until released (D4.5.1v4).
 
@@ -848,6 +855,11 @@ generation ownership, format/alpha/color-space metadata, and a snapshot path
 for CPU consumers. An OpenGL texture cannot be handed to the present CPU painter
 as if it were an `ImageSurface`. Establish the compositor seam before promising
 zero-copy performance; changing the whole page renderer is not an initial gate.
+The seam is designed in [Radiant — GPU Compositing of Native Graphics Viewports](Radiant_Design_GPU_Compositor.md),
+whose rulings Q7–Q13 the user accepted on 2026-11-02. WebGL canvases composite through it since
+2026-11-03 (its step 5): the presenter samples a presented copy of the drawing buffer, so the
+`preserveDrawingBuffer` rules above hold unchanged and a canvas reads its frame back only when a
+CPU consumer asks.
 
 ## 8. Delivery phases and acceptance
 
@@ -1168,7 +1180,10 @@ is about **7.91 MiB**; reading one such image at 60 frames/s moves about
 **475 MiB/s** of pixel payload before conversion and compositing. Driver
 synchronization may cost more than the raw transfer. Measure draw submission,
 GPU execution, resolve/readback, conversion, page composition, and end-to-end
-frame pacing separately, including multiple dirty viewports.
+frame pacing separately, including multiple dirty viewports. The first such
+measurement, a full-window Retina scene, confirmed the risk: the synchronous
+readback waits about 6 ms for the GPU whatever the pixel count (see
+[Retina frame pacing](../impl/Radiant_Scene3d_Phase1.md#retina-frame-pacing-midtown-2026-11-02)).
 
 Use release builds only. Record GL/GLSL versions, driver/device, dimensions,
 density, shaders, Lambda scene revision, warmup, and correctness output. Measure
@@ -1510,8 +1525,9 @@ local evidence, not durable release inputs.
 
 ## Appendix S — superseded decisions
 
-The following earlier directions were replaced by the user's 2026-10-08
-revisions. They remain as history and do not constrain the current design.
+The following earlier directions were replaced by the user's revisions of
+2026-10-08, unless a later date is noted. They remain as history and do not
+constrain the current design.
 
 - ~~The root name remains proposed, with `<scene>` as an alternative to `<scene3d>`.~~ Replaced by §4: the user selected `<scene3d>`. `<scene>` was more generic; numeric-leading `<3d_scene>` failed bare parsing; `<canvas type:'webgl'>` described a backend rather than the declarative vocabulary. The package spelling remains a recommendation.
 - ~~Default intrinsic size is 300 × 150 CSS pixels; resize updates the auto-aspect camera to the used viewport ratio.~~ Replaced by §7: SVG-style intrinsic sizing and viewBox fitting. A valid viewBox fixes the default camera's logical frame ratio; CSS resize fits that frame. The viewport ratio supplies the default camera aspect only without a valid viewBox.
@@ -1524,6 +1540,7 @@ revisions. They remain as history and do not constrain the current design.
 - ~~Three.js is the initial compatibility target, using its WebGL2 entry point.~~ Replaced by §1/§8: native Lambda scenes are Phase I; JS WebGL and Three.js are Phase II.
 - ~~Radiant needs no duplicate native 3D scene graph for this workload. Its retained page display list references the canvas image; Three.js's retained scene lives in the script heap.~~ Replaced by §4/§5: Lambda elements drive a native rendering projection in Phase I. The quoted ownership still describes the separate Phase II Three.js path.
 - ~~For Three.js-generated GLSL ES, implement a first-party, token-aware source adapter.~~ Its placement in initial delivery is superseded by §6: native desktop material shaders first; ES normalization joins Phase II.
+- ~~Initially use isolated contexts per viewport and share resources only within their valid context.~~ Replaced by §5 on 2026-11-02 (USER, [GPU compositor](Radiant_Design_GPU_Compositor.md) Q7): each viewport keeps its own context and GL state, but a window's presenter and its documents' native contexts form one share group, so presentation needs no readback.
 
 ## 15. Asset loading into native scenes
 
