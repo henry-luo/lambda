@@ -3039,7 +3039,7 @@ struct HtmlUaElementDefault {
     float font_scale;              // multiplies the inherited size; 1 keeps it
     bool keeps_medium;             // a scaled heading size keeps the inherited medium lineage
     bool monospace;
-    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, text_align;
+    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, line_height, text_align;
     CssEnum list_style, color;
     float margin_px, margin_block_em, margin_inline_px, margin_inline_start_px;
     float padding_px, padding_inline_start_px;
@@ -4902,6 +4902,7 @@ void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float 
 void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y);
 void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y,
     float break_offset_x);
+void layout_shift_inline_flow(View* root, float offset_x, float offset_y);
 bool layout_inline_boundary_allows_soft_wrap(LayoutContext* context, DomNode* source);
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);

@@ -716,7 +716,7 @@ static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
     float shift = start - box->natural_start;
     for (int index = 0; index < box->node_count; index++) {
         if (box->fragmented) layout_shift_inline_fragment(box->nodes[index], box->fragment_line, shift, 0.0f);
-        else layout_shift_view_tree(static_cast<View*>(box->nodes[index]), shift, 0.0f);
+        else layout_shift_inline_flow(static_cast<View*>(box->nodes[index]), shift, 0.0f);
     }
     float extra = max(0.0f, width - box->natural_width);
     View* first_leaf = nullptr;
@@ -764,7 +764,7 @@ static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
     auto align_view = [&](View* view, bool leaf, int) {
         if (!leaf) return;
         if (view->view_type != RDT_VIEW_TEXT) {
-            layout_shift_view_tree(view, offset, 0.0f);
+            layout_shift_inline_flow(view, offset, 0.0f);
             return;
         }
         ViewText* text = lam::view_require_text(view);
@@ -831,8 +831,10 @@ static void ruby_shift_level(LayoutRubyLevel* level, float offset_y, bool conten
         return;
     }
     auto shift = [&](View* view) {
-        if (contents_only && view->is_group()) layout_shift_view_children(view, 0.0f, offset_y);
-        else layout_shift_view_tree(view, 0.0f, offset_y);
+        if (contents_only && view->is_group()) {
+            for (View* child = lam::view_require_element(view)->first_placed_child(); child; child = child->next())
+                layout_shift_inline_flow(child, 0.0f, offset_y);
+        } else layout_shift_inline_flow(view, 0.0f, offset_y);
     };
     if (level->element) {
         shift(level->element);
@@ -1087,12 +1089,15 @@ static void ruby_suppress_annotation_box(LayoutContext* context, LayoutRubyBox* 
 }
 
 static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel* level,
-                                          const Linebox* base_line) {
+                                          const Linebox* base_line, float column_width) {
     LayoutContextScope state(context);
     LayoutViewScope view(context);
     RubyLevelScope level_scope(context, level);
+    // this stage emits one selected parallel interval, not an independent soft-wrap decision.
+    LayoutInlineKeepScope keep(context, true);
     context->block.inline_box_metrics = nullptr;
-    line_init(context, base_line->left, FLT_MAX);
+    // the measured columns contain every reading; RTL placement needs a finite alignment edge.
+    line_init(context, base_line->left, base_line->left + column_width);
     for (LayoutRubyBox* box = level->first; box; box = box->next) {
         if (box->hidden) ruby_suppress_annotation_box(context, box);
     }
@@ -1232,10 +1237,8 @@ static bool ruby_finish_segment_flow(LayoutContext* context, ViewSpan* ruby,
     // whole units and selected text fragments commit through one column/baseline stage.
     ruby_measure_used_level(&segment->base);
     Linebox base_line = context->line;
-    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
-        LayoutInlineKeepScope keep(context, source_fragments);
-        ruby_layout_annotation_level(context, level, &base_line);
-    }
+    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
+        ruby_layout_annotation_level(context, level, &base_line, segment->width);
     ruby_resolve_segment_columns(segment, scope, &model->failed);
     if (model->failed) return false;
     float height = 0.0f;
@@ -1652,7 +1655,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         Rect bounds = ruby_level_bounds(&segment->base);
         base_has_content |= bounds.width > 0.0f || bounds.height > 0.0f;
         for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
-            ruby_layout_annotation_level(context, level, &base_line);
+            ruby_layout_annotation_level(context, level, &base_line, segment->width);
             annotations_have_content |= level->line.start_view.get() != nullptr ||
                 level->line.max_atomic_inline_height > 0.0f;
         }

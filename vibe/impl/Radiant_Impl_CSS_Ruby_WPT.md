@@ -1924,3 +1924,99 @@ placement before modifying the owning stage; do not clamp the output. The
 finite diagnostic plan and controls are retained in
 `temp/ruby-m20/next-milestone.json`. References, upstream fixtures, comparison
 tolerances and baseline floors remain unchanged.
+
+## M21: finite coordinates for independent RTL Ruby content
+
+P1 shared placement defect. `ruby-bidi-003-ref` and an explicit-font control
+publish an atomic reading at `-FLT_MAX`, with the base losing its right-side
+placement. Both the qualified M19 and M20 executables reproduce this. Ordinary
+text in the explicit ProbeSerif control agrees with Chromium on advance, so
+the separate default-font disagreement is not evidence for this cause.
+
+Trace source flow, the independent annotation line, bidi placement and column
+translation to locate the first invalid coordinate before editing the owning
+algorithm. The current annotation line uses an unbounded right edge; verify
+which consumer treats that edge as a finite origin. Reuse existing measurement
+and coordinate-frame services. Do not clamp the final coordinates or substitute
+fixture offsets. CSS Ruby §2.1.1 / §3.1 / §3.5 retain independent annotation
+contexts and paired columns. Scratch and selected-view ownership remain
+**D4.5.1v4 / D4.1.4v5**.
+
+Acceptance: the imported reference and horizontal LTR/RTL ordinary, direct-text
+and inline-block base/reading controls; initial/retained and direction/width
+mutations; finite right alignment, source identities, paint and character Range
+geometry. Begin the shared atomic-reading placement path; defer independent
+default-font metrics, vertical flow and optional overhang refinements.
+Budget: focused failing native/browser controls, relevant bidi/Ruby neighbors
+and unchanged-reference Ruby scores, then one stable required Radiant gate
+plus dimension lint/inventory. Run boundary validation for actual module API,
+import or ownership changes. The raw Ruby failures remain open.
+
+The trace confirms two ownership errors. Atomic RTL placement uses the
+annotation's `FLT_MAX` edge as a finite alignment origin, losing its width to
+float precision. Column translation then moves both the atomic box and its
+local text. The annotation line now uses its measured column frame and an
+explicit keep scope for the selected parallel interval. Whole-flow translation
+shares the fragment shifter, preserves inline font boxes and fragment unions,
+and stops at independent atomic coordinate frames. Single-line shifts retain
+their previous selection and bounds-recomputation behavior.
+
+Qualification exposed a related UA-style prerequisite: atomic reading children
+inherited the paragraph's leading. The shared HTML default table now supplies
+`rt` with local `normal` leading, also serialized into secondary-view UA CSS.
+This is a browser-compatible UA policy following the annotation-local leading
+intent of CSS Ruby Appendix A.1; its sample value `1` is informative. Explicit
+author leading, inheritance, font shorthand and resets still take precedence.
+`all:initial` now materializes initial normal leading so a descendant cannot
+fall through its parent to an older ancestor. No view-specific property copy
+or source mutation is introduced (**D4.5.1v4 / D4.1.4v5**).
+
+The earlier forced-break regression's atomic reading now expects one 20px line
+of normal Ahem leading, replacing its previous 100px inherited paragraph line.
+Its width/source assertions remain strict. CSS Ruby §2.2 step 7 still suppresses
+annotation segment breaks inside independent descendants; Chromium's two-line
+40px result for that authored control is recorded without copying it.
+
+All 66 focused Ruby/UA/bidi/fragmentation neighbors pass, including source,
+paint and per-character Range checks through retained direction/width edits.
+The raw suite reaches **55/212 full matches**: `ruby-bidi-003-ref` and
+`ruby-text-combine-upright-002-ref` become full matches, with none lost. Four
+other partial documents improve. `ruby-align-space-around-ref` text drops from
+100% to 50%: the old invalid local translation canceled an existing empty
+zero-font-base anchor mismatch. Atomic height and local text origin now agree
+with the ordinary-box control, but the parent annotation remains at 104px
+instead of 88px in the first example. That separate parent-anchor mismatch
+stays open; the raw failure and unchanged reference retain it. Evidence:
+`temp/ruby-m21/geometry-trace-1.log`, `geometry-trace-2.log`,
+`space-ref-native-ua.json`, `space-ref-browser.json`, and `delta-ua-2.json`.
+
+The explicit-font browser comparison covers 160 row/source coordinates. All
+but one agree exactly: Chromium leaves a 10px block-axis gap for the mixed
+direct-base/atomic-reading RTL row, while native controls keep the stacked
+containers adjacent under CSS Ruby §3.1.2. The difference remains visible in
+`temp/ruby-m21/browser-comparison.json`. Zero-leading atomic boxes agree on
+local text origins; that check does not claim their parent anchors agree.
+
+The stable required Radiant gate passes: **9389 checks; 9082 passed, 305 partial,
+0 failed, 2 skipped**. Native text/layout passes 486/486 and UI 752/752. Layout
+retains **4973 full / 301 partial / 0 regressions**; CSS Text retains **894 full /
+86 partial / 0 regressions**. Dimension lint, diff and generated-inventory checks
+pass; all 421 names/IDs remain, with changes only in reference columns 13–15.
+All eight frozen source/test inputs and the qualified CLI hash remain unchanged,
+so the stable raw Ruby run applies to this qualified candidate without replay.
+Qualification: `temp/ruby-m21/qualification-result.json`.
+
+The strict module DSOs link; the boundary checker rejects the same six deferred
+imports recorded by M18, with no additions or allowlist edits. That audit remains
+a qualification limit, not a passing gate. The unrelated M15 input/PDF build
+limit was not rerun. Evidence: `temp/ruby-m21/boundary-comparison.json` and
+`boundary.log`.
+
+M21's coordinate-ownership core is complete; the goal remains active with 157
+raw Ruby mismatches. The next diagnostic milestone verifies an embedded CJK
+Ruby min-content discrepancy against current Chromium and explicit-font controls
+before assigning its owning stage. That common shrink-to-fit flow precedes the
+rare empty-zero-font parent-anchor tail. The saved comparison and finite plan
+are in `temp/ruby-m21/intrinsic-embedding-saved-comparison.json` and
+`next-milestone.json`. References, upstream fixtures, comparison tolerances and
+baseline floors remain unchanged.

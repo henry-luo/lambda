@@ -15851,6 +15851,132 @@ TEST_F(RadiantTextQuery, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColu
     }
 }
 
+TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirections) {
+    ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base", "reading"};
+    struct Source { DomText* text = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr; };
+    struct Row { const char* id; bool rtl; Source sources[2]; } rows[] = {
+        {"ltr-reading", false, {}}, {"ltr-base", false, {}}, {"ltr-both", false, {}}, {"ltr-wide", false, {}},
+        {"rtl-reading", true, {}}, {"rtl-base", true, {}}, {"rtl-both", true, {}}, {"rtl-wide", true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < 2; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* text = first_text_leaf(find(id));
+        ASSERT_NE(text, nullptr);
+        row.sources[role] = {text, text->parent, text->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-atomic-coordinates"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, 40.0f);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            str_fmt(id, sizeof(id), "%s-ruby", entry.id);
+            EXPECT_FLOAT_EQ(find(id)->width, 40.0f);
+            float x, y, control_x, control_y;
+            view_get_visual_bounds(row, &x, &y, nullptr, nullptr);
+            view_get_visual_bounds(control, &control_x, &control_y, nullptr, nullptr);
+            for (size_t role = 0; role < 2; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", entry.id, roles[role]);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(reference, nullptr);
+                DomText* references[] = {reference};
+                expect_text_paint_sources<8>(row, source.text, control, references, 1);
+                for (unsigned index = 0; index < dom_text_utf16_length(reference); index++) {
+                    SCOPED_TRACE(index);
+                    Rect expected = {};
+                    ASSERT_TRUE(character_rect(range, reference, index, &expected));
+                    expected.x += x - control_x; expected.y += y - control_y;
+                    expect_character_rect(range, source.text, index, expected);
+                }
+            }
+        }
+        // an annotation translation cannot change the independent box's zero-line-height text origin.
+        DomElement* zero = find("zero-reading");
+        DomElement* zero_control = find("zero-control");
+        DomText* zero_text = first_text_leaf(zero);
+        DomText* zero_reference = first_text_leaf(zero_control);
+        ASSERT_NE(zero_text, nullptr);
+        ASSERT_NE(zero_reference, nullptr);
+        ASSERT_NE(zero_text->rect, nullptr);
+        ASSERT_NE(zero_reference->rect, nullptr);
+        EXPECT_FLOAT_EQ(zero->height, 0.0f);
+        EXPECT_FLOAT_EQ(zero->height, zero_control->height);
+        EXPECT_FLOAT_EQ(zero_text->rect->x, zero_reference->rect->x);
+        EXPECT_FLOAT_EQ(zero_text->rect->y, zero_reference->rect->y);
+        float zero_x, zero_y, control_x, control_y;
+        view_get_visual_bounds(zero, &zero_x, &zero_y, nullptr, nullptr);
+        view_get_visual_bounds(zero_control, &control_x, &control_y, nullptr, nullptr);
+        for (unsigned index = 0; index < dom_text_utf16_length(zero_reference); index++) {
+            Rect expected = {};
+            ASSERT_TRUE(character_rect(range, zero_reference, index, &expected));
+            expected.x += zero_x - control_x; expected.y += zero_y - control_y;
+            expect_character_rect(range, zero_text, index, expected);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial");
+    }
+    for (bool reverse : {true, false}) {
+        for (const Row& entry : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            for (DomElement* row : {find(entry.id), find(id)}) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", reverse ? "260px" : "200px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(row, "direction", entry.rtl != reverse ? "rtl" : "ltr"));
+            }
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(reverse ? "reverse" : "restore");
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndResets) {
+    ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    DomElement* reading = dom_find_element_by_id(document->root, "ua-reading");
+    DomElement* atomic = dom_find_element_by_id(document->root, "ua-atomic");
+    ASSERT_NE(reading, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    DomText* source = first_text_leaf(atomic);
+    ASSERT_NE(source, nullptr);
+    const unsigned char* data = source->text_data();
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        EXPECT_FLOAT_EQ(atomic->height, 20.0f);
+    }
+    const struct { const char* style; float height; } cases[] = {
+        {"font-size:20px;line-height:0", 0.0f}, {"font-size:20px;line-height:12px", 12.0f},
+        {"font-size:20px;line-height:inherit", 100.0f}, {"font-size:20px;line-height:unset", 100.0f},
+        {"all:inherit;font-size:20px", 100.0f}, {"all:unset;font-size:20px", 100.0f},
+        {"all:initial;font-family:Ahem;font-size:20px", 20.0f},
+        {"all:revert;font-family:Ahem;font-size:20px", 20.0f},
+        {"font:20px Ahem", 20.0f}, {"font-size:20px", 20.0f}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.style);
+        ASSERT_TRUE(reading->set_attribute("style", entry.style));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(atomic->height, entry.height);
+        EXPECT_EQ(first_text_leaf(atomic), source);
+        EXPECT_EQ(source->parent.get(), atomic);
+        EXPECT_EQ(source->text_data(), data);
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
     ASSERT_NE(load("test/html/layout_ruby_multicol_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
@@ -16245,7 +16371,8 @@ TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutCha
         ASSERT_NE(annotation_atomic, nullptr);
         EXPECT_FLOAT_EQ(ordinary->parent->height, 200.0f);
         EXPECT_FLOAT_EQ(base_atomic->height, 200.0f);
-        EXPECT_FLOAT_EQ(annotation_atomic->height, 100.0f);
+        // the UA reading default supplies normal leading; annotation segment breaks still collapse.
+        EXPECT_FLOAT_EQ(annotation_atomic->height, 20.0f);
         DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
         ASSERT_NE(reading, nullptr);
         EXPECT_STREQ((const char*)reading->first_child->text_data(), "A\nB");

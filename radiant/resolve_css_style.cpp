@@ -5841,6 +5841,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
         }
+        // an explicit initial normal value must stop descendant leading from falling through to an ancestor.
+        if (span) span->ensure_block(lycon)->line_height = lam::shared(css_line_height_normal_value());
     }
     if (all_reset_keyword == CSS_VALUE_INHERIT || all_reset_keyword == CSS_VALUE_UNSET) {
         CssDeclaration* font_all = style_tree_get_declaration(

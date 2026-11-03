@@ -414,7 +414,7 @@ static constexpr float HTML_BODY_DEFAULT_MARGIN = 8.0f;
 bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
     HtmlUaElementDefault value = {1.0f, false, false,
         CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF,
-        CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+        CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
     // heading sizes scale the inherited size; heading margins are relative to the heading's own size.
     static const float heading_scales[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
     static const float heading_margins[] = {0.67f, 0.83f, 1.0f, 1.33f, 1.67f, 2.33f};
@@ -458,7 +458,11 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
         break;
     case MARKUP_NAME_SMALL: value.font_scale = 0.83f; break;
     case MARKUP_NAME_BIG: value.font_scale = 1.17f; break;
-    case MARKUP_NAME_RT: value.font_scale = 0.5f; break;
+    case MARKUP_NAME_RT:
+        value.font_scale = 0.5f;
+        // the UA annotation default keeps descendants independent of the base paragraph's leading.
+        value.line_height = CSS_VALUE_NORMAL;
+        break;
     case MARKUP_NAME_SUB: value.font_scale = 0.83f; value.vertical_align = CSS_VALUE_SUB; break;
     case MARKUP_NAME_SUP: value.font_scale = 0.83f; value.vertical_align = CSS_VALUE_SUPER; break;
     case MARKUP_NAME_A: value.color = CSS_VALUE_BLUE; value.text_decoration = CSS_VALUE_UNDERLINE; break;
@@ -591,6 +595,7 @@ bool layout_html_ua_stylesheet(StrBuf* css) {
         html_ua_keyword(css, "text-decoration", value.text_decoration);
         html_ua_keyword(css, "vertical-align", value.vertical_align);
         html_ua_keyword(css, "white-space", value.white_space);
+        html_ua_keyword(css, "line-height", value.line_height);
         html_ua_keyword(css, "text-align", value.text_align);
         html_ua_keyword(css, "list-style-type", value.list_style);
         html_ua_keyword(css, "color", value.color);
@@ -1183,6 +1188,8 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
     if (size_scale != 1.0f) {
         apply_html_font_size(font, lycon->font.style->font_size * size_scale, false);
     }
+    if (value.line_height == CSS_VALUE_NORMAL)
+        span->ensure_block(lycon)->line_height = lam::shared(css_line_height_normal_value());
     if (vertical_align != CSS_VALUE__UNDEF) {
         span->ensure_inline(lycon)->vertical_align = vertical_align;
     }
