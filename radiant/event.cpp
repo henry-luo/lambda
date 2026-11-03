@@ -13521,8 +13521,11 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     int current_offset = rect->start_index;
     // CSS Ruby ranges retain alignment padding at the first/last boundary.
     if (rect->ruby_alignment_advance > 0.0f) {
-        if (byte_offset <= rect->start_index) return rect->x;
-        if (byte_offset >= rect->start_index + rect->length) return rect->x + rect->width;
+        int first, length;
+        // suppressed separator bytes share the visible end's allocated column edge.
+        text_rect_painted_source_range(rect, &first, &length);
+        if (byte_offset <= first) return rect->x;
+        if (byte_offset >= first + length) return rect->x + rect->width;
     }
     float x = rect->x + rect->ruby_alignment_offset;
     bool has_space = false;

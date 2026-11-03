@@ -1849,3 +1849,78 @@ flow milestone is anchored to that failure in
 `temp/ruby-m19/next-milestone.json`, reusing common emission and break-group
 policy. References, upstream documents, tolerances and baseline floors remain
 unchanged.
+
+## M20: coordinated fragments share flow with neighboring segments
+
+P1 common annotated-paragraph flow. The verified three-segment probe formats
+the long base before the parallel reading, then moves its already completed
+rectangles as a whole. Source identity is intact, but the first base fragment
+starts at 40px instead of 20px and the reading remains on the first line.
+The selected-source formatter accepts only one segment with interior breaks
+in every level, while the whole-unit formatter rejects a model containing
+any such break. Mixed models therefore lose the chosen-line protocol.
+
+Prepare applicability before emitting sources. Compose breakable text pairs
+with indivisible neighbors, sharing the existing column, annotation-baseline,
+placement and line-contribution stages instead of adding another formatter
+copy. Reuse base seam policy and linear cached break groups, including the
+first legal paired prefix and any forbidden following tail. CSS Ruby §3.4.1
+and §3.4.2 require paired levels and independent alignment of each fragment.
+Plans and normalized boxes remain scratch-owned; selected outputs and borrowed
+callbacks retain **D4.5.1v4 / D4.1.4v5**.
+
+Acceptance: original short/long/short failure, unequal-width neighbor readings,
+ordinary Japanese seams and forbidden Latin seams/tails; initial/retained and
+wide/narrow flow; original source parents, data, glyph and character-range
+geometry against independent explicitly split controls. Begin plain horizontal
+LTR inline one-column segments. Mixed/atomic/generated/decorated, conditional
+or preserved-space protocols, block Ruby and vertical/RTL flow remain separate.
+Budget: focused native reproducer/browser controls and existing Ruby/source
+neighbors, unchanged-reference raw Ruby delta, then one stable required Radiant
+gate and dimension lint/inventory; boundary validation only for API/ownership
+changes. The 159 remaining raw mismatches are not an accepted baseline.
+
+The formatter now prepares every participating text level before clearing any
+selected output. One loop commits eligible fragments and indivisible neighbors;
+the existing whole-unit and selected-source paths share column resolution,
+baseline placement and line contribution. Cached forbidden groups stop at the
+first legal paired prefix, so a final piece reserves its following tail without
+rescanning the whole model. Unsupported models still use their existing flow
+protocol before any source is emitted.
+
+The Latin control exposed a second shared defect: isolate-edge trimming read
+raw source bytes after CSS Text §4.1.3 had already suppressed the fragment's
+separator. Alignment first allocated 40px correctly, then a later isolate trim
+removed another 10px. Both the trim and Ruby Range edge resolver now use the
+existing painted-source interval. Suppressed reading separators share the
+visible end's allocated column edge; original source lengths and parents stay
+intact. Temporary trace logging was removed.
+
+Focused verification passes all 33 selected Ruby/isolate/whitespace neighbors,
+including initial/retained and wide/narrow paint and per-character Range checks.
+The five actual/control row pairs match Chromium on all 356 checked coordinates
+(0px maximum delta). The unchanged-reference imported suite remains **53/212
+full matches**, with no partial-score changes or regressions. These imported
+documents do not exercise the selected mixed-segment case; this milestone
+repairs the independently reproduced common flow without claiming a WPT gain.
+The selected-source path retains M15's deferred overhang scope.
+
+The stable required Radiant gate passes: **9387 checks; 9080 passed, 305 partial,
+0 failed, 2 skipped**. Native text/layout passes 484/484 and UI 752/752. Layout
+retains **4973 full / 301 partial / 0 regressions**; CSS Text retains **894 full /
+86 partial / 0 regressions**. Dimension lint, diff and generated-inventory checks
+pass; the inventory still has 421 names/IDs, with changes only in reference
+columns 14/15. All six frozen source/test inputs and the qualified CLI hash
+remain unchanged. No module API, import or ownership placement changed, so the
+previous boundary audit was not repeated. Qualification:
+`temp/ruby-m20/qualification-result.json`.
+
+The M20 core is complete; the goal remains active. The next investigation is
+an existing RTL atomic-reading defect in `ruby-bidi-003-ref`: its text acquires
+an x coordinate of `-FLT_MAX`. The same explicit-font probe reproduces this
+with both qualified M19 and M20, while ordinary text has matching advances.
+Trace the independent annotation line's unbounded edge and its RTL/atomic
+placement before modifying the owning stage; do not clamp the output. The
+finite diagnostic plan and controls are retained in
+`temp/ruby-m20/next-milestone.json`. References, upstream fixtures, comparison
+tolerances and baseline floors remain unchanged.

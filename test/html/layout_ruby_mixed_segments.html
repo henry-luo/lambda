@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8">
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/60px Ahem; word-break:break-all; }
+.row { width:100px; }
+.japanese { font-family:"Times New Roman"; word-break:normal; }
+.latin { word-break:normal; }
+rt { font-size:50%; }
+</style>
+<div id="result" lang="ja">
+<div class="row" id="mixed"><ruby id="mixed-group"><span id="mixed-before">X</span><rt id="mixed-before-reading">xx</rt><span id="mixed-base">mmmmm</span><rt id="mixed-reading">mmmmmmmmmm</rt><span id="mixed-after">Z</span><rt id="mixed-after-reading">zz</rt></ruby></div>
+<div class="row" id="mixed-control"><ruby><span id="mixed-c-before">X</span><rt id="mixed-c-before-reading">xx</rt></ruby><ruby><span id="mixed-c-a">mmmm</span><rt id="mixed-c-ra">mmmmmmmm</rt></ruby><br class="cut"><ruby><span id="mixed-c-b">m</span><rt id="mixed-c-rb">mm</rt></ruby><ruby><span id="mixed-c-after">Z</span><rt id="mixed-c-after-reading">zz</rt></ruby></div>
+<div class="row" id="wide-prefix"><ruby id="wide-prefix-group"><span id="wide-prefix-before">X</span><rt id="wide-prefix-before-reading">xxxx</rt><span id="wide-prefix-base">mmmmm</span><rt id="wide-prefix-reading">mmmmmmmmmm</rt><span id="wide-prefix-after">Z</span><rt id="wide-prefix-after-reading">zz</rt></ruby></div>
+<div class="row" id="wide-prefix-control"><ruby><span id="wide-prefix-c-before">X</span><rt id="wide-prefix-c-before-reading">xxxx</rt></ruby><ruby><span id="wide-prefix-c-a">mmm</span><rt id="wide-prefix-c-ra">mmmmmm</rt></ruby><br class="cut"><ruby><span id="wide-prefix-c-b">mm</span><rt id="wide-prefix-c-rb">mmmm</rt></ruby><ruby><span id="wide-prefix-c-after">Z</span><rt id="wide-prefix-c-after-reading">zz</rt></ruby></div>
+<div class="row" id="wide-suffix"><ruby id="wide-suffix-group"><span id="wide-suffix-before">X</span><rt id="wide-suffix-before-reading">xx</rt><span id="wide-suffix-base">mmmmm</span><rt id="wide-suffix-reading">mmmmmmmmmm</rt><span id="wide-suffix-after">Z</span><rt id="wide-suffix-after-reading">zzzz</rt></ruby></div>
+<div class="row" id="wide-suffix-control"><ruby><span id="wide-suffix-c-before">X</span><rt id="wide-suffix-c-before-reading">xx</rt></ruby><ruby><span id="wide-suffix-c-a">mmmm</span><rt id="wide-suffix-c-ra">mmmmmmmm</rt></ruby><br class="cut"><ruby><span id="wide-suffix-c-b">m</span><rt id="wide-suffix-c-rb">mm</rt></ruby><ruby><span id="wide-suffix-c-after">Z</span><rt id="wide-suffix-c-after-reading">zzzz</rt></ruby></div>
+<div class="row japanese" id="japanese"><ruby id="japanese-group"><span id="japanese-before">一</span><rt id="japanese-before-reading">いち</rt><span id="japanese-base">優先通行帯</span><rt id="japanese-reading">ゆうせんつうこうたい</rt><span id="japanese-after">一</span><rt id="japanese-after-reading">いち</rt></ruby></div>
+<div class="row japanese" id="japanese-control"><ruby><span id="japanese-c-before">一</span><rt id="japanese-c-before-reading">いち</rt></ruby><ruby><span id="japanese-c-a">優先通行</span><rt id="japanese-c-ra">ゆうせんつうこう</rt></ruby><br class="cut"><ruby><span id="japanese-c-b">帯</span><rt id="japanese-c-rb">たい</rt></ruby><ruby><span id="japanese-c-after">一</span><rt id="japanese-c-after-reading">いち</rt></ruby></div>
+<div class="row latin" id="latin"><ruby id="latin-group"><span id="latin-before">X</span><rt id="latin-before-reading">x</rt><span id="latin-base">AA BB CC</span><rt id="latin-reading">aa bb cc</rt><span id="latin-after">Z</span><rt id="latin-after-reading">z</rt></ruby></div>
+<div class="row latin" id="latin-control"><ruby><span id="latin-c-before">X</span><rt id="latin-c-before-reading">x</rt></ruby><ruby><span id="latin-c-a">AA</span><rt id="latin-c-ra">aa</rt></ruby><br class="cut"><ruby><span id="latin-c-b">BB</span><rt id="latin-c-rb">bb</rt></ruby><br class="cut"><ruby><span id="latin-c-c">CC</span><rt id="latin-c-rc">cc</rt></ruby><ruby><span id="latin-c-after">Z</span><rt id="latin-c-after-reading">z</rt></ruby></div>
+<div class="row latin" id="latin-wide-control" style="display:none"><ruby><span id="latin-wide-before">X</span><rt id="latin-wide-before-reading">x</rt></ruby><ruby><span id="latin-wide-base">AA BB CC</span><rt id="latin-wide-reading">aa bb cc</rt></ruby><ruby><span id="latin-wide-after">Z</span><rt id="latin-wide-after-reading">z</rt></ruby></div>
+</div>

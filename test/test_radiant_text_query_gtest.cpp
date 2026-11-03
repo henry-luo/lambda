@@ -430,20 +430,25 @@ protected:
         EXPECT_FLOAT_EQ(element->width, width) << id;
         EXPECT_FLOAT_EQ(element->height, height) << id;
     }
-    void expect_character_rect(DomRange* range, DomNode* node, unsigned start, Rect expected) {
+    bool character_rect(DomRange* range, DomNode* node, unsigned start, Rect* result) {
         const char* exception = nullptr;
-        ASSERT_TRUE(dom_range_set_start(range, node, start, &exception));
-        ASSERT_TRUE(dom_range_set_end(range, node, start+1, &exception));
+        if (!dom_range_set_start(range, node, start, &exception) ||
+            !dom_range_set_end(range, node, start+1, &exception)) return false;
         struct Selected { unsigned count; Rect rect; } selected = {};
         dom_range_for_each_rect(range, &ui, [](float x, float y, float width, float height, void* pointer) {
             Selected* selected = (Selected*)pointer;
             selected->count++; selected->rect = {x, y, width, height};
         }, &selected);
-        EXPECT_EQ(selected.count, 1u);
-        EXPECT_FLOAT_EQ(selected.rect.x, expected.x);
-        EXPECT_FLOAT_EQ(selected.rect.y, expected.y);
-        EXPECT_FLOAT_EQ(selected.rect.width, expected.width);
-        EXPECT_FLOAT_EQ(selected.rect.height, expected.height);
+        *result = selected.rect;
+        return selected.count == 1;
+    }
+    void expect_character_rect(DomRange* range, DomNode* node, unsigned start, Rect expected) {
+        Rect actual = {};
+        ASSERT_TRUE(character_rect(range, node, start, &actual));
+        EXPECT_FLOAT_EQ(actual.x, expected.x);
+        EXPECT_FLOAT_EQ(actual.y, expected.y);
+        EXPECT_FLOAT_EQ(actual.width, expected.width);
+        EXPECT_FLOAT_EQ(actual.height, expected.height);
     }
     IntrinsicSizes measure_physical_widths(DomElement* element, DomElement* flow_box = nullptr,
                                           bool content_only = true) {
@@ -15749,6 +15754,100 @@ TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments)
             ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
             check(narrow);
         }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColumns) {
+    ASSERT_NE(load("test/html/layout_ruby_mixed_segments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"before", "before-reading", "base", "reading", "after", "after-reading"};
+    struct Source { DomText* text = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr; };
+    struct Row { const char* id; unsigned pieces; bool latin; Source sources[6]; } rows[] = {
+        {"mixed", 2, false, {}}, {"wide-prefix", 2, false, {}}, {"wide-suffix", 2, false, {}},
+        {"japanese", 2, false, {}}, {"latin", 3, true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < 6; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* source = first_text_leaf(find(id));
+        ASSERT_NE(source, nullptr);
+        row.sources[role] = {source, source->parent, source->text_data()};
+    }
+    auto check = [&](bool narrow) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-mixed-segments"), nullptr);
+        SCOPED_TRACE(narrow ? "narrow" : "wide");
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64];
+            str_fmt(id, sizeof(id), "%s-%s", entry.id, !narrow && entry.latin ? "wide-control" : "control");
+            DomElement* control = find(id);
+            ASSERT_NE(control, nullptr);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            EXPECT_FLOAT_EQ(row->height, narrow ? (entry.latin ? 180.0f : 120.0f) : 60.0f);
+            float x, y, control_x, control_y;
+            view_get_visual_bounds(row, &x, &y, nullptr, nullptr);
+            view_get_visual_bounds(control, &control_x, &control_y, nullptr, nullptr);
+            for (size_t role = 0; role < 6; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(source.text, first_text_leaf(find(id)));
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                DomText* references[3] = {};
+                bool split = role == 2 || role == 3;
+                size_t count = split && (narrow || !entry.latin) ? entry.pieces : 1;
+                for (size_t part = 0; part < count; part++) {
+                    if (!narrow && entry.latin)
+                        str_fmt(id, sizeof(id), "%s-wide-%s", entry.id, roles[role]);
+                    else if (split)
+                        str_fmt(id, sizeof(id), "%s-c-%s%c", entry.id, role == 3 ? "r" : "", static_cast<char>('a' + part));
+                    else str_fmt(id, sizeof(id), "%s-c-%s", entry.id, roles[role]);
+                    references[part] = first_text_leaf(find(id));
+                    ASSERT_NE(references[part], nullptr) << id;
+                }
+                expect_text_paint_sources<32>(row, source.text, control, references, count);
+                unsigned offset = 0;
+                for (size_t part = 0; part < count; part++) {
+                    unsigned length = dom_text_utf16_length(references[part]);
+                    for (unsigned index = 0; index < length; index++) {
+                        SCOPED_TRACE(offset + index);
+                        Rect expected = {};
+                        ASSERT_TRUE(character_rect(range, references[part], index, &expected));
+                        expected.x += x - control_x; expected.y += y - control_y;
+                        expect_character_rect(range, source.text, offset + index, expected);
+                    }
+                    if (narrow && entry.latin && role == 3 && part + 1 < count) {
+                        Rect edge = {};
+                        ASSERT_TRUE(character_rect(range, references[part], length - 1, &edge));
+                        edge.x += edge.width + x - control_x; edge.y += y - control_y;
+                        edge.width = 0.0f;
+                        expect_character_rect(range, source.text, offset + length, edge);
+                    }
+                    offset += length + (narrow && entry.latin && split ? 1 : 0);
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(true); }
+    for (bool narrow : {false, true}) {
+        for (const Row& row : rows) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(row.id), "width", narrow ? "100px" : "400px"));
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", row.id);
+            DomElement* control = find(id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, "width", narrow ? "100px" : "400px"));
+            for (DomNode* child = control->first_child; child; child = child->next_sibling)
+                if (child->is_element() && child->tag() == MARKUP_NAME_BR)
+                    ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(), "display", narrow ? "inline" : "none"));
+        }
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-control"), "display", narrow ? "block" : "none"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-wide-control"), "display", narrow ? "none" : "block"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-wide-control"), "width", "400px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(narrow);
     }
 }
 

@@ -541,8 +541,11 @@ static void trim_isolated_inline_text_edge(LayoutContext* lycon,
         return;
     }
     unsigned char* data = text->text_data();
-    int end = rect->start_index + rect->length;
-    if (!data || end <= rect->start_index || !is_space(data[end - 1])) return;
+    int start, length;
+    // a source suffix already suppressed by line breaking must not consume alignment space again.
+    text_rect_painted_source_range(rect, &start, &length);
+    int end = start + length;
+    if (!data || end <= start || !is_space(data[end - 1])) return;
 
     FontProp* font = text->font ? text->font : span->font;
     if (!font) return;
