@@ -1,18 +1,23 @@
-# Lambda MIR MVP: scalar and array implementation
+# Lambda MIR MVP: typed execution implementation
 
-2026-11-01. Implements and tunes the first scalar slice of
+2026-11-01. Implements and tunes
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; performance
-qualification remains open.** Updated 2026-11-02: **28 benchmark rows** are
-covered, including the latest 15-row expansion. Coverage does not imply a
-performance pass. The preceding 13-row tuning campaign beat full MIR on all
-13 rows and qualified nine against C2MIR; the expansion and subsequent tuning
-measurements appear below. The latest follow-up qualifies 21/28 rows against
-Full MIR and 13/28 against both targets; the 28/28 milestone remains open.
+qualification remains open.** Updated 2026-11-03: **48 benchmark rows** are
+covered. All **42 focused groups** pass; aggregate-baseline failures and their
+focused rechecks are recorded below. The final 100-sample release comparison
+detects no statistically established regressions against the committed starting
+MVP across all 48. Including the separate matched Sumfp batch, the original
+rows qualify **28/28 against Full MIR and 20/28 against both performance
+targets**. Of the 20 additions, **10/20 qualify against Full MIR and 6/20
+against both**. That is **38/48 against Full MIR and 26/48 against both**.
+The requested performance milestone remains unfinished. The
+[latest tuning results](#2026-11-03-tuning-the-slower-expansion-rows) record every
+row and the remaining gaps; earlier campaigns below are history.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
-**S4.1, S4.4–S4.5**, declared contracts **S11.4.1v3**, and error
+**S4.1, S4.4–S4.5**, declared contracts **S11.4.1v5**, and error
 containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 
 ## Implementation
@@ -2290,4 +2295,473 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
   --previous-mvp temp/lambda_mir_mvp/tune28h/start-release.exe \
   --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
   --c2mir-allowance-percent 20 --output temp/lambda_mir_mvp/recheck_sumfp.json
+```
+
+
+## 2026-11-03: twenty-row coverage expansion
+
+This expansion retains the original 28 workloads and adds 20 distinct rows:
+CPSTak, Diviter, Larceny Primes, Puzzle, Triangl, GCbench, Deriv, BENG NBody,
+Binarytrees, Fasta, Pidigits, AWFY List, Permute, Storage, Towers, Base64,
+JetStream NBody, Navier–Stokes, Cube3D and Raytrace3D. Admission is implemented
+in MVP itself. The Lambda benchmark sources and runtime data layouts are
+unchanged. Coverage and performance qualification remain separate gates.
+
+### Implemented capabilities
+
+- Typed record construction, native descriptor reads and scalar stores, nullable
+  recursive records, and invariant record `var` arguments. Literal fields are
+  evaluated before destination admission. Scalar fields stay in native lanes
+  across allocation; existing insertion-ownership rules avoid share-marking
+  scalars and freshly produced children. Direct stores require matching trusted
+  layout and unique storage. Other cases use the existing checked map runtime
+  (**S9.1.2, S9.1.3v2, S9.3.1, S11.4.1v5, D2.6.1v3, D5.3**).
+- General and heterogeneous array literals, ordinary array-key iteration with
+  a captured source, base-type `match`, and the existing `cos`, `round` and
+  `slice` builtins. Value-producing comprehensions and general match patterns
+  remain outside this admitted subset (**S11.2.1, S9.1.2**).
+- Nullable native returns retain their semantic contract. Item null and native
+  pointer null are converted explicitly; scalar nullable lanes retain their
+  own sentinels. Recursive records and mixed arrays exercise these boundaries
+  under collection and freed-memory poisoning (**D2.4.3, D5.3**).
+- Unannotated mutable container contents remain observations rather than write
+  contracts. An inferred array may change element type, and an inferred map may
+  accept a different field value. Closed homogeneous literal tables can retain
+  a private representation proof after all writes and `var` borrows have been
+  excluded; the public AST type remains unchanged (**S12.2.1v3, D3.3.3v3**).
+- Immutable module literal tables use the existing Input arena and ordinary
+  COW rules. Constant string-table indices and nullable String[] reads avoid
+  repeated generic dispatch. Null text pieces use the join identity only when
+  another piece guarantees a string result; owned multi-piece append reuses the
+  existing fixed-arity helpers (**D4.1.2, S9.1.2, S10.6.1**).
+- Finite table domains feed guarded indexed loops. A typed integer declaration
+  may retain the finite element domain after its existing admission check;
+  an unguarded absent read never becomes a finite integer proof
+  (**S7.1.1v3, S11.4.1v5**).
+- A possible sibling `var` alias no longer makes every read-only parameter an
+  unconditional storage escape. Direct calls still capture actual aliases;
+  guarded kernels require exclusive writable owners before borrowing storage.
+  Same-binding aliases, distinct snapshot aliases, short arrays and partial
+  writes followed by a rejected read are covered explicitly
+  (**S9.1.3v2, D8.4.1v2**).
+
+The additional native C references use the same kernel-timing macros as the
+original rows. BENG and JetStream NBody share the existing AWFY kernel; the
+AWFY main retains its original initialization and loop after preprocessing.
+Every C reference is checked against the corresponding Lambda golden. C2MIR
+is the independent C reference driver, not the removed Lambda C-text backend
+(**D1.6**). Timings exclude process startup and compilation; row metadata
+records whether formatting or output falls inside the measured window.
+
+### Validation
+
+The aggregate `make test-lambda-baseline` passes **8,646/8,646** tests
+(**2,112 input; 6,534 runtime**), including **353/353** forced-GC stress tests.
+This final aggregate run includes the completed constructor refinement. All
+**41 focused groups** pass, including all 48 Lambda and C reference goldens.
+The three new semantic fixtures also match the interpreter, production MIR and
+AUTO execution. The new record,
+array-domain and alias fixtures run normally, with collection at every
+allocation, and with seeded collection plus freed-memory poisoning. The record
+and read-only NBody kernel emission assertions also pass. Logs are retained in
+`temp/lambda_mir_mvp/expand20/`: `focused-final.log`,
+`ownership-delivered.log` and `baseline-delivered.log`.
+
+### Qualification summary
+
+Against the merged starting release (`fc5f257e3`), **no original row has a
+two-sided 95% ratio interval wholly above 1.0**. Spectralnorm improves **20.2%**;
+the other 27 rows show no statistically established change. This is a measured
+no-regression result for these frozen workloads, not a proof of identical
+performance on every input or machine. The raw single-run campaign qualifies
+27/28 against Full MIR and 18/28 against C2MIR; the supplemental Sumfp batch
+brings the combined result to **28/28 and 19/28**, respectively.
+
+The added rows qualify **7/20 against Full MIR and 5/20 against C2MIR and both
+gates**. CPSTak, Diviter, Larceny Primes and both new NBody rows meet the complete
+target. BENG NBody runs at **0.975× C2MIR**, JetStream NBody at **1.031×**.
+Base64 and Navier–Stokes beat Full MIR but still miss the C2MIR allowance.
+AWFY List has a faster median than Full MIR, but its confidence bound crosses
+1.0 and it does not qualify. The other 15 additions remain performance failures;
+none is hidden or routed through production lowering.
+
+Raw samples, randomized run orders, timer scopes, source and binary hashes:
+[original 28](../../test/benchmark/lambda_mvp/expand20_regression28_2026-11-03.json),
+[additional 20](../../test/benchmark/lambda_mvp/expand20_2026-11-03.json),
+[matched Sumfp batch](../../test/benchmark/lambda_mvp/expand20_sumfp_2026-11-03.json).
+The old pre-merge campaign does not qualify this implementation.
+
+### Release measurements
+
+All measurements use the isolated final release, execution-only script timers,
+two warmups, randomized engine order and 10,000 paired-bootstrap resamples.
+The original rows and supplemental Sumfp batch use 100 measured samples;
+the 20 additions use 30. Full MIR qualifies only when the one-sided 95%
+upper ratio bound is below 1.0; C2MIR qualifies at an upper bound of 1.20.
+Raw zero-duration Sumfp samples remain unqualified. The table below uses
+the separate matched 10,000-invocation batch for that row.
+
+| Added benchmark | MVP ms | Full MIR ms | C2MIR ms | MVP / Full | MVP / C2MIR | Both gates |
+|---|---:|---:|---:|---:|---:|:---:|
+| r7rs/cpstak | 0.140 | 0.248 | 0.235 | 0.563× | 0.594× | yes |
+| larceny/diviter | 230.095 | 262.858 | 262.818 | 0.875× | 0.875× | yes |
+| larceny/primes | 0.904 | 2.281 | 1.707 | 0.396× | 0.530× | yes |
+| larceny/puzzle | 20.618 | 4.748 | 1.274 | 4.343× | 16.185× | no |
+| larceny/triangl | 672.149 | 143.468 | 60.397 | 4.685× | 11.129× | no |
+| larceny/gcbench | 145.661 | 81.386 | 75.206 | 1.790× | 1.937× | no |
+| larceny/deriv | 13.659 | 7.317 | 2.623 | 1.867× | 5.208× | no |
+| beng/nbody | 1.369 | 9.751 | 1.403 | 0.140× | 0.975× | yes |
+| beng/binarytrees | 4.329 | 3.343 | 2.703 | 1.295× | 1.602× | no |
+| beng/fasta | 1.333 | 0.371 | 0.229 | 3.588× | 5.833× | no |
+| beng/pidigits | 0.361 | 0.336 | 0.045 | 1.076× | 8.014× | no |
+| awfy/list | 0.183 | 0.189 | 0.018 | 0.971× | 10.130× | no |
+| awfy/permute | 0.072 | 0.068 | 0.021 | 1.059× | 3.429× | no |
+| awfy/storage | 0.300 | 0.228 | 0.087 | 1.319× | 3.447× | no |
+| awfy/towers | 0.308 | 0.180 | 0.025 | 1.711× | 12.248× | no |
+| kostya/base64 | 3.279 | 4.954 | 0.491 | 0.662× | 6.677× | no |
+| jetstream/nbody | 1.456 | 10.238 | 1.412 | 0.142× | 1.031× | yes |
+| jetstream/navier_stokes | 58.818 | 80.028 | 38.594 | 0.735× | 1.524× | no |
+| jetstream/cube3d | 8.309 | 4.889 | 0.399 | 1.699× | 20.827× | no |
+| jetstream/raytrace3d | 38.249 | 12.987 | 1.896 | 2.945× | 20.169× | no |
+
+| Original benchmark | MVP / starting MVP | Two-sided 95% interval | Comparison |
+|---|---:|---:|---|
+| r7rs/fib | 0.997× | 0.982–1.018 | no established change |
+| r7rs/sum | 0.986× | 0.953–1.010 | no established change |
+| r7rs/sumfp | 1.000× | 1.000–1.000 | no established change |
+| awfy/mandelbrot | 1.008× | 0.994–1.022 | no established change |
+| larceny/array1 | 0.996× | 0.973–1.009 | no established change |
+| awfy/sieve | 0.941× | 0.882–1.000 | no established change |
+| beng/spectralnorm | 0.798× | 0.781–0.830 | faster |
+| awfy/nbody | 1.002× | 0.956–1.018 | no established change |
+| r7rs/tak | 0.980× | 0.947–1.027 | no established change |
+| r7rs/ack | 0.985× | 0.946–1.010 | no established change |
+| larceny/quicksort | 0.996× | 0.970–1.042 | no established change |
+| kostya/matmul | 1.010× | 0.983–1.035 | no established change |
+| kostya/collatz | 1.006× | 0.988–1.028 | no established change |
+| r7rs/fibfp | 1.000× | 0.977–1.026 | no established change |
+| r7rs/fft | 1.000× | 0.974–1.028 | no established change |
+| r7rs/nqueens | 0.988× | 0.959–1.010 | no established change |
+| awfy/bounce | 0.990× | 0.959–1.021 | no established change |
+| awfy/queens | 0.958× | 0.885–1.000 | no established change |
+| beng/fannkuch | 0.969× | 0.747–1.149 | no established change |
+| kostya/primes | 0.971× | 0.834–1.074 | no established change |
+| kostya/levenshtein | 0.993× | 0.858–1.021 | no established change |
+| kostya/brainfuck | 0.993× | 0.978–1.005 | no established change |
+| larceny/paraffins | 0.989× | 0.957–1.045 | no established change |
+| larceny/pnpoly | 1.004× | 0.978–1.030 | no established change |
+| larceny/ray | 0.984× | 0.953–1.017 | no established change |
+| beng/mandelbrot | 0.993× | 0.985–1.004 | no established change |
+| kostya/json_gen | 0.994× | 0.971–1.012 | no established change |
+| larceny/divrec | 0.988× | 0.964–1.023 | no established change |
+
+### Remaining performance work
+
+The all-20 target remains open. The source and current lowering expose several
+areas for further proofs and measurement:
+
+- Puzzle mutates plain array parameters; Lambda requires snapshots, while its
+  C reference shares arrays and restores their contents. Removing snapshots
+  requires a restoration/escape proof (**S9.1.3v2**). Triangl still needs stronger
+  bounds for its changing search stack and indirect indices.
+- GCbench, Deriv, Binarytrees and the AWFY record rows retain allocation and
+  typed call/root boundaries. Native field stores are implemented; reducing
+  those remaining boundaries must preserve **S9.3.1** and precise **D5.3** roots.
+- Fasta and Base64 still construct text through repeated owned append; their C
+  ports write contiguous byte buffers. Cube3D and Raytrace3D allocate and return
+  small float arrays across calls, beyond the present allocation-free kernel
+  proofs. Pidigits uses the existing decimal runtime while the C port uses
+  fixed-capacity native big-integer structs. C2MIR is a performance reference,
+  with different physical work, rather than a Lambda semantic oracle.
+
+No benchmark algorithm or Lambda workload was rewritten to close these gaps.
+The full 48-row harness continues checking the original output goldens.
+
+### Reproduction
+
+The root executable is the baseline's debug build. All measurements explicitly
+select the isolated `release_native` binary; do not time the root executable.
+
+```sh
+make -C build/premake -f lambda.make config=release_native \
+  TARGET=../../temp/lambda_mir_mvp/expand20/tuned-release.exe -j6
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/expand20/tuned-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/expand20/tuned-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/expand20/start-release.exe \
+  --subset original --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/expand20/original-final.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/expand20/tuned-release.exe \
+  --subset additional --runs 30 --warmups 2 \
+  --output temp/lambda_mir_mvp/expand20/additional-final.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/expand20/tuned-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/expand20/start-release.exe \
+  --subset original --case r7rs/sumfp --sumfp-batch 10000 --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/expand20/sumfp-final.json
+```
+
+
+## 2026-11-03: tuning the slower expansion rows
+
+This follow-up tunes the existing 48 workloads against the committed expansion
+(`63f73cd3a`). No Lambda benchmark algorithm, workload, golden, or native C
+reference was changed. The original 28 remain the regression control.
+
+### Lowering changes
+
+- Contextual record constructors retain their enforced shape when all field
+  admissions are proven. A local observed only by returns can adopt
+  that return layout too. Unknown fields still use checked admission, and an
+  ordinary error companion remains whenever a field or call can fail
+  (**S11.4.1v5, D8.4.1v2**). Nullable native pointers need a full boundary check
+  on their absence arm; an already admitted present value stays native.
+- Read-only record cursors retain the same trusted shape across rebinding.
+  Field mutation and `var` borrowing exclude that proof; assignment to another
+  shape widens it. Exact shape identity is required: first-class type equality
+  is not a physical record-layout certificate (**S12.2.1v3, D3.3.3v3**).
+- Primitive inferred arrays retain a private domain only after their initializer
+  and every indexed write pass the effect fixed point. Replacement, borrowing,
+  a changing element kind, an unknown producer, or a potentially failed fill
+  keeps the general path. No inferred observation becomes a user write contract
+  (**S12.2.1v3, S11.4.1v5**).
+- A nullable integer key retains the nullable element domain through nested
+  indexing. Nullable boolean `not` and logical selection use native lanes;
+  selection preserves the selected null, and encountered errors retain the
+  general error path. Read-only compound array predicates can guard their read
+  set independently of a taken arm that changes search indices
+  (**S7.1.1v3, S3.4–S3.5**).
+- Guarded allocating vector bodies reuse the existing extent and primitive-array
+  admission proofs. Inputs remain precise owner roots and every access reloads
+  its buffer after allocation. Native literals construct with the existing
+  primitive constructor and destination certificate; short arrays and other
+  layouts retain the original checked construction. These bodies never retain
+  an interior pointer across GC (**D2.6.1v3, D5.3, S11.4.1v5**).
+- Erased-value stores into plain, uncounted primitive arrays reuse the runtime's
+  existing preplanned setter and live primitive-carrier proof. A valid
+  compiler-owned certificate need not have the runtime interner's identity;
+  repeatedly comparing its semantic type made Fasta regress despite identical
+  hot-loop MIR. The shared helper still checks keys, values, COW ownership and
+  the actual carrier; masks, invalid values and incompatible layouts retain
+  checked admission (**D3.3.3v3, S9.1.3v2, S11.4.1v5**).
+- Forwarded `var` arguments reuse an enclosing precise owner home when the actual
+  occurs once. Aliased actuals keep the original call cells; replaced owners are
+  reloaded on return. Record insertion avoids a duplicate capture after a named
+  read that already captured its snapshot. The required capture remains for
+  borrowed member/index results. Fresh map/array locals observed only by returns
+  transfer their owner without a redundant snapshot capture; any other use
+  preserves the ordinary capture (**S9.1.2–S9.1.3v2, S9.3.1, D5.3**).
+
+Runtime types, layouts, GC and the production MIR lowering are unchanged. No
+vendor code or benchmark-specific native replacement was introduced.
+
+### Validation and measurement notes
+
+The new `mir_mvp_proven_domains` fixture covers unrestricted inferred writes,
+record-shape changes, invalid record fields, nullable pointer admission, short
+vectors, nested boolean indexing, selected absence, erased-value checked writes,
+recursive owner replacement, and caller snapshots. The ownership gate runs it
+normally, under collection at every allocation, and with seeded collection plus
+freed-memory poisoning. An
+emission check requires native vector arithmetic/construction and preserves the
+checked fallback. The focused gate has 42 groups.
+
+The interpreter and AUTO match the complete new fixture. Full MIR has an existing
+failure on `require_flag`: `flags[9] and true` is null and must fail its declared
+`bool` return (**S3.4, S11.4.1v5**), but Full MIR returns false. Both the starting
+and final release binaries reproduce that discrepancy. The MVP golden retains
+the correct error result; no production harness or golden was weakened to hide
+it. All selected benchmark goldens remain shared across the measured engines.
+Detailed reproduction output is in
+`temp/lambda_mir_mvp/tune48/cross-tier-final.log`.
+
+### Release comparison protocol
+
+The final candidate is release SHA-256
+`15c90345fa9379b2ba5188d132057a108a9a61fd8bd9c828df6eed0889954d6b`.
+The committed-expansion control is release SHA-256
+`06422a07e8703838bb9b141ee08a2a5d6c5a0727b0f36cf0ddf58da984562119`.
+Reports retain both executable identities, compiler-source hashes, benchmark
+hashes, engine order, raw samples and bootstrap intervals. The unrelated
+Radiant merge at `da601e608` does not change Lambda runtime sources relative to
+the starting expansion.
+
+Each row uses 100 randomized, interleaved samples after two warmups per engine.
+The engines are the new MVP, the starting MVP, Full MIR from the same new
+executable, and the independent native C2MIR driver. Build and aggregate-test
+jobs finish before timing begins. These are self-reported execution-window
+timings, excluding parsing, JIT compilation and process startup. All selected
+Lambda and native C goldens must pass before measurement.
+
+The per-row gates use 10,000 paired bootstrap resamples: a one-sided 95% upper
+ratio below 1.0 against Full MIR and at most 1.20 against C2MIR. A regression
+against the starting MVP is established only when the two-sided 95% lower
+ratio is above 1.0. Inconclusive comparisons remain unqualified. Single-run
+Sumfp remains below timer resolution, so the original-set totals substitute a
+separate matched 10,000-invocation, 30-sample batch without changing either
+kernel or treating a zero-duration sample as a pass.
+
+### Final qualification
+
+The original set qualifies **28/28 against Full MIR and 20/28 against both
+targets**, including the matched Sumfp batch. The additions qualify **10/20
+against Full MIR and 6/20 against both**, compared with 7/20 and 5/20 in the
+committed expansion. Overall qualification is **38/48 against Full MIR and
+26/48 against both targets**. The requested all-row milestone remains open.
+
+No statistically established regression against the starting MVP appears in
+either set. Twelve additions improve: Puzzle **11.4%**, Triangl **25.4%**,
+GCbench **46.3%**, Deriv **40.8%**, Binarytrees **47.5%**, Fasta **2.9%**, List
+**27.1%**, Permute **8.2%**, Storage **2.3%**, Towers **3.5%**, Cube3D **31.0%**
+and Raytrace3D **41.6%**. Quicksort, Bounce, Brainfuck and Larceny Ray also
+improve in the original set. An interval crossing 1.0 is recorded as no
+established change, even when its median moves.
+
+GCbench's one-sided upper ratios are **0.991× Full MIR and 1.080× C2MIR**;
+Binarytrees' medians are below both references. List now clears the Full MIR
+gate, but remains far from C2MIR. BENG NBody's median is **1.076× C2MIR**, while
+its upper confidence bound is **1.320×**, so it remains unqualified in this
+campaign. Counts use the retained final reports and their confidence gates.
+
+Raw reports:
+
+- [Added 20, 100 samples](../../test/benchmark/lambda_mvp/tune48_additional_2026-11-03.json).
+- [Original 28, 100 samples and paired starting-MVP control](../../test/benchmark/lambda_mvp/tune48_regression28_2026-11-03.json).
+- [Matched Sumfp batch, 30 samples](../../test/benchmark/lambda_mvp/tune48_sumfp_2026-11-03.json).
+
+The following ratios are medians; **Both** follows the confidence gates above.
+
+| Added benchmark | Previous MVP ms | MVP ms | Full ms | C2MIR ms | MVP / Full | MVP / C2MIR | Both |
+|---|---:|---:|---:|---:|---:|---:|:---:|
+| r7rs/cpstak | 0.143 | 0.142 | 0.260 | 0.233 | 0.547× | 0.611× | yes |
+| larceny/diviter | 237.897 | 235.709 | 278.322 | 276.756 | 0.847× | 0.852× | yes |
+| larceny/primes | 0.999 | 0.994 | 2.312 | 1.690 | 0.430× | 0.588× | yes |
+| larceny/puzzle | 19.895 | 17.623 | 4.662 | 1.231 | 3.780× | 14.310× | no |
+| larceny/triangl | 605.522 | 451.873 | 129.101 | 52.079 | 3.500× | 8.677× | no |
+| larceny/gcbench | 130.945 | 70.364 | 72.219 | 66.131 | 0.974× | 1.064× | yes |
+| larceny/deriv | 16.950 | 10.038 | 9.780 | 2.752 | 1.026× | 3.647× | no |
+| beng/nbody | 1.427 | 1.737 | 14.140 | 1.615 | 0.123× | 1.076× | no |
+| beng/binarytrees | 4.418 | 2.320 | 3.362 | 2.735 | 0.690× | 0.848× | yes |
+| beng/fasta | 1.318 | 1.280 | 0.379 | 0.243 | 3.382× | 5.267× | no |
+| beng/pidigits | 0.366 | 0.365 | 0.343 | 0.045 | 1.064× | 8.081× | no |
+| awfy/list | 0.180 | 0.132 | 0.185 | 0.018 | 0.709× | 7.279× | no |
+| awfy/permute | 0.073 | 0.067 | 0.067 | 0.021 | 1.000× | 3.191× | no |
+| awfy/storage | 0.305 | 0.298 | 0.235 | 0.086 | 1.268× | 3.468× | no |
+| awfy/towers | 0.302 | 0.291 | 0.183 | 0.025 | 1.593× | 11.592× | no |
+| kostya/base64 | 3.471 | 3.423 | 5.214 | 0.502 | 0.657× | 6.825× | no |
+| jetstream/nbody | 1.446 | 1.485 | 10.256 | 1.473 | 0.145× | 1.008× | yes |
+| jetstream/navier_stokes | 52.517 | 52.151 | 78.598 | 35.166 | 0.664× | 1.483× | no |
+| jetstream/cube3d | 8.232 | 5.684 | 4.643 | 0.434 | 1.224× | 13.084× | no |
+| jetstream/raytrace3d | 34.549 | 20.188 | 11.696 | 1.986 | 1.726× | 10.163× | no |
+
+| Original benchmark | MVP / previous MVP | Two-sided 95% interval | Result |
+|---|---:|---:|---|
+| r7rs/fib | 1.001× | 0.984–1.020 | no established change |
+| r7rs/sum | 1.044× | 1.000–1.081 | no established change |
+| r7rs/sumfp | 1.000× | 0.917–1.091 | no established change |
+| awfy/mandelbrot | 0.998× | 0.988–1.008 | no established change |
+| larceny/array1 | 1.000× | 0.964–1.037 | no established change |
+| awfy/sieve | 1.062× | 1.000–1.125 | no established change |
+| beng/spectralnorm | 0.977× | 0.950–1.028 | no established change |
+| awfy/nbody | 1.005× | 0.972–1.040 | no established change |
+| r7rs/tak | 1.007× | 0.973–1.041 | no established change |
+| r7rs/ack | 1.004× | 0.991–1.015 | no established change |
+| larceny/quicksort | 0.837× | 0.811–0.860 | faster |
+| kostya/matmul | 1.003× | 0.992–1.015 | no established change |
+| kostya/collatz | 1.004× | 0.985–1.017 | no established change |
+| r7rs/fibfp | 0.968× | 0.951–1.007 | no established change |
+| r7rs/fft | 1.029× | 1.000–1.088 | no established change |
+| r7rs/nqueens | 0.993× | 0.965–1.009 | no established change |
+| awfy/bounce | 0.837× | 0.816–0.894 | faster |
+| awfy/queens | 1.000× | 0.917–1.000 | no established change |
+| beng/fannkuch | 0.986× | 0.950–1.023 | no established change |
+| kostya/primes | 0.993× | 0.960–1.056 | no established change |
+| kostya/levenshtein | 1.007× | 0.980–1.025 | no established change |
+| kostya/brainfuck | 0.948× | 0.936–0.957 | faster |
+| larceny/paraffins | 0.979× | 0.946–1.011 | no established change |
+| larceny/pnpoly | 1.009× | 0.980–1.035 | no established change |
+| larceny/ray | 0.968× | 0.930–0.992 | faster |
+| beng/mandelbrot | 1.006× | 0.983–1.019 | no established change |
+| kostya/json_gen | 1.006× | 0.984–1.034 | no established change |
+| larceny/divrec | 0.951× | 0.930–1.019 | no established change |
+
+### Remaining performance work
+
+The ten additions that do not clear Full MIR are Puzzle, Triangl, Deriv, Fasta,
+Pidigits, Permute, Storage, Towers, Cube3D and Raytrace3D. The largest gains
+reduce those gaps but do not complete their qualification. Puzzle still needs
+a proof before removing snapshots across restored recursive mutation
+(**S9.1.3v2**); Triangl retains checked indirect search indices. Deriv and the
+AWFY record workloads still allocate owners and cross typed call/root
+boundaries (**D3.2.4v3, D5.3**). Fasta retains the dynamic integer conversion
+and text construction paths. Cube3D and Raytrace3D now have guarded allocating
+vector bodies, while their callers still allocate and return arrays across
+calls. Further extent and escape proofs must preserve **D2.6.1v3, D5.3 and
+S9.3.1**. The existing decimal-versus-native-big-integer Pidigits gap remains.
+
+The original eight C2MIR misses are Sieve, FFT, NQueens, Bounce, Queens,
+Fannkuch, Brainfuck and Paraffins. Their Full MIR gates pass. Runtime types,
+data models and benchmark algorithms remain unchanged.
+
+### Aggregate baseline and focused failure rechecks
+
+The final release passes **42/42 focused MVP groups**, including the new
+semantic fixture in normal, collect-every-allocation and seeded/poisoned modes,
+all 48 Lambda/C goldens, and constructor/vector/store MIR checks. All measured
+executions also check their original golden. The new fixture matches the
+interpreter and AUTO; its known Full MIR boolean-return discrepancy is recorded
+above rather than hidden by a changed expectation.
+
+The final `make test-lambda-baseline` run was sandboxed and reports
+**8,617/8,641 with 24 failures**. This raw count includes a synthetic
+binary-storage report failure instead of that executable's six real cases.
+Server logs show denied loopback binds. Other failures include missing MIR/JSON
+artifacts, REPL checks, a Docx timeout, and chart output checks. The aggregate
+run is retained as failed, not described as an all-green baseline.
+
+After timing finished, sequential rechecks with loopback access pass **630/630**:
+server **152**, JS optimization **121**, runtime/error **301**, REPL **50**, and
+binary storage **6**. The seven selected script rechecks pass **6/7**, including
+the four socket scripts, Docx and the previously failing HTML adapter. Only
+`chart_test_transform_controls` remains: its final two error-result checks
+produce false. The unchanged starting release reproduces the same mismatch in
+both AUTO and Full JIT; this is an existing chart/runtime issue, outside this
+MVP lowering change. Its golden and harness remain intact. Starting-release
+Docx and HTML controls also pass in both modes.
+
+Evidence under `temp/lambda_mir_mvp/tune48/`:
+`focused-setter.log`, `baseline-setter.log`, `baseline-test_summary.json`,
+`sequential-rechecks.log`, `script-rechecks.json`,
+`starting-script-controls.log`, and `cross-tier-final.log`.
+Unrelated in-progress HTML adapter edits were preserved.
+
+### Reproduction
+
+Build the isolated release executable, then run correctness checks before the
+timing commands. Finish aggregate tests before measuring. The root executable
+is the baseline's debug build and is not used for timing.
+
+```sh
+make -C build/premake -f lambda.make config=release_native \
+  TARGET=../../temp/lambda_mir_mvp/tune48/final-release.exe -j6
+LAMBDA_TEST_EXE=temp/lambda_mir_mvp/tune48/final-release.exe \
+  PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+make test-lambda-baseline
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune48/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune48/start-release.exe \
+  --subset additional --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/tune48/additional-final.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune48/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune48/start-release.exe \
+  --subset original --runs 100 --warmups 2 \
+  --output temp/lambda_mir_mvp/tune48/original-final.json
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune48/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune48/start-release.exe \
+  --subset original --case r7rs/sumfp --sumfp-batch 10000 --runs 30 --warmups 2 \
+  --output temp/lambda_mir_mvp/tune48/sumfp-final.json
 ```

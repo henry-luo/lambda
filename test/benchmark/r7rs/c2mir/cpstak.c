@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of r7rs/cpstak2.ls (the suite's two direct tak runs). */
 extern int printf(const char *, ...);
 
@@ -13,8 +14,11 @@ static int tak(int x, int y, int z) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int result = tak(18, 12, 6);
     result = tak(18, 12, 6);
+    BENCH_KERNEL_END();
     printf(result == 7 ? "cpstak: PASS\n" : "cpstak: FAIL result=%d\n", result);
+    BENCH_KERNEL_REPORT();
     return result != 7;
 }

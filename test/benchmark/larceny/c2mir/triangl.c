@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/triangl.ls. */
 extern int printf(const char *, ...);
 
@@ -6,6 +7,7 @@ static const int move_over[36] = {1,2,3,4,4,5,1,4,6,7,7,8,2,4,8,9,3,7,4,8,4,7,5,
 static const int move_to[36] = {3,5,6,8,7,9,0,5,10,12,11,13,0,3,12,14,1,8,2,9,1,6,2,7,3,12,4,13,3,5,10,14,4,11,5,12};
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int board[15];
     int stack[14];
     int i;
@@ -45,6 +47,8 @@ int main(void) {
             }
         }
     }
+    BENCH_KERNEL_END();
     printf("triangl: solutions=%d\n%s\n", solutions, solutions == 29760 ? "triangl: PASS" : "triangl: DONE");
+    BENCH_KERNEL_REPORT();
     return solutions != 29760;
 }

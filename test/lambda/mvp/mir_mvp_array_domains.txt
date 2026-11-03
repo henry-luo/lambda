@@ -1,0 +1,9 @@
+60 20 0
+3.5 1
+2 1
+xy null
+7 null
+1.5 null
+true null
+yes null
+1 11

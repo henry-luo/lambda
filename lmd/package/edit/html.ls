@@ -477,21 +477,25 @@ pub fn inline_html(items) => join(nest_marks(items, mark_order, wrap_mark, inlin
 fn body_html(blocks, depth) =>
   if (len(blocks) == 1 and is_implied(blocks[0])) inline_html(blocks[0].content) else blocks_html(blocks, depth)
 
+fn envelope_html(items, leading, trailing) =>
+  join([for (item in items) leading ++ retained_html(item) ++ trailing], "")
+
 // Serialize an editor document with its envelope back to HTML source.
 pub fn export_text(doc, envelope) {
+  let before = envelope_html(envelope.before, "", "\n")
+  let between = envelope_html(envelope.between, "\n", "")
+  let after = envelope_html(envelope.after, "\n", "")
   if (not envelope.document) {
     // a fragment is the head-level elements the parser moved into <head>,
-    // then its body content
-    let head_items = significant_children(envelope.head)
+    // then its body content; leading comments can be outside the parser's implicit <html>.
+    // head whitespace is part of the envelope; adding or dropping it changes the reimported head.
+    let head_items = [for (item in content(envelope.head)) item]
     let body = body_html(doc.content, 0)
-    join([for (h in head_items) retained_html(h) ++ "\n"], "") ++
-      (if (starts_with(body, "\n")) slice(body, 1, len(body)) else body) ++ "\n"
+    before ++ envelope_html(head_items, "", "") ++ between ++
+      (if (starts_with(body, "\n")) slice(body, 1, len(body)) else body) ++ after ++ "\n"
   }
   else {
-    let before = join([for (x in envelope.before) retained_html(x) ++ "\n"], "")
     let head = if (envelope.head_tag) "\n" ++ retained_html(envelope.head) else ""
-    let between = join([for (x in envelope.between) "\n" ++ retained_html(x)], "")
-    let after = join([for (x in envelope.after) "\n" ++ retained_html(x)], "")
     before ++ open_tag('html', envelope.html_attrs) ++ head ++ between ++ "\n" ++
       open_tag('body', envelope.body_attrs) ++ body_html(doc.content, 1) ++ "\n" ++ close_tag('body') ++
       "\n" ++ close_tag('html') ++ after ++ "\n"

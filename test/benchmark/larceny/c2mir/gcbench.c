@@ -1,8 +1,10 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/gcbench.ls. */
 extern int printf(const char *, ...);
 #include "../../c2mir/tree_benchmark.h"
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int depth;
     C2MirTreeNode *stretch = c2mir_make_tree(15);
     C2MirTreeNode *long_lived;
@@ -20,7 +22,9 @@ int main(void) {
         }
         printf("%d trees of depth %d check: %d\n", iterations, depth, total);
     }
+    BENCH_KERNEL_END();
     printf("long lived tree of depth 14 check: %d\n", c2mir_check_tree(long_lived));
     c2mir_free_tree(long_lived);
+    BENCH_KERNEL_REPORT();
     return 0;
 }

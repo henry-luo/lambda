@@ -76,6 +76,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_flags.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_fn_local.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_records.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_array_domains.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_borrow_kernel.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_proven_domains.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -206,6 +210,36 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("\tcall\t" + helper, first)
             self.assertIn("\tcall\t" + helper, body)
 
+    def test_records_and_readonly_kernel_emission(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_records.ls", "chain")
+        self.assertIn("map_alloc_for_type", body)
+        self.assertNotIn("map_fill", body)
+        self.assertNotIn("cow_capture_value", body)
+        caller = self.function_mir(ROOT / "test/benchmark/beng/nbody2.ls", "main")
+        native = caller[:caller.index("\tcall\tmvp_1_advance_dp")]
+        self.assertIn("\tcall\tsqrt_", native)
+        # the ordinary call remains for layout, alias and short-array misses.
+        self.assertIn("\tcall\tmvp_1_advance_dp", caller)
+
+    def test_allocating_vector_emission(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_proven_domains.ls"
+        for name in ("cell", "transient_cell"):
+            constructor = self.function_mir(source, name)
+            self.assertIn("map_alloc_for_type", constructor)
+            self.assertNotIn("map_fill", constructor)
+            self.assertNotIn("cow_capture_value", constructor)
+        body = self.function_mir(source, "shifted")
+        native = body[:body.index("\tcall\tarray_plain_")]
+        self.assertIn("lambda_fill_primitive_bits", native)
+        self.assertGreaterEqual(native.count("\tdadd\t"), 3)
+        self.assertNotIn("\tcall\tfn_index_", native)
+        self.assertNotIn("\tcall\tlambda_type_check_", native)
+        # short arrays and other layouts retain the checked construction path.
+        self.assertIn("\tcall\tfn_index_", body)
+        self.assertIn("\tcall\tlambda_type_check_", body)
+        store = self.function_mir(source, "put_erased")
+        self.assertIn("lambda_array_set_checked_preplanned", store)
+
     def test_guarded_iterations_and_borrow_inlining(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls", "butterfly")
         native = body[:body.index("\tcall\tfn_index_")]
@@ -254,7 +288,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_admission_precedes_execution(self):
         sources = {
-            "array": 'pn main() { print("EXECUTED"); let a = [1, "two"]; print(a) }',
+            "comprehension": 'pn main() { print("EXECUTED"); let a = [for (x in 0 to 2) x]; print(a) }',
             "builtin": 'pn main() { print("EXECUTED"); print(math.tan(2.0)) }',
             "capture": 'pn outer(x: int) { pn inner() int { return x }; return inner() }; pn main() { print("EXECUTED"); print(outer(7)) }',
             "content": '1; 2',
