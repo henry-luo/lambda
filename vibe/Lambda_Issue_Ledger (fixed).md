@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **268 anchored records**, preserving fixed, resolved,
+This archive contains **270 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -1662,6 +1662,30 @@ Fixture: `test/lambda/array_ndim_join_spread.ls`, which agrees on T0, interp and
 
 ## 10. Error handling (LR_10)
 
+<a id="lr10-13"></a>**LR10-13 · A value-producing handler over a `pn` call yielded `null` · FIXED 2026-11-02; VERIFIED 2026-11-03 (found 2026-09-26)**
+
+**Original report (retained; cited ruling versions are historical):**
+
+```
+pn p(x: int) int^ { if (x < 0) { raise error("negative") } return x + 1 }
+pn main() {
+    let a = p(1) ^ { -1 }
+    let b = p(-5) ^ { -1 }
+    print([a, b])      // [null, null] on both tiers
+}
+```
+S7.6.7v4 (and v3 before it) says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
+
+**Resolution (S7.6.1v9 / S7.6.7v5).** M1 of the type/error-handling implementation preserves procedure-handler results, including suspension. The old statement-only ruling is superseded. Rechecked at `09f81fdfb`: the original example yields `[2, -1]` on interpreter, JIT and auto. The `proc/handler_results` golden now also covers string/map result carriers and is pinned in the tier-parity table. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+
+<a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call lost its success value · FIXED 2026-11-02; VERIFIED 2026-11-03 (found 2026-10-05)**
+
+**Original report (retained; cited ruling versions are historical):**
+
+`pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
+
+**Resolution (S7.6.1v9 / S7.6.7v5).** Procedure handlers yield normal and recovery values for synchronous and suspending calls. M1 already implements that ruling; no further ruling is needed. String success is `"ab"`, map success preserves its fields, and the existing integer/suspension cases retain their values on all tiers and under forced/poisoned GC. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+
 <a id="lr10-14"></a>**LR10-14 · A payload-less `ItemError` reads a stale `last_error` for its members · FIXED 2026-10-29 (found 2026-09-27)**
 
 **Original report (retained):**
@@ -1755,7 +1779,7 @@ entered once per top-level item, had no case for `let`/`var`/`pub` or `for`,
 and returned at every `fn`/`pn` node, so `let x = risky()`,
 `for i in xs { risky() }`, `io.mkdir("out")` in `pn main()` and
 `let a = risky(); 5` inside an `fn` all compiled with no diagnostic.
-*Fixed 2026-09-27:* the walk reaches every position. Its default arm recurses through `interp_visit_children`, so a node kind it has no case for is walked, not skipped. `let`/`var`/`pub` declarators are walked; `raise` and `start` acknowledge their operand; an error-admitting assignment target acknowledges its value; `if`, `match` and handler arms inherit the acknowledgment of their position. `validate_function_enforcing_calls` walks each function body once: its tail is acknowledged when the function can raise or declares an error-admitting return, and so is a `that` predicate's tail (its return admits error, S11.4.11). The arm and `that` rules are implementation choices pending a ruling; S7.5.1 names only the immediate expression. Migrated with the fix: about 140 corpus sites (the input tests, `conc`/`proc` sleep and io, graphviz, and the `edit/session`, `graph/scene` and `openapi` packages) and 85 sites in nine docs, with `^`, or an `any | error` binding for a `pn` call because of [LR10-13](Lambda_Issue_Ledger.md#lr10-13). `check_doc_blocks.py` reports no E228. Fixture `negative/semantic/unhandled_error_positions.ls` (`SemanticError_EnforcingCallInEveryPosition`). Residue: [LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>).
+*Fixed 2026-09-27:* the walk reaches every position. Its default arm recurses through `interp_visit_children`, so a node kind it has no case for is walked, not skipped. `let`/`var`/`pub` declarators are walked; `raise` and `start` acknowledge their operand; an error-admitting assignment target acknowledges its value; `if`, `match` and handler arms inherit the acknowledgment of their position. `validate_function_enforcing_calls` walks each function body once: its tail is acknowledged when the function can raise or declares an error-admitting return, and so is a `that` predicate's tail (its return admits error, S11.4.11). The arm and `that` rules are implementation choices pending a ruling; S7.5.1 names only the immediate expression. Migrated with the fix: about 140 corpus sites (the input tests, `conc`/`proc` sleep and io, graphviz, and the `edit/session`, `graph/scene` and `openapi` packages) and 85 sites in nine docs, with `^`, or an `any | error` binding for a `pn` call because of [LR10-13](#lr10-13). `check_doc_blocks.py` reports no E228. Fixture `negative/semantic/unhandled_error_positions.ls` (`SemanticError_EnforcingCallInEveryPosition`). Residue: [LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>).
 
 <a id="lr10-10"></a>**LR10-10 · S7.4.4's other error members and the two-argument constructor were missing · FIXED 2026-09-27**
 Found while fixing LR10-7, both tiers: `error(msg, source)` was not

@@ -18,6 +18,22 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Handler values and invalid writes follow-up — 2026-11-03
+
+Fixed the direct-write residue of **LR12-27** under **S7.1.3v3 / S7.7.6v2**:
+unannotated stores now preserve the existing containment/reporting boundary on
+both tiers. The original out-of-range write reports E302 and exits one;
+recoverable calls retain their error payload and container snapshots.
+**LR10-13 / LR10-18** already conform to **S7.6.1v9 / S7.6.7v5** and moved to
+the fixed ledger after rechecking. The caller policy for a discarded plain
+procedure call remains an LR12-27 ruling question. LR02-35 and LR09-31 still
+need their separate rulings.
+
+Qualification: **56/56** focused tier/promotion/GC runs; baseline
+**8,700/8,708**, with all eight sandbox-denied listener cases passing their
+socket-enabled rerun. See
+[implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+
 ## Type-operator precedence follow-up — 2026-11-03
 
 The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern precedence `to` > `&` > `!` > `|`. The production C parser has distinct binding powers for these operators. **LR02-37 remains open pending focused qualification; no tests were run in this change.**
@@ -384,7 +400,7 @@ The user then clarified S11.1.7 (spec 47.2.0): literal operands include containe
 
 ### Procedure arrow pass — 2026-09-26
 
-The user ruled the unnamed form of [LR02-21](<Lambda_Issue_Ledger (fixed).md#lr02-21>) as S16.6.7v2 (spec 48.0.0): `fn` never begins an anonymous function, and the procedure arrow `pn (x) => { … }` is the anonymous procedure ([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Both front ends implement it; the S16 harnesses stand at C 372/372 and Tree-sitter 358/358, and `test/lambda/proc/pn_arrow.ls` is pinned in `kTune27TierParity`. That remaining value-name residue was fixed 2026-10-29 under S16.10.1v3; LR02-21 is archived. Probing the arrow found [LR10-13](#lr10-13): a value-producing handler over a `pn` call yields `null`, where S7.6.7v3 makes it a compile error. A named `pn` does the same.
+The user ruled the unnamed form of [LR02-21](<Lambda_Issue_Ledger (fixed).md#lr02-21>) as S16.6.7v2 (spec 48.0.0): `fn` never begins an anonymous function, and the procedure arrow `pn (x) => { … }` is the anonymous procedure ([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Both front ends implement it; the S16 harnesses stand at C 372/372 and Tree-sitter 358/358, and `test/lambda/proc/pn_arrow.ls` is pinned in `kTune27TierParity`. That remaining value-name residue was fixed 2026-10-29 under S16.10.1v3; LR02-21 is archived. Probing the arrow found [LR10-13](<Lambda_Issue_Ledger (fixed).md#lr10-13>): a value-producing handler over a `pn` call yields `null`, where S7.6.7v3 makes it a compile error. A named `pn` does the same.
 
 ### Type-value fix pass — 2026-09-26
 
@@ -1038,24 +1054,6 @@ GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, 
 <a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
 `x that p` binds `~` to `x` whatever it is. With `let e = error("boom")`, `e that true` is the error, but `e that ~ > 3` is `null`: the comparison propagates the error (S7.9.3), an error is falsy, so the proviso fails. S10.1.5v3 rules a failed proviso absence and says nothing of an error operand. S7.9 asks whether a result can be mistaken for a successful computation, and a null proviso can. Both tiers agree.
 
-<a id="lr10-13"></a>**LR10-13 · A value-producing handler over a `pn` call yields `null` (S7.6.7v4) · OPEN (found 2026-09-26)**
-```
-pn p(x: int) int^ { if (x < 0) { raise error("negative") } return x + 1 }
-pn main() {
-    let a = p(1) ^ { -1 }
-    let b = p(-5) ^ { -1 }
-    print([a, b])      // [null, null] on both tiers
-}
-```
-S7.6.7v4 (and v3 before it) says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
-
-
-
-
-
-<a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
-`pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
-
 
 
 ## 11. Mark data API (LR_11)
@@ -1329,7 +1327,9 @@ registry row.
 ---
 
 
-<a id="lr12-27"></a>**LR12-27 · `push` onto an unannotated number array is a silent no-op; out-of-range writes do not raise · PARTIAL (found 2026-09-21; push fixed 2026-09-25)**
+<a id="lr12-27"></a>**LR12-27 · `push` and direct-write failures repaired; plain-call error policy pending · PARTIAL (found 2026-09-21; push fixed 2026-09-25; direct writes fixed 2026-11-03)**
+
+**Original report (retained):**
 In a `pn`, `var a = [1, 2, 3]; push(a, 4)` leaves `a` as `[1, 2, 3]` on both
 tiers: the literal is an uncertified `ArrayNum` and `push` returns a soft error
 that nothing surfaces (`collection_runtime.cpp:240`, "an uncertified ArrayNum
@@ -1340,7 +1340,9 @@ contradict **S7.1.3v2** (writes are checked and raise through the `T^`
 channel).
 
 *Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D2.6.5v3); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
-*Residue (blocked):* `b[5] = 2` still only logs. Raising it on both tiers needs [LR12-24](#lr12-24)'s store class: a callee with a native return lane would publish the error as `inf` on the JIT while T0 raises, a new split. And whether a plain `pn`'s write error survives a statement-position call is unruled (S7.4.3 against TE-18 "What pn adds").
+*Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D6.1.3v2). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+
+*Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
 
 ## 13. Schema validator (LR_13)
 

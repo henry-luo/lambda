@@ -1,0 +1,5 @@
+[true, 302, false]
+[true, 302, true, 302, false, [1], [1]]
+[true, 302, false, [2], [2]]
+[false, true]
+[17, 17.5, true, [9], [1], [9], [2]]

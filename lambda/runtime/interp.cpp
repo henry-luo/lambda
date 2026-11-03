@@ -5909,8 +5909,9 @@ static Item exec_place_assign(InterpFrame* f, AstNode* node) {
     if (!ast_collect_cow_path(&path, assignment->object) || !path.root ||
             path.root->node_type != AST_NODE_IDENT) return result;
     NameEntry* root = ((AstIdentNode*)path.root)->entry;
-    if (!root || (!ast_declared_type_is_map(root->declared_type) &&
-            !ast_declared_array_element(root->declared_type))) return result;
+    // S7.1.3v3/S7.7.6v2: unannotated stores own the same failure boundary;
+    // a procedure without an error return must not discard a rejected write.
+    if (!root) return result;
     return interp_skip_binding(f, root, result, node, 2);
 }
 

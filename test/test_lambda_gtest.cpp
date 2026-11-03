@@ -813,8 +813,31 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/ledger_parameter_result_site.ls", "test/lambda/ledger_parameter_result_site.txt"},
     {"test/lambda/proc/ledger_containment.ls", "test/lambda/proc/ledger_containment.txt"},
     {"test/lambda/proc/ledger_matrix_rows.ls", "test/lambda/proc/ledger_matrix_rows.txt"},
+    // S7.1.3v3/S7.6.7v5: retain store failures and procedure-handler values.
+    {"test/lambda/proc/ledger_index_write_error.ls", "test/lambda/proc/ledger_index_write_error.txt"},
+    {"test/lambda/proc/handler_results.ls", "test/lambda/proc/handler_results.txt"},
 
 };
+
+TEST(LambdaTierParityTests, UnannotatedIndexWriteStopsMain) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
+        const char* args[] = {LAMBDA_EXE, "run", "--no-log",
+            "test/lambda/negative/runtime/index_write_out_of_bounds.ls", NULL};
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 30000;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, 1);
+        EXPECT_STREQ(result.stdout_buf ? result.stdout_buf : "", "");
+        EXPECT_NE(strstr(result.stderr_buf ? result.stderr_buf : "", "error[E302]"), nullptr)
+            << (result.stderr_buf ? result.stderr_buf : "");
+        shell_result_free(&result);
+    }
+}
 
 // explicit exclusions used to pass this test by silently executing MIR
 TEST(LambdaTierParityTests, Tune27FixturesHonorTierSupport) {

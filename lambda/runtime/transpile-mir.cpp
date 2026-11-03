@@ -39004,6 +39004,8 @@ static void emit_array_num_store_fallback(MirTranspiler* mt,
             MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
+        // S7.1.3v3: open arrays retain the store boundary on the cold arm too.
+        emit_return_if_item_error(mt, result);
     }
     // keep the branch result in one register so an OOB error reaches T^ propagation
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg),
@@ -39024,6 +39026,8 @@ static void emit_compound_array_store_fallback(MirTranspiler* mt,
         MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
+    // S7.7.6v2: reject before a statement can discard the setter's error.
+    emit_return_if_item_error(mt, result);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result_reg), MIR_new_reg_op(mt->ctx, result)));
 }
@@ -41624,13 +41628,8 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             emit_label(mt, l_oob);
             {
                 MIR_reg_t boxed_val = emit_box_int(mt, val_native);
-                MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                // assignment status is a real MIR value; branch-local C++ register selection loses OOB errors.
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                    MIR_new_reg_op(mt->ctx, call_result)));
+                emit_compound_array_store_fallback(mt, obj, obj_tid, arr_ptr,
+                    idx_int, boxed_val, assign_obj_var, false, assign_result);
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
@@ -41638,13 +41637,8 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             emit_label(mt, l_slow);
             {
                 MIR_reg_t boxed_val = emit_box_int(mt, val_native);
-                MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                // assignment status is a real MIR value; branch-local C++ register selection loses helper errors.
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                    MIR_new_reg_op(mt->ctx, call_result)));
+                emit_compound_array_store_fallback(mt, obj, obj_tid, arr_ptr,
+                    idx_int, boxed_val, assign_obj_var, false, assign_result);
             }
 
             emit_label(mt, l_end);

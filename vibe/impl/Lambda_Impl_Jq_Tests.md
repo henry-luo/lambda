@@ -119,14 +119,14 @@ Writing them turned up Lambda defects.
 - LR09-32: JSON `compact: true` was ignored; fixed 2026-10-29 in the
   [parser/admission follow-up](<Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>), with the
   unknown-option policy still governed by S17.8.1.
-- LR10-18: a value-bound handler on a `pn ... T^` call yields `null`.
+- LR10-18: a value-bound handler on a `pn ... T^` call yielded `null`; fixed by the 2026-11-02 M1 handler work under S7.6.1v9/S7.6.7v5, [verified 2026-11-03](<../Lambda_Issue_Ledger (fixed).md#lr10-18>).
 - LR12-42: T0 cannot execute a constant-key index assignment.
 
 **Translation choices this forced:**
 - Float sums start at `0.0`. jq numbers are doubles, so this is faithful, and
   it also avoids LR07-43.
-- A `pn` call's error is propagated with `^`, because its `^ { … }` handler is
-  statement-only.
+- A `pn` call's error was propagated with `^` because handlers were
+  statement-only at translation time. S7.6.7v5 now permits value handlers.
 - Recursive helpers use statement-form loops, so they collect no values.
 - `jq_contains` short-circuits as jq's `jv_contains` does.
 
