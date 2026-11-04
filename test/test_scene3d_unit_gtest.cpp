@@ -8641,11 +8641,19 @@ TEST_F(Scene3dTest, ShaderReflectionUniformsFailuresAndForeignGenerations) {
         "#version 330 core\nin vec4 vary;out vec4 result;void main(){result=vary;}").id,0u);
     NativeGlContext* foreign=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(foreign,nullptr);
     EXPECT_FALSE(native_gl_valid(foreign,program,NATIVE_GL_PROGRAM));EXPECT_FALSE(native_gl_uniform_set(foreign,uniform,color,4));
+    ASSERT_NE(native_gl_buffer(foreign,color,sizeof(color)).id,0u);
+    ASSERT_NE(native_gl_buffer(foreign,color,sizeof(color)).id,0u);
+    native_gl_lose(foreign);EXPECT_EQ(glfwGetCurrentContext(),previous);
+    NativeGlStats lost_stats{};ASSERT_TRUE(native_gl_stats(foreign,&lost_stats));
+    EXPECT_EQ(lost_stats.resources,0u);
     native_gl_destroy(foreign);EXPECT_EQ(glfwGetCurrentContext(),previous);
     native_gl_release(graphics,program);EXPECT_FALSE(native_gl_uniform_set(graphics,uniform,color,4));
     // just over the 512 MiB context budget: refused before the 16-byte source is read.
     EXPECT_EQ(native_gl_buffer(graphics,color,513u*1024u*1024u).id,0u);
-    native_gl_destroy(graphics);EXPECT_EQ(native_gl_create(false,diagnostic,sizeof(diagnostic)),nullptr);
+    ASSERT_NE(native_gl_buffer(graphics,color,sizeof(color)).id,0u);
+    ASSERT_NE(native_gl_buffer(graphics,color,sizeof(color)).id,0u);
+    native_gl_destroy(graphics);EXPECT_EQ(glfwGetCurrentContext(),previous);
+    EXPECT_EQ(native_gl_create(false,diagnostic,sizeof(diagnostic)),nullptr);
 }
 TEST_F(Scene3dTest, TextureResolutionCapBoundsMipBytesAndPreservesSourceAndOrientation) {
     char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;

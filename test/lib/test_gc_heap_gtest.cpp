@@ -615,6 +615,53 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
     lambda_side_stack_reset_for(&runtime);
 }
 
+TEST_F(UICollectionStorageTest, SideStackTrimmingPreservesLivePagesAndRegrowsBothRegions) {
+    auto* owner = (Context*)&runtime;
+    ASSERT_TRUE(lambda_side_stack_bind_for(owner));
+    uint64_t* roots = lambda_side_root_alloc_n_for(owner, 1);
+    uint64_t* number = lambda_side_number_alloc_for(owner);
+    ASSERT_NE(roots, nullptr);
+    ASSERT_NE(number, nullptr);
+    void* kept = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    void* unrooted = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_NE(kept, nullptr);
+    ASSERT_NE(unrooted, nullptr);
+    roots[0] = string_item(kept);
+    number[0] = string_item(unrooted);
+    LambdaSideStackSnapshot live = lambda_side_stack_snapshot_for(owner);
+    const size_t slots = 128u * 1024u / sizeof(uint64_t);
+    ASSERT_NE(lambda_side_root_alloc_n_for(owner, slots), nullptr);
+    ASSERT_TRUE(lambda_side_stack_ensure_for(owner, 0, slots));
+    runtime.side_number_top += slots;
+    runtime.side_number_top[-1] = UINT64_C(0x12345678);
+
+    lambda_side_stack_restore_for(owner, live);
+    lambda_side_stack_decommit_unused();
+#ifndef __EMSCRIPTEN__
+    EXPECT_LT(runtime.side_root_commit_limit, runtime.side_root_limit);
+    EXPECT_LT(runtime.side_number_commit_limit, runtime.side_number_limit);
+#endif
+    EXPECT_GE(runtime.side_root_commit_limit, live.root_top);
+    EXPECT_GE(runtime.side_number_commit_limit, live.number_top);
+    uint64_t* trimmed = runtime.side_root_commit_limit;
+    heap_gc_collect();
+    EXPECT_EQ(runtime.side_root_commit_limit, trimmed);
+    EXPECT_TRUE(gc_is_managed(gc, kept));
+    EXPECT_EQ(gc->object_count, 1u); // number words never become roots
+
+    uint64_t* grown = lambda_side_root_alloc_n_for(owner, slots);
+    ASSERT_NE(grown, nullptr);
+    EXPECT_EQ(grown[slots - 1], 0u);
+    ASSERT_TRUE(lambda_side_stack_ensure_for(owner, 0, slots));
+    runtime.side_number_top += slots;
+    runtime.side_number_top[-1] = UINT64_C(0x87654321);
+    heap_gc_collect();
+    EXPECT_EQ(roots[0], string_item(kept));
+    EXPECT_TRUE(gc_is_managed(gc, kept));
+    EXPECT_EQ(runtime.side_number_top[-1], UINT64_C(0x87654321));
+    lambda_side_stack_reset_for(owner);
+}
+
 // JSCU12: the one growable rooted vector. Blocks are address-stable across
 // growth, registered before their first Item is published, cleared on pop,
 // dropped and re-registered when the owning heap is replaced, and released
@@ -2087,6 +2134,20 @@ TEST_F(GCHeapTest, MultipleCollections) {
     EXPECT_EQ(gc->collections, 3u);
 
     gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, RepeatedSharedRootsAreRevalidatedForEveryCollection) {
+    void* object = make_string("shared root");
+    uint64_t roots[257];
+    for (auto& root : roots) root = string_item(object);
+    for (unsigned cycle = 0; cycle < 3; cycle++) {
+        gc_collect_with_root_region(gc, NULL, 0, roots, 257);
+        EXPECT_EQ(gc->object_count, 1u);
+        EXPECT_EQ(((String*)object)->len, 11u);
+    }
+    for (auto& root : roots) root = 0;
+    gc_collect_with_root_region(gc, NULL, 0, roots, 257);
+    EXPECT_EQ(gc->object_count, 0u);
 }
 
 // ============================================================================

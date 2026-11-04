@@ -2990,6 +2990,44 @@ TEST(JsOpt, LazyMirFunctionMetadataPreservesReflectionAndDeletion) {
     expect_trace_off_same("lazy_mir_function_metadata", source, output);
 }
 
+TEST(JsOpt, LazyNativeMetadataPreservesReflectionMutationAndAccessors) {
+    const char* source =
+        "function check(fn, name, length) {\n"
+        "  var keys = Reflect.ownKeys(fn);\n"
+        "  if (keys[0] !== 'length' || keys[1] !== 'name') throw Error('native key order');\n"
+        "  for (var key of ['length', 'name']) {\n"
+        "    var d = Object.getOwnPropertyDescriptor(fn, key);\n"
+        "    if (!d || d.writable || d.enumerable || !d.configurable) throw Error('native descriptor');\n"
+        "  }\n"
+        "  if (fn.name !== name || fn.length !== length) throw Error('native metadata');\n"
+        "}\n"
+        "if (!Object.hasOwn(JSON.parse, 'name') || !Object.hasOwn(JSON.parse, 'length') ||\n"
+        "    Reflect.set(Math.ceil, 'length', 9) || Math.ceil.length !== 1) throw Error('native first observation');\n"
+        // mutation before a metadata read must still preserve the initial key prefix.
+        "Object.defineProperty(Math.abs, 'extra', {value: 1});\n"
+        "check(Math.abs, 'abs', 1);\n"
+        "if (Reflect.ownKeys(Math.abs)[2] !== 'extra' || Math.abs(-7) !== 7) throw Error('native extra');\n"
+        "check(Object.getOwnPropertyDescriptor(Map.prototype, 'size').get, 'get size', 0);\n"
+        "if (!delete JSON.stringify.name || Object.hasOwn(JSON.stringify, 'name') ||\n"
+        "    JSON.stringify.name !== '') throw Error('native deletion');\n"
+        "Object.defineProperty(JSON.stringify, 'name', {value: 'renamed', configurable: true});\n"
+        "if (JSON.stringify.name !== 'renamed' || JSON.stringify.length !== 3) throw Error('native redefine');\n"
+        "Object.freeze(Array.prototype.includes);\n"
+        "var frozen = Object.getOwnPropertyDescriptor(Array.prototype.includes, 'length');\n"
+        "if (Array.prototype.includes.name !== 'includes' || frozen.value !== 1 ||\n"
+        "    frozen.configurable || ![1, 2].includes(2)) throw Error('native freeze');\n"
+        "console.log('OPT_OK');\n";
+    for (const char* backend : {"ast", "mir", "auto"}) {
+        SCOPED_TRACE(backend);
+        char name[96], output[4096];
+        snprintf(name, sizeof(name), "lazy_native_metadata_%s", backend);
+        TraceResult trace;
+        ASSERT_TRUE(run_fixture_mode_backend(name, source, true, backend,
+            &trace, output, sizeof(output)));
+        expect_ok_output(output);
+    }
+}
+
 TEST(JsOpt, NumericLocalFactsSurviveBoxedAndVoidReturns) {
     const char* source =
         "function boxed(limit) {\n"

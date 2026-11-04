@@ -4171,7 +4171,10 @@
           {
             "source": "test/test_scene3d_unit_gtest.cpp",
             "name": "Scene3D Native Unit Tests",
-            "case_workers": 2,
+            "case_workers": 4,
+            "case_workers_env": "LAMBDA_SCENE3D_TEST_JOBS",
+            "case_batch_size": 32,
+            "case_batch_size_env": "LAMBDA_SCENE3D_TEST_BATCH_SIZE",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4916,7 +4919,7 @@
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],
-            "case_workers": 6,
+            "case_workers": 7,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"

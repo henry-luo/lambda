@@ -87,6 +87,8 @@ RadiantWindow* radiant_platform_create_window(int width, int height, const char*
                                               bool visible) {
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
+    // hidden graphics hosts never present native window decorations.
+    glfwWindowHint(GLFW_DECORATED, visible ? GLFW_TRUE : GLFW_FALSE);
     // the same core profile as native graphics contexts, so the presenter can later sample their textures
     native_gl_core_profile_hints();
     GLFWwindow* window = glfwCreateWindow(width, height, title, NULL, NULL);

@@ -261,7 +261,7 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*:RadiantViewTest.Photo*'));
-        assert.equal(view.caseWorkers, 6);
+        assert.equal(view.caseWorkers, 7);
         assert.equal(view.exclusive, true);
         assert.equal(view.pinExecutables, true);
         assert.deepEqual(view.artifactDirs, ['radiant_view']);
@@ -412,7 +412,7 @@ try {
     });
     for (const [runner, jobsEnv, workerArg] of [
         ['test_radiant_view_gtest', 'LAMBDA_RADIANT_VIEW_TEST_JOBS', '--radiant-case-worker'],
-        ['test_scene3d_unit_gtest', null, null],
+        ['test_scene3d_unit_gtest', 'LAMBDA_SCENE3D_TEST_JOBS', null],
     ]) for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
         check(`${runner} case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
             const trace = path.join(fixture, `trace-${runner}-${limit}-${parallel}`);
@@ -427,7 +427,9 @@ try {
             const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
             assert.equal(rows.length, 4);
             assert.ok(rows.every(row => row.cap === '1' && (!workerArg || row.args.includes(workerArg))));
-            const events = rows.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
+            // batched cases share a PID; count processes against the worker limit.
+            const processes = [...new Map(rows.map(row => [row.pid, row])).values()];
+            const events = processes.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
                 .sort((a, b) => a.time - b.time || a.delta - b.delta);
             let active = 0, peak = 0;
             for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
