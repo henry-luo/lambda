@@ -1,0 +1,8 @@
+wrap: 0 4294967295 4294967294
+shift: 2147483648 1
+wide: 0 0
+negative: true
+failed: true
+mixed: 4294967297
+convert: 17 true
+admit: 0 4294967295 true true true

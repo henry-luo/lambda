@@ -3,6 +3,31 @@
 #include "ast.hpp"
 #include "ast_build.hpp"
 
+// shared binding-identity and RHS ownership observations for both MIR emitters.
+static inline bool mir_is_direct_binding(AstNode* node, const NameEntry* binding) {
+    AstNode* value = ast_unwrap_primary(node);
+    return value && value->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)value)->entry == binding;
+}
+
+struct MirBindingUseCount { const NameEntry* binding; int count; };
+
+static inline bool mir_count_binding_uses(AstNode* node, void* data) {
+    MirBindingUseCount* uses = (MirBindingUseCount*)data;
+    if (node->node_type == AST_NODE_IDENT && ((AstIdentNode*)node)->entry == uses->binding)
+        uses->count++;
+    return true;
+}
+
+static inline bool mir_join_rhs_does_not_observe_owner(AstNode* rhs,
+        const NameEntry* binding) {
+    if (mir_is_direct_binding(rhs, binding)) return true;
+    MirBindingUseCount uses = {binding, 0};
+    walk_lambda_ast(rhs, mir_count_binding_uses, &uses, true);
+    return uses.count == 0;
+}
+
+
 static inline bool mir_flow_nested_function(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {

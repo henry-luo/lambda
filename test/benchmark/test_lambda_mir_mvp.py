@@ -81,8 +81,9 @@ class LambdaMirMvpTests(unittest.TestCase):
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for compiler in ("mvp", "production"):
             for mode in modes:
-                with self.subTest(compiler=compiler, mode=mode):
-                    self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+                for fixture in (source, ROOT / "test/lambda/mvp/mir_mvp_u32.ls"):
+                    with self.subTest(compiler=compiler, mode=mode, fixture=fixture.name):
+                        self.check_golden(fixture, {**mode, "LAMBDA_MIR_COMPILER": compiler})
         for mode in modes:
             with self.subTest(membership_outcomes=mode):
                 self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_membership_outcomes.ls", mode)
@@ -265,10 +266,13 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("\tdmul\t", native)
         self.assertNotIn("lambda_type_check", native)
         body = self.function_mir(source, "repeated_float")
-        call = re.search(r"\tcall\tmvp_\d+_float_update_dp", body)
-        self.assertIsNotNone(call)
-        self.assertIn("\tdmul\t", body[:call.start()])
-        self.assertNotIn("lambda_type_check", body[:call.start()])
+        # accurate numeric effects permit the checked leaf to inline as well;
+        # the first checked reader still separates it from the guarded loop.
+        self.assertNotRegex(body, r"\tcall\tmvp_\d+_float_update_dp")
+        self.assertIn("\tcall\tfn_index", body)
+        native = body.split("\tcall\tfn_index", 1)[0]
+        self.assertIn("\tdmul\t", native)
+        self.assertNotIn("lambda_type_check", native)
 
     def test_string_outcome_appends(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_string_outcomes.ls"
@@ -371,21 +375,27 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_mvp_regression_only_retains_pairs(self):
         reference = Path(self.scratch.name) / "regression-reference"
         output = Path(self.scratch.name) / "mvp-regression.json"
-        arguments = ["lambda_mir_mvp.py", "--release", "--regression-only", "--exe", str(self.exe),
-            "--previous-mvp", str(self.exe), "--c2mir-exe", str(reference), "--case", "r7rs/fib",
-            "--runs", "3", "--warmups", "1", "--output", str(output)]
-        with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
-                return_value="fib: PASS\n__TIMING__:1.0\n") as invoke:
-            lambda_mir_mvp.main()
-        row = json.loads(output.read_text())["cases"][0]
-        self.assertEqual(invoke.call_count, 8)
-        self.assertEqual(set(row["commands"]), {"mvp", "previous_mvp"})
-        self.assertEqual(len(row["samples_ms"]["previous_mvp"]), 3)
-        self.assertEqual(len(row["samples_ms"]["mvp"]), 3)
-        self.assertEqual(row["samples_ms"]["production"], [])
-        self.assertEqual(row["samples_ms"]["c2mir"], [])
-        self.assertFalse(row["engine_failures"])
-        self.assertIn("c2mir", row["engine_unavailable"])
+        for mode in ("--regression-only", "--lambda-only"):
+            with self.subTest(mode=mode):
+                arguments = ["lambda_mir_mvp.py", "--release", mode, "--exe", str(self.exe),
+                    "--previous-mvp", str(self.exe), "--c2mir-exe", str(reference), "--case", "r7rs/fib",
+                    "--runs", "3", "--warmups", "1", "--output", str(output)]
+                with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
+                        return_value="fib: PASS\n__TIMING__:1.0\n") as invoke:
+                    lambda_mir_mvp.main()
+                row = json.loads(output.read_text())["cases"][0]
+                commands = {"mvp", "previous_mvp"}
+                if mode == "--lambda-only":
+                    commands.add("production")
+                self.assertEqual(invoke.call_count, 4 * len(commands))
+                self.assertEqual(set(row["commands"]), commands)
+                for engine in commands:
+                    self.assertEqual(len(row["samples_ms"][engine]), 3)
+                if mode == "--regression-only":
+                    self.assertEqual(row["samples_ms"]["production"], [])
+                self.assertEqual(row["samples_ms"]["c2mir"], [])
+                self.assertFalse(row["engine_failures"])
+                self.assertIn("c2mir", row["engine_unavailable"])
 
     def test_batch_record_and_decimal_paths(self):
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
@@ -699,6 +709,20 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertNotRegex(body, r"\tcall\tmvp_\d+_collecting_tail_dp")
         self.assertRegex(body, r"\tcall\t(?:fn_fill|lambda_fill_for_contract)")
         self.assertIn("lambda_type_check", body)
+
+    def test_implicit_tail_and_split_observations(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_benchmark_expansion.ls"
+        for name in ("implicit_collect", "implicit_record_rows"):
+            body = self.function_mir(source, name)
+            self.assertNotRegex(body, rf"\tcall\tmvp_\d+_{name}(?:_|,)")
+        body = self.function_mir(source, "split_observation")
+        self.assertIn("fn_split2", body)
+        self.assertNotIn("lambda_item_adopt_scalar_home", body)
+        # a generic field replacement can rebuild a record's physical layout;
+        # the subsequent typed call must establish its own prefix.
+        body = self.function_mir(source, "updated_box")
+        self.assertIn("lambda_map_set_checked", body)
+        self.assertIn("\tcall\tlambda_type_check", body)
 
     def test_guarded_recursive_arrays(self):
         source = ROOT / "test/benchmark/awfy/queens2.ls"

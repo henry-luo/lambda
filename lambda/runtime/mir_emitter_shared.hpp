@@ -18,9 +18,56 @@
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/lambda_alloca.h"
 
+typedef struct MirPropertyKeyEntry {
+    NameRef name;
+    NameId predefined_id;
+    // The module-wide key table outlives individual MIR functions, so the
+    // cached register must be qualified by its defining function.
+    MIR_func_t cached_func;
+    MIR_reg_t cached_reg;
+} MirPropertyKeyEntry;
+
+static inline uint32_t em_module_property_key_index(ArrayList** keys, Pool* pool, NameRef name) {
+    if (!keys || !name) return UINT32_MAX;
+    if (!(*keys)) (*keys) = arraylist_new(8);
+    if (!(*keys)) return UINT32_MAX;
+    for (int index = 0; index < (*keys)->length; index++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+            (*keys), index);
+        if (entry && entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return (uint32_t)index;
+        }
+    }
+    MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)pool_calloc(pool,
+        sizeof(MirPropertyKeyEntry));
+    if (!entry) return UINT32_MAX;
+    entry->name = name;
+    // AST identifiers can still be plain compiler-owned Strings. Preserve their
+    // spelling into the sealed image; only recover NameMeta after its pooled
+    // provenance is explicit.
+    entry->predefined_id = string_is_pooled(name) ? name_ref_id(name)
+        : well_known_name_id({name->chars, name->len});
+    if (!arraylist_append((*keys), entry)) return UINT32_MAX;
+    return (uint32_t)((*keys)->length - 1);
+}
+
 struct JsClassEntry;
 struct JubeTypeDef;
 struct NameEntry;
+
+static inline bool em_module_property_key_image_size(ArrayList* keys, uint32_t* size) {
+    uint64_t bytes = keys ? (uint64_t)keys->length * sizeof(PropertyKeySpec) : 0;
+    if (bytes > UINT32_MAX) return false;
+    for (int i = 0; keys && i < keys->length; i++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(keys, i);
+        if (!entry || !entry->name) return false;
+        if (entry->predefined_id == NAME_ID_NONE) bytes += (uint64_t)entry->name->len + 1;
+        if (bytes > UINT32_MAX) return false;
+    }
+    *size = (uint32_t)bytes;
+    return true;
+}
 
 // Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
 // storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
@@ -1986,6 +2033,100 @@ static inline MirValue em_lower_value(MirEmitter* em, AstNode* node,
         abort();
     }
     return em_apply_value_demand(em, em->lower_value(em->call_owner, node, demand), demand);
+}
+
+// exact Item membership shared by scalar admission and native entry guards.
+static inline MIR_reg_t em_exact_item_type_test(MirEmitter* em,
+        MIR_reg_t item, TypeId type_id) {
+    if (type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t inline_bits = em_new_reg(em, "guard_float_bits", MIR_T_I64);
+        MIR_reg_t inline_float = em_new_reg(em, "guard_float_inline", MIR_T_I64);
+        MIR_reg_t tagged_float = em_new_reg(em, "guard_float_tagged", MIR_T_I64);
+        MIR_reg_t result = em_new_reg(em, "guard_float", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+            MIR_new_reg_op(em->ctx, inline_bits), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_NE,
+            MIR_new_reg_op(em->ctx, inline_float),
+            MIR_new_reg_op(em->ctx, inline_bits), MIR_new_int_op(em->ctx, 0)));
+        MIR_reg_t tag = em_new_reg(em, "guard_type_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+            MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, tagged_float), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+            MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, inline_float),
+            MIR_new_reg_op(em->ctx, tagged_float)));
+        return result;
+    }
+
+    switch (type_id) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_STRING:
+        break;
+    default: {
+        MIR_reg_t no_match = em_new_reg(em, "guard_unsupported", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, no_match), MIR_new_int_op(em->ctx, 0)));
+        return no_match;
+    }
+    }
+
+    MIR_reg_t tag = em_new_reg(em, "guard_type_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 56)));
+    MIR_reg_t result = em_new_reg(em, "guard_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, tag),
+        MIR_new_int_op(em->ctx, type_id)));
+    return result;
+}
+
+// slab buffers may grow in the REPL; only the context-owned state is stable.
+// Dynamic slot descriptors retain the runtime accessor's missing-slot result.
+static inline MIR_reg_t em_module_slot_item(MirEmitter* em, MIR_reg_t state,
+        MIR_op_t slot, bool checked) {
+    MIR_reg_t result = em_new_reg(em, "module_item", MIR_T_I64);
+    MIR_label_t done = checked ? em_new_label(em) : NULL;
+    if (checked) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+            MIR_new_uint_op(em->ctx, ITEM_NULL)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, 0)));
+    }
+    MIR_reg_t vars = em_load_at(em, state, offsetof(LambdaModuleState, vars), MIR_T_P, "module_vars");
+    if (checked) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, vars), MIR_new_int_op(em->ctx, 0)));
+        MIR_reg_t count = em_load_at(em, state, offsetof(LambdaModuleState, var_count), MIR_T_U32, "module_count");
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGE, MIR_new_label_op(em->ctx, done),
+            slot, MIR_new_reg_op(em->ctx, count)));
+    }
+    MIR_reg_t address = 0;
+    MIR_disp_t offset = 0;
+    if (slot.mode == MIR_OP_UINT || slot.mode == MIR_OP_INT)
+        offset = (MIR_disp_t)(slot.mode == MIR_OP_UINT ? slot.u.u : slot.u.i) * sizeof(Item);
+    else {
+        address = em_new_reg(em, "module_slot", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MUL, MIR_new_reg_op(em->ctx, address),
+            slot, MIR_new_int_op(em->ctx, sizeof(Item))));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, offset, vars, address, 1)));
+    if (done) em_emit_label(em, done);
+    return result;
+}
+
+static inline MIR_reg_t em_module_property_key_at(MirEmitter* em,
+        MIR_reg_t state, uint32_t index) {
+    // a published satellite may grow the table; reload it beside its use.
+    static_assert(sizeof(NameId) == 4, "inline key load reads NameId as u32");
+    MIR_reg_t keys = em_load_at(em, state, offsetof(LambdaModuleState, property_keys), MIR_T_P, "property_keys");
+    return em_load_at(em, keys, (MIR_disp_t)index * sizeof(NameId), MIR_T_U32, "static_name_id");
 }
 
 static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
@@ -5301,6 +5442,39 @@ static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,
     MIR_op_t ops[2] = {a1, a2};
     return em_call_with_args(em, fn_name, ret_type, 2, types, ops, include_signature);
 }
+
+// promoted from production's module prologue: a matching context-local hint
+// proves the logical owner without baking runtime state into a cached image.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static inline MIR_reg_t em_module_state_for_unit(MirEmitter* em, MIR_reg_t unit,
+        bool include_signature) {
+    MIR_reg_t state = em_new_reg(em, "module_state", MIR_T_P);
+    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    MIR_reg_t active = em_load_at(em, em->frame.runtime,
+        offsetof(EvalContext, jit_current_module_state), MIR_T_P, "active_module");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, slow),
+        MIR_new_reg_op(em->ctx, active), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t active_unit = em_load_at(em, active, offsetof(LambdaModuleState, module_layout_id),
+        MIR_T_U32, "active_module_unit");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, slow),
+        MIR_new_reg_op(em->ctx, active_unit), MIR_new_reg_op(em->ctx, unit)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, state),
+        MIR_new_reg_op(em->ctx, active)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, slow);
+    MIR_reg_t resolved = em_call_2(em, "lambda_module_state_for_unit", MIR_T_P,
+        MIR_T_P, MIR_new_reg_op(em->ctx, em->frame.runtime),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, unit), include_signature);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_P, offsetof(EvalContext, jit_current_module_state),
+            em->frame.runtime, 0, 1), MIR_new_reg_op(em->ctx, resolved)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, state),
+        MIR_new_reg_op(em->ctx, resolved)));
+    em_emit_label(em, done);
+    return state;
+}
+#pragma clang diagnostic pop
 
 static inline MIR_reg_t em_call_3(MirEmitter* em, const char* fn_name,
                                   MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,

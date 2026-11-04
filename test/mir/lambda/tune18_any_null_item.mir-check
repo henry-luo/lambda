@@ -1,13 +1,18 @@
 {
   "schema_version": 1,
-  "description": "S1.6 / D2.4.1\u2013D2.4.3: erased values are boxed through MirValue before a guarded null-tag comparison; the runtime equality fallback remains for Type values.",
+  "description": "S5.1.1v2 / D2.4.1–D2.4.3: erased null inequality preserves Error, guards Type-value fallback, compares the null tag or zero pointer, then inverts the predicate.",
   "checks": [
     {
       "in_func": "_walk_any_chain18_#",
       "expect": [
         "ursh\t{{r}},",
-        "ne\t{{r}}, {{r}}, 1",
-        "call\tfn_ne_value_p, fn_ne_value"
+        "{{r}}, 27",
+        "{{r}}, 24",
+        "eq\t{{r}}, {{r}}, 1",
+        "eq\t{{r}}, {{r}}, 0",
+        "or\t{{r}}, {{r}}, {{r}}",
+        "call\tfn_ne_value_p",
+        ", fn_ne_value,"
       ]
     }
   ]

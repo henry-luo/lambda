@@ -1,21 +1,22 @@
 # Lambda MIR MVP: typed execution implementation
 
-2026-11-04. Implements and tunes
+2026-11-05. Implements and tunes
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; the performance
-milestone remains open.** The current expansion covers all **77 registered typed
-benchmark entries**, adding 29 to the previous 48. All 77 output checks pass.
-The original 48 pass the release regression check with no statistically
-significant slowdown detected against the frozen starting MVP.
+milestone remains open.** All 77 registered typed benchmarks pass their MVP
+output checks. The current complete timing run clearly beats Full MIR on
+**70/77**, using a matched Sumfp supplement for its timer-limited primary window.
+**Three medians remain slower** (CD, Microdiff and RegexRedux); Pidigits and
+Permute have faster inconclusive medians; two Full controls fail.
 
-The expanded semantics fixture passes under MVP and production in normal,
-forced/poisoned and seeded/poisoned GC modes. Membership error-payload and module
-snapshot probes pass under MVP; production retains existing discrepancies in
-these cases (**S7.9.3, S9.1.2, S9.3.1**). The broader MVP gate retains exactly
-the control's 59 failing subtests, with no new failure headers. See the
-[completion record](#2026-11-04-complete-registered-benchmark-coverage) for the
-current qualification and the archived prior tuning sections for their own
-performance populations.
+The fresh Lambda baseline passes **8,756/8,756**. Shared fixtures pass normal,
+forced/poisoned and seeded/poisoned GC modes; 18 array benchmarks pass forced GC.
+The 65-group broader gate retains 58 legacy failing subtests with no new failure
+headers. The complete 15-pair comparison against the phase-1 MVP retains one
+Diviter regression flag (+1.4% median). The original 48 30-pair repeat was stopped
+at the user's wrap-up request, so this source has **no completed zero-regression
+qualification**. See the [wrap-up evidence](#2026-11-05-wrap-up) and retain earlier
+qualification sections as historical evidence. C2MIR is unmeasured.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
@@ -25,32 +26,37 @@ containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 
 ## Current checkpoint
 
-- **Completed:** 2026-11-04; all 77 registered typed benchmark entries pass, adding 29.
-- Branch `master`; starting revision `695c2b887`.
-- Authority: D2.4.1–D2.4.3, D5.2–D5.3, D8.4.2v2; S9.1.2–S9.2.3, S12.1.2v3.
-- Runtime models, existing workloads/goldens and vendor sources are unchanged.
-- Private release builds freeze 789 starting link inputs; the root executable is untouched.
-- Final candidate: `temp/lambda_mir_mvp/expand_all/stage24-release.exe`.
-- Candidate SHA256: `c98251585039ceee4677c706e151768fe21fea3b5ade1e1510b67e77112b1fa7`.
-- Control: `control-release.exe`, SHA256 `c1ec26023d6acc4ee188cd31a7a3b050383df5124bfc603f250d07dfe0b1a21f`.
-- Original 48: 30 paired release observations and two warmups; no regression flags.
-- Timing uses self-reported execution windows, excluding startup and JIT compilation.
-- Sumfp uses a matched 10,000-call supplement; timer-limited primary samples remain archived.
-- Binary Trees initially regressed; bounded record-result inlining removed the flag.
-- Final Binary Trees ratio is 0.9374; independent 60-pair confirmation is 0.9333.
-- Full MIR/C2MIR are unmeasured in final regression qualification; their speed targets remain open.
-- All 77 goldens and the new default/module/query/ABI probes pass.
-- Shared expansion fixture passes both compilers under normal, forced/poison and seeded/poison GC.
-- MVP membership and module-snapshot probes pass under the same three GC modes.
-- Two production discrepancies reproduce on control: payload erasure and returned module snapshots.
-- All 18 previously covered array/GC benchmarks pass; the 62-group MVP gate retains 59 legacy failures.
-- Lambda baseline: 8,755/8,755, comprising 6,643 fresh and 2,112 unchanged input-parser results.
-- Baseline validates shared/production changes; final MVP-only edits have separate release qualification.
-- User confirmed Lambda baseline alone is sufficient; no Radiant qualification is required.
-- Published coverage, regression samples, analysis and validation are linked in the completion record below.
-- Raw logs, failed diagnostics, frozen sources and build provenance remain under the task directory.
-- No subagents, benchmark-name special cases or production-lowering fallback.
-- Remaining work belongs to later milestones: legacy MVP failures and Full MIR/C2MIR speed targets.
+- **Updated:** 2026-11-05; **wrapped up at user request**. No active build/test/benchmark coordinator. Goal remains all 77 faster than Full, preserving original 48; targets are not all met. Commit scope: validated MVP sources, tests, documentation and evidence; unrelated work excluded.
+- Branch `master`, starting commit `64be60daa`. Unrelated package/editor work, shared `lambda.exe`, runtime data models and vendor files are untouched. Lambda baseline only; C2MIR unmeasured.
+- Authority: D2.4.3, D3.2.4v5, D3.3.3v3, D4.6.1v2–D4.6.2v2, D5.2–D5.3, D8.4.1v2–D8.4.2v2; S3.4, S5.1.1v2, S7.4.4, S7.6.1v9, S7.9.3, S9.1.2–S9.1.3, S9.3.1, S10.6.1, S11.1, S11.4.1v5, S12.2.1v3. No ruling changes.
+- Private build artifacts/snapshots: `temp/lambda_mir_mvp/tune77_full/`; investigations/profiles/campaigns: `temp/lambda_mir_mvp/tune77_phase2/`.
+- Active checked source/release: **`captured_fields`**, SHA256 `ca0746fe673f1c78845144d45de6127e33a15ce9df534dd9ad7537762cd2e645`. All42 live compiler hashes agree with release/debug manifests after wrap-up restoration.
+- Build: release O3/ThinLTO/march=native, frozen expansion runtime inputs; rebuilt MVP/Full/registry TUs. Debug host `captured_fields_debug` is correctness/debugging only. No root executable replacement.
+- Correctness: all 77 MVP benchmark goldens; 21 paired diagnostic profiles; expanded/u32 fixtures in both compilers under normal, forced/poisoned and seeded/poisoned GC; 18 forced-GC array benchmarks pass.
+- Broad gate: 65 groups, same 58 legacy failing subtests versus starting 59, no new normalized failure headers. `captured_fields-broad.log` retains failures.
+- Fresh Lambda baseline **8,756/8,756**: 6,644 fresh runtime checks plus 2,112 unchanged parser results, no reruns. Evidence: `captured_fields-baseline-{analysis,provenance}.json`.
+- Complete performance: Full 77×15 with phase-1 MVP, plus matched Sumfp 10k×30 versus Full/stage24. Paired release self-reported execution windows, startup/JIT excluded, process interference monitoring. Frozen912-input corpus plus four live paths verified; workloads/iterations/goldens unchanged.
+- Results: **70 clear Full wins /77**, five gate misses, two invalid Full controls. Original48:45 clear wins, two faster inconclusive medians, one invalid control; no slower Full medians. Additional29:25 clear wins, three slower medians, one invalid control.
+- Slower medians MVP/Full: CD 194.975/180.002 ms (+8.3%), Microdiff 32.622/29.665 (+10.0%), RegexRedux 0.750/0.748 (+0.3%, statistically inconclusive).
+- Faster inconclusive Full comparisons: Pidigits 0.337/0.355 ms; Permute 0.070/0.075 ms. Strict one-sided95% upper bound must be below1.0 to count a clear win.
+- Invalid Full controls: NavierStokes checksum12 vs77; TextSearch exit-11. Both reproduce in the starting control. MVP outputs pass all 77.
+- Phase-1 MVP comparison: one retained Diviter regression flag,236.176/232.810 ms (+1.4% median; two-sided lower ratio bound1.000107). Sumfp's primary prior-MVP comparison remains timer-limited; the supplement compares stage24.
+- The original 48×30 repeat was stopped before producing samples at the user's wrap-up request. **No zero-regression claim for current source.** `wrap-up-campaign-status.json` and own-process cancellation inventory retain this disposition.
+- Published current evidence: `test/benchmark/lambda_mvp/tune77_phase2_{full,sumfp,analysis,validation}_2026-11-05.json`. Original phase-1 six Nov4 reports remain unchanged; they retain the earlier58-win/zero-original 48-regression qualification.
+- Starting MVP: `expand_all/stage24-release.exe`, SHA256 `c98251585039ceee4677c706e151768fe21fea3b5ade1e1510b67e77112b1fa7`; phase-1 MVP: `primitive_push_effects-release.exe`, SHA256 `f4ccd15e804c0e8a1cd021436c47de32018e2d498d1a6ef3aa41732aa486f418`.
+- Phase2 retains all phase-1 native u32/record-COW/N-D/exclusive-borrow/float/tail-root work. Scalar/error facts avoid revalidation/no-op captures/freezes; mutable wide scalars still snapshot owned number homes.
+- Context-linked module/key locations, per-use predefined NameIds, enforced constructor destinations/union arms, selective tensor packing and shared ownership/shape queries remain in place.
+- Shared physical helpers cover certified append, literal UTF-8 comparison, semantic type/null predicates and physical array words. Unknown/view/JS/native/virtual carriers retain checked fallbacks.
+- Primitive-array normal domains survive only invariant typed var borrows; storage/escape queries retain strict no-borrow defaults. Unannotated direct mutation stays conservative.
+- Current batch adds guarded generic boxed-array reads, single/fresh literal capture policy, pure-sibling scalar observations, bool/Error `not` facts, open-array nested-write dispatch and admitted GC-pointer field stores.
+- Known-container captures skip the helper if already shared. Integer text joins reuse the rooted formatter; recovery/conditional joins share normal-domain unions; exact Error metadata reuses shared AST typing.
+- New probes exposed an existing projected-RHS alias bug (MVP199 vs Full179). Member/array/nested writes now capture borrowed RHS children before native/checked stores. Typed container slots match reader eligibility independently of the scalar-native flag.
+- Superseded fixture/conversion/alias failures remain recorded, without relaxed goldens. Earlier `primitive_borrows` baseline emission expectations were updated with retained initial/rerun logs; current baseline passes without reruns.
+- The unbuilt RMW follow-up was removed from live source at wrap-up and saved as `rmw-follow-up-unvalidated.patch`; restoration and all 42 hashes are recorded in `wrap-up-source-restoration.json`. It is not qualified or applied.
+- Follow-up roots: CD has 39,799 extra plain-array copies/26.7MB versus Full; MVP omits runtime spine handling/release markers for shared-AST RMW borrows. Full also has an open-string spare-capacity append MVP lacks. See `rmw-observations.md` for these and checked-len/nonretaining-call hypotheses.
+- Existing debt probes `wide-sibling-existing-gap.*` and `domain-push-probe.json` reproduce earlier issues. Do not remove wide snapshots or infer new array write contracts from them.
+- If resumed: implement/test the RMW and shared append/normal-result fixes as a batch; independently investigate Diviter and confirm near-boundary Full comparisons; then run original 48×30 and update same-source evidence. Keep all primary flags/failed controls explicit.
+- Disk ~1.2GiB free. Keep frozen inputs/snapshots and private evidence. Superseded gzip/object cleanup inventories retain provenance. Performance targets remain open; the commit does not claim completion.
 
 ## Implementation
 
@@ -3982,3 +3988,300 @@ the raw logs. Per the user's instruction, no Radiant baseline is required.
 
 Immutable control link inputs, exact source snapshots, private hosts, raw logs
 and MIR dumps remain under `temp/lambda_mir_mvp/expand_all/`.
+
+## 2026-11-04: Full MIR tuning across all 77 entries
+
+The performance target remains open. This batch retains all 77 registered typed
+benchmark entries, the original 48 regression population, shared runtime models,
+and the existing benchmark algorithms, sizes and goldens. Authority:
+**D2.4.3, D3.2.4v5, D3.3.3v3, D5.2–D5.3, D8.4.2v2**;
+**S4.4.4, S7.9.3, S9.1.2–S9.1.3, S11.4.1v5, S11.4.6v4, S12.2.1v3**.
+No formal ruling or execution default changes.
+
+### Lowering changes
+
+Fixed-key places now evaluate/root keys once and reuse checked COW helpers.
+Exclusive projected borrows avoid temporary path arrays; typed scalar record
+spines and packed/erased N-D stores guard the complete path before writing.
+Shared physical emitters retain layout, lane, bounds and ownership checks.
+Pointer arrays use their admitted element contract and guarded physical carrier
+(**D3.2.4v5, D5.3, S9.1.2–S9.1.3**).
+
+The native bitwise emitter is shared with production and handles mixed u32/int
+promotion and full-width shift counts. Outcome-aware numeric and indexed reads
+keep their error and absence alternatives while exposing admitted native lanes.
+Text comparison handles pointer identity; indexed ASCII literal comparisons
+use an ordinal lane, while Unicode and NUL/absence keep their full semantics
+(**D2.4.3, S4.4.4, S7.9.3**).
+
+Immutable null-arm facts, typed call/split outcomes and closed local array
+observations remove repeated classification and unnecessary scalar-home work.
+Implicit self-tail positions preserve precise owners and checked scalar
+arguments. Primitive array refinements survive the observation pass; otherwise
+Triangl lost its packed storage proof. Larger collecting var-array mutators
+retain their entries, while read-only witnesses and confined snapshots retain
+their established expansion paths (**D5.2–D5.3, S11.4.1v5, S12.2.1v3**).
+
+The final record fix resets inferred mutable `Record | Error` observations just
+as plain mutable records were reset. A generic field replacement can change the
+physical prefix. Treating the earlier producer's semantic record type as the
+current layout proof skipped a later boundary and made Raytrace3D take 237,304
+extra `fn_member` calls. Re-admission removes them. The retained-input fixture
+and MIR check cover this boundary (**D3.2.4v5, S11.4.6v4, S9.1.2**).
+
+Builtin effects retain collection behavior. Certified `pn_push` remains
+callback-conservative because element admission can invoke a nominal constraint.
+Open `pn_push_cow` clears the certificate before growth; MVP also proves plain
+builtin numeric-array push callback-free at its call site. String conversion,
+replacement, sorting and joining retain their conservative generic effects.
+Diagnostic call counting reuses the shared emitter and emits no counters in
+ordinary MIR (**D5.4.4**).
+
+Shared production changes fix u32 shift-width guards and nullable-int admission
+on typed tail backedges. The strengthened MIR sidecars and nullable recursive
+probe cover those fixes (**S4.4.4, S11.4.1v5**).
+
+### Qualification protocol
+
+The private `primitive_push_effects` release has SHA256
+`f4ccd15e804c0e8a1cd021436c47de32018e2d498d1a6ef3aa41732aa486f418`.
+It rebuilds the current compiler/registry translation units against frozen
+expansion runtime link inputs. The source manifest captures 41 compiler inputs;
+912 frozen benchmark inputs and four live input files are checked by hash.
+Root `lambda.exe`, vendor sources and unrelated package/editor changes are
+untouched.
+
+All timings are paired release self-reported execution windows, excluding
+startup/JIT. Original 48 uses 30 pairs plus 2 warmups against frozen expansion
+MVP; Full 77 uses 15 pairs plus 2 warmups on the same candidate binary with the
+compiler selector changed. A matched 10,000-call Sumfp supplement retains both
+original kernels because the primary MVP window is timer-limited. Full wins
+require a one-sided 95% paired-bootstrap upper ratio bound below 1.0; regression
+flags require the two-sided 95% lower bound above 1.0. Competing builds/tests
+pause timing or discard affected paired rounds. C2MIR is unmeasured.
+
+All 77 MVP output checks pass. The expanded shared fixture and u32 fixture pass
+under MVP and production in normal, force-every/poison and seeded/poison GC
+modes; 18 array benchmark cases also pass forced GC. The 65-group broader gate
+retains 58 legacy failing subtests versus the starting 59, with no new failure
+headers; the read-only tail emission check is now satisfied. No legacy failure
+was masked.
+
+The final shared-runtime Lambda baseline passes **8,756/8,756**: all 6,644 fresh
+runtime cases on the private `audited_layouts_debug` host, plus 2,112 unchanged
+parser results. No rerun was needed with local HTTP/WebSocket access. The final
+release differs only in MVP planning, as checked by source hashes. No Radiant
+baseline was run.
+
+### Results
+
+The primary 77-row campaign has 57 clear Full MIR wins, 17 gate misses and 3
+unqualified rows. Replacing only the timer-limited Sumfp qualification with its
+matched supplement gives the following complete population; the primary
+samples remain published unchanged.
+
+| Population | Entries | Clear Full wins | Gate misses | Unqualified | Slower medians |
+|---|---:|---:|---:|---:|---:|
+| Original 48 | 48 | 47 | 0 | 1 | 0 |
+| Additional 29 | 29 | 11 | 17 | 1 | 16 |
+| All 77 | 77 | 58 | 17 | 2 | 16 |
+
+All 48 original benchmarks have a qualified regression comparison with **zero
+slowdown flags**. All 47 original entries with valid Full MIR controls beat
+Full MIR. The 16 slower medians are confined to the 29 additions. Julia Formatted
+Output has a faster median but its upper 95% ratio bound is 1.0472, so its lead is
+inconclusive. Full MIR fails NavierStokes' checksum and crashes in TextSearch;
+these controls remain unqualified. Both failures also reproduce in the starting
+control. All 77 MVP outputs pass. **The all-benchmark Full MIR target remains
+open**, and C2MIR has not been measured for this compiler.
+
+Selected final execution windows (milliseconds):
+
+| Benchmark | MVP | Full MIR | Full/MVP |
+|---|---:|---:|---:|
+| `larceny/triangl` | 719.494 | 2546.670 | 3.54× |
+| `awfy/havlak` | 872.508 | 2644.750 | 3.03× |
+| `julia/matrix_statistics` | 93.971 | 150.395 | 1.60× |
+| `jetstream/hashmap` | 14.953 | 21.430 | 1.43× |
+| `jetstream/raytrace3d` | 8.976 | 13.316 | 1.48× |
+| `text/fast_diff` | 74.818 | 186.490 | 2.49× |
+| `text/log_pipeline` | 1023.230 | 1327.850 | 1.30× |
+| `text/jq_bf` | 148.003 | 176.989 | 1.20× |
+
+The next tuning population contains these 16 slower medians.
+
+| Benchmark | MVP ms | Full MIR ms | MVP/Full |
+|---|---:|---:|---:|
+| `r7rs/mbrot` | 0.846 | 0.523 | 1.618× |
+| `awfy/richards` | 260.654 | 157.402 | 1.656× |
+| `awfy/json` | 5.214 | 3.782 | 1.379× |
+| `awfy/deltablue` | 57.745 | 24.185 | 2.388× |
+| `awfy/cd` | 245.072 | 183.744 | 1.334× |
+| `beng/regexredux` | 0.729 | 0.702 | 1.038× |
+| `julia/parse_integers` | 48.979 | 40.815 | 1.200× |
+| `jetstream/richards` | 259.929 | 158.881 | 1.636× |
+| `jetstream/splay` | 743.941 | 641.967 | 1.159× |
+| `jetstream/crypto_sha1` | 119.581 | 91.849 | 1.302× |
+| `text/microdiff` | 45.874 | 30.481 | 1.505× |
+| `text/hyphen` | 15.755 | 13.533 | 1.164× |
+| `text/prettier_ast` | 2843.630 | 1635.290 | 1.739× |
+| `text/three_way_merge` | 3112.520 | 1421.000 | 2.190× |
+| `text/jq_mix` | 948.361 | 713.061 | 1.330× |
+| `text/jq_records` | 420.286 | 374.054 | 1.124× |
+
+The next investigations should batch nested numeric stores and scalar floating
+loop calls, record-spine guards, pointer-array witnesses, u32 array lanes and
+remaining generic text/query dispatch. These are investigation directions,
+not measured fixes. Preserve the qualified original 48 comparison while working
+on them; the faster median in Formatted Output also still needs a clear lead.
+
+### Evidence and reproduction
+
+| Evidence | Scope |
+|---|---|
+| [Analysis](../../test/benchmark/lambda_mvp/tune77_analysis_2026-11-04.json) | Complete 77-row counts, uncertainty, remaining misses and zero original 48 regression flags |
+| [Full 77 paired samples](../../test/benchmark/lambda_mvp/tune77_full_2026-11-04.json) | Final same-binary MVP/Full comparison, 15 pairs plus 2 warmups |
+| [Original 48 paired samples](../../test/benchmark/lambda_mvp/tune77_regression48_2026-11-04.json) | Final candidate versus frozen expansion MVP, 30 pairs plus 2 warmups |
+| [Matched Sumfp](../../test/benchmark/lambda_mvp/tune77_sumfp_2026-11-04.json) | Matched 10,000-call supplement across candidate, Full and starting MVP |
+| [Starting screen](../../test/benchmark/lambda_mvp/tune77_start_2026-11-04.json) | Earlier 5-pair diagnostic; 49 primary Full wins and 23 slower medians, with its own source identity |
+| [Validation](../../test/benchmark/lambda_mvp/tune77_validation_2026-11-04.json) | Source/build/input hashes, baseline provenance, GC/fixture coverage and retained failures |
+
+Exact commands are retained in each paired report. Private release binaries,
+source snapshots, frozen link provenance, MIR dumps, diagnostic profiles,
+60-pair Towers/Raytrace3D confirmations and superseded measurements remain in
+`temp/lambda_mir_mvp/tune77_full/`. The earlier two-regression candidate is retained
+as diagnostic evidence and never substituted for this qualification.
+
+## 2026-11-05: remaining Full MIR misses, phase 2
+
+This continuation follows **D3.2.4v5, D3.3.3v3, D4.6.1v2–D4.6.2v2,
+D5.2–D5.3, D8.4.1v2–D8.4.2v2; S3.4, S5.1.1v2, S7.9.3,
+S9.1.2–S9.1.3, S10.6.1, S11.1, S11.4.1v5 and S12.2.1v3**.
+No formal ruling or runtime data model changes.
+
+The initial phase-2 profiles found 62.3 million ThreeWayMerge validations and
+31.9 million no-op freezes, repeated module resolution in Prettier, nullable
+Boolean dispatch in Richards, and checked scalar stores in DeltaBlue. Private
+normal/error observations, may-own string-buffer analysis, linked module/key
+images, direct constructor destinations and guarded native lanes address those
+causes. Full's existing physical operations and ownership/shape queries were
+promoted for reuse instead of copied.
+
+Intermediate failures remain recorded. A boxed nullable-float join needed a
+separate destination-lane register. Cached predefined NameId registers lacked
+dominance when defined in cold branches. Blanket N-D packing made JQ Tree
+allocate row views for reads. Cold typed-member key loads added hot prologue
+work. The later candidates correct those causes; those failing/superseded
+builds do not qualify current code.
+
+The `imported_domains` release completes the current correctness milestone:
+all 77 MVP goldens, unchanged broad failure headers, 21 paired diagnostic cases,
+and a fresh Lambda baseline of 8,756/8,756. Its 23-case seven-pair screen has 16
+clear Full wins, five slower medians and two inconclusive faster medians. Both
+Richards entries, Splay, JQ Records and JQ Tree now beat Full in that screen.
+The report is `temp/lambda_mir_mvp/tune77_phase2/imported_domains-screen17.json`;
+the filename predates the expanded population. Original48 and full77 final
+qualification are still required. The phase-1 public reports remain unchanged.
+
+The next batch shares literal UTF-8 comparisons, semantic type/null predicates
+and certified primitive-array append operations, and retains normal primitive
+array observations across invariant var borrows. These observations do not
+weaken the no-borrow storage/escape proofs. New probes cover error/absence joins,
+Unicode and embedded NUL, named union-arm identity, generic member misses,
+append growth/snapshots, imported wide scalar ownership, typed borrows and
+coarse replacement. The null type's singleton AST descriptor is canonicalized
+before the MVP's ordinary literal-pattern exclusion.
+
+The completed `primitive_borrows` selected screen has 16 clear Full wins, four
+inconclusive faster medians and three slower medians. JSON moves to
+3.675/3.691 ms and DeltaBlue to 21.146/21.756 ms (MVP/Full), both inconclusive;
+ThreeWayMerge becomes a clear win at 1300.800/1381.670 ms. No selected
+previous-MVP regression flags. Its baseline retains the initial three emission
+expectation failures and two full-suite reruns; the final emission suite passes
+285/285 and the qualified combined baseline is 8,756/8,756.
+
+The next physical-read batch generalizes the existing pointer-array reader into
+a shared guarded word reader, rejecting native, shaped, JS and virtual storage
+when the consumer needs Items. It preserves generic index fallbacks and
+full-width absence checks. Literal insertion captures projected/named observers
+once and leaves fresh children owned (**S9.3.1**); scalar predicates borrow only
+when sibling evaluation cannot mutate their input (**S7.9.3, S9.1.2**). A new
+snapshot probe exposed an existing MVP dispatch bug: a coarse array root entered
+the fixed typed setter, whose fallback accepts maps or concrete array contracts.
+Its resolved leaf was correctly `any`; the root dispatch was wrong. Open arrays
+now use the generic checked COW walk, while concrete element contracts retain
+their declared admission (**D3.2.4v5, S11.4.1v5**). These changes pass all 77
+benchmark goldens, expanded GC probes and the existing broad failure-header
+gate; baseline and performance qualification remain active.
+
+The next admitted-field batch reuses the native scalar store proof for admitted
+GC-pointer fields, including projected-container insertion captures before the
+COW/layout walk. Known container captures check the existing share bit before
+calling the idempotent runtime marker; null/error arms stay unchanged. Integer
+text joins use the existing rooted `fn_strcat_values` formatter rather than
+constructing disposable intermediate strings (**D3.2.4v5, D5.3, S9.1.2–S9.1.3,
+S9.3.1, S10.6.1**). Expanded probes cover retained field snapshots and large
+integer/error text joins. This source is not yet correctness/performance
+qualified. Its first gate stopped at a new invalid fixture (undischarged
+constructor errors in both compilers). After correcting the fixture, a recovered
+text join exposed missing producer domains: exact Error metadata now reuses
+shared AST typing, and recovery joins retain both normal domains using the same
+join helper as conditional expressions (**S7.4.4, S7.6.1v9**). No benchmark output
+regression was observed. A new build is required.
+
+The field snapshot probe also finds an existing MVP alias defect (199 versus
+Full's 179), reproduced in `physical_paths`. Projected RHS values now acquire
+their **S9.3.1** snapshot at array, member and nested-place write boundaries;
+checked destination setters do not provide that caller-side capture. Typed
+container pointer slots use their physical descriptor independently of its
+scalar-native flag, matching the existing member reader. The `captured_fields`
+build contains these corrections and is pending qualification.
+
+## 2026-11-05 wrap-up
+
+The user requested wrap-up before another tuning batch. Live compiler source now
+exactly matches the correctness-checked `captured_fields` release; the unbuilt
+RMW follow-up is preserved only as a private patch. All42 source hashes agree
+with both release/debug snapshots. No shared executable or unrelated change was
+replaced. The in-flight Full 77 and Sumfp campaigns finished; the longer
+original 48 regression repeat was stopped before samples. No coordinator remains
+active.
+
+The complete current run has **70/77 clear Full MIR wins**, versus 58/77 in the
+previous full qualification. It retains **three slower medians**, two faster
+inconclusive medians and two invalid Full controls. These are release
+self-reported execution windows, with 15 measured pairs plus two warmups and a
+matched 10,000-call Sumfp supplement with 30 pairs. The strict Full win criterion
+is the one-sided95% upper ratio bound below1.0.
+
+| Case | MVP ms | Full ms | Phase-1 MVP ms |
+|---|---:|---:|---:|
+| AWFY JSON | 1.569 | 3.824 | 5.208 |
+| AWFY DeltaBlue | 19.127 | 24.413 | 62.284 |
+| AWFY Richards | 105.221 | 153.657 | 262.200 |
+| Splay | 553.056 | 659.842 | 771.294 |
+| Prettier AST | 454.351 | 1747.000 | 3043.610 |
+| ThreeWayMerge | 1388.180 | 1445.880 | 3199.400 |
+| JQ Tree | 902.111 | 1416.880 | 1368.100 |
+
+Remaining slower medians are CD 194.975/180.002 ms (+8.3%),
+Microdiff 32.622/29.665 ms (+10.0%) and RegexRedux 0.750/0.748 ms (+0.3%;
+statistically inconclusive). Pidigits and Permute have faster inconclusive
+medians. NavierStokes and TextSearch retain the previously reproduced invalid
+Full controls; all 77 MVP goldens pass.
+
+The fresh Lambda baseline passes **8,756/8,756** without reruns (6,644 fresh
+runtime checks plus 2,112 unchanged parser results). Expanded/u32 fixtures pass
+both compilers and all three GC modes,18 array benchmarks pass forced GC,
+and the broader 65-group gate has the same 58 legacy failures and no new headers.
+The performance goal remains open: Diviter retains a phase-1 MVP regression
+flag (+1.4% median), and the original 48×30 campaign was not completed for this
+source. Earlier zero-regression results remain historical.
+
+Current evidence: [analysis](../../test/benchmark/lambda_mvp/tune77_phase2_analysis_2026-11-05.json),
+[Full 77 samples](../../test/benchmark/lambda_mvp/tune77_phase2_full_2026-11-05.json),
+[matched Sumfp](../../test/benchmark/lambda_mvp/tune77_phase2_sumfp_2026-11-05.json),
+and [validation](../../test/benchmark/lambda_mvp/tune77_phase2_validation_2026-11-05.json).
+The checkpoint records the private binaries, failed intermediate probes, source
+restoration, stopped own processes and proposed follow-ups. The subsequent user
+commit request covers this validated source and evidence.

@@ -1,15 +1,42 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback. Re-pinned 2026-09-13: both strides are still computed, but each now multiplies its index parameter in place (%p2 row, %p3 column) instead of a copied local, so the patterns name the parameter registers -- `{{r}}` matches only %r<hex> by design. The native lane store likewise writes the value parameter (%p4) straight into the computed slot.",
+  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write guards the ArrayNum kind, owned N-D layout and int lane in one header word, then checks rank and both extents before computing its two strides. The native store precedes the allocation-bearing checked fallback. Parameter registers are preserved directly (%p2 row, %p3 column, %p4 value).",
   "checks": [
     {
       "in_func": "_store_#",
       "expect_seq": [
         {
-          "pattern": "\tand\t{{r}}, {{r}}, 3"
+          "pattern": "\tmov\t{{r:header}}, u32:(%p1)"
+        },
+        {
+          "pattern": "\tand\t{{r:header}}, {{r:header}}, 4278386943"
+        },
+        {
+          "pattern": ", {{r:header}}, 65553"
+        },
+        {
+          "pattern": "\tmov\t{{r:shape}}, i64:48(%p1)"
+        },
+        {
+          "pattern": "\tmov\t{{r:rank}}, u8:({{r:shape}})"
+        },
+        {
+          "pattern": ", {{r:rank}}, 2"
+        },
+        {
+          "pattern": "\tmov\t{{r:rows}}, i64:40({{r:shape}})"
+        },
+        {
+          "pattern": ", %p2, {{r:rows}}"
         },
         {
           "pattern": "\tmul\t{{r}}, %p2, {{r}}"
+        },
+        {
+          "pattern": "\tmov\t{{r:columns}}, i64:48({{r:shape}})"
+        },
+        {
+          "pattern": ", %p3, {{r:columns}}"
         },
         {
           "pattern": "\tmul\t{{r}}, %p3, {{r}}"
@@ -28,7 +55,8 @@
         "\tmul\t{{r}}, %p2, {{r}}": 1,
         "\tmul\t{{r}}, %p3, {{r}}": 1,
         "call\tarray_plain_p, array_plain": 1,
-        "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1
+        "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1,
+        "\tubge\t": 2
       }
     }
   ]

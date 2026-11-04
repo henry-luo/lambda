@@ -1266,6 +1266,22 @@ static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
     return node;
 }
 
+// a self-prefixed join is the only assignment that can retain an owned
+// string append buffer. Both MIR lowerings use this whole-body may-own fact.
+static inline bool ast_is_owned_string_append(AstNode* node, NameEntry* binding) {
+    if (!node || node->node_type != AST_NODE_ASSIGN_STAM ||
+            ((AstAssignStamNode*)node)->target_entry != binding) return false;
+    AstNode* left = ast_unwrap_primary(((AstAssignStamNode*)node)->value);
+    bool joined = false;
+    while (left && left->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)left)->op == OPERATOR_JOIN) {
+        joined = true;
+        left = ast_unwrap_primary(((AstBinaryNode*)left)->left);
+    }
+    return joined && left && left->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)left)->entry == binding;
+}
+
 // The root identifier of a member/index chain (`t.nodes[i].value` -> `t`), or
 // the bare identifier itself; NULL when the base is not a name (a call, a
 // literal). Promoted from build_ast.cpp's compound_root_ident (rule 13) so the

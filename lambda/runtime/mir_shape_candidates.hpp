@@ -2,6 +2,21 @@
 
 #include "transpiler.hpp"
 
+// the registry supplies optimization candidates only. Callers own its lifetime
+// and must still guard the receiver's physical layout (D8.4.1v2).
+static inline Type* mir_unique_shape_for_field(ArrayList* types, const char* name,
+        size_t name_len, bool trusted, Type* (*addressable)(Type*, bool)) {
+    if (!types || !name || !name_len) return NULL;
+    Type* found = NULL;
+    for (int64_t index = 0; index < types->length; index++) {
+        Type* shape = addressable((Type*)types->data[index], trusted);
+        if (!shape || !find_shape_field_by_name((TypeMap*)shape, name, name_len)) continue;
+        if (found && found != shape) return NULL;
+        found = shape;
+    }
+    return found;
+}
+
 // plans retain layout owners, never a runtime receiver or a speculative type.
 // JS resolves a module recipe; Lambda retains its already selected TypeMap.
 struct MirConstructionPlan {

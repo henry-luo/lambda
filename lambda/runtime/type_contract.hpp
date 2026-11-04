@@ -4,6 +4,23 @@
 
 #include "../lambda-data.hpp"
 
+// a union has no common physical record layout. Constructors may select one
+// matching arm; multiple matches retain dynamic admission (D3.2.4v5).
+static inline void lambda_type_select_map_arm(Type* target, TypeMap** selected,
+        bool* ambiguous, bool (*matches)(TypeMap*, void*), void* data, int depth = 0) {
+    target = type_field_unwrap_simple_decl(target);
+    if (!target || !selected || !ambiguous || *ambiguous || depth > 64) return;
+    if (lambda_type_is_union(target)) {
+        TypeBinary* binary = (TypeBinary*)target;
+        lambda_type_select_map_arm(binary->left, selected, ambiguous, matches, data, depth + 1);
+        lambda_type_select_map_arm(binary->right, selected, ambiguous, matches, data, depth + 1);
+        return;
+    }
+    if (target->type_id != LMD_TYPE_MAP || target == &TYPE_MAP || !matches((TypeMap*)target, data)) return;
+    if (*selected && *selected != target) { *ambiguous = true; return; }
+    *selected = (TypeMap*)target;
+}
+
 enum LambdaTypeExclusion {
     LAMBDA_TYPE_EXCLUDE_ERROR = 1u << 0,
     LAMBDA_TYPE_EXCLUDE_NULL = 1u << 1,

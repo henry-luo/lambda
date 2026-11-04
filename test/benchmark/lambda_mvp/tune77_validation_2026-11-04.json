@@ -1,0 +1,883 @@
+{
+  "candidate": {
+    "revision": "64be60daa1ef17c13801b355e7d61239a80acd1d",
+    "binary_sha256": "f4ccd15e804c0e8a1cd021436c47de32018e2d498d1a6ef3aa41732aa486f418",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "62a21c0fca9356a5132aff0d18e20cbe364ef38b5c614f68645926bd630ce978",
+        "file_count": 41,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "bc731b4f694e4df3796ffc3ea6d30d7f716e28aad4d31a4091e357ec6cc87c10"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "6a58ad32636e2a08c5e61816ea380ad33cab68c7ee57117475a93bbcc885793f"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "e4f89c93d16c361072385fcdaa8208ad199650ee7f055afaaabc7d8c134be7af"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "add4dca17d5c27b4067adcc180485887e657141706bb70a7ef09ad1bc7213966"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "b47a430b147b9fdbb2ceaa6fe10dd87a19fc58361052fbd1835518ad95749d33"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "bcd0a268e8509c778dd226305eece382e05e955ecd9efc5c276e7ff7b2fa0bbc"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "a23c5ad699a2c256a0556e5ee0bff8a19fa08dc596ccbe257449f4192b940ca8"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "135f0501dae11617ed304de83db9d007145a49e9593201bb59ca3df4c23bcf23"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "4faf16c311ebfa0cd1d5d78f3281431852334663182720db62aa3623c0ae8e10"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "19dbc90125cdfc2c253beb921a4d0c3505d694c0e62ec76363ddd2c709972b82"
+          },
+          {
+            "path": "lambda/runtime/mir_function_value.hpp",
+            "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mir_path.hpp",
+            "sha256": "f874a8a3a5af6a50edeb9b4f83d0905e82afe5e1e3eddaaa4203e032dd55fbcd"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "8f2bf50d972828f3aa93bb543f2c698fb56c66c5c408b523e3a4ff9f22a6cae3"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "d154f720b6629d7291453ea9946b380067a92a7f17ccce49d5456901e2fb0092"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "a975ffa61a69ca10cab39ce0b0020b3fe7b9379db44b3b3a088161f31023142f"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "16a0e807451f7b54f2a961938ff045bc020b9ba4f40eb7f31335bebb338ff629"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "a9d1cfeae30cba81e138cafc94f8349bb72223b0c87d88e28124c9c5b9a9cc86"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "6c037886879c54ad1a4b857e53e3c191d6703d76147beaba2ebf8123bb77fdf8"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "2ef592a644835073a9402251e28f5b2da118f846b99240327aa6e4a042526c7d"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "build_configuration": "release_native, O3 ThinLTO march=native, frozen expansion runtime inputs",
+    "frozen_link_provenance": "temp/lambda_mir_mvp/expand_all/control-provenance.json",
+    "frozen_link_provenance_sha256": "916ce3b802ec585b97ea2c0ca1c2dba75aadc3ee8cc3c54ca5f0620fde17c2c6",
+    "snapshot": "temp/lambda_mir_mvp/tune77_full/primitive_push_effects-sources"
+  },
+  "all77_mvp_output_checks": "pass",
+  "shared_expansion_and_u32": "MVP+Full; normal, force-every/poison and seeded/poison pass",
+  "forced_gc_benchmark_cases": 18,
+  "broad_gate": {
+    "groups": 65,
+    "starting_failure_headers": [
+      "test_allocating_vector_emission (LambdaMirMvpTests)",
+      "test_array_reduction_mir (LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (LambdaMirMvpTests)",
+      "test_guarded_float_body (LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (LambdaMirMvpTests)",
+      "test_modular_array_update (LambdaMirMvpTests)",
+      "test_module_initialization (LambdaMirMvpTests)",
+      "test_native_string_array_read (LambdaMirMvpTests)",
+      "test_nullable_comparison_mir (LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (LambdaMirMvpTests)",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_power_two_divmod (LambdaMirMvpTests)",
+      "test_readonly_array_tail (LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (LambdaMirMvpTests)",
+      "test_reference_goldens (LambdaMirMvpTests) (suite='awfy', name='cd')",
+      "test_reference_goldens (LambdaMirMvpTests) (suite='awfy', name='havlak')",
+      "test_scalar_record_witness (LambdaMirMvpTests)",
+      "test_single_use_string_constructor (LambdaMirMvpTests)"
+    ],
+    "candidate_failure_headers": [
+      "test_allocating_vector_emission (LambdaMirMvpTests)",
+      "test_array_reduction_mir (LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (LambdaMirMvpTests)",
+      "test_guarded_float_body (LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (LambdaMirMvpTests)",
+      "test_modular_array_update (LambdaMirMvpTests)",
+      "test_module_initialization (LambdaMirMvpTests)",
+      "test_native_string_array_read (LambdaMirMvpTests)",
+      "test_nullable_comparison_mir (LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (LambdaMirMvpTests)",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_power_two_divmod (LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (LambdaMirMvpTests)",
+      "test_reference_goldens (LambdaMirMvpTests) (suite='awfy', name='cd')",
+      "test_reference_goldens (LambdaMirMvpTests) (suite='awfy', name='havlak')",
+      "test_scalar_record_witness (LambdaMirMvpTests)",
+      "test_single_use_string_constructor (LambdaMirMvpTests)"
+    ],
+    "new": [],
+    "resolved": [
+      "test_readonly_array_tail (LambdaMirMvpTests)"
+    ],
+    "log_sha256": "47f145f2be82cc4c00618ee9c95e4dd882024fc7c77c39c80d8901b1381611bc"
+  },
+  "baseline": {
+    "initial_summary": "temp/lambda_mir_mvp/tune77_full/audited-layouts-baseline-output/test_summary.json",
+    "initial_summary_sha256": "a55c3a3050d2c7004a7f5aa9b99718ee512ab2451523e5ae647e10d1d0a05bdd",
+    "initial_runtime_total": 6644,
+    "initial_runtime_passed": 6644,
+    "initial_runtime_failed": 0,
+    "disposition": "All fresh runtime checks pass on the audited private host with local HTTP/WebSocket access. No reruns or assertion changes.",
+    "reruns": [],
+    "qualified_runtime_total": 6644,
+    "qualified_runtime_passed": 6644,
+    "qualified_runtime_failed": 0,
+    "reused_unchanged_input": {
+      "path": "temp/lambda_mir_mvp/tune48_batch/baseline-artifacts/input_baseline_results.json",
+      "passed": 2112,
+      "failed": 0
+    },
+    "combined_total": 8756,
+    "combined_passed": 8756
+  },
+  "baseline_provenance": {
+    "workspace": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace",
+    "executable": {
+      "source": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/audited_layouts_debug-release.exe",
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/lambda.exe",
+      "sha256": "f47d83763f3cd3517e21befee5ff3236d3937e52b0f1728afbab93ec4ffeeced"
+    },
+    "frozen_suite_provenance": "temp/lambda_mir_mvp/expand_all/baseline-provenance.json",
+    "note": "Final shared helper/registry changes, including callback-capable certified push and callback-free open push. Frozen prior baseline runtime link inputs are reused; source manifests capture all rebuilt translation units.",
+    "tests": [
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_opt_gtest.exe",
+        "sha256": "eeb125fd0c0e498d35ca1f9243f63610e2259ceb3f3f519a604b6334bf0eac9f"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_std_gtest.exe",
+        "sha256": "cfadaf34d0cfb2460c7b24a5bb7ffb91a653780d701195454ce5caceaae84505"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_gc_stress_gtest.exe",
+        "sha256": "25923326ed6a5da76a045b56155d370a66cca287ae73e27e57dcdd4e64b84186"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_ts_gtest.exe",
+        "sha256": "e107bb806750a4791e98f05842d87732b2302682e1fe9390d6e8f3914452f87f"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_gtest.exe",
+        "sha256": "992fb19256c47d6c27b4d3b66bd97065eaa1163f7bfb7408670089ba39054015"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_scalar_compare_gtest.exe",
+        "sha256": "f5d45136a1b0ce77f34ffa5eccb080be0314d4aaf84b86232e32895abd4fa6df"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_compiler_pass_gtest.exe",
+        "sha256": "2294e1863bf9c3b2b583f836922271a297927f7bd38770102ce70e9c10ab46a7"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_parser_poc_gtest.exe",
+        "sha256": "b7accf4d6e15c369eae268d566f200aeed647b7b8e0c432e3249cdeb9022b38c"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_mvp_lmd_gtest.exe",
+        "sha256": "737cbc1a82501bc9cb69465dfa2984ee4b9e1e6ba1ec4234f2277ef5975e375e"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_script_gtest.exe",
+        "sha256": "80232152036635bf1f972f58dac680320553e75f74c2b0532cfbcef7a53f0a6a"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_mir_emission_gtest.exe",
+        "sha256": "8991efd3a683ac0779d0cb4cc317ce92a38efebc35476b58146a3144eb85ce29"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_binary_storage_gtest.exe",
+        "sha256": "7d42fbe6bbf632a45fdc1177c840784d78e48c706ef0044bb16ccddb0c2cabbf"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_runtime_gtest.exe",
+        "sha256": "b10ddae1bef2b917ea64d35530d7ac92eb53232406db81049f9abdc3fe4695e6"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_io_terminal_gtest.exe",
+        "sha256": "3bdab2d1345ba99986fd41c5b14758cf6bcc72b99835a703e2b1cc1dce790adf"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_proc_gtest.exe",
+        "sha256": "e6be39649c79efce854abdcc7b102dba7d9d75fa7ee83e363fad8e7ccaeb1070"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_zip_gtest.exe",
+        "sha256": "a922e5c034ab4d378b92b6d00d812d1757ee9f24c928fdf2a9ca43495042feba"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_security_runtime_gtest.exe",
+        "sha256": "8873157ce952d64bafa033b5c9122e9c5125e31c320cb26c4f9ed7c768b00045"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_item_repr_gtest.exe",
+        "sha256": "bf6f6003df451b37b17f94362a8157cb32bbacb900cfd7a249ef801ce7539467"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_regex_router_poc_gtest.exe",
+        "sha256": "794bfed8176d7a54633b6aa2093aabc4772ef060cecbf87bce12029f1eb2db96"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_test262_gtest.exe",
+        "sha256": "0a31ac105696e3e9dd04e5be5d5872dfde1b665e958aa45d5ddcc5418e39472a"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_opt_gtest.exe",
+        "sha256": "5f23827df54f879ca95667de1a2e8204557c91f10bcb0b74128c22fdd55c658a"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_input_script_cache_gtest.exe",
+        "sha256": "f3ea2d1948d2a8fe69b25817025860c56ef40599ce54b3d1ab24fff292fe1361"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_bt_regex_gtest.exe",
+        "sha256": "bf61d9db5c4995c86626596dd72e078baa70b3d79edee9c2680bb3b5949dfbad"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_coerce_gtest.exe",
+        "sha256": "7320fa29edfc8c2e881833f486a528821a888b0ee6cf1ed66e1b5aa00b2ece3e"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_serve_gtest.exe",
+        "sha256": "b792749329ebcd5fb5dcf17366a1ee44724010bc171b2b6b18541bb4bba080bd"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_ratchet_gtest.exe",
+        "sha256": "93f1bb4acd2aaa24beebbe5c12160c27315034368d7681b00cb73c3578b237a3"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_repl_gtest.exe",
+        "sha256": "1bba6b71961e0861083afff673c9e69b9bf211280ec288eb1745a642efac5f21"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_emission_gtest.exe",
+        "sha256": "5cf0274560bb4beaf63a7270f463e03967180acc2dc531e333e8b071fce06868"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_c_parser_gtest.exe",
+        "sha256": "e73b137877e00f9dc0002f1a4e357389a4b1c3e1070d610e609b233a40c498dd"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_gtest.exe",
+        "sha256": "7e39e6f56a861b2953570fc532ed6329e74d935359fd5e5506429ab038f8f8f5"
+      },
+      {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_typed.exe",
+        "sha256": "c4388a7cafd7888b44caa632992c57c4a06db91acaa68ea2a20357da525f2d17"
+      }
+    ],
+    "manifest": "audited_layouts_debug-source-manifest.json"
+  },
+  "live_inputs": [
+    {
+      "live": "test/benchmark/beng/input/fasta_1000.txt",
+      "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/beng/input/fasta_1000.txt",
+      "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852",
+      "matches_frozen": true
+    },
+    {
+      "live": "test/benchmark/text/jq/fib.bf",
+      "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/fib.bf",
+      "sha256": "752deee7b534b9528d87656c6d6fb45375ef5e3bfb81f460ae6397959e427dbb",
+      "matches_frozen": true
+    },
+    {
+      "live": "test/benchmark/text/jq/orders.json",
+      "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/orders.json",
+      "sha256": "2cebbf8c4143c114fcff38b94169c68b72bcb15624e906d6d4df94e17782ddfe",
+      "matches_frozen": true
+    },
+    {
+      "live": "test/benchmark/text/prettier_ast.json",
+      "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/prettier_ast.json",
+      "sha256": "8763a65fd667fc2d513860f42fffa39a51ce74650fcb83567e83e00cfd3b1cf1",
+      "matches_frozen": true
+    }
+  ],
+  "frozen_input_verification": {
+    "frozen_files": 912,
+    "all_hashes_match": true,
+    "live_inputs": [
+      {
+        "live": "test/benchmark/beng/input/fasta_1000.txt",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/beng/input/fasta_1000.txt",
+        "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/jq/fib.bf",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/fib.bf",
+        "sha256": "752deee7b534b9528d87656c6d6fb45375ef5e3bfb81f460ae6397959e427dbb",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/jq/orders.json",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/orders.json",
+        "sha256": "2cebbf8c4143c114fcff38b94169c68b72bcb15624e906d6d4df94e17782ddfe",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/prettier_ast.json",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/prettier_ast.json",
+        "sha256": "8763a65fd667fc2d513860f42fffa39a51ce74650fcb83567e83e00cfd3b1cf1",
+        "matches_frozen": true
+      }
+    ]
+  },
+  "shared_baseline_reuse": {
+    "baseline": "audited_layouts_debug-source-manifest.json",
+    "candidate": "primitive_push_effects-source-manifest.json",
+    "changed_compiler_files": [
+      "lambda/runtime/mvp/mvp_plan.cpp"
+    ],
+    "shared_sources_identical": true
+  },
+  "fixture_corpus": [
+    {
+      "path": "test/lambda/mvp/mir_mvp_array_domains.ls",
+      "sha256": "44d1639dd6663d9e7e7479346119b8b2ce002cd842101ec61c11dd6a38802ca3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_array_domains.txt",
+      "sha256": "5a60fe6791adf4127f3ce8d8564acaef7e0ef91e4fd00418f636accfd2078bb3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_arrays.ls",
+      "sha256": "8419316b25c530f7e9cbc497abc5344d26fb804211723ef43d88e7ccae67f24c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_arrays.txt",
+      "sha256": "d3a6ed5a970352594a1bfb3907a7cc087ac06b7ccc334758c5abd356fce3299b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_batch_records.ls",
+      "sha256": "eed18ef83836be3aa3bdb119ba6d37db68ff52928580b361e3f2295341e3c4f4"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_batch_records.txt",
+      "sha256": "e4c8fb2cfaccc296bcfe7ac5f287e651afb8ca82ac5aa68f25c99d3f47118697"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_benchmark_expansion.ls",
+      "sha256": "69445c093e59954197beaa82b91e0b4ae148db5e8e456169a55fd4ec9c189a35"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_benchmark_expansion.txt",
+      "sha256": "dc60ac29886bd8def1568929d4974d2315980874aa18936c8bebb33e32c09ab3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_inline.ls",
+      "sha256": "9247efce07e115a47899ba89c79e21b9ed7adba993a3ee65e791aa37b4108283"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_inline.txt",
+      "sha256": "08814709b9e1298445a1bb10f0a555bc5bf3d28745645ce4a5b4155eebfffb1a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_kernel.ls",
+      "sha256": "7098d6f1188d17ff76cc3c1c5492dcff8da02c1e55a6ced9091232523713c37c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_kernel.txt",
+      "sha256": "47b269653c0190f07ba9fe08eb339e960db6c569fda1ab4984ce99f900b5cb91"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_comparisons.ls",
+      "sha256": "404d36e37f0d447ad584b366c8ee35bfad2277d99c3e397dbecf189ae5bbaecd"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_comparisons.txt",
+      "sha256": "8de6bd5520c0b9ab4ecde65b48562a4fcf377a7b75a6ab8b8c9e7d3642141d1f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_confined_arrays.ls",
+      "sha256": "cba91cf652a83ce69a95939b673e848b54d31e474ec0ee45201f8a71e48fe702"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_confined_arrays.txt",
+      "sha256": "20bc627ce5cee5f9f4df0a3d2a2d8b280e0f21ba94dffe7505aa4c394ca30745"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_constructor_boundary.ls",
+      "sha256": "0ad3f2e26df30e0f4bd4cff4a506b5d56e4ebf76bd78643a8d7c64e8caf885f3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_constructor_boundary.txt",
+      "sha256": "7e975b099ec8566a36a454b8e0f3704b88cc17449da6a0f21ec76cfb8254c017"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_consumers.ls",
+      "sha256": "1d61b757af2b8eb3480626de946adb8e0778ef338c8023bd1a90134c47f3d8fa"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_consumers.txt",
+      "sha256": "53f7098e5cbdf8d49c8a5c3835c95cd92e5d70ec615605437c2fb0f561dd9f1b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_copy_loops.ls",
+      "sha256": "6c1a7bb184a6c6d4036ecb98d4e97c666ab7c534103532d18dfd4d65a93ed9de"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_copy_loops.txt",
+      "sha256": "8c96f187024314d33d54339833e2554f61a4440cbbb8262e026400e1b4c87a7a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_decimal_dispatch.ls",
+      "sha256": "fa1ee027896a6047b990350b715b7b6322029d0cb7b9683df5b943c185111624"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_decimal_dispatch.txt",
+      "sha256": "cf5ddcc7de2482913493032a41e92a2d3ecfe3232c77e4a753c3ddd4bda6745f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_errors.ls",
+      "sha256": "6cacbe6cd4563a5e4691e077f178873034ccae10491e0629eec87c39dcaa7d15"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_errors.txt",
+      "sha256": "f48a4de5bd5ec0e2d30e51db15d1edd1361f6798dbab560ccc18113b3f3f243d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_extended.ls",
+      "sha256": "8833b70e5b28a665bf9e7aa495d22c88da0658bdba932aabff0c692a06b6af7b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_extended.txt",
+      "sha256": "fe383cb54bb439ded9d65b74fb6ac4d4395da77f24694ac18a400a6b6fe04884"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_flags.ls",
+      "sha256": "f68bf92be7e1271d436492466fec78ce023708dfaf2443138c658c49d1a96f88"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_flags.txt",
+      "sha256": "bef7be161df1d13a8c1b6114a898a9c12b3e83d9215e3ae65961f25788bb476b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_arrays.ls",
+      "sha256": "f316ab154888460d8fe326c7cc7f4b7840dbecf663abf18d3a5c7dde40eff0df"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_arrays.txt",
+      "sha256": "1cd6bb5f25758bd0aa9a5ab806b4c7fe2869e1d14360a48bcbce5e67aef75e8f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_compare.ls",
+      "sha256": "cc3b1258829f6a18180ab831685f355c5d7f6724cdb92f9f0ff28a5acc3efea7"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_compare.txt",
+      "sha256": "b0bf5051e37c76a6a833560d15914dc64ecc2c310c43b3a3c472dab4bbcdf022"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_fn_local.ls",
+      "sha256": "5217262c3a3337245c7e16bab5f2c14599af228313b38dba9ba578a5b13f1162"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_fn_local.txt",
+      "sha256": "b1b049b9cd93bbf9d845d40de7d3d29fc56d9ab929d43d5d68a3b9a729510ba4"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_indirect_keys.ls",
+      "sha256": "879c358b1596c53508bd1434d7302cd682ad9194e3b92d86b159e2cf9fb88982"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_indirect_keys.txt",
+      "sha256": "e9ce6699f25dcc26c87767daec7907550a9d91074daee3f3ca683ea8c14a0213"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_integer.ls",
+      "sha256": "577dfd13a71c49771ff3c5eb8289e330df6c7c640a18b82a4929482173992806"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_integer.txt",
+      "sha256": "190be653bd5b2c0a9c535bb138f7e6aac70a7dbbc894c0bd4313e8c39f011aa2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_iterations.ls",
+      "sha256": "f91800aca24a871c157db114086ed329a04c45fa3b0dd26b27b3eac5096f2282"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_iterations.txt",
+      "sha256": "571d618c7d9ff181b9ce1625dc8aa75adcbb513818da674202bcd518d1a4a67b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_kernel_loops.ls",
+      "sha256": "665572686abae8566736006c3a65ef1374d01e1be920fc5c1fe018b683759dba"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_kernel_loops.txt",
+      "sha256": "6e4350ee44940038cabf9b5d44377d9fd04d744b44805d7dc1128a342f6db40d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_membership_outcomes.ls",
+      "sha256": "c4ed07bdaafcd0a9484762adb4e4ced3941d03cf24844839b0e23552359b61fa"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_membership_outcomes.txt",
+      "sha256": "829d146ef30b04570c8d229e8f2e1b40d313aff6fac5c69f19f4ea2d4cb2950a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_modular_update.ls",
+      "sha256": "3790f4887099362c730423e55aa10246312c51a04c5e91efd6c0c946ffc18897"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_modular_update.txt",
+      "sha256": "b6dc9ceca9bbfa0247e9a60bf0ccf4a53ef904b9c52a992a9609970285f580b3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_module_snapshots.ls",
+      "sha256": "59ae4e694e748d467e5cd1b6e0b4825fc0d973b3fe58c7d290b9e675703f1c2f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_module_snapshots.txt",
+      "sha256": "aeca024a80c14a8452b129cd6899d76a656f7d0459c8b7ff0f70bbb9be79e697"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_native.ls",
+      "sha256": "ce683aa866c43af7dfd268163b000da24335fc4039107caa28a27678eccf59f2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_native.txt",
+      "sha256": "2b188e8be91e22328680578a70587bc39f2f6479212f840ea94d290bb56c380e"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_numeric_cast.ls",
+      "sha256": "eee3d396435e4d8c7e932fd79f242bc0f8d33a5062adaed4d3095504ff49ac4a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_numeric_cast.txt",
+      "sha256": "1e10e8ef3e65b773d23bc212ce8733f80d5c289afad26dc02599848864ee6048"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_predicate_branch.ls",
+      "sha256": "d6d8885e0379714ac62aba0a67fbefc1df00d2e139c9bc063e8333fdc02a9e7b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_predicate_branch.txt",
+      "sha256": "b366c73f675a231f53d0f27281ebf9f1ede5db825e899d67ec1edbaf7d94646d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_propagation.ls",
+      "sha256": "2a3b610e82027e236e3b4f2a2de1493d1132fe6ed571fc142e5bd9e2826c14ce"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_propagation.txt",
+      "sha256": "8ce904c970a22c07e4dc8dff63bc1f019d02a8654458536c349beb6bb66a0a6c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_proven_domains.ls",
+      "sha256": "2e603a220e5dfb1acf5bf67055a714d976a6b8894e620ed19036da547316e014"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_proven_domains.txt",
+      "sha256": "bdca789a4bffd3651c40f98e05c54c4375d34ca186fa9fc6bcad12df30478194"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_record_witness.ls",
+      "sha256": "4185b549bcc8527381094185dd36d236f4cf80790c3fac37e58e778aed40e03c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_record_witness.txt",
+      "sha256": "9d50496825301aa28e256e2e1b678d80089cdf5f413f74b7fd2d3a5f9fece3e2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_records.ls",
+      "sha256": "db7291be6b547d6faa26f8e24555e6f841a94fda851e7419480a4e43bab2e1b6"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_records.txt",
+      "sha256": "585dccefbfc6ee4c52fc77907f23331aa83035878fa19e02d6af2be7ff167588"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_recursive_arrays.ls",
+      "sha256": "0714ccf1017ff41b64b8ac41bd7477246e032c47257920d1398b0136fe36cab4"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_recursive_arrays.txt",
+      "sha256": "5c8ff3ccfc1884a5d8b5b33a63fa3f5a8c0c8016c351bb91a951ea8d8fd33ae3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_region_loops.ls",
+      "sha256": "05f09bcf70bad9f7bb8ea2a1ebc201b8ce3a00f99c79d0b0689171a01c8e6f8f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_region_loops.txt",
+      "sha256": "ecd8599a42f541231fe3fa3561407fb71e5f998b517b8780b58a28c6dc3f7ab2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_fallback.ls",
+      "sha256": "057936d4c7b70c1e92838736f141b8b2f1d43b8652008637744e5683364766aa"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_fallback.txt",
+      "sha256": "7c11e1ff2439cb5e297e5a00d717b9cf5a01cb6c5aea78dcb2af91a21fddcc9c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_outcomes.ls",
+      "sha256": "ccb6c6cc5a18fdcb583dbc90435e89020d4fb0bc4fb1d909a958bb92fa358139"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_outcomes.txt",
+      "sha256": "9ba1fd9239a9fa6e57e88d57494006f1864bba9608faa286ed5b4fc8b061d395"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_shift.ls",
+      "sha256": "977fd7768cbbd6decd2896d0743d590138223ab588bc10d92fd6e1d5dadfcd30"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_shift.txt",
+      "sha256": "e06ab0f35785d3550542aa5cf2ac35b806bdaeaa9888901f02f33b0b5915852c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_snapshot_loop.ls",
+      "sha256": "da9d5f7bdf48b5de35b6e15482b358e5b8995e26e82a8c2bdbdb5fbe9f2bcfcc"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_snapshot_loop.txt",
+      "sha256": "b175618ca9a61e5f304368598391afc9d1423dbcae69a588210566aa2ae1f8fd"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_arrays.ls",
+      "sha256": "0a089bf1119a19aeaadc7a4945f75dd74628029f6819195530a5ed2b44ba3907"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_arrays.txt",
+      "sha256": "b7a9a00c24275ae5dd84207c95afa5e4684d7e61827e930dd9352c19241584e6"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_forward.ls",
+      "sha256": "2d1d21f67ab35e628f9dee368db3e20ebe3d6be880bb9894748da34d3b1cd657"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_forward.txt",
+      "sha256": "e73eb6e04fc7a012fac82aa47f58e23fcc4d6a2a292c4ede0ed8dafe9fb98f75"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_outcomes.ls",
+      "sha256": "606a53c8a141d7b93e0f097755dda7f724d40a1ba9a8df605f1d1abf3e13a20c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_outcomes.txt",
+      "sha256": "b6fd458251fd0ee867827f62c38c1072d1ff749129ba16fad52d0782330e2486"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_tuning.ls",
+      "sha256": "48387b5af0d4224583148af3eb66a83d837c06e23f876ec783693c96ca33c405"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_tuning.txt",
+      "sha256": "bcb4715cc28bd36047e31584116517bdd746ff53f4dc27a81bbadd4ba4603049"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_u32.ls",
+      "sha256": "3d227416289d140e82e7c1c2b3ca9572b4e86761f2ebc887797907f28a1c14a3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_u32.txt",
+      "sha256": "2078bf9868ac4c2ce7ff88847672c500741ac7c4ad315e193c5d51c01457169a"
+    }
+  ],
+  "constraints": "No runtime model, vendor, benchmark workload/size/golden or root executable changes. Lambda baseline only."
+}

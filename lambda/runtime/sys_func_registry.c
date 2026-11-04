@@ -1975,8 +1975,9 @@ JitImport jit_runtime_imports[] = {
     {"fn_join2", FPTR(fn_join2),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // split dispatches native arrays, text and RE2 patterns without guest callbacks.
     {"fn_split2", FPTR(fn_split),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_trim", FPTR(fn_trim),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
@@ -2031,13 +2032,15 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_slice3", FPTR(fn_slice3),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     // slicing copies/views runtime data and never invokes a guest callback.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_push", FPTR(pn_push),
+     // a certified element contract can invoke its nominal constraint.
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_splice", FPTR(pn_splice),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
 
     // fn_fill's every return path is a container or an error Item — Array
@@ -2341,13 +2344,27 @@ JitImport jit_runtime_imports[] = {
     {"fn_not", FPTR(fn_not)},
     {"fn_and", FPTR(fn_and)},
     {"fn_or", FPTR(fn_or)},
-    {"fn_band_item", FPTR(fn_band_item)},
-    {"fn_bor_item", FPTR(fn_bor_item)},
-    {"fn_bxor_item", FPTR(fn_bxor_item)},
-    {"fn_bnot_item", FPTR(fn_bnot_item)},
-    {"fn_shl_item", FPTR(fn_shl_item)},
-    {"fn_shr_item", FPTR(fn_shr_item)},
-    {"fn_ushr_item", FPTR(fn_ushr_item)},
+    // numeric dispatch/boxing can allocate but never calls guest code;
+    // leave collection conservative while allowing bounded leaf expansion.
+#define JIT_NUMERIC_NO_REENTRY(name, result) \
+    {#name, FPTR(name), {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, result, 0}}
+    JIT_NUMERIC_NO_REENTRY(fn_band, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bor, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bxor, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bnot, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_band_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bor_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bxor_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bnot_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_shl_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_shr_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_ushr_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_int, JIT_VALUE_UNKNOWN),
+    JIT_NUMERIC_NO_REENTRY(fn_float, JIT_VALUE_UNKNOWN),
+    // Unicode conversion reads scalar/text payloads and never calls guest code.
+    JIT_NUMERIC_NO_REENTRY(fn_chr, JIT_VALUE_UNKNOWN),
+    JIT_NUMERIC_NO_REENTRY(fn_ord, JIT_VALUE_UNKNOWN),
+#undef JIT_NUMERIC_NO_REENTRY
     {"op_and", FPTR(op_and)},
     {"op_or", FPTR(op_or)},
     {"fn_is", FPTR(fn_is)},
@@ -2624,7 +2641,11 @@ JitImport jit_runtime_imports[] = {
     {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
-    {"pn_push_cow", FPTR(pn_push_cow)},
+    // open growth clears its certificate before pushing, so it cannot invoke
+    // a certified element constraint; allocation remains conservative.
+    {"pn_push_cow", FPTR(pn_push_cow),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
 
     // ========================================================================

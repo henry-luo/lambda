@@ -1,9 +1,56 @@
 module: 3 5 bb
 defaults: 8 11
 places: 1 7 0 1
+borrow: 4 5 10 12
+borrow-replace: 1 21
+borrow-alias: 21 31
+borrow-scalar: 32
+record-store: 3 7 true
+record-outcome: true true 3
+record-spine: 1 2 3 true true
+optional-spine: 8 2 true
+mixed-spine: 0.5 false 2.5 true
+indexed-outcome: 5 true true true true
+indexed-order: owner
+null-branch: 0 2 0 7 false true
+null-branch-error: receiver
+scalar-admission: false true true ready true scalar
+container-admission: 3 2 2 true true true true
+member-key: 7 true member
+member-arms: 11 12
+comparison-domains: true false true false 0 1 compare
+comparison-projection: true false flag
+path-append: 5 6 3 x
+accumulate: 1252 1 true
+candidate-member: 9 other true candidate
+optional-field: 12 1 true
+append-growth: 4450 10
+imported-domain: 3 5 imported true
+borrow-domain: 8 imported mixed
+projection-outcome: 4 true receiver
+implicit-tail: 192 true 7 true
+split-observation: 21 21 0 separator
+float-cache: 2.5 true true
+float-admission: 1.25 true true
+erased-float: 2.5 true true true
+boxed-array-read: text right true true owner
+literal-children: 125
+container-field: 179
+integer-text: i=4294967296; 7
+record-layout: 3 2
+packed-store: 3 9 11 true true
+sequence-store: 0 5 6
+kernel: true true true
+pointer-read: true true 1 9
 open-array: 9
 keys: a2,b3
 text: λx
+text-compare: true false true
+character: true true true true
+literal-text: true false false literal
+selected-character: b 猫 true true
+semantic-kind: 1 2 3 4 5 6 7
+dynamic-null: true false false true absence
 empty: 0
 sort: 3 2 1
 groups: 1:1 2:2
@@ -12,4 +59,5 @@ map-write: 1 4 6
 branch: kept:
 recovery: 2,3
 membership: true true true
+text-outcome: first
 observer: true true

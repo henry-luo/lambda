@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.6.4v3, D8.4.1v2: inferred packed layouts use exact shape guards and descriptor-aware slot kernels.",
+  "description": "D2.6.4v3, D8.4.1v2, S5.1.1v2: inferred packed reads retain exact layout guards; null predicates preserve Error and Type-value fallback before tag/zero-pointer equality.",
   "checks": [
     {
       "in_func": "_tune32_phase2_record_#",
@@ -19,8 +19,13 @@
       "in_func": "_tune32_phase2_record_null_#",
       "expect": [
         "ursh\t{{r}}, {{r}}, 56",
+        "{{r}}, 27",
+        "{{r}}, 24",
         "eq\t{{r}}, {{r}}, 1",
-        "call\tfn_eq_value_p, fn_eq_value"
+        "eq\t{{r}}, {{r}}, 0",
+        "or\t{{r}}, {{r}}, {{r}}",
+        "call\tfn_eq_value_p",
+        ", fn_eq_value,"
       ]
     }
   ]

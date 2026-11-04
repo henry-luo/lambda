@@ -76,6 +76,7 @@ def compiler_identity():
         "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_cow_analysis.hpp",
+        "lambda/runtime/mir_shape_candidates.hpp",
         "lambda/runtime/mir_bitwise.hpp",
         "lambda/runtime/mir_container_access.hpp",
         "lambda/runtime/mir_path.hpp", "lambda/runtime/mir_function_value.hpp",
@@ -197,8 +198,11 @@ def main():
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
     parser.add_argument("--record-failures", action="store_true",
                         help="retain failed engines as unqualified rows, continue other engines, and exit nonzero")
-    parser.add_argument("--regression-only", action="store_true",
+    engines = parser.add_mutually_exclusive_group()
+    engines.add_argument("--regression-only", action="store_true",
                         help="measure only candidate and --previous-mvp; retain other engines as unmeasured")
+    engines.add_argument("--lambda-only", action="store_true",
+                        help="measure Lambda engines without requiring or running the C2MIR reference")
     parser.add_argument("--pause-for-jobs", action="store_true",
                         help="wait for competing builds/tests and retry interrupted paired rounds")
     args = parser.parse_args()
@@ -212,12 +216,13 @@ def main():
         parser.error("use a Sumfp batch count from 1 to 100000")
     if args.sumfp_batch > 1 and (args.case != "r7rs/sumfp" or args.legacy_timer):
         parser.error("batched timing requires --case r7rs/sumfp and matched kernel timers")
-    if not args.c2mir_exe and not args.regression_only:
+    measure_c2mir = not (args.regression_only or args.lambda_only)
+    if not args.c2mir_exe and measure_c2mir:
         error = ensure_c2m()
         if error:
             raise RuntimeError(error)
     reference = (args.c2mir_exe or C2M).resolve()
-    if not args.regression_only and not reference.is_file():
+    if measure_c2mir and not reference.is_file():
         parser.error("C2MIR executable does not exist")
     executable = args.exe.resolve()
     control = (args.control or executable).resolve()
@@ -294,6 +299,9 @@ def main():
             for engine in ("production", "c2mir"):
                 commands.pop(engine, None)
                 unavailable[engine] = "not measured in the MVP regression-only campaign"
+        elif args.lambda_only:
+            commands.pop("c2mir", None)
+            unavailable["c2mir"] = "not measured in the Lambda-only campaign"
         if args.previous_mvp:
             commands["previous_mvp"] = [str(binaries["previous_mvp"]), "run", str(run_source), "--no-log"]
         samples = {engine: [] for engine in binaries}
@@ -393,7 +401,7 @@ def main():
         ratio = row["mvp_over_c2mir"]
         ratio_text = f"{ratio:.2f}x" if ratio is not None else "unresolved"
         timings = ", ".join(f"{engine}={elapsed:.3f}ms" if elapsed is not None else
-                            f"{engine}=UNMEASURED" if args.regression_only and engine in unavailable else
+                            f"{engine}=UNMEASURED" if not measure_c2mir and engine in unavailable else
                             f"{engine}=UNAVAILABLE" if engine in unavailable else f"{engine}=FAILED"
                             for engine, elapsed in medians.items())
         print(f"{row['name']}: {timings}, ratio={ratio_text}", flush=True)
@@ -408,6 +416,8 @@ def main():
         "; historical timer scopes differ" if args.legacy_timer else "; matched workload boundaries, paired bootstrap per row")
     if args.regression_only:
         report["qualification"] += "; MVP regression comparison only; Full MIR and C2MIR unmeasured"
+    elif args.lambda_only:
+        report["qualification"] += "; Lambda engines only; C2MIR unmeasured"
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if any(row["engine_failures"] for row in report["cases"]):
         raise SystemExit(1)
