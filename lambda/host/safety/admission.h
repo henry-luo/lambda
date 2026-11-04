@@ -47,6 +47,9 @@ typedef struct SecurityFileSelection {
 SecurityAdmission* security_admission_open(const SecurityAdmissionConfig* config,
     SecurityAdmissionReport* report);
 void security_admission_close(SecurityAdmission* admission);
+// Join all borrowed clients/dispatchers first. Revokes this session and reports
+// temporary-file cleanup; persistent data/cache and saved grants are retained.
+bool security_admission_finish(SecurityAdmission* admission);
 uint64_t security_admission_session(const SecurityAdmission* admission);
 const char* security_admission_entry(const SecurityAdmission* admission);
 bool security_admission_binding(const SecurityAdmission* admission, SecurityGrantBinding* out);

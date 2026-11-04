@@ -13,6 +13,8 @@ struct SupervisorSession {
     SecuritySupervisorReport* report;
     pthread_mutex_t mutex;
     bool active;
+    ConfinedProcess* process;
+    SecurityChannelDeliveryGuard delivery;
 };
 struct SupervisorMonitor {
     ConfinedProcess* process;
@@ -30,6 +32,16 @@ static void* supervise_child(void* context) {
     pthread_mutex_unlock(&monitor->session->mutex);
     security_channel_interrupt(monitor->channel);
     return nullptr;
+}
+static SecurityIOResult supervised_capture(void* context, SecurityAuthorityStamp* stamp) {
+    SupervisorSession* session = (SupervisorSession*)context;
+    pthread_mutex_lock(&session->mutex);
+    bool ready = session->active && confined_process_is_sandboxed(session->process);
+    pthread_mutex_unlock(&session->mutex);
+    // The exact verified bootstrap owns the policy; label readback prevents an
+    // early/missing bootstrap from receiving source bytes or invoking broker IO.
+    if (!ready) { *stamp = {}; return {SECURITY_DENIED, EACCES, false, {}}; }
+    return session->delivery.capture(session->delivery.context, stamp);
 }
 static SecurityIOResult supervised_write(void* context, const char* path, const void* data,
         size_t size, bool append, bool atomic) {
@@ -73,6 +85,12 @@ static SecurityIOResult supervised_write(void* context, const char* path, const 
     return {SECURITY_DENIED, EACCES, false, {}};
 }
 
+static bool supervisor_close_admission(SecurityAdmission* admission, SecuritySupervisorReport* report) {
+    bool cleaned = security_admission_finish(admission);
+    if (!cleaned) report->cleanup_error = errno ? errno : EIO;
+    security_admission_close(admission); return cleaned;
+}
+
 bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySupervisorReport* report) {
     if (!config || !report) return false;
     memset(report, 0, sizeof(*report)); report->process.exit_code = -1;
@@ -88,7 +106,7 @@ bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySup
         config->working_directory, security_admission_session(admission)) : nullptr;
     if (!process) {
         report->system_error = errno;
-        security_admission_close(admission); confined_code_close(code); return false;
+        supervisor_close_admission(admission, report); confined_code_close(code); return false;
     }
     report->launched = true;
     SupervisorSession session = {admission, security_admission_client(admission), config->ask_overwrite, report};
@@ -96,9 +114,11 @@ bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySup
     // A wrapper client forwards each callback to keep a single context owner.
     if (pthread_mutex_init(&session.mutex, nullptr)) {
         report->system_error = ENOMEM; confined_process_destroy(process);
-        security_admission_close(admission); confined_code_close(code); return false;
+        supervisor_close_admission(admission, report); confined_code_close(code); return false;
     }
     session.active = true;
+    session.process = process;
+    session.delivery = security_admission_delivery_guard(admission);
     SecurityIOClient wrapped = session.client;
     wrapped.context = &session;
     wrapped.read = [](void* c, const char* path, bool source, uint64_t limit, MemCategory category, char** bytes, size_t* size) {
@@ -124,7 +144,16 @@ bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySup
         int status = pthread_create(&thread, nullptr, supervise_child, &monitor);
         if (!status) {
             started = true;
-            SecurityChannelDeliveryGuard guard = security_admission_delivery_guard(admission);
+            SecurityChannelDeliveryGuard guard = {&session, supervised_capture,
+                [](void* c, const SecurityAuthorityStamp* stamp, SecurityIOResult* failure) -> void* {
+                    SupervisorSession* s = (SupervisorSession*)c;
+                    return s->delivery.acquire(s->delivery.context, stamp, failure); },
+                [](void* c, void* lease) {
+                    SupervisorSession* s = (SupervisorSession*)c;
+                    return s->delivery.check(s->delivery.context, lease); },
+                [](void* c, void* lease) {
+                    SupervisorSession* s = (SupervisorSession*)c;
+                    s->delivery.release(s->delivery.context, lease); }, session.delivery.timeout_ms};
             report->served = security_channel_dispatch_guarded(channel, &wrapped, &guard, &report->channel);
             if (!report->served) confined_process_cancel(process);
         } else report->system_error = status;
@@ -134,6 +163,6 @@ bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySup
     pthread_mutex_destroy(&session.mutex);
     security_channel_destroy(channel);
     confined_process_destroy(process);
-    security_admission_close(admission); confined_code_close(code);
-    return started && monitor.success && report->served && report->process.exit_code == 0 && !report->process.signal;
+    bool cleaned = supervisor_close_admission(admission, report); confined_code_close(code);
+    return cleaned && started && monitor.success && report->served && report->process.exit_code == 0 && !report->process.signal;
 }

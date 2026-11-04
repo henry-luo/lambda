@@ -3155,8 +3155,10 @@ The first M7 provider component connects existing `dom.audio_open`,
 same document submix as MIDI and speech. `dom.audio_clock(owner)` counts rendered
 frames on that submix. The scene integration below adds sources/listeners,
 Doppler, bounded bus/DSP graphs, native sample-time cues and explicit offline
-PCM/WAV jobs and named MIDI/speech routes. Shared video-track output and microphone input remain subsequent M7 work
-(**D7.5.3v2 / D7.5.4**).
+PCM/WAV jobs, named MIDI/speech routes and macOS video-track output with named
+scene routes. Prepared MIDI/speech/video snapshots now join explicit offline jobs;
+explicit microphone acquisition uses the host capture seam below
+(**D7.5.3v2 / D7.5.4 / D7.5.10**).
 
 Opening encoded bytes prepares owned 48000-Hz interleaved stereo float PCM
 without opening an output device. The portable decoder supports PCM WAV, MP3
@@ -3167,7 +3169,8 @@ existing clips intact. Decoding and channel/rate conversion happen before the
 audio callback (**D4.5.2**).
 
 Native limits are 256 MiB of encoded input and 256 MiB of retained PCM per clip,
-512 MiB of decoded-player storage and 128 open decoded clips per document.
+512 MiB of decoded-player/stream storage and 128 combined decoded clips and
+video-stream reservations per document.
 Ready, paused and ended clips retain their PCM until explicit close or document
 teardown. Only playing clips occupy a voice in the existing global 96-voice
 table, shared with MIDI and speech; exhaustion rejects the new play without
@@ -3193,11 +3196,33 @@ from the previous platform player's output.
 Local documents retain ordinary audible starts. Network documents require their
 own sticky activation or the host grant; muted playback and decoding retain
 **D7.5.4** behavior. These existing play rows keep their start gate with the
-host's offline output backend; explicit buffer/file render jobs remain M7 work.
-Video-track audio remains on its existing
-platform path; shared output integration beyond these decoded clips remains
-part of M7. See the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md)
+host's offline output backend; explicit buffer/file jobs are described below.
+See the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md)
 for qualification and remaining scope.
+
+### Shared HTML video audio
+
+On macOS, existing HTML media commands decode an audio-bearing video's first
+audio track into the document submix. AVPlayer remains silent. Consumed stereo
+PCM at 48000 Hz supplies media time and frame selection; starvation holds that
+time instead of silently skipping samples. Pause retains the cursor, seek
+replaces queued PCM, looping refills the bounded stream and mute/volume affect
+the shared output. Silent videos retain the platform video clock.
+
+The native profile admits finite media up to 24 hours, a two-second PCM ring
+and one decoded packet of at most 65536 frames. Control-thread polling prepares
+PCM; the audio callback only consumes owned samples (**D4.5.2**). Each stream
+reserves its ring storage against the document's shared reader/byte limits.
+Decoder failure, voice admission failure and output loss fail the media owner;
+no second audible player takes over. Removal and document teardown retire the
+reader before releasing its storage.
+
+Network play, unmute and a positive gain increase from zero require the same
+sticky activation as other audible output (**D7.5.4**). A refused command returns
+`false`; JavaScript reports `NotAllowedError`. Removing authored `muted` without
+activation pauses playback. These checks also apply to the host's offline
+backend. Named video routes and prepared export snapshots are described below. Microphone acquisition,
+other platform backends and release/device qualification remain pending.
 
 ### Native Scene3D clips and spatial sources
 
@@ -3268,8 +3293,8 @@ DOM, graphics or player tokens. Network playback and audible gain changes use
 authored gain for **D7.5.4**, including distant/attenuated sources and the host
 offline backend. Device loss marks active players `error`; explicit play can
 prepare a new reader from the retained asset. The cue and explicit render-job
-contracts below define their additional behavior. Shared video-track routing,
-HRTF/surround and ratified capture remain separate components. Music/voice/
+contracts below define their additional behavior. Named video routes are
+described below; HRTF/surround and ratified capture remain separate components. Music/voice/
 occlusion policy remains deferred M13.
 
 ### Native Scene3D bus routing and DSP
@@ -3336,8 +3361,8 @@ Reverb tails continue after MIDI voice retirement. A muted MIDI transport may
 play without activation; positive audible starts and live gain changes retain
 **D7.5.4**. Graph/source snapshots copy ordered insert parameters, send target/
 current gains, bus peak/RMS/frame meters, routing generation/storage/activity and
-fault state. Additional provider route adapters, video-track output and ratified microphone
-capture remain native M7 work. Routing factories and music/voice/occlusion
+fault state. Prepared provider export uses the render jobs below; explicit
+microphone capture uses its own document grant. Routing factories and music/voice/occlusion
 policy remain deferred M13.
 
 ### Native Scene3D sample-time cues
@@ -3404,9 +3429,10 @@ overwrite old rows. Source rows add `armed` and `pitch_follow`.
 Native readers and commands have explicit ownership (**D4.5.2 / D5.3.3**).
 Preparation and retired-reader cleanup occur on the main owner; the callback
 only applies copied commands and swaps retained PCM readers at split-buffer
-deadlines. Shared video-track output, microphone acquisition and release
-callback/memory qualification remain M7/M12
-work; cue selection and voice policy remain deferred M13.
+deadlines. Prepared provider snapshots join render jobs below; microphone
+acquisition uses the explicit capture seam below. Physical device and release
+callback/memory qualification remain M7/M12 work; cue selection and voice
+policy remain deferred M13.
 
 ### Native Scene3D MIDI and speech routes
 
@@ -3417,7 +3443,7 @@ second mixer or playback clock (**D7.5.3v2 / D4.5.2**).
 
 | Procedure | Request and behavior |
 |-----------|----------------------|
-| `audio_provider_read(node, request)` | `{session, provider, token}` reads a copied provider routing snapshot. `provider` is `midi` or `speech`; `token` identifies an existing provider in this document. |
+| `audio_provider_read(node, request)` | `{session, provider, token}` reads a copied provider routing snapshot. `provider` is `midi`, `speech`, `video` or `capture`; `token` identifies an existing provider in this document. |
 | `audio_provider_route(node, request)` | Adds `expected`, the provider's current route, plus `bus` and that bus's exact `identity` from `audio_snapshot`. Returns the new snapshot after atomic publication. Omit `bus` or pass null, with zero/omitted `identity`, to select the ordinary document dry route. |
 
 Snapshots contain `session`, `provider`, `token`, `route`, `route_valid`,
@@ -3452,19 +3478,78 @@ authored bus edits affecting active positive-gain providers retain **D7.5.4**
 activation. These checks use provider state as well as DSP tail state, so a dry
 MIDI/speech input cannot evade the gate. Muted preparation/playback and bus
 edits with paused providers remain allowed.
-This profile routes existing providers; offline jobs still select decoded scene
-sources, and provider export, shared video-track output and ratified capture
-remain native M7 work. Music/voice policy remains deferred M13.
+Prepared providers can also supply copied PCM to the explicit render jobs below.
+Ratified capture remains native M7 work; music/voice policy remains deferred M13.
+
+### Native Scene3D video routes
+
+On macOS, an admitted audio-bearing HTML media source exposes an exact
+`audio_token` in `dom.media_info(node)`; unavailable/silent sources expose null.
+Use that ticket with the provider read/route procedures above and
+`provider: "video"`. It identifies the selected native source in its requesting
+document, independently of scene/bus identities (**S4.9.1 / D7.5.3v2**). A foreign
+document's ticket or a retired source ticket rejects.
+
+Routes can be assigned before PCM starts, while paused, or during playback.
+Rewiring preserves media time and queued samples. `gain` includes the media's
+mute state and volume, before the scene bus fader. HTML media commands retain
+transport control; no second player is created. Active audible rewires use the
+same **D7.5.4** activation gate. Authored bus edits affecting active video also
+check its positive-gain intent, including when a muted dry bus has no DSP tail.
+Early denied network play with `preload=none`
+preserves its visible `NotAllowedError` while readiness is polled.
+
+A retained DOM element keeps its selected decoder, cursor and route ticket
+when detached; removal pauses playback, and reattachment preserves them.
+Source reload/replacement, native disposal and document teardown retire the
+ticket and release route references (**D4.5.2 / D5.3.3**). Bus deletion is fenced
+by ready/paused references. Graph-owner removal faults ready, paused and playing
+providers with `route_lost`; no default output takes over. Default detach can
+release the reference, but playback requires source reload after the fault.
+The shared finite-media/PCM limits above still apply. Prepared video snapshots
+join offline jobs below. Other video backends and physical-device/deadline
+qualification remain pending.
 
 ### Native Scene3D offline audio render jobs
 
 `runtime.audio_render_open(node, request)` creates an explicit output-free native
 job (**D7.5.4 / D7.5.3v2**, proposal §9.2). Supply the current scene `session`,
-an output length `frames`, and 1–64 `events` using the cue schema above. Source
-and clip identities come from `audio_snapshot`. Optional `scene_time` (default
+an output length `frames`, and clip `events`, prepared `providers`, or both.
+Clip events use the cue schema above; source/clip identities come from
+`audio_snapshot`. Optional `scene_time` (default
 0) and positive finite `time_scale` (default 1) define the private scene-clock
 anchor. Audio-frame events count from zero; scene events map through that anchor.
 Deadlines must fit within the selected interval, including its final boundary.
+
+A `providers` entry contains `{provider, token, position?, bus?}`. Kinds are
+`midi`, `speech` and `video`; tickets identify an existing prepared provider in
+this document. `position` defaults to zero and selects a fresh source seek;
+`bus` defaults to `master` in the copied scene graph. Position must fit that
+provider's finite duration. Foreign/stale, loading/rendering, cancelled and
+failed providers reject. Video requires the macOS native backend. Speech uses
+an already completed engine render; opening a job does not initiate synthesis
+or resume its live utterance.
+
+Before a job becomes ready, each provider materializes an owned stereo 48-kHz
+PCM interval of the requested output length on the control thread. MIDI copies
+volume/speed/mute/solo into a fresh synth/seek state; speech copies normalized,
+gain-applied engine PCM; video reuses its timestamp-gap/overlap, mute/volume and
+loop kernel with an independent decoder. At the copied interval’s input EOF,
+non-looping sources contribute silence through the remaining output frames.
+MIDI's legacy document reverb send is outside this copied bus graph; named
+inserts/sends provide the job's effects. Readers use fresh decoder, synth/filter
+and DSP histories. Later live controls, source close/reload/removal, or device
+loss cannot alter admitted PCM.
+
+Provider intervals start at private audio frame zero through the existing cue
+kernel. Job cue history includes their starts, with identities private to that
+job. Combined clip/provider sources are limited to 32, and explicit clip events
+plus provider starts to 64. Omit `events` or supply an empty array for a
+provider-only job. Each provider snapshot reserves `frames * 8` PCM bytes plus
+reader metadata within the existing document PCM/reader limits; output storage
+has its separate limits below. Preparation is finite and synchronous; explicit
+render steps remain capped at 4096 frames. Physical/release latency and peak
+memory qualification remain open (**D4.5.2 / D5.3.3 / D7.5.4**).
 
 Opening copies the referenced authored audio descriptions and current selected
 native poses, listener and bus/insert/send graph into private readers and fresh
@@ -3500,17 +3585,85 @@ Each document retains at most four job handles, 64 MiB of output per job and
 128 MiB across jobs. The existing 128 decoded-player/512-MiB PCM limits, 96
 shared voice records, submix table and 8-MiB graph bound also apply. Admission
 is atomic; quota failure preserves live playback and earlier jobs. Each plan
-references at most 32 sources. Completion retires readers/DSP while retaining
+references at most 32 combined clip/provider sources. Completion retires readers/DSP while retaining
 output; cancellation also releases output, and close releases the handle slot.
 Scene removal or document teardown closes its jobs. No job advances from the
 device callback or ordinary frame polling; callers explicitly step it. The
 host-wide offline playback backend retains audible-output gating.
 
 Native jobs reuse the submix, cue and DSP kernel with explicit reader ownership
-(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; capture and
-provider export and shared video-track output remain separate native M7 work. Release
+(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; microphone
+acquisition uses the separate input permission below. Release
 deadlines/peak memory, cross-platform execution and broader combined-scene
 qualification remain M12 work.
+
+### Explicit microphone capture
+
+**D7.5.10** requires an explicit procedure plus both an OS permission and a
+host grant for the requesting document. `view --microphone document.html`
+grants the initial document; it does not start capture or grant audible output.
+Embedded hosts use `radiant_capture_grant(document, granted)`. Child frames and
+navigation never inherit this grant. The host owns grant UI; request fields
+such as `granted` cannot grant permission. macOS supplies the native input
+backend and the CLI embeds its microphone purpose string. Other platforms
+report `unavailable` until a host supplies an OS-authorized native backend.
+
+`dom.audio_capture(owner, request)` is a procedure returning a copied map or
+`null` for an invalid operation/ticket. It shares the existing host waist
+(**D7.5.3v2**) and supports:
+
+| Request | Behavior |
+|---|---|
+| `{op: "open"}` | Mint a document-local ticket; request OS consent only after the host grant. A second pending/active acquisition is rejected. |
+| `{op: "status", token: ticket}` | Poll permission/device state and copy diagnostics. |
+| `{op: "read", token: ticket, frames: 4096}` | Copy up to 4096 contiguous frames into `data`, an interleaved stereo `f32le` binary at 48000 Hz. Empty reads return an empty binary. |
+| `{op: "monitor", token: ticket, gain: 0.5}` | Enable separate dry monitoring through the document submix; positive gain requires **D7.5.4** output permission. Zero disables monitoring. Gain is finite and within `[0,1]`. |
+| `{op: "stop", token: ticket}` | Retire the device and monitor, release native PCM and keep terminal diagnostics. |
+
+States are `denied`, `pending`, `capturing`, `unavailable`, `stopped`, `revoked`,
+`lost` or `error`. A ticket is valid only for its owning document's latest
+acquisition. Tokens and sample counters cross JS as exact BigInts (**S4.9.1**).
+JS can inspect the returned binary with `new Uint8Array(packet.data)`.
+`first_frame` identifies the first copied sample and `next_frame` the device
+callback timeline. `start_ms` is the document-clock acquisition anchor, not a
+hardware presentation timestamp. Polling meters/counters is advisory while
+the producer runs. `captured` counts delivered callback frames; `dropped`
+counts queue overflow, callback-limit discards and explicit timestamp gaps.
+
+Recording and monitoring have independent two-second bounded queues, charged
+against the existing document PCM/reader quota. Each callback processes at most
+4096 frames without allocating, waiting or calling scripts/GC. Overflow drops
+new input and records its count; reads stop at timestamp gaps instead of
+inventing silence. Monitoring starts off, and `monitor_dropped` reports its
+independent overflow. Output-device loss disables monitoring while recording
+continues; `monitor_lost` requires an explicit re-enable. Input-device loss,
+OS/host revocation, stop and document teardown join the producer before freeing
+queues (**D4.5.2 / D5.3.3**); unread native PCM is discarded. Source code keeps
+only copied records/binaries. Hardware timing and physical permission/hotplug
+qualification remain outside this profile.
+
+An explicitly acquired pending/active capture also joins the shared scene
+provider seam with `provider: "capture"`. Use `audio_provider_route` with its
+capture `token`, current `expected` route, scene `session`, and a bus's exact
+`identity`; `audio_provider_read` copies the resulting route, validity and loss.
+The route applies to monitoring through the bus's gain/mute/solo, sends and
+ordered effects. It never changes raw recording PCM or advances either reader.
+Preparation while permission is pending opens no device. Positive monitoring,
+audible rewiring/default detachment, and bus edits affecting a positive monitor
+retain **D7.5.4**; a host input grant under **D7.5.10** cannot authorize output.
+
+The route remains pinned while monitoring is off, so removing a retained bus
+rejects until explicit detach, rebind or capture close. Graph-owner loss silences
+monitoring with `route_lost`, retains a queryable stale route, and leaves input
+recording active. Explicitly rebind/detach and re-enable monitoring to recover.
+Output-device loss similarly disables monitoring while keeping its valid bus
+binding and recording. Stop, input loss, denial, revocation and document teardown
+release the route reference before PCM/quota ownership retires. Stale, foreign,
+terminal and over-capacity route requests preserve the existing binding.
+Capture `position` reports the input sample timeline in seconds; exact frame
+counters remain available from `dom.audio_capture`. Live capture is explicitly
+rejected as a prepared offline-job provider; export never consumes recording
+data or implicitly acquires input (**D4.5.2 / D5.3.3 / S4.9.1**).
 
 ### Native CPU/GPU mesh particles
 
@@ -4322,7 +4475,12 @@ playback without relinking (**S12.1.1v3, D2.11.4**). See the
 [qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#physical-materials-m4-selected-profile).
 
 The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
-`exposure` defaults to 1. Native light units retain Lambert's historical
+`exposure` defaults to 1. `max-pixel-ratio` caps the density a scene renders
+at: with `'max-pixel-ratio': 1.0` a full-window scene on a 2× display renders
+one pixel per CSS pixel, and the GPU upsamples the frame before the page
+composites it. Multisampled HDR targets cost about 92 bytes per rendered pixel,
+so the cap keeps large viewports inside the graphics budget and cuts fill
+cost; it is unlimited by default. Native light units retain Lambert's historical
 brightness. glTF punctual lights divide intensity by π on import and
 multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#10-decisions-for-the-user)).
 There are at most eight directional/point/spot lights, plus ambient and one

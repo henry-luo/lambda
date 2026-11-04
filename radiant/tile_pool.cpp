@@ -226,12 +226,13 @@ static void* worker_thread_fn(void* arg) {
         tile_surface.pitch = tile->pixel_w * 4;
         tile_surface.pixels = tile->pixels;
         tile_surface.tile_offset_y = 0;  // tile-local coords
+        tile_surface.alpha_mode = job->alpha_mode;
 
         // replay display list for this tile (culling + coordinate translation)
         dl_replay_tile(job->display_list, &tl_worker.vec, &tile_surface,
                        &tl_worker.scratch,
                        tile->x, tile->y, tile->w, tile->h,
-                       job->raster_scale);
+                       job->raster_scale, 0, job->segment.get());
         }
         pthread_mutex_unlock(&s_thorvg_tile_mutex);
         }
@@ -352,7 +353,7 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
-                    float scale, int first_item) {
+                    float scale, int first_item, const DisplayReplaySegment* segment) {
     // image owners resolved during this replay stay alive until it ends
     ImageSurfaceReadScope read_scope;
     DisplayReplayBackdropStack backdrop_stack;
@@ -376,6 +377,10 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     // SVG backdrop capture replays the already recorded prefix from its isolation boundary.
     DisplayListCursor cursor(dl, first_item);
     while (const DisplayItem* item = cursor.next()) {
+        // a compositor segment leaves the other side's drawing to its own segment
+        DlSegmentAction segment_action = dl_segment_action(segment, item, &cursor);
+        if (segment_action == DL_SEGMENT_SKIP_ELEMENT) { cursor.skip_element(); continue; }
+        if (segment_action == DL_SEGMENT_SKIP) continue;
 
         // Cull draw work that doesn't intersect this tile; the skip path below
         // still preserves clip/backdrop stack state for ordered replay.

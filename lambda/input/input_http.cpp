@@ -4,6 +4,7 @@
 
 #include <curl/curl.h>
 #include "../network/curl_trust.h"
+#include "../../lib/curl_runtime.h"
 #include "../../lib/host_paths.h"
 #include <string.h>
 #include <stdio.h>
@@ -209,20 +210,6 @@ static size_t write_document_header_callback(char* buffer, size_t size, size_t n
     return header_size;
 }
 
-// Initialize libcurl (call once at startup)
-static bool curl_initialized = false;
-
-static bool init_curl() {
-    if (!curl_initialized) {
-        if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-            log_error("HTTP: Failed to initialize libcurl");
-            return false;
-        }
-        curl_initialized = true;
-    }
-    return true;
-}
-
 // Map HTTP Content-Type to file extension for routing
 // Delegates to lib/mime-detect; defaults to ".html" for unknown types
 const char* content_type_to_extension(const char* content_type) {
@@ -246,7 +233,7 @@ static char* download_http_content_impl(const char* url, size_t* content_size,
     if (content_language) *content_language = NULL;
     if (content_type) *content_type = NULL;
     if (status) *status = 0;
-    if (!init_curl()) {
+    if (!curl_runtime_initialize()) {
         return NULL;
     }
 
@@ -687,7 +674,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
 
 FetchResponse* http_fetch2(const char* url, const FetchConfig* config, FetchFailure* failure) {
     if (failure) memset(failure, 0, sizeof(*failure));
-    if (!init_curl()) {
+    if (!curl_runtime_initialize()) {
         fetch_failure_set(failure, 0, false, false, "libcurl initialization failed");
         return NULL;
     }

@@ -360,7 +360,7 @@ static float flex_measure_zero_child_height_fallback(DomNode* child,
                                                      ViewElement* child_view,
                                                      FlexContainerLayout* flex_layout,
                                                      bool is_row_flex_container) {
-    DisplayValue child_display = resolve_display_value((void*)child);
+    DisplayValue child_display = layout_resolved_display((void*)child);
     bool nested_flex = child_display.inner == CSS_VALUE_FLEX;
     if (!nested_flex && (child_display.outer != CSS_VALUE_BLOCK || !lycon)) {
         return 0.0f;
@@ -780,7 +780,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child, bool width
 void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
     // Get display properties for the element
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     // CSS Flexbox §4: display:none elements do not generate flex items and must
     // not have a View created. Without this check, a ViewBlock is allocated and
     // linked into the view tree, causing display:none children (e.g. hidden
@@ -1194,7 +1194,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             flex_item_content_width_for_child_percentages(lycon, item, flex_layout);
                         // CSS Flexbox §4.1: Absolutely positioned children and display:none
                         // elements are not flex items and should not contribute to intrinsic sizing.
-                        DisplayValue child_display = resolve_display_value((void*)c);
+                        DisplayValue child_display = layout_resolved_display((void*)c);
                         if (flex_measurement_child_is_skipped_flex_item(child_view, child_display)) {
                             c = c->next_sibling;
                             continue;

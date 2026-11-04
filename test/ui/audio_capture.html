@@ -1,0 +1,11 @@
+<!doctype html>
+<html><body><div id="owner">Explicit microphone capture</div><script type="module">
+import {capture_request} from './fixtures/_audio_shared_bridge.ls';
+globalThis.captureBusy=false;
+globalThis.captureResult=null;
+globalThis.captureCall=async request=>{
+    globalThis.captureBusy=true;
+    try { globalThis.captureResult=await capture_request(document.getElementById('owner'),request); }
+    finally { globalThis.captureBusy=false; }
+};
+</script></body></html>

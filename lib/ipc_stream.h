@@ -9,6 +9,8 @@ extern "C" {
 
 typedef struct IpcStream IpcStream;
 
+// Inspect endpoint shape without changing flags or taking ownership.
+bool ipc_stream_is_connected_local(int fd);
 // Mechanism only: adopt an exclusively owned, connected AF_UNIX stream. No
 // endpoint creation, path lookup or caller authentication. Ownership transfers
 // only on success; it becomes nonblocking and close-on-exec.

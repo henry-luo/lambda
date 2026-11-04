@@ -141,6 +141,24 @@ per-app separation, other egress/process/debug routes, concurrency with trusted
 revocation/publication, quotas and production launch/persistence still need
 M2 qualification. No complete offline sandbox release is claimed.
 
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, worker bootstrap also validates
+kernel descriptor roles and one startup thread before runtime/source IO.
+Only the actual null input device, two anonymous output pipes and one connected
+local stream remain. Extra low/high descriptors, file/FIFO redirection and a
+live startup thread refuse the real worker before any broker request. Native
+controls prove that pre-held file reads and shared writable mappings survive
+policy installation; those capabilities must never reach untrusted code.
+Clearing inherited Mach rights remains a separate launcher obligation; kernel
+task-access/debug and already-mapped startup resources remain under audit.
+
+Native-constructor coverage now proves that a clean fd table does not exclude
+retained mappings in the direct-linked worker. The opt-in early-bootstrap build
+applies policy before loading the separate T0 runtime. Its only extra native
+read/map allowance is the canonical sealed runtime image, not an app-selected
+path or directory. The host checks nested package code and retains hardened
+library validation. Local composition controls and the still-unqualified
+publisher/deployment gate are recorded separately (**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
+
 ## Trusted admission and restoration
 
 Under **D7.5.5–D7.5.7**, `host/safety/admission.*` now builds an ad-hoc
@@ -164,3 +182,38 @@ inode-reuse qualification, complete installed-app/global catalog coordination,
 worker resource-path mapping, production UI and process supervision remain open.
 The signed fixture demonstrates actual restart/grant/revocation behavior but is
 not the production launch path; ordinary CLI execution remains unbound.
+
+
+## Broker-owned private storage
+
+`host/safety/private_storage.*` routes the virtual data, cache and per-admission
+temp mounts (`/.lambda/app-data`, `/.lambda/app-cache`, `/.lambda/app-temp`) to
+the principal bound by admission's private channel (**D7.5.2, D7.5.5–D7.5.7**).
+The worker never selects a physical owner root. Reads, classification, stat,
+enumeration and writes use a separate PRIVATE-scope anchored file broker;
+source/canonical-source acquisition is denied. The main protected catalog
+reserves `~/.lambda/app-data` against overlapping project/selection grants.
+Admission's existing generation lease guards private callbacks and publication.
+A per-owner lock serializes bounded byte/entry accounting before writes;
+private native filesystem access is denied by the experimental process policy.
+Host-only cache eviction, joined session finish and nonblocking lease-based
+abandoned-temp recovery use bounded strict anchored traversal. Temp quota counts
+all live sessions; source acquisition never falls through to a physical mount.
+The supervisor reports cleanup failures. Trusted management now inspects bounded
+usage without admission/recovery and performs explicitly requested persistent-data
+reset through an object/principal-bound random intent and bounded cleanup steps.
+Live sessions refuse reset; a pending intent blocks new admissions until trusted
+resumption completes. No reset/inspection opcode is present in worker IPC.
+Uninstall retains data by default (**D7.5.9**); installed-app integration remains
+pending. Persistent-data repair, the full
+crash/power-loss matrix, deployment and remaining OS gates stay open.
+The private-Darwin process backend was approved experimentally on 2026-11-03;
+qualification is required before any default rollout.
+
+Host-private quota policy uses a typed principal-keyed protected-state slot
+(**D7.5.2, D7.5.7**). Admission reads saved policy under its owner lock before
+creating a live session. Trusted edits/default restoration require no live
+session or pending reset and an exact generation; the worker protocol remains
+unchanged. Records bind account/profile and principal, not code fingerprints;
+source revalidation still clears its own remembered grants. Over-quota data is
+retained; a replacement may shrink it into the effective budget.

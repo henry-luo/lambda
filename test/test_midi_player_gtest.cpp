@@ -17,6 +17,7 @@ protected:
     void* font = nullptr;
     size_t font_size = 0;
     MidiPlayer* player = nullptr;
+    MidiPlayer* copy = nullptr;
     float samples[4800 * 2] = {};
     void SetUp() override {
         FILE* file = fopen("lmd/package/music/soundfonts/TimGM6mb.sf2", "rb");
@@ -31,7 +32,7 @@ protected:
         ASSERT_EQ(fread(font, 1, font_size, file), font_size);
         fclose(file);
     }
-    void TearDown() override { midi_player_close(player); mem_free(font); }
+    void TearDown() override { midi_player_close(copy); midi_player_close(player); mem_free(font); }
     void open(const MidiEvent* events, size_t count, double duration = 2) {
         player = midi_player_open(events, count, duration, font, font_size);
         ASSERT_NE(player, nullptr);
@@ -50,6 +51,23 @@ TEST_F(MidiPlayback, SampleClockAndDelayedOnset) {
     EXPECT_EQ(render(),0);
     EXPECT_NEAR(midi_player_info(player).position,0.1,1e-9);
     EXPECT_GT(render(),0.1);
+}
+TEST_F(MidiPlayback, ClonedReadersCopyControlsAndRetainTheFontAfterOriginalClose) {
+    MidiEvent events[] = {{0,144,60,100},{0,145,67,100},{.2,128,60,0},{.2,129,67,0}};
+    open(events, 4, .4);
+    ASSERT_TRUE(midi_player_command(player, "volume", .25)); ASSERT_TRUE(midi_player_command(player, "speed", .5));
+    ASSERT_TRUE(midi_player_command(player, "mute", 2)); ASSERT_TRUE(midi_player_command(player, "solo", 1));
+    copy = midi_player_clone(player, .1); ASSERT_NE(copy, nullptr);
+    ASSERT_TRUE(midi_player_command(player, "seek", .1)); ASSERT_TRUE(midi_player_command(player, "play", 0));
+    ASSERT_TRUE(midi_player_command(copy, "play", 0)); EXPECT_GT(render(), 0);
+    float copied[4800 * 2]; midi_player_render(copy, copied, 4800);
+    for (unsigned i = 0; i < 4800 * 2; i++) EXPECT_FLOAT_EQ(copied[i], samples[i]);
+    midi_player_close(player); player = nullptr;
+    ASSERT_TRUE(midi_player_command(copy, "seek", 0)); ASSERT_TRUE(midi_player_command(copy, "play", 0));
+    midi_player_render(copy, copied, 4800); double energy = 0; for (float value : copied) energy += value * value;
+    EXPECT_GT(energy, 0); auto info = midi_player_info(copy);
+    EXPECT_EQ(info.volume, .25); EXPECT_EQ(info.speed, .5); EXPECT_EQ(info.mute, 2); EXPECT_EQ(info.solo, 1);
+    EXPECT_NEAR(info.position, .05, 1e-9);
 }
 TEST_F(MidiPlayback, PauseStopAndResumeSilence) {
     MidiEvent events[] = {{0,144,60,100},{1,128,60,0}};

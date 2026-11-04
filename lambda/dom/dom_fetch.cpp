@@ -27,6 +27,7 @@
 #include "../../lib/url.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/curl_runtime.h"
 #include "../../lib/utf.h"
 #include "../../lib/mime-detect.h"
 
@@ -307,7 +308,7 @@ static void fetch_work_cb(uv_work_t* req) {
 
     if (!fw || atomic_load32(&fw->cancelled) != 0) return;
 
-    fw->easy = curl_easy_init();
+    fw->easy = curl_runtime_initialize() ? curl_easy_init() : nullptr;
     if (!fw->easy) {
         fw->curl_error = -1;
         snprintf(fw->error_msg, sizeof(fw->error_msg), "curl_easy_init failed");

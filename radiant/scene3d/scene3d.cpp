@@ -335,7 +335,7 @@ struct Scene3dEntry {
     // one shader variant per material model (basic/Lambert, standard) and tone-mapping curve,
     // compiled on first use; `program_frame` marks the frame whose scene uniforms each holds
     NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES][2], white,
-        dfg;
+        dfg, upscale;
     uint64_t program_frame[SCENE_PROGRAM_VARIANTS], frame;
     Scene3dMappedProgram* mapped_programs;
     size_t mapped_count, mapped_capacity;
@@ -374,7 +374,12 @@ struct Scene3dEntry {
     Scene3dAudio* audio;
     uint64_t physical_generation, particle_generation;
     ImageSurface* snapshot;
+    // a composited frame publishes `published` and leaves the snapshot's pixels unread until a CPU
+    // consumer asks (Radiant_Design_GPU_Compositor C4)
+    NativeGlResource published;
+    bool snapshot_pending;
     uint64_t mutation_epoch, source_key, projection_generation, snapshot_generation;
+    uint32_t source_generation;
     float width, height, scale;
     Scene3dStats stats;
     char diagnostic[2048];
@@ -422,6 +427,7 @@ static void scene3d_retire_snapshot(Scene3dEntry* entry) {
     image_surface_bump_generation(entry->snapshot);
     image_surface_snapshot_release(entry->snapshot);
     entry->snapshot = nullptr;
+    entry->snapshot_pending = false;
 }
 
 static bool scene3d_fail(Scene3dEntry* entry, const char* message) {
@@ -438,6 +444,16 @@ ItemReader scene3d_value(DomElement* node, const char* key) {
 }
 bool scene3d_present(DomElement* node, const char* key) {
     return node->has_attribute(key) || !scene3d_value(node, key).isNull();
+}
+// dom_layer_note_mutation advances layer_generation on a mutated node and every ancestor, so the
+// root's generation moves exactly when its subtree does; a page's own HUD writes leave it alone.
+bool scene3d_source_unchanged(DomElement* root, uint64_t* epoch, uint32_t generation) {
+    if (*epoch == root->doc->mutation_epoch)
+        return true;
+    if (*epoch == UINT64_MAX || generation != root->layer_generation)
+        return false;
+    *epoch = root->doc->mutation_epoch;
+    return true;
 }
 // source collectors share one bounded walk and choose their own subtree boundaries.
 bool scene3d_visit(DomElement* root, Scene3dVisitor visitor, void* context) {
@@ -1809,7 +1825,9 @@ static bool scene3d_graphics_prepare(Scene3dEntry *entry, UiContext *ui) {
         ui->render_failed = true;
         return scene3d_fail(entry, "native graphics host unavailable for export");
     }
-    entry->graphics = native_gl_create(ui && ui->window, entry->diagnostic, sizeof(entry->diagnostic));
+    // the window presenter's share group lets it composite the scene's published target (Q7)
+    entry->graphics = native_gl_create(ui && ui->window, entry->diagnostic, sizeof(entry->diagnostic),
+                                       ui ? ui->window : nullptr);
     return entry->graphics != nullptr;
 }
 // the particle owner can allocate/recover device state before the first scene projection.
@@ -3818,6 +3836,7 @@ void scene3d_context_lost(DomElement* root) {
     e->mapped_count = e->mapped_capacity = 0;
     e->target = {};
     e->hdr_target = {};
+    e->upscale = {};
     for (auto& variants : e->output_programs)
         for (auto& program : variants)
             program = {};
@@ -6140,7 +6159,55 @@ static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection, N
     return native_gl_draw(entry->graphics, &draw);
 }
 
+// Fills a deferred snapshot from the target the frame published. A frame rendered at a capped density
+// (max-pixel-ratio) is published at that density for the compositor; only a CPU consumer needs it
+// upsampled to the snapshot's size, so the upscale target exists only once one has asked
+// (Radiant_Design_GPU_Compositor C4).
+static bool scene3d_materialize_entry(Scene3dEntry* entry) {
+    if (!entry->snapshot_pending)
+        return true;
+    entry->snapshot_pending = false;
+    NativeGlResource source = entry->published;
+    unsigned width = (unsigned)entry->snapshot->width, height = (unsigned)entry->snapshot->height;
+    if (entry->stats.raster_width != width || entry->stats.raster_height != height) {
+        if (!entry->upscale.id)
+            entry->upscale = native_gl_upscale_target(entry->graphics, width, height);
+        source = entry->upscale.id && native_gl_upscale(entry->graphics, entry->published, entry->upscale)
+            ? entry->upscale : NativeGlResource{};
+    }
+    if (source.id && native_gl_snapshot_into(entry->graphics, source, entry->snapshot))
+        return true;
+    if (!entry->diagnostic[0])
+        scene3d_fail(entry, native_gl_diagnostic(entry->graphics));
+    scene3d_retire_snapshot(entry);
+    return false;
+}
+
 ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, float height, float raster_scale) {
+    return scene3d_frame(root, ui, width, height, raster_scale, true);
+}
+
+bool scene3d_materialize(DomElement* root) {
+    Scene3dEntry* entry = root ? scene3d_entry(root, false) : nullptr;
+    return entry && entry->snapshot && scene3d_materialize_entry(entry);
+}
+
+bool scene3d_external_image(DomElement* root, NativeGlContext** producer, NativeGlResource* image, bool* opaque,
+                            bool* upsampled) {
+    Scene3dEntry* entry = root ? scene3d_entry(root, false) : nullptr;
+    if (!entry || !entry->graphics || !entry->snapshot || !entry->published.id)
+        return false;
+    *producer = entry->graphics;
+    *image = entry->published;
+    // an opaque background leaves every pixel opaque; bloom already requires one
+    *opaque = entry->projection.background[3] >= 1.0f;
+    *upsampled = entry->stats.raster_width != (unsigned)entry->snapshot->width ||
+        entry->stats.raster_height != (unsigned)entry->snapshot->height;
+    return true;
+}
+
+ImageSurface* scene3d_frame(DomElement* root, UiContext* ui, float width, float height, float raster_scale,
+                            bool materialize) {
     if (!root || !ui)
         return nullptr;
     scene3d_collect(root->doc);
@@ -6161,23 +6228,43 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         entry->target = {};
         native_gl_release(entry->graphics, entry->hdr_target);
         entry->hdr_target = {};
+        native_gl_release(entry->graphics, entry->upscale);
+        entry->upscale = {};
         return nullptr;
     }
-    float pixel_width = ceilf(width * raster_scale), pixel_height = ceilf(height * raster_scale);
-    if (!isfinite(pixel_width) || !isfinite(pixel_height) || pixel_width > 4096 || pixel_height > 4096) {
+    // max-pixel-ratio caps the density the scene renders at; the GPU then upsamples the frame once to
+    // the page's raster scale, so dense displays need not multisample every device pixel
+    double pixel_ratio = 0;
+    if (!scene3d_real(root, "max-pixel-ratio", 0, &pixel_ratio) || pixel_ratio < 0) {
+        scene3d_fail(entry, "max-pixel-ratio must be a positive number");
+        scene3d_retire_snapshot(entry);
+        return nullptr;
+    }
+    float render_scale = pixel_ratio > 0 && pixel_ratio < raster_scale ? (float)pixel_ratio : raster_scale;
+    float pixel_width = ceilf(width * render_scale), pixel_height = ceilf(height * render_scale);
+    float output_width = ceilf(width * raster_scale), output_height = ceilf(height * raster_scale);
+    if (!isfinite(output_width) || !isfinite(output_height) || output_width > 4096 || output_height > 4096) {
         scene3d_fail(entry, "scene raster dimensions exceed quota");
         scene3d_retire_snapshot(entry);
         return nullptr;
     }
+    scene3d_source_unchanged(root, &entry->mutation_epoch, entry->source_generation);
     bool changed = entry->mutation_epoch != root->doc->mutation_epoch || entry->width != width ||
                    entry->height != height || entry->scale != raster_scale ||
                    entry->animated_generation != scene3d_animation_generation(entry->animation) ||
                    entry->physical_generation != scene3d_physics_generation(entry->physics) ||
                    entry->particle_generation != scene3d_particles_generation(entry->particles);
-    if (!changed && entry->snapshot)
+    if (!changed && entry->snapshot) {
+        if (materialize && !scene3d_materialize_entry(entry))
+            return nullptr;
         return entry->snapshot;
+    }
     if (!scene3d_graphics_prepare(entry, ui))
         return nullptr;
+    // a frame makes thousands of graphics calls; switch to the scene's context once for all of them
+    NativeGlCurrent current(entry->graphics);
+    // this frame's writes to a target the presenter composited wait, on the GPU, for that draw
+    native_gl_await_presenter(entry->graphics, entry->target);
     if (!scene3d_program(entry, 0).id)
         return nullptr;
     if (!entry->white.id) {
@@ -6243,6 +6330,13 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         native_gl_release(entry->graphics, entry->hdr_target);
         entry->target = output;
         entry->hdr_target = hdr;
+    }
+    // the upscale target, which a materialization allocates, follows the output size
+    bool upscaled = output_width != pixel_width || output_height != pixel_height;
+    if (entry->upscale.id && (!upscaled || entry->stats.output_width != (unsigned)output_width ||
+                              entry->stats.output_height != (unsigned)output_height)) {
+        native_gl_release(entry->graphics, entry->upscale);
+        entry->upscale = {};
     }
     bool transmission_needed = false, transmission_active = false;
     for (int i = 0; i < p->mesh_count; i++) {
@@ -6373,7 +6467,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
             rendered = scene3d_draw_mesh(entry, pass, p->meshes[i]);
     NativeGlResource processed = {};
     if (rendered)
-        rendered = scene3d_post_linear(entry, root, raster_scale, &processed) && scene3d_output(entry, p, processed);
+        rendered = scene3d_post_linear(entry, root, render_scale, &processed) && scene3d_output(entry, p, processed);
     // preserve the existing after-tone-map blend contract and opaque depth for transparent surfaces.
     if (rendered)
         rendered = native_gl_copy_depth(entry->graphics, entry->hdr_target, entry->target);
@@ -6385,22 +6479,31 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     NativeGlResource published = {};
     if (rendered)
         rendered = scene3d_post_display(entry, &published);
-    ImageSurface* snapshot = rendered ? native_gl_snapshot(entry->graphics, published) : nullptr;
+    // Every frame publishes its target at the density it rendered, since a later composited frame may
+    // present it unchanged; the snapshot, at the output size, is filled when a consumer reads it.
+    bool publication = rendered && native_gl_publish(entry->graphics, published);
+    ImageSurface* snapshot = !publication ? nullptr
+        : image_surface_create((int)output_width, (int)output_height); // INT_CAST_OK: target pixel extents
     if (!snapshot) {
         if (!entry->diagnostic[0])
             scene3d_fail(entry, native_gl_diagnostic(entry->graphics));
         scene3d_retire_snapshot(entry);
         return nullptr;
     }
+    // a deferred snapshot already has the representation its readback will fill
+    snapshot->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.
     scene3d_retire_snapshot(entry);
     image_surface_snapshot_publish(snapshot);
     entry->snapshot = snapshot;
+    entry->published = published;
+    entry->snapshot_pending = true;
     entry->snapshot_generation++;
     entry->width = width;
     entry->height = height;
     entry->scale = raster_scale;
     entry->mutation_epoch = root->doc->mutation_epoch;
+    entry->source_generation = root->layer_generation;
     entry->source_key = source_key;
     entry->animated_generation = scene3d_animation_generation(entry->animation);
     entry->physical_generation = scene3d_physics_generation(entry->physics);
@@ -6412,8 +6515,13 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     entry->stats.textures = p->texture_count;
     entry->stats.raster_width = (unsigned)pixel_width;
     entry->stats.raster_height = (unsigned)pixel_height;
+    entry->stats.output_width = (unsigned)output_width;
+    entry->stats.output_height = (unsigned)output_height;
     entry->stats.camera_aspect = aspect;
     entry->diagnostic[0] = 0;
+    // a frame for a CPU consumer reads back now, from the stats this frame recorded
+    if (materialize && !scene3d_materialize_entry(entry))
+        return nullptr;
     return snapshot;
 }
 
@@ -6427,20 +6535,41 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
         if (node && node->is_element()) {
             BlockBlot origin = {};
             Rect rect = render_geometry_block_content_rect(&origin, (ViewBlock*)node->as_element(), 1);
-            if (entry->mutation_epoch != document->mutation_epoch ||
+            if (!scene3d_source_unchanged(node->as_element(), &entry->mutation_epoch, entry->source_generation) ||
                 entry->animated_generation != scene3d_animation_generation(entry->animation) ||
                 entry->physical_generation != scene3d_physics_generation(entry->physics) ||
                 entry->particle_generation != scene3d_particles_generation(entry->particles) ||
                 entry->width != rect.width || entry->height != rect.height || entry->scale != raster_scale)
-                scene3d_snapshot(node->as_element(), ui, rect.width, rect.height, raster_scale);
+                // a live window that composites scenes reads them back only when a CPU consumer asks
+                scene3d_frame(node->as_element(), ui, rect.width, rect.height, raster_scale,
+                              !ui_context_gpu_compositor(ui));
         }
     }
+}
+
+// The GPU presenter draws the scene's published target in place of its snapshot when nothing between the
+// scene and the window needs its pixels on the CPU (Radiant_Design_GPU_Compositor C1); the scene renders
+// first, leaving its snapshot to be filled only if a CPU consumer reads it.
+static bool scene3d_composite_content(RasterRenderContext* context, ViewBlock* view, Rect rect) {
+    if (!context->compositor.get() || rect.width <= 0 || rect.height <= 0)
+        return false;
+    DomElement* root = view->as_element();
+    float scale = context->raster_scale;
+    CompositorSource source = {};
+    source.element = root;
+    source.materialize = scene3d_materialize;
+    source.snapshot = scene3d_frame(root, context->ui_context, rect.width / scale, rect.height / scale, scale, false);
+    if (source.snapshot)
+        scene3d_external_image(root, &source.producer, &source.image, &source.opaque, &source.upsampled);
+    return render_compositor_cut(context, view, rect, &source);
 }
 
 void render_scene3d_content(RasterRenderContext* context, ViewBlock* view) {
     if (!context || !view || !view->is_element())
         return;
     Rect rect = render_geometry_block_content_rect(&context->block, view, context->raster_scale);
+    if (scene3d_composite_content(context, view, rect))
+        return;
     ImageSurface* image = scene3d_snapshot(view->as_element(), context->ui_context, rect.width / context->raster_scale,
                                            rect.height / context->raster_scale, context->raster_scale);
     if (image)

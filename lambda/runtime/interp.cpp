@@ -15,6 +15,7 @@
 #include "lambda-root-frame.hpp"
 #include "write_set.hpp"
 #include "runtime-state.h"
+#include "security_context.h"
 #include "recovery_frame.h"
 #include "lambda-stack.h"
 #include "concurrency.h"
@@ -9285,7 +9286,7 @@ static Item interp_run_nodes(Runner* runner, bool run_main,
     if (!runner->context->cwd) {
         // T0 bypasses the JIT output wrapper, which normally owns this URL at
         // one execution boundary; REPL fragments therefore recreate it here.
-        runner->context->cwd = get_current_dir();
+        runner->context->cwd = eval_context_current_directory(runner->context);
     }
 #endif
     List* saved_vargs = runner->context->current_vargs;

@@ -16,11 +16,12 @@ globalThis.providerTokens = {};
 globalThis.sceneProvider = null;
 globalThis.providerLegacy = null;
 globalThis.providerBusy = false;
-globalThis.audioSceneProvider = async (action, kind='midi', bus='providers') => {
-  // each operation crosses several asynchronous PN calls; publish completion after the final snapshot.
+const providerWork = async operation => {
   globalThis.providerBusy=true;
-  try {
-  const owner=document.getElementById('result');
+  try { return await operation(); } finally { globalThis.providerBusy=false; }
+};
+globalThis.audioSceneProvider = (action, kind='midi', bus='providers') => providerWork(async () => {
+  const owner=document.getElementById(kind==='video'?'movie':'result');
   if (action==='legacy') {
     globalThis.providerLegacy=await provider_request(owner,kind+'_read',providerTokens[kind],null);
     return;
@@ -34,12 +35,27 @@ globalThis.audioSceneProvider = async (action, kind='midi', bus='providers') => 
     current=await audio_provider_route(world,{session:packet.session,provider:kind,token,expected:current.route,bus:target?target.id:null,identity:target?target.identity:0n});
   }
   if (action==='play'||action==='pause'||action==='cancel') {
-    const command=kind==='midi'?(action==='cancel'?'stop':action):(action==='play'?'resume':action);
+    const command=kind==='speech'?(action==='play'?'resume':action):(action==='cancel'?'stop':action);
     await provider_request(owner,kind+'_command',providerTokens[kind],command);
     current=await audio_provider_read(world,{session:packet.session,provider:kind,token});
   }
   globalThis.sceneProvider=current;
-  } finally { globalThis.providerBusy=false; }
+});
+globalThis.audioSceneCheckProvider = (request, operation='read') => providerWork(async () => {
+  globalThis.providerRejected=false;
+  try {
+    const packet=await audio_snapshot(world);
+    const payload={session:packet.session,...request};
+    globalThis.providerProbe=operation==='route'?await audio_provider_route(world,payload):await audio_provider_read(world,payload);
+  } catch (error) { globalThis.providerRejected=true; }
+});
+globalThis.readForeignVideoTicket = node => providerWork(async () => {
+  globalThis.foreignVideoToken=await provider_request(node,'video_open',0,null);
+});
+const renderJobOperation = (action, job, session, frames, target) => {
+  const request={session,job:job.job,frames};
+  const operations={step:audio_render_step,read:audio_render_snapshot,cancel:audio_render_cancel,close:audio_render_close};
+  return action==='file'?audio_render_file(world,request,target):operations[action](world,request);
 };
 globalThis.audioSceneRender = async action => {
   const packet = await audio_snapshot(world);
@@ -48,14 +64,29 @@ globalThis.audioSceneRender = async action => {
       {source:'speaker',identity:packet.sources[0].identity,clip_identity:packet.clips[0].identity,op:'play',frame:17n},
       {source:'speaker',identity:packet.sources[0].identity,op:'stop',frame:177n}]});
   } else {
-    const request={session:packet.session,job:sceneRender.job,frames:128};
-    if (action === 'step') globalThis.sceneRender=await audio_render_step(world,request);
-    if (action === 'read') globalThis.sceneRender=await audio_render_snapshot(world,request);
-    if (action === 'file') globalThis.sceneRender=await audio_render_file(world,request,'temp/scene3d-audio-render/ui-output.wav');
-    if (action === 'cancel') globalThis.sceneRender=await audio_render_cancel(world,request);
-    if (action === 'close') globalThis.sceneRenderClosed=await audio_render_close(world,request);
+    const result=await renderJobOperation(action,sceneRender,packet.session,128,'temp/scene3d-audio-render/ui-output.wav');
+    if(action==='close') globalThis.sceneRenderClosed=result; else globalThis.sceneRender=result;
   }
 };
+globalThis.audioSceneExportProviders = (action, options={}) => providerWork(async () => {
+  const packet=await audio_snapshot(world);
+  const providers=options.providers||['midi','speech','video'].map(provider=>({provider,token:BigInt(providerTokens[provider]),bus:'providers',position:0}));
+  if(action==='open') {
+    globalThis.providerExport=await audio_render_open(world,{session:packet.session,frames:1024,providers});
+  } else if(action==='retire') {
+    const owner=document.getElementById('result');
+    await provider_request(owner,'midi_close',providerTokens.midi,null);
+    await provider_request(owner,'speech_command',providerTokens.speech,'cancel');
+    movie.removeAttribute('src');movie.load();globalThis.exportRetired=true;
+  } else if(action==='rejected') {
+    globalThis.exportRejected=false;
+    try { await audio_render_open(world,{session:packet.session,frames:1024,providers}); }
+    catch(error) { globalThis.exportRejected=true; }
+  } else {
+    const result=await renderJobOperation(action,providerExport,packet.session,options.frames||4096,'temp/scene3d-provider-export-ui.wav');
+    if(action==='close') globalThis.providerExportClosed=result; else globalThis.providerExport=result;
+  }
+});
 globalThis.audioSceneCue = async action => {
   const packet = await audio_snapshot(world);
   if (action === 'queue') {

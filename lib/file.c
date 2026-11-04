@@ -981,8 +981,19 @@ struct FileAnchor {
 };
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static int file_anchor_sync(int fd, uint32_t flags) {
+    if (fsync(fd) != 0) return -1;
+#ifdef __APPLE__
+    // fsync alone can leave reordered writes in a volatile drive cache.
+    // Strict state requires the stronger barrier, with no weaker fallback.
+    if (flags & FILE_ANCHOR_FULL_SYNC) return fcntl(fd, F_FULLFSYNC);
+#else
+    (void)flags;
+#endif
+    return 0;
+}
 static bool file_anchor_flags_valid(uint32_t flags) {
-    return !(flags & ~(FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_PRIVATE | FILE_ANCHOR_SAME_DEVICE));
+    return !(flags & ~(FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_PRIVATE | FILE_ANCHOR_SAME_DEVICE | FILE_ANCHOR_FULL_SYNC));
 }
 
 static bool file_anchor_component_valid(const char* name) {
@@ -1073,7 +1084,7 @@ static bool file_anchor_object_stat(FileAnchor* anchor, const struct stat* st) {
     return true;
 }
 
-static int file_anchor_walk(FileAnchor* anchor, char* copy, bool parent_only, bool create, uint32_t flags) {
+static int file_anchor_walk(FileAnchor* anchor, char* copy, bool parent_only, bool create, bool exclusive, uint32_t flags) {
     if (!file_anchor_validate(anchor)) return -1;
     int fd = fcntl(anchor->fd, F_DUPFD_CLOEXEC, 0);
     if (fd < 0) return -1;
@@ -1084,6 +1095,11 @@ static int file_anchor_walk(FileAnchor* anchor, char* copy, bool parent_only, bo
         if (!file_anchor_component_valid(component)) { errno = EINVAL; break; }
         if (!file_anchor_namespace(&anchor->options, fd, component)) break;
         if (parent_only && !slash) return fd;
+        bool created = false;
+        if (exclusive && !slash) {
+            if (!file_anchor_guard(anchor, copy, FILE_ANCHOR_CREATE, NULL) || mkdirat(fd, component, 0700)) break;
+            created = true;
+        }
         int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
         if (next < 0 && errno == ENOENT && create) {
             if (!file_anchor_guard(anchor, copy, FILE_ANCHOR_CREATE, NULL)) break;
@@ -1096,6 +1112,9 @@ static int file_anchor_walk(FileAnchor* anchor, char* copy, bool parent_only, bo
             file_anchor_directory_stat(&st, flags, true);
         FileRevision revision = file_revision_from_stat(valid ? &st : NULL);
         if (valid) valid = file_anchor_guard(anchor, copy, FILE_ANCHOR_TRAVERSE, &revision);
+        // A durable child record cannot repair an unsynced ancestor name.
+        // Create-mode retries also sync a retained, unacknowledged directory.
+        if (valid && (created || create)) valid = file_anchor_sync(next, flags) == 0 && file_anchor_sync(fd, flags) == 0;
         if (!valid) { int error = errno; close(next); errno = error; break; }
         close(fd);
         fd = next;
@@ -1128,7 +1147,7 @@ static char* file_anchor_copy_relative(const char* relative) {
 static int file_anchor_parent(FileAnchor* anchor, const char* relative, char** copy, const char** leaf) {
     *copy = file_anchor_copy_relative(relative);
     if (!*copy) return -1;
-    int fd = file_anchor_walk(anchor, *copy, true, false, anchor ? anchor->options.flags : 0);
+    int fd = file_anchor_walk(anchor, *copy, true, false, false, anchor ? anchor->options.flags : 0);
     char* slash = strrchr(*copy, '/');
     *leaf = slash ? slash + 1 : *copy;
     return fd;
@@ -1229,16 +1248,17 @@ char* file_anchor_path(FileAnchor* anchor) {
     return file_anchor_validate(anchor) ? file_descriptor_path(anchor->fd) : NULL;
 }
 
-FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative, bool create, uint32_t flags) {
+static FileAnchor* file_anchor_child(FileAnchor* parent, const char* relative, bool create, bool exclusive, uint32_t flags) {
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
-    (void)parent; (void)relative; (void)create; (void)flags; errno = ENOTSUP; return NULL;
+    (void)parent; (void)relative; (void)create; (void)exclusive; (void)flags; errno = ENOTSUP; return NULL;
 #else
     if (!parent || !file_anchor_flags_valid(flags) || (parent->options.flags & ~flags)) {
         errno = EINVAL; return NULL;
     }
     char* copy = file_anchor_copy_relative(relative);
     if (!copy) return NULL;
-    int fd = file_anchor_walk(parent, copy, false, create, flags);
+    if (exclusive && strchr(copy, '/')) { mem_free(copy); errno = EINVAL; return NULL; }
+    int fd = file_anchor_walk(parent, copy, false, create, exclusive, flags);
     mem_free(copy);
     if (fd < 0) return NULL;
     struct stat st;
@@ -1255,6 +1275,54 @@ FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative, bool
     child->options.flags = flags;
     if (!child->path || !child->guard_prefix || !file_anchor_validate(child)) { file_anchor_close(child); return NULL; }
     return child;
+#endif
+}
+
+FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative, bool create, uint32_t flags) {
+    return file_anchor_child(parent, relative, create, false, flags);
+}
+FileAnchor* file_anchor_create_directory(FileAnchor* parent, const char* name, uint32_t flags) {
+    return file_anchor_child(parent, name, false, true, flags);
+}
+
+bool file_anchor_remove(FileAnchor* anchor, const char* relative, const FileRevision* expected) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; (void)expected; errno = ENOTSUP; return false;
+#else
+    if (!expected) { errno = EINVAL; return false; }
+    char* copy = NULL; const char* leaf = NULL;
+    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
+    struct stat st;
+    bool valid = parent >= 0;
+    FileRevision actual = file_revision_from_stat(NULL);
+    for (unsigned pass = 0; valid && pass < 2; pass++) {
+        if (pass) {
+            // A guard may run host code. Rebind the parent and leaf after it
+            // before deleting, so callback-time substitution stays untouched.
+            char* fresh_copy = NULL; const char* fresh_leaf = NULL;
+            int fresh = file_anchor_parent(anchor, relative, &fresh_copy, &fresh_leaf);
+            struct stat held_parent, named_parent;
+            valid = fresh >= 0 && fstat(parent, &held_parent) == 0 && fstat(fresh, &named_parent) == 0 &&
+                held_parent.st_dev == named_parent.st_dev && held_parent.st_ino == named_parent.st_ino;
+            if (fresh >= 0) close(fresh);
+            mem_free(fresh_copy);
+            if (!valid) { errno = ESTALE; break; }
+        }
+        valid = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 && file_anchor_object_stat(anchor, &st);
+        if (!valid) break;
+        actual = file_revision_from_stat(&st);
+        // Child cleanup changes directory metadata, but never its identity.
+        valid = expected->device == actual.device && expected->inode == actual.inode &&
+            expected->stat.is_dir == actual.stat.is_dir &&
+            (actual.stat.is_dir || file_revision_equal(expected, &actual));
+        if (!valid) errno = ESTALE;
+        if (valid && !pass) valid = file_anchor_guard(anchor, relative, FILE_ANCHOR_REMOVE, &actual);
+    }
+    valid = valid && unlinkat(parent, leaf, actual.stat.is_dir ? AT_REMOVEDIR : 0) == 0;
+    if (valid) valid = file_anchor_sync(parent, anchor->options.flags) == 0;
+    int error = errno;
+    if (parent >= 0) close(parent);
+    mem_free(copy); errno = error; return valid;
 #endif
 }
 
@@ -1292,10 +1360,10 @@ bool file_anchor_stat(FileAnchor* anchor, const char* relative, FileRevision* ou
 #endif
 }
 
-bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
-        FileAnchorVisitor visitor, void* context) {
+static bool file_anchor_visit_impl(FileAnchor* directory, uint32_t max_entries,
+        FileAnchorVisitor visitor, void* context, bool strict) {
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
-    (void)directory; (void)max_entries; (void)visitor; (void)context;
+    (void)directory; (void)max_entries; (void)visitor; (void)context; (void)strict;
     errno = ENOTSUP; return false;
 #else
     if (!visitor || !max_entries) { errno = EINVAL; return false; }
@@ -1315,7 +1383,7 @@ bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (visited++ == max_entries) { errno = EFBIG; valid = false; break; }
         if (!file_anchor_namespace(&directory->options, fd, entry->d_name)) {
-            if (errno == EACCES) continue;
+            if (!strict && errno == EACCES) continue;
             valid = false; break;
         }
         struct stat st;
@@ -1323,12 +1391,12 @@ bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
             valid = false; break;
         }
         if (!file_anchor_object_stat(directory, &st)) {
-            if (errno == EACCES || errno == EXDEV) continue;
+            if (!strict && (errno == EACCES || errno == EXDEV)) continue;
             valid = false; break;
         }
         FileRevision revision = file_revision_from_stat(&st);
         if (!file_anchor_guard(directory, entry->d_name, FILE_ANCHOR_METADATA, &revision)) {
-            if (errno == EACCES) continue;
+            if (!strict && errno == EACCES) continue;
             valid = false; break;
         }
         if (!visitor(context, entry->d_name, &revision)) { valid = false; break; }
@@ -1343,6 +1411,15 @@ bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
     errno = error;
     return valid;
 #endif
+}
+
+bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
+        FileAnchorVisitor visitor, void* context) {
+    return file_anchor_visit_impl(directory, max_entries, visitor, context, false);
+}
+bool file_anchor_visit_strict(FileAnchor* directory, uint32_t max_entries,
+        FileAnchorVisitor visitor, void* context) {
+    return file_anchor_visit_impl(directory, max_entries, visitor, context, true);
 }
 
 static FILE* file_anchor_open_stream(FileAnchor* anchor, const char* relative, bool create) {
@@ -1363,6 +1440,10 @@ static FILE* file_anchor_open_stream(FileAnchor* anchor, const char* relative, b
         FileRevision revision = file_revision_from_stat(&st);
         valid = file_anchor_guard(anchor, relative, FILE_ANCHOR_READ, &revision);
     }
+    // Publish a new lock/lease stream only after its empty inode and name have
+    // been synced. Failure may leave that object, so exclusive retry must fail.
+    if (valid && create) valid = file_anchor_sync(fd, anchor->options.flags) == 0 &&
+        file_anchor_sync(parent, anchor->options.flags) == 0;
     FILE* stream = valid ? fdopen(fd, create ? "w+b" : "rb") : NULL;
     int error = errno;
     if (!stream && fd >= 0) close(fd);
@@ -1460,7 +1541,8 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
     if (fd < 0) goto done;
     FILE* stream = fdopen(fd, "wb");
     if (!stream) { close(fd); unlinkat(parent, stage, 0); goto done; }
-    bool written = fwrite(content, 1, size, stream) == size && fflush(stream) == 0 && fsync(fd) == 0;
+    bool written = fwrite(content, 1, size, stream) == size && fflush(stream) == 0 &&
+        file_anchor_sync(fd, anchor->options.flags) == 0;
     if (fclose(stream) != 0) written = false;
     if (!written || !file_anchor_validate(anchor)) { unlinkat(parent, stage, 0); goto done; }
     if (expected) {
@@ -1483,7 +1565,7 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
         int publish_error = errno;
         if (result != 0) unlinkat(parent, stage, 0);
         // publication has committed even if directory durability cannot be confirmed
-        if (result == 0 && fsync(parent) != 0) {
+        if (result == 0 && file_anchor_sync(parent, anchor->options.flags) != 0) {
             publish_error = errno;
             log_error("FILE-ANCHOR: publication committed but directory sync failed");
             result = 1;
@@ -1561,7 +1643,7 @@ int file_anchor_write_existing(FileAnchor* anchor, const char* relative,
         touched = true;
         offset += (size_t)written;
     }
-    if (valid) valid = fsync(fd) == 0;
+    if (valid) valid = file_anchor_sync(fd, anchor->options.flags) == 0;
     int error = errno;
     if (fd >= 0 && close(fd) != 0) { valid = false; error = errno; }
     if (parent >= 0) close(parent);

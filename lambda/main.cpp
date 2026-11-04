@@ -897,6 +897,7 @@ struct DocWindowLaunchOptions {
     bool state_dump;
     bool fullscreen;
     bool autoplay;
+    bool microphone;
     const char* graph_view_key;
     bool source_surface;
     bool browse_archive;
@@ -954,6 +955,8 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
         } else if (is_view && strcmp(argv[i], "--autoplay") == 0) {
             // D7.5.4: only the host grants audio activation up front.
             out->autoplay = true;
+        } else if (is_view && strcmp(argv[i], "--microphone") == 0) {
+            out->microphone = true;
         } else if (strcmp(argv[i], "--event-log") == 0) {
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
@@ -1031,7 +1034,7 @@ extern int view_doc_in_window_with_events(const char* doc_file, const char* even
                                            bool enable_event_log = false,
                                            bool enable_state_dump = false,
                                            const RenderPagedOptions* paged_options = nullptr,
-                                           bool fullscreen = false);
+                                           bool fullscreen = false, bool microphone_granted = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
@@ -2538,6 +2541,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
+    {"midtown", "test/demo/midtown/midtown.ls"},
     {"photo", "test/demo/photo/photo.ls"},
     {"photos", "test/demo/photos/photos.ls"},
     {"draw", "test/demo/draw/draw.ls"},
@@ -4338,6 +4342,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                   "  --block-remote-resources Disable remote subresources\n", stdout);
             fputs("  --fullscreen              Start in fullscreen (F11 toggles)\n", stdout);
             fputs("  --autoplay                Grant audio activation up front: network documents may start sound without a click (D7.5.4)\n", stdout);
+            fputs("  --microphone              Grant input to the initial document; explicit capture also requires OS permission (D7.5.10)\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
@@ -4401,7 +4406,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,
-                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options, launch.fullscreen);
+                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options, launch.fullscreen, launch.microphone);
             lambda_view_log_completion(result);
             return lambda_main_finish(result);
         }
@@ -4495,7 +4500,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
-                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen);
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen, launch.microphone);
         } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("graph");
@@ -4509,7 +4514,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("GRAPH_VIEW_TRANSFORM: viewing '%s' through Lambda graph transform", filename);
             exit_code = view_lambda_document_transform_with_events(filename, transform,
                 &option, 1, event_file, headless, font_dirs, font_dir_count,
-                event_log, state_dump, launch.fullscreen);
+                event_log, state_dump, launch.fullscreen, launch.microphone);
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
@@ -4534,7 +4539,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
             exit_code = view_doc_in_window_with_events(filename, event_file, headless,
                                                        font_dirs, font_dir_count, event_log,
-                                                       state_dump, nullptr, launch.fullscreen);
+                                                       state_dump, nullptr, launch.fullscreen, launch.microphone);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .epub, .docx, .pptx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");

@@ -69,6 +69,9 @@ char* security_grant_store_account_home(void);
 // Host catalog uses the actual held settings directory, not an environment path.
 char* security_grant_store_directory(SecurityGrantStore* store);
 bool security_grant_store_identity(SecurityGrantStore* store, FileRevision* out);
+// Host-owned private storage namespace beside settings. Never a worker resource.
+// Caller owns this anchor; opening it does not grant any principal data access.
+FileAnchor* security_grant_store_private_root(SecurityGrantStore* store);
 void security_grant_store_close(SecurityGrantStore* store);
 SecurityStoreResult security_grant_store_load(SecurityGrantStore* store,
     const SecurityGrantBinding* binding, SecurityGrantSnapshot* out);

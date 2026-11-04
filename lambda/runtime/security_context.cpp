@@ -7,6 +7,8 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/url.h"
+#include "../../lib/path_str.h"
 #include <string.h>
 
 extern __thread EvalContext* context;
@@ -22,6 +24,29 @@ const SecurityIOClient* eval_context_security_io(EvalContext* owner) {
 
 const SecurityIOClient* lambda_current_security_io(void) {
     return eval_context_security_io(context);
+}
+
+bool eval_context_bind_security_directory(EvalContext* owner, const char* directory) {
+    if (!eval_context_security_io(owner) || !directory || strnlen(directory, 4096) >= 4096 ||
+            context_capsule_extension(owner, security_capsule_owner, 3)) return false;
+#ifdef _WIN32
+    if (!path_str_win32_is_absolute(directory)) return false;
+#else
+    if (!path_str_posix_is_absolute(directory)) return false;
+#endif
+    StrBuf* base = strbuf_create(directory);
+    if (!base) return false;
+    if (!base->length || (base->str[base->length - 1] != '/' && base->str[base->length - 1] != '\\'))
+        strbuf_append_char(base, '/');
+    char* binding = mem_strdup(base->str, MEM_CAT_EVAL); strbuf_free(base);
+    static const ContextCapsuleOps ops = {"security-working-directory", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
+        0, nullptr, nullptr, nullptr};
+    if (binding && context_capsule_extension_install(owner, security_capsule_owner, 3, binding, &ops)) return true;
+    mem_free(binding); return false;
+}
+Url* eval_context_current_directory(EvalContext* owner) {
+    const char* directory = (const char*)context_capsule_extension(owner, security_capsule_owner, 3);
+    return directory ? url_parse_path_or_url(directory, nullptr) : get_current_dir();
 }
 
 struct SecurityPathEntry {

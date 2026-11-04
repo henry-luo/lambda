@@ -3436,7 +3436,7 @@ static bool paged_note_context_admit(PagedFlowState* state, DomElement* element)
     }
     // an inline binding may never pass through the block admission hook.
     if (authored && !paged_source_style(state, element)) return false;
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     if (display.outer == CSS_VALUE_NONE || display.outer == CSS_VALUE_CONTENTS ||
         layout_display_is_inline_level(display.outer) || layout_view_is_out_of_flow(element)) return true;
     for (DomElement* owner = element; owner; owner = owner->parent_element()) {
@@ -3445,7 +3445,7 @@ static bool paged_note_context_admit(PagedFlowState* state, DomElement* element)
             return false;
         }
         if (owner != element) {
-            DisplayValue parent = resolve_display_value(owner);
+            DisplayValue parent = layout_resolved_display(owner);
             // an atomic inline owns its block descendants; they are not block material in the call's line.
             if (layout_intrinsic_element_is_atomic_inline(owner) ||
                 (parent.outer != CSS_VALUE_CONTENTS && !layout_display_is_inline_level(parent.outer))) break;
@@ -3620,7 +3620,7 @@ static float paged_detached_layout(PagedFlowState* state, LayoutContext* lycon, 
         lycon->block.used_size_owner = lycon->block.flow_box;
     }
     line_init(lycon, 0.0f, width);
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     if (display.outer != CSS_VALUE_BLOCK && display.outer != CSS_VALUE_LIST_ITEM) display.outer = CSS_VALUE_BLOCK;
     state->outside++;
     DomElement* saved_root = state->detached_root; float saved_width = state->detached_width;
@@ -3684,7 +3684,7 @@ static bool paged_flow_anchor_kind(PagedFlowState* state, DomElement* element, P
     if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return false;
     CssEnum keyword = value->data.keyword;
     if (keyword != CSS_VALUE_FOOTNOTE && keyword != CSS_VALUE_TOP && keyword != CSS_VALUE_BOTTOM) return false;
-    if (layout_display_is_none(resolve_display_value(element))) return false;
+    if (layout_display_is_none(layout_resolved_display(element))) return false;
     if (keyword == CSS_VALUE_FOOTNOTE) { *kind = PAGED_ANCHOR_NOTE; return true; }
     const CssDeclaration* reference = style_tree_get_declaration(style, CSS_PROPERTY_FLOAT_REFERENCE);
     const char* name = reference && reference->value ? css_value_identifier_name(reference->value) : nullptr;

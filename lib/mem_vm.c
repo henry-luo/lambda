@@ -12,6 +12,9 @@
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/vm_page_size.h>
+#endif
 #endif
 
 #define MEM_VM_MAGIC 0x4D56524Eu
@@ -37,6 +40,10 @@ size_t mem_vm_page_size(void) {
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     return (size_t)info.dwPageSize;
+#elif defined(__APPLE__)
+    // Darwin's uncached sysconf/getpagesize queries require sysctl access.
+    // libSystem initializes this process ABI value before sandbox entry.
+    return (size_t)vm_page_size;
 #else
     long page_size = sysconf(_SC_PAGESIZE);
     return page_size > 0 ? (size_t)page_size : 4096u;

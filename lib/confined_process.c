@@ -4,7 +4,9 @@
 #include "confined_process.h"
 #include "digest.h"
 #include "file.h"
+#include "ipc_stream.h"
 #include "mem.h"
+#include "process_sandbox.h"
 #include <errno.h>
 #include <string.h>
 
@@ -12,9 +14,11 @@
 #include "time_util.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <libproc.h>
 #include <mach/mach_time.h>
+#include <mach/mach_param.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -35,6 +39,31 @@ struct ConfinedCode {
     char* executable;
 };
 struct ConfinedProcess { pid_t pid; int channel; int output; int error; bool reaped; bool resumed; atomic_bool cancelled; };
+
+static void stop_owned_child(ConfinedProcess* process) {
+    // An unreaped child reserves its PID. Never signal a number after reaping,
+    // when the kernel could have assigned it to an unrelated process/session.
+    if (process && process->pid > 0 && !process->reaped) {
+        (void)kill(-process->pid, SIGKILL); (void)kill(process->pid, SIGKILL);
+    }
+}
+static bool reap_exited_child(ConfinedProcess* process, int* status, bool* known, int* error) {
+    if (process->reaped) return true;
+    siginfo_t exited = {0};
+    int observed = waitid(P_PID, process->pid, &exited, WEXITED | WNOHANG | WNOWAIT);
+    pid_t waited = 0;
+    if (!observed && exited.si_pid == process->pid) {
+        stop_owned_child(process); // stop descendants while PID ownership is pinned
+        waited = waitpid(process->pid, status, WNOHANG);
+        if (waited == process->pid) { process->reaped = true; *known = true; }
+    }
+    if ((observed < 0 || waited < 0) && errno != EINTR) {
+        *error = errno;
+        if (errno == ECHILD) process->reaped = true; // ownership was already lost
+        return false;
+    }
+    return true;
+}
 
 static bool signing_string(CFDictionaryRef info, CFStringRef key, const char* expected) {
     CFTypeRef value = CFDictionaryGetValue(info, key);
@@ -59,7 +88,7 @@ ConfinedCode* confined_code_open(const ConfinedCodeSpec* spec) {
     SecRequirementRef publisher = spec->team ? apple_publisher_requirement() : NULL;
     bool valid = url && SecStaticCodeCreateWithPath(url, kSecCSDefaultFlags, &reference) == errSecSuccess &&
         (!spec->team || publisher) &&
-        SecStaticCodeCheckValidity(reference, kSecCSStrictValidate | kSecCSCheckAllArchitectures, publisher) == errSecSuccess &&
+        SecStaticCodeCheckValidity(reference, kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode, publisher) == errSecSuccess &&
         SecCodeCopySigningInformation(reference, kSecCSSigningInformation, &info) == errSecSuccess;
     if (publisher) CFRelease(publisher);
     if (url) CFRelease(url);
@@ -68,15 +97,15 @@ ConfinedCode* confined_code_open(const ConfinedCodeSpec* spec) {
         CFTypeRef flags = CFDictionaryGetValue(info, kSecCodeInfoFlags);
         uint32_t bits = 0;
         // Reject extra entitlements, including JIT, network, file exceptions,
-        // debugging and inheritance. This offline T0 profile has one entitlement.
+        // debugging and inheritance. App Sandbox would prevent installation of
+        // our stricter process policy; this offline T0 profile has no entitlement.
         valid = signing_string(info, kSecCodeInfoIdentifier, spec->identifier) &&
             (!spec->team || signing_string(info, kSecCodeInfoTeamIdentifier, spec->team)) &&
             flags && CFGetTypeID(flags) == CFNumberGetTypeID() &&
             CFNumberGetValue(flags, kCFNumberSInt32Type, &bits) && (bits & kSecCodeSignatureRuntime) &&
             (!spec->team || !(bits & kSecCodeSignatureAdhoc)) &&
-            entitlements && CFGetTypeID(entitlements) == CFDictionaryGetTypeID() &&
-            CFDictionaryGetCount(entitlements) == 1 &&
-            CFDictionaryGetValue(entitlements, CFSTR("com.apple.security.app-sandbox")) == kCFBooleanTrue;
+            (!entitlements || (CFGetTypeID(entitlements) == CFDictionaryGetTypeID() &&
+                CFDictionaryGetCount(entitlements) == 0));
     }
     char path[4096];
     if (valid) {
@@ -155,6 +184,21 @@ static bool child_identity(ConfinedCode* code, pid_t pid) {
     if (number) CFRelease(number);
     return valid;
 }
+static int configure_mach_ports(posix_spawnattr_t* attr) {
+    // CLOEXEC controls fd inheritance only. Empty Mach actions must run in
+    // the kernel before dyld/constructors can acquire the parent's rights.
+    typedef int (*SetRegisteredPorts)(posix_spawnattr_t*, mach_port_t[], uint32_t);
+    SetRegisteredPorts set_registered = (SetRegisteredPorts)dlsym(RTLD_DEFAULT,
+        "posix_spawnattr_set_registered_ports_np");
+    if (!set_registered) return ENOTSUP;
+    mach_port_t empty[TASK_PORT_REGISTER_MAX] = {0};
+    // A zero count appends no action and would preserve the inherited array.
+    int error = set_registered(attr, empty, TASK_PORT_REGISTER_MAX);
+    if (!error) error = posix_spawnattr_setspecialport_np(attr, MACH_PORT_NULL, TASK_BOOTSTRAP_PORT);
+    if (!error) error = posix_spawnattr_setexceptionports_np(attr, EXC_MASK_ALL,
+        MACH_PORT_NULL, EXCEPTION_DEFAULT, THREAD_STATE_NONE);
+    return error;
+}
 ConfinedProcess* confined_process_spawn(ConfinedCode* code, const char* entry, const char* cwd, uint64_t session) {
     if (!code || !entry || entry[0] != '/' || !cwd || cwd[0] != '/' || !session) { errno = EINVAL; return NULL; }
     int pair[2] = {-1, -1}, output[2] = {-1, -1}, error[2] = {-1, -1}, input = -1;
@@ -175,6 +219,7 @@ ConfinedProcess* confined_process_spawn(ConfinedCode* code, const char* entry, c
         if (!marked_fd(descriptors[i], i == 2 || i == 4)) { failure = errno; goto done; }
     failure = posix_spawnattr_init(&attr); if (failure) goto done; has_attr = true;
     failure = posix_spawn_file_actions_init(&actions); if (failure) goto done; has_actions = true;
+    failure = configure_mach_ports(&attr); if (failure) goto done;
     sigset_t empty, defaults; sigemptyset(&empty); sigfillset(&defaults);
     if ((failure = posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED | POSIX_SPAWN_CLOEXEC_DEFAULT |
                 POSIX_SPAWN_SETSID | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF)) ||
@@ -194,10 +239,10 @@ ConfinedProcess* confined_process_spawn(ConfinedCode* code, const char* entry, c
     char* env[] = {"PATH=/usr/bin:/bin", "LANG=en_US.UTF-8", NULL};
     failure = posix_spawn(&process->pid, code->executable, &actions, &attr, argv, env);
     if (failure) { process->pid = 0; goto done; }
-    // The kernel has exec'd and applied App Sandbox, but no worker instruction
-    // executes until the verified process is explicitly resumed by its host.
+    // The kernel has exec'd, but no bootstrap instruction runs until the host
+    // verifies/resumes it. Broker dispatch later checks sandbox installation.
     if (!child_identity(code, process->pid) ||
-            SecStaticCodeCheckValidity(code->reference, kSecCSStrictValidate, NULL) != errSecSuccess) {
+            SecStaticCodeCheckValidity(code->reference, kSecCSStrictValidate | kSecCSCheckNestedCode, NULL) != errSecSuccess) {
         failure = EACCES; goto done;
     }
     process->channel = pair[0]; pair[0] = -1;
@@ -217,6 +262,9 @@ int confined_process_take_channel(ConfinedProcess* process) {
     int fd = process->channel; process->channel = -1; return fd;
 }
 void confined_process_close_channel(int descriptor) { if (descriptor >= 0) close(descriptor); }
+bool confined_process_is_sandboxed(ConfinedProcess* process) {
+    return process && process_sandbox_is_applied(process->pid);
+}
 bool confined_process_resume(ConfinedProcess* process) {
     if (!process || process->resumed || process->reaped) { errno = EINVAL; return false; }
     if (kill(process->pid, SIGCONT)) return false;
@@ -226,7 +274,7 @@ void confined_process_cancel(ConfinedProcess* process) {
     if (process) atomic_store(&process->cancelled, true);
 }
 static bool capture_output(int* fd, char* buffer, size_t* size, size_t available,
-        uint64_t* total, uint32_t limit, ConfinedProcessStop* reason) {
+        uint64_t* total, uint32_t limit, ConfinedProcessStop* reason, int* system_error) {
     char bytes[4096];
     ssize_t count = read(*fd, bytes, sizeof(bytes));
     if (count > 0) {
@@ -237,6 +285,7 @@ static bool capture_output(int* fd, char* buffer, size_t* size, size_t available
     }
     if (!count) { close_fd(fd); return true; }
     if (errno == EAGAIN || errno == EINTR) return true;
+    *system_error = errno ? errno : EIO;
     *reason = CONFINED_PROCESS_MONITOR_ERROR; return false;
 }
 bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits* limits, ConfinedProcessResult* result) {
@@ -247,16 +296,18 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
     memset(result, 0, sizeof(*result)); result->exit_code = -1;
     result->output = (char*)mem_alloc((size_t)limits->output_bytes + 1, MEM_CAT_SYSTEM);
     result->error_output = (char*)mem_alloc((size_t)limits->output_bytes + 1, MEM_CAT_SYSTEM);
-    uint64_t start = time_now_ms(), total = 0; int status = 0;
+    uint64_t start = time_now_ms(), total = 0; int status = 0; bool status_known = false;
     mach_timebase_info_data_t timebase;
     bool has_timebase = mach_timebase_info(&timebase) == KERN_SUCCESS && timebase.denom && timebase.numer;
     if (!result->output || !result->error_output || !has_timebase) {
         result->reason = CONFINED_PROCESS_MONITOR_ERROR; result->system_error = ENOMEM;
     } else while (true) {
         if (atomic_load(&process->cancelled)) { result->reason = CONFINED_PROCESS_CANCELLED; break; }
-        pid_t waited = waitpid(process->pid, &status, WNOHANG);
-        if (waited == process->pid) process->reaped = true;
-        else if (waited < 0 && errno != EINTR) { result->system_error = errno; result->reason = CONFINED_PROCESS_MONITOR_ERROR; break; }
+        // Reap once. Pipe data/EOF may need later iterations after a clean
+        // leader exit; another waitpid would report ECHILD and truncate capture.
+        if (!reap_exited_child(process, &status, &status_known, &result->system_error)) {
+            result->reason = CONFINED_PROCESS_MONITOR_ERROR; break;
+        }
         result->elapsed_ms = time_now_ms() - start;
         if (result->elapsed_ms >= limits->wall_ms) { result->reason = CONFINED_PROCESS_WALL_LIMIT; break; }
         if (!process->reaped) {
@@ -264,9 +315,10 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
             if (proc_pid_rusage(process->pid, RUSAGE_INFO_V0, (rusage_info_t*)&usage)) {
                 // An exit may race sampling; waitpid below will authenticate it.
                 int saved = errno;
-                waited = waitpid(process->pid, &status, WNOHANG);
-                if (waited == process->pid) process->reaped = true;
-                else { result->system_error = saved; result->reason = CONFINED_PROCESS_MONITOR_ERROR; break; }
+                if (!reap_exited_child(process, &status, &status_known, &result->system_error) || !process->reaped) {
+                    if (!result->system_error) result->system_error = saved ? saved : EIO;
+                    result->reason = CONFINED_PROCESS_MONITOR_ERROR; break;
+                }
             } else {
                 if (usage.ri_phys_footprint > result->peak_memory) result->peak_memory = usage.ri_phys_footprint;
                 if (usage.ri_phys_footprint > limits->memory_bytes) { result->reason = CONFINED_PROCESS_MEMORY_LIMIT; break; }
@@ -284,21 +336,19 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
         int ready = poll(streams, 2, 20);
         if (ready < 0 && errno != EINTR) { result->system_error = errno; result->reason = CONFINED_PROCESS_MONITOR_ERROR; break; }
         if (streams[0].revents && !capture_output(&process->output, result->output, &result->output_size,
-                limits->output_bytes - result->output_size, &total, limits->output_bytes, &result->reason)) break;
+                limits->output_bytes - result->output_size, &total, limits->output_bytes, &result->reason, &result->system_error)) break;
         if (streams[1].revents && !capture_output(&process->error, result->error_output, &result->error_size,
-                limits->output_bytes - result->error_size, &total, limits->output_bytes, &result->reason)) break;
+                limits->output_bytes - result->error_size, &total, limits->output_bytes, &result->reason, &result->system_error)) break;
     }
     // Even a clean leader exit must not leave a descendant holding the broker
     // or output pipes. Only the private session's process group is signalled.
-    if (!process->reaped || result->reason != CONFINED_PROCESS_EXITED) {
-        (void)kill(-process->pid, SIGKILL); (void)kill(process->pid, SIGKILL);
-        if (!process->reaped) {
-            pid_t waited; do { waited = waitpid(process->pid, &status, 0); } while (waited < 0 && errno == EINTR);
-            process->reaped = waited == process->pid;
-        }
-    } else (void)kill(-process->pid, SIGKILL);
-    if (process->reaped && WIFEXITED(status)) result->exit_code = WEXITSTATUS(status);
-    if (process->reaped && WIFSIGNALED(status)) result->signal = WTERMSIG(status);
+    stop_owned_child(process);
+    if (!process->reaped) {
+        pid_t waited; do { waited = waitpid(process->pid, &status, 0); } while (waited < 0 && errno == EINTR);
+        process->reaped = waited == process->pid; status_known = process->reaped;
+    }
+    if (status_known && WIFEXITED(status)) result->exit_code = WEXITSTATUS(status);
+    if (status_known && WIFSIGNALED(status)) result->signal = WTERMSIG(status);
     if (result->output) result->output[result->output_size] = 0;
     if (result->error_output) result->error_output[result->error_size] = 0;
     return process->reaped && result->reason == CONFINED_PROCESS_EXITED;
@@ -306,20 +356,10 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
 void confined_process_destroy(ConfinedProcess* process) {
     if (!process) return;
     if (process->pid > 0 && !process->reaped) {
-        (void)kill(-process->pid, SIGKILL); (void)kill(process->pid, SIGKILL);
+        stop_owned_child(process);
         while (waitpid(process->pid, NULL, 0) < 0 && errno == EINTR) {}
     }
     close_fd(&process->channel); close_fd(&process->output); close_fd(&process->error); mem_free(process);
-}
-bool confined_process_worker_limits(void) {
-    static const struct { int resource; rlim_t value; } caps[] = {
-        {RLIMIT_CPU, 10}, {RLIMIT_FSIZE, 1024 * 1024}, {RLIMIT_NOFILE, 64}, {RLIMIT_NPROC, 0}, {RLIMIT_CORE, 0}
-    };
-    for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]); i++) {
-        struct rlimit limit = {caps[i].value, caps[i].value};
-        if (setrlimit(caps[i].resource, &limit)) return false;
-    }
-    return true;
 }
 bool confined_process_confirm(const char* prompt, uint32_t timeout_ms) {
     if (!prompt || !timeout_ms || timeout_ms > 30000) return false;
@@ -366,6 +406,7 @@ bool confined_process_emit(int descriptor, const char* bytes, size_t size) {
     return true;
 }
 #else
+bool confined_process_is_sandboxed(ConfinedProcess* process) { (void)process; errno = ENOTSUP; return false; }
 ConfinedCode* confined_code_open(const ConfinedCodeSpec* spec) { (void)spec; errno = ENOTSUP; return NULL; }
 void confined_code_close(ConfinedCode* code) { (void)code; }
 bool confined_code_self(char* executable, size_t capacity, char team[64]) { (void)executable; (void)capacity; (void)team; errno = ENOTSUP; return false; }
@@ -380,7 +421,6 @@ bool confined_process_wait(ConfinedProcess* process, const ConfinedProcessLimits
     (void)process; (void)limits; (void)result; errno = ENOTSUP; return false;
 }
 void confined_process_destroy(ConfinedProcess* process) { (void)process; }
-bool confined_process_worker_limits(void) { errno = ENOTSUP; return false; }
 bool confined_process_confirm(const char* prompt, uint32_t timeout_ms) { (void)prompt; (void)timeout_ms; return false; }
 bool confined_process_emit(int descriptor, const char* bytes, size_t size) { (void)descriptor; (void)bytes; (void)size; return false; }
 #endif

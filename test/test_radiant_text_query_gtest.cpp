@@ -2,11 +2,14 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/layout_ruby.hpp"
 #include "../radiant/layout_text_context.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_capture.hpp"
 #include "../radiant/audio_cue_owner.hpp"
+#include "../radiant/audio_render.hpp"
 #include "../radiant/document_clock.hpp"
 #include "test_audio_fixture.hpp"
 #include <uv.h>
@@ -18,11 +21,14 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_core.h"
+#include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/dom/dom_cssom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/value_builder.hpp"
 #include "../lib/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "radiant_flow_test_utils.hpp"
@@ -430,20 +436,25 @@ protected:
         EXPECT_FLOAT_EQ(element->width, width) << id;
         EXPECT_FLOAT_EQ(element->height, height) << id;
     }
-    void expect_character_rect(DomRange* range, DomNode* node, unsigned start, Rect expected) {
+    bool character_rect(DomRange* range, DomNode* node, unsigned start, Rect* result) {
         const char* exception = nullptr;
-        ASSERT_TRUE(dom_range_set_start(range, node, start, &exception));
-        ASSERT_TRUE(dom_range_set_end(range, node, start+1, &exception));
+        if (!dom_range_set_start(range, node, start, &exception) ||
+            !dom_range_set_end(range, node, start+1, &exception)) return false;
         struct Selected { unsigned count; Rect rect; } selected = {};
         dom_range_for_each_rect(range, &ui, [](float x, float y, float width, float height, void* pointer) {
             Selected* selected = (Selected*)pointer;
             selected->count++; selected->rect = {x, y, width, height};
         }, &selected);
-        EXPECT_EQ(selected.count, 1u);
-        EXPECT_FLOAT_EQ(selected.rect.x, expected.x);
-        EXPECT_FLOAT_EQ(selected.rect.y, expected.y);
-        EXPECT_FLOAT_EQ(selected.rect.width, expected.width);
-        EXPECT_FLOAT_EQ(selected.rect.height, expected.height);
+        *result = selected.rect;
+        return selected.count == 1;
+    }
+    void expect_character_rect(DomRange* range, DomNode* node, unsigned start, Rect expected) {
+        Rect actual = {};
+        ASSERT_TRUE(character_rect(range, node, start, &actual));
+        EXPECT_FLOAT_EQ(actual.x, expected.x);
+        EXPECT_FLOAT_EQ(actual.y, expected.y);
+        EXPECT_FLOAT_EQ(actual.width, expected.width);
+        EXPECT_FLOAT_EQ(actual.height, expected.height);
     }
     IntrinsicSizes measure_physical_widths(DomElement* element, DomElement* flow_box = nullptr,
                                           bool content_only = true) {
@@ -549,6 +560,35 @@ protected:
         EXPECT_EQ(expected, nullptr);
         DomText* references[] = {control};
         expect_text_paint_sources<GlyphCount>(owner, text, control_owner, references, 1, GlyphCount);
+    }
+    template <size_t Capacity>
+    void expect_text_source_parts(DomRange* range, DomElement* owner, DomText* text,
+                                  DomElement* control_owner, DomText* const* references, size_t count) {
+        unsigned length = 0;
+        for (size_t part = 0; part < count; part++) length += dom_text_utf16_length(references[part]);
+        ASSERT_EQ(dom_text_utf16_length(text), length);
+        expect_text_paint_sources<Capacity>(owner, text, control_owner, references, count);
+        float x, y, control_x, control_y;
+        view_get_visual_bounds(owner, &x, &y, nullptr, nullptr);
+        view_get_visual_bounds(control_owner, &control_x, &control_y, nullptr, nullptr);
+        unsigned offset = 0;
+        for (size_t part = 0; part < count; part++) {
+            DomText* control = references[part];
+            for (unsigned index = 0; index < dom_text_utf16_length(control); index++) {
+                SCOPED_TRACE(offset + index);
+                Rect expected = {};
+                ASSERT_TRUE(character_rect(range, control, index, &expected));
+                expected.x += x - control_x; expected.y += y - control_y;
+                expect_character_rect(range, text, offset + index, expected);
+            }
+            offset += dom_text_utf16_length(control);
+        }
+    }
+    template <size_t Capacity>
+    void expect_text_source_pair(DomRange* range, DomElement* owner, DomText* text,
+                                 DomElement* control_owner, DomText* control) {
+        DomText* references[] = {control};
+        expect_text_source_parts<Capacity>(range, owner, text, control_owner, references, 1);
     }
     DomText* first_text_leaf(DomNode* node) {
         return dom_range_edge_text(node, false);
@@ -3587,6 +3627,52 @@ TEST_F(RadiantTextQuery, SizeContainedContributionsKeepOwnConstraints) {
         free_document(document);
         document = nullptr;
     }
+}
+
+TEST_F(RadiantTextQuery, ResolvedLayoutDisplayPreservesTheLiveComputedDisplayQuery) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>#result{display:block}</style><button id=result>label</button>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    ASSERT_TRUE(result->display_resolved());
+    EXPECT_EQ(layout_resolved_display(result).inner, CSS_VALUE_FLOW_ROOT);
+    EXPECT_EQ(resolve_display_value(result).inner, CSS_VALUE_FLOW);
+    ASSERT_TRUE(dom_cssom_set_inline_property(result, "display", "none"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_resolved_display(result).outer, CSS_VALUE_NONE);
+    EXPECT_EQ(resolve_display_value(result).outer, CSS_VALUE_NONE);
+}
+
+TEST_F(RadiantTextQuery, GlyphOrientationQueriesFollowInheritedEditsAndReparenting) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>#vertical{writing-mode:vertical-rl;text-orientation:upright}"
+        "#horizontal{writing-mode:horizontal-tb}</style>"
+        "<div id=vertical><span id=result>AB</span></div><div id=horizontal></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    DomElement* vertical = dom_find_element_by_id(document->root, "vertical");
+    DomElement* horizontal = dom_find_element_by_id(document->root, "horizontal");
+    ASSERT_NE(vertical, nullptr);
+    ASSERT_NE(horizontal, nullptr);
+    LayoutContext query = {};
+    query.doc = lam::up(document);
+    query.elmt = lam::up(result->first_child.get());
+    for (unsigned repeat = 0; repeat < 2; repeat++)
+        EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_UPRIGHT);
+    ASSERT_TRUE(dom_cssom_set_inline_property(vertical, "text-orientation", "mixed"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_SIDEWAYS_CW);
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 0x4e00), TEXT_GLYPH_UPRIGHT);
+    // reuse the same query after moving its owner to a different inherited flow.
+    ASSERT_TRUE(vertical->remove_child(result));
+    ASSERT_TRUE(horizontal->append_child(result));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_HORIZONTAL);
+    ASSERT_TRUE(dom_cssom_set_inline_property(horizontal, "writing-mode", "sideways-lr"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_SIDEWAYS_CCW);
 }
 
 TEST_F(RadiantTextQuery, FontUnitsUseInheritedOrientationAndHorizontalSidewaysMetrics) {
@@ -15142,6 +15228,845 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
+TEST_F(RadiantTextQuery, RubyAnnotationFloatsKeepContainingBfcClearanceAndAutoHeight) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { DomElement* row; DomElement* clear; DomText* source; DomNode* parent;
+        const unsigned char* data; bool annotation_float; } cases[16] = {};
+    size_t count = 0;
+    for (const char* mode : {"root", "root-seeded", "nested", "nested-seeded"}) {
+        for (const char* kind : {"plain", "outside", "base", "reading"}) {
+            char id[80]; str_fmt(id, sizeof(id), "%s-%s", mode, kind);
+            Case& entry = cases[count++]; entry.row = dom_find_element_by_id(document->root, id);
+            str_fmt(id, sizeof(id), "%s-%s-clear", mode, kind);
+            entry.clear = dom_find_element_by_id(document->root, id);
+            str_fmt(id, sizeof(id), "%s-%s-base", mode, kind);
+            entry.source = first_text_leaf(dom_find_element_by_id(document->root, id));
+            ASSERT_NE(entry.row, nullptr); ASSERT_NE(entry.clear, nullptr); ASSERT_NE(entry.source, nullptr);
+            entry.parent = entry.source->parent; entry.data = entry.source->text_data();
+            entry.annotation_float = strcmp(kind, "reading") == 0;
+        }
+    }
+    auto check = [&](float height, bool hidden) {
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.row->get_attribute("id"));
+            float clear = hidden && entry.annotation_float ? 40.0f : height + 4.0f;
+            float row_y = 0.0f, clear_y = 0.0f;
+            view_get_visual_bounds(entry.row, nullptr, &row_y, nullptr, nullptr);
+            view_get_visual_bounds(entry.clear, nullptr, &clear_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(clear_y - row_y, clear);
+            EXPECT_FLOAT_EQ(entry.row->height, clear + 10.0f);
+            EXPECT_EQ(entry.source->parent.get(), entry.parent);
+            EXPECT_EQ(entry.source->text_data(), entry.data);
+            EXPECT_EQ(first_text_leaf(entry.parent), entry.source);
+        }
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(100.0f, false); }
+    for (bool left : {false, true}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-side", left ? "left" : "right"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "width", left ? "300px" : "260px"));
+        }
+        check(100.0f, false);
+    }
+    for (bool hidden : {true, false}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--reading-display", hidden ? "none" : "ruby-text"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-height", hidden ? "70px" : "100px"));
+        }
+        check(hidden ? 70.0f : 100.0f, hidden);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationIntrinsicProbesPreserveLiveFloatListsAndSelectedFlow) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* row = find("root-seeded-reading"), *ruby = find("root-seeded-reading-ruby");
+    DomElement* seed = find("root-seeded-reading-seed"), *reading = find("root-seeded-reading-reading");
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(seed, nullptr); ASSERT_NE(reading, nullptr);
+    DomText* base = first_text_leaf(find("root-seeded-reading-base")), *annotation = first_text_leaf(reading);
+    ASSERT_NE(base, nullptr); ASSERT_NE(annotation, nullptr);
+    DomNode* base_parent = base->parent, *reading_parent = annotation->parent;
+    const unsigned char* base_data = base->text_data(), *reading_data = annotation->text_data();
+    View* targets[] = {static_cast<View*>(ruby), static_cast<View*>(reading), static_cast<View*>(base),
+        static_cast<View*>(annotation), static_cast<View*>(find("root-seeded-reading-float"))};
+    Rect before[5] = {};
+    for (size_t index = 0; index < sizeof(targets) / sizeof(*targets); index++)
+        view_get_visual_bounds(targets[index],
+            &before[index].x, &before[index].y, &before[index].width, &before[index].height);
+    LayoutContext context = {};
+    LayoutPassScope pass(&context, document, &ui);
+    context.selected_view_tree = lam::up(document->view_tree.get());
+    context.root_font_size = 20.0f;
+    context.view = lam::up(static_cast<View*>(row)); context.elmt = lam::up(static_cast<DomNode*>(row));
+    layout_setup_assigned_block_context(&context, lam::view_require_block(row), nullptr, 300.0f, -1.0f);
+    setup_font(&ui, &context.font, row->font);
+    setup_line_height(&context, lam::view_require_block(row));
+    layout_setup_block_font_metrics(&context); setup_inline(&context, lam::view_require_block(row));
+    block_context_add_float(&context.block, lam::view_require_block(seed));
+    FloatBox* head = context.block.left_floats;
+    ASSERT_NE(head, nullptr); ASSERT_EQ(head->next.get(), nullptr);
+    ASSERT_EQ(context.block.left_float_count, 1);
+    float bottom = context.block.lowest_float_bottom;
+    for (float width : {300.0f, 260.0f, 300.0f}) {
+        EXPECT_GT(layout_ruby_intrinsic_height(&context, ruby, width), 0.0f);
+        EXPECT_EQ(context.block.left_floats.get(), head); EXPECT_EQ(context.block.left_floats_tail.get(), head);
+        EXPECT_EQ(head->next.get(), nullptr); EXPECT_EQ(context.block.left_float_count, 1);
+        EXPECT_EQ(context.block.right_floats.get(), nullptr); EXPECT_EQ(context.block.right_float_count, 0);
+        EXPECT_FLOAT_EQ(context.block.lowest_float_bottom, bottom);
+        // flow-result replay clones fragment payloads while retaining source identity and geometry.
+        EXPECT_EQ(first_text_leaf(ruby), base); EXPECT_EQ(first_text_leaf(reading), annotation);
+        EXPECT_EQ(base->parent.get(), base_parent); EXPECT_EQ(annotation->parent.get(), reading_parent);
+        EXPECT_EQ(base->text_data(), base_data); EXPECT_EQ(annotation->text_data(), reading_data);
+        for (size_t index = 0; index < sizeof(targets) / sizeof(*targets); index++) {
+            Rect after = {}; view_get_visual_bounds(targets[index],
+                &after.x, &after.y, &after.width, &after.height);
+            EXPECT_FLOAT_EQ(after.x, before[index].x); EXPECT_FLOAT_EQ(after.y, before[index].y);
+            EXPECT_FLOAT_EQ(after.width, before[index].width); EXPECT_FLOAT_EQ(after.height, before[index].height);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyColumnsPreserveTheSourceOriginBesideInternalFloats) {
+    ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    const char* ids[] = {"p0-direct-short", "p0-direct-long", "p0-nested-short", "p0-nested-long",
+        "p10-direct-short", "p10-direct-long", "p10-nested-short", "p10-nested-long",
+        "p0-plain", "p0-hidden", "p10-plain", "p10-hidden"};
+    struct Case { DomElement* row; DomElement* ruby; DomElement* base; DomElement* reading;
+        DomElement* floating; DomElement* tail; DomText* source; DomNode* parent;
+        const unsigned char* data; float padding; bool long_reading; } cases[12] = {};
+    auto part = [&](const char* id, const char* suffix) {
+        char name[80]; str_fmt(name, sizeof(name), "%s-%s", id, suffix);
+        return dom_find_element_by_id(document->root, name);
+    };
+    for (size_t index = 0; index < sizeof(ids) / sizeof(*ids); index++) {
+        const char* id = ids[index]; Case& entry = cases[index];
+        entry.row = dom_find_element_by_id(document->root, id);
+        entry.ruby = part(id, "ruby"); entry.base = part(id, "base");
+        entry.reading = part(id, "reading"); entry.floating = part(id, "float"); entry.tail = part(id, "tail");
+        ASSERT_NE(entry.row, nullptr); ASSERT_NE(entry.ruby, nullptr); ASSERT_NE(entry.base, nullptr);
+        ASSERT_NE(entry.floating, nullptr); ASSERT_NE(entry.tail, nullptr);
+        entry.source = first_text_leaf(entry.base); ASSERT_NE(entry.source, nullptr);
+        entry.parent = entry.source->parent; entry.data = entry.source->text_data();
+        entry.padding = strncmp(id, "p10-", 4) == 0 ? 10.0f : 0.0f;
+        entry.long_reading = strstr(id, "-long") != nullptr;
+    }
+    auto check = [&](bool left, bool hidden) {
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.row->get_attribute("id"));
+            bool visible = entry.reading && entry.reading->view_type != RDT_VIEW_NONE && !hidden;
+            float column = visible && entry.long_reading ? 180.0f : 120.0f;
+            float origin = entry.row->x + (left ? 14.0f : 0.0f);
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(entry.floating, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE),
+                left ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT);
+            EXPECT_FLOAT_EQ(entry.floating->x, entry.row->x + (left ? 2.0f : entry.row->width - 12.0f));
+            EXPECT_FLOAT_EQ(entry.base->x, origin + entry.padding);
+            EXPECT_FLOAT_EQ(entry.base->width, column);
+            EXPECT_FLOAT_EQ(entry.ruby->x, origin);
+            EXPECT_FLOAT_EQ(entry.ruby->width, column + entry.padding);
+            EXPECT_FLOAT_EQ(entry.tail->x, origin + entry.padding + column);
+            EXPECT_EQ(first_text_leaf(entry.base), entry.source);
+            EXPECT_EQ(entry.source->parent.get(), entry.parent); EXPECT_EQ(entry.source->text_data(), entry.data);
+            ASSERT_NE(entry.source->rect, nullptr); EXPECT_EQ(entry.source->rect->line_number, 0);
+            Rect bounds = {};
+            view_get_visual_bounds(entry.base, &bounds.x, &bounds.y, &bounds.width, &bounds.height);
+            // ruby-align:start assigns remaining column space to the last source character's range.
+            for (unsigned character = 0; character < 6; character++)
+                expect_character_rect(range, entry.source, character,
+                    {origin + entry.padding + (float)character * 20.0f, bounds.y,
+                        20.0f + (character == 5 ? column - 120.0f : 0.0f), 20.0f});
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(true, false); }
+    for (bool left : {false, true}) {
+        for (Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "--float-side", left ? "left" : "right"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.row, "width", left ? "300px" : "400px"));
+        }
+        check(left, false);
+    }
+    for (bool hidden : {true, false}) {
+        for (size_t index = 0; index < 8; index++)
+            ASSERT_TRUE(dom_cssom_set_inline_property(cases[index].reading, "display", hidden ? "none" : "ruby-text"));
+        check(true, hidden);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyWholeSegmentsRetainNewFloatExclusions) {
+    ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* row = find("series"), *ruby = find("series-ruby"), *tail = find("series-tail");
+    DomElement* bases[] = {find("series-first"), find("series-second")};
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(tail, nullptr);
+    DomText* sources[2] = {};
+    for (size_t index = 0; index < 2; index++) {
+        ASSERT_NE(bases[index], nullptr); sources[index] = first_text_leaf(bases[index]);
+        ASSERT_NE(sources[index], nullptr);
+    }
+    for (bool left : {true, false, true}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(row, "--float-side", left ? "left" : "right"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float start = row->x + (left ? 14.0f : 0.0f);
+        EXPECT_FLOAT_EQ(ruby->x, start); EXPECT_FLOAT_EQ(ruby->width, 180.0f);
+        EXPECT_FLOAT_EQ(tail->x, start + 180.0f);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (size_t index = 0; index < 2; index++) {
+            EXPECT_EQ(first_text_leaf(bases[index]), sources[index]);
+            EXPECT_FLOAT_EQ(bases[index]->x, start + (float)index * 100.0f);
+            Rect bounds = {}; view_get_visual_bounds(bases[index], &bounds.x, &bounds.y, &bounds.width, &bounds.height);
+            for (unsigned character = 0; character < 4; character++)
+                expect_character_rect(range, sources[index], character,
+                    {start + (float)index * 100.0f + (float)character * 20.0f, bounds.y, 20.0f, 20.0f});
+        }
+        dom_range_release(range);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyFirstLinePositionChangesAcrossOneFragmentedSource) {
+    ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    DomElement* row = dom_find_element_by_id(document->root, "fragmented");
+    DomElement* ruby = dom_find_element_by_id(document->root, "fragmented-ruby");
+    DomElement* reading = dom_find_element_by_id(document->root, "fragmented-reading");
+    ASSERT_NE(row, nullptr); ASSERT_NE(ruby, nullptr); ASSERT_NE(reading, nullptr);
+    DomText* base = first_text_leaf(ruby), *annotation = first_text_leaf(reading);
+    ASSERT_NE(base, nullptr); ASSERT_NE(annotation, nullptr);
+    DomNode* base_parent = base->parent, *reading_parent = annotation->parent;
+    const unsigned char* base_data = base->text_data(), *reading_data = annotation->text_data();
+    const struct { const char* width; unsigned line[3]; } widths[] = {
+        {"140px", {0, 0, 1}}, {"80px", {0, 1, 2}}, {"400px", {0, 0, 0}}, {"140px", {0, 0, 1}}};
+    for (bool under : {true, false, true}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(row, "--first-side", under ? "under" : "over"));
+        for (const auto& state : widths) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", state.width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_EQ(first_text_leaf(ruby), base); EXPECT_EQ(first_text_leaf(reading), annotation);
+            EXPECT_EQ(base->parent.get(), base_parent); EXPECT_EQ(annotation->parent.get(), reading_parent);
+            EXPECT_EQ(base->text_data(), base_data); EXPECT_EQ(annotation->text_data(), reading_data);
+            DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+            Rect first = {}; ASSERT_TRUE(character_rect(range, base, 0, &first));
+            for (unsigned word = 0; word < 3; word++) {
+                Rect source = {}, parallel = {};
+                ASSERT_TRUE(character_rect(range, base, word * 4, &source));
+                ASSERT_TRUE(character_rect(range, annotation, word * 7, &parallel));
+                EXPECT_FLOAT_EQ(source.y, first.y + (float)state.line[word] * 40.0f);
+                EXPECT_FLOAT_EQ(parallel.y, source.y + (under && state.line[word] == 0 ? 20.0f : -10.0f));
+                EXPECT_FLOAT_EQ(source.height, 20.0f); EXPECT_FLOAT_EQ(parallel.height, 10.0f);
+            }
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(ruby, CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE),
+                CSS_VALUE_ALTERNATE);
+            dom_range_release(range);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyFirstLinePositionFollowsSelectedLineInheritanceAndMetrics) {
+    ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool projected; bool authored_under; bool normal_under; bool soft; bool tight;
+        CssEnum normal_keyword = CSS_VALUE_ALTERNATE;
+        DomText* base[2]; DomText* reading[2]; DomNode* parent[2]; const unsigned char* data[2];
+    } cases[] = {{"under", true, true}, {"color"}, {"local", false, false, false, false, false, CSS_VALUE_OVER},
+        {"inherit", true, true}, {"initial"},
+        {"unset", true, true}, {"invalid", true, true}, {"normal-under", true, false, true},
+        {"constant", false, false, true}, {"ancestor", false, false, false, false, false, CSS_VALUE_OVER},
+        {"soft", true, true, false, true},
+        {"tight", true, true, false, false, true}};
+    auto part = [&](const Case& entry, size_t second, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s-%s", entry.id, second ? "-second" : "", suffix); return find(id);
+    };
+    for (Case& entry : cases) for (size_t line = 0; line < 2; line++) {
+        entry.base[line] = first_text_leaf(part(entry, line, "ruby"));
+        entry.reading[line] = first_text_leaf(part(entry, line, "reading"));
+        ASSERT_NE(entry.base[line], nullptr); ASSERT_NE(entry.reading[line], nullptr);
+        entry.parent[line] = entry.reading[line]->parent; entry.data[line] = entry.reading[line]->text_data();
+    }
+    enum class Width { Authored, Wide, Narrow };
+    enum class Rule { Authored, Over, Under };
+    auto check = [&](Width width, Rule rule) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-first-line-position"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            for (size_t second = 0; second < 2; second++) {
+                ASSERT_NE(entry.base[second]->rect, nullptr);
+                int line = entry.base[second]->rect->line_number;
+                int expected_line = width == Width::Narrow ? (second ? entry.soft ? 2 : 3 : 1)
+                    : second && !(entry.soft && width == Width::Wide) ? 1 : 0;
+                EXPECT_EQ(line, expected_line);
+                bool under = entry.normal_under;
+                if (entry.projected && line == 0)
+                    under = rule == Rule::Authored ? entry.authored_under : rule == Rule::Under;
+                DomElement* ruby = part(entry, second, "ruby"), *reading = part(entry, second, "reading");
+                EXPECT_EQ(css_prop_compute_cascaded_keyword(ruby, CSS_PROPERTY_RUBY_POSITION, CSS_VALUE_ALTERNATE),
+                    entry.normal_under ? CSS_VALUE_UNDER : entry.normal_keyword);
+                Rect base = {}, annotation = {};
+                view_get_visual_bounds(ruby, &base.x, &base.y, &base.width, &base.height);
+                view_get_visual_bounds(reading, &annotation.x, &annotation.y, &annotation.width, &annotation.height);
+                EXPECT_FLOAT_EQ(base.width, 80.0f); EXPECT_FLOAT_EQ(base.height, 20.0f);
+                EXPECT_FLOAT_EQ(annotation.x, base.x); EXPECT_FLOAT_EQ(annotation.width, 80.0f);
+                EXPECT_FLOAT_EQ(annotation.height, 10.0f);
+                float y = under ? base.y + base.height : base.y - annotation.height;
+                EXPECT_FLOAT_EQ(annotation.y, y);
+                EXPECT_EQ(first_text_leaf(reading), entry.reading[second]);
+                EXPECT_EQ(entry.reading[second]->parent.get(), entry.parent[second]);
+                EXPECT_EQ(entry.reading[second]->text_data(), entry.data[second]);
+                for (unsigned character = 0; character < 8; character++)
+                    expect_character_rect(range, entry.reading[second], character,
+                        {base.x + (float)character * 10.0f, y, 10.0f, 10.0f});
+            }
+            if (entry.tight && width != Width::Narrow) {
+                bool first_under = rule == Rule::Authored ? entry.authored_under : rule == Rule::Under;
+                // padding hosts first-line over-leading; an under reading must reserve its own advance.
+                EXPECT_FLOAT_EQ(find(entry.id)->height, first_under ? 80.0f : 70.0f);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(Width::Authored, Rule::Authored); }
+    for (Width width : {Width::Wide, Width::Narrow, Width::Authored}) {
+        for (const Case& entry : cases)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "width",
+                width == Width::Wide ? "400px" : width == Width::Narrow ? "130px" : "300px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(width, Rule::Authored);
+    }
+    for (Rule rule : {Rule::Over, Rule::Under}) {
+        for (const Case& entry : cases)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "--first-side", rule == Rule::Over ? "over" : "under"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(Width::Authored, rule);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyLineSidesFollowLineOverWithoutReversingBlockProgression) {
+    ASSERT_NE(load("test/html/layout_ruby_line_sides.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool vertical; bool reverse; float top, right, bottom, left;
+        size_t lines; float padding; DomText* source[3]; DomNode* parent[3]; const unsigned char* data[3];
+    } cases[] = {{"horizontal", false, false, 0, 0, 0, 0, 1},
+        {"horizontal-all", false, false, 10, 10, 10, 10, 1},
+        {"horizontal-top", false, false, 10, 0, 0, 0, 1},
+        {"horizontal-bottom", false, false, 0, 0, 10, 0, 1},
+        {"horizontal-lines", false, false, 0, 0, 0, 0, 3},
+        {"lr", true, false, 0, 0, 0, 0, 1}, {"lr-all", true, false, 10, 10, 10, 10, 1},
+        {"lr-top", true, false, 10, 0, 0, 0, 1}, {"lr-bottom", true, false, 0, 0, 10, 0, 1},
+        {"lr-lines", true, false, 0, 0, 0, 0, 3},
+        {"rl", true, true, 0, 0, 0, 0, 1}, {"rl-all", true, true, 10, 10, 10, 10, 1},
+        {"rl-top", true, true, 10, 0, 0, 0, 1}, {"rl-bottom", true, true, 0, 0, 10, 0, 1},
+        {"rl-lines", true, true, 0, 0, 0, 0, 3},
+        {"horizontal-padding", false, false, 0, 0, 0, 0, 3, 20},
+        {"lr-padding", true, false, 0, 0, 0, 0, 3, 20},
+        {"rl-padding", true, true, 0, 0, 0, 0, 3, 20}};
+    auto part = [&](const Case& entry, size_t line, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s-%s", entry.id,
+            line == 0 ? "" : line == 1 ? "-second" : "-third", suffix); return find(id);
+    };
+    auto bounds = [](DomElement* element) {
+        Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height); return box;
+    };
+    for (Case& entry : cases) for (size_t line = 0; line < entry.lines; line++) {
+        DomText* text = first_text_leaf(part(entry, line, "reading")); ASSERT_NE(text, nullptr);
+        entry.source[line] = text; entry.parent[line] = text->parent; entry.data[line] = text->text_data();
+    }
+    auto check = [&](bool under) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-line-sides"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id); Rect previous = {};
+            for (size_t line = 0; line < entry.lines; line++) {
+                Rect base = bounds(part(entry, line, "ruby")), reading = bounds(part(entry, line, "reading"));
+                if (!line && entry.padding > 0.0f) {
+                    char id[80]; str_fmt(id, sizeof(id), "%s-flow", entry.id);
+                    Rect flow = bounds(find(id));
+                    if (!entry.vertical) EXPECT_FLOAT_EQ(base.y, flow.y + entry.padding);
+                    else if (entry.reverse)
+                        EXPECT_FLOAT_EQ(base.x + base.width, flow.x + flow.width - entry.padding);
+                    else EXPECT_FLOAT_EQ(base.x, flow.x + entry.padding);
+                }
+                if (entry.vertical) {
+                    if (under) EXPECT_FLOAT_EQ(reading.x + reading.width + entry.right, base.x);
+                    else EXPECT_FLOAT_EQ(reading.x - entry.left, base.x + base.width);
+                    EXPECT_FLOAT_EQ(reading.width, 10.0f); EXPECT_FLOAT_EQ(reading.height, 80.0f);
+                } else {
+                    if (under) EXPECT_FLOAT_EQ(reading.y - entry.top, base.y + base.height);
+                    else EXPECT_FLOAT_EQ(reading.y + reading.height + entry.bottom, base.y);
+                    EXPECT_FLOAT_EQ(reading.width, 80.0f); EXPECT_FLOAT_EQ(reading.height, 10.0f);
+                }
+                Rect envelope = reading;
+                envelope.x -= entry.left; envelope.y -= entry.top;
+                envelope.width += entry.left + entry.right; envelope.height += entry.top + entry.bottom;
+                float end_x = max(envelope.x + envelope.width, base.x + base.width);
+                float end_y = max(envelope.y + envelope.height, base.y + base.height);
+                envelope.x = min(envelope.x, base.x); envelope.y = min(envelope.y, base.y);
+                envelope.width = end_x - envelope.x; envelope.height = end_y - envelope.y;
+                if (line) {
+                    if (!entry.vertical) EXPECT_LE(previous.y + previous.height, envelope.y);
+                    else if (entry.reverse) EXPECT_GE(previous.x, envelope.x + envelope.width);
+                    else EXPECT_LE(previous.x + previous.width, envelope.x);
+                }
+                previous = envelope;
+                DomText* text = entry.source[line];
+                EXPECT_EQ(first_text_leaf(part(entry, line, "reading")), text);
+                EXPECT_EQ(text->parent.get(), entry.parent[line]); EXPECT_EQ(text->text_data(), entry.data[line]);
+                for (unsigned character = 0; character < 8; character++) {
+                    Rect expected = {reading.x, reading.y, 10.0f, 10.0f};
+                    if (entry.vertical) expected.y += (float)character * 10.0f;
+                    else expected.x += (float)character * 10.0f;
+                    expect_character_rect(range, text, character, expected);
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(false); }
+    for (bool under : {true, false}) {
+        for (const Case& entry : cases) {
+            char id[80]; str_fmt(id, sizeof(id), "%s-flow", entry.id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "ruby-position", under ? "under" : "over"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(under);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyInlineMarginsContributeToColumnsWithoutEnteringBorderBoxes) {
+    ASSERT_NE(load("test/html/layout_ruby_inline_margins.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; float left, right; bool decorated; CssEnum width; bool base;
+        DomText* source[2]; DomNode* parent[2]; const unsigned char* data[2];
+    } cases[] = {{"left", 10, 0}, {"right", 0, 10}, {"both", 5, 15},
+        {"decorated", 5, 15, true}, {"minimum", 5, 15, false, CSS_VALUE_MIN_CONTENT},
+        {"maximum", 5, 15, false, CSS_VALUE_MAX_CONTENT}, {"custom", 5, 15},
+        {"base-inline", 5, 15, false, CSS_VALUE__UNDEF, true}};
+    auto part = [&](const Case& entry, bool control, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s%s%s", entry.id, control ? "-control" : "", suffix);
+        return find(id);
+    };
+    for (Case& entry : cases) for (size_t role = 0; role < 2; role++) {
+        DomText* text = first_text_leaf(part(entry, false, role ? "-reading" : "-ruby"));
+        ASSERT_NE(text, nullptr);
+        entry.source[role] = text; entry.parent[role] = text->parent; entry.data[role] = text->text_data();
+    }
+    auto check = [&](bool zero, bool swapped) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-inline-margins"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            float left = zero ? 0.0f : swapped ? entry.right : entry.left;
+            float right = zero ? 0.0f : swapped ? entry.left : entry.right;
+            float border_width = entry.decorated ? 90.0f : 80.0f;
+            float column = border_width + left + right;
+            DomElement* row = part(entry, false, ""), *control = part(entry, true, "");
+            const char* unit = entry.base ? "-base" : "-reading";
+            DomElement* ruby = part(entry, false, "-ruby"), *reading = part(entry, false, unit);
+            EXPECT_FLOAT_EQ(ruby->width, column);
+            EXPECT_FLOAT_EQ(part(entry, true, "-ruby")->width, column);
+            float reading_x = 0.0f; view_get_visual_bounds(reading, &reading_x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(reading_x, left); EXPECT_FLOAT_EQ(reading->width, border_width);
+            EXPECT_FLOAT_EQ(part(entry, true, unit)->width, column);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, column); EXPECT_FLOAT_EQ(sizes.max_content, column);
+            IntrinsicSizes row_sizes = measure_physical_widths(row);
+            // preferred intrinsic keywords constrain the parent's contribution as well as its used width.
+            EXPECT_FLOAT_EQ(row_sizes.min_content, entry.width == CSS_VALUE_MAX_CONTENT ? column + 10.0f : column);
+            EXPECT_FLOAT_EQ(row_sizes.max_content, entry.width == CSS_VALUE_MIN_CONTENT ? column : column + 10.0f);
+            if (entry.width == CSS_VALUE_MIN_CONTENT) EXPECT_FLOAT_EQ(row->width, column);
+            if (entry.width == CSS_VALUE_MAX_CONTENT) EXPECT_FLOAT_EQ(row->width, column + 10.0f);
+            float tail_x = 0.0f, tail_y = 0.0f, control_x = 0.0f, control_y = 0.0f;
+            view_get_visual_bounds(part(entry, false, "-tail"), &tail_x, &tail_y, nullptr, nullptr);
+            view_get_visual_bounds(part(entry, true, "-tail"), &control_x, &control_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(tail_x, control_x); EXPECT_FLOAT_EQ(tail_y - row->y, control_y - control->y);
+            for (size_t role = 0; role < 2; role++) {
+                const char* suffix = role ? "-reading" : "-ruby";
+                EXPECT_EQ(first_text_leaf(part(entry, false, suffix)), entry.source[role]);
+                EXPECT_EQ(entry.source[role]->parent.get(), entry.parent[role]);
+                EXPECT_EQ(entry.source[role]->text_data(), entry.data[role]);
+                expect_text_source_pair<16>(range, row, entry.source[role], control,
+                    first_text_leaf(part(entry, true, suffix)));
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(false, false); }
+    for (bool zero : {true, false}) {
+        for (const Case& entry : cases) {
+            float left = zero ? 0.0f : entry.right, right = zero ? 0.0f : entry.left;
+            const char* unit = entry.base ? "-base" : "-reading";
+            char value[32];
+            str_fmt(value, sizeof(value), "%.0fpx", left);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, false, unit), "margin-left", value));
+            str_fmt(value, sizeof(value), "%.0fpx", right);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, false, unit), "margin-right", value));
+            str_fmt(value, sizeof(value), "%.0fpx", left + (entry.decorated ? 3.0f : 0.0f));
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, true, unit), "padding-left", value));
+            str_fmt(value, sizeof(value), "%.0fpx", right);
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(entry, true, unit), "padding-right", value));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(zero, true);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationMarginsSeparateLevelsAndReserveRepeatedLineSpace) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_margins.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Row { const char* id; bool under; bool decorated; DomText* source[2]; } rows[] = {
+        {"over"}, {"under", true}, {"over-decorated", false, true}, {"under-decorated", true, true}};
+    auto part = [&](const Row& row, size_t line, const char* suffix) {
+        char id[80]; str_fmt(id, sizeof(id), "%s-%s%s", row.id, line ? "last" : "first", suffix);
+        return find(id);
+    };
+    for (Row& row : rows) for (size_t line = 0; line < 2; line++) {
+        row.source[line] = first_text_leaf(part(row, line, "-reading"));
+        ASSERT_NE(row.source[line], nullptr);
+    }
+    auto check = [&](float before, float after) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-annotation-margins"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        float row_y = 0.0f;
+        for (const Row& row : rows) {
+            SCOPED_TRACE(row.id);
+            float reading_height = row.decorated ? 22.0f : 10.0f;
+            float advance = 20.0f + reading_height + before + after;
+            EXPECT_FLOAT_EQ(find(row.id)->y, row_y);
+            float height = 80.0f + (row.under ? advance * 2.0f : 20.0f + advance);
+            EXPECT_FLOAT_EQ(find(row.id)->height, height);
+            for (size_t line = 0; line < 2; line++) {
+                DomElement* ruby = part(row, line, ""), *reading = part(row, line, "-reading");
+                ASSERT_NE(ruby, nullptr); ASSERT_NE(reading, nullptr);
+                float base_y = row_y + 80.0f + (float)line * advance;
+                Rect base = {}, annotation = {}, tail = {};
+                view_get_visual_bounds(ruby, &base.x, &base.y, &base.width, &base.height);
+                view_get_visual_bounds(reading, &annotation.x, &annotation.y, &annotation.width, &annotation.height);
+                view_get_visual_bounds(part(row, line, "-tail"), &tail.x, &tail.y, &tail.width, &tail.height);
+                EXPECT_FLOAT_EQ(base.x, 0.0f); EXPECT_FLOAT_EQ(base.y, base_y);
+                EXPECT_FLOAT_EQ(base.width, 80.0f); EXPECT_FLOAT_EQ(base.height, 20.0f);
+                float reading_y = row.under ? base_y + 20.0f + before : base_y - reading_height - after;
+                EXPECT_FLOAT_EQ(annotation.x, 0.0f); EXPECT_FLOAT_EQ(annotation.y, reading_y);
+                EXPECT_FLOAT_EQ(annotation.width, 80.0f); EXPECT_FLOAT_EQ(annotation.height, reading_height);
+                EXPECT_FLOAT_EQ(tail.x, 80.0f); EXPECT_FLOAT_EQ(tail.y, base_y + 12.0f);
+                EXPECT_EQ(first_text_leaf(reading), row.source[line]);
+                EXPECT_EQ(row.source[line]->parent.get(), reading);
+                EXPECT_STREQ((const char*)row.source[line]->text_data(), "xxxxxxxx");
+                for (size_t character : {size_t(0), size_t(7)}) {
+                    Rect source = {}; ASSERT_TRUE(character_rect(range, row.source[line], character, &source));
+                    EXPECT_FLOAT_EQ(source.x, (float)character * 10.0f);
+                    EXPECT_FLOAT_EQ(source.y, reading_y + (row.under && row.decorated ? 12.0f : 0.0f));
+                    EXPECT_FLOAT_EQ(source.width, 10.0f); EXPECT_FLOAT_EQ(source.height, 10.0f);
+                }
+            }
+            row_y += height;
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(9.0f, 11.0f); }
+    for (bool zero : {true, false}) {
+        for (const Row& row : rows) for (size_t line = 0; line < 2; line++) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(row, line, "-reading"), "margin-top", zero ? "0px" : "4px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(part(row, line, "-reading"), "margin-bottom", zero ? "0px" : "6px"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(zero ? 0.0f : 4.0f, zero ? 0.0f : 6.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyRelativeOffsetsSurviveColumnAndLinePlacement) {
+    ASSERT_NE(load("test/html/layout_ruby_relative_offsets.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* id; bool ancestor; bool offset_reading; bool atomic_reading; bool atomic_base;
+        DomText* base; DomText* reading; DomNode* base_parent; DomNode* reading_parent;
+        const unsigned char* base_data; const unsigned char* reading_data;
+    } cases[] = {{"root"}, {"ancestor", true}, {"sum", false, true},
+        {"atomic", false, true, true}, {"base-atom", false, true, false, true}};
+    auto part = [&](const char* id, const char* suffix) {
+        char name[64]; str_fmt(name, sizeof(name), "%s-%s", id, suffix); return find(name);
+    };
+    for (Case& entry : cases) {
+        entry.base = first_text_leaf(part(entry.id, "ruby"));
+        entry.reading = first_text_leaf(part(entry.id, "reading"));
+        ASSERT_NE(entry.base, nullptr); ASSERT_NE(entry.reading, nullptr);
+        entry.base_parent = entry.base->parent; entry.reading_parent = entry.reading->parent;
+        entry.base_data = entry.base->text_data(); entry.reading_data = entry.reading->text_data();
+    }
+    struct State { const char* root; const char* ancestor; const char* reading_x; const char* reading_y;
+        float root_x; float ancestor_x; float x; float y;
+    } states[] = {{"0px", "0px", "0px", "0px", 0, 0, 0, 0},
+        {"100px", "100px", "10px", "-50px", 100, 100, 10, -50},
+        {"-24px", "15px", "-7px", "13px", -24, 15, -7, 13},
+        {"0px", "0px", "0px", "0px", 0, 0, 0, 0}};
+    auto check = [&](const State& state) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-relative-offsets"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
+            const Case& entry = cases[index]; SCOPED_TRACE(entry.id);
+            float flow_x = index == 2 || index == 3 ? 20.0f : 0.0f;
+            float base_y = (float)index * 100.0f + 20.0f;
+            float root_x = flow_x + (entry.ancestor ? state.ancestor_x : state.root_x);
+            auto bounds = [&](DomElement* element, float x, float y, float width, float height) {
+                ASSERT_NE(element, nullptr);
+                Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height);
+                EXPECT_FLOAT_EQ(box.x, x); EXPECT_FLOAT_EQ(box.y, y);
+                EXPECT_FLOAT_EQ(box.width, width); EXPECT_FLOAT_EQ(box.height, height);
+            };
+            bounds(part(entry.id, "ruby"), root_x, base_y, 80.0f, 20.0f);
+            float reading_x = root_x + (entry.offset_reading ? state.x : 0.0f);
+            float reading_y = base_y - 10.0f + (entry.offset_reading ? state.y : 0.0f);
+            bounds(part(entry.id, "reading"), reading_x, reading_y, 80.0f, 10.0f);
+            bounds(part(entry.id, "tail"), flow_x + 80.0f, base_y + 12.0f, 10.0f, 4.0f);
+            if (entry.atomic_reading) bounds(find("reading-atom"), reading_x - 6.0f, reading_y + 7.0f, 80.0f, 10.0f);
+            if (entry.atomic_base) bounds(find("base-atom-box"), root_x + 6.0f, base_y + 7.0f, 80.0f, 20.0f);
+            EXPECT_EQ(first_text_leaf(part(entry.id, "ruby")), entry.base);
+            EXPECT_EQ(first_text_leaf(part(entry.id, "reading")), entry.reading);
+            EXPECT_EQ(entry.base->parent.get(), entry.base_parent); EXPECT_EQ(entry.reading->parent.get(), entry.reading_parent);
+            EXPECT_EQ(entry.base->text_data(), entry.base_data); EXPECT_EQ(entry.reading->text_data(), entry.reading_data);
+            for (bool annotation : {false, true}) {
+                DomText* text = annotation ? entry.reading : entry.base;
+                float x = annotation ? reading_x - (entry.atomic_reading ? 6.0f : 0.0f)
+                    : root_x + (entry.atomic_base ? 6.0f : 0.0f);
+                float y = annotation ? reading_y + (entry.atomic_reading ? 7.0f : 0.0f)
+                    : base_y + (entry.atomic_base ? 7.0f : 0.0f);
+                float advance = annotation ? 10.0f : 20.0f;
+                TestRadiantPaintGlyphs<16> glyphs;
+                ASSERT_TRUE(visit_text_paint_glyphs(find("result"), text, TestRadiantPaintGlyphs<16>::collect, &glyphs));
+                ASSERT_EQ(glyphs.count, dom_text_utf16_length(text));
+                // the collector emits local glyph coordinates; queries use document coordinates.
+                float frame_x = 0.0f, frame_y = 0.0f;
+                view_get_visual_bounds(text, &frame_x, &frame_y, nullptr, nullptr);
+                frame_x -= text->rect->x; frame_y -= text->rect->y;
+                for (size_t character = 0; character < glyphs.count; character++) {
+                    Rect box = {}; ASSERT_TRUE(character_rect(range, text, character, &box));
+                    EXPECT_FLOAT_EQ(box.x, x + (float)character * advance); EXPECT_FLOAT_EQ(box.y, y);
+                    EXPECT_FLOAT_EQ(box.width, advance); EXPECT_FLOAT_EQ(box.height, annotation ? 10.0f : 20.0f);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[character].x + frame_x, box.x);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[character].y + frame_y,
+                        box.y + font_get_rendering_ascender(text->font->font_handle));
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(states[0]); }
+    for (const State& state : states) {
+        for (const Case& entry : cases) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(entry.ancestor ? find("ancestor-span") : part(entry.id, "ruby"),
+                "left", entry.ancestor ? state.ancestor : state.root));
+            if (entry.offset_reading) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(part(entry.id, "reading"), "left", state.reading_x));
+                ASSERT_TRUE(dom_cssom_set_inline_property(part(entry.id, "reading"), "top", state.reading_y));
+            }
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(state);
+    }
+    DomElement* row = find("base-atom"), *ruby = find("base-atom-ruby"), *element = find("base-atom-box");
+    ASSERT_TRUE(dom_cssom_set_inline_property(element, "left", "10%"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(element, "top", "10%"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    Rect before = {}; view_get_visual_bounds(element, &before.x, &before.y, &before.width, &before.height);
+    float ruby_x = 0.0f; view_get_visual_bounds(ruby, &ruby_x, nullptr, nullptr, nullptr);
+    FlexFlowTestContext flow(&ui, document, row); ASSERT_NE(flow.arena, nullptr);
+    {
+        radiant::LayoutMeasureScope trial(&flow.layout, row);
+        row->width *= 0.5f; row->content_width *= 0.5f;
+        row->height *= 0.5f; row->content_height *= 0.5f;
+        element->x = element->y = 0.0f;
+        layout_relative_positioned(&flow.layout, lam::view_require_block(element));
+        float measured_x = 0.0f, measured_y = 0.0f;
+        view_get_visual_bounds(element, &measured_x, &measured_y, nullptr, nullptr);
+        EXPECT_NE(measured_x, before.x); EXPECT_NE(measured_y, before.y);
+    }
+    Rect after = {}; view_get_visual_bounds(element, &after.x, &after.y, &after.width, &after.height);
+    EXPECT_FLOAT_EQ(after.x, before.x); EXPECT_FLOAT_EQ(after.y, before.y);
+    EXPECT_FLOAT_EQ(after.width, before.width); EXPECT_FLOAT_EQ(after.height, before.height);
+    recompute_span_bounding_box_after_line_layout(lam::view_require<RDT_VIEW_INLINE>(ruby), false, ruby->font->font_handle);
+    float restored_x = 0.0f; view_get_visual_bounds(ruby, &restored_x, nullptr, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(restored_x, ruby_x);
+}
+
+TEST_F(RadiantTextQuery, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLines) {
+    ASSERT_NE(load("test/html/layout_ruby_float_band.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* rows[] = {"under", "over", "tall", "prefix", "wrap", "nested", "push", "counter", "single-wrap"};
+    struct Source { const char* id; DomText* text; DomNode* parent; const unsigned char* data; } sources[] = {
+        {"under-ruby"}, {"over-ruby"}, {"prefix-ruby"}, {"wrap-ruby"},
+        {"wrap-next-ruby"}, {"nested-ruby"}, {"push-ruby"}, {"counter-ruby"}, {"single-wrap-ruby"}
+    };
+    for (Source& source : sources) {
+        source.text = first_text_leaf(find(source.id));
+        ASSERT_NE(source.text, nullptr);
+        source.parent = source.text->parent;
+        source.data = source.text->text_data();
+    }
+    auto check = [&](float second_width, bool wide) {
+        float edge = max(50.0f, second_width);
+        auto bounds = [&](const char* id, float x, float y, float width, float height) {
+            SCOPED_TRACE(id);
+            DomElement* element = find(id); ASSERT_NE(element, nullptr);
+            Rect box = {}; view_get_visual_bounds(element, &box.x, &box.y, &box.width, &box.height);
+            EXPECT_FLOAT_EQ(box.x, x); EXPECT_FLOAT_EQ(box.y, y);
+            EXPECT_FLOAT_EQ(box.width, width); EXPECT_FLOAT_EQ(box.height, height);
+        };
+        for (size_t index = 0; index < sizeof(rows) / sizeof(rows[0]); index++) {
+            char id[64];
+            str_fmt(id, sizeof(id), "%s-first", rows[index]);
+            bounds(id, 0.0f, (float)index * 100.0f, 50.0f, 20.0f);
+            str_fmt(id, sizeof(id), "%s-second", rows[index]);
+            bounds(id, 0.0f, (float)index * 100.0f + 20.0f, second_width, 50.0f);
+        }
+        bounds("under-ruby", edge, 0.0f, 40.0f, 20.0f);
+        bounds("under-reading", edge, 20.0f, 40.0f, 10.0f);
+        bounds("over-ruby", edge, 110.0f, 40.0f, 20.0f);
+        bounds("over-reading", edge, 100.0f, 40.0f, 10.0f);
+        bounds("tall-control", edge, 200.0f, 40.0f, 30.0f);
+        bounds("prefix-control", edge, 300.0f, 30.0f, 20.0f);
+        bounds("prefix-ruby", edge + 30.0f, 300.0f, 40.0f, 20.0f);
+        bool wraps = !wide && second_width > 50.0f;
+        float wrap_x = edge + (wraps ? 0.0f : 30.0f);
+        float wrap_y = 400.0f + (wraps ? 20.0f : 0.0f);
+        bounds("wrap-control", edge, 400.0f, 30.0f, 20.0f);
+        bounds("wrap-ruby", wrap_x, wrap_y, 40.0f, 20.0f);
+        bounds("wrap-next-ruby", wrap_x + 40.0f, wrap_y, 40.0f, 20.0f);
+        bounds("nested-control", edge, 500.0f, 30.0f, 20.0f);
+        bounds("nested-wrapper", edge, 500.0f, 70.0f, 20.0f);
+        bounds("nested-ruby", edge + 30.0f, 500.0f, 40.0f, 20.0f);
+        bool clears = !wide && second_width > 50.0f;
+        bounds("push-ruby", clears ? 0.0f : edge, 600.0f + (clears ? 70.0f : 0.0f), 40.0f, 20.0f);
+        bounds("counter-ruby", edge, 700.0f, 40.0f, 20.0f);
+        bounds("counter-after", edge + 40.0f, 700.0f, 20.0f, 20.0f);
+        bounds("single-wrap-control", edge, 800.0f, 30.0f, 20.0f);
+        bounds("single-wrap-ruby", edge + (wraps ? 0.0f : 30.0f), 800.0f + (wraps ? 20.0f : 0.0f), 40.0f, 20.0f);
+        DomElement* after = find("counter-after");
+        ASSERT_NE(after->pseudo, nullptr); ASSERT_NE(after->pseudo->before, nullptr);
+        DomText* generated = first_text_leaf(after->pseudo->before);
+        ASSERT_NE(generated, nullptr); EXPECT_STREQ((const char*)generated->text_data(), "1");
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-float-band"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Source& source : sources) {
+            SCOPED_TRACE(source.id);
+            EXPECT_EQ(first_text_leaf(find(source.id)), source.text);
+            EXPECT_EQ(source.text->parent.get(), source.parent);
+            EXPECT_EQ(source.text->text_data(), source.data);
+            EXPECT_STREQ((const char*)source.data, "ab");
+            Rect first = {}, second = {};
+            ASSERT_TRUE(character_rect(range, source.text, 0, &first));
+            ASSERT_TRUE(character_rect(range, source.text, 1, &second));
+            float x = 0.0f, y = 0.0f;
+            view_get_visual_bounds(find(source.id), &x, &y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(first.x, x); EXPECT_FLOAT_EQ(first.y, y); EXPECT_FLOAT_EQ(first.width, 20.0f);
+            EXPECT_FLOAT_EQ(second.x, x + 20.0f); EXPECT_FLOAT_EQ(second.y, y); EXPECT_FLOAT_EQ(second.width, 20.0f);
+            TestRadiantPaintGlyphs<4> glyphs;
+            ASSERT_TRUE(visit_text_paint_glyphs(find("result"), source.text, TestRadiantPaintGlyphs<4>::collect, &glyphs));
+            ASSERT_EQ(glyphs.count, 2u);
+            EXPECT_EQ(glyphs.glyphs[0].codepoint, 'a'); EXPECT_EQ(glyphs.glyphs[1].codepoint, 'b');
+            EXPECT_FLOAT_EQ(glyphs.glyphs[0].x, first.x); EXPECT_FLOAT_EQ(glyphs.glyphs[1].x, second.x);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(100.0f, false); }
+    for (bool wide : {false, true, false}) {
+        for (const char* row : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-second", row);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", wide ? "100px" : "40px"));
+        }
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("wrap"), "width", wide ? "240px" : "180px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("push"), "width", wide ? "160px" : "120px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("single-wrap"), "width", wide ? "200px" : "160px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? 100.0f : 40.0f, wide);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
+    ASSERT_NE(load("test/html/layout_ruby_trailing_space.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    struct Case { const char* name; bool ruby; bool forced; bool nbsp; bool dominant = false;
+        DomText* source = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr;
+    } cases[] = {{"soft", true, false, false}, {"wide", true, false, false},
+        {"hard", true, true, false}, {"isolate-soft", false, false, false},
+        {"isolate-wide", false, false, false}, {"nbsp", true, false, true},
+        {"reading-dominates", true, false, false, true}};
+    for (Case& entry : cases) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-n", entry.name);
+        entry.source = first_text_leaf(find(id));
+        ASSERT_NE(entry.source, nullptr);
+        entry.parent = entry.source->parent;
+        entry.data = entry.source->text_data();
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-line-end-space"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.name);
+            DomElement* row = find(entry.name);
+            DomText* text = entry.source;
+            ASSERT_NE(text->rect, nullptr);
+            bool preserved = entry.nbsp || (!entry.forced && row->width > 240.0f);
+            float width = entry.dominant ? 60.0f : preserved ? 40.0f : 20.0f;
+            EXPECT_FLOAT_EQ(text->rect->width, width);
+            EXPECT_EQ(text->parent.get(), entry.parent);
+            EXPECT_EQ(text->text_data(), entry.data);
+            EXPECT_EQ(dom_text_utf16_length(text), 2u);
+            Rect letter = {}, space = {};
+            ASSERT_TRUE(character_rect(range, text, 0, &letter));
+            ASSERT_TRUE(character_rect(range, text, 1, &space));
+            float letter_width = entry.dominant ? 60.0f : 20.0f;
+            EXPECT_FLOAT_EQ(letter.width, letter_width);
+            EXPECT_FLOAT_EQ(space.x, letter.x + letter_width);
+            EXPECT_FLOAT_EQ(space.width, width - letter_width);
+            float row_x = 0.0f, row_y = 0.0f;
+            view_get_visual_bounds(row, &row_x, &row_y, nullptr, nullptr);
+            TestRadiantPaintGlyphs<4> base_glyphs;
+            ASSERT_TRUE(visit_text_paint_glyphs(row, text, TestRadiantPaintGlyphs<4>::collect, &base_glyphs));
+            ASSERT_GT(base_glyphs.count, 0u);
+            EXPECT_EQ(base_glyphs.glyphs[0].codepoint, 'n');
+            EXPECT_FLOAT_EQ(base_glyphs.glyphs[0].x,
+                letter.x - row_x + (entry.dominant ? 20.0f : 0.0f));
+            EXPECT_FLOAT_EQ(base_glyphs.glyphs[0].y,
+                letter.y - row_y + font_get_rendering_ascender(text->font->font_handle));
+            if (entry.dominant) {
+                EXPECT_FLOAT_EQ(letter.x - row_x, 220.0f);
+            }
+            if (entry.ruby) {
+                char id[64]; str_fmt(id, sizeof(id), "%s-reading", entry.name);
+                DomText* reading = first_text_leaf(find(id));
+                ASSERT_NE(reading, nullptr);
+                ASSERT_NE(reading->rect, nullptr);
+                EXPECT_FLOAT_EQ(reading->rect->width, width);
+                TestRadiantPaintGlyphs<8> glyphs;
+                ASSERT_TRUE(visit_text_paint_glyphs(row, reading, TestRadiantPaintGlyphs<8>::collect, &glyphs));
+                ASSERT_EQ(glyphs.count, dom_text_utf16_length(reading));
+                float start = text->rect->x + (width - 10.0f * (float)glyphs.count) * 0.5f;
+                for (size_t index = 0; index < glyphs.count; index++) {
+                    EXPECT_EQ(glyphs.glyphs[index].codepoint, 'x');
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[index].x, start + (float)index * 10.0f);
+                    EXPECT_FLOAT_EQ(glyphs.glyphs[index].y,
+                        reading->rect->y + font_get_rendering_ascender(reading->font->font_handle));
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial"); }
+    for (bool wide : {true, false}) {
+        for (const Case& entry : cases) {
+            if (!entry.dominant)
+                ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.name), "width", wide ? "480px" : "240px"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
+}
+
 TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     ASSERT_NE(load("test/html/layout_terminal_space_decoration.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -15805,6 +16730,433 @@ TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments)
     }
 }
 
+TEST_F(RadiantTextQuery, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColumns) {
+    ASSERT_NE(load("test/html/layout_ruby_mixed_segments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"before", "before-reading", "base", "reading", "after", "after-reading"};
+    struct Source { DomText* text = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr; };
+    struct Row { const char* id; unsigned pieces; bool latin; Source sources[6]; } rows[] = {
+        {"mixed", 2, false, {}}, {"wide-prefix", 2, false, {}}, {"wide-suffix", 2, false, {}},
+        {"japanese", 2, false, {}}, {"latin", 3, true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < 6; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* source = first_text_leaf(find(id));
+        ASSERT_NE(source, nullptr);
+        row.sources[role] = {source, source->parent, source->text_data()};
+    }
+    auto check = [&](bool narrow) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-mixed-segments"), nullptr);
+        SCOPED_TRACE(narrow ? "narrow" : "wide");
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64];
+            str_fmt(id, sizeof(id), "%s-%s", entry.id, !narrow && entry.latin ? "wide-control" : "control");
+            DomElement* control = find(id);
+            ASSERT_NE(control, nullptr);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            EXPECT_FLOAT_EQ(row->height, narrow ? (entry.latin ? 180.0f : 120.0f) : 60.0f);
+            float x, y, control_x, control_y;
+            view_get_visual_bounds(row, &x, &y, nullptr, nullptr);
+            view_get_visual_bounds(control, &control_x, &control_y, nullptr, nullptr);
+            for (size_t role = 0; role < 6; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(source.text, first_text_leaf(find(id)));
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                DomText* references[3] = {};
+                bool split = role == 2 || role == 3;
+                size_t count = split && (narrow || !entry.latin) ? entry.pieces : 1;
+                for (size_t part = 0; part < count; part++) {
+                    if (!narrow && entry.latin)
+                        str_fmt(id, sizeof(id), "%s-wide-%s", entry.id, roles[role]);
+                    else if (split)
+                        str_fmt(id, sizeof(id), "%s-c-%s%c", entry.id, role == 3 ? "r" : "", static_cast<char>('a' + part));
+                    else str_fmt(id, sizeof(id), "%s-c-%s", entry.id, roles[role]);
+                    references[part] = first_text_leaf(find(id));
+                    ASSERT_NE(references[part], nullptr) << id;
+                }
+                expect_text_paint_sources<32>(row, source.text, control, references, count);
+                unsigned offset = 0;
+                for (size_t part = 0; part < count; part++) {
+                    unsigned length = dom_text_utf16_length(references[part]);
+                    for (unsigned index = 0; index < length; index++) {
+                        SCOPED_TRACE(offset + index);
+                        Rect expected = {};
+                        ASSERT_TRUE(character_rect(range, references[part], index, &expected));
+                        expected.x += x - control_x; expected.y += y - control_y;
+                        expect_character_rect(range, source.text, offset + index, expected);
+                    }
+                    if (narrow && entry.latin && role == 3 && part + 1 < count) {
+                        Rect edge = {};
+                        ASSERT_TRUE(character_rect(range, references[part], length - 1, &edge));
+                        edge.x += edge.width + x - control_x; edge.y += y - control_y;
+                        edge.width = 0.0f;
+                        expect_character_rect(range, source.text, offset + length, edge);
+                    }
+                    offset += length + (narrow && entry.latin && split ? 1 : 0);
+                }
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(true); }
+    for (bool narrow : {false, true}) {
+        for (const Row& row : rows) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(row.id), "width", narrow ? "100px" : "400px"));
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", row.id);
+            DomElement* control = find(id);
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, "width", narrow ? "100px" : "400px"));
+            for (DomNode* child = control->first_child; child; child = child->next_sibling)
+                if (child->is_element() && child->tag() == MARKUP_NAME_BR)
+                    ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(), "display", narrow ? "inline" : "none"));
+        }
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-control"), "display", narrow ? "block" : "none"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-wide-control"), "display", narrow ? "none" : "block"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(find("latin-wide-control"), "width", "400px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(narrow);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirections) {
+    ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base", "reading"};
+    struct Source { DomText* text = nullptr; DomNode* parent = nullptr; const unsigned char* data = nullptr; };
+    struct Row { const char* id; bool rtl; Source sources[2]; } rows[] = {
+        {"ltr-reading", false, {}}, {"ltr-base", false, {}}, {"ltr-both", false, {}}, {"ltr-wide", false, {}},
+        {"rtl-reading", true, {}}, {"rtl-base", true, {}}, {"rtl-both", true, {}}, {"rtl-wide", true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < 2; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* text = first_text_leaf(find(id));
+        ASSERT_NE(text, nullptr);
+        row.sources[role] = {text, text->parent, text->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-atomic-coordinates"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, 40.0f);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            str_fmt(id, sizeof(id), "%s-ruby", entry.id);
+            EXPECT_FLOAT_EQ(find(id)->width, 40.0f);
+            for (size_t role = 0; role < 2; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", entry.id, roles[role]);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(reference, nullptr);
+                expect_text_source_pair<8>(range, row, source.text, control, reference);
+            }
+        }
+        // an annotation translation cannot change the independent box's zero-line-height text origin.
+        DomElement* zero = find("zero-reading");
+        DomElement* zero_control = find("zero-control");
+        DomText* zero_text = first_text_leaf(zero);
+        DomText* zero_reference = first_text_leaf(zero_control);
+        ASSERT_NE(zero_text, nullptr);
+        ASSERT_NE(zero_reference, nullptr);
+        ASSERT_NE(zero_text->rect, nullptr);
+        ASSERT_NE(zero_reference->rect, nullptr);
+        EXPECT_FLOAT_EQ(zero->height, 0.0f);
+        EXPECT_FLOAT_EQ(zero->height, zero_control->height);
+        EXPECT_FLOAT_EQ(zero_text->rect->x, zero_reference->rect->x);
+        EXPECT_FLOAT_EQ(zero_text->rect->y, zero_reference->rect->y);
+        float zero_x, zero_y, control_x, control_y;
+        view_get_visual_bounds(zero, &zero_x, &zero_y, nullptr, nullptr);
+        view_get_visual_bounds(zero_control, &control_x, &control_y, nullptr, nullptr);
+        for (unsigned index = 0; index < dom_text_utf16_length(zero_reference); index++) {
+            Rect expected = {};
+            ASSERT_TRUE(character_rect(range, zero_reference, index, &expected));
+            expected.x += zero_x - control_x; expected.y += zero_y - control_y;
+            expect_character_rect(range, zero_text, index, expected);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial");
+    }
+    for (bool reverse : {true, false}) {
+        for (const Row& entry : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            for (DomElement* row : {find(entry.id), find(id)}) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", reverse ? "260px" : "200px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(row, "direction", entry.rtl != reverse ? "rtl" : "ltr"));
+            }
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(reverse ? "reverse" : "restore");
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndResets) {
+    ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    DomElement* reading = dom_find_element_by_id(document->root, "ua-reading");
+    DomElement* atomic = dom_find_element_by_id(document->root, "ua-atomic");
+    ASSERT_NE(reading, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    DomText* source = first_text_leaf(atomic);
+    ASSERT_NE(source, nullptr);
+    const unsigned char* data = source->text_data();
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        EXPECT_FLOAT_EQ(atomic->height, 20.0f);
+    }
+    const struct { const char* style; float height; } cases[] = {
+        {"font-size:20px;line-height:0", 0.0f}, {"font-size:20px;line-height:12px", 12.0f},
+        {"font-size:20px;line-height:inherit", 100.0f}, {"font-size:20px;line-height:unset", 100.0f},
+        {"all:inherit;font-size:20px", 100.0f}, {"all:unset;font-size:20px", 100.0f},
+        {"all:initial;font-family:Ahem;font-size:20px", 20.0f},
+        {"all:revert;font-family:Ahem;font-size:20px", 20.0f},
+        {"font:20px Ahem", 20.0f}, {"font-size:20px", 20.0f}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.style);
+        ASSERT_TRUE(reading->set_attribute("style", entry.style));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(atomic->height, entry.height);
+        EXPECT_EQ(first_text_leaf(atomic), source);
+        EXPECT_EQ(source->parent.get(), atomic);
+        EXPECT_EQ(source->text_data(), data);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyColumnsKeepPairedSourcesAcrossSharedLevelFragments) {
+    ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base-a", "base-b", "reading-a", "reading-b", "second-a", "second-b"};
+    struct Source { DomText* text; DomNode* parent; const unsigned char* data; };
+    struct Row { const char* id; size_t count; bool collapsed; Source sources[6]; } rows[] = {
+        {"columns", 4, false, {}}, {"levels", 6, false, {}}, {"neighbors", 4, false, {}},
+        {"whole", 4, false, {}}, {"collapsed", 6, true, {}}
+    };
+    for (Row& row : rows) for (size_t role = 0; role < row.count; role++) {
+        char id[64]; str_fmt(id, sizeof(id), "%s-%s", row.id, roles[role]);
+        DomText* source = first_text_leaf(find(id));
+        ASSERT_NE(source, nullptr);
+        row.sources[role] = {source, source->parent, source->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-column-fragments"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const Row& entry : rows) {
+            SCOPED_TRACE(entry.id);
+            DomElement* row = find(entry.id);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            str_fmt(id, sizeof(id), "%s-ruby", entry.id);
+            IntrinsicSizes widths = measure_physical_widths(find(id));
+            str_fmt(id, sizeof(id), "%s-control-ruby", entry.id);
+            IntrinsicSizes control_widths = measure_physical_widths(find(id));
+            EXPECT_FLOAT_EQ(widths.min_content, control_widths.min_content);
+            EXPECT_FLOAT_EQ(widths.max_content, control_widths.max_content);
+            if (strcmp(entry.id, "neighbors") == 0) {
+                // the first paired prefix fits beside the ordinary text on the same line.
+                Rect prefix = {}, first_base = {};
+                ASSERT_TRUE(character_rect(range, first_text_leaf(row), 0, &prefix));
+                ASSERT_TRUE(character_rect(range, entry.sources[0].text, 0, &first_base));
+                EXPECT_FLOAT_EQ(first_base.y, prefix.y);
+            }
+            for (size_t role = 0; role < entry.count; role++) {
+                SCOPED_TRACE(roles[role]);
+                const Source& source = entry.sources[role];
+                str_fmt(id, sizeof(id), "%s-%s", entry.id, roles[role]);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", entry.id, roles[role]);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(reference, nullptr);
+                if (entry.collapsed && role == 3) {
+                    EXPECT_EQ(source.text->rect, nullptr);
+                    EXPECT_EQ(reference->rect, nullptr);
+                    EXPECT_EQ(source.text->view_type, RDT_VIEW_NONE);
+                    EXPECT_EQ(reference->view_type, RDT_VIEW_NONE);
+                    continue;
+                }
+                expect_text_source_pair<16>(range, row, source.text, control, reference);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial");
+    }
+    for (bool wide : {true, false}) {
+        for (const Row& entry : rows) {
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", entry.id);
+            const char* width = wide ? "240px" : strcmp(entry.id, "whole") == 0 ? "60px" : "90px";
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
+}
+
+TEST_F(RadiantTextQuery, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalFonts) {
+    ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* roles[] = {"base-a", "base-b", "reading-a", "reading-b"};
+    auto check = [&]() {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-shared-column-baselines"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (const char* name : {"unequal", "cross", "descending"}) {
+            SCOPED_TRACE(name);
+            DomElement* row = find(name);
+            char id[64]; str_fmt(id, sizeof(id), "%s-control", name);
+            DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            for (const char* role : roles) {
+                SCOPED_TRACE(role);
+                str_fmt(id, sizeof(id), "%s-%s", name, role);
+                DomText* source = first_text_leaf(find(id));
+                str_fmt(id, sizeof(id), "%s-control-%s", name, role);
+                DomText* reference = first_text_leaf(find(id));
+                ASSERT_NE(source, nullptr);
+                ASSERT_NE(reference, nullptr);
+                expect_text_source_pair<16>(range, row, source, control, reference);
+            }
+            str_fmt(id, sizeof(id), "%s-reading-a", name);
+            DomText* first = first_text_leaf(find(id));
+            str_fmt(id, sizeof(id), "%s-reading-b", name);
+            DomText* second = first_text_leaf(find(id));
+            Rect first_rect = {}, second_rect = {};
+            ASSERT_TRUE(character_rect(range, first, 0, &first_rect));
+            ASSERT_TRUE(character_rect(range, second, 0, &second_rect));
+            // CSS Ruby §3.1: readings within one level share an inline-formatting baseline.
+            EXPECT_FLOAT_EQ(first_rect.y + first->font->ascender,
+                second_rect.y + second->font->ascender);
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(); }
+    DomText* base = first_text_leaf(find("descending-base-b"));
+    DomText* first_reading = first_text_leaf(find("descending-reading-a"));
+    DomText* last_reading = first_text_leaf(find("descending-reading-b"));
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(first_reading, nullptr);
+    ASSERT_NE(last_reading, nullptr);
+    DomNode* parent = last_reading->parent;
+    const unsigned char* data = last_reading->text_data();
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("descending"), "width", "180px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    for (bool retained : {false, true}) {
+        if (retained) layout_html_doc(&ui, document, true);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-shared-wrapped-baseline"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        Rect large = {}, small = {}, tail_base = {}, tail_reading = {};
+        Rect control_base = {}, control_reading = {};
+        ASSERT_TRUE(character_rect(range, first_reading, 0, &large));
+        ASSERT_TRUE(character_rect(range, last_reading, 0, &small));
+        EXPECT_FLOAT_EQ(large.y + first_reading->font->ascender,
+            small.y + last_reading->font->ascender);
+        ASSERT_TRUE(character_rect(range, base, 3, &tail_base));
+        ASSERT_TRUE(character_rect(range, last_reading, 2, &tail_reading));
+        ASSERT_TRUE(character_rect(range, first_text_leaf(find("descending-tail-base")), 0, &control_base));
+        ASSERT_TRUE(character_rect(range, first_text_leaf(find("descending-tail-reading")), 0, &control_reading));
+        // the previous line's larger reading cannot set the next line's annotation baseline.
+        EXPECT_FLOAT_EQ(tail_reading.y - tail_base.y, control_reading.y - control_base.y);
+        EXPECT_FLOAT_EQ(find("descending")->height,
+            find("descending-control")->height + find("descending-tail-control")->height);
+        EXPECT_EQ(first_text_leaf(find("descending-reading-b")), last_reading);
+        EXPECT_EQ(last_reading->parent.get(), parent);
+        EXPECT_EQ(last_reading->text_data(), data);
+        dom_range_release(range);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(find("descending"), "width", "400px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    check();
+}
+
+TEST_F(RadiantTextQuery, RubyMixedAtomicUnitsKeepParallelTextAndLocalWrapping) {
+    ASSERT_NE(load("test/html/layout_ruby_mixed_atomic.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    const char* names[] = {"prefix-base", "prefix-reading", "suffix-base", "suffix-reading",
+        "wrapped-base", "wrapped-reading", "ordinary"};
+    const struct { const char* actual; const char* first; const char* last; } roles[] = {
+        {"before", "before", nullptr}, {"before-reading", "before-reading", nullptr},
+        {"base", "a", "b"}, {"reading", "ra", "rb"},
+        {"after", "after", nullptr}, {"after-reading", "after-reading", nullptr}
+    };
+    constexpr size_t row_count = sizeof(names) / sizeof(*names);
+    constexpr size_t role_count = sizeof(roles) / sizeof(*roles);
+    struct Source { DomText* text; DomNode* parent; const unsigned char* data; } sources[row_count][role_count] = {};
+    for (size_t row = 0; row < row_count; row++) for (size_t role = 0; role < role_count; role++) {
+        char id[80]; str_fmt(id, sizeof(id), "%s-%s", names[row], roles[role].actual);
+        DomText* text = first_text_leaf(find(id));
+        ASSERT_NE(text, nullptr);
+        sources[row][role] = {text, text->parent, text->text_data()};
+    }
+    auto check = [&](const char* phase) {
+        SCOPED_TRACE(phase);
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-mixed-atomic"), nullptr);
+        DomRange* range = dom_range_create(document->state);
+        ASSERT_NE(range, nullptr);
+        for (size_t row = 0; row < row_count; row++) {
+            SCOPED_TRACE(names[row]);
+            char id[80]; str_fmt(id, sizeof(id), "%s-control", names[row]);
+            DomElement* owner = find(names[row]); DomElement* control = find(id);
+            EXPECT_FLOAT_EQ(owner->height, control->height);
+            for (size_t role = 0; role < role_count; role++) {
+                SCOPED_TRACE(roles[role].actual);
+                const Source& source = sources[row][role];
+                str_fmt(id, sizeof(id), "%s-%s", names[row], roles[role].actual);
+                EXPECT_EQ(first_text_leaf(find(id)), source.text);
+                EXPECT_EQ(source.text->parent.get(), source.parent);
+                EXPECT_EQ(source.text->text_data(), source.data);
+                str_fmt(id, sizeof(id), "%s-control-%s", names[row], roles[role].first);
+                DomText* references[] = {first_text_leaf(find(id)), nullptr};
+                if (roles[role].last) {
+                    str_fmt(id, sizeof(id), "%s-control-%s", names[row], roles[role].last);
+                    references[1] = first_text_leaf(find(id));
+                }
+                ASSERT_NE(references[0], nullptr);
+                expect_text_source_parts<32>(range, owner, source.text, control, references,
+                    roles[role].last ? 2 : 1);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(retained ? "retained" : "initial"); }
+    for (bool wide : {true, false}) {
+        for (const char* name : names) {
+            const char* width = wide ? "240px" : strcmp(name, "ordinary") == 0 ? "140px" : "100px";
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(name), "width", width));
+            char id[80]; str_fmt(id, sizeof(id), "%s-control", name);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "width", width));
+            str_fmt(id, sizeof(id), "%s-control-cut", name);
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(id), "display", wide ? "none" : "inline"));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(wide ? "wide" : "narrow");
+    }
+}
+
 TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
     ASSERT_NE(load("test/html/layout_ruby_multicol_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
@@ -15942,6 +17294,66 @@ TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
         check(cases[0], strcmp(width, "60px") == 0 ? 60.0f : 30.0f);
         EXPECT_EQ(atomic->parent.get(), parent);
         EXPECT_EQ(parent, base);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelope) {
+    ASSERT_NE(load("test/html/layout_ruby_zero_base_envelope.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id, const char* suffix) {
+        char name[80]; str_fmt(name, sizeof(name), "%s-%s", id, suffix);
+        return dom_find_element_by_id(document->root, name);
+    };
+    struct Case { const char* id; bool under; bool explicit_base; bool mutable_font;
+        DomText* reading; DomNode* parent; const unsigned char* data;
+    } cases[] = {{"over-empty", false, true, true}, {"over-text", false, true, true},
+        {"over-atomic", false, true, true}, {"over-anonymous"}, {"over-missing"},
+        {"over-normal", false, true}, {"under-empty", true, true, true},
+        {"under-text", true, true, true}, {"under-atomic", true, true, true},
+        {"under-anonymous", true}, {"under-missing", true}, {"under-normal", true, true}};
+    for (Case& entry : cases) {
+        entry.reading = first_text_leaf(find(entry.id, "reading"));
+        ASSERT_NE(entry.reading, nullptr);
+        entry.parent = entry.reading->parent; entry.data = entry.reading->text_data();
+    }
+    auto check = [&](float font_size) {
+        ASSERT_NE(radiant_document_ensure_state(document, "ruby-zero-base-envelope"), nullptr);
+        DomRange* range = dom_range_create(document->state); ASSERT_NE(range, nullptr);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = find(entry.id, "ruby"), *reading = find(entry.id, "reading");
+            ASSERT_NE(ruby, nullptr); ASSERT_NE(reading, nullptr);
+            Rect base = {}, annotation = {}, tail = {};
+            DomElement* base_element = entry.explicit_base ? find(entry.id, "base") : ruby;
+            ASSERT_NE(base_element, nullptr);
+            view_get_visual_bounds(base_element, &base.x, &base.y, &base.width, &base.height);
+            view_get_visual_bounds(reading, &annotation.x, &annotation.y, &annotation.width, &annotation.height);
+            view_get_visual_bounds(find(entry.id, "tail"), &tail.x, &tail.y, &tail.width, &tail.height);
+            // CSS Ruby §3.1.2 stacks against the explicit base's own margin box, even at zero size.
+            EXPECT_FLOAT_EQ(annotation.y, entry.under ? base.y + base.height : base.y - annotation.height);
+            EXPECT_FLOAT_EQ(annotation.width, 80.0f);
+            EXPECT_FLOAT_EQ(tail.x, annotation.x + 80.0f);
+            if (entry.explicit_base) {
+                EXPECT_FLOAT_EQ(base.height, entry.mutable_font ? font_size : 20.0f);
+                EXPECT_FALSE(ruby->ext->has_empty_ruby_base);
+            }
+            EXPECT_EQ(first_text_leaf(reading), entry.reading);
+            EXPECT_EQ(entry.reading->parent.get(), entry.parent);
+            EXPECT_EQ(entry.reading->text_data(), entry.data);
+            for (size_t character : {size_t(0), size_t(7)}) {
+                Rect box = {}; ASSERT_TRUE(character_rect(range, entry.reading, character, &box));
+                EXPECT_FLOAT_EQ(box.x, annotation.x + (float)character * 10.0f);
+                EXPECT_FLOAT_EQ(box.y, annotation.y);
+                EXPECT_FLOAT_EQ(box.width, 10.0f); EXPECT_FLOAT_EQ(box.height, 10.0f);
+            }
+        }
+        dom_range_release(range);
+    };
+    for (bool retained : {false, true}) { layout_html_doc(&ui, document, retained); check(0.0f); }
+    for (const char* size : {"10px", "20px", "0px"}) {
+        for (const Case& entry : cases) if (entry.mutable_font)
+            ASSERT_TRUE(dom_cssom_set_inline_property(find(entry.id, "base"), "font-size", size));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document)); check(strtof(size, nullptr));
     }
 }
 
@@ -16199,7 +17611,8 @@ TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutCha
         ASSERT_NE(annotation_atomic, nullptr);
         EXPECT_FLOAT_EQ(ordinary->parent->height, 200.0f);
         EXPECT_FLOAT_EQ(base_atomic->height, 200.0f);
-        EXPECT_FLOAT_EQ(annotation_atomic->height, 100.0f);
+        // the UA reading default supplies normal leading; annotation segment breaks still collapse.
+        EXPECT_FLOAT_EQ(annotation_atomic->height, 20.0f);
         DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
         ASSERT_NE(reading, nullptr);
         EXPECT_STREQ((const char*)reading->first_child->text_data(), "A\nB");
@@ -19605,6 +21018,145 @@ protected:
     }
 };
 
+class RadiantAudioCapture : public RadiantDecodedAudio {
+protected:
+    AudioFixtureCaptureBackend host;
+    void prepare() {
+        ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+        auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend));
+    }
+};
+TEST_F(RadiantAudioCapture, HostGrantAndOsPermissionAreIndependentAndAcquisitionIsExplicit) {
+    prepare(); uint64_t denied = radiant_capture_open(document); ASSERT_NE(denied, 0u);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); EXPECT_EQ(host.requests, 0u); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_DENIED; uint64_t os_denied = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, os_denied, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    EXPECT_FALSE(radiant_capture_info(document, denied, &info));
+    host.permission = AUDIO_CAPTURE_PENDING; uint64_t pending = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, pending, &info)); EXPECT_STREQ(info.state, "pending");
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_EQ(radiant_capture_open(document), 0u);
+    ASSERT_TRUE(radiant_capture_stop(document, pending)); host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_FALSE(radiant_capture_tick(document)); EXPECT_EQ(host.opens, 0u);
+    uint64_t active = radiant_capture_open(document); ASSERT_NE(active, 0u);
+    ASSERT_TRUE(radiant_capture_info(document, active, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.granted); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_frames_pending(document)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+}
+TEST_F(RadiantAudioCapture, PendingConsentKeepsTheHostAliveAndStartsOnlyOnce) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); ASSERT_NE(token, 0u); EXPECT_TRUE(radiant_audio_tick(document, 0));
+    EXPECT_TRUE(dom_document_has_pending_work(document));
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u);
+    host.permission = AUDIO_CAPTURE_ALLOWED; EXPECT_TRUE(radiant_audio_tick(document, 1)); EXPECT_EQ(host.opens, 1u);
+    EXPECT_TRUE(radiant_audio_tick(document, 2)); EXPECT_EQ(host.opens, 1u);
+    ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 1u); EXPECT_EQ(bytes, audio_capture_pcm_bytes());
+    const float samples[] = {.25f,-.25f,.5f,-.5f}; ASSERT_NE(host.sink, nullptr);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 123, samples, 2), 2u);
+    float output[4]; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    EXPECT_EQ(first, 123u); for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i]);
+    ASSERT_TRUE(radiant_capture_stop(document, token)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    EXPECT_FALSE(radiant_audio_frames_pending(document)); ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes));
+    EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "stopped");
+    EXPECT_EQ(info.pcm.captured, 2u); EXPECT_EQ(info.pcm.dropped, 123u); EXPECT_EQ(info.pcm.queued, 0u);
+}
+TEST_F(RadiantAudioCapture, ProceduralReadCopiesWideTimestampsAndPcmIntoOrdinaryGcValues) {
+    DomElement* element = load("test/ui/audio_shared_bus.html", true); ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(radiant_eval_context_switch(runtime_get_eval_context(dom_document_script_runtime(document))));
+    auto backend = host.backend(); ASSERT_TRUE(radiant_capture_set_backend(document, &backend)); ASSERT_TRUE(radiant_capture_grant(document, true));
+    RootFrame roots(2); ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, radiant_dom_wrap_node(element)), result(roots, ItemNull);
+    RootedValueBuilder request(RootedValueBuilder::DATA_MAP);
+    request.put("op", Item{.item=s2it(heap_create_name("open"))});
+    result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    auto field = [&](const char* key) {
+        Item name = {.item=s2it(heap_create_name(key))}; return fn_member(result.get(), name);
+    };
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    auto token = field("token").get_uint64(); ASSERT_NE(token, 0u);
+    const float input[] = {.25f,-.25f,.5f,-.5f}; uint64_t wide = (UINT64_C(1) << 53) + 17;
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, wide, input, 2), 2u);
+    request.put("op", Item{.item=s2it(heap_create_name("read"))}); request.put("token", box_uint64_value(token));
+    request.put("frames", push_d(2)); result.set(dom_engine_audio_capture(owner.get(), request.value.get()));
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_VMAP);
+    EXPECT_EQ(field("first_frame").get_uint64(), wide); EXPECT_EQ(field("next_frame").get_uint64(), wide + 2);
+    EXPECT_EQ(field("dropped").get_uint64(), wide); EXPECT_EQ(it2l(field("frames")), 2);
+    ASSERT_EQ(get_type_id(field("data")), LMD_TYPE_BINARY); auto* bytes = field("data").get_binary(); ASSERT_EQ(bytes->len, 16u);
+    for (unsigned i = 0; i < 2; i++) for (unsigned channel = 0; channel < 2; channel++)
+        EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), i, channel), input[i * 2 + channel]);
+    ASSERT_TRUE(radiant_capture_stop(document, token));
+    // the copied binary survives closure of the producer and its native queues (D5.3.3).
+    EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), 1, 0), .5f);
+    request.put("frames", push_d(1.5)); EXPECT_EQ(dom_engine_audio_capture(owner.get(), request.value.get()).item, ItemNull.item);
+}
+TEST_F(RadiantAudioCapture, PendingDenialOrDocumentRetirementNeverStartsADeviceLater) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); host.permission = AUDIO_CAPTURE_PENDING;
+    auto token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED; AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "denied"); EXPECT_EQ(host.opens, 0u);
+    host.permission = AUDIO_CAPTURE_PENDING; ASSERT_NE(radiant_capture_open(document), 0u);
+    ui.document = nullptr; free_document(document); document = nullptr; host.permission = AUDIO_CAPTURE_ALLOWED;
+    EXPECT_EQ(host.opens, 0u); EXPECT_EQ(host.closes, 0u); EXPECT_EQ(host.sink, nullptr);
+}
+TEST_F(RadiantAudioCapture, RecordingDoesNotNeedOutputActivationAndMonitoringUsesTheSharedGate) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto* local = document->url.get(); auto* network = url_parse("https://example.test/capture"); ASSERT_NE(network, nullptr);
+    document->url = lam::own(network); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    EXPECT_FALSE(radiant_document_may_start_audio(document)); EXPECT_FALSE(radiant_capture_monitor(document, token, .5f));
+    const float samples[] = {.5f,-.5f,.25f,-.25f}; ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, samples, 2), 2u);
+    radiant_audio_note_activation(document); ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 2, samples, 2), 2u);
+    float output[8] = {}; uint64_t first = 0; ASSERT_EQ(radiant_capture_read(document, token, output, 4, &first), 4u);
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 4));
+    for (unsigned i = 0; i < 4; i++) EXPECT_FLOAT_EQ(output[i], samples[i] * .5f);
+    for (unsigned i = 4; i < 8; i++) EXPECT_FLOAT_EQ(output[i], 0);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, 0)); EXPECT_FALSE(audio_submix_has_voices(radiant_document_submix(document)));
+    document->url = lam::own(local); url_destroy(network);
+}
+TEST_F(RadiantAudioCapture, RevocationAndDeviceLossJoinTheProducerAndReleaseItsQuota) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_capture_monitor(document, token, 1));
+    ASSERT_TRUE(radiant_capture_grant(document, false)); EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+    AudioCaptureInfo info; ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked");
+    EXPECT_FALSE(radiant_capture_monitor(document, token, 1)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_capture_grant(document, true)); token = radiant_capture_open(document); host.loss = true;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "lost"); EXPECT_EQ(host.closes, 2u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+    host.loss = false; token = radiant_capture_open(document); host.permission = AUDIO_CAPTURE_DENIED;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "revoked"); EXPECT_EQ(host.closes, 3u);
+}
+TEST_F(RadiantAudioCapture, OutputLossLeavesRecordingActiveAndMonitoringMustBeReenabled) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f)); audio_bus_retire_output(); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "capturing");
+    EXPECT_TRUE(info.monitor_lost); EXPECT_FLOAT_EQ(info.monitor_gain, 0); EXPECT_EQ(host.closes, 0u);
+    ASSERT_EQ(audio_capture_pcm_write(host.sink, 0, nullptr, 2), 2u); float output[4]; uint64_t first = 0;
+    EXPECT_EQ(radiant_capture_read(document, token, output, 2, &first), 2u);
+    ASSERT_TRUE(radiant_capture_monitor(document, token, .5f));
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_FALSE(info.monitor_lost);
+}
+TEST_F(RadiantAudioCapture, FailedDeviceAndFullDocumentBudgetLeaveNoReaderOrDeviceBehind) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true));
+    auto reservation = radiant_audio_storage_acquire(document, 512u * 1024u * 1024u); ASSERT_NE(reservation, 0u);
+    auto token = radiant_capture_open(document); AudioCaptureInfo info;
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "error"); EXPECT_EQ(host.opens, 0u);
+    radiant_audio_storage_release(document, reservation); host.fail_open = true; token = radiant_capture_open(document);
+    ASSERT_TRUE(radiant_capture_info(document, token, &info)); EXPECT_STREQ(info.state, "unavailable"); EXPECT_EQ(host.opens, 1u);
+    size_t readers = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &readers, &bytes)); EXPECT_EQ(readers, 0u); EXPECT_EQ(bytes, 0u);
+}
+TEST_F(RadiantAudioCapture, TeardownClosesBeforeItsQuotaOwnerAndNoGrantIsInherited) {
+    prepare(); ASSERT_TRUE(radiant_capture_grant(document, true)); auto token = radiant_capture_open(document); ASSERT_NE(token, 0u);
+    auto inherited = document_js_host_config_inherit(&ui, document); EXPECT_FALSE(inherited.microphone_granted);
+    struct Peer { DomDocument* doc; ~Peer() { dom_document_destroy(doc); } } peer{dom_document_create(document->input)};
+    ASSERT_NE(peer.doc, nullptr); dom_document_borrow_input_resources(peer.doc); auto backend = host.backend();
+    ASSERT_TRUE(radiant_capture_set_backend(peer.doc, &backend)); document_apply_js_host_config(peer.doc, &inherited);
+    AudioCaptureInfo info; EXPECT_FALSE(radiant_capture_info(peer.doc, token, &info));
+    auto denied = radiant_capture_open(peer.doc); ASSERT_TRUE(radiant_capture_info(peer.doc, denied, &info)); EXPECT_STREQ(info.state, "denied");
+    dom_document_destroy(peer.doc); peer.doc = nullptr;
+    ui.document = nullptr; free_document(document); document = nullptr; EXPECT_EQ(host.closes, 1u); EXPECT_EQ(host.sink, nullptr);
+}
+
 TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
     unsigned char bytes[44 + 16 * 4];
@@ -19621,6 +21173,29 @@ TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
     }
     EXPECT_STREQ(radiant_audio_state(document, token), "ended");
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 16.0 / AUDIO_BUS_RATE);
+}
+
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareDecodedPcmBytesAndRejectStaleRelease) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    size_t players = 0, bytes = 0; size_t limit = 512u * 1024u * 1024u;
+    EXPECT_EQ(radiant_audio_storage_acquire(document, 0), 0u);
+    EXPECT_EQ(radiant_audio_storage_acquire(document, limit + 1), 0u);
+    auto all = radiant_audio_storage_acquire(document, limit); ASSERT_NE(all, 0u);
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, limit);
+    radiant_audio_storage_release(document, all); auto next = radiant_audio_storage_acquire(document, 1);
+    ASSERT_NE(next, 0u); EXPECT_NE(next, all); radiant_audio_storage_release(document, all);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_EQ(bytes, 1u);
+    EXPECT_NE(open_clip(), 0u); radiant_audio_storage_release(document, next);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u); EXPECT_GT(bytes, 1u);
+}
+TEST_F(RadiantDecodedAudio, StreamingReservationsShareTheDocumentReaderCapacity) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr); uint64_t reservations[128];
+    for (auto& id : reservations) { id = radiant_audio_storage_acquire(document, 1); ASSERT_NE(id, 0u); }
+    EXPECT_EQ(open_clip(), 0u); EXPECT_EQ(radiant_audio_storage_acquire(document, 1), 0u);
+    radiant_audio_storage_release(document, reservations[0]); EXPECT_NE(open_clip(), 0u);
+    for (auto id : reservations) radiant_audio_storage_release(document, id);
+    size_t players = 0, bytes = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &bytes)); EXPECT_EQ(players, 1u);
 }
 
 TEST_F(RadiantDecodedAudio, PauseResumeEndAndCloseRetireTheirBusVoices) {
@@ -19652,6 +21227,7 @@ TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmiss
     radiant_audio_tick(document, start + 20); EXPECT_STREQ(radiant_audio_state(document, token), "ended");
     EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
 }
+
 
 TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
@@ -19697,6 +21273,124 @@ TEST_F(RadiantDecodedAudio, NetworkStartsRetainActivationAndMutedPlaybackRules) 
     radiant_audio_note_activation(document); ASSERT_TRUE(radiant_audio_play(document, token, 1));
     EXPECT_FALSE(radiant_audio_play(document, token, NAN)); EXPECT_STREQ(radiant_audio_state(document, token), "playing");
     ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64)); EXPECT_FLOAT_EQ(output[0], 0.5f);
+}
+
+TEST_F(RadiantDecodedAudio, MediaGainChangesCannotBypassNetworkActivation) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    Url* local = document->url.get(); Url* network = url_parse("https://example.test/video");
+    ASSERT_NE(network, nullptr); document->url = lam::own(network);
+    MediaViewState media = {}; media.play_requested = true; media.volume = 1; media.muted = true;
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false));
+    EXPECT_TRUE(media.muted); EXPECT_EQ(media.play_error, 1);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, 0, false));
+    EXPECT_FALSE(media.muted); EXPECT_FLOAT_EQ(media.volume, 0);
+    EXPECT_FALSE(radiant_media_set_gain(document, &media, 1, false)); EXPECT_FLOAT_EQ(media.volume, 0);
+    media.play_requested = false; EXPECT_TRUE(radiant_media_set_gain(document, &media, 1, false));
+    media.play_requested = true; radiant_audio_note_activation(document);
+    EXPECT_TRUE(radiant_media_set_gain(document, &media, .5f, false)); EXPECT_EQ(media.play_error, 0);
+    document->url = lam::own(local); url_destroy(network);
+}
+
+TEST_F(RadiantDecodedAudio, MediaStatusPollingPreservesARefusedStartDiagnostic) {
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_status_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr);
+    media->play_error = 1;
+    for (unsigned poll = 0; poll < 3; poll++) {
+        EXPECT_EQ(radiant_media_prepare(movie), media); EXPECT_EQ(media->play_error, 1);
+        EXPECT_FALSE(media->muted); EXPECT_FLOAT_EQ(media->volume, 1);
+    }
+}
+TEST_F(RadiantDecodedAudio, VideoProviderJobsRetainPcmAfterTheSelectedSourceIsDisposed) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, .25f, false));
+    AudioRenderPlan plan = {}; plan.frames = 1024; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("video"); plan.providers[0].token = media->audio_token;
+    const char* error = nullptr; uint64_t id = 0; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    ASSERT_TRUE(movie->remove_attribute("src")); EXPECT_EQ(radiant_media_prepare(movie)->player, nullptr);
+    ASSERT_TRUE(audio_render_step(document, 1, id, 1024, &error)); unsigned char bytes[1024 * 8]; size_t length = 0;
+    ASSERT_TRUE(audio_render_read(document, 1, id, 0, 1024, false, bytes, sizeof(bytes), &length, &error)); ASSERT_EQ(length, sizeof(bytes));
+    double energy = 0; for (unsigned i = 0; i < 1024; i++) energy += audio_fixture_sample(bytes, i) * audio_fixture_sample(bytes, i);
+    EXPECT_GT(energy, 0); EXPECT_EQ(radiant_audio_frame(document), 0u); ASSERT_TRUE(audio_render_close(document, 1, id));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, ProviderSnapshotsRejectUnopenedMediaWithoutStartingItsDecoder) {
+#ifdef __APPLE__
+    ASSERT_NE(load_script_source("<div id='result'><video id='movie' preload='none' src='../media/test_video_audio.mp4'></video></div>"), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_export_pending_test"), nullptr);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_FALSE(media->opened); const char* error = nullptr;
+    EXPECT_EQ(radiant_audio_provider_snapshot(document, radiant_audio_provider("video"), media->audio_token, 0, 32, &error), 0u);
+    EXPECT_NE(error, nullptr); EXPECT_FALSE(media->opened); EXPECT_FALSE(media->play_requested);
+    EXPECT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_IDLE);
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
+}
+TEST_F(RadiantDecodedAudio, PreparedSpeechJobsRegisterTheirQuotaOwnerBeforeDocumentTeardown) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr); use_fake_speech();
+    auto speech = audio_fixture_speech(owner, "go"); ASSERT_NE(speech, 0u);
+    AudioRenderPlan plan = {}; plan.frames = 64; plan.time_scale = 1; plan.provider_count = 1;
+    plan.providers[0].provider = radiant_audio_provider("speech"); plan.providers[0].token = speech;
+    uint64_t id; const char* error = nullptr; ASSERT_TRUE(audio_render_open(document, 1, plan, &id, &error)) << (error ? error : "");
+    AudioRenderSnapshot state; ASSERT_TRUE(audio_render_snapshot(document, 1, id, &state)); EXPECT_EQ(state.state, AUDIO_RENDER_READY);
+    // teardown must retire this unfinished reader before its newly created document quota service.
+}
+
+TEST_F(RadiantDecodedAudio, DryVideoInputsFenceBusEditsWhenHostAutoplayIsWithdrawn) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/ui/audio_video_shared.html", true), nullptr);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "media_graph_gate_test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    auto* movie = dom_find_element_by_id(document->root->as_element(), "movie"); ASSERT_NE(movie, nullptr);
+    auto* media = radiant_media_prepare(movie); ASSERT_NE(media, nullptr); ASSERT_NE(media->player, nullptr);
+    ASSERT_TRUE(audio_fixture_video_wait(media->player, RDT_VIDEO_STATE_READY, 3000));
+    auto mix = radiant_document_submix(document); auto graph = audio_submix_graph_open(mix); ASSERT_NE(graph, 0u);
+    AudioGraphConfig config = {}; config.count = 2;
+    config.buses[0] = audio_graph_bus_default("master"); config.buses[1] = audio_graph_bus_default("providers");
+    config.buses[1].mute = true;
+    ASSERT_TRUE(audio_fixture_graph_publish(mix, graph, config));
+    auto route = audio_submix_graph_route(mix, graph, nullptr, "providers"); ASSERT_NE(route, 0u);
+    const char* error = nullptr; ASSERT_TRUE(radiant_media_route(document, media->audio_token, 0, route, &error));
+    struct NetworkUrl {
+        DomDocument* doc; Url* local; Url* network;
+        ~NetworkUrl() { radiant_audio_grant_activation(false); doc->url = lam::own(local); url_destroy(network); }
+    } url{document, document->url.get(), url_parse("https://example.test/video")};
+    ASSERT_NE(url.network, nullptr); document->url = lam::own(url.network);
+    radiant_audio_grant_activation(true); media->play_requested = true; rdt_video_play(media->player);
+    ASSERT_EQ(rdt_video_get_state(media->player), RDT_VIDEO_STATE_PLAYING);
+    float output[64 * 2]; ASSERT_TRUE(audio_submix_render(mix, output, 64));
+    AudioGraphSnapshot snapshot; ASSERT_TRUE(audio_submix_graph_snapshot(mix, graph, &snapshot));
+    ASSERT_FALSE(snapshot.active); for (float value : output) EXPECT_FLOAT_EQ(value, 0);
+    radiant_audio_grant_activation(false); EXPECT_FALSE(radiant_document_may_start_audio(document));
+    EXPECT_FALSE(radiant_audio_graph_may_edit(document, graph));
+    config.buses[1].mute = false; AudioGraph* prepared = nullptr;
+    ASSERT_TRUE(audio_submix_graph_prepare(mix, graph, config, &prepared, &error));
+    bool committed = radiant_audio_graph_commit(document, graph, prepared, nullptr, 0, &error);
+    if (!committed) audio_graph_destroy(prepared);
+    EXPECT_FALSE(committed);
+    EXPECT_FALSE(radiant_media_route(document, media->audio_token, route, 0, &error));
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 0, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    rdt_video_pause(media->player); media->play_requested = false;
+    ASSERT_TRUE(radiant_media_set_gain(document, media, 1, false));
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+    radiant_audio_note_activation(document); media->play_requested = true; rdt_video_play(media->player);
+    EXPECT_TRUE(radiant_audio_graph_may_edit(document, graph));
+#else
+    GTEST_SKIP() << "native video backend is unavailable";
+#endif
 }
 
 TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers) {

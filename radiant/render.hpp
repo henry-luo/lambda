@@ -11,6 +11,7 @@
 #include <thorvg_capi.h>
 #include "view.hpp"
 #include "view_tree_model.hpp"
+#include "gl_core.hpp"
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
@@ -1085,6 +1086,9 @@ bool dl_supports_premultiplied_capture(const DisplayList* list);
 // when an op's pixels are not determined by the list alone (pictures, fragments, live media,
 // borrowed filters).
 bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint);
+// one item's fingerprint, by content like dl_content_fingerprint; false when it cannot see the
+// item's painting (pictures, fragments, filters, placeholders). Open an ImageSurfaceReadScope first.
+bool dl_item_fingerprint(const DisplayItem* item, uint64_t* fingerprint);
 bool dl_supports_vector_translation(const DisplayList* list, int first = 0, int end = -1);
 // caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.
 bool dl_trim_empty_arena(DisplayList* list);
@@ -2206,6 +2210,62 @@ struct RenderContext {
 };
 
 struct Css3dPaintContext;
+// An untransformed clip shape that cuts into a composited viewport, by value (polygons excluded): the
+// presenter masks the viewport by its coverage, rasterized as the CPU's clip path is (Q10).
+struct CompositorClip { ClipShapeType type; float values[8]; };
+static constexpr unsigned COMPOSITOR_VIEWPORT_CLIPS = 4;
+// false for a shape that cannot be copied by value: a polygon, or a transformed shape
+bool compositor_clip_from_shape(const ClipShape* shape, CompositorClip* out);
+// The coverage of `clips` over the whole-pixel `region`, in a new surface's alpha channel, rasterized by
+// the vector backend through the same clip paths a replay pushes; null when allocation fails.
+ImageSurface* compositor_clip_coverage(const CompositorClip* clips, unsigned count, Bound region);
+// One native viewport the GPU presenter composites in place of its snapshot.
+struct RenderCompositorViewport {
+    int cut;                     // top-level index of the viewport's image item
+    DomElement* element;         // its <scene3d> or WebGL <canvas>
+    bool (*materialize)(DomElement* element); // fills its snapshot if the frame abandons this cut
+    NativeGlPresentLayer layer;  // where the presenter draws the viewport
+    bool opaque;                 // every pixel of the viewport is opaque
+    CompositorClip clips[COMPOSITOR_VIEWPORT_CLIPS];
+    unsigned clip_count;
+};
+// A live-window frame whose eligible native viewports, at most four (Q12), the GPU presenter composites
+// (vibe/radiant/Radiant_Design_GPU_Compositor.md). Recording marks the cuts in paint order; replay draws
+// the page between each pair of cuts into its own segment.
+struct RenderCompositorFrame {
+    const DisplayList* list;     // the frame's own recording; nested captures never cut
+    RenderCompositorViewport viewports[NATIVE_GL_PRESENT_LAYERS];
+    unsigned count;
+};
+// a replay of one segment: drawing items strictly between two top-level indices, -1 and INT_MAX at the ends
+struct DisplayReplaySegment { int begin; int end; };
+// How a segment replay treats an item: drawn; left to the other side, where only a state item
+// still applies, so clips and scopes opened across the cut stay balanced; or skipped with its whole
+// element, which lies entirely on the other side. The viewport item itself is the presenter's.
+enum DlSegmentAction { DL_SEGMENT_DRAW, DL_SEGMENT_STATE_ONLY, DL_SEGMENT_SKIP_ELEMENT, DL_SEGMENT_SKIP };
+DlSegmentAction dl_segment_action(const DisplayReplaySegment* segment, const struct DisplayItem* item,
+                                  const struct DisplayListCursor* cursor);
+// What one page segment drew in the last composited frame, item by item, so the next frame can
+// repaint and upload only what changed (Radiant_Design_GPU_Compositor C2).
+struct CompositorSegmentItem { Bound bounds; uint64_t fingerprint; uint32_t op; bool known; };
+struct CompositorSegmentSummary { CompositorSegmentItem* items; int count, capacity; bool valid; };
+static constexpr unsigned COMPOSITOR_DAMAGE_RECTS = 8;
+struct CompositorDamage { Bound rects[COMPOSITOR_DAMAGE_RECTS]; unsigned count; bool full; };
+// What the window presents over its page surface until the next render replaces it.
+struct UiCompositorState {
+    NativeGlPresentLayer layers[NATIVE_GL_PRESENT_LAYERS];
+    unsigned count;
+    bool surface_hidden;                          // an opaque layer covers the page surface
+    ImageSurface* above[NATIVE_GL_PRESENT_LAYERS]; // owned transparent segments, reused across frames
+    ImageSurface* reference;                      // owned; RADIANT_PRESENT_CHECK's CPU composition
+    CompositorSegmentSummary summaries[1 + NATIVE_GL_PRESENT_LAYERS]; // the page segment, then each upper one
+    CompositorDamage above_damage[NATIVE_GL_PRESENT_LAYERS]; // repainted since the last present
+    ImageSurface* masks[NATIVE_GL_PRESENT_LAYERS]; // owned clip coverage per layer, kept while its key holds
+    uint64_t mask_keys[NATIVE_GL_PRESENT_LAYERS];
+};
+// adds a device-pixel rectangle, merging overlaps; past the cap it all merges into one
+void compositor_damage_add(CompositorDamage* damage, Bound rect);
+
 typedef struct RasterRenderContext : RenderContext {
     ListBlot list;
     RdtVector vec;      // platform-agnostic vector renderer
@@ -2229,6 +2289,8 @@ typedef struct RasterRenderContext : RenderContext {
     bool paint_failed;             // abort replay when preserved-context composition fails
     bool has_foreign_paint_dependencies; // embedded documents need their own generation summaries
     lam::Up<Css3dPaintContext> css3d_context; // borrowed only during a preserved-context walk
+    // set on a live-window frame that may cut a native viewport out for the GPU presenter
+    lam::Up<struct RenderCompositorFrame> compositor;
 
     // Derived logical-paint -> destination-surface scale (RSC7).
     float raster_scale;
@@ -2830,10 +2892,11 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
                ScratchArena* scratch, float scale,
                DirtyTracker* dirty_tracker);
+// `segment` replays one side of a GPU-composited viewport (Radiant_Design_GPU_Compositor §5)
 void dl_replay_validated(const ValidatedDisplayList& recording, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
                ScratchArena* scratch, float scale,
-               DirtyTracker* dirty_tracker);
+               DirtyTracker* dirty_tracker, const struct DisplayReplaySegment* segment = nullptr);
 
 // ===== tile_pool.h =====
 // ==========================================================================
@@ -2909,6 +2972,9 @@ typedef struct TileJob {
     lam::Up<DisplayList> display_list;  // shared, read-only
     float raster_scale;
     uint32_t bg_color;          // tile background clear color (ABGR8888)
+    // a compositor segment's side of the cut, and the representation of a transparent or matte tile
+    lam::Up<const struct DisplayReplaySegment> segment;
+    ImageAlphaMode alpha_mode;
     void (*work)(void*);        // optional pure pixel job, without a vector canvas
     void* work_context;         // borrowed until synchronous dispatch completes
 } TileJob;
@@ -2972,7 +3038,7 @@ int render_output_dispatch_jobs(TileJob* jobs, int count);
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
-                    float scale, int first_item = 0);
+                    float scale, int first_item = 0, const struct DisplayReplaySegment* segment = nullptr);
 
 #ifdef __cplusplus
 }
@@ -4080,6 +4146,12 @@ uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
 uint32_t render_pixel_premultiply_abgr(uint32_t pixel);
 uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel);
 void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* source, size_t count);
+// RGBA from a replay over opaque black and one over opaque white: coverage is what the white backdrop
+// lost, color is the black pass (premultiplied) or that scaled back up by coverage (straight)
+void render_pixel_resolve_matte(const uint32_t* over_black, const uint32_t* over_white, uint32_t* out,
+                                size_t count, bool premultiplied);
+// every pixel of the row has full alpha (ABGR, alpha in the top byte)
+bool render_pixel_row_opaque(const uint32_t* pixels, size_t count);
 uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity);
 float render_color_srgb_to_linear(float channel);
 float render_color_linear_to_srgb(float channel);
@@ -4093,6 +4165,10 @@ ScaleMode render_image_scale_mode(const DomElement* element, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
                                       bool round_channels, bool premultiply_samples = false);
+// The edge lines SCALE_MODE_LINEAR_EDGE covers pixels by: the destination quad mapped by `matrix`, each
+// edge as a, b, c with a x + b y + c the signed distance, positive inside. False for a degenerate quad
+// or a corner behind the viewer. The GPU presenter's layer shader samples by the same lines.
+bool render_image_quad_edges(const RdtMatrix* matrix, Rect destination, float edges[4][3]);
 // Caller owns the returned premultiplied pixels; an empty projection returns null.
 bool render_image_project_pixels(const uint32_t* pixels, int width, int height, int stride,
     Rect destination, const RdtMatrix* transform, Rect viewport, ScaleMode mode,
@@ -4530,6 +4606,8 @@ const char* render_media_image_alternative(ViewBlock* view);
 char* render_media_alternative_glyph_run(ViewBlock* view, const Rect& content_rect,
     const FontBox* font, Color color, PaintGlyphRun* run);
 void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view);
+// the translucent overlay over replaced content inside a cross-view selection
+void render_media_selection_overlay(RasterRenderContext* rdcon, ViewBlock* view);
 bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
                                      const Rect* content_rect, const FontBox* font, Color color);
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
@@ -4542,7 +4620,27 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
 void render_image_view(struct RasterRenderContext* rdcon, ViewBlock* view);
-void render_surface_content(struct RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface);
+void render_surface_content(struct RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface,
+                            ScaleMode scale_mode = SCALE_MODE_LINEAR);
+// A native viewport's published image, offered to the GPU presenter in place of its snapshot
+// (vibe/radiant/Radiant_Design_GPU_Compositor.md C4).
+struct CompositorSource {
+    DomElement* element;
+    bool (*materialize)(DomElement* element); // fills `snapshot` for a CPU consumer
+    ImageSurface* snapshot;      // what the recording draws, filled only once a CPU consumer reads it
+    NativeGlContext* producer;
+    NativeGlResource image;      // the published target the presenter samples; none keeps the CPU path
+    bool opaque;                 // every pixel of the image is opaque
+    bool upsampled;              // at a capped density below the snapshot's, which native_gl_upscale fills
+};
+// Records `source` at `rect` (device pixels) and cuts it out of the frame's recording when nothing between
+// the viewport and the window needs its pixels on the CPU (C1). The image is recorded with
+// SCALE_MODE_LINEAR_EDGE, whose sampling the presenter reproduces, so a CPU replay of the same recording
+// draws the same pixels. False records nothing: the caller paints the snapshot.
+bool render_compositor_cut(struct RasterRenderContext* rdcon, ViewBlock* view, Rect rect,
+                           const CompositorSource* source);
+// logs why a viewport stays on the CPU; false
+bool render_compositor_reject(ViewBlock* view, const char* why);
 void render_canvas_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 void render_video_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 bool render_media_is_webview_layer(ViewBlock* view);
@@ -5114,4 +5212,6 @@ LAM_NODE_OF(RasterPaintContext, NodeStack);
 LAM_NODE_OF(RasterRenderContext, NodeStack);
 LAM_NODE_OF(SvgInlineRenderContext, NodeStack);
 
-void radiant_canvas_prepare_document(DomDocument* document);
+// brings each WebGL canvas's snapshot up to its latest frame; `defer` publishes presented copies instead
+// for a window the GPU compositor presents, leaving the readback to a CPU consumer
+void radiant_canvas_prepare_document(DomDocument* document, bool defer);

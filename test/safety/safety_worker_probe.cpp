@@ -1,4 +1,8 @@
 #include "../../lambda/host/safety/worker.h"
+#include "../../lib/process_sandbox.h"
+#include "../../lib/file.h"
+#include "async_fixture.h"
+#include "constructor_fixture.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -11,7 +15,14 @@
 // Native attempts bypass the runtime's client, in the same executable that
 // subsequently runs the real Lambda entry through broker IPC.
 int main(int argc, char** argv) {
-    if (argc != 8) return 2;
+    if (argc != 9) return 2;
+    char directory[4096];
+    if (!file_getcwd_into(directory, sizeof(directory))) return 2;
+    // Only this test entrypoint has an explicit native unsandboxed control.
+    // lambda_safety_worker_run still requires confinement for every script.
+    bool threaded = !strcmp(argv[8], "threaded");
+    if (strcmp(argv[8], "control") &&
+            ((!threaded && !safety_constructor.requested && strcmp(argv[8], "confined")) || !process_sandbox_enter_offline())) return 2;
     char* end = nullptr;
     long fd_number = strtol(argv[1], &end, 10);
     if (!end || *end || fd_number < 3 || fd_number > 1048576) return 2;
@@ -36,10 +47,22 @@ int main(int argc, char** argv) {
         if (connect(fd, (sockaddr*)&address, sizeof(address))) errors[3] = errno;
         close(fd);
     }
-    char report[256];
+    atomic_int32 finish = {};
+    SafetyAsync thread;
+    if (threaded && (thread.start([](void* context) { (void)SafetyAsync::wait((atomic_int32*)context, 5000); }, &finish) ||
+            !SafetyAsync::wait(&thread.started))) return 2;
+    char constructor[192];
+    int constructor_size = safety_constructor_report(constructor, sizeof(constructor));
+    if (constructor_size < 0 || (size_t)constructor_size >= sizeof(constructor)) return 2;
+    char report[512];
     int size = snprintf(report, sizeof(report),
-        "{\"read_errno\":%d,\"write_errno\":%d,\"create_errno\":%d,\"connect_errno\":%d,\"unexpected_fds\":%u}\n",
-        errors[0], errors[1], errors[2], errors[3], unexpected);
+        "{\"read_errno\":%d,\"write_errno\":%d,\"create_errno\":%d,\"connect_errno\":%d,\"unexpected_fds\":%u,\"thread_started\":%s,"
+        "\"constructor\":%s}\n",
+        errors[0], errors[1], errors[2], errors[3], unexpected, threaded ? "true" : "false",
+        constructor);
     if (size <= 0 || (size_t)size >= sizeof(report) || write(STDOUT_FILENO, report, (size_t)size) != size) return 2;
-    return lambda_safety_worker_run((int)fd_number, (uint64_t)session, argv[3]);
+    int result = lambda_safety_worker_run((int)fd_number, (uint64_t)session, argv[3], directory);
+    safety_constructor_close();
+    atomic_store32(&finish, 1); thread.join();
+    return result;
 }

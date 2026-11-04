@@ -536,6 +536,8 @@ typedef struct LayoutIntrinsicMarginPair {
 LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
         LayoutContext* lycon, DomElement* element,
         LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
+void layout_intrinsic_add_inline_margins(LayoutContext* context, DomElement* element,
+    IntrinsicSizes* sizes, bool include_unsegmented_min = true);
 float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
     bool physical_left, bool include_margin = true);
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
@@ -2666,6 +2668,7 @@ typedef struct Linebox {
     float align_left, align_right;    // original alignment bounds when wrap measure differs
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
+    float float_query_height;         // selected exclusion band, independent of final line advance
     float advance_x;
     lam::Up<LayoutInlineAdvance> inline_advances; // consumed inline ranges can differ from overhanging ink
     float max_ascender;
@@ -3039,7 +3042,7 @@ struct HtmlUaElementDefault {
     float font_scale;              // multiplies the inherited size; 1 keeps it
     bool keeps_medium;             // a scaled heading size keeps the inherited medium lineage
     bool monospace;
-    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, text_align;
+    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, line_height, text_align;
     CssEnum list_style, color;
     float margin_px, margin_block_em, margin_inline_px, margin_inline_start_px;
     float padding_px, padding_inline_start_px;
@@ -4030,6 +4033,12 @@ typedef struct LayoutContext {
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
     FontBox font;  // current font style
+    // glyphs in one text run share CSS orientation; expire on style/tree/pass changes.
+    lam::Up<DomNode> text_orientation_owner;
+    TextOrientationPolicy text_orientation_policy;
+    uint64_t text_orientation_style_epoch, text_orientation_mutation_epoch;
+    uint32_t text_orientation_generation, text_orientation_measurement_generation;
+    ViewType text_orientation_view_type;
     float root_font_size;
     lam::Up<FlexContainerLayout> flex_container; // integrated flex container layout
     lam::Up<GridContainerLayout> grid_container; // integrated grid container layout
@@ -4651,6 +4660,7 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx);
  *                     Used for inline-blocks whose height exceeds the line-height.
  */
 void update_line_for_bfc_floats(LayoutContext* lycon, float query_height = 0);
+void layout_prepare_inline_float_band(LayoutContext* lycon, View* pending, float height);
 
 /**
  * Find the BFC root for a given BlockContext
@@ -4875,6 +4885,9 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
                                              bool update_ancestor_bounds,
                                              bool suppress_text = false);
+// source suffix length; consuming its advance need not remove it from exported text.
+int text_rect_trailing_collapsible_bytes(ViewText* text, const TextRect* rect);
+void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
 void layout_finalize_phantom_inline_line(LayoutContext* lycon);
@@ -4883,9 +4896,8 @@ CssEnum inline_box_decoration_break_value(DomElement* parent);
 View* layout_inline_span_edge_leaf(ViewSpan* span, bool source_end,
     float* left_decoration = nullptr, float* right_decoration = nullptr,
     float* relative_offset = nullptr);
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
-                                              View* view, float offset);
+    View* view, float offset, bool include_inline_ancestors = false);
 void layout_bidi_line(LayoutContext* lycon);
 void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
@@ -4902,6 +4914,7 @@ void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float 
 void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y);
 void layout_shift_inline_fragment(View* root, int line_number, float offset_x, float offset_y,
     float break_offset_x);
+void layout_shift_inline_flow(View* root, float offset_x, float offset_y);
 bool layout_inline_boundary_allows_soft_wrap(LayoutContext* context, DomNode* source);
 bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
@@ -5070,6 +5083,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback);
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 RdtLogicalPoint layout_relative_position_offset_in_flow(ViewBlock* block);
+RdtLogicalPoint layout_applied_inline_relative_offset(View* first, View* stop = nullptr);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -5514,6 +5528,7 @@ void layout_shift_view_children(View* view, float offset_x, float offset_y);
 void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y);
 void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+bool layout_line_over_is_block_end(ViewBlock* block);
 float layout_line_block_start_baseline(LayoutContext* lycon, float used_line_height = -1.0f);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,

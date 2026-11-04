@@ -1,0 +1,36 @@
+<!doctype html>
+<html><body><div id="result"><scene3d id="world" camera="main" style="display:block;width:128px;height:128px">
+<camera id="main" position="0 0 4" target="0 0 0"></camera>
+<audio-bus id="mic" gain="0.25" smoothing="0"></audio-bus>
+<audio-bus id="other" gain="0.5" smoothing="0"></audio-bus>
+</scene3d></div><script type="module">
+import {capture_request} from '../ui/fixtures/_audio_shared_bridge.ls';
+import {audio_snapshot,audio_provider_read,audio_provider_route,audio_render_open} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+globalThis.captureBusy=false;
+globalThis.capturePacket=null;
+globalThis.captureProvider=null;
+globalThis.captureRouteCall=async (op,bus='mic',expected=null)=>{
+    globalThis.captureBusy=true;
+    try {
+        if(op==='open') {
+            globalThis.capturePacket=await capture_request(world,{op:'open'});
+            globalThis.captureToken=capturePacket.token;
+        } else if(op==='monitor'||op==='stop'||op==='read') {
+            globalThis.capturePacket=await capture_request(world,{op,token:captureToken,gain:0.5,frames:4});
+        } else {
+            const scene=await audio_snapshot(world);
+            const request={session:scene.session,provider:'capture',token:captureToken};
+            const current=await audio_provider_read(world,request);
+            if(op==='route') {
+                const target=bus===null?null:scene.buses.find(value=>value.id===bus);
+                globalThis.captureProvider=await audio_provider_route(world,{...request,expected:expected===null?current.route:expected,bus:target?target.id:null,identity:target?target.identity:0n});
+            } else if(op==='export') {
+                globalThis.captureExportRejected=false;
+                try { await audio_render_open(world,{session:scene.session,frames:64,providers:[{provider:'capture',token:captureToken}]}); }
+                catch(error) { globalThis.captureExportRejected=true; }
+            } else globalThis.captureProvider=current;
+        }
+    } finally { globalThis.captureBusy=false; }
+};
+</script></body></html>

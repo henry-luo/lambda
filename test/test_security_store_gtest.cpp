@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "safety/child_fixture.h"
 #include "../lambda/host/safety/grant_store.h"
 #include "../lib/file.h"
 #include "../lib/file_utils.h"
@@ -115,6 +116,21 @@ TEST_F(SecurityStoreTest, PersistentGrantsRoundTripThroughReopen) {
     EXPECT_EQ(snapshot.grants[1].operations, records[1].operations);
     security_grant_snapshot_destroy(&snapshot);
     EXPECT_EQ(snapshot.count, 0U);
+}
+
+TEST_F(SecurityStoreTest, PrivateStorageUsesTheAcquiredProfile) {
+    SecurityGrantStore* store = open_store(); ASSERT_NE(store, nullptr);
+    FileAnchor* workspace = security_grant_store_private_root(store); ASSERT_NE(workspace, nullptr);
+    char* path = file_anchor_path(workspace); ASSERT_NE(path, nullptr);
+    char* expected = file_path_join(home, ".lambda/app-data"); EXPECT_STREQ(path, expected);
+    EXPECT_EQ(file_anchor_identity(workspace).stat.mode & 0077, 0);
+    file_anchor_close(workspace);
+    ASSERT_EQ(chmod(path, 0755), 0);
+    EXPECT_EQ(security_grant_store_private_root(store), nullptr);
+    ASSERT_EQ(chmod(path, 0700), 0); ASSERT_EQ(rmdir(path), 0);
+    ASSERT_EQ(symlink(home, path), 0);
+    EXPECT_EQ(security_grant_store_private_root(store), nullptr);
+    mem_free(path); mem_free(expected);
 }
 
 TEST_F(SecurityStoreTest, StaleWriterCannotRestoreRevokedGrants) {
@@ -335,27 +351,24 @@ TEST_F(SecurityStoreTest, AcknowledgedRevocationSurvivesWriterProcessDeath) {
     SecurityGrantStore* store = open_store();
     SecurityPersistentGrant original = grant(); uint64_t generation = 0;
     ASSERT_EQ(security_grant_store_save(store, &binding, 0, &original, 1, &generation), SECURITY_STORE_OK);
-    int ready[2]; ASSERT_EQ(pipe(ready), 0);
-    pid_t child = fork(); ASSERT_GE(child, 0);
-    if (child == 0) {
-        close(ready[0]);
+    struct Writer { const char* home; SecurityGrantBinding binding; } writer_config = {home, binding};
+    SafetyChild child;
+    auto action = [](void* context, int ready) -> int {
+        Writer* config = (Writer*)context;
         SecurityStoreResult result;
-        SecurityGrantStore* writer = security_grant_store_test_open(home, &result);
-        if (!writer) _exit(2);
+        SecurityGrantStore* writer = security_grant_store_test_open(config->home, &result);
+        if (!writer) return 2;
         uint64_t current = 1;
         for (int i = 0; i < 10000; i++) {
-            if (security_grant_store_save(writer, &binding, current, nullptr, 0, &current) != SECURITY_STORE_OK) _exit(3);
-            if (i == 3 && write(ready[1], &current, sizeof(current)) != sizeof(current)) _exit(4);
+            if (security_grant_store_save(writer, &config->binding, current, nullptr, 0, &current) != SECURITY_STORE_OK) return 3;
+            if (i == 3 && !SafetyChild::publish(ready, &current, sizeof(current))) return 4;
         }
-        _exit(0);
-    }
-    close(ready[1]);
+        return 0;
+    };
+    ASSERT_EQ(child.start(action, &writer_config), 0);
     uint64_t acknowledged = 0;
-    ssize_t count = read(ready[0], &acknowledged, sizeof(acknowledged));
-    close(ready[0]);
-    kill(child, SIGKILL);
-    int status = 0; ASSERT_EQ(waitpid(child, &status, 0), child);
-    ASSERT_EQ(count, (ssize_t)sizeof(acknowledged));
+    ASSERT_TRUE(child.receive(&acknowledged, sizeof(acknowledged)));
+    int status = 0; ASSERT_EQ(child.reap(&status, true), 0);
     ASSERT_GE(acknowledged, 2U);
     close_store(store); store = open_store();
     SecurityGrantSnapshot snapshot = {};
@@ -404,13 +417,16 @@ TEST_F(SecurityStoreTest, AccountHomeResolutionIgnoresAppEnvironmentOverrides) {
     ASSERT_NE(account, nullptr);
     char* expected = mem_strdup(account->pw_dir, MEM_CAT_TEMP);
     ASSERT_NE(expected, nullptr);
-    pid_t child = fork(); ASSERT_GE(child, 0);
-    if (child == 0) {
-        setenv("HOME", home, 1); setenv("LAMBDA_HOME", home, 1);
+    struct Home { const char* fixture; const char* expected; } config = {home, expected};
+    SafetyChild child;
+    auto action = [](void* context, int) -> int {
+        Home* config = (Home*)context;
+        setenv("HOME", config->fixture, 1); setenv("LAMBDA_HOME", config->fixture, 1);
         char* actual = security_grant_store_account_home();
-        _exit(actual && !strcmp(actual, expected) && strcmp(actual, home) ? 0 : 1);
-    }
-    int status = 0; ASSERT_EQ(waitpid(child, &status, 0), child);
+        return actual && !strcmp(actual, config->expected) && strcmp(actual, config->fixture) ? 0 : 1;
+    };
+    ASSERT_EQ(child.start(action, &config), 0);
+    int status = 0; ASSERT_EQ(child.reap(&status), 0);
     EXPECT_TRUE(WIFEXITED(status)); EXPECT_EQ(WEXITSTATUS(status), 0);
     EXPECT_FALSE(file_exists(setting));
     mem_free(expected);

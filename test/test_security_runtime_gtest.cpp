@@ -280,6 +280,22 @@ TEST_P(SecurityRuntimeTest, RealOutputCreatesNewFilesAndChallengesExistingFiles)
     mem_free(second);
 }
 
+TEST_P(SecurityRuntimeTest, HostDirectoryResolvesRelativeDataAndTaskPathsWithoutChangingProcessCwd) {
+    EvalContext* owner = runtime_get_eval_context(&runtime);
+    EXPECT_FALSE(eval_context_bind_security_directory(owner, "relative"));
+    ASSERT_TRUE(eval_context_bind_security_directory(owner, directory));
+    EXPECT_FALSE(eval_context_bind_security_directory(owner, directory));
+    char before[4096], after[4096]; ASSERT_TRUE(file_getcwd_into(before, sizeof(before)));
+    seed("data.json", "{\"n\":41}"); seed("data.txt", "payload");
+    run("pn reader() { io.read(\"data.txt\")^ }\n"
+        "pn main() { let data = input(\"data.json\")^; let h = start(reader); let text = wait(h)^; "
+        "output(text, \"relative.txt\")^; output(data.n, \"relative.json\", 'json')^ }\n");
+    ASSERT_NE(last_run, nullptr); EXPECT_NE(get_type_id(last_run->root), LMD_TYPE_ERROR);
+    EXPECT_EQ(capture.last_write.decision, SECURITY_ALLOWED); EXPECT_TRUE(capture.last_write.committed);
+    expect_text("relative.txt", "payload"); expect_text("relative.json", "41");
+    ASSERT_TRUE(file_getcwd_into(after, sizeof(after))); EXPECT_STREQ(before, after);
+}
+
 TEST_P(SecurityRuntimeTest, AnUnknownWriteOutcomeIsReportedWithoutAnAutomaticRetry) {
     struct Case { const char* script; const char* target; } cases[] = {
         {"pn main() { output(\"payload\", \"@ROOT@/unknown.txt\")^ }\n", "unknown.txt"},

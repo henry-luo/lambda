@@ -797,7 +797,7 @@ class PremakeGenerator:
             '            for _, option in ipairs(cfg.linkoptions) do',
             '                -- "=" separates --dynamic-list=<file> from its operand',
             '                for token in option:gmatch("[^%s,=]+") do',
-            '                    if (token:find("%.a$") or token:find("%.sym$")) and',
+            '                    if (token:find("%.a$") or token:find("%.sym$") or token:find("%.plist$")) and',
             '                            not token:find("^%-") and',
             '                            not table.contains(archives, token) then',
             '                        table.insert(archives, token)',
@@ -2125,7 +2125,7 @@ class PremakeGenerator:
         self._emit_library_build_dependencies(self._executable_external_dependencies(lib))
 
         # Add macOS frameworks for library projects
-        if self.use_macos_config:
+        if self.use_macos_config and lib.get('macos_frameworks', None) != []:
             self.premake_content.extend([
                 '    -- Add macOS frameworks',
                 '    linkoptions {'
@@ -2136,7 +2136,9 @@ class PremakeGenerator:
                 if self.external_libraries[lib_name].get('link') == 'dynamic':
                     lib_flag = self.external_libraries[lib_name]['lib']
                     if lib_flag.startswith('-framework '):
-                        self.premake_content.append(f'        "{lib_flag}",')
+                        allowed = lib.get('macos_frameworks')
+                        if allowed is None or lib_flag[len('-framework '):] in allowed:
+                            self.premake_content.append(f'        "{lib_flag}",')
 
             self.premake_content.extend([
                 '    }',
@@ -3625,11 +3627,14 @@ class PremakeGenerator:
         # in the main program - they are only for development and testing
 
         # Remove .exe extension for project name and adjust for platform
-        project_name = output.replace('.exe', '')
+        main_kind = self.variant_config.get('main_kind', 'ConsoleApp')
+        if main_kind not in ('ConsoleApp', 'SharedLib'):
+            raise ValueError(f'Unsupported main target kind: {main_kind}')
+        project_name = os.path.splitext(output)[0] if main_kind == 'SharedLib' else output.replace('.exe', '')
 
         # Use platform-specific target names
-        target_name = output.replace('.exe', '')  # Use the config output name without .exe
-        target_extension = self.variant_config.get('target_extension', '.exe')
+        target_name = project_name
+        target_extension = self.variant_config.get('target_extension', os.path.splitext(output)[1] if main_kind == 'SharedLib' else '.exe')
 
         # Add files from source directories explicitly
         all_source_files = source_files[:]
@@ -3708,7 +3713,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'project "{project_name}"',
-            '    kind "ConsoleApp"',
+            f'    kind "{main_kind}"',
             '    language "C++"',  # Use C++ as primary language since we have mixed sources
             '    targetdir "."',
             f'    objdir "{self.config.get("object_dir", "build/obj/%{prj.name}")}"',
@@ -3718,6 +3723,8 @@ class PremakeGenerator:
             f'    targetname "{target_name}"',
             f'    targetextension "{target_extension}"',
         ])
+        if main_kind == 'SharedLib':
+            self.premake_content.append('    targetprefix ""')
         if self.variant_config.get('debug_target_suffix'):
             self.premake_content.extend([
                 '    filter "configurations:debug"',
@@ -4063,6 +4070,12 @@ class PremakeGenerator:
             platforms_config = self.config.get('platforms', {})
             macos_config = platforms_config.get('macos', {})
             linker_flags = macos_config.get('linker_flags', [])
+            # an embedded host purpose string is required before macOS can request microphone consent.
+            info_plist = macos_config.get('info_plist')
+            if info_plist:
+                relative = os.path.relpath(info_plist, self._premake_location())
+                option = '-Wl,-sectcreate,__TEXT,__info_plist,' + relative
+                self.premake_content.append('    linkoptions { ' + json.dumps(option) + ' }')
             if linker_flags:
                 self.premake_content.append('    linkoptions {')
                 for flag in linker_flags:

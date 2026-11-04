@@ -1,4 +1,5 @@
 #include "admission.h"
+#include "private_storage.h"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/digest.h"
 #include "../../../lib/mem.h"
@@ -30,6 +31,8 @@ struct SecurityAdmission {
     SecurityFileBroker* broker;
     SecurityGrantBinding binding;
     SecurityIOClient raw;
+    SecurityPrivateStorage* storage;
+    SecurityIOClient private_io;
     ArrayList* sources;
     ArrayList* grants;
     char* entry;
@@ -45,6 +48,9 @@ struct SecurityAdmission {
 
 static bool admission_ok(SecurityIOResult result) {
     return result.decision == SECURITY_ALLOWED && !result.system_error;
+}
+static SecurityIOClient* admission_resource_client(SecurityAdmission* admission, const char* path) {
+    return security_private_storage_path(path) ? &admission->private_io : &admission->raw;
 }
 
 struct AdmissionLease {
@@ -121,6 +127,8 @@ static bool admission_catalog(SecurityAdmission* admission, const SecurityAdmiss
     bool valid = setting && home && admission_protect(admission, setting, SECURITY_ALL_OPERATIONS, true) &&
         admission_protect(admission, lambda_dir, admission_mutations, true) &&
         admission_protect(admission, config->runtime_directory, admission_mutations, true);
+    valid = valid && security_file_broker_protect_name(admission->broker, lambda_dir,
+        "app-data", SECURITY_ALL_OPERATIONS);
     const char* private_names[] = {".ssh", ".aws", ".gnupg", ".config"};
     for (const char* name : private_names) {
         char* path = home ? file_path_join(home, name) : nullptr;
@@ -229,6 +237,8 @@ static bool admission_code_digest(SecurityAdmission* admission) {
 
 static SecurityIOResult admission_source(SecurityAdmission* admission, const char* path,
         uint64_t limit, MemCategory category, SecuritySourceCapture* capture) {
+    // Virtual data mounts never fall through to a physical source namespace.
+    if (security_private_storage_path(path)) return {SECURITY_DENIED, EACCES, false, {}};
     SecurityIOResult result = security_file_broker_capture_source(admission->broker, path, limit, category, capture);
     if (!admission_ok(result)) return result;
     uint8_t hash[32]; bool valid = digest_sha256(capture->data, capture->size, hash);
@@ -255,7 +265,10 @@ static SecurityIOResult admission_read(void* owner, const char* path, bool sourc
     AdmissionOperation operation(admission);
     if (!operation.ready()) return {SECURITY_REVOKED, EACCES, false, {}};
     if (!data || !size) return {SECURITY_INVALID_REQUEST, EINVAL, false, {}};
-    if (!source) return admission->raw.read(admission->raw.context, path, false, limit, category, data, size);
+    if (!source) {
+        SecurityIOClient* client = admission_resource_client(admission, path);
+        return client->read(client->context, path, false, limit, category, data, size);
+    }
     SecuritySourceCapture capture = {};
     SecurityIOResult result = admission_source(admission, path, limit, category, &capture);
     if (admission_ok(result)) { *data = capture.data; *size = capture.size; capture.data = nullptr; }
@@ -278,25 +291,29 @@ static SecurityIOResult admission_write(void* owner, const char* path, const voi
         size_t size, bool append, bool atomic) {
     SecurityAdmission* admission = (SecurityAdmission*)owner; AdmissionOperation operation(admission);
     if (!operation.ready()) return {SECURITY_REVOKED, EACCES, false, {}};
-    return admission->raw.write(admission->raw.context, path, data, size, append, atomic);
+    SecurityIOClient* client = admission_resource_client(admission, path);
+    return client->write(client->context, path, data, size, append, atomic);
 }
 static SecurityIOResult admission_kind(void* owner, const char* path, int32_t* kind) {
     if (kind) *kind = -1;
     SecurityAdmission* admission = (SecurityAdmission*)owner; AdmissionOperation operation(admission);
     if (!operation.ready()) return {SECURITY_REVOKED, EACCES, false, {}};
-    return admission->raw.input_kind(admission->raw.context, path, kind);
+    SecurityIOClient* client = admission_resource_client(admission, path);
+    return client->input_kind(client->context, path, kind);
 }
 static SecurityIOResult admission_enumerate(void* owner, const char* path, uint32_t limit, SecurityDirectory* out) {
     if (out) *out = {};
     SecurityAdmission* admission = (SecurityAdmission*)owner; AdmissionOperation operation(admission);
     if (!operation.ready()) return {SECURITY_REVOKED, EACCES, false, {}};
-    return admission->raw.enumerate(admission->raw.context, path, limit, out);
+    SecurityIOClient* client = admission_resource_client(admission, path);
+    return client->enumerate(client->context, path, limit, out);
 }
 static SecurityIOResult admission_stat(void* owner, const char* path, FileStat* out) {
     if (out) *out = {};
     SecurityAdmission* admission = (SecurityAdmission*)owner; AdmissionOperation operation(admission);
     if (!operation.ready()) return {SECURITY_REVOKED, EACCES, false, {}};
-    return admission->raw.stat(admission->raw.context, path, out);
+    SecurityIOClient* client = admission_resource_client(admission, path);
+    return client->stat(client->context, path, out);
 }
 static SecurityIOResult admission_stamp(void* owner, SecurityAuthorityStamp* out) {
     if (out) *out = {};
@@ -509,11 +526,32 @@ SecurityAdmission* security_admission_open(const SecurityAdmissionConfig* config
     security_grant_snapshot_destroy(&snapshot);
     if (report) *report = {store_result, admission->generation, restored, rejected};
     if (store_result != SECURITY_STORE_OK) { security_admission_close(admission); return nullptr; }
+    // The virtual mount is bound by this admitted channel, never by a worker's
+    // claimed ID/path. Its fixed private roots share this admission's revocation
+    // lease; no private operation can outlive a changed source or grant binding.
+    SecurityPrivateStorageConfig storage = {config->store, admission->binding, limits, {}};
+    security_private_storage_default_limits(storage.limits);
+    admission->storage = security_private_storage_open(&storage);
+    if (!admission->storage) { security_admission_close(admission); return nullptr; }
+    admission->private_io = security_private_storage_client(admission->storage);
     admission->active = true; return admission;
+}
+
+bool security_admission_finish(SecurityAdmission* admission) {
+    if (!admission) return true;
+    pthread_mutex_lock(&admission->mutex);
+    if (admission->active) {
+        admission->active = false; security_file_broker_restrict(admission->broker, 0);
+    }
+    // No store lease crosses host cleanup. Joined borrowers cannot publish IO
+    // after the session closes, even if temporary removal must be retried.
+    bool valid = security_private_storage_finish(admission->storage);
+    int error = errno; pthread_mutex_unlock(&admission->mutex); errno = error; return valid;
 }
 
 void security_admission_close(SecurityAdmission* admission) {
     if (!admission) return;
+    (void)security_admission_finish(admission);
     if (admission->sources) {
         for (int i = 0; i < admission->sources->length; i++) {
             AdmissionSource* source = (AdmissionSource*)admission->sources->data[i];
@@ -525,6 +563,7 @@ void security_admission_close(SecurityAdmission* admission) {
         for (int i = 0; i < admission->grants->length; i++) admission_grant_free((AdmissionGrant*)admission->grants->data[i]);
         arraylist_free(admission->grants);
     }
+    security_private_storage_close(admission->storage);
     security_file_broker_destroy(admission->broker); mem_free(admission->entry); mem_free(admission->store_directory);
     pthread_mutex_destroy(&admission->mutex); mem_free(admission);
 }

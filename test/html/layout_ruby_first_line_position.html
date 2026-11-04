@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><style>
+@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+body{margin:0;font:20px/40px Ahem}.row{width:300px;margin:30px 0}rt{font-size:10px}ruby{ruby-overhang:none}.styled::first-line{ruby-position:var(--first-side,under);color:orange}#color::first-line{color:orange}#normal-under{ruby-position:under;--first-side:over}#constant{ruby-position:under}.tight{line-height:20px;padding-top:20px}
+</style><div id="result">
+<div class="row styled" id="under">foo <ruby id="under-ruby" style="">base<rt id="under-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="under-second-ruby" style="">base<rt id="under-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row" id="color">foo <ruby id="color-ruby" style="">base<rt id="color-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="color-second-ruby" style="">base<rt id="color-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="local">foo <ruby id="local-ruby" style="ruby-position:over">base<rt id="local-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="local-second-ruby" style="ruby-position:over">base<rt id="local-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="inherit">foo <ruby id="inherit-ruby" style="ruby-position:inherit">base<rt id="inherit-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="inherit-second-ruby" style="ruby-position:inherit">base<rt id="inherit-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="initial">foo <ruby id="initial-ruby" style="ruby-position:initial">base<rt id="initial-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="initial-second-ruby" style="ruby-position:initial">base<rt id="initial-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="unset">foo <ruby id="unset-ruby" style="ruby-position:unset">base<rt id="unset-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="unset-second-ruby" style="ruby-position:unset">base<rt id="unset-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="invalid">foo <ruby id="invalid-ruby" style="ruby-position:var(--missing)">base<rt id="invalid-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="invalid-second-ruby" style="ruby-position:var(--missing)">base<rt id="invalid-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="normal-under">foo <ruby id="normal-under-ruby" style="">base<rt id="normal-under-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="normal-under-second-ruby" style="">base<rt id="normal-under-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row" id="constant">foo <ruby id="constant-ruby" style="">base<rt id="constant-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="constant-second-ruby" style="">base<rt id="constant-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="ancestor">foo <span style="ruby-position:over"><ruby id="ancestor-ruby" style="">base<rt id="ancestor-reading">xxxxxxxx</rt></ruby></span><br>bar <span style="ruby-position:over"><ruby id="ancestor-second-ruby" style="">base<rt id="ancestor-second-reading">xxxxxxxx</rt></ruby></span></div>
+<div class="row styled" id="soft">abcdef <ruby id="soft-ruby" style="">base<rt id="soft-reading">xxxxxxxx</rt></ruby> <ruby id="soft-second-ruby" style="">base<rt id="soft-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled tight" id="tight">foo <ruby id="tight-ruby" style="">base<rt id="tight-reading">xxxxxxxx</rt></ruby><br>bar <ruby id="tight-second-ruby" style="">base<rt id="tight-second-reading">xxxxxxxx</rt></ruby></div>
+<div class="row styled" id="fragmented" style="width:140px"><ruby id="fragmented-ruby">aaa bbb ccc<rt id="fragmented-reading">xxxxxx yyyyyy zzzzzz</rt></ruby></div>
+</div>

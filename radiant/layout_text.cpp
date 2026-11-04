@@ -999,7 +999,7 @@ static uint32_t inline_text_edge_in_scope(DomNode* node, bool backwards,
             }
         } else if (node->is_element()) {
             DomElement* elmt = node->as_element();
-            DisplayValue display = resolve_display_value(node);
+            DisplayValue display = layout_resolved_display(node);
             InlineOutOfFlowKind kind = inline_out_of_flow_kind(elmt);
             auto boundary = [&](uint32_t cp) {
                 if (source && mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) *source = node;
@@ -1009,7 +1009,7 @@ static uint32_t inline_text_edge_in_scope(DomNode* node, bool backwards,
             // but an atomic inline or forced break separates adjacent text.
             bool parallel_annotation = !annotation_scope &&
                 layout_ruby_annotation_node(node) && node->parent &&
-                resolve_display_value(node->parent).inner == CSS_VALUE_RUBY;
+                layout_resolved_display(node->parent).inner == CSS_VALUE_RUBY;
             if (display.outer == CSS_VALUE_NONE || kind.floated || kind.positioned ||
                 parallel_annotation) {
                 node = backwards ? node->prev_sibling : node->next_sibling;
@@ -1083,7 +1083,7 @@ uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
         // css ruby: an annotation owns a separate inline formatting context.
         if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
             layout_ruby_annotation_node(parent)) break;
-        CssEnum parent_display = resolve_display_value(parent).outer;
+        CssEnum parent_display = layout_resolved_display(parent).outer;
         if (parent_display != CSS_VALUE_INLINE &&
             !(mode != LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE &&
               parent_display == CSS_VALUE_CONTENTS)) break;
@@ -1999,6 +1999,9 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     // CSS 2.1 §9.5.1: For inline-blocks, query using the element's full height
     float effective_height = query_height > 0 ? query_height :
         (lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f);
+    // nested wrappers cannot narrow a band already selected for a taller pending inline.
+    effective_height = max(effective_height, lycon->line.float_query_height);
+    lycon->line.float_query_height = effective_height;
 
     FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height,
         query_height <= 0.0f);
@@ -2033,6 +2036,19 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
         lycon->line.advance_x = lycon->line.effective_left;
     }
 
+}
+
+void layout_prepare_inline_float_band(LayoutContext* lycon, View* pending, float height) {
+    float previous_left = lycon->line.has_float_intrusion
+        ? lycon->line.effective_left : lycon->line.left;
+    float previous_advance = lycon->line.advance_x;
+    update_line_for_bfc_floats(lycon, height);
+    float offset = lycon->line.effective_left - previous_left;
+    if (!lycon->line.is_line_start && offset > 0.0f) {
+        // all committed siblings share the new float edge; atomic descendants keep local coordinates.
+        layout_shift_preceding_inline_line_views(lycon, pending, offset, true);
+        lycon->line.advance_x = previous_advance + offset;
+    }
 }
 
 struct LineFillProbe {
@@ -2090,7 +2106,7 @@ static bool inline_node_is_unbreakable_text(LayoutContext* lycon, DomNode* node)
     if (layout_element_is_out_of_flow(element)) return true;
     // empty break elements still terminate the unbroken sequence.
     if (element->tag() == MARKUP_NAME_BR || element->tag() == MARKUP_NAME_WBR) return false;
-    if (resolve_display_value(element).outer != CSS_VALUE_INLINE) return false;
+    if (layout_resolved_display(element).outer != CSS_VALUE_INLINE) return false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!inline_node_is_unbreakable_text(lycon, child)) return false;
     }
@@ -2109,7 +2125,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
                                    LineFillProbe* probe, float* measured_width) {
     *measured_width = 0.0f;
     if (!span || !span->is_element()) return RDT_NOT_SURE;
-    if (resolve_display_value(span).inner == CSS_VALUE_RUBY) {
+    if (layout_resolved_display(span).inner == CSS_VALUE_RUBY) {
         DomElement* ruby = span->as_element();
         IntrinsicSizes sizes = calculate_node_intrinsic_widths(lycon, span);
         LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(lycon, ruby);
@@ -2136,7 +2152,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
     }
     LayoutFontScope font_scope(lycon);
     if (element->font) setup_font(lycon->ui_context, &lycon->font, element->font);
-    bool has_box = resolve_display_value(span).outer != CSS_VALUE_CONTENTS;
+    bool has_box = layout_resolved_display(span).outer != CSS_VALUE_CONTENTS;
     float start_edge = has_box ? layout_intrinsic_inline_edge(lycon, element, true) : 0.0f;
     float end_edge = has_box ? layout_intrinsic_inline_edge(lycon, element, false) : 0.0f;
     float saved_advance_x = lycon->line.advance_x;
@@ -2336,6 +2352,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = lycon->line.has_replaced_content = false;
+    lycon->line.float_query_height = 0.0f;
     lycon->line.atomic_inline_count = 0;
     lycon->line.max_top_bottom_height = lycon->line.max_top_height =
         lycon->line.max_bottom_height = 0;
@@ -2486,19 +2503,23 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
 static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
                                                        TextRect* text_rect);
 
-static void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text) {
-    rect->width = max(0.0f, rect->width - advance);
-    // bidi consumes the same trim decision even when soft-wrap source bytes stay queryable.
-    rect->collapsed_space_advance += advance;
-    if (!suppress_text || !text || !text->text_data()) return;
+int text_rect_trailing_collapsible_bytes(ViewText* text, const TextRect* rect) {
+    if (!text || !rect || !text->text_data()) return 0;
     int end = rect->start_index + rect->length - rect->hyphenated_trailing_bytes;
     int start = end;
     bool preserve_spaces = white_space_preserves_space_advance(get_white_space_value(text));
     while (start > rect->start_index && (preserve_spaces
         ? layout_text_is_segment_break(text->text_data()[start - 1])
         : is_space(text->text_data()[start - 1]))) start--;
-    // suppress the raw suffix once, even when several source spaces shared one measured advance.
-    rect->trailing_whitespace_bytes = max(rect->trailing_whitespace_bytes, end - start);
+    return end - start;
+}
+
+void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text) {
+    rect->width = max(0.0f, rect->width - advance);
+    // consumed advance and exported source separators have independent policies.
+    rect->collapsed_space_advance += advance;
+    if (suppress_text) rect->trailing_whitespace_bytes = max(
+        rect->trailing_whitespace_bytes, text_rect_trailing_collapsible_bytes(text, rect));
 }
 
 static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
@@ -2510,8 +2531,13 @@ static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
     bool preserve_vertical_gap = text_rect && line_trailing_space_is_vertical_atomic_gap(
         text_view, text_rect);
     float trim_amount = preserve_vertical_gap ? 0.0f : space_width;
+    View* trim_owner = owner;
     if (trim_text_bounds && !preserve_vertical_gap) {
-        if (text_rect) text_rect_trim_trailing_space(text_view, text_rect, trim_amount, suppress_text);
+        if (text_rect) {
+            View* ruby = layout_ruby_trim_trailing_space(lycon, text_view, text_rect, &trim_amount, suppress_text);
+            if (ruby) trim_owner = ruby;
+            else text_rect_trim_trailing_space(text_view, text_rect, trim_amount, suppress_text);
+        }
         else owner->width = max(0.0f, owner->width - trim_amount);
     }
     lycon->line.advance_x -= trim_amount;
@@ -2521,7 +2547,7 @@ static void trim_line_trailing_space(LayoutContext* lycon, View* owner,
             lycon, text_view, text_rect);
     }
     if (update_ancestor_bounds) {
-        propagate_inline_trim(owner, trim_amount);
+        propagate_inline_trim(trim_owner, trim_amount);
     }
 }
 
@@ -2754,7 +2780,6 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     line_align(lycon);
     layout_finalize_static_inline_positions(lycon);
-    layout_trim_isolated_inline_text_edges(lycon, lycon->line.start_view);
     place_rtl_initial_letter_line(lycon);
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
@@ -3306,7 +3331,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node,
                 lycon->line.advance_x = saved_advance_x;
                 return RDT_LINE_NOT_FILLED;
             }
-            CssEnum outer_display = resolve_display_value(node).outer;
+            CssEnum outer_display = layout_resolved_display(node).outer;
             if (outer_display == CSS_VALUE_BLOCK) {
                 lycon->line.advance_x = saved_advance_x;
                 return RDT_LINE_NOT_FILLED;
@@ -3338,10 +3363,10 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view,
     DomNode* node = view->next_sibling;
     DomNode* parent = view->parent;
     if (parent && parent->is_element() &&
-        resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
+        layout_resolved_display(parent).inner == CSS_VALUE_RUBY) {
         while (node && node->is_element() &&
                (layout_ruby_annotation_node(node) ||
-                resolve_display_value(node).outer == CSS_VALUE_NONE)) {
+                layout_resolved_display(node).outer == CSS_VALUE_NONE)) {
             node = node->next_sibling;
         }
     }
@@ -3852,7 +3877,7 @@ static bool collapsed_space_followed_by_fitting_atomic(
         return false;
     }
     DomElement* next = text_node->next_sibling->as_element();
-    DisplayValue display = resolve_display_value(next);
+    DisplayValue display = layout_resolved_display(next);
     bool inline_outer = display.outer == CSS_VALUE_INLINE ||
         display.outer == CSS_VALUE_INLINE_BLOCK;
     bool atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
@@ -5294,7 +5319,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // else cannot break and no float intrusion, continue the flow in current line
         }
         // CSS Text 3 §3/§5: white-space: nowrap prevents ALL line breaks within this
-        else if (!wrap_lines &&
+        // a selected interval may include its trimmed end separator; its formatter owns line selection.
+        else if (!wrap_lines && !layout_inline_flow_is_kept(lycon) &&
                  rect->x + rect->width +
                      ((text_node->next_sibling == nullptr && text_view->parent_view() &&
                        text_view->parent_view()->view_type == RDT_VIEW_INLINE)

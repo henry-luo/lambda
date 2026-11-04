@@ -74,7 +74,8 @@ typedef enum FileAnchorAction {
     FILE_ANCHOR_METADATA,
     FILE_ANCHOR_CREATE,
     FILE_ANCHOR_REPLACE,
-    FILE_ANCHOR_APPEND
+    FILE_ANCHOR_APPEND,
+    FILE_ANCHOR_REMOVE
 } FileAnchorAction;
 typedef bool (*FileAnchorGuard)(void* context, const char* relative,
     FileAnchorAction action, const FileRevision* object);
@@ -84,7 +85,12 @@ typedef bool (*FileAnchorNamespaceGuard)(void* context, const FileRevision* pare
 enum {
     FILE_ANCHOR_TRUSTED_PARENTS = 1,
     FILE_ANCHOR_PRIVATE = 2,
-    FILE_ANCHOR_SAME_DEVICE = 4
+    FILE_ANCHOR_SAME_DEVICE = 4,
+    // macOS additionally requires F_FULLFSYNC; failure never falls back to
+    // fsync alone. Other supported POSIX hosts use fsync's storage guarantee.
+    FILE_ANCHOR_FULL_SYNC = 8,
+    FILE_ANCHOR_STRICT_STORAGE = FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_PRIVATE |
+        FILE_ANCHOR_SAME_DEVICE | FILE_ANCHOR_FULL_SYNC
 };
 typedef struct FileAnchorOptions {
     uint32_t flags;
@@ -97,8 +103,14 @@ typedef struct FileAnchorOptions {
 } FileAnchorOptions;
 
 FileAnchor* file_anchor_open(const char* path, const FileAnchorOptions* options);
+// Create mode syncs each child directory and its parent, including retained
+// directories on retry. Read-only acquisition does not perform any sync.
 FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative,
     bool create, uint32_t flags);
+// One new child only. Existing directories, links and competing creators fail.
+// Creation syncs child then parent. A sync failure can leave the new object;
+// failure never authorizes replacing or removing it on an exclusive retry.
+FileAnchor* file_anchor_create_directory(FileAnchor* parent, const char* name, uint32_t flags);
 bool file_anchor_validate(FileAnchor* anchor);
 FileRevision file_anchor_identity(const FileAnchor* anchor);
 // Kernel path of an acquired object; these raw mechanisms do not grant access.
@@ -107,13 +119,22 @@ char* file_stream_path(FILE* stream);
 char* file_anchor_path(FileAnchor* anchor);
 void file_anchor_close(FileAnchor* anchor);
 bool file_anchor_stat(FileAnchor* anchor, const char* relative, FileRevision* out);
+// Removes only the named admitted object; directories must already be empty.
+// Identity/revision checks detect substitution, not CAS against external writers.
+// A sync error can follow a committed unlink; never retry against a new object.
+bool file_anchor_remove(FileAnchor* anchor, const char* relative, const FileRevision* expected);
 // Empty relative addresses the held directory itself. Enumeration visits only
 // ordinary, singly linked files and directories accepted by the anchor guard.
 // The visitor must retain its output privately until the whole call succeeds.
 typedef bool (*FileAnchorVisitor)(void* context, const char* name, const FileRevision* revision);
 bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
     FileAnchorVisitor visitor, void* context);
+// Cleanup/accounting must fail on forbidden entries instead of hiding them.
+bool file_anchor_visit_strict(FileAnchor* directory, uint32_t max_entries,
+    FileAnchorVisitor visitor, void* context);
 FILE* file_anchor_open_read(FileAnchor* anchor, const char* relative);
+// Create-only, synced empty inode and parent before returning the stream.
+// Later content needs its own flush/sync. Failure can leave the created object.
 FILE* file_anchor_create_regular(FileAnchor* anchor, const char* relative);
 bool file_anchor_read_all(FileAnchor* anchor, const char* relative, uint64_t limit,
     MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision);

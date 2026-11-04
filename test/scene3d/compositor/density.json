@@ -1,0 +1,15 @@
+{
+  "name": "Compositor_density",
+  "viewport": {
+    "width": 520,
+    "height": 560
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 1500
+    }
+  ]
+}

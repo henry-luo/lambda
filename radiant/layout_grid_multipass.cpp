@@ -59,7 +59,7 @@ static float grid_item_percentage_base_from_parent(LayoutContext* lycon, ViewBlo
     for (DomNode* ancestor = grid_item->parent; ancestor;
          ancestor = ancestor->parent) {
         if (!ancestor->is_element()) continue;
-        DisplayValue display = resolve_display_value(ancestor);
+        DisplayValue display = layout_resolved_display(ancestor);
         if (display.outer == CSS_VALUE_CONTENTS) continue;
         if (display.inner != CSS_VALUE_GRID) break;
         ViewBlock* grid_container = lam::view_as_block(ancestor->as_element());
@@ -522,7 +522,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     DomElement* elem = child->as_element();
     // Resolve and store display value for this element
     // This is crucial for detecting nested grid/flex containers
-    elem->display = resolve_display_value((void*)child);
+    elem->display = layout_resolved_display((void*)child);
     // Allocate table-role state before grid blockification; table layout later
     // reads border-spacing from that state even though the grid item is a block.
     bool is_table = elem->display.inner == CSS_VALUE_TABLE;

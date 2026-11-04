@@ -62,6 +62,83 @@ static RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     return p;
 }
 
+bool compositor_clip_from_shape(const ClipShape* shape, CompositorClip* out) {
+    if (!shape || !out || shape->transformed) return false;
+    *out = {};
+    out->type = shape->type;
+    switch (shape->type) {
+        case CLIP_SHAPE_ROUNDED_RECT: {
+            const auto& r = shape->rounded_rect;
+            const float values[8] = {r.x, r.y, r.w, r.h, r.r_tl, r.r_tr, r.r_br, r.r_bl};
+            memcpy(out->values, values, sizeof(values));
+            return true;
+        }
+        case CLIP_SHAPE_CIRCLE: {
+            const float values[3] = {shape->circle.cx, shape->circle.cy, shape->circle.r};
+            memcpy(out->values, values, sizeof(values));
+            return true;
+        }
+        case CLIP_SHAPE_ELLIPSE: {
+            const auto& e = shape->ellipse;
+            const float values[4] = {e.cx, e.cy, e.rx, e.ry};
+            memcpy(out->values, values, sizeof(values));
+            return true;
+        }
+        case CLIP_SHAPE_INSET: {
+            const auto& r = shape->inset;
+            const float values[6] = {r.x, r.y, r.w, r.h, r.rx, r.ry};
+            memcpy(out->values, values, sizeof(values));
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+ImageSurface* compositor_clip_coverage(const CompositorClip* clips, unsigned count, Bound region) {
+    int width = (int)(region.right - region.left), height = (int)(region.bottom - region.top); // INT_CAST_OK: whole-pixel region
+    ImageSurface* mask = width > 0 && height > 0 ? image_surface_create(width, height) : nullptr;
+    if (!mask) return nullptr;
+    for (int y = 0; y < height; y++) memset((uint8_t*)mask->pixels + (size_t)y * mask->pitch, 0, (size_t)width * 4);
+    RdtVector vec = {};
+    rdt_vector_init(&vec, (uint32_t*)mask->pixels, width, height, mask->pitch / 4);
+    if (!vec.impl) { image_surface_destroy(mask); return nullptr; }
+    // a tile offset keeps the paths in the surface coordinates a replay clips by
+    rdt_vector_set_tile_offset_x(&vec, region.left);
+    rdt_vector_set_tile_offset_y(&vec, region.top);
+    rdt_vector_begin_batch(&vec);
+    unsigned pushed = 0;
+    bool complete = true;
+    for (unsigned i = 0; complete && i < count; i++) {
+        const float* v = clips[i].values;
+        ClipShape shape = {};
+        shape.type = clips[i].type;
+        switch (shape.type) {
+            case CLIP_SHAPE_ROUNDED_RECT: shape.rounded_rect = {v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]}; break;
+            case CLIP_SHAPE_CIRCLE: shape.circle = {v[0], v[1], v[2]}; break;
+            case CLIP_SHAPE_ELLIPSE: shape.ellipse = {v[0], v[1], v[2], v[3]}; break;
+            case CLIP_SHAPE_INSET: shape.inset = {v[0], v[1], v[2], v[3], v[4], v[5]}; break;
+            default: complete = false; continue;
+        }
+        RdtPath* path = render_clip_create_shape_path(&shape);
+        complete = path != nullptr;
+        if (!path) break;
+        rdt_push_clip(&vec, path, nullptr);
+        rdt_path_free(path);
+        pushed++;
+    }
+    // full coverage through every clip leaves each pixel's clip coverage in its alpha
+    Color white;
+    white.c = 0xFFFFFFFF;
+    if (complete) rdt_fill_rect(&vec, region.left, region.top, (float)width, (float)height, white);
+    rdt_vector_flush_batch(&vec);
+    while (pushed--) rdt_pop_clip(&vec);
+    rdt_vector_destroy(&vec);
+    if (complete) return mask;
+    image_surface_destroy(mask);
+    return nullptr;
+}
+
 const char* render_clip_css_value(ViewElement* view) {
     if (!view) return nullptr;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));

@@ -114,7 +114,7 @@ bool layout_sum_reversed_counter_incs(DomElement* parent, const char* counter_na
         DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
         // unreached descendants already have a cascade, but no used display yet.
         if (query ? !query->visible(query->context, elem) :
-            resolve_display_value(elem).outer == CSS_VALUE_NONE) continue;
+            layout_resolved_display(elem).outer == CSS_VALUE_NONE) continue;
         // HTML list containers establish an implicit list-item scope even when
         // no authored counter-reset declaration is present.
         if (include_implicit_reversed_list_item &&
@@ -848,7 +848,7 @@ static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, uns
     DomElement* element = node->as_element();
     ViewType previous_type = element->view_type;
     LayoutContext saved = *context;
-    DisplayValue display = resolve_display_value(element);
+    DisplayValue display = layout_resolved_display(element);
     element->display = display;
     element->view_type = layout_view_type_for_display(display);
     context->view = lam::up(static_cast<View*>(element));

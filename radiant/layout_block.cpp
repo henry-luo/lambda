@@ -1394,7 +1394,9 @@ static void refresh_pseudo_element_style(LayoutContext* lycon, DomElement* paren
     // CSS generated boxes borrow the owner's pseudo cascade; rebind retained
     // nodes after a stylesheet recascade before resolving their display.
     dom_element_borrow_specified_style(pseudo, style);
-    pseudo->display = resolve_display_value(pseudo);
+    // rebinding a generated cascade invalidates its previously resolved role.
+    pseudo->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
+    pseudo->display = layout_resolved_display(pseudo);
 }
 
 static bool pseudo_content_has_function(StyleTree* style, const char* name) {
@@ -1813,7 +1815,7 @@ static bool margin_collapse_has_separating_content_after(View* child,
          sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
         if (!sibling->view_type) {
             if (include_unlaid_content && sibling->is_element()) {
-                DisplayValue display = resolve_display_value(static_cast<void*>(sibling));
+                DisplayValue display = layout_resolved_display(static_cast<void*>(sibling));
                 if (display.outer != CSS_VALUE_NONE && display.outer != CSS_VALUE_INLINE) {
                     return true;
                 }
@@ -5545,7 +5547,7 @@ static DomElement* find_fieldset_legend_in_contents(DomNode* first_child) {
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* candidate = child->as_element();
-        DisplayValue display = resolve_display_value(candidate);
+        DisplayValue display = layout_resolved_display(candidate);
         if (layout_display_is_none(display)) continue;
         if (display.outer == CSS_VALUE_CONTENTS) {
             DomElement* nested = find_fieldset_legend_in_contents(
@@ -5671,7 +5673,7 @@ static DomNode* fieldset_first_flow_node(DomNode* first_child,
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (child == static_cast<DomNode*>(rendered_legend)) continue;
         if (child->is_element()) {
-            DisplayValue display = resolve_display_value(child);
+            DisplayValue display = layout_resolved_display(child);
             if (layout_display_is_none(display)) continue;
             if (display.outer == CSS_VALUE_CONTENTS &&
                 view_geometry_dom_is_descendant(
@@ -5696,7 +5698,7 @@ static void fieldset_initialize_contents_ancestors(
     }
     if (node->is_element()) {
         DomElement* element = node->as_element();
-        if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+        if (layout_resolved_display(element).outer == CSS_VALUE_CONTENTS) {
             layout_init_display_contents_view(lycon, element);
         }
     }
@@ -5733,7 +5735,7 @@ bool layout_node_has_in_flow_inline_content(DomNode* node, bool descend_blocks) 
     }
     if (!node->is_element()) return false;
     DomElement* elem = node->as_element();
-    DisplayValue display = resolve_display_value(node);
+    DisplayValue display = layout_resolved_display(node);
     if (layout_display_is_none(display)) return false;
     if (layout_element_is_out_of_flow(elem)) return false;
     if (display.outer != CSS_VALUE_INLINE && !descend_blocks) return false;
@@ -5777,7 +5779,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             continue;
         }
         if (!first_float_node) {
-            DisplayValue display = resolve_display_value(child);
+            DisplayValue display = layout_resolved_display(child);
             if (elem->tag() == MARKUP_NAME_BUTTON) {
                 display = layout_button_used_display(elem, display);
             }
@@ -5838,7 +5840,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
         }
         DomElement* elem = child->as_element();
         if (elem->float_prelaid()) continue;
-        DisplayValue display = resolve_display_value(child);
+        DisplayValue display = layout_resolved_display(child);
         if (layout_display_is_none(display)) continue;
         CssEnum float_value = get_element_float_value(elem);
         // Subsequent floats must be laid out in normal flow order
@@ -5933,7 +5935,7 @@ static bool layout_retained_subtree_walk(DomNode* node, int depth,
     DomElement* element = node->as_element();
     // hidden descendants have no committed flow; native controls in them may
     // deliberately retain unresolved style adapters until they become visible.
-    if (layout_display_is_none(resolve_display_value(element))) return true;
+    if (layout_display_is_none(layout_resolved_display(element))) return true;
     // a measurement-restyled node keeps its committed geometry here; its flag
     // stays until the next committed layout of that node resolves it again.
     if (!element->styles_resolved() || element->needs_style_recompute() ||
@@ -6207,7 +6209,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
         // MathML's package consumes semantic children directly, before generic
         // flow can flatten scripts or allocate text boxes for inert annotations.
         if (block->is_element() && !(layout_is_mathml_root(block->as_element()) &&
-                resolve_display_value(block).inner == CSS_VALUE_MATH)) {
+                layout_resolved_display(block).inner == CSS_VALUE_MATH)) {
             child = layout_render_child_list(block->as_element());
         }
         if (child) {
@@ -6269,11 +6271,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
                                 should_collapse_inter_element_whitespace(flow_child)) continue;
                             if (!flow_child->is_element() && !flow_child->is_text()) continue;
                             if (flow_child->is_element() &&
-                                resolve_display_value(flow_child).outer == CSS_VALUE_NONE) continue;
+                                layout_resolved_display(flow_child).outer == CSS_VALUE_NONE) continue;
                             // Any inline-level or text sibling can leave line state
                             // that a retained block's height cannot reconstruct.
                             if (!flow_child->is_element() ||
-                                resolve_display_value(flow_child).outer != CSS_VALUE_BLOCK) {
+                                layout_resolved_display(flow_child).outer != CSS_VALUE_BLOCK) {
                                 block_only_flow = false;
                                 break;
                             }
@@ -6551,7 +6553,7 @@ void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsig
     const char* tag = element->tag_name;
     bool is_switch = tag && strcmp(tag, "switch") == 0;
     if (!tag || (strcmp(tag, "svg") != 0 && strcmp(tag, "g") != 0 && strcmp(tag, "a") != 0 && !is_switch)) return;
-    if (layout_display_is_none(resolve_display_value(element))) return;
+    if (layout_display_is_none(layout_resolved_display(element))) return;
     DomNode* selected = is_switch ? (DomNode*)dom_svg_switch_selected_child(element) : nullptr;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element() || (is_switch && child != selected)) continue;
@@ -6794,9 +6796,10 @@ static float layout_inline_content_measure(LayoutContext* lycon, ViewBlock* bloc
 }
 
 static float block_start_annotation_space(LayoutContext* context, ViewBlock* block) {
-    if (layout_block_inline_axis_is_vertical(block)) return 0.0f;
     BoxMetrics box = layout_box_metrics(block);
-    float space = max(box.padding.top, 0.0f);
+    float space = max(layout_line_relative_box_edges(box.padding, block).top, 0.0f);
+    // internal padding is axis-independent; the adjoining-margin protocol below uses physical Y.
+    if (layout_block_inline_axis_is_vertical(block)) return space;
     // independent contexts keep their external margins outside the internal annotation space.
     if (block_context_establishes_bfc(block) || box.border.top > 0.0f ||
             (block->scroller && block->scroll()->overflow_y != CSS_VALUE_VISIBLE) ||
@@ -9807,7 +9810,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->is_element() && elmt->as_element()->has_animated_display()) {
         // CSS Animations apply after the cascade; refresh the local routing
         // value because this call may have entered through the underlying box.
-        display = resolve_display_value(elmt->as_element());
+        display = layout_resolved_display(elmt->as_element());
         block->display = display;
     }
     if (elmt->is_element() && elmt->as_element()->tag() == MARKUP_NAME_BUTTON) {
@@ -9815,7 +9818,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // keep the computed display on DomElement, but lay out the principal box
         // as flow-root so authored children form the anonymous button content.
         display = layout_button_used_display(elmt->as_element(),
-            resolve_display_value(elmt));
+            layout_resolved_display(elmt));
         block->display = display;
     }
     if (display.outer == CSS_VALUE_NONE) {
@@ -9856,7 +9859,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     layout_clear_cyclic_percentage_height(lycon, block);
     const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
     bool package_mathml = !custom_layout_name && layout_is_mathml_root(dom_elem) &&
-        resolve_display_value(dom_elem).inner == CSS_VALUE_MATH;
+        layout_resolved_display(dom_elem).inner == CSS_VALUE_MATH;
     if (package_mathml) {
         custom_layout_name = "lambda-mathml";
     }
@@ -10039,6 +10042,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_inline_atomic && !is_float_element) {
             // wrapping finalizes the old line; its bidi pass must not collect this pending item.
             block->inline_line_number = -1;
+            // assigning a fresh atomic frame discards offsets applied by an earlier content pass.
+            if (block->position)
+                block->position->inline_relative_x = block->position->inline_relative_y = 0.0f;
             if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(block));
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
             float inline_block_height = block->height;

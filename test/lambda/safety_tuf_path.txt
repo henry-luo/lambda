@@ -1,0 +1,1 @@
+["..%2F%E5%90%8D%23%3Frole", "1...%2F%E5%90%8D%23%3Frole.json", true, false, false, "docs/%E5%90%8D%20file%20name.pkg", "%2520", "literal%25name.pkg", [true, true, true, true, true, true], [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], true, false, "docs/%E5%90%8D%20file%20name.pkg", false, "1", "2"]

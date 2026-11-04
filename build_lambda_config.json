@@ -35,6 +35,10 @@
       "args": [
         "build_lambda_config.json"
       ]
+    },
+    {
+      "script": "utils/generate_update_verifier.py",
+      "args": []
     }
   ],
   "source_dirs": [
@@ -365,6 +369,14 @@
       "description": "Character-set conversion for native archive names and mail (lib/mail_mime)",
       "lib": "-liconv",
       "link": "dynamic"
+    },
+    {
+      "name": "openssl-crypto",
+      "version": "3",
+      "description": "Public-key verification using an isolated built-in provider",
+      "include": "/opt/homebrew/opt/openssl@3/include",
+      "lib": "/opt/homebrew/opt/openssl@3/lib/libcrypto.a",
+      "link": "static"
     }
   ],
   "dev_libraries": [
@@ -535,6 +547,8 @@
       "libraries": [
         "utf8proc",
         "re2",
+        "curl",
+        "nghttp2",
         "mbedtls",
         "mbedx509",
         "mbedcrypto",
@@ -545,7 +559,8 @@
         "pthread",
         "image-codecs",
         "zlib",
-        "archive-iconv"
+        "archive-iconv",
+        "openssl-crypto"
       ],
       "linux": {
         "additional_libraries": [
@@ -1045,6 +1060,7 @@
         "lambda/module/radiant/*.cpp"
       ],
       "objcxx_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
@@ -1112,10 +1128,20 @@
         "lambda/host/safety/host_main.cpp",
         "lambda/host/safety/supervisor.cpp",
         "lambda/host/safety/admission.cpp",
+        "lambda/host/safety/private_storage.cpp",
+        "lambda/host/safety/storage_tree.cpp",
         "lambda/host/safety/file_broker.cpp",
         "lambda/host/safety/grant_store.cpp",
         "lambda/host/safety/update_controls.cpp",
-        "lambda/host/safety/update_command.cpp"
+        "lambda/host/safety/update_command.cpp",
+        "lambda/host/safety/storage_command.cpp",
+        "lambda/host/safety/update_download.cpp",
+        "lambda/host/safety/update_metadata.cpp",
+        "lambda/host/safety/update_payload.cpp",
+        "lambda/host/safety/update_refresh.cpp",
+        "lambda/host/safety/update_stage.cpp",
+        "lambda/host/safety/update_process.cpp",
+        "lambda/host/safety/update_wire.cpp"
       ],
       "libraries": [
         "lambda-data",
@@ -1135,10 +1161,20 @@
         "lambda/host/safety/host_main.cpp",
         "lambda/host/safety/supervisor.cpp",
         "lambda/host/safety/admission.cpp",
+        "lambda/host/safety/private_storage.cpp",
+        "lambda/host/safety/storage_tree.cpp",
         "lambda/host/safety/file_broker.cpp",
         "lambda/host/safety/grant_store.cpp",
         "lambda/host/safety/update_controls.cpp",
-        "lambda/host/safety/update_command.cpp"
+        "lambda/host/safety/update_command.cpp",
+        "lambda/host/safety/storage_command.cpp",
+        "lambda/host/safety/update_download.cpp",
+        "lambda/host/safety/update_metadata.cpp",
+        "lambda/host/safety/update_payload.cpp",
+        "lambda/host/safety/update_refresh.cpp",
+        "lambda/host/safety/update_stage.cpp",
+        "lambda/host/safety/update_process.cpp",
+        "lambda/host/safety/update_wire.cpp"
       ],
       "libraries": [
         "lambda-data",
@@ -1162,6 +1198,7 @@
         "test/safety/supervisor_probe.cpp"
       ],
       "libraries": [
+        "lambda-data",
         "lambda-lib",
         "CoreFoundation",
         "Security"
@@ -1169,6 +1206,22 @@
       "target_name": "lambda-safety-supervisor-probe",
       "target_dir": ".",
       "link": "executable"
+    },
+    {
+      "name": "lambda-safety-bootstrap",
+      "description": "Experimental minimal libSystem-only sandbox-before-runtime bootstrap; no default rollout",
+      "lang": "c11",
+      "source_files": [
+        "lambda/host/safety/bootstrap.c",
+        "lib/confined_process_worker.c",
+        "lib/ipc_stream_endpoint.c",
+        "lib/process_sandbox.c"
+      ],
+      "libraries": [],
+      "target_name": "lambda-safety-bootstrap",
+      "target_dir": ".",
+      "link": "executable",
+      "macos_frameworks": []
     }
   ],
   "static_module_validation": {
@@ -2011,6 +2064,12 @@
           "lib": "/clang64/lib/libiconv.a",
           "include": "/clang64/include",
           "link": "static"
+        },
+        {
+          "name": "openssl-crypto",
+          "include": "/clang64/include",
+          "lib": "/clang64/lib/libcrypto.a",
+          "link": "static"
         }
       ],
       "dev_libraries": [
@@ -2294,6 +2353,12 @@
           "lib": "-lc",
           "include": "/usr/include",
           "link": "dynamic"
+        },
+        {
+          "name": "openssl-crypto",
+          "include": "/usr/include",
+          "lib": "-lcrypto",
+          "link": "dynamic"
         }
       ],
       "dev_libraries": [
@@ -2327,6 +2392,7 @@
     },
     "macos": {
       "exclude_source_files": [
+        "radiant/audio_capture_mac_static.cpp",
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
@@ -2345,6 +2411,7 @@
       "linker_flags": [
         "mmacosx-version-min=15.7"
       ],
+      "info_plist": "radiant/host_info.plist",
       "libraries": [
         {
           "name": "CoreFoundation",
@@ -2828,6 +2895,38 @@
       "debug": false,
       "premake_location": "build_safety_probe_worker/premake",
       "object_dir": "build_safety_probe_worker/obj/%{prj.name}"
+    },
+    "safety-runtime": {
+      "extends": "safety-worker",
+      "description": "Experimental preconfined T0 runtime loaded after the minimal bootstrap installs policy; publisher qualification pending",
+      "main_kind": "SharedLib",
+      "output": "LambdaSafetyRuntime.dylib",
+      "build_dir": "build_safety_runtime",
+      "extra_source_files": [
+        "lambda/host/safety/worker_module.cpp"
+      ],
+      "premake_location": "build_safety_runtime/premake",
+      "object_dir": "build_safety_runtime/obj/%{prj.name}",
+      "extra_exclude_source_files": [
+        "lambda/host/safety/worker_main.cpp"
+      ]
+    },
+    "update-runtime": {
+      "extends": "safety-runtime",
+      "description": "Embedded Lambda Script update verifier; separate offline protocol and bounded trusted process",
+      "output": "LambdaUpdateRuntime.dylib",
+      "build_dir": "build_update_runtime",
+      "premake_location": "build_update_runtime/premake",
+      "object_dir": "build_update_runtime/obj/%{prj.name}",
+      "extra_exclude_source_files": [
+        "lambda/host/safety/worker.cpp",
+        "lambda/host/safety/worker_module.cpp"
+      ],
+      "extra_source_files": [
+        "lambda/host/safety/update_verifier_worker.cpp",
+        "lambda/host/safety/update_wire.cpp",
+        "lambda/host/safety/update_payload.cpp"
+      ]
     }
   },
   "test": {
@@ -3769,7 +3868,9 @@
             "additional_sources": [
               "lambda/host/safety/file_broker.cpp",
               "lambda/host/safety/grant_store.cpp",
-              "lambda/host/safety/admission.cpp"
+              "lambda/host/safety/admission.cpp",
+              "lambda/host/safety/private_storage.cpp",
+              "lambda/host/safety/storage_tree.cpp"
             ],
             "defines": [
               "LAMBDA_SECURITY_STORE_TESTING"
@@ -3873,7 +3974,10 @@
             ],
             "additional_sources": [
               "lambda/host/safety/grant_store.cpp",
-              "lambda/host/safety/update_controls.cpp"
+              "lambda/host/safety/update_controls.cpp",
+              "lambda/host/safety/update_metadata.cpp",
+              "lambda/host/safety/update_payload.cpp",
+              "lambda/host/safety/update_wire.cpp"
             ],
             "defines": [
               "LAMBDA_SECURITY_STORE_TESTING"
@@ -3883,6 +3987,114 @@
               "gtest_main"
             ],
             "binary": "test_security_update_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
+            "source": "test_security_update_pull_gtest.cpp",
+            "name": "App Safety Anonymous HTTPS Pull",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/grant_store.cpp",
+              "lambda/host/safety/update_controls.cpp",
+              "lambda/host/safety/update_download.cpp",
+              "lib/https_pull.cpp",
+              "lambda/host/safety/update_refresh.cpp",
+              "lambda/host/safety/storage_tree.cpp",
+              "lambda/host/safety/update_stage.cpp",
+              "lambda/host/safety/update_process.cpp",
+              "lambda/host/safety/update_metadata.cpp",
+              "lambda/host/safety/update_payload.cpp",
+              "lambda/host/safety/update_wire.cpp"
+            ],
+            "defines": [
+              "LAMBDA_SECURITY_STORE_TESTING",
+              "LAMBDA_HTTPS_PULL_TESTING",
+              "LAMBDA_SECURITY_UPDATE_TESTING"
+            ],
+            "libraries": [
+              "gtest",
+              "curl",
+              "nghttp2",
+              "mbedtls",
+              "mbedx509",
+              "mbedcrypto",
+              "zlib",
+              "CoreFoundation",
+              "Security",
+              "pthread",
+              "SystemConfiguration"
+            ],
+            "linux": {
+              "exclude_libraries": [
+                "CoreFoundation",
+                "Security",
+                "SystemConfiguration"
+              ]
+            },
+            "windows": {
+              "exclude_libraries": [
+                "CoreFoundation",
+                "Security",
+                "SystemConfiguration"
+              ]
+            },
+            "binary": "test_security_update_pull_gtest.exe",
+            "icon": "\ud83d\udee1\ufe0f"
+          },
+          {
+            "source": "test_security_update_stage_gtest.cpp",
+            "name": "App Safety Protected Package Staging",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "additional_sources": [
+              "lambda/host/safety/grant_store.cpp",
+              "lambda/host/safety/update_controls.cpp",
+              "lambda/host/safety/update_download.cpp",
+              "lib/https_pull.cpp",
+              "lambda/host/safety/update_refresh.cpp",
+              "lambda/host/safety/storage_tree.cpp",
+              "lambda/host/safety/update_stage.cpp",
+              "lambda/host/safety/update_process.cpp",
+              "lambda/host/safety/update_metadata.cpp",
+              "lambda/host/safety/update_payload.cpp",
+              "lambda/host/safety/update_wire.cpp"
+            ],
+            "defines": [
+              "LAMBDA_SECURITY_STORE_TESTING",
+              "LAMBDA_HTTPS_PULL_TESTING",
+              "LAMBDA_SECURITY_UPDATE_TESTING"
+            ],
+            "libraries": [
+              "gtest",
+              "curl",
+              "nghttp2",
+              "mbedtls",
+              "mbedx509",
+              "mbedcrypto",
+              "zlib",
+              "CoreFoundation",
+              "Security",
+              "pthread",
+              "SystemConfiguration"
+            ],
+            "linux": {
+              "exclude_libraries": [
+                "CoreFoundation",
+                "Security",
+                "SystemConfiguration"
+              ]
+            },
+            "windows": {
+              "exclude_libraries": [
+                "CoreFoundation",
+                "Security",
+                "SystemConfiguration"
+              ]
+            },
+            "binary": "test_security_update_stage_gtest.exe",
             "icon": "\ud83d\udee1\ufe0f"
           }
         ],
@@ -4046,6 +4258,10 @@
               "gtest_main"
             ],
             "macos": {
+              "additional_sources": [
+                "test/test_window_fullscreen_gtest.cpp",
+                "radiant/rdt_video_avf.mm"
+              ],
               "libraries": [
                 "CoreFoundation",
                 "Security",
@@ -4311,6 +4527,13 @@
             "additional_sources": [
               "radiant/rdt_video_stub.cpp"
             ],
+            "additional_files": [
+              "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
+              "radiant/audio_reverb.cpp",
+              "radiant/rdt_audio.cpp",
+              "radiant/audio_stream.cpp"
+            ],
             "macos": {
               "additional_sources": [
                 "radiant/rdt_video_avf.mm"
@@ -4319,6 +4542,7 @@
                 "CoreFoundation",
                 "Security",
                 "AVFoundation",
+                "AudioToolbox",
                 "CoreMedia",
                 "CoreVideo",
                 "Cocoa"
@@ -4349,16 +4573,27 @@
           {
             "source": "test_audio_player_gtest.cpp",
             "name": "Decoded Audio Playback Tests",
-            "dependencies": ["lambda-data"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "additional_sources": [
               "radiant/rdt_audio.cpp",
               "radiant/audio_bus.cpp",
               "radiant/audio_graph.cpp",
               "radiant/audio_cues.cpp",
+              "radiant/audio_stream.cpp",
+              "radiant/audio_capture_pcm.cpp",
               "radiant/audio_reverb.cpp"
             ],
-            "macos": {"libraries": ["AudioToolbox"]},
+            "macos": {
+              "libraries": [
+                "AudioToolbox"
+              ]
+            },
             "binary": "test_audio_player_gtest.exe",
             "icon": "\ud83c\udfb5"
           },

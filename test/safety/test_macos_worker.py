@@ -95,7 +95,7 @@ def exercise(directory: Path, executable: Path, label: str, port: int,
     try:
         admission_boot = None
         if admission_host:
-            command = [str(ROOT / "test/test_security_admission_gtest.exe"), "--serve-admission-fixture",
+            command = [str(directory / "host-admission.exe"), "--serve-admission-fixture",
                        str(first.fileno()), str(project), str(project), str(entry), str(installation), str(protected)]
             if mode in {"remember", "revoked", "changed-code"}:
                 subprocess.run(command + ["remember", str(outside)], cwd=ROOT, check=True, capture_output=True,
@@ -107,7 +107,7 @@ def exercise(directory: Path, executable: Path, label: str, port: int,
                 (project / "helper.ls").write_text("pub let offset = 2\n")
             command += ["approve" if mode == "approve" else "deny"]
         else:
-            command = [str(ROOT / "test/test_security_channel_gtest.exe"), "--serve-fixture",
+            command = [str(directory / "host-channel.exe"), "--serve-fixture",
                        str(first.fileno()), str(session), str(project), str(protected),
                        "approve" if mode == "approve" else "deny"]
         host = subprocess.Popen(command,
@@ -132,7 +132,7 @@ def exercise(directory: Path, executable: Path, label: str, port: int,
             session = admission_boot["session"]
         command = [str(executable), str(second.fileno()), str(session), str(entry)]
         if native_probe:
-            command += [str(data), str(secret), str(raw_create), str(port)]
+            command += [str(data), str(secret), str(raw_create), str(port), "confined" if sandboxed else "control"]
         worker = subprocess.Popen(command,
                                   cwd=project, env={"PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"},
                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -203,26 +203,34 @@ def main() -> int:
         if not args.no_build:
             build(output)
         binary = ROOT / "lambda-safety-probe-worker.exe"
-        symbols = run(["nm", "-gj", str(binary)])
-        management = ("_security_file_broker_", "_security_grant_store_", "_security_admission_", "_security_policy_")
+        # Policy code can be hidden/local after archive linking. Inspect the
+        # complete symbol table in both controls, including private storage.
+        symbols = run(["nm", "-j", str(binary)])
+        management = ("security_file_broker_", "security_grant_store_", "security_admission_", "security_policy_",
+                      "security_private_storage_")
         if any(name in symbols for name in management):
             raise RuntimeError("worker unexpectedly links host grant/broker management")
         report["worker_management_symbols_absent"] = True
         report["worker_dependencies"] = run(["otool", "-L", str(binary)])
         directory = Path(tempfile.mkdtemp(prefix="run-", dir=output))
+        # Pin the fixture hosts too; a concurrent build may relink shared test
+        # executables between cases, invalidating this run's recorded hashes.
+        for source, name in [("test_security_admission_gtest.exe", "host-admission.exe"),
+                             ("test_security_channel_gtest.exe", "host-channel.exe")]:
+            shutil.copy2(ROOT / "test" / source, directory / name)
         report["artifacts"] = str(directory.relative_to(ROOT))
         control = stage_bundle(directory, "LambdaControl", binary, args.sign_identity, False)
-        worker = stage_bundle(directory, "LambdaSandboxed", binary, args.sign_identity, True)
+        worker = stage_bundle(directory, "LambdaSandboxed", binary, args.sign_identity, False)
         bootstrap = ROOT / "lambda-safety-worker.exe"
-        bootstrap_symbols = run(["nm", "-gj", str(bootstrap)])
+        bootstrap_symbols = run(["nm", "-j", str(bootstrap)])
         if any(name in bootstrap_symbols for name in management):
             raise RuntimeError("bootstrap worker unexpectedly links host management")
-        bootstrap_worker = stage_bundle(directory, "LambdaT0Worker", bootstrap, args.sign_identity, True)
+        bootstrap_worker = stage_bundle(directory, "LambdaT0Worker", bootstrap, args.sign_identity, False)
         report["signed_worker_sha256"] = hashlib.sha256(worker.read_bytes()).hexdigest()
         report["signed_bootstrap_sha256"] = hashlib.sha256(bootstrap_worker.read_bytes()).hexdigest()
-        report["host_sha256"] = hashlib.sha256((ROOT / "test/test_security_channel_gtest.exe").read_bytes()).hexdigest()
-        host_admission = ROOT / "test/test_security_admission_gtest.exe"
-        host_symbols = run(["nm", "-gj", str(host_admission)])
+        report["host_sha256"] = hashlib.sha256((directory / "host-channel.exe").read_bytes()).hexdigest()
+        host_admission = directory / "host-admission.exe"
+        host_symbols = run(["nm", "-j", str(host_admission)])
         if not all(name in host_symbols for name in management):
             raise RuntimeError("trusted admission fixture is missing a management component")
         report["host_admission_sha256"] = hashlib.sha256(host_admission.read_bytes()).hexdigest()

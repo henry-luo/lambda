@@ -1,0 +1,21 @@
+{
+  "name": "MidtownMobilePedalsDriveTheCar",
+  "viewport": {"width": 420, "height": 860},
+  "events": [
+    {"type": "wait", "ms": 400},
+    {"type": "assert_script", "js": "getComputedStyle(document.querySelector('.pedals')).display !== 'none'"},
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "assert_attribute", "target": {"selector": "#midtown"}, "attribute": "data-started", "equals": "true"},
+    {"type": "script", "js": "window.__needle = getComputedStyle(document.getElementById('needle')).transform"},
+    {"type": "snapshot_surface", "source": "scene3d", "target": "#city", "width": 320, "height": 640, "name": "parked"},
+    {"type": "pointer_event", "event": "pointerdown", "target": ".pedal-up", "x": 380, "y": 818, "button": 0, "buttons": 1},
+    {"type": "wait", "ms": 1500},
+    {"type": "pointer_event", "event": "pointerup", "target": ".pedal-up", "x": 380, "y": 818, "button": 0, "buttons": 0},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('needle')).transform !== window.__needle"},
+    {"type": "assert_surface", "source": "scene3d", "target": "#city", "width": 320, "height": 640, "reference": "parked", "count": {"min": 2000}},
+    {"type": "pointer_event", "event": "pointerdown", "target": ".pedal-left", "x": 44, "y": 818, "button": 0, "buttons": 1},
+    {"type": "wait", "ms": 400},
+    {"type": "pointer_event", "event": "pointerup", "target": ".pedal-left", "x": 44, "y": 818, "button": 0, "buttons": 0},
+    {"type": "assert_render_stats", "source": "scene3d", "target": "#city", "fields": {"runtime_faulted": 0}}
+  ]
+}

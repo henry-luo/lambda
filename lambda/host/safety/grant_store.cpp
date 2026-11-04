@@ -14,6 +14,7 @@
 
 struct SecurityGrantStore {
     FileAnchor* directory;
+    FileAnchor* profile;
     FILE* lock;
     pthread_mutex_t mutex;
     bool unavailable;
@@ -21,7 +22,7 @@ struct SecurityGrantStore {
 struct SecurityGrantLease { SecurityGrantStore* store; };
 struct SecurityStateTransaction {
     SecurityGrantStore* store;
-    const char* name;
+    char name[96];
     FileRevision revision;
     bool ready;
     bool missing;
@@ -192,14 +193,17 @@ static SecurityStoreResult grant_store_path_error(void) {
 static SecurityGrantStore* grant_store_open_home(const char* home, SecurityStoreResult* result) {
     if (result) *result = SECURITY_STORE_INVALID;
     if (!home || home[0] != '/') return nullptr;
-    const uint32_t directory_flags = FILE_ANCHOR_PRIVATE | FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE;
+    const uint32_t directory_flags = FILE_ANCHOR_STRICT_STORAGE;
     FileAnchorOptions options = {FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE, nullptr, nullptr};
     FileAnchor* home_dir = file_anchor_open(home, &options);
     FileAnchor* lambda_dir = home_dir ? file_anchor_directory(home_dir, ".lambda", true, directory_flags) : nullptr;
     FileAnchor* directory = lambda_dir ? file_anchor_directory(lambda_dir, "setting", true, directory_flags) : nullptr;
     int error = errno;
-    file_anchor_close(lambda_dir); file_anchor_close(home_dir);
-    if (!directory) { errno = error; if (result) *result = grant_store_path_error(); return nullptr; }
+    file_anchor_close(home_dir);
+    if (!directory) {
+        file_anchor_close(lambda_dir); errno = error;
+        if (result) *result = grant_store_path_error(); return nullptr;
+    }
     FILE* lock = file_anchor_open_read(directory, ".grants.lock");
     if (!lock && errno == ENOENT) {
         lock = file_anchor_create_regular(directory, ".grants.lock");
@@ -208,6 +212,7 @@ static SecurityGrantStore* grant_store_open_home(const char* home, SecurityStore
     if (!lock) {
         int lock_error = errno;
         file_anchor_close(directory);
+        file_anchor_close(lambda_dir);
         errno = lock_error;
         if (result) *result = grant_store_path_error();
         return nullptr;
@@ -216,11 +221,13 @@ static SecurityGrantStore* grant_store_open_home(const char* home, SecurityStore
     if (!store || pthread_mutex_init(&store->mutex, nullptr) != 0) {
         if (lock) fclose(lock);
         file_anchor_close(directory);
+        file_anchor_close(lambda_dir);
         mem_free(store);
         if (result) *result = SECURITY_STORE_IO_ERROR;
         return nullptr;
     }
     store->directory = directory;
+    store->profile = lambda_dir;
     store->lock = lock;
     if (result) *result = SECURITY_STORE_OK;
     return store;
@@ -272,6 +279,7 @@ void security_grant_store_close(SecurityGrantStore* store) {
     // callers join outstanding requests before destroying the host service
     fclose(store->lock);
     file_anchor_close(store->directory);
+    file_anchor_close(store->profile);
     pthread_mutex_destroy(&store->mutex);
     mem_free(store);
 }
@@ -308,6 +316,17 @@ static void grant_store_end(SecurityGrantStore* store) {
     flock(fileno(store->lock), LOCK_UN);
 #endif
     pthread_mutex_unlock(&store->mutex);
+}
+
+FileAnchor* security_grant_store_private_root(SecurityGrantStore* store) {
+    if (grant_store_begin(store) != SECURITY_STORE_OK) return nullptr;
+    FileAnchor* result = file_anchor_directory(store->profile, "app-data", true,
+        FILE_ANCHOR_STRICT_STORAGE);
+    int error = errno; grant_store_end(store); errno = error; return result;
+}
+FileAnchor* security_state_package_staging(SecurityStateTransaction* transaction, bool create) {
+    if (!transaction || !transaction->store) { errno = EINVAL; return nullptr; }
+    return file_anchor_directory(transaction->store->profile, "package-staging", create, FILE_ANCHOR_STRICT_STORAGE);
 }
 
 char* security_grant_store_directory(SecurityGrantStore* store) {
@@ -405,17 +424,39 @@ static SecurityStoreResult grant_store_publish(SecurityGrantStore* store, const 
     return errno == ESTALE || errno == EEXIST ? SECURITY_STORE_CONFLICT : grant_store_path_error();
 }
 
-SecurityStateTransaction* security_state_begin(SecurityGrantStore* store,
-        SecurityStateSlot slot, SecurityStoreResult* result) {
+static SecurityStateTransaction* security_state_begin_named(SecurityGrantStore* store,
+        const char* name, SecurityStoreResult* result) {
     if (result) *result = SECURITY_STORE_INVALID;
-    if (slot != SECURITY_STATE_PACKAGE_UPDATES) return nullptr;
+    if (strnlen(name, sizeof(SecurityStateTransaction::name)) >= sizeof(SecurityStateTransaction::name)) return nullptr;
     SecurityStateTransaction* transaction = (SecurityStateTransaction*)mem_calloc(1, sizeof(*transaction), MEM_CAT_SYSTEM);
     if (!transaction) { if (result) *result = SECURITY_STORE_IO_ERROR; return nullptr; }
     SecurityStoreResult status = grant_store_begin(store);
     if (result) *result = status;
     if (status != SECURITY_STORE_OK) { mem_free(transaction); return nullptr; }
-    transaction->store = store; transaction->name = "package-updates.state";
+    transaction->store = store; memcpy(transaction->name, name, strlen(name) + 1);
     return transaction;
+}
+SecurityStateTransaction* security_state_begin(SecurityGrantStore* store,
+        SecurityStateSlot slot, SecurityStoreResult* result) {
+    if (result) *result = SECURITY_STORE_INVALID;
+    return slot == SECURITY_STATE_PACKAGE_UPDATES ? security_state_begin_named(store, "package-updates.state", result) : nullptr;
+}
+SecurityStateTransaction* security_state_begin_principal(SecurityGrantStore* store,
+        SecurityStateSlot slot, uint32_t kind, const uint8_t principal[32], SecurityStoreResult* result) {
+    if (result) *result = SECURITY_STORE_INVALID;
+    if (slot != SECURITY_STATE_PRIVATE_QUOTA || !security_state_fingerprint_present(principal) ||
+            (kind != SECURITY_PRINCIPAL_APP && kind != SECURITY_PRINCIPAL_SCRIPT)) return nullptr;
+    char name[81] = "storage-"; name[8] = kind == SECURITY_PRINCIPAL_APP ? 'a' : 's'; name[9] = '-';
+    hex_encode(principal, 32, name + 10); memcpy(name + 74, ".quota", 7);
+    return security_state_begin_named(store, name, result);
+}
+bool security_state_select_update_metadata(SecurityStateTransaction* transaction, const uint8_t package[32]) {
+    if (!transaction || !transaction->ready || strcmp(transaction->name, "package-updates.state") ||
+            !security_state_fingerprint_present(package) || transaction->store->unavailable) return false;
+    char name[81] = "update-"; hex_encode(package, 32, name + 7); memcpy(name + 71, ".metadata", 10);
+    memcpy(transaction->name, name, sizeof(name));
+    transaction->ready = transaction->missing = false; memset(&transaction->revision, 0, sizeof(transaction->revision));
+    return true;
 }
 SecurityStoreResult security_state_read(SecurityStateTransaction* transaction, char** bytes, size_t* size) {
     if (bytes) *bytes = nullptr;

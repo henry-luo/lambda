@@ -32,6 +32,9 @@
 #include <climits>
 #include <errno.h>
 #include <pthread.h>
+#if defined(__APPLE__) || defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #ifdef _WIN32
 #include <windows.h>
 static inline char* realpath(const char* path, char* resolved) {
@@ -51,6 +54,37 @@ extern "C" {
 }
 
 #ifndef _WIN32
+#if defined(__APPLE__) || defined(__linux__)
+struct AnchorSyncTrace;
+static thread_local AnchorSyncTrace* anchor_sync_trace = nullptr;
+struct AnchorSyncTrace {
+    struct Event { uint64_t device, inode; bool directory; } events[32] = {};
+    uint32_t calls = 0;
+    uint32_t fail_at;
+    uint32_t close_at = 0;
+    explicit AnchorSyncTrace(uint32_t fail = 0) : fail_at(fail) { anchor_sync_trace = this; }
+    ~AnchorSyncTrace() { anchor_sync_trace = nullptr; }
+    AnchorSyncTrace(const AnchorSyncTrace&) = delete;
+    AnchorSyncTrace& operator=(const AnchorSyncTrace&) = delete;
+};
+
+// test-executable interposition only: disabled calls still reach the real
+// kernel; enabled cases can fail one sync without a production test hook
+extern "C" int fsync(int fd) {
+    AnchorSyncTrace* trace = anchor_sync_trace;
+    if (trace) {
+        struct stat st;
+        if (fstat(fd, &st)) return -1;
+        uint32_t call = trace->calls++;
+        if (call < 32) trace->events[call] = {(uint64_t)st.st_dev, (uint64_t)st.st_ino, S_ISDIR(st.st_mode)};
+        if (trace->calls == trace->fail_at) { errno = EIO; return -1; }
+    }
+    int result = (int)syscall(SYS_fsync, fd);
+    if (!result && trace && trace->calls == trace->close_at) close(fd);
+    return result;
+}
+#endif
+
 class FileAnchorTest : public ::testing::Test {
 protected:
     char* fixture = nullptr;
@@ -130,6 +164,196 @@ TEST_F(FileAnchorTest, ReadCreateAndRevisionUseHeldObjects) {
     EXPECT_EQ(errno, EFBIG);
     EXPECT_EQ(data, nullptr);
     EXPECT_EQ(size, 0U);
+}
+
+TEST_F(FileAnchorTest, ExclusiveDirectoryCreationNeverAdoptsAnExistingNamespace) {
+    const uint32_t flags = FILE_ANCHOR_PRIVATE | FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE;
+    FileAnchor* anchor = open(flags);
+    ASSERT_NE(anchor, nullptr);
+    FileAnchor* child = keep(file_anchor_create_directory(anchor, "owned", FILE_ANCHOR_PRIVATE |
+        FILE_ANCHOR_TRUSTED_PARENTS | FILE_ANCHOR_SAME_DEVICE)); ASSERT_NE(child, nullptr);
+    EXPECT_EQ(file_anchor_create_directory(anchor, "owned", flags), nullptr); EXPECT_EQ(errno, EEXIST);
+    EXPECT_EQ(file_anchor_create_directory(anchor, "nested/child", flags), nullptr); EXPECT_EQ(errno, EINVAL);
+    FileRevision value; EXPECT_FALSE(file_anchor_stat(anchor, "nested", &value));
+    char* alias = file_path_join(project, "alias"); ASSERT_EQ(symlink("owned", alias), 0);
+    EXPECT_EQ(file_anchor_create_directory(anchor, "alias", flags), nullptr); EXPECT_EQ(errno, EEXIST);
+    mem_free(alias);
+}
+
+#if defined(__APPLE__) || defined(__linux__)
+TEST_F(FileAnchorTest, SyncControlObservesAtomicPublicationAndRealKernelErrors) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    {
+        AnchorSyncTrace trace;
+        ASSERT_EQ(file_anchor_write_atomic(anchor, "control", "data", 4, nullptr), 0);
+        ASSERT_EQ(trace.calls, 2U); EXPECT_FALSE(trace.events[0].directory); EXPECT_TRUE(trace.events[1].directory);
+        EXPECT_EQ(trace.events[1].inode, file_anchor_identity(anchor).inode);
+    }
+    {
+        AnchorSyncTrace trace(1);
+        EXPECT_EQ(file_anchor_write_atomic(anchor, "failed", "data", 4, nullptr), -1); EXPECT_EQ(errno, EIO);
+    }
+    FileRevision revision; EXPECT_FALSE(file_anchor_stat(anchor, "failed", &revision)); EXPECT_EQ(errno, ENOENT);
+    AnchorSyncTrace invalid;
+    EXPECT_EQ(fsync(-1), -1); EXPECT_EQ(errno, EBADF);
+}
+
+TEST_F(FileAnchorTest, DirectoryCreationSyncsChildBeforeItsParent) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    AnchorSyncTrace trace;
+    FileAnchor* child = keep(file_anchor_create_directory(anchor, "durable", FILE_ANCHOR_SAME_DEVICE));
+    ASSERT_NE(child, nullptr); ASSERT_EQ(trace.calls, 2U);
+    EXPECT_TRUE(trace.events[0].directory); EXPECT_TRUE(trace.events[1].directory);
+    EXPECT_EQ(trace.events[0].inode, file_anchor_identity(child).inode);
+    EXPECT_EQ(trace.events[1].inode, file_anchor_identity(anchor).inode);
+}
+
+TEST_F(FileAnchorTest, NestedDirectoryCreationSyncsEveryNewEdge) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    AnchorSyncTrace trace;
+    FileAnchor* leaf = keep(file_anchor_directory(anchor, "one/two/three", true, FILE_ANCHOR_SAME_DEVICE));
+    ASSERT_NE(leaf, nullptr); ASSERT_EQ(trace.calls, 6U);
+    FileAnchor* first = keep(file_anchor_directory(anchor, "one", false, FILE_ANCHOR_SAME_DEVICE)); ASSERT_NE(first, nullptr);
+    FileAnchor* second = keep(file_anchor_directory(first, "two", false, FILE_ANCHOR_SAME_DEVICE)); ASSERT_NE(second, nullptr);
+    FileAnchor* children[] = {first, second, leaf}; FileAnchor* parents[] = {anchor, first, second};
+    for (unsigned i = 0; i < 3; i++) {
+        EXPECT_EQ(trace.events[i * 2].inode, file_anchor_identity(children[i]).inode);
+        EXPECT_EQ(trace.events[i * 2 + 1].inode, file_anchor_identity(parents[i]).inode);
+    }
+    EXPECT_EQ(trace.calls, 6U);
+}
+
+TEST_F(FileAnchorTest, CreateModeResyncsExistingDirectoriesButReadOnlyOpenDoesNot) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    FileAnchor* child = keep(file_anchor_create_directory(anchor, "retained", FILE_ANCHOR_SAME_DEVICE)); ASSERT_NE(child, nullptr);
+    AnchorSyncTrace trace;
+    ASSERT_NE(keep(file_anchor_directory(anchor, "retained", false, FILE_ANCHOR_SAME_DEVICE)), nullptr);
+    EXPECT_EQ(trace.calls, 0U);
+    ASSERT_NE(keep(file_anchor_directory(anchor, "retained", true, FILE_ANCHOR_SAME_DEVICE)), nullptr);
+    ASSERT_EQ(trace.calls, 2U);
+    EXPECT_EQ(trace.events[0].inode, file_anchor_identity(child).inode);
+    EXPECT_EQ(trace.events[1].inode, file_anchor_identity(anchor).inode);
+}
+
+TEST_F(FileAnchorTest, DirectorySyncFailureNeverPublishesAnAnchorOrCreatesDeeperChildren) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    for (unsigned fail = 1; fail <= 2; fail++) {
+        const char* prefix = fail == 1 ? "first" : "second";
+        const char* nested = fail == 1 ? "first/child" : "second/child";
+        {
+            AnchorSyncTrace trace(fail);
+            EXPECT_EQ(file_anchor_directory(anchor, nested, true, FILE_ANCHOR_SAME_DEVICE), nullptr);
+            EXPECT_EQ(errno, EIO); EXPECT_EQ(trace.calls, fail);
+        }
+        FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, prefix, &revision)); EXPECT_TRUE(revision.stat.is_dir);
+        EXPECT_FALSE(file_anchor_stat(anchor, nested, &revision)); EXPECT_EQ(errno, ENOENT);
+        // failure may leave the newly created object: never replace or erase it
+        EXPECT_EQ(file_anchor_create_directory(anchor, prefix, FILE_ANCHOR_SAME_DEVICE), nullptr); EXPECT_EQ(errno, EEXIST);
+        ASSERT_NE(keep(file_anchor_directory(anchor, nested, true, FILE_ANCHOR_SAME_DEVICE)), nullptr);
+    }
+}
+
+TEST_F(FileAnchorTest, ExclusiveDirectorySyncFailureLeavesItsUnacknowledgedObject) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    for (unsigned fail = 1; fail <= 2; fail++) {
+        const char* name = fail == 1 ? "first" : "second";
+        AnchorSyncTrace trace(fail);
+        EXPECT_EQ(file_anchor_create_directory(anchor, name, FILE_ANCHOR_SAME_DEVICE), nullptr);
+        EXPECT_EQ(errno, EIO); EXPECT_EQ(trace.calls, fail);
+        FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, name, &revision)); EXPECT_TRUE(revision.stat.is_dir);
+    }
+}
+
+TEST_F(FileAnchorTest, NewRegularFileSyncsBeforeReturningAStream) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    AnchorSyncTrace trace;
+    FILE* stream = file_anchor_create_regular(anchor, "lock"); ASSERT_NE(stream, nullptr);
+    FileRevision identity = file_revision_stream(stream); fclose(stream);
+    ASSERT_EQ(trace.calls, 2U); EXPECT_FALSE(trace.events[0].directory); EXPECT_TRUE(trace.events[1].directory);
+    EXPECT_EQ(trace.events[0].inode, identity.inode); EXPECT_EQ(trace.events[1].inode, file_anchor_identity(anchor).inode);
+    stream = file_anchor_open_read(anchor, "lock"); ASSERT_NE(stream, nullptr); fclose(stream); EXPECT_EQ(trace.calls, 2U);
+}
+
+TEST_F(FileAnchorTest, NewRegularFileSyncFailureNeverPublishesAStreamOrRetriesCreation) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    for (unsigned fail = 1; fail <= 2; fail++) {
+        const char* name = fail == 1 ? "first" : "second";
+        AnchorSyncTrace trace(fail);
+        EXPECT_EQ(file_anchor_create_regular(anchor, name), nullptr); EXPECT_EQ(errno, EIO); EXPECT_EQ(trace.calls, fail);
+        FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, name, &revision)); EXPECT_TRUE(revision.stat.is_file);
+        EXPECT_EQ(file_anchor_create_regular(anchor, name), nullptr); EXPECT_EQ(errno, EEXIST);
+    }
+}
+#ifdef __APPLE__
+TEST_F(FileAnchorTest, FullSyncFailureAfterPublicationCannotBeReportedAsDurable) {
+    FileAnchor* anchor = open(FILE_ANCHOR_STRICT_STORAGE); ASSERT_NE(anchor, nullptr);
+    {
+        // Force the later F_FULLFSYNC to fail after fsync itself succeeds.
+        // The parent here is a temporary duplicate, not the held root anchor.
+        AnchorSyncTrace trace; trace.close_at = 2;
+        EXPECT_EQ(file_anchor_write_atomic(anchor, "committed", "data", 4, nullptr), 1);
+        EXPECT_EQ(errno, EBADF); EXPECT_EQ(trace.calls, 2U);
+    }
+    expect_text(anchor, "committed", "data");
+}
+
+TEST_F(FileAnchorTest, FullSyncCannotBeDroppedWhenDerivingAChildAnchor) {
+    FileAnchor* anchor = open(FILE_ANCHOR_STRICT_STORAGE); ASSERT_NE(anchor, nullptr);
+    EXPECT_EQ(file_anchor_create_directory(anchor, "weaker", FILE_ANCHOR_STRICT_STORAGE & ~FILE_ANCHOR_FULL_SYNC), nullptr);
+    EXPECT_EQ(errno, EINVAL);
+    FileRevision revision; EXPECT_FALSE(file_anchor_stat(anchor, "weaker", &revision)); EXPECT_EQ(errno, ENOENT);
+    ASSERT_NE(keep(file_anchor_create_directory(anchor, "strong", FILE_ANCHOR_STRICT_STORAGE)), nullptr);
+}
+#endif
+#endif
+
+TEST_F(FileAnchorTest, CleanupRequiresTheRecordedFileAndEmptyDirectory) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    FileAnchor* child = keep(file_anchor_create_directory(anchor, "owned", FILE_ANCHOR_SAME_DEVICE));
+    ASSERT_NE(child, nullptr); FileRevision directory = file_anchor_identity(child);
+    ASSERT_EQ(file_anchor_write_atomic(child, "data", "first", 5, nullptr), 0);
+    FileRevision first; ASSERT_TRUE(file_anchor_stat(child, "data", &first));
+    EXPECT_FALSE(file_anchor_remove(anchor, "owned", &directory)); EXPECT_EQ(errno, ENOTEMPTY);
+    ASSERT_EQ(file_anchor_write_atomic(child, "data", "second", 6, &first), 0);
+    EXPECT_FALSE(file_anchor_remove(child, "data", &first)); EXPECT_EQ(errno, ESTALE);
+    expect_text(child, "data", "second");
+    FileRevision current; ASSERT_TRUE(file_anchor_stat(child, "data", &current));
+    ASSERT_TRUE(file_anchor_remove(child, "data", &current));
+    EXPECT_TRUE(file_anchor_remove(anchor, "owned", &directory));
+}
+
+TEST_F(FileAnchorTest, CleanupLeavesCallbackTimeReplacementsUntouched) {
+    struct Switch { const char* path; bool replaced; };
+    char* path = file_path_join(project, "data");
+    Switch change = {path, false};
+    auto guard = [](void* context, const char*, FileAnchorAction action, const FileRevision*) -> bool {
+        Switch* state = (Switch*)context;
+        if (action == FILE_ANCHOR_REMOVE && !state->replaced) {
+            state->replaced = true;
+            return write_binary_file_atomic(state->path, "new owner", 9) == 0;
+        }
+        return true;
+    };
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, guard, &change); ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(anchor, "data", "old", 3, nullptr), 0);
+    FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, "data", &revision));
+    EXPECT_FALSE(file_anchor_remove(anchor, "data", &revision)); EXPECT_EQ(errno, ESTALE);
+    EXPECT_TRUE(change.replaced); expect_text(anchor, "data", "new owner"); mem_free(path);
+}
+
+TEST_F(FileAnchorTest, CleanupNeedsRemoveAuthorityAndStrictEnumerationRejectsHiddenAliases) {
+    auto guard = [](void*, const char*, FileAnchorAction action, const FileRevision*) -> bool {
+        return action != FILE_ANCHOR_REMOVE;
+    };
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, guard, nullptr); ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(anchor, "kept", "old", 3, nullptr), 0);
+    FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, "kept", &revision));
+    EXPECT_FALSE(file_anchor_remove(anchor, "kept", &revision)); EXPECT_EQ(errno, EACCES);
+    expect_text(anchor, "kept", "old");
+    char* alias = file_path_join(project, "alias"); ASSERT_EQ(symlink("kept", alias), 0);
+    auto visit = [](void*, const char*, const FileRevision*) -> bool { return true; };
+    EXPECT_TRUE(file_anchor_visit(anchor, 8, visit, nullptr));
+    EXPECT_FALSE(file_anchor_visit_strict(anchor, 8, visit, nullptr)); EXPECT_EQ(errno, EACCES); mem_free(alias);
 }
 
 TEST_F(FileAnchorTest, BoundedEnumerationRevalidatesBeforeDelivery) {

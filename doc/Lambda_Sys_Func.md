@@ -954,6 +954,22 @@ hash("abc", 'sha256')     // b'\xBA7816BF…F20015AD' (32 bytes)
 len(hash(b'\x00FF', 'sha512'))   // 64
 ```
 
+### verify_signature(public_key, message, signature, scheme)
+
+Verify a public-key signature; return `true` for a valid signature and `false`
+for a mismatched signature or malformed key. The pure function returns an
+error for unsupported schemes, invalid argument types, or an unavailable
+cryptographic provider. Keys, messages and signatures accept binary or UTF-8
+text; `null` denotes empty bytes. Signatures are binary bytes, not hexadecimal.
+
+Supported schemes are `'ed25519'` (raw 32-byte public key),
+`'rsassa-pss-sha256'` (RSA 2048–8192 bits, SHA-256/MGF1, 32-byte salt), and
+`'ecdsa-sha2-nistp256'` (P-256/SHA-256, DER signature). RSA and EC public keys
+use PEM or DER SubjectPublicKeyInfo. The native primitive uses OpenSSL 3's
+built-in provider in a private context, without reading key files or ambient
+OpenSSL configuration. It grants no network, filesystem, installation or
+publisher authority (**D7.5.7–D7.5.8**).
+
 ### uuid()
 
 A random version 4 UUID (RFC 4122) drawn from a cryptographically secure generator, such as `"3f2b8c1e-…-4…"`. It is a procedure, since each call returns a different value, so call it from a `pn`.
@@ -2503,6 +2519,7 @@ channels continue to process pixel-array input. See the
 | `url_resolve` | 2 | Resolve relative URL against base |
 | `url_encode` | 1 | Percent-encode text (RFC 3986) |
 | `hash` | 2 | SHA-256/384/512 digest as binary |
+| `verify_signature` | 4 | Ed25519, RSA-PSS/SHA-256 or P-256/SHA-256 public-key signature verification |
 | `uuid` | 0 | Random version 4 UUID (proc) |
 
 ### Collection Functions

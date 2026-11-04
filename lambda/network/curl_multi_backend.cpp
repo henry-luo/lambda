@@ -12,6 +12,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/curl_runtime.h"
 #include <curl/curl.h>
 #include "curl_trust.h"
 #include "curl_response.h"
@@ -54,23 +55,6 @@ struct CurlMultiBackend {
     CurlMultiCompletionCallback callback;
     void* callback_data;
 };
-
-static bool curl_multi_global_initialized = false;
-static pthread_mutex_t curl_multi_global_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static bool init_curl_multi_global(void) {
-    pthread_mutex_lock(&curl_multi_global_mutex);
-    if (!curl_multi_global_initialized) {
-        if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-            pthread_mutex_unlock(&curl_multi_global_mutex);
-            log_error("curl-multi: failed to initialize libcurl");
-            return false;
-        }
-        curl_multi_global_initialized = true;
-    }
-    pthread_mutex_unlock(&curl_multi_global_mutex);
-    return true;
-}
 
 static size_t write_response_callback(void* contents,
                                       size_t size,
@@ -441,7 +425,7 @@ extern "C" {
 
 CurlMultiBackend* curl_multi_backend_create(CurlMultiCompletionCallback callback,
                                             void* user_data) {
-    if (!init_curl_multi_global()) return NULL;
+    if (!curl_runtime_initialize()) return NULL;
 
     CurlMultiBackend* backend =
         (CurlMultiBackend*)mem_calloc(1, sizeof(CurlMultiBackend), MEM_CAT_NETWORK);

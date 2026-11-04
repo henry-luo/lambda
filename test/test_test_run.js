@@ -87,10 +87,15 @@ const workerCase = workerCases.includes('Case1') ? 'Case1' : workerCases[0] || '
 const scenario = !workerCase || workerCase === 'Case1' ? requestedScenario : 'pass';
 const output = process.argv.find(arg => arg.startsWith('--gtest_output=json:')).slice('--gtest_output=json:'.length);
 if (process.env.FAKE_SUITE_TRACE_DIR) {
-    const trace = { name, case: workerCase, start: Date.now(), cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT),
+    const trace = { name, pid: process.pid, case: workerCase, start: Date.now(), cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT),
         args: process.argv.slice(2), logLevel: process.env.LAMBDA_LOG_LEVEL };
     process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_SUITE_TRACE_DIR,
         name + '-' + (workerCase || path.basename(output)) + '.json'), JSON.stringify({ ...trace, end: Date.now() })));
+}
+if (name === process.env.FAKE_WAIT_TEST && process.env.FAKE_NATIVE_READY) {
+    const ready = process.env.FAKE_NATIVE_READY;
+    fs.writeFileSync(ready + '.pending', JSON.stringify({ pid: process.pid }));
+    fs.renameSync(ready + '.pending', ready);
 }
 if (scenario === 'no-json') process.exit(1);
 if (scenario === 'invalid-json') { fs.writeFileSync(output, '{'); process.exit(0); }
@@ -574,7 +579,7 @@ try {
             LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
             LAMBDA_LOG_LEVEL: 'DEBUG',
             LAMBDA_UI_TEST_JOBS: String(Math.max(1, Math.min(budget,
-                Math.max(1, Math.floor(os.cpus().length * 1.25))) - 1)),
+                Math.max(1, os.cpus().length - 1)) - 1)),
         }, true);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, names.length);
@@ -590,7 +595,7 @@ try {
             if (event.name !== 'test_map_gtest') parallelPeak = Math.max(parallelPeak, active);
         }
         assert.equal(active, 0);
-        const ceiling = Math.min(budget, Math.max(1, Math.floor(os.cpus().length * 1.25)));
+        const ceiling = Math.min(budget, Math.max(1, os.cpus().length - 1));
         assert.ok(peak <= ceiling, `peak reserved workers: ${peak}`);
         assert.ok(parallelPeak <= ceiling);
         if (ceiling > summary.level2_c_tests.find(row => row.test === 'test_ui_automation_gtest').worker_slots) {
@@ -635,14 +640,27 @@ try {
     // Keep adapter tests independent of native binaries and the external corpus.
     fs.writeFileSync(path.join(fixture, 'make'), `#!/usr/bin/env node
 const fs = require('fs');
-if (process.env.FAKE_LAYOUT_ARGS) fs.writeFileSync(process.env.FAKE_LAYOUT_ARGS, JSON.stringify(process.argv.slice(2)));
-if (process.env.FAKE_LAYOUT_WORKSPACE) fs.writeFileSync(process.env.FAKE_LAYOUT_WORKSPACE, JSON.stringify({
-    cwd: process.cwd(), host: fs.realpathSync('lambda.exe'), home: process.env.LAMBDA_HOME,
-    cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT), start: Date.now() }));
-const output = process.argv.find(arg => arg.startsWith('LAYOUT_BASELINE_RESULTS=')).slice('LAYOUT_BASELINE_RESULTS='.length);
-if (process.env.FAKE_LAYOUT === 'missing') process.exit(0);
-fs.writeFileSync(output, 'form|✅ PASS|3|2|0|1|2\\n');
-process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
+function runLayout(peerPid) {
+    if (peerPid) process.kill(peerPid, 0);
+    if (process.env.FAKE_LAYOUT_ARGS) fs.writeFileSync(process.env.FAKE_LAYOUT_ARGS, JSON.stringify(process.argv.slice(2)));
+    if (process.env.FAKE_LAYOUT_WORKSPACE) fs.writeFileSync(process.env.FAKE_LAYOUT_WORKSPACE, JSON.stringify({
+        cwd: process.cwd(), host: fs.realpathSync('lambda.exe'), home: process.env.LAMBDA_HOME,
+        cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT), start: Date.now(), peerPid }));
+    const output = process.argv.find(arg => arg.startsWith('LAYOUT_BASELINE_RESULTS=')).slice('LAYOUT_BASELINE_RESULTS='.length);
+    if (process.env.FAKE_LAYOUT === 'missing') process.exit(0);
+    fs.writeFileSync(output, 'form|✅ PASS|3|2|0|1|2\\n');
+    process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
+}
+if (!process.env.FAKE_NATIVE_READY) runLayout();
+else {
+    const deadline = Date.now() + 5000;
+    const poll = setInterval(() => {
+        if (fs.existsSync(process.env.FAKE_NATIVE_READY)) {
+            clearInterval(poll);
+            runLayout(JSON.parse(fs.readFileSync(process.env.FAKE_NATIVE_READY, 'utf8')).pid);
+        } else if (Date.now() >= deadline) process.exit(9);
+    }, 10);
+}
 `, { mode: 0o755 });
     for (const scenario of ['pass', 'exit', 'missing']) {
         check(`Layout adapter preserves counts and handles ${scenario}`, () => {
@@ -703,6 +721,9 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
             'pass', [], { PATH: fixture + path.delimiter + process.env.PATH, FAKE_LAYOUT: 'pass',
                 FAKE_LAYOUT_WORKSPACE: workspaceTrace, FAKE_SUITE_TRACE_DIR: trace,
                 FAKE_WAIT_TEST: 'test_ui_automation_gtest', FAKE_WAIT_FILE: workspaceTrace,
+                FAKE_NATIVE_READY: path.join(fixture, 'layout-native-ready.json'),
+                // leave the script pool its three slots within the actual CPU budget.
+                LAMBDA_UI_TEST_JOBS: String(Math.max(1, os.cpus().length - 1 - 3)),
                 LAMBDA_TEST_MAX_CONCURRENT: '12' }, true);
         assert.equal(child.status, 0, child.stderr);
         const layout = summary.level2_c_tests.find(t => t.test === 'test_radiant_layout_baseline');
@@ -711,8 +732,8 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
         const row = JSON.parse(fs.readFileSync(workspaceTrace, 'utf8'));
         assert.equal(row.cap, 3);
         const native = JSON.parse(fs.readFileSync(path.join(trace, fs.readdirSync(trace)[0]), 'utf8'));
-        // the adapter starts while the native pool still owns its granted slots.
-        assert.ok(row.start < native.end && native.start < row.start);
+        // readiness plus the native workspace wait proves overlap without assuming child start order.
+        assert.equal(row.peerPid, native.pid);
     });
     function pooledLayout(data) {
         const child = spawnSync(process.execPath, ['-e', `

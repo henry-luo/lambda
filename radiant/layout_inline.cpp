@@ -479,7 +479,7 @@ static bool has_following_content(DomNode* node, bool inline_only) {
                 }
             } else if (sib->is_element()) {
                 DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(sib);
-                DisplayValue display = resolve_display_value(elem);
+                DisplayValue display = layout_resolved_display(elem);
                 if (inline_only) return display.outer == CSS_VALUE_INLINE;
                 InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
                 if (display.outer != CSS_VALUE_NONE && !kind.floated && !kind.positioned) {
@@ -496,79 +496,6 @@ static bool has_following_content(DomNode* node, bool inline_only) {
         current = parent;
     }
     return false;
-}
-
-static void find_last_isolated_inline_text(View* view, int line_number,
-                                           ViewText** text_out,
-                                           TextRect** rect_out) {
-    while (view) {
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
-        if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (rect->line_number == line_number) {
-                    *text_out = text;
-                    *rect_out = rect;
-                }
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            // nested isolates own their boundary whitespace.
-            if (!layout_inline_span_isolate(span) && span->first_child) {
-                find_last_isolated_inline_text(
-                    span->first_child, line_number, text_out, rect_out);
-            }
-        }
-        view = view->next();
-    }
-}
-
-static void trim_isolated_inline_text_edge(LayoutContext* lycon,
-                                           ViewSpan* span) {
-    if (!lycon || !span || !layout_inline_span_isolate(span) ||
-        !has_following_content(span, true)) {
-        return;
-    }
-    ViewText* text = nullptr;
-    TextRect* rect = nullptr;
-    find_last_isolated_inline_text(
-        span->first_child, lycon->block.line_number, &text, &rect);
-    if (!text || !rect || !layout_white_space_collapses(
-            get_white_space_value(static_cast<DomNode*>(text)))) {
-        return;
-    }
-    unsigned char* data = text->text_data();
-    int end = rect->start_index + rect->length;
-    if (!data || end <= rect->start_index || !is_space(data[end - 1])) return;
-
-    FontProp* font = text->font ? text->font : span->font;
-    if (!font) return;
-    float trim = layout_measure_space_advance(
-        lycon, font->font_handle, font) + font->word_spacing + font->letter_spacing;
-    if (trim <= 0.0f || rect->width <= 0.0f) return;
-
-    // cssom keeps the isolated inline's box width while omitting its trailing
-    // collapsed separator from the text rect.
-    rect->width = max(0.0f, rect->width - trim);
-    adjust_text_bounds(text);
-}
-
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
-    while (view) {
-        if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (layout_inline_span_isolate(span)) {
-                trim_isolated_inline_text_edge(lycon, span);
-            }
-            if (span->first_child) {
-                layout_trim_isolated_inline_text_edges(lycon, span->first_child);
-            }
-        }
-        view = view->next();
-    }
 }
 
 bool layout_inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
@@ -636,7 +563,7 @@ bool layout_text_is_collapsible_whitespace(DomNode* node, size_t start_index,
 bool layout_inline_child_is_block_split(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(node);
-    DisplayValue display = resolve_display_value(elem);
+    DisplayValue display = layout_resolved_display(elem);
     InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
     if (kind.floated || kind.positioned) return false;
     return display.outer == CSS_VALUE_BLOCK ||
@@ -652,7 +579,7 @@ static DomNode* inline_next_participating_child(DomNode* node) {
         if (sibling->is_comment()) continue;
         if (layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
-            layout_display_is_none(resolve_display_value(sibling))) {
+            layout_display_is_none(layout_resolved_display(sibling))) {
             continue;
         }
         return sibling;
@@ -667,7 +594,7 @@ static bool inline_empty_box_between_block_siblings(DomNode* node) {
          sibling = sibling->prev_sibling) {
         if (sibling->is_comment() || layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
-            layout_display_is_none(resolve_display_value(sibling))) {
+            layout_display_is_none(layout_resolved_display(sibling))) {
             continue;
         }
         previous = sibling;
@@ -698,7 +625,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
         DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(child);
         InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
         if (kind.floated || kind.positioned ||
-            layout_display_is_none(resolve_display_value(element))) {
+            layout_display_is_none(layout_resolved_display(element))) {
             continue;
         }
         if (layout_inline_child_is_block_split(child)) {
@@ -706,7 +633,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
             *last_block = element;
             continue;
         }
-        DisplayValue display = resolve_display_value(element);
+        DisplayValue display = layout_resolved_display(element);
         if (display.outer == CSS_VALUE_INLINE) {
             DomElement* nested_last = nullptr;
             bool nested_content = inline_wrapper_last_block(element, &nested_last);
@@ -730,10 +657,10 @@ static DomElement* inline_previous_wrapper_block(DomElement* inline_elem) {
         DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(sibling);
         InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
         if (kind.floated || kind.positioned ||
-            layout_display_is_none(resolve_display_value(element))) {
+            layout_display_is_none(layout_resolved_display(element))) {
             continue;
         }
-        DisplayValue display = resolve_display_value(element);
+        DisplayValue display = layout_resolved_display(element);
         if (display.outer != CSS_VALUE_INLINE) return nullptr;
         DomElement* last_block = nullptr;
         if (!inline_wrapper_last_block(element, &last_block)) continue;
@@ -760,7 +687,7 @@ static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) 
 bool layout_ruby_annotation_node(DomNode* node) {
     if (!node || !node->is_element()) return false;
     // CSS Ruby 1 §2.1 assigns roles through computed display, including author overrides of rt.
-    CssEnum role = resolve_display_value(node).inner;
+    CssEnum role = layout_resolved_display(node).inner;
     return role == CSS_VALUE_RUBY_TEXT || role == CSS_VALUE_RUBY_TEXT_CONTAINER;
 }
 
@@ -790,7 +717,7 @@ static bool ruby_annotation_display_is_misparented(DomNode* node,
         return false;
     }
     if (!node->parent || !node->parent->is_element()) return true;
-    DisplayValue parent_display = resolve_display_value(node->parent);
+    DisplayValue parent_display = layout_resolved_display(node->parent);
     return parent_display.inner != CSS_VALUE_RUBY &&
         parent_display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER;
 }
@@ -917,14 +844,14 @@ static bool inline_paint_line_collect(DomNode* node, void* context) {
         if (selected && layout_ruby_annotation_outside_scope(parent, collected->span)) {
             // a misparented annotation flows as an anonymous Ruby unit at its source position.
             if (parent != node || !ruby_annotation_display_is_misparented(parent,
-                    resolve_display_value(parent))) return true;
+                    layout_resolved_display(parent))) return true;
         }
         if (parent == node) continue;
         if (parent->view_type != RDT_VIEW_INLINE) return true;
     }
     if (node->view_type != RDT_VIEW_TEXT) {
         bool anonymous_ruby = selected && layout_ruby_annotation_outside_scope(node, collected->span) &&
-            ruby_annotation_display_is_misparented(node, resolve_display_value(node));
+            ruby_annotation_display_is_misparented(node, layout_resolved_display(node));
         if (selected && node->is_element() &&
                 (anonymous_ruby || layout_intrinsic_element_is_atomic_inline(node->as_element())) &&
                 node->inline_line_number == collected->selected_line)
@@ -1505,19 +1432,16 @@ static void compute_span_content_bounds(ViewSpan* span, bool is_multi_line, Font
     auto get_child_relative_offset = [source_flow](View* c, float* offset_x, float* offset_y) {
         if (offset_x) *offset_x = 0.0f;
         if (offset_y) *offset_y = 0.0f;
-        if (!c) return;
-        if (ViewBlock* vb = lam::view_as_block(c)) {
-            if (source_flow) {
-                RdtLogicalPoint offset = layout_relative_position_offset_in_flow(vb);
-                if (offset_x) *offset_x = offset.x;
-                if (offset_y) *offset_y = offset.y;
-            } else {
-                layout_relative_position_offset(vb, offset_x, offset_y);
-            }
-        } else if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            layout_relative_position_offset(lam::unsafe_view_block_api_span(elem),
-                                            offset_x, offset_y);
+        if (!c || !c->is_element()) return;
+        // declared atomic insets can still be deferred when an ancestor first measures its bounds.
+        RdtLogicalPoint offset = layout_applied_inline_relative_offset(c, c->parent);
+        ViewBlock* flow = layout_nearest_block_ancestor(c->parent_view());
+        if (!source_flow && layout_block_inline_axis_is_vertical(flow)) {
+            // publication converts the retained source-axis displacement to physical coordinates.
+            offset = {layout_block_writing_mode(flow) == WM_VERTICAL_RL ? -offset.y : offset.y, offset.x};
         }
+        if (offset_x) *offset_x = offset.x;
+        if (offset_y) *offset_y = offset.y;
     };
 
     auto text_child_uses_slice_decoration = [](View* c) -> bool {
@@ -1994,7 +1918,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             }
         }
         DisplayValue child_display = child->is_element() ?
-            resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+            layout_resolved_display(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
         // block children below take layout_block directly, so the page flow's
         // out-of-flow material (footnote bodies, running elements, page controls)
         // leaves here as it does in layout_flow_node
@@ -2427,7 +2351,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
-    if (span->position) span->position->inline_relative_y = 0.0f;
+    if (span->position) span->position->inline_relative_x = span->position->inline_relative_y = 0.0f;
     // CSS Position 3 §4.1: preserve the first inline box origin separately
     // because the visible DOM rectangle may start on a later line fragment.
     FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
@@ -2537,7 +2461,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS Ruby §3.4: a unit without a parallel opportunity fits as a complete unbroken run.
         span_is_unbreakable = !layout_ruby_intrinsic_sizes(lycon, span).has_used_content_break;
     }
-    if (span_is_unbreakable && child && !lycon->line.is_line_start &&
+    // a selected interval is placed by its formatter; child wrappers cannot break that interval again.
+    if (!layout_inline_flow_is_kept(lycon) && span_is_unbreakable && child && !lycon->line.is_line_start &&
         line_has_prior_flow_content(&lycon->line)) {
         float line_left = lycon->line.has_float_intrusion
             ? lycon->line.effective_left : lycon->line.left;
@@ -2571,7 +2496,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     DomNode* scan = child;
     while (scan) {
         if (scan->is_element()) {
-            DisplayValue child_display = resolve_display_value(scan);
+            DisplayValue child_display = layout_resolved_display(scan);
             bool child_is_table_internal =
                 is_table_internal_display(child_display.inner) ||
                 is_table_internal_display(child_display.outer);
@@ -2754,7 +2679,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             bool child_has_replaced_fragment = false;
             if (child->is_element()) {
                 DomElement* child_element = child->as_element();
-                DisplayValue child_display = resolve_display_value(child_element);
+                DisplayValue child_display = layout_resolved_display(child_element);
                 child_can_close_inline_line =
                     !layout_element_is_abs_or_fixed(child_element) &&
                     layout_display_is_inline_level(child_display.outer);

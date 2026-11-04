@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "suite_repository": "https://github.com/theupdateframework/tuf-conformance.git",
+  "suite_commit": "8535468cf76f5395a579809c4e72ca5698a2a1cd",
+  "collected_tests": 119,
+  "clock_repository": "https://github.com/wolfcw/libfaketime.git",
+  "clock_commit": "9da91d97cc2b5bc08bcf420a34c9788d5946786c",
+  "notes": "Provenance only. No expected-failure exclusions: the complete conformance gate remains nonzero until every required test passes."
+}

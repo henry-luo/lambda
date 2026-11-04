@@ -155,6 +155,7 @@ install_msys2_package "vim" "Vim editor (provides xxd binary data tool)"
 # Core mathematical and text processing libraries
 install_msys2_package "${TOOLCHAIN_PREFIX}-mpdecimal" "Multi-precision decimal library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-mbedtls" "mbedTLS - SSL/TLS library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-openssl" "OpenSSL 3 - public-key signature verification"
 # image codecs build from lib/image; retain their shared compression dependency explicitly.
 install_msys2_package "${TOOLCHAIN_PREFIX}-zlib" "Compression library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-openjpeg2" "JPEG 2000 image samples in PDFs"

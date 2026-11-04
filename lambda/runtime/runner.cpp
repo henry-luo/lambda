@@ -3146,7 +3146,7 @@ void runner_setup_context(Runner* runner) {
         ctx->cwd = NULL;
     }
 #ifndef LAMBDA_NO_FILE_IO
-    ctx->cwd = get_current_dir();  // proper URL object for current directory
+    ctx->cwd = eval_context_current_directory(ctx);
 #endif
     // initialize decimal context (use shared fixed-precision context for runtime)
     ctx->decimal_ctx = decimal_fixed_context();

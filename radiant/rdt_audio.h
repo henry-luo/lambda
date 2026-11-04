@@ -32,6 +32,10 @@ extern "C" {
 RdtAudio* rdt_audio_open_bytes(const void* bytes, size_t length);
 // storage_budget includes the player and retained PCM; document owners share a finite budget.
 RdtAudio* rdt_audio_open_bytes_limit(const void* bytes, size_t length, size_t storage_budget);
+// consumes an owned, exact-size stereo 48-kHz float allocation, including on failure.
+RdtAudio* rdt_audio_adopt_pcm(float* samples, size_t frames);
+size_t rdt_audio_pcm_storage_bytes(size_t frames);
+float* rdt_audio_pcm_alloc(size_t frames);
 size_t rdt_audio_storage_bytes(const RdtAudio* audio);
 size_t rdt_audio_frames(const RdtAudio* audio);
 // clones share immutable PCM, but never a cursor, filter, gain or meter state.

@@ -7574,7 +7574,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_inline = inline_align;
     doc->pending_scroll_into_view_behavior = behavior;
     // scrolling changes presentation; the geometry checkpoint validates flow separately.
-    if (doc->state) doc_state_request_repaint(doc->state);
+    dom_engine_document_request_repaint(doc);
 }
 
 static Item dom_focus_method(DomElement* elem, bool focus,
@@ -9733,8 +9733,6 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
 }
 JS_FORWARD_STATIC_VOID( _collect_form_controls_rec, (DomNode* node, Item arr), _collect_form_related_rec, (node, arr, true))
 
-extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
-extern "C" int radiant_dom_m4b_src_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
 
@@ -10306,7 +10304,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         if (prop_id == JS_DOM_PROP_HREF) {
             Item result = ItemNull;
-            if (radiant_dom_m4b_href_get(elem_item, &result)) return result;
+            if (dom_engine_url_attribute_get(elem_item, &result, "href")) return result;
         }
     }
 
@@ -11076,8 +11074,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     const char* string_attr = nullptr;
     if (_is_string_reflected(elem, prop, &string_attr)) {
         Item url_value = ItemNull;
-        if (prop_id == JS_DOM_PROP_SRC && radiant_dom_m4b_src_get(elem_item, &url_value)) return url_value;
-        if (prop_id == JS_DOM_PROP_HREF && radiant_dom_m4b_href_get(elem_item, &url_value)) return url_value;
+        if ((prop_id == JS_DOM_PROP_SRC || prop_id == JS_DOM_PROP_HREF) &&
+                dom_engine_url_attribute_get(elem_item, &url_value, string_attr)) return url_value;
         const char* v = dom_element_attribute_value_ns(elem, "", string_attr);
         return js_name_item(v ? v : "");
     }
@@ -14654,7 +14652,7 @@ extern "C" Item dom_core_text_control_range_rects(Item n, Item start, Item end) 
     TextControlRangeRectContext ctx = {elem->doc, &result, x, y, block->x, block->y,
         width / block->width, height / block->height, form->scroll_x, form->scroll_y,
         x + width, y + height};
-    if (!editing_geometry_text_control_for_each_selection_rect(_js_current_ui_context,
+    if (!dom_engine_text_control_selection_rects(_js_current_ui_context,
             elem, first, last, dom_text_control_range_rect, &ctx)) return ItemNull;
     return result.get();
 }

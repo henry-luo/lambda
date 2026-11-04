@@ -7,9 +7,11 @@ exclusive publication, host ad-hoc admission/source manifests and grant
 restoration, context-owned transactions, unsupported-adapter refusals,
 bounded broker IPC and an experimental signed macOS T0
 worker, a verified macOS supervisor, once-only terminal consent and resource
-monitoring, guarded response publication, protected package-update controls
-and host console management are
-implemented. Default production admission, remaining I/O and
+monitoring, guarded response publication, protected package-update controls,
+host console management and a bounded anonymous HTTPS pull component returning
+unverified bytes, plus broker-owned data/cache and per-admission
+temporary files with lease-based recovery, are implemented. A private-Darwin native process policy is an experimental
+qualification candidate, approved by the user on 2026-11-03 with default rollout gated on qualification. Default production admission, remaining I/O and
 non-Lambda loading adapters, persistent permission UI and full M2 remain pending.
 **Date / source survey:** 2026-11-02, base checkout at `c5e40c521` with the
 approved safety documentation and ongoing implementation in the working tree.
@@ -134,8 +136,9 @@ confinement before broad adapter work.
 **Platform caution:** one signed helper used by every app must not give each
 worker access to every app's container, selected files, keychain items or
 entitlements. The supported helper/container arrangement needs evidence.
-Do not substitute a private sandbox API or an ordinary child process for that
-proof. Apple's entitlements describe the target's sandbox and optional access,
+USER 2026-11-03 permits the private-Darwin process backend as an experiment,
+with qualification required before any default rollout. API availability or
+an ordinary child process cannot substitute for the isolation proof. Apple's entitlements describe the target's sandbox and optional access,
 not Lambda's per-principal delegation model.
 [Apple App Sandbox entitlements](https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/EnablingAppSandbox.html).
 
@@ -342,8 +345,9 @@ Deliver in three reviewable steps:
    tracking tokens and redirects/artifacts outside the admitted origin set.
    Do not expose a per-app request-now timing channel. Download into bounded
    staging; verify authentic metadata, hashes/lengths, version/freshness and
-   key rotation. Use an established update-verification design/library after
-   dependency review, rather than inventing signing cryptography.
+   key rotation. The user selected a Lambda Script implementation of the TUF
+   verification workflow on 2026-11-03, with native cryptographic primitives
+   and trusted host IO/storage mechanisms; no Python/Rust client runtime.
 3. **Activation and recovery.** Extract in a confined staging worker; reject
    traversal, links to outside objects, special files and archive bombs.
    The installer publishes only an admitted managed package image, with
@@ -353,8 +357,9 @@ Deliver in three reviewable steps:
    requests remain denied pending consent. Project-vendored file replacement
    still follows **D7.5.6**. No privileged package install hooks.
 
-TUF supplies a reference for signed roles, freshness and rollback resistance;
-select the concrete metadata/client format during this phase.
+TUF supplies the selected metadata/workflow model for signed roles, freshness
+and rollback resistance. The initial Lambda profile and unsupported extensions
+are explicit; full conformance remains a qualification gate.
 [TUF client workflow](https://theupdateframework.github.io/specification/latest/).
 Existing Jube digest tooling proves artifact consistency, not a complete
 publisher-authenticated update channel. Local recovery to an older image must
@@ -1357,3 +1362,1235 @@ ordinary CLI is still unbound. **M2 remains incomplete**, particularly per-app
 OS container separation, deployed publisher qualification, complete catalogs,
 persistent permission UI and remaining quota/race coverage. Updater delivery,
 network/content/native-extension services and other platforms remain open.
+
+
+### 2026-11-03 — Private persistent data and experimental native process policy
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, admission now binds a broker-owned
+`/.lambda/app-data` virtual mount to the existing private channel. No worker ID
+selects a physical root. Each profile/principal has private anchored storage;
+an owner record checks principal and namespace/owner/data object identities.
+The physical namespace is protected against broad project/selected-directory
+grants, including aliases and absent names. Reads/stat/enumeration and ordinary
+create/replace/append use a PRIVATE-scope broker; source loading is denied.
+Private writes need no project-overwrite prompt. Admission/store generation
+leases also cover private callbacks and response publication. Revalidation can
+retain data while clearing obsolete file grants.
+
+Write accounting rescans bounded held directories under an identity-checked
+cross-instance lock. It charges bytes and new parent directories/files before
+mutation. Lock contention fails without waiting under a grant lease. Current
+admission quotas are 64 MiB and 1,024 files/directories, alongside existing
+request/session limits. Cache/temp mounts, cleanup/recovery, quota UI and the
+complete multiprocess/crash matrix remain open. Incomplete/corrupt owner state
+fails closed; it is not silently adopted or repaired.
+
+A per-principal ad-hoc worker-signing prototype was rejected. A copy with the
+same bundle ID and a launch constraint allowing its **actual** parent could read
+another container's fixture file (`read_errno = 0`). Earlier passing denial
+results were caused by an incorrect parent constraint and are invalidated.
+Retired source, the corrected control and failure evidence are preserved in
+`temp/app-safety-rejected-container-design/`. Claimed bundle IDs are not principal
+authentication; no local signing/key mechanism remains in the host.
+
+The new **experimental** process policy applies before runtime initialization.
+It denies direct user-file/disk mutation, network, fork/exec, process inspection,
+preferences and named Mach services; explicit Darwin restrictions also close
+operations omitted by `default`. Native fresh/pre-held IOKit probes additionally
+exposed that the legacy `iokit*` group omits `iokit-get-properties`; the explicit
+operation now denies both model/unique-ID reads and native device-client opens.
+No identifier value is serialized by the probe. Read/map access is limited to immutable OS
+runtime resources, random bytes and the root directory alone. The root-directory
+open is needed by libuv's EVFILT_USER placeholder, as confirmed by the native
+reproducer and [libuv 1.52.1 async implementation](https://github.com/libuv/libuv/blob/v1.52.1/src/unix/async.c#L258-L280).
+Inherited IPC/stdio remain usable. Signed image/child verification precedes
+resume; the host refuses callback dispatch before kernel label readback. A label
+is not policy authentication on its own. No App Sandbox/JIT/network/file/debug
+entitlement is accepted, and no unrestricted bootstrap fallback exists.
+
+This prototype uses private Darwin `sandbox_init_with_parameters` and
+`sandbox_check` interfaces. The user approved keeping this backend experimental
+on 2026-11-03, with qualification required before any default rollout. The M0/M2
+platform gates remain open. Native evidence currently covers
+macOS 26.5.2 arm64 only. The old App Sandbox syscall runner is historical evidence.
+Default CLI admission remains pending. Inherited Mach rights, task-port/debug,
+code mappings, hardware, full quotas/crash recovery, deployed publisher
+qualification, persistent UI/bookmarks and complete catalogs remain open.
+
+A fresh no-MIR build also exposed an AST escape-analysis dependency on MIR's
+import-audit table. T0-only builds now keep the conservative escape proof when
+that table is absent; the sandbox does not link a compiler merely to obtain an
+optional optimization proof (**D8.1.1, D5.4.2–D5.4.4**).
+
+The fixed process policy also denied native `getcwd`, exposing a relative-path
+runtime gap. The trusted bootstrap now captures the launch directory before
+confinement and supplies an immutable copied directory capsule to the bound
+evaluation context (**D5.4.2–D5.4.4, D7.5.2, D7.5.5**). Runner and T0 execution
+boundaries recreate their owned CWD URLs from that metadata; file acquisition
+still goes through the broker. The task-path helper now uses the active lexical
+CWD in both target-conversion steps, matching ordinary input/output. Both-tier
+runtime tests cover relative data, async reads and output without changing
+process CWD; the signed supervisor also covers a relative-path workflow.
+
+Supervisor qualification exposed a clean-exit/output-drain bug in
+`confined_process_wait`: it called `waitpid` again after reaping the leader while
+captured pipes still contained data. A native fixture uses non-reaping
+`waitid(WNOWAIT)` to establish that state. Before the fix it returned `ECHILD`
+and captured only 4 KiB from each stream; afterward the same signed child exits
+successfully with all 12 KiB from each stream. Reaping happens once; owned
+process-group cleanup precedes reaping while the PID is pinned, and cleanup
+never signals a reaped/reused PID. Read failures retain their errno. The consent
+expiry fixture starts observation at the concrete prompt and waits past the
+configured wall deadline, preserving the output/quota/approval assertions.
+
+Current focused qualification:
+
+| Gate | Result |
+|---|---|
+| Release library baseline | **2,079/2,079**, no failures, partials or skips |
+| Both-tier safety runtime | **94/94**, also green in the full Lambda baseline |
+| Host/filesystem components | **238/238**: admission/delivery 31, store 15, channel 15, file broker 26, updater controls 21, anchored filesystem 130 |
+| Native process-policy controls | **4/4** fresh/pre-held-rights control/confined combinations |
+| Signed Lambda worker | **17/17**, management symbols absent from the full symbol table |
+| Signed supervisor | **30/30**, including private data, relative paths, complete output draining and early-bootstrap refusal |
+| Host update console | **28/28**; delivery remains unavailable |
+| Full Lambda/input baseline | **8,638/8,638**: runtime 6,526 and input 2,112 |
+| Test262 baseline | **40,261/40,261**, zero regressions; 2,652 preparation skips |
+
+Worker fixture hosts are pinned per run, so concurrent relinking cannot change
+the executable behind recorded hashes. All native evidence is macOS 26.5.2
+arm64 with ad-hoc fixture signing; it does not qualify a deployed publisher.
+The final host/fixture rebuild and signed matrices include the portability
+correction from `EDQUOT` to `EFBIG` for quota rejection (MinGW does not declare
+`EDQUOT`). The release library gate covers that source revision. A worker
+refresh correctly refused stripped release admission fixtures; the required
+unstripped debug fixtures were rebuilt, preserving the symbol checks. This
+control is retained in `temp/app-safety-private-worker-stripped-fixture-control.log`.
+
+The final Lambda/input and Test262 gates are green. Earlier
+aggregate controls remain explicitly incomplete: **8,631/8,636** under the tool
+sandbox (four denied loopback binds and one stack diagnostic under load), then
+**8,635/8,636** unrestricted (a chart JIT subprocess timeout). The server suite
+passes **152/152**, and the stack/chart cases pass in isolation. Original failure
+reports remain in `temp/app-safety-private-initial-aggregate/`. A subsequent
+build stopped before tests because release/debug targets share a runtime archive;
+its release contents lacked a required debug profiling symbol. Regenerating the
+debug archives corrects that artifact mismatch. The baseline build list also
+omitted the safety-runtime suite selected by the runner; it now derives all
+build targets from that same runner selection, preventing stale executables
+after module relinking. These controls are retained separately from the green
+final Lambda/input gate in `temp/app-safety-private-stale-runtime-control/`.
+
+Source snapshots, binary/result/log hashes, final gate counts and explicit
+qualification limits are recorded in `temp/app-safety-private-qualification.json`.
+Debug/release engine executables and the debug Node module dependencies are
+preserved separately. Documentation links, Python syntax, whitespace and formal
+index checks pass; the existing duplicate `DO25` warning remains.
+
+The goal remains active. M2/default launch, deployed signing, inherited Mach
+rights/task-port/debug/mapping and remaining hardware coverage, cache/temp and
+crash recovery, permission UI/bookmarks, complete catalogs, updater delivery,
+network/content/native-extension services and other platforms remain open.
+
+
+### 2026-11-03 — Private cache/temp lifecycle and host-death recovery
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, the private-storage service now shares
+one mount implementation for data, cache and temporary files. The admitted
+channel selects their principal; no worker ID or directory handle was added.
+Source/canonical-source requests at virtual mounts refuse before physical source
+lookup. Data/cache persist per principal; each admission gets an unpredictable
+128-bit temp session and private files. Another live admission cannot address it.
+
+Current class quotas are data 64 MiB/1,024 entries, cache 32 MiB/1,024 entries
+and temp 16 MiB/512 entries across all live sessions, capped at 16 sessions per
+principal. Internal session directories/leases count toward temp entries. All
+mutations use the identity-checked owner lock and bounded strict usage scans;
+a busy lock refuses without mutation. Cache eviction is a trusted host API and
+is absent from the seven-operation worker protocol. Existing-file project
+approval is unchanged; private replacement/append remain prompt-free.
+
+Each temp session holds a kernel file lock until teardown. Recovery holds the
+owner lock, preserves busy leases and reclaims acquirable abandoned sessions
+before creating a new random session. It covers host death and interruption
+before lease/files initialization without relying on PID existence or age.
+Unpublished cache/temp mounts without an owner record are discarded rather
+than adopted; mismatched records fail closed. Persistent-data owner format and
+retention are preserved. Corrupt/incomplete persistent data still needs trusted
+repair; process-death recovery does not prove every power-loss scenario.
+
+Joined admission finish revokes session IO before bounded temp removal.
+The supervisor exposes `cleanup_error` and refuses a success result when
+cleanup fails. Strict anchor traversal detects forbidden entries instead of
+silently hiding them; unlink checks a distinct REMOVE guard and syncs the
+parent directory. A shared bounded child fixture qualifies real host-process
+termination and replaces unbounded store-test observation/reaping.
+
+The initial lifecycle test failed because cache acquisition was absent. Current
+focused native suites pass **224/224**: admission/delivery **37/37**, store
+**15/15**, anchored filesystem **131/131**, file broker **26/26**, channel
+**15/15**. Tests cover class/principal/session separation, shared temp quota,
+source denial, persisted revocation, cache eviction, busy/alias cleanup failure,
+a killed host with acknowledged data/cache/temp writes, live-session preservation,
+unpublished-session recovery, initialization corruption and the session cap.
+The initial signed supervisor matrix passes **33/33**, including real private
+data/cache/temp IO, native worker faults, watchdog cleanup and injected alias
+failure. The final release library baseline passes **2,086/2,086**, with no
+failures, partials or skips. Full Lambda/input, Test262 and final signed-artifact
+qualification are being refreshed sequentially. The worker policy remains experimental; default CLI rollout remains gated. The full M2,
+private-data repair/power-loss/reset/uninstall policies, quota UI, persistent
+permission management, updater delivery and later profiles remain in the goal.
+
+
+The first refreshed Lambda/input aggregate passed **8,636/8,638**. Its two
+failures were the DOCX business-plan fixture's 60-second timeout and the
+previously observed mutual-recursion diagnostic reporting E0 instead of E308.
+The DOCX fixture passes in isolation, and the diagnostic passes 30 isolated
+functional repetitions. Logs/results are retained in
+`temp/app-safety-cache-temp-initial-aggregate/`, with focused evidence in
+`temp/app-safety-cache-temp-docx-focused.*` and
+`temp/app-safety-cache-temp-stack-repeat.*`. The diagnostic's intermittent
+failure remains unresolved. No timeout, exclusion or expected-result change
+was used. The later MIR-carrier fix is recorded below; final aggregates remain
+under qualification.
+
+
+The unchanged retry overlapped a verified CPU-heavy UI test runner in the
+separate `Lambda-opus` checkout. Process names/parents and its CWD identified
+that job; it was left untouched and later exited. The retry again reported
+E0 in `MutualRecursionOverflowIsE308`, and also in the auto-tier lane of
+`UnusedRecursionExhaustionFaultsOnEveryTier`. The overlap establishes resource
+contention, not the cause of the E0 diagnostic. No diagnostic fallback, timeout
+increase, exclusion or expected-result change has been introduced.
+
+
+The loaded retry finished **8,635/8,638**, adding a chart transform-control
+mismatch. Unlike the diagnostic flakes, that mismatch reproduced in isolation.
+The prior qualified executable passes it in auto mode but also fails when MIR
+is forced; a smaller recursive reproducer fails in both MIR executables and
+passes in T0. The current full negative-runtime suite passes **301/301** in
+isolation. Both aggregate failures remain archived separately.
+
+MIR inspection found the concrete carrier loss under **S7.7.3 / S11.4.3**:
+a tail-call argument guard filled its local error join, but successful TCO had
+marked the entire call terminal. Its enclosing `if` therefore substituted zero
+for the join's actual boxed error. `transpile_call` now restores incoming block
+reachability when that argument-error join exists. The generated failure edge
+changes from `mov result, 0` to `mov result, parameter_error`; successful TCO
+still jumps to its loop. No optimization was disabled and no error expectation
+was softened. The new regression runs on T0/MIR/auto, also with forced/poisoned
+GC (**D5.3.3**); it and the forced-MIR chart fixture now pass. Before/after MIR
+and paired controls remain in `temp/app-safety-cache-temp-tco-*` and
+`temp/app-safety-cache-temp-chart-*`. Fresh aggregates are required after this
+compiler fix; the earlier library **2,086/2,086** remains a retained control.
+
+The first post-MIR library refresh passed every native suite but failed one
+runner-contract assertion (**2,085/2,086**). That fixture inferred pool overlap
+from child timestamp order, which process launch order does not guarantee. A
+control that delays native-child startup reproduces the reversed timestamps.
+The fixture now waits for native readiness, checks that peer's live PID, and
+only then publishes the workspace that lets the native child exit. This proves
+causal overlap while retaining the slot/count assertions. The delayed-start
+control passes with the handshake. The production scheduler is unchanged;
+original failure and red/fixed controls remain in
+`temp/app-safety-cache-temp-library-contract-failure/` and
+`temp/app-safety-cache-temp-runner-start-order-*`.
+
+The post-fix aggregate finished **8,637/8,639**: all execution cases passed,
+including the chart and both recursion diagnostics, while two MIR shape/size
+checks failed. A pinned pre-fix/fixed emission comparison identifies the growth
+in `render_parts_at` (+38) and `render_doc` (+42), restoring typed destination
+return/error epilogues previously suppressed by the wrong terminal flag.
+Prettier's actual module count changes **21,441 → 21,521** (prior ceiling
+21,495), with `print_node` unchanged. Each affected function reserves three
+additional precise roots; successful self-tail jumps and map-allocation
+exclusions remain intact. The renderer emits a third concatenation behind the
+restored boxed-error return guard. Its structural check now requires that
+ordered error guard, and the exact default Prettier ceiling pins the reviewed
+21,521 instructions. No other profile ceiling changes and no performance claim
+is made. Paired hashes, full/normalized MIR and counts are retained in
+`temp/app-safety-cache-temp-emission-review/`.
+
+The added `tco_argument_error_destination.ls` regression demonstrates why that
+cold path matters: pre-fix MIR replaces an argument's E201 with an unrelated
+"expected Result, got null" return failure; fixed MIR preserves the argument's
+original error like T0. Both tail-error regressions pass on T0/MIR/auto, including
+forced/poisoned GC, and both reviewed emission checks pass in isolation. The
+pre-review aggregate remains archived in
+`temp/app-safety-cache-temp-post-fix-aggregate/`. The final aggregate is being
+refreshed with these test expectations; no execution oracle was weakened.
+
+The reviewed default-concurrency aggregate finished **8,638/8,639**. All
+MIR emission/ratchet checks and error regressions passed; its sole failed case
+was the DOCX business-plan script's existing 60-second timeout. The batch also
+reported a segmentation fault after timing that script out; this ordinary-CLI
+cancellation/teardown issue remains unresolved and is not counted as fixed by
+the app sandbox. The case passes on the same executable in isolation in
+**52 seconds**. A read-only process observation verifies concurrent CPU-heavy
+UI/WPT/layout jobs in the separate `Lambda-opus` checkout; those jobs were left
+untouched. Contention is observed, not a proven explanation for every failure.
+The complete inventory is being rerun with the existing
+`AST_TUNE_BATCH_WORKERS=1` setting. No test, timeout, expected result or batch
+implementation has changed. Default-concurrency failure artifacts remain in
+`temp/app-safety-cache-temp-reviewed-aggregate/`; the focused DOCX result and
+process observation have distinct files under `temp/app-safety-cache-temp-*`.
+
+The complete one-worker rerun also finished **8,638/8,639**, with a different
+residual: **all 1,999/1,999 Lambda script cases passed**, including DOCX
+business plans in **47 seconds**, while
+`Tiers/HotwireHttpTest.ClientAndServer/1` hit its 30-second process timeout.
+The same HTTP MIR case passes in isolation in **8.6 seconds**, and passed in
+prior aggregates on this source. Its timeout remains unresolved; focused
+success does not turn the aggregate green. No further broad Lambda rerun is
+being substituted for this result. The complete one-worker report is retained
+in `temp/app-safety-cache-temp-one-worker-aggregate/`, and the focused HTTP
+result in `temp/app-safety-cache-temp-http-focused.*`. Test262 and the independent
+signed/native component matrices are being refreshed next. Default rollout and
+full M2 remain gated.
+
+
+Final component qualification passes: release library **2,086/2,086**;
+Test262 **40,261/40,261**, zero regressions and 2,652 existing preparation skips;
+signed macOS worker **17/17**; supervisor **33/33**; native policy combinations
+**4/4**; updater-console controls **28/28**. The worker refresh rebuilt
+unstripped debug host fixtures and checked complete management-symbol separation.
+The supervisor's passing report is published only after all cases and signature
+checks finish; a failed refresh replaces any earlier success with an unqualified
+checkpoint. Default production CLI behavior is unchanged.
+
+The full Lambda/input aggregate remains **8,638/8,639**, with the one-worker
+setting and HTTP timeout described above. All **1,999/1,999** script cases,
+**302/302** error cases, **94/94** safety-runtime cases and both MIR emission
+suites pass in that run. The passing focused HTTP retry does not substitute for
+a green aggregate. Earlier E0 diagnostics, the default-concurrency DOCX timeout
+and its post-timeout batch crash remain unresolved. These limits are retained
+alongside the successful component evidence.
+
+Fresh source snapshots, binary/result/log hashes, gate counts and remaining
+scope are recorded in `temp/app-safety-cache-temp-qualification.json`; snapshots
+live in `temp/app-safety-cache-temp-sources/`. Release library fixtures, debug
+and release engines, and debug Node dependencies are preserved separately.
+Documentation links, Python syntax, whitespace/unmerged-entry and formal-index
+checks pass (the existing duplicate `DO25` warning remains). No native runtime
+source changed after the final component builds.
+
+The goal remains active. Next are the remaining M2 isolation/debug/Mach-rights,
+mapping/hardware/resource-exhaustion and deployed-signing gates; persistent-data
+repair/power-loss/reset/uninstall and quota management; permission UI/bookmarks
+and complete catalogs. Authenticated privacy-qualified updater delivery,
+network/content/device profiles, extensions and other OS backends remain later
+work. The user's private-Darwin backend approval is experimental; this milestone
+does not qualify a default sandbox rollout or complete M2.
+
+### 2026-11-03 — Mach capability inheritance and ptrace qualification
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, a new actual-launch probe found an
+OS boundary gap: fd `CLOEXEC` did not remove registered Mach rights or inherited
+task exception/bootstrap ports. The original signed confined launch retained
+three registered send rights and sent three messages to its parent after
+sandbox installation. A writable-memory-entry control additionally shows that
+the worker policy alone does not revoke such a capability: both unfiltered and
+sandboxed unfiltered children modify the parent's fixture page.
+
+The launcher now installs empty registered-port, exception-port and bootstrap
+spawn actions before any child instruction. It uses the SDK's register limit
+rather than an empty action count, which would preserve inheritance. The
+registered-port setter is a private Darwin SPI, resolved at runtime; missing
+support fails with `ENOTSUP`. This remains within the approved experimental
+backend. The fixed launch exposes no user ports before bootstrap, sends no
+fixture message and cannot modify the parent page.
+
+The native syscall probe also reproduced successful `PT_TRACE_ME` inside the
+worker. [XNU](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/mach_process.c)
+checks the parent's MAC credentials on that path. Hardened parent/child signing
+and a parent-side task-port denial did not close it. The worker profile now
+rejects `SYS_ptrace` with a `syscall-unix` filter, following syntax in the installed
+Apple system profiles. All four basic native combinations pass with a successful
+unconfined tracing control. Failed speculative profile operations were removed;
+no unsupported operation or parent-policy prototype remains in production code.
+
+The full Mach gate remains **unqualified**: `TASK_ACCESS_PORT` is present before
+and after policy installation. A minimal spawn-clear control returns `EINVAL`,
+and the tested special-port denial did not block its retrieval. The test keeps
+this failure, with independently passing user-capability and ptrace results in
+its JSON. Parent task-name acquisition succeeds in the unfiltered control and
+fails under the policy; parent task-control acquisition fails in both, so no
+successful debugger positive control is claimed. Full special-port/debug,
+remaining mapping/hardware/exhaustion and deployed-signing qualification remain
+in M2. No default CLI rollout is made.
+
+Sources: [XNU inheritance](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/ipc_tt.c),
+[spawn port actions](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/spawn/posix_spawn.c),
+and [exec port dispatch](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exec.c).
+Red controls are retained under `temp/app-safety-mach-red/`,
+`temp/app-safety-mach-ptrace-red/`, and `temp/app-safety-parent-trace-controls-*`.
+
+Final refreshed gates pass: release library **2,086/2,086** (no failures, partials
+or skips), signed worker **17/17**, supervisor **33/33**, updater-console
+controls **28/28**, and native syscall combinations **4/4**. Both `ptrace()` and
+`syscall(SYS_ptrace, ...)` have successful unconfined controls and fail under
+the worker profile. The complete actual-launch inheritance test retains exit
+**1 / unqualified** at its task-access assertion; all three preceding cases
+establish user-port/memory-entry isolation and tracing denial. Its task-control
+positive-control availability is explicitly false, not counted as a denial proof.
+
+Evidence and current source/binary hashes are recorded in
+`temp/app-safety-mach-qualification.json`; original storage-stage qualification
+remains separately in `temp/app-safety-cache-temp-qualification.json`.
+The Lambda runtime/compiler sources have not changed in this follow-up. Earlier
+Test262 **40,261/40,261** and the incomplete Lambda/input **8,638/8,639** remain
+prior engine-stage evidence, not newly refreshed engine gates. No full M2 or
+default rollout qualification is claimed. The goal remains active.
+
+### 2026-11-03 — Qualification checks survive Python optimization
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, a qualification runner must retain
+its controls and refusal checks regardless of Python optimization. Running the
+original inheritance runner with `python3 -O` reproduced a false passing result:
+all three cases were counted despite a live task-access port and no successful
+task-control positive control. Python removed the `assert` statements; some
+other safety runners also put fixture operations inside assertions.
+
+The four assertion-based native-inheritance, process-policy, supervisor and
+updater-console runners now share `require_qualification()`, whose explicit
+failure branch survives `-O`. Conditions, side effects and evidence are retained.
+The normal and optimized inheritance executions both retain exit 1 and an
+unqualified report, independently recording successful user-capability and
+ptrace denials. The false passing control and original scripts are preserved
+under `temp/app-safety-qualification-optimized-red/`.
+
+The updater runner also invalidates its prior passing report before build or
+fixture work and checkpoints each command before checking its result. An
+injected fixture-launch failure now records zero passes and an unqualified
+status. Actual isolated-profile updater controls pass **28/28** in normal and
+optimized modes; optimized supervisor **33/33** and native-policy **4/4** also
+pass. AST comparison against the retained original runners confirms that the
+assertion migration preserves their predicates and fixture operations.
+Source hashes and reports are recorded in
+`temp/app-safety-qualification-checks-qualification.json`. The earlier production
+and engine gates remain separately archived; no runtime/compiler change or
+full M2 qualification is claimed here.
+
+The task-access audit also confirms that
+[XNU refuses overwrite of an already populated task-access port](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/ipc_tt.c).
+Its presence is an unresolved OS endpoint qualification question; the failed
+clear attempt alone does not establish access to another task. The debugger
+positive-control gate remains mandatory. No normative ruling or default CLI
+behavior changes in this follow-up.
+
+### 2026-11-03 — Refuse leaked bootstrap handles before source IO
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, owned native controls demonstrate
+that installing the process policy does not revoke a pre-held writable file
+descriptor: reads, shared writable mapping and a synchronized fixture-page
+modification all succeed afterward. The native policy runner now records the
+read/map capability separately from fresh-resource denials; its expected
+pre-held success is not counted as containment. The standalone write control
+is retained in `temp/app-safety-held-file-results.json`.
+
+A real signed-worker red control then passed an extra temporary-file descriptor
+to the existing production bootstrap. It still sent a 121-byte broker request,
+just as its valid-handles control did. The worker therefore had no independent
+validation of descriptors retained or opened during native startup. The launcher
+already closes inherited descriptors, but that is a different boundary.
+
+`confined_process_worker_handles()` now runs before runtime initialization,
+limits/policy setup and source acquisition. It requires exactly the actual
+`/dev/null` input device, two anonymous output pipes and a connected local stream
+broker endpoint, with no extra descriptor at any number. Public kernel process
+information also requires one bootstrap thread before the descriptor snapshot;
+untrusted/runtime work has not begun. Wrong roles, extra descriptors, concurrent
+startup threads or unsupported inspection refuse startup with no broker request.
+The fixed profile permits metadata only for `/dev/null` so policy-first native
+fixtures can revalidate its device identity; no new user-resource access is added.
+
+`test_macos_bootstrap.py` exercises the real signed production entry with a
+valid-handles control, low/high file leaks, file-backed stdin/stdout/stderr and a
+named output FIFO. A signed native fixture uses the same production worker entry
+with a proven-live joined `SafetyAsync` thread and no extra fd. The old production
+image, source and failing result are retained in `temp/app-safety-bootstrap-red/`.
+The self-target `task_for_pid` control is also now recorded in the Mach fixture:
+it succeeds unfiltered and is denied under the existing profile. This is an
+entry-point result, not a substitute for the still-unavailable foreign-task
+control or the outstanding kernel task-access endpoint audit.
+
+Final qualification passes: release library **2,086/2,086**, signed worker
+**17/17**, supervisor **33/33**, updater-console **28/28**, native policy
+**4/4**, and bootstrap **9/9** in both normal and optimized Python modes.
+The eight invalid bootstrap cases exit 2 with zero broker-request bytes. The
+valid-handles control is deliberately terminated by the fixture after observing
+its first request; this measures bootstrap handoff, not script execution. The
+separate worker/supervisor matrices prove the actual script workflows.
+
+The transport validator was promoted to `ipc_stream_is_connected_local()` and
+is shared with adoption. The existing invalid-channel unit now verifies stream,
+datagram and unconnected cases, unchanged flags/ownership, and subsequent byte
+transfer. Bootstrap additionally checks output direction and distinguishes
+anonymous pipes from named FIFOs; the FIFO fixture uses a write-only handle so
+that the object-kind gate is actually exercised.
+
+The full Mach gate retains exit **1 / unqualified**, with inherited user rights,
+ptrace and the self task-control entry independently verified. Foreign-task
+control remains unavailable and the task-access endpoint is still present.
+Current source/binary hashes and retained evidence are recorded in
+`temp/app-safety-bootstrap-qualification.json`. Core runtime/compiler sources
+are unchanged from the earlier engine stage; Test262 **40,261/40,261** and the
+incomplete Lambda/input **8,638/8,639** are earlier evidence, not refreshed here.
+The private backend remains experimental and M2/default rollout remain
+unqualified; no normative ruling changes here. The goal remains active.
+
+### 2026-11-03 — Sandbox before runtime constructors
+
+Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, the new full-worker constructor
+gate exposes a remaining boundary gap in the direct-linked worker. Real native
+initializers acquire shared or private file mappings and close their descriptors
+before `main`. Both cases retain readable contents after policy installation,
+show zero unexpected descriptors and issue a broker request. The dirty private
+mapping reports `external_pager == 0` on this OS; pager-bit filtering cannot prove
+that no user data was acquired. The failing gate remains nonzero/unqualified;
+original image/source/results are retained in `temp/app-safety-constructors-red/`.
+
+The opt-in `build-safety-early-worker` target implements a minimal C bootstrap
+and separately loaded T0 runtime module. Bootstrap handle/limit mechanisms and
+local-endpoint inspection are factored into small libSystem-only C units.
+The build generator now supports a module main target and a target-local implicit
+framework whitelist: it previously added every configured framework to all
+library/executable targets. The bootstrap's explicit empty whitelist is verified
+with `otool`; its only direct dependency is libSystem. No Lambda or document-runtime initializer is linked into that image before
+policy installation.
+
+The bootstrap captures cwd, rejects image-path redirection, validates handles,
+sets limits and installs the fixed profile before `dlopen`. Only the canonical
+sealed runtime image gains literal read/map authority; process exec stays denied.
+Its versioned module entry uses the already-established policy and binds the same
+broker/context machinery. Host bundle checks now include nested code. No
+library-validation exception, retry with weaker authority or ordinary CLI change
+is introduced. This follows
+[Chromium's delayed-framework architecture](https://chromium.googlesource.com/chromium/src/+/main/sandbox/mac/seatbelt_sandbox_design.md).
+
+Local controls demonstrate constructor denial under the early profile and real
+T0 source/import/data/output through the module. Hardened ad-hoc loading refuses
+because it lacks a matching publisher identity; unhardened controls are explicitly
+separate and are never admitted by the production supervisor. USER requested
+skipping signing-identity setup, so certificate-backed publisher/deployment
+qualification remains open without changing the hardened-runtime requirement.
+
+Initial library qualification found a startup race in the descriptor-passing
+fixture: the peer could close before the server thread adopted its socket.
+Darwin `getpeername` then returns `EINVAL` (owned minimal control retained as
+`temp/app-safety-peer-close.c`). The fixture now adopts the channel synchronously
+before starting dispatch, matching production's construct-before-resume order.
+All rejection and received-descriptor closure assertions remain. The full
+15-case channel suite passes 20 repetitions; the refreshed release library gate
+passes **2,086/2,086**, with no skips or partials. The earlier failure is retained
+in `temp/app-safety-early-library-red/`.
+
+Final native refresh passes: ordinary signed worker **17/17**, supervisor
+**33/33**, updater-console **28/28**, process-policy combinations **4/4** and
+bootstrap handles/threads **9/9**. The early-loader runner records **14 passing
+component checks**: two constructor-denial controls, two hardened ad-hoc loading
+refusals, seven brokered runtime composition workflows, a real supervisor's
+hardened handoff refusal, tampered nested-runtime rejection and unhardened-image
+admission refusal. Its status remains **unqualified**, with publisher and full
+M2 gates open. The component controls do not replace a successful hardened
+same-publisher runtime workflow.
+
+The direct-linked constructor gate still exits **1 / unqualified** for both
+shared and dirty private mappings; the complete Mach gate also retains exit
+**1 / unqualified**. These failures are not weakened or counted as passes.
+Source/binary hashes and retained controls are recorded in
+`temp/app-safety-early-qualification.json`. Core parser/compiler/evaluator sources
+are unchanged from the earlier engine-stage qualification; earlier Test262
+**40,261/40,261** and incomplete Lambda/input **8,638/8,639** are not refreshed
+engine gates here. The goal remains active and default rollout stays disabled.
+
+### 2026-11-03 — Trusted storage inspection and resumable persistent-data reset
+
+Under **D7.5.2, D7.5.5–D7.5.7**, private-storage management now shares the
+same anchored owner acquisition, namespace/owner locks, marker checks, bounded
+usage traversal and removal helpers as ordinary admissions. Inspection creates
+no admission and performs no abandoned-temp recovery. It reports bytes/entries,
+quota excess, live/abandoned sessions and pending reset state, publishing no
+partial result on failure. Its traversal remains capped at 4,096 entries per
+class even when a configured write quota is smaller.
+
+An explicit trusted data reset refuses live sessions and validates all retained
+trees before durably publishing a random 128-bit intent bound to the principal
+and namespace/owner/data object identities. New admissions refuse while that
+intent exists. Cleanup removes a caller-bounded number of entries per step,
+checks the same intent ID, syncs each unlink's parent and removes the intent
+only after the data tree is empty. It preserves the data directory/owner record,
+cache, grants, updater settings and other principals. Interrupted cleanup is
+resumed only through trusted management; ordinary script launch never resumes
+deletion. Stale or cross-principal IDs and corrupt records refuse. No new worker
+opcode, script builtin, native directory handle or network grant was added.
+
+The verified host CLI now exposes `storage status`, `storage reset-data` and
+`storage resume-reset`, addressed by principal kind/digest. Each deletion command
+requires `--confirm-data-loss`; resumption also requires the current reset ID.
+Remembered grant records identify only the management target; they do not
+restore script authority. Default quota constants are shared with admission.
+Commands remain behind the existing publisher-signature gate. Signing-identity
+setup is skipped per user instruction; no hardening entitlement was weakened.
+
+The user selected retention on uninstall: **D7.5.9** now requires persistent
+app data to survive uninstall by default, with deletion as a separate explicit
+action. Formal design advances to 59.1.0 and the working design records the same
+rule. Installed-app uninstall/catalog integration remains pending; this step
+implements trusted management of valid private stores, not an installer or
+automatic repair/adoption of corrupt owner records.
+
+Qualification: admission/delivery **44/44**, including a real killed host after
+one acknowledged partial reset and successful trusted resumption; actual storage
+console **17/17**; updater console **28/28**; signed supervisor **33/33**; final
+library baseline **2,088/2,088**, with no failures, partials or skips. The initial
+restricted library run was **2,082/2,088**, with five loopback-tunnel failures and
+one platform trust-root failure; the worker also refused inherited policy
+before its first request. Those reports are retained separately from the
+unrestricted passing controls. The first console seed lacked the broker's
+mandatory clock and was fixed using the existing fixture clock; the kind-mismatch
+expectation now follows the store's identity refusal rather than assuming a
+missing record. No runtime denial assertion was weakened.
+
+Evidence, source/binary hashes and remaining gates:
+`temp/app-safety-storage-qualification.json`. Core compiler/evaluator sources and
+worker runtime are unchanged from the prior stage; full Lambda/input and
+Test262 are not rerun for this host-storage step. The earlier Lambda/input
+**8,638/8,639** residual remains open. Full M2, default rollout, publisher loading,
+Mach/debug qualification, corrupt-data repair, physical power-loss testing,
+installed-app lifecycle, quota editing/UI, permission UI/bookmarks, full catalogs,
+updater delivery, remaining network/content/extension services and other OS
+backends remain outstanding. The goal stays active.
+
+
+### 2026-11-03 — Ordered namespace publication and strict storage barriers
+
+Under **D7.5.2, D7.5.7**, a storage durability audit found that a later synced
+record did not make its newly created ancestor names durable. Anchored directory
+creation previously called `mkdirat`/`openat` without syncing the child and
+parent; new lock/lease files were exposed without syncing their empty inode or
+name. An instrumented atomic-write control passed, while seven new creation-
+sync cases failed against that implementation. The retained red report is
+`temp/app-safety-durability-red.json`.
+
+Directory creation now syncs child before parent, and create-mode retries sync
+retained edges before proceeding deeper. Read-only acquisition does not sync.
+A new regular-file stream is returned only after its empty inode and parent
+have synced. A failed barrier returns failure without implying the created
+object is absent; exclusive retry still refuses replacement. The tests inject
+failures at both stages and verify that deeper descendants are not created.
+
+Protected settings/profile directories and PRIVATE-scope file brokers now share
+`FILE_ANCHOR_STRICT_STORAGE`: owner/private checks, trusted parents, one device
+and full-sync requirements. One shared anchored sync helper handles creation,
+atomic/in-place writes and unlink publication. On macOS it requires
+`F_FULLFSYNC` after `fsync`; an error has no weaker fallback. Child derivation
+cannot drop the requirement. The native mounted-filesystem control accepts the
+operation for regular files and directories. A separate test first reproduced
+incorrect durable success after publication, then proved that a full-sync error
+returns the existing committed-but-not-durable result. The protected state store
+continues to quarantine such an unavailable instance.
+
+The test executable alone interposes `fsync`, normally forwarding to the real
+kernel. Injection is thread-local and absent from production. The full-sync
+error case closes only the operation's temporary parent descriptor after a
+successful `fsync`, making the actual later `F_FULLFSYNC` fail while the held
+root stays usable. Native symbol inspection confirms the host imports the
+system `fsync`; the interposing definition belongs to the filesystem test
+object. No vendor source or worker protocol changed.
+
+References: [Apple fsync](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html),
+[Apple F_FULLFSYNC](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html),
+[Linux directory syncing](https://man7.org/linux/man-pages/man2/fsync.2.html).
+These barriers and fault controls do not simulate physical power loss or prove
+that every storage device/filesystem honors its advertised guarantees.
+
+Focused checks pass: filesystem **141/141**, admission/delivery **44/44**,
+storage console **17/17**, updater console **28/28**, and the signed supervisor
+matrix **33/33** against the preserved prior worker/runtime images. Library
+correctness passes **2,098/2,098**, with no failures, partials or skips. A fresh
+`make test-lambda-baseline` passes **8,639/8,639** (Lambda **6,527/6,527** plus
+input **2,112/2,112**), with runner concurrency capped at four. The previously
+timed-out DOCX business-plan case passes in this run; no timeout or golden was
+changed. `make test262-baseline` passes **40,261/40,261** baseline cases with
+zero regressions; 2,652 cases outside that baseline remain skipped by the
+existing selection.
+
+Evidence and source/binary hashes are recorded in
+`temp/app-safety-durability-qualification.json`. Signing-identity setup remains
+skipped. The native backend stays experimental; M2/default rollout, publisher
+loading, complete Mach/debug/kernel-endpoint and hardware qualification,
+corrupt-data repair, physical power-loss tests, installer/catalog integration,
+quota and permission UI, updater delivery, later service profiles and other OS
+backends remain in the active goal.
+
+
+### 2026-11-03 — Protected per-principal storage quotas and host console
+
+Under **D7.5.2, D7.5.7**, the trusted storage service now persists quota policy
+in `~/.lambda/setting/storage-{a|s}-<principal>.quota`. A new typed principal-
+keyed state slot constructs that fixed name; it cannot select a grant, updater
+record or caller pathname. It reuses the protected store's locking, revision-
+checked atomic publication, strict storage barriers and unavailable-instance
+handling. The 160-byte record binds principal kind/digest, profile identity,
+monotonic generation, custom/default mode and all three class limits, with an
+integrity checksum. It grants no source, file-selection or network authority.
+
+Missing policy uses trusted fallback limits. Saved custom policy survives host
+restart and source revalidation; default-mode records use the current host
+fallback and retain their generation. Corrupt or cross-principal/profile
+records refuse inspection/admission and cannot be overwritten by default
+restoration. The counter cannot wrap. Admission reads policy under the owner
+lock before creating its live session; protected-state transactions end before
+traversal/cleanup. Edits require no live session or pending reset and an exact
+inspected generation. Finished clients already refuse IO and cannot keep old
+limits in use after an edit.
+
+The verified host CLI exposes `storage quota KIND PRINCIPAL GENERATION CLASS
+BYTES ENTRIES` and `storage quota-defaults KIND PRINCIPAL GENERATION`; `status`
+reports effective limits, generation and custom/default state. Quota reduction
+preserves files and reports over-limit state. Class measurement is independent
+of the current write cap, allowing a replacement that shrinks total bytes into
+quota; retained-byte/entry guards prevent unsigned subtraction from bypassing
+the cap. Other request/session budgets and private source denial remain in force.
+The public entry maximum is 4,096, with at least three temp entries for internal
+session/files/lease bookkeeping. Quota edits/default restoration do not clear
+file grants, updater preferences or data; explicit data reset preserves quotas.
+
+A maximum-entry crash-state test exposed a recovery defect: 4,096 retained
+entries plus a staging file from an interrupted atomic write made the original
+4,096-entry management scan fail. The retained red test is
+`temp/app-safety-quota-stage-red.json`. Inspection and cleanup now have a shared
+4,097-entry structural bound, while all retained stages still count against the
+4,096-entry user quota. CLI reset derives its finite step count from that same
+bound. The API and actual console both inspect and reset the full class plus
+stage, with the intent remaining resumable between bounded steps. This fixture
+constructs a reachable interrupted namespace; it does not simulate power loss.
+
+Qualification passes: admission/delivery **54/54**; actual storage console
+**37/37**; updater console **28/28**; signed supervisor **35/35**; final library
+correctness **2,108/2,108**, with no failures, partials or skips. Tests cover all
+three saved mounts, real host restart, live/stale/competing edits, code
+revalidation, generation exhaustion, corruption/profile isolation, shrinking
+over-quota data and reset preservation. The console also holds a separate live
+host, verifies edit refusal, kills it and verifies a permitted edit without
+silently recovering its abandoned temp tree. The signed matrix reuses one real
+admitted script/image: a reduced quota refuses its private write and preserves
+bytes, then default restoration lets the same script finish. The initial library
+gate was **2,107/2,107** before adding the reproduced staging-boundary case.
+
+Evidence, exact code and source/binary snapshots:
+`temp/app-safety-quota-qualification.json`. Core compiler/evaluator and shared
+file primitives are unchanged from the preceding durability stage; fresh
+Lambda/input **8,639/8,639** and Test262 **40,261/40,261** from that stage are
+retained as prior engine evidence, not repeated or relabeled as new quota tests.
+Worker protocol/ABI and the pinned worker/runtime images are unchanged. Signing-identity
+setup remains skipped per user instruction.
+
+Graphical quota UI, installed-app/catalog and persistent permission management,
+corrupt-state repair, physical power-loss qualification, full Mach/debug/OS and
+publisher containment/deployment gates, default launch integration, updater
+delivery, later network/content/extension profiles and other OS backends remain
+outstanding. M2 remains incomplete, default rollout stays disabled and the goal
+remains active.
+
+### 2026-11-03 — Host-only updater HTTPS pull component
+
+Under **D7.5.2, D7.5.7–D7.5.8**, `lib/https_pull` implements one bounded,
+anonymous HTTPS GET. `host/safety/update_download` supplies the protected live
+job's endpoint and a public repository-relative role/artifact name, handles at
+most three admitted redirects and performs one bounded final handoff under
+the existing publication lease. Neither a worker opcode nor a fetch CLI was
+added. Update delivery remains unavailable; bytes are explicitly unverified.
+
+The host reuses the catalog's canonical endpoint/origin admission and a shared
+pre-parse reference validator. It rejects credentials, query/fragment data,
+percent escapes, dot segments and local/noncanonical hostnames on each hop.
+The raw mechanism checks actual resolved IPv4/IPv6 socket peers before connect,
+including each new redirected connection, against a conservative public-unicast
+profile. No connection pool is reused. This is a numeric-peer check, rather
+than trusting a prior DNS lookup. The implementation uses the curl
+[open-socket callback](https://curl.se/libcurl/c/CURLOPT_OPENSOCKETFUNCTION.html).
+
+Fresh handles carry fixed public headers and no cookie/cache, proxy, netrc,
+credential, persistent TLS session, referrer, client identifier or request
+body. Compression is refused. Hostname/chain verification uses the OS root
+chain independently of ordinary TLS CA-file overrides. The current transport
+requires libcurl 8.10.1+, mbedTLS and asynchronous DNS; other adapters refuse.
+The bundled curl compiles proxy/netrc support out: their absent disable options
+are recognized specifically, while all other failed security options refuse.
+An ambient `SSLKEYLOGFILE`, or its retained curl initialization history, also
+refuses the service. All Lambda curl entrypoints now use the same thread-safe
+once initializer; the normal environment-aware TLS profile is retained.
+
+URLs fit a 4,096-byte buffer. Headers have a 16 KiB aggregate limit per hop;
+body bytes share the package ceiling across redirects, at most 256 MiB for a
+download. Redirect/error bodies consume this budget too. One monotonic
+deadline spans the hops, and the live ticket retains its original deadline.
+Progress, headers, body chunks, socket creation and final delivery recheck
+policy. There is no protected-state lease during a network wait. An error,
+policy change, incomplete response or limit discards partial payload bytes;
+already transmitted traffic cannot be recalled.
+
+The native test checks IPv4/IPv6 boundaries, canonical origin/URL admission and
+preflight refusal. The owned TLS fixture records fixed headers and empty bodies,
+tests admitted and denied redirects, actual loopback-peer refusal, certificate
+chain/hostname failures, response/redirect budgets, truncation, compression,
+stall deadlines and cross-process pause/disable/offline while a transfer waits.
+It pins its executable copies and uses ephemeral CA/server files under `temp/`,
+without installing roots, changing signing identities, using real settings or
+contacting a remote endpoint. Its **35/35** checks also pass under Python `-O`;
+the production entrypoint's peer-denial control uses OS roots and no fixture
+overrides. The fixture-only resolution/root/loopback entrypoints are absent
+from production targets.
+
+The current library baseline is **2,119/2,119** with platform trust/owned-local
+socket access; its sandboxed first run refused those six controls. Updater
+console controls remain **28/28**, scheduler tests **10/10**. Three of six
+ordinary local HTTP tests fail on cookie forwarding/Brotli in the installed
+curl build (`CURL_DISABLE_COOKIES`, no Brotli decoder). Paired binaries with
+pre-change/current `input_http` initialization and otherwise shared objects and
+libraries reproduce the identical three failures. Those tests and vendored
+curl were not altered. Engine and module-boundary refresh evidence is recorded
+in `temp/app-safety-pull-qualification.json`; initial failures are retained. The
+new libcurl dependency closure now declares nghttp2 and the strict library DSO
+links. The boundary checker still reports six Radiant/DOM Class-F imports
+outside these transport changes, so that aggregate gate remains open.
+
+The refreshed Lambda/input gate passes **8,639/8,639**. Its initial run was
+8,637/8,639 (Hotwire MIR timeout and mutual-recursion diagnostic); isolated
+repeats passed, followed by a full green rerun with the supported concurrency
+cap of two. No timeout, test expectation or baseline was changed. The fresh
+release Test262 gate passes **40,261/40,261**, with no regressions and 2,652
+outside-baseline skips. Source/binary hashes and retained initial/final gate
+artifacts accompany `temp/app-safety-pull-qualification.json`.
+
+This is the transport portion of **M3u**, not authenticated update delivery.
+Trusted-root persistence/rotation, signed freshness/anti-rollback verification,
+safe artifact staging/extraction, activation and crash recovery, complete
+installed-package/catalog coordination and service/deployment qualification
+remain open. M2/default rollout remain disabled. The goal remains active.
+
+
+### 2026-11-03 — Lambda Script update-verification component
+
+Under **D7.5.7–D7.5.8**, and the user's direction to implement verification in
+Lambda Script, added `lmd/package/security/tuf.ls` and its `json`, `metadata`,
+`delegation` and `update` modules. Metadata decisions and sequencing run in
+Lambda; native code supplies signature math, admitted transport and opaque
+protected storage. No Rust build toolchain or Python client runtime is added.
+
+The strict reader preserves arbitrary-size integer lexemes and unknown signed
+fields, rejects duplicate decoded keys/invalid UTF-8/invalid Unicode escapes,
+and produces OLPC canonical signing bytes. The verifier handles root bootstrap
+fingerprints, recomputed key IDs, unique-key thresholds, old/new root continuity, exact sequential
+root rotation, final-root expiry, timestamp/snapshot rollback and freshness,
+metadata lengths/hashes, target hashes/lengths and consistent-snapshot names.
+Delegated lookup uses ordered depth-first search, every edge's path/hash-prefix
+restriction, terminating roles, ancestry-cycle refusal and bounded role visits.
+
+The pure refresh machine emits a fetch or a durable-checkpoint action. The host
+must acknowledge atomic publication before it can obtain the next fetch. Each
+accepted root is checkpointed; changes to timestamp/snapshot keys discard both
+cached roles atomically. Each accepted metadata role is checkpointed before
+subsequent fetches. An equal timestamp ends the cycle as unchanged. Only actual
+404/410 for the next root ends rotation; malformed metadata and other failures
+abort. Verified artifact output still requires live-policy recheck and the
+separate confined staging/installer pipeline.
+
+`lib/signature` and the pure `verify_signature` builtin use OpenSSL 3 for raw
+Ed25519, RSA-PSS/SHA-256 and ECDSA P-256/SHA-256 public-key verification. A private
+context loads the built-in default provider, without ambient configuration or
+key files. No command helper or private signing key is used by the runtime.
+Dependency configuration/setup and system-function documentation are updated.
+The local Homebrew libcrypto targets a newer macOS than the configured link
+minimum; deployment must rebuild it for the advertised minimum OS. Passing on
+this machine does not qualify older macOS or Linux/Windows deployment.
+
+`host/safety/update_metadata` adds a bounded opaque per-package checkpoint
+under the existing protected settings lock. Records bind profile, public
+package/update authority, generation and observed clock. Explicit create-only
+initialization checks the admitted bootstrap SHA-256. Full-role replacement
+supports atomic rotation/cache deletion, generation comparison and live ticket
+revalidation. Cached versions remain opaque signed bytes, so native integers
+do not constrain Lambda's version checks. Missing/corrupt/mismatched state or
+clock rollback refuses the captured job. Live-controller watermarks also refuse
+observed generation rollback and changed bytes at an unchanged generation.
+A regression fixture reproduced history-reset detection occurring after
+publication; that check now runs before touching disk. Native store tests use
+opaque inert bytes and do not claim to authenticate signatures.
+
+The initial profile supports strict integer JSON, fixed UTC expiry text, the
+three signature schemes, ASCII public repository paths, `*`/`?` delegation
+patterns and hash prefixes. Bracket classes, succinct roles and other optional
+TUF extensions fail closed. Limits are 32 root advances, 64 role visits/cache
+entries, 1 MiB total checkpoint, 64 KiB root, 256 KiB other metadata and 64 MiB
+artifact requests before smaller host limits. This is not a claim of complete
+TUF conformance or hardware-backed anti-rollback protection.
+
+Focused qualification: five golden-driven scripts pass in interpreter, JIT and
+automatic modes; independent OpenSSL signing fixtures cover all three schemes,
+thresholds, authentic rollback/removal attempts, expiry, root continuity,
+artifact tampering, checkpoint order, terminating delegation, cycles and path
+restrictions. The protected update control/store suite passes **32/32**. The
+fresh owned TLS fixture passes **35/35** under Python optimization. Final engine,
+library, artifact hashes and document checks are recorded in
+`temp/app-safety-tuf-qualification.json`.
+
+This closes the verifier/storage component, not M3u delivery. The next adapter
+must run immutable trusted Lambda verifier code with bounded resources and no
+ambient app IO, bind its state/actions to one live update job, execute admitted
+fetches and expected-generation checkpoints, and refuse policy changes at every
+handoff. Conformance/fuzz testing and the VM/native dependency review must
+qualify this security-critical path. Production bridge composition, confined
+extraction, activation/recovery and installed catalog coordination remain open.
+M2/default rollout and delivery stay disabled. The user's choice to skip signing
+identity setup remains respected. The full safety goal remains active.
+
+Final aggregate qualification passes **8,644/8,644** Lambda/input cases and
+**2,135/2,135** library cases. The release Test262 baseline passes
+**40,261/40,261**, with zero regressions and 2,652 outside-baseline skips.
+The updater console fixture passes **28/28**. Focused scripts pass again after
+the key-ID and shared scheme-table changes. Strict lib/core/io/radiant boundary
+images link; the overall checker retains the same six Radiant/DOM Class-F
+imports recorded in the preceding transport milestone. No boundary baseline,
+engine expectation or timeout was changed. Formal-index regeneration succeeds
+with the pre-existing duplicate DO25 warning. These residuals and minimum-OS,
+conformance, bridge, deployment and staging gates remain explicit in the report.
+
+
+### 2026-11-03 — Bounded offline verifier and trusted refresh coordinator
+
+Under **D7.5.2, D7.5.7–D7.5.8**, `update_refresh` now runs the Lambda Script
+verification machine in a dedicated process and executes its bounded actions.
+`make build-update-verifier` embeds the exact seven-file trusted source closure
+into `LambdaUpdateRuntime.dylib`; the existing libSystem-only bootstrap applies
+the experimental native policy before loading the runtime. Its T0 source client
+reads only that embedded manifest. Other filesystem/data IO is denied. No grant,
+update-control/store or host-management implementation is linked into the image.
+The production entry requires the sealed hardened Apple-issued publisher image,
+actual sandbox readiness and CPU/memory/wall/output budgets. The app worker
+protocol has no updater opcode.
+
+A separate versioned IPC codec validates the session, directional sequence,
+operation shape and bounded lengths before processing cache/action messages.
+The host observes trusted time before parsing or network work, executes
+expected-generation full-cache checkpoints and rechecks the live job throughout
+transfer and handoff. A shared opaque role codec preserves the existing disk
+format and avoids a second row serializer for IPC. Response ceilings include
+zero-length artifacts; one aggregate budget charges all roles, artifacts and
+redirect bodies. No settings lock spans network work or Lambda execution.
+The host retains the final fetched artifact and requires the verifier's digest
+to match it. Returned artifacts bind the persisted random reservation, rather
+than a reusable job pointer. Every view rechecks that binding and live policy;
+a future installer must still acquire a publication lease at commit.
+
+Three reproduced defects were fixed rather than weakening the gates:
+
+- A saved timestamp followed by a failed artifact caused later refreshes to
+  stop as unchanged forever. The default now resumes using the trusted old
+  envelope, checking its expiry without accepting same-version replacement
+  references. Explicit timestamp-only polls may opt into `stop_on_unchanged`.
+- A terminating cyclic delegation could fall through to a lower-priority root
+  sibling. Signed fixtures reproduce the acceptance; the cycle branch now
+  preserves termination before skipping the already visited ancestor.
+- Early confinement denied uncached Darwin page-size queries. A guessed 4 KiB
+  page on this 16 KiB machine caused invalid commits, runaway pool growth and
+  an AST startup crash. `mem_vm_page_size` now uses libSystem's initialized
+  process ABI value under **D4.1.4v5**, without broadening the sandbox. The actual
+  offline worker then completed verification with sysconf/getpagesize denied.
+
+A fourth timing regression proved a one-second persisted job could expire on
+the next UTC tick and be stolen by a second host. Persisted seconds now round
+up; the exact monotonic budget starts before publication and is unchanged.
+The protected controls/metadata/protocol suite passes **40/40**. The owned TLS
+and real early-confined interpreter composition passes **52/52** under Python
+optimization: valid/repeated refresh, saved-cache retry, malformed/expired/
+tampered data, aggregate exhaustion, pause-after-handoff, finish/rebegin binding,
+and cross-process pause/disable/offline while artifact verification is stalled.
+Build-generator checks enforce the verifier's separation from host/app authority.
+Strict JSON result emission preserves large integer lexemes and escapes controls;
+six script goldens include that separate host-document encoding.
+
+The composition fixture is explicitly unhardened and ad-hoc signed; production
+admission never accepts it. Successful hardened publisher loading remains
+unqualified, respecting skipped identity setup. Full conformance/fuzzing,
+VM/native dependency review, confined extraction, activation/recovery and
+installed-catalog coordination remain open. Older minimum-OS and Linux/Windows
+qualification are also pending. M2/default rollout and M3u delivery stay disabled;
+this is a qualified component, not completion of the full safety goal.
+
+Final aggregate gates, pinned artifacts and source provenance for this component
+are recorded in `temp/app-safety-update-adapter-qualification.json`.
+
+
+Final qualification passes **8,645/8,645** combined Lambda/input cases,
+**2,135/2,135** release library cases, and all six focused goldens on interpreter,
+automatic and JIT tiers. The trusted console passes **28/28**. Test262 passes
+**40,261/40,261** at four workers with unchanged timing thresholds and zero
+regressions; 2,652 outside-baseline cases remain skipped. The default eight-worker
+run recorded four RegExp timing-only partial results, all passing individual
+retry, with zero semantic regressions. Both logs are retained. A first library
+run overlapped replacement of the shared executable and failed five view-runner
+contracts; the stable-executable rerun passes all 75 runner contracts and the
+complete library gate. Existing regression baselines and timing thresholds are unchanged.
+Formal-index regeneration retains the pre-existing duplicate DO25 warning;
+155 local document links and whitespace checks pass. Prior strict-module evidence
+and its six outstanding Class-F imports remain separate, without a new claim of
+whole-boundary qualification.
+
+
+### 2026-11-03 — Independent TUF conformance and parser adversarial qualification
+
+Under **D7.5.8** and **S12.1.2v3**, added a test-only CLI adapter driving the
+production Lambda Script state machine through the official upstream conformance
+suite. The suite and real libfaketime source are unmodified, pinned checkouts
+under `temp/`; test dependencies are isolated in a local virtual environment.
+The checked-in runner pins the native executable, source closure and relay,
+requires a successful UTC interposition control and the complete 119-case
+inventory, keeps failures visible and returns nonzero while conformance is
+incomplete. Python supplies fixture transport/files/processes only; no Python
+TUF verifier decides acceptance. Native protected-host/deployment qualification
+remains a separate gate. See [the conformance contract](../../test/safety/tuf/Conformance.md).
+
+The first independent run passed 98/119; missing clock-tool setup accounted for
+five failures. A real locally built clock tool then qualified expiry tests
+without changing system time. The suite reproduced and drove fixes for:
+
+- Same-version timestamp polling now checks the expiry of the old trusted
+  envelope; a fresh same-version response cannot revive it. A standalone
+  reproducer returned `unchanged` before the fix and the permanent golden now
+  requires denial.
+- Snapshot, targets and delegated cache bytes now pass the same current
+  reference/hash/signature/version/expiry checks as downloaded bytes. A cached
+  diamond role is authenticated on each current delegation edge. Reuse avoids
+  duplicate requests but retains acknowledged checkpoints and rollback history.
+- A signed root with an impossible child threshold is retained; the child
+  authentication fails independently. Threshold numerals stay exact instead of
+  being converted to machine integers. An invalid extra signature contributes
+  nothing while independent valid keys can meet the threshold.
+
+The reusable machine now supports metadata-only refresh and repeated target
+selection against one fixed time/snapshot. The production native bridge still
+requires its admitted nonempty target. The test adapter preserves existing
+artifact modification times when verified cached bytes are reused.
+
+The independent suite exposed stack exhaustion on long flat JSON strings.
+The strict reader now uses local loops for whitespace, integers, strings and
+flat containers, while actual nesting remains bounded to 64. A 5,000-character
+string reproducer failed before and passes after; a seventh golden covers long
+strings/whitespace/numbers/arrays/objects and malformed late escapes. The hex
+wire decoder also preserves zero-byte input explicitly: S2.2.2v2 intentionally
+makes `binary([])` null. A 688-input deterministic differential/mutation corpus
+passes on interpreter and JIT against an independent canonical encoder, covering
+UTF-8, decoded duplicate/NUL keys, surrogates, arbitrary integers and malformed
+input. All seven goldens pass on interpreter/JIT/automatic tiers and with forced
+collections plus freed-memory poisoning. The rebuilt early-confined verifier
+retains **52/52** owned TLS/host composition checks.
+
+The current full official result is **108/119**, with all 11 failures retained:
+six optional schemes outside the selected crypto profile; four opaque role
+names rejected by the current path profile; one historical repository declaring
+non-SemVer `1.0`. The clock, schema, freshness, rollback, delegation/cached-edge,
+root-continuity and supported-key cases pass. No expected-failure list, timeout,
+upstream code or signature-math implementation was changed to hide a failure.
+Full conformance, encoded role/path support, broader algorithms/interoperability,
+confined extraction, activation/recovery and installed catalog coordination
+remain open. Signing-identity setup remains skipped. M2/default rollout and
+M3u delivery stay disabled. Evidence and source/binary provenance are in
+`temp/app-safety-conformance-qualification.json`; the previous native/aggregate
+engine gate remains separately pinned in the adapter qualification report.
+
+
+### 2026-11-03 — Opaque role identity and canonical repository URI policy
+
+Under **D7.5.2, D7.5.7–D7.5.8**, added the pure Lambda `tuf.path` module and
+an independent native URI policy. The four official unusual-role cases now
+pass, bringing the unmodified pinned suite to **112/119**. All seven remaining
+failures are retained: six optional signature schemes and the historical
+non-SemVer `1.0` repository. Full conformance remains incomplete/nonzero.
+
+The root cause was treating a role label as both an OS pathname and a URL path.
+Role labels now remain printable UTF-8 byte identities, bounded to 128 bytes,
+inside the existing opaque cache record. Whole role names are encoded as single
+URI components. The cache's v1 layout, per-package physical filename, generation,
+authority binding and publication leases are unchanged. Traversal-shaped role
+labels cannot select files. A native regression preserves a protected canary
+through those names and retains distinct NFC/NFD labels across controller reload;
+the Lambda golden separately confirms exact text equality and JSON lookup.
+
+Target references support UTF-8/space and existing canonical escapes exactly
+once. Native transport checks uppercase escapes, decoded UTF-8/controls and
+literal dot segments before URL parsing. Escaped unreserved aliases and encoded
+authorities are refused. Encoded separators stay path data; they are never
+reinterpreted as local filesystem separators. Admitted origins and base
+directories keep their plain exact profile, and every redirect still rechecks
+origin/peer/policy. App worker IPC and default app-network denial are unchanged.
+The immutable verifier closure now has eight source files.
+
+The conformance adapter separately encodes metadata filenames and hashes target
+cache names. Signed fixture case `encoded` contains `../名#?role`; a generic
+URI-to-asset manifest keeps public request names distinct from fixture filesystem
+names. The actual early-confined verifier fetches and authenticates that role,
+persists its raw label, then reuses it after host restart without re-fetching
+metadata. Role-cache identity never grants source or file authority.
+
+Qualification passes **41/41** native control/store/protocol tests and **4/4**
+native transport tests. The owned TLS/real verifier matrix passes **74/74**:
+Unicode and reserved path bytes, encoded separators, literal percent sequences,
+malformed/control/noncanonical UTF-8 requests, exact wire spelling, signed role
+reload, privacy, budgets and prior cancellation cases. A deterministic
+**728-input** differential corpus agrees with Python's standard-library URI codec
+across the native gate, interpreter and JIT. Eight golden scripts pass across
+interpreter/automatic/JIT and with forced collections plus freed-memory poisoning.
+The trusted updater console passes **28/28**; the release library baseline passes
+**2,137/2,137**, with the shared Lambda executable kept stable. Native/URI changes
+are host-specific; the unchanged engine image and prior Lambda/input/Test262
+qualification remain separately pinned, rather than reported as fresh runs.
+
+Evidence, source snapshots and executable hashes are recorded in
+`temp/app-safety-uri-qualification.json`. The signing-identity skip, experimental
+Darwin status, minimum-OS/platform gaps, optional crypto/legacy interoperability,
+VM/native review, confined staging/extraction, activation/recovery and installed
+catalog integration remain open. M2/default rollout and M3u delivery stay off.
+
+### 2026-11-03 — Offline package decoder in Lambda Script
+
+Under **D7.5.2, D7.5.8**, `lambda.security.package_stage` now implements the
+initial inactive ZIP image policy. It uses the existing bounded captured-byte
+archive reader (**S12.1.1v3, S14.3.1v3**) and validates the complete namespace
+before emitting the first member. Entries stream exact binary bytes, directory
+type and executable intent; package source/hooks are never evaluated. The
+decoder has no filesystem-write, network, settings or installation authority.
+
+The profile caps archive/expanded bytes at 64 MiB each, members at 16 MiB,
+index bytes at 8 MiB, entries (including implicit directories) at 4,096, depth
+at 32, paths at 1,024 bytes and components at 255. Printable ASCII image names
+exclude Windows forbidden/device names, trailing dots/spaces and Lambda
+internal storage names. Complete-tree collision checks reject ASCII case
+aliases, duplicates and file/directory conflicts. Native decoding rejects
+traversal/absolute paths, links/special entries and unsupported/encrypted ZIP
+features; the script also rejects privileged mode bits. Member CRC/size checks
+precede emission. A later decode failure has no completion record and cannot
+authorize activating a partial image. Unicode image-member admission remains
+pending filesystem alias qualification; TUF role/target UTF-8 support is retained.
+
+The fixed `lambda-package-stage-v1` entry shares the immutable offline runtime,
+whose admission manifest now contains ten embedded files (the existing eight
+verifier files plus the decoder and its fixed entry). Dedicated stage operations
+reuse the versioned session/directional-sequence framing. Native per-operation
+caps reject oversized frames before allocation; a successful, fixed-size empty
+`STAGE_ACK` is required between entries. The final count/byte total and archive
+SHA-256 bind stream consistency, not publisher or installation authority.
+The real worker exposed a bridge defect with a promoted `integer` byte total;
+native conversion now accepts bounded u64 and exact integer carriers without
+truncation. Ordinary archive virtual views are enumerated through their
+supported **D7.4.5v2** iterator; no engine or virtual-splice implementation changed.
+
+Qualification on macOS arm64 uses an explicitly unhardened ad-hoc composition
+control, with no signing identity installation, user settings or remote fetch:
+
+- **53/53** owned archive/IPC cases, including the exact 16 MiB member, 64 MiB
+  expansion and 4,096-entry boundaries, malformed namespaces, bombs, corruption,
+  inert script bytes, cancellation and denied/nonempty/replayed acknowledgements.
+  Initial agent-sandbox startup failure and reproduced bridge failures remain
+  separate from the final native-platform run.
+- **46/46** native update-control/cache/wire checks and **4/4** native transport
+  checks. The stage acknowledgement cannot allocate a payload.
+- **74/74** existing owned TLS/real Lambda verifier composition checks against
+  the final runtime/channel build.
+- **9/9** safety goldens on interpreter, MIR JIT and auto; the same nine pass
+  forced-GC/poison on interpreter and JIT. The new `.ls` has its paired golden.
+- Premake-generator self-test, release runtime/host/test links and formal-index
+  regeneration pass. The existing duplicate `DO25` warning and local newer-OS
+  dependency warnings remain recorded; no vendor or build workaround was added.
+- **2,137/2,137** library correctness checks pass in a final serialized
+  native-platform run (63 selected executables/scripts; the performance runner
+  is excluded). The preceding platform run recovered all six local-socket/root
+  failures but retained one one-second runner-fixture timeout under load; that
+  runner passed **75/75** in isolation before the complete serialized pass.
+  Both earlier aggregate reports remain intact, with no excluded failing test.
+
+The ordinary release engine executable is unchanged, so the earlier same-binary
+Lambda/input **8,645/8,645** and Test262 **40,261/40,261** evidence is inherited,
+not reported as freshly rerun. The TUF verification sources are unchanged and
+the independent **112/119** conformance result remains a limitation, not a pass.
+The library correctness gate and immutable source/artifact provenance are
+recorded in `temp/app-safety-stage-qualification.json`; its initial restricted
+run retains the six local-socket/platform-root failures separately.
+
+This is the confined decoder component. The production trusted adapter from a
+live reservation-bound `SecurityVerifiedUpdate` to independently validated,
+anchored protected staging, durable publication and cleanup is still required.
+Activation/recovery, installed-catalog integration, full interoperability,
+VM/native review, minimum-OS/platform qualification and hardened publisher
+launch remain open. M2/default rollout and M3u delivery remain disabled; the
+broader goal stays active. Contract: [package staging](../../lmd/package/security/Stage.md).
+
+### 2026-11-03 — Verified-artifact handoff to protected inactive staging
+
+Under **D7.5.2, D7.5.8**, `update_stage` now accepts only the opaque verified
+artifact bound to the live reservation. The host independently checks decoder
+paths, case/duplicate collisions, parent types, member/entry/aggregate ceilings
+and completion digest/counts. It creates private, inactive files through strict
+same-device anchors, create-only atomic writes and full-sync barriers. A fixed
+OS-account profile namespace admits one pending stage, named by a random ID;
+neither app code nor the decoder selects a destination or receives a writable
+descriptor. Archive executable bits remain receipt intent, never permission.
+
+The checksummed intent binds reservation, authority, artifact/description hashes
+and held directory identities. The host receipt records exact paths, flags,
+sizes and file hashes in bounded canonical binary form. Per-entry publication
+holds a live policy lease; no settings lock spans decoding, IPC or network waits.
+The extracted `update_process` runner shares the existing strict publisher and
+resource monitor with refresh. Ready publication follows clean process exit and
+a final policy check. Failed/uncertain writes leave inactive data; receipt views
+recheck the reservation, image, intent revision and receipt hash. The zero-byte
+IPC/file-API carrier mismatch was reproduced and corrected at the adapter.
+
+Closing a handle retains the inactive image and releases its exclusive claim.
+Trusted inspection refuses live claims. Cleanup works offline/paused, requires
+the inspected random ID, persists a discard intent and removes at most 64
+objects per call. Stale IDs cannot select newer stages. Interrupted empty
+initialization is recoverable; unknown orphan payload, corrupt intent and
+substituted image identity are refused. App data and user projects are preserved.
+Shared strict tree enumeration/removal was extracted from `private_storage`
+into `storage_tree`; its existing policy is unchanged.
+
+Qualification:
+
+- **14/14** native staging checks, covering successful private output/receipts,
+  hostile decoder paths and parents, completion mismatch, pause/finished-ticket
+  invalidation, single-stage admission, claims and stale IDs, receipt/intent
+  tampering, interrupted initialization and substituted/unknown objects.
+- **13/13** actual early-confined Lambda decoder/host composition checks.
+  Ten use an explicit test-only opaque-artifact factory. Three use fresh signed
+  ZIP repositories over owned TLS and the actual Lambda TUF verifier: valid
+  artifacts stage, tampering creates no stage, and signed traversal archives
+  remain inactive. Receipts are decoded independently; cleanup crosses separate
+  host processes while preserving user-file and retained app-data canaries.
+- **74/74** existing owned TLS/verifier composition checks still pass after
+  the shared process/record-lease refactor. Native update/cache/wire **46/46**
+  and transport **4/4** regression checks pass.
+- **2,151/2,151** library correctness checks pass in the serialized native-
+  platform gate; the performance runner is excluded. Premake generation,
+  host/test links, worker/host partition self-test, production fixture-symbol
+  absence, document checks and formal-index regeneration pass. The pre-existing
+  duplicate `DO25` and newer-minimum-OS dependency warnings remain recorded.
+
+The ordinary release engine executable and verifier/decoder Lambda sources are
+unchanged. Earlier same-binary engine/Test262, nine-golden/forced-GC and independent
+**112/119** conformance evidence is inherited, not reported as freshly rerun.
+No Rust/Python verification runtime, app updater API, user signing identity,
+installation hook, grant expansion or default rollout was added. Python remains
+fixture/build tooling; the optional fixture-generator payload does not change
+the existing public corpus.
+
+Evidence and immutable source/binary provenance are in
+`temp/app-safety-staging-qualification.json`. The receipt is not an independent
+publisher signature over the extracted table: managed-image/code/publisher and
+capability admission, active publication, activation/catalog integration and
+active-version recovery remain pending. Full conformance, hardened publisher,
+VM/native, minimum-OS/platform and power-loss qualification also remain open.
+Delivery and default sandbox rollout stay disabled. The user requested wrap-up;
+the broader goal is being paused with these outstanding items preserved.

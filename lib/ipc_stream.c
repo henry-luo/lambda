@@ -16,14 +16,7 @@
 struct IpcStream { int fd; };
 
 IpcStream* ipc_stream_adopt(int fd) {
-    int kind = 0;
-    socklen_t length = sizeof(kind);
-    struct sockaddr_un address = {0};
-    socklen_t address_size = sizeof(address);
-    if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &kind, &length) || kind != SOCK_STREAM ||
-            getpeername(fd, (struct sockaddr*)&address, &address_size) || address.sun_family != AF_UNIX) {
-        errno = EINVAL; return NULL;
-    }
+    if (!ipc_stream_is_connected_local(fd)) return NULL;
     IpcStream* stream = (IpcStream*)mem_calloc(1, sizeof(*stream), MEM_CAT_SYSTEM);
     if (!stream) { errno = ENOMEM; return NULL; }
     int flags = fcntl(fd, F_GETFL), descriptor_flags = fcntl(fd, F_GETFD);
